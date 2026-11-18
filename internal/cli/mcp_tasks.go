@@ -54,9 +54,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -1063,8 +1063,8 @@ func mcpPoisonedReceipt(status int, body []byte, writes bool) (reason, hint stri
 }
 
 // clampMCPToolResult bounds a tool-result body at mcpToolResultMaxBytes,
-// cutting on a rune boundary (walk back with utf8.RuneStart so a multi-byte
-// rune is never split) and appending the AXI-format truncation notice: the
+// cutting on a grapheme boundary (textcut.Prefix, so neither a rune nor a
+// flag is split) and appending the AXI-format truncation notice: the
 // byte total plus the exact escape commands that retrieve the rest. Small
 // payloads pass through untouched.
 func clampMCPToolResult(text string) string {
@@ -1080,10 +1080,7 @@ func clampMCPToolResultWithHint(text, hint string) string {
 	if len(text) <= mcpToolResultMaxBytes {
 		return text
 	}
-	cut := mcpToolResultMaxBytes
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
+	cut := len(textcut.Prefix(text, mcpToolResultMaxBytes))
 	return text[:cut] + fmt.Sprintf(
 		"\n[truncated: %d bytes total, first %d shown — %s to fetch the rest]",
 		len(text), cut, hint)

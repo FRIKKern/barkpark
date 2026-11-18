@@ -152,7 +152,10 @@ defmodule BarkparkWeb.Studio.ChatCodexFailureLineTest do
     line = failure_line(%{"message" => message})
 
     refute line =~ ~r/\x{200D}\.\z/u, "the line ends on a dangling joiner"
-    assert String.ends_with?(line, "🐕.")
+    # The byte cut backs off to a grapheme boundary (task-fb5274e13f678d29), so
+    # the whole dog-joiner-vest sequence goes, not only its joiner.
+    refute line =~ "🐕"
+    assert String.ends_with?(line, "́.")
   end
 
   test "an uncut reason that ends in a dash keeps it" do

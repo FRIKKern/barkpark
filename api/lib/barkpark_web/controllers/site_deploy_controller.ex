@@ -619,7 +619,8 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp cap_reason(reason) when is_binary(reason) do
     if byte_size(reason) > @max_reason_bytes do
-      binary_part(reason, 0, @max_reason_bytes) <> "… [truncated at #{@max_reason_bytes} bytes]"
+      Barkpark.ByteCut.prefix(reason, @max_reason_bytes) <>
+        "… [truncated at #{@max_reason_bytes} bytes]"
     else
       reason
     end

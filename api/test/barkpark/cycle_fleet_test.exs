@@ -1630,7 +1630,7 @@ defmodule Barkpark.CycleFleetTest do
 
   describe "whole-fleet reconciliation" do
     test "database serializes simultaneous genesis promotions with one canonical head" do
-      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      Barkpark.Unboxed.run(Repo, fn ->
         workspace = Barkpark.TenancyFixtures.create_workspace!()
         project = Barkpark.TenancyFixtures.create_project!(workspace)
 
@@ -1704,7 +1704,7 @@ defmodule Barkpark.CycleFleetTest do
 
                 receive do
                   :promotion_race_go ->
-                    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+                    Barkpark.Unboxed.run(Repo, fn ->
                       raw_genesis_promotion(fixture, key)
                     end)
                 end
@@ -3027,7 +3027,7 @@ defmodule Barkpark.CycleFleetTest do
     # sandbox's single shared transaction cannot observe cross-connection lock ordering.
     # Manual teardown via Tenancy.delete_workspace/1 since unboxed writes are not rolled back.
     test "bind_assignment_task FOR SHARE serializes against a concurrent dataset-row lock (55P03)" do
-      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      Barkpark.Unboxed.run(Repo, fn ->
         workspace = Barkpark.TenancyFixtures.create_workspace!("cycle-lock-mutation")
         project = Barkpark.TenancyFixtures.create_project!(workspace, "cycle-lock-mutation")
 
@@ -3079,7 +3079,7 @@ defmodule Barkpark.CycleFleetTest do
           # row and rendezvous-signals the parent BEFORE releasing (holder-first).
           holder =
             Task.async(fn ->
-              Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+              Barkpark.Unboxed.run(Repo, fn ->
                 Repo.transaction(fn ->
                   Repo.query!("SELECT id FROM datasets WHERE id = $1 FOR UPDATE", [
                     Ecto.UUID.dump!(dataset.id)
@@ -3139,7 +3139,7 @@ defmodule Barkpark.CycleFleetTest do
     # manual teardown via Tenancy.delete_workspace/1 since unboxed writes are not
     # rolled back. The 55P03 rollback leaves no attempt/session rows behind.
     test "prepare_runtime_attempt FOR UPDATE serializes against a concurrent dataset-row lock (55P03)" do
-      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      Barkpark.Unboxed.run(Repo, fn ->
         suffix = System.unique_integer([:positive])
         workspace = Barkpark.TenancyFixtures.create_workspace!("attempt-lock-mutation-#{suffix}")
 
@@ -3226,7 +3226,7 @@ defmodule Barkpark.CycleFleetTest do
           # dataset row and rendezvous-signals the parent BEFORE releasing.
           holder =
             Task.async(fn ->
-              Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+              Barkpark.Unboxed.run(Repo, fn ->
                 Repo.transaction(fn ->
                   Repo.query!("SELECT id FROM datasets WHERE id = $1 FOR UPDATE", [
                     Ecto.UUID.dump!(dataset.id)
@@ -3282,7 +3282,7 @@ defmodule Barkpark.CycleFleetTest do
     # This test is itself unboxed, so it cleans up by hand — including the
     # foreign sentinel row it plants.
     test "deletes this workspace's committed projector jobs and NOTHING else" do
-      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      Barkpark.Unboxed.run(Repo, fn ->
         foreign_workspace_id = Ecto.UUID.generate()
 
         {:ok, sentinel} =

@@ -20,7 +20,6 @@ defmodule Barkpark.LockWaiter do
   import ExUnit.Assertions, only: [flunk: 1]
 
   alias Barkpark.Repo
-  alias Ecto.Adapters.SQL.Sandbox
 
   @waiting """
   SELECT count(*) FROM pg_stat_activity
@@ -34,7 +33,7 @@ defmodule Barkpark.LockWaiter do
 
     task =
       Task.async(fn ->
-        Sandbox.unboxed_run(Repo, fn ->
+        Barkpark.Unboxed.run(Repo, fn ->
           %{rows: [[backend]]} = Repo.query!("SELECT pg_backend_pid()")
           send(parent, {__MODULE__, self(), backend})
           fun.()
@@ -61,7 +60,7 @@ defmodule Barkpark.LockWaiter do
   def await_lock!(backend, tries \\ 250) do
     waiting =
       Task.async(fn ->
-        %{rows: [[n]]} = Sandbox.unboxed_run(Repo, fn -> Repo.query!(@waiting, [backend]) end)
+        %{rows: [[n]]} = Barkpark.Unboxed.run(Repo, fn -> Repo.query!(@waiting, [backend]) end)
         n
       end)
       |> Task.await()

@@ -148,7 +148,10 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
 
     assert has_element?(view, ~s(#{@footer_button}[popovertarget="#{menu_id}"]))
     # "Incoming references" is the header's alone, as the TanStack Studio's.
-    assert items(view, @footer_menu) == items(view) -- ["Incoming references"]
+    # Incoming references, Copy document and Paste document are the header's
+    # alone, as TanStack's DocHeaderMenu has them.
+    assert items(view, @footer_menu) ==
+             items(view) -- ["Incoming references", "Copy document", "Paste document"]
 
     # The specs' `getByRole('button', {name: 'Document actions'}).last()` is this one.
     html = view |> element("[data-pane-editing]") |> render()

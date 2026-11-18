@@ -103,6 +103,20 @@ defmodule Barkpark.Plugins.FormsContractTest do
     end
   end
 
+  describe "new_submission/1 shortens long source metadata" do
+    # task-fb5274e13f678d29: the 512-byte cut backs off to a grapheme
+    # boundary, so a flag in a Referer never ends as one boxed letter.
+    test "a cut between a flag's two indicators drops the flag" do
+      referer = "https://my-blog.example.com/" <> String.duplicate("p", 480) <> "🇳🇴tail"
+      # 28 + 480 = 508 bytes, so byte 512 falls between the two indicators.
+      submission =
+        Contract.new_submission(%{site: "my-blog", fields: %{}, source: %{referer: referer}})
+
+      assert submission["source"]["referer"] ==
+               "https://my-blog.example.com/" <> String.duplicate("p", 480)
+    end
+  end
+
   describe "sanitize_fields/2 refuses whole, never trims" do
     test "an unknown field is refused, naming it" do
       assert {:error, {:unknown_fields, ["evil"]}} =

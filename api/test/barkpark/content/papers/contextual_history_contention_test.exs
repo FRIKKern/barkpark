@@ -13,7 +13,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
   test "concurrent requests can consume one contextual history reference only once" do
     Barkpark.DeletedWorkspaceResidue.purge_on_exit()
 
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
       principal = "user:history-consumer-#{Ecto.UUID.generate()}"
@@ -46,7 +46,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
         parent = self()
 
         call = fn request_id ->
-          Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+          Barkpark.Unboxed.run(Repo, fn ->
             send(parent, {:ready, self()})
 
             receive do
@@ -108,7 +108,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
   test "concurrent retries of one contextual history request replay one receipt after one write" do
     Barkpark.DeletedWorkspaceResidue.purge_on_exit()
 
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
       principal = "user:history-replay-#{Ecto.UUID.generate()}"
@@ -154,7 +154,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
         ]
 
         call = fn ->
-          Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+          Barkpark.Unboxed.run(Repo, fn ->
             send(parent, {:ready, self()})
 
             receive do
@@ -208,7 +208,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
   test "contextual history holds the physical paper row lock through persistence" do
     Barkpark.DeletedWorkspaceResidue.purge_on_exit()
 
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
       principal = "user:history-row-lock-#{Ecto.UUID.generate()}"
@@ -241,7 +241,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
         lock_probe = fn ->
           result =
             Task.async(fn ->
-              Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+              Barkpark.Unboxed.run(Repo, fn ->
                 try do
                   Repo.transaction(fn ->
                     Repo.query!(

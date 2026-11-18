@@ -44,14 +44,15 @@ defmodule Barkpark.StudioChat.Recorder.DisplacedAsks do
   ends (a managed Claude result, a runtime `turn_completed`, a runtime
   failure). When `Recorder.TurnOwner` marked the closing event as not the
   asking run's (`asks_closer?: false`: a refused newer send_turn's close while
-  the owner's run is live), the asks are only untracked, as before, and stay
-  pending and answerable.
+  the owner's run is live), the asks stay pending and answerable, and stay
+  TRACKED under the owner: the owner's own close, when it comes, is what
+  cancels them (task-fe4832b24ab1c40b). Dropping them here left that close
+  nothing to cancel, and the ask a live card for a turn that had ended.
   """
   @spec cancel_ended(map()) :: map()
   def cancel_ended(state) do
     case Map.pop(state, :asks_closer?, true) do
       {true, state} -> cancel_with(state, @ended)
-      {false, %{pending_asks: _} = state} -> %{state | pending_asks: MapSet.new()}
       {false, state} -> state
     end
   end

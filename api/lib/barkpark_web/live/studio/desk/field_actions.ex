@@ -253,9 +253,12 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
 
   defp copy(_assigns, _name), do: nil
 
-  # The field a paste may write: one of the open document's, shown by the
-  # form and open to this editor. nil otherwise.
-  defp target(assigns, name) do
+  @doc """
+  The field a paste may write: one of the open document's, shown by the
+  form and open to this editor (`paste?/2`). nil otherwise.
+  """
+  @spec target(map(), String.t()) :: map() | nil
+  def target(assigns, name) do
     form = assigns[:editor_form] || %{}
 
     with %{} = field <- shown(assigns, name),
@@ -284,9 +287,12 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
 
   defp shown(_assigns, _name), do: nil
 
-  # Whether a document `id` of `type` exists for this editor, published or
-  # draft: the scoped read every Studio handler makes.
-  defp ref?(socket, type, id) do
+  @doc """
+  Whether a document `id` of `type` exists for this editor, published or
+  draft: the scoped read every Studio handler makes.
+  """
+  @spec ref?(Phoenix.LiveView.Socket.t(), String.t(), String.t()) :: boolean()
+  def ref?(socket, type, id) do
     opts = Shared.hook_opts(socket)
     dataset = socket.assigns.dataset
 
@@ -309,7 +315,8 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
       if name == "title", do: %{"name" => "title", "type" => "string"}
   end
 
-  # The title is the document's own column; every other field is in its content.
-  defp stored(doc, "title"), do: Map.get(doc, :title)
-  defp stored(doc, name), do: Map.get(Map.get(doc, :content) || %{}, name)
+  @doc "A field's stored value: the title is the document's own column, every other field is in its content."
+  @spec stored(map(), String.t()) :: term()
+  def stored(doc, "title"), do: Map.get(doc, :title)
+  def stored(doc, name), do: Map.get(Map.get(doc, :content) || %{}, name)
 end

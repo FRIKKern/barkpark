@@ -1139,6 +1139,40 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert length(body["stages"]) == 32
     end
 
+    # task-fb5274e13f678d29: the 4,000-byte cut was a raw binary_part, so it
+    # could split a character (and the JSON encoder raises on that) or keep one
+    # letter of a flag. It now backs off to a grapheme boundary.
+    test "the reason cap backs off to a grapheme boundary, never one letter of a flag",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      File.write!(
+        Path.join(run_state, "flag-b1.terminal.json"),
+        Jason.encode!(%{
+          "slug" => "flag",
+          "build_id" => "b1",
+          "run_tag" => "b1",
+          "log_file" => Path.join(run_state, "flag-b1.log"),
+          "exit_code" => 1,
+          # Byte 4,000 falls between the flag's two indicators.
+          "failure_reason" => String.duplicate("x", 3_996) <> "🇳🇴" <> String.duplicate("y", 100),
+          "stages" => []
+        })
+      )
+
+      body =
+        conn
+        |> admin_conn()
+        |> get("/v1/admin/site-deploy?slug=flag&build_id=b1&record=1")
+        |> json_response(200)
+
+      assert String.replace_prefix(body["failure_reason"], String.duplicate("x", 3_996), "") ==
+               "… [truncated at 4000 bytes]"
+    end
+
     test "WITHOUT the flag the existing status contract is byte-identical — BoxRelay is untouched",
          %{conn: conn} do
       run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")

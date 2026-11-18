@@ -245,7 +245,7 @@ defmodule Barkpark.LabelFixtures do
   end
 
   defp purge_committed_tags!(ids) do
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Barkpark.Repo, fn ->
+    Barkpark.Unboxed.run(Barkpark.Repo, fn ->
       Barkpark.Repo.query!(
         "DELETE FROM documents WHERE id = ANY($1) AND type = 'tag'",
         [Enum.map(ids, &Ecto.UUID.dump!/1)]

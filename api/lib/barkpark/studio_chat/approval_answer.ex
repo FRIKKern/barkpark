@@ -19,7 +19,13 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
       delivered, and the route keeps its 204 no-op (`:noop`, pinned in
       `chat_controller_test.exs`);
     * a delivery that fails or exits: `{:error, _}`, the route answers 503, and
-      a resend delivers.
+      a resend delivers;
+    * a runtime that cannot be reached now (`deliverer/2` returns
+      `{:error, _}`): nothing is claimed or sent, the route answers 503, and
+      the ask stays pending;
+    * nothing left to answer to (a nil `deliver`): the session's pending asks
+      are canceled first, as Studio does on reopen (D11,
+      task-dc4980982da790c9), and a pending ask is refused as canceled.
 
   The ask stays "pending" until its answer is delivered, so both server
   cancels, which touch only pending rows (`cancel_pending_approvals/1` and
@@ -34,22 +40,60 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
 
   import Ecto.Query, only: [where: 3, lock: 2]
 
+  alias Barkpark.ChatHosts
   alias Barkpark.Repo
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.Message
+  alias Barkpark.StudioChat.{Message, Recorder}
 
   @claim "answer_claimed_at"
   @claim_ttl_s 60
+  @refused %{"cancel_reason" => "asking_run_gone"}
 
   @type outcome :: :delivered | :noop | {:refused, String.t()} | {:error, term()}
 
   @doc """
-  Claim a pending ask, run `deliver`, then flip it to `status`; any other ask
-  is not delivered. A nil `deliver` (no live runtime) only checks: the ask is
-  never claimed or flipped, as before.
+  The `deliver` for `settle/4`, from who can still answer the session's asks
+  (task-dc4980982da790c9, rev26731 on #26937):
+
+    * a Recorder hands over its runtime: a deliver that calls `send` with it;
+    * a Recorder that does not answer (busy past the call timeout, or exiting),
+      or no local Recorder while a host still holds the session's turn (a
+      registered host's turn after a restart, still blocked on its ask):
+      `{:error, _}`. The ask must stay pending, and a send brings a Recorder
+      back to deliver it. "Holds the turn" is `ChatHosts.turn_held?/1`: an open
+      lease inside the sweep's grace, or one the expiry sweep can still end
+      (a heartbeat revives it until then);
+    * no Recorder and no held turn: nil, so `settle/4` cancels (D11).
   """
-  @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil) :: outcome()
-  def settle(session_id, request_id, _status, nil), do: check(session_id, request_id)
+  @spec deliverer(String.t(), (term() -> any())) :: (-> any()) | nil | {:error, term()}
+  def deliverer(session_id, send) when is_function(send, 1) do
+    case Recorder.whereis(session_id) do
+      pid when is_pid(pid) ->
+        case Recorder.session_pid(pid) do
+          {:ok, runtime} -> fn -> send.(runtime) end
+          {:error, reason} -> {:error, {:runtime_unavailable, reason}}
+        end
+
+      nil ->
+        if ChatHosts.turn_held?(session_id),
+          do: {:error, {:runtime_unavailable, :no_recorder}}
+    end
+  end
+
+  @doc """
+  Claim a pending ask, run `deliver`, then flip it to `status`; any other ask
+  is not delivered. A nil `deliver` (nothing left to answer to) cancels the
+  session's pending asks (D11), so the store never holds an answer nothing
+  received. An `{:error, _}` from `deliverer/2` touches nothing.
+  """
+  @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil | {:error, term()}) ::
+          outcome()
+  def settle(_session_id, _request_id, _status, {:error, _} = unavailable), do: unavailable
+
+  def settle(session_id, request_id, _status, nil) do
+    StudioChat.cancel_pending_approvals(session_id)
+    check(session_id, request_id)
+  end
 
   def settle(session_id, request_id, status, deliver) when is_function(deliver, 0) do
     case claim(session_id, request_id) do
@@ -85,6 +129,75 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
         deliver.()
         {:ok, status}
     end
+  end
+
+  @doc """
+  The host refused a delivered answer (task-746c02d760f26ce7): the ask was
+  asked by a run that is no longer the session's active run on the host
+  (`asked_lease_id`, internal/chathost/answer_lease.go), so the answer reached
+  no one. `ask` is that ask's own row (`ChatHosts.RefusedAnswer` finds it from
+  the answer's lease), never the newest row with its id: another run can ask
+  under the same id. The row is canceled (`cancel_reason: "asking_run_gone"`)
+  whether it already reads "allowed"/"denied" or is still pending, and live
+  viewers flip its card. An ask already canceled keeps its reason and is not
+  broadcast again. Returns `:canceled` or `:unchanged`.
+  """
+  @spec refused_by_host(String.t(), Message.t()) :: :canceled | :unchanged
+  def refused_by_host(session_id, %Message{id: id, metadata: %{"request_id" => request_id}} = ask) do
+    result =
+      case ask.metadata["approval_status"] do
+        "pending" -> cancel_pending(session_id, request_id, id)
+        status when status in ~w(allowed denied) -> cancel_answered(id)
+        _canceled -> {:error, :not_open}
+      end
+
+    case result do
+      {:ok, _} ->
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          Barkpark.StudioChat.Recorder.topic(session_id),
+          {:chat_permission_resolved, request_id, :canceled}
+        )
+
+        :canceled
+
+      _ ->
+        :unchanged
+    end
+  end
+
+  # A pending ask is canceled through `update_approval_status/4` (its count
+  # and blocked state), which takes the NEWEST pending row with the id. If that
+  # is not this row, nothing is written.
+  defp cancel_pending(session_id, request_id, id) do
+    Repo.transaction(fn ->
+      case StudioChat.update_approval_status(session_id, request_id, "canceled", @refused) do
+        {:ok, %Message{id: ^id} = row} -> row
+        _other_row -> Repo.rollback(:not_this_ask)
+      end
+    end)
+  end
+
+  # An answered ask flips to canceled under its row lock; the pending count
+  # already dropped when it was answered, so it is not touched.
+  defp cancel_answered(id) do
+    Repo.transaction(fn ->
+      Message
+      |> where([m], m.id == ^id)
+      |> where([m], fragment("?->>'approval_status' IN ('allowed', 'denied')", m.metadata))
+      |> lock("FOR UPDATE")
+      |> Repo.one()
+      |> case do
+        nil ->
+          Repo.rollback(:not_answered)
+
+        row ->
+          write!(
+            row,
+            row.metadata |> Map.merge(@refused) |> Map.put("approval_status", "canceled")
+          )
+      end
+    end)
   end
 
   defp stored(session_id, request_id) do
