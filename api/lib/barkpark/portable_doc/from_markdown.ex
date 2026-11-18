@@ -53,42 +53,62 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   input gives `[]`.
   """
   @spec blocks(term()) :: [map()]
-  def blocks(markdown) when is_binary(markdown) do
-    blocks =
+  def blocks(markdown), do: markdown |> read() |> elem(0)
+
+  @doc """
+  `blocks/1` with the ` ```portabledoc ` fences it kept back as code blocks,
+  in order: each fence's source and the path of the code block that stands in
+  for it. Only a top-level fence is read as one (a fence in a list item or a
+  quote joins its text). When the whole input falls back to one code block the
+  list is empty.
+  """
+  @spec read(term()) :: {[map()], [%{source: String.t(), path: String.t()}]}
+  def read(markdown) when is_binary(markdown) do
+    converted =
       case EarmarkParser.as_ast(markdown, gfm: true, smartypants: false) do
         {:ok, ast, _messages} -> convert(ast)
         {:error, ast, _messages} when is_list(ast) -> convert(ast)
         _ -> :error
       end
 
-    if is_list(blocks) and Validate.validate(%{"blocks" => blocks}) == :ok,
-      do: blocks,
-      else: fallback(markdown)
+    case converted do
+      {blocks, kept} when is_list(blocks) ->
+        if Validate.validate(%{"blocks" => blocks}) == :ok,
+          do: {blocks, kept},
+          else: {fallback(markdown), []}
+
+      _ ->
+        {fallback(markdown), []}
+    end
   rescue
-    _ -> fallback(markdown)
+    _ -> {fallback(markdown), []}
   end
 
-  def blocks(_markdown), do: []
+  def read(_markdown), do: {[], []}
 
   defp fallback(markdown),
     do: if(String.trim(markdown) == "", do: [], else: [code_block(markdown)])
 
   # The top-level walk: portabledoc fences share the ids they have used, and an
   # emphasised paragraph right after a mermaid fence is the diagram's caption.
-  defp convert(ast), do: convert(ast, MapSet.new(), [])
+  # `at` counts the blocks so far, so a kept-back fence knows its code block's
+  # index.
+  defp convert(ast), do: convert(ast, {MapSet.new(), [], 0}, [])
 
-  defp convert([], _ids, acc), do: acc |> Enum.reverse() |> Enum.concat()
+  defp convert([], {_ids, kept, _at}, acc),
+    do: {acc |> Enum.reverse() |> Enum.concat(), Enum.reverse(kept)}
 
-  defp convert([node | rest], ids, acc) do
-    {blocks, ids} = top_block(node, ids)
+  defp convert([node | rest], {ids, kept, at}, acc) do
+    {blocks, ids, kept} = top_block(node, ids, kept, at)
+    state = {ids, kept, at + length(blocks)}
 
     with [%{"type" => "diagram"} = diagram] <- blocks,
          true <- mermaid?(node),
          [next | after_next] <- rest,
          text when text != "" <- caption(next) do
-      convert(after_next, ids, [[Map.put(diagram, "caption", text)] | acc])
+      convert(after_next, state, [[Map.put(diagram, "caption", text)] | acc])
     else
-      _ -> convert(rest, ids, [blocks | acc])
+      _ -> convert(rest, state, [blocks | acc])
     end
   end
 
@@ -97,21 +117,26 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
 
   defp mermaid?(_node), do: false
 
-  defp top_block({"pre", _, [{"code", code_attrs, code_children, _} | _], meta} = node, ids)
+  defp top_block(
+         {"pre", _, [{"code", code_attrs, code_children, _} | _], meta} = node,
+         ids,
+         kept,
+         at
+       )
        when not is_map_key(meta, :verbatim) do
     if fence_language(code_attrs) == "portabledoc" do
       source = code_children |> flatten_text() |> String.trim_trailing("\n")
 
       case Fence.splice(source, ids) do
-        {:ok, blocks, ids} -> {blocks, ids}
-        :error -> {[code_block(source)], ids}
+        {:ok, blocks, ids} -> {blocks, ids, kept}
+        :error -> {[code_block(source)], ids, [%{source: source, path: "/blocks/#{at}"} | kept]}
       end
     else
-      {block(node), ids}
+      {block(node), ids, kept}
     end
   end
 
-  defp top_block(node, ids), do: {block(node), ids}
+  defp top_block(node, ids, kept, _at), do: {block(node), ids, kept}
 
   # A paragraph that is one emphasised run is a caption.
   defp caption({"p", _, children, meta}) when not is_map_key(meta, :verbatim) do
