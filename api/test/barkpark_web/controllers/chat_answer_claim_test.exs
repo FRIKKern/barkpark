@@ -9,8 +9,20 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
   over a canceled ask. Now the claim takes the row lock and re-reads it: a
   question canceled since the read is the route's 404, and nothing is sent.
 
+  The claim runs only when a runtime holds the session, so those tests stub one:
+  a process holding the session's Recorder name, and a codex adapter that
+  reports each delivery to the test. With no Recorder and no host holding the
+  turn (`ChatHosts.turn_held?/1`) the route cancels the question, as Studio does
+  on reopen (D11, task-dc4980982da790c9): it answers 404, and the store never
+  says "allowed" over an answer nothing received. A held turn with no Recorder,
+  or a Recorder that does not answer, is a 503 instead
+  (`chat_registered_host_ask_test.exs`).
+
   The sandbox puts every process on ONE connection, so this runs `unboxed_run`
-  on real connections and removes its rows itself. A holder connection cancels
+  on real connections and removes its rows itself. A test body already runs on
+  `with_question`'s unboxed connection and never nests another `unboxed_run`:
+  that would check the connection in and roll the cleanup back
+  (task-23b6ba92b28c809a). A holder connection cancels
   the question and keeps its transaction open, so the request is provably
   waiting on the row lock before the cancel commits.
   """
@@ -29,8 +41,64 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
     "questions" => [%{"question" => "Which color?", "options" => [%{"label" => "Blue"}]}]
   }
 
+  defmodule RecorderStub do
+    @moduledoc false
+    use GenServer
+
+    def start_link(sid),
+      do:
+        GenServer.start_link(__MODULE__, nil,
+          name: {:via, Registry, {Barkpark.StudioChat.RecorderRegistry, sid}}
+        )
+
+    @impl true
+    def init(_), do: {:ok, nil}
+
+    @impl true
+    def handle_call(:session_pid, _from, state), do: {:reply, {:ok, :stub_runtime}, state}
+  end
+
+  defmodule RecordingAdapter do
+    @moduledoc false
+    def answer_approval(:stub_runtime, request_id, decision) do
+      send(
+        Application.fetch_env!(:barkpark, :answer_claim_test_pid),
+        {:delivered, request_id, decision}
+      )
+
+      :ok
+    end
+  end
+
+  setup do
+    prev = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+    adapters = Map.put(prev || %{}, :codex, RecordingAdapter)
+    Application.put_env(:barkpark, :studio_chat_runtime_adapters, adapters)
+    Application.put_env(:barkpark, :answer_claim_test_pid, self())
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
+
+      Application.delete_env(:barkpark, :answer_claim_test_pid)
+    end)
+  end
+
+  test "with a live runtime an answer is delivered once, recorded and 204s" do
+    with_question(fn raw, sid ->
+      start_supervised!({RecorderStub, sid})
+
+      assert answer(raw, sid).status == 204
+      assert_received {:delivered, "q-1", {:allow, _server_rebuilt_input}}
+      refute_received {:delivered, _, _}
+      assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] == "allowed"
+    end)
+  end
+
   test "an answer whose question is canceled while it waits is a 404 and leaves it canceled" do
     with_question(fn raw, sid ->
+      start_supervised!({RecorderStub, sid})
       holder = hold(fn -> 1 = StudioChat.cancel_pending_approvals(sid) end)
       {request, backend} = LockWaiter.start(fn -> answer(raw, sid) end)
 
@@ -42,15 +110,20 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
 
       assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] ==
                "canceled"
+
+      refute_received {:delivered, _, _}
     end)
   end
 
-  test "an answer to a pending question with no live runtime still records it and 204s" do
-    # Already on with_question's unboxed connection: a nested unboxed_run would
-    # check it in and roll this test's cleanup back (task-23b6ba92b28c809a).
+  test "an answer to a pending question with no live runtime cancels it and 404s" do
     with_question(fn raw, sid ->
-      assert answer(raw, sid).status == 204
-      assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] == "allowed"
+      resp = answer(raw, sid)
+      assert resp.status == 404, "an unsent answer answered #{resp.status}: #{resp.resp_body}"
+
+      assert StudioChat.get_needs_you_message(sid, "q-1").metadata["approval_status"] ==
+               "canceled"
+
+      assert StudioChat.get_session(sid).pending_approvals == 0
     end)
   end
 
@@ -68,7 +141,9 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
     unboxed(fn ->
       raw = "answer-claim-#{System.unique_integer([:positive])}"
       {:ok, token} = Auth.create_token(raw, "answer-claim", "production", ~w(read write admin))
-      {:ok, session} = StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp/x"})
+
+      {:ok, session} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp/x", provider: "codex"})
 
       {:ok, _} =
         StudioChat.append_message(session, %{
