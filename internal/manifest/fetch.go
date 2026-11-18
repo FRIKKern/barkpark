@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/apierr"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // CapabilitiesPath is the flat endpoint that emits the manifest. The CLI
@@ -343,16 +343,12 @@ func isOlderGeneration(incoming, cached string) bool {
 }
 
 // clampErrBody bounds a server body before it lands in an error string, cutting
-// on a rune boundary (walk back with utf8.RuneStart so a multi-byte rune is
-// never split) and marking truncation with an ellipsis.
+// on a grapheme boundary (textcut.Prefix, so neither a rune nor a flag is
+// split) and marking truncation with an ellipsis.
 func clampErrBody(s string) string {
 	const max = 2048
 	if len(s) <= max {
 		return s
 	}
-	cut := max
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
+	return textcut.Prefix(s, max) + "…"
 }
