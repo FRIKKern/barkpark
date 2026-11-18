@@ -9,13 +9,16 @@ import (
 
 // instanceForbiddenBody is the BYTES the instance answers a non-admin mint with.
 // POST /w/<ws>/p/<proj>/v1/tokens sits behind the :scoped_admin pipeline, whose
-// RequireWorkspaceRole plug halts with Errors.to_envelope({:error, :forbidden})
-// — code/message from Errors.build/1, hint from the code-keyed @hints table,
-// request_id stamped by Errors.stamp/2. It carries NO required/scope keys: that
+// RequireWorkspaceRole plug halts with
+// Errors.to_envelope({:error, :forbidden_workspace_role}) — code, message,
+// reason and hint from that Errors.build/1 arm, request_id stamped by
+// Errors.stamp/2 (task-18861daee04d1328). It carries NO required/scope keys: that
 // grammar belongs to the CLOUD control plane's POST /v1/tokens (Auth.forbidden),
 // a different server this client never calls.
-const instanceForbiddenBody = `{"error":{"code":"forbidden","message":"token lacks required permission",` +
-	`"hint":"Use a token with write/admin permission that is a member of this workspace.",` +
+const instanceForbiddenBody = `{"error":{"code":"forbidden",` +
+	`"message":"this route needs the owner or admin role in this workspace",` +
+	`"reason":"workspace_role_required",` +
+	`"hint":"This route needs the owner or admin role in this workspace, a membership role, not a token permission: a token's write or admin permission does not grant it. Ask a workspace owner to raise this principal's role, or call with a credential belonging to an owner or admin of this workspace.",` +
 	`"request_id":"F-abc123"}}`
 
 func mintAgainst(t *testing.T, status int, body string) error {
@@ -42,8 +45,8 @@ func mintAgainst(t *testing.T, status int, body string) error {
 // the gate wanted — not the raw JSON envelope.
 func TestMintReadTokenRendersForbiddenSentence(t *testing.T) {
 	err := mintAgainst(t, http.StatusForbidden, instanceForbiddenBody)
-	want := "status 403: forbidden: token lacks required permission — " +
-		"Use a token with write/admin permission that is a member of this workspace."
+	want := "status 403: forbidden: this route needs the owner or admin role in this workspace — " +
+		"This route needs the owner or admin role in this workspace, a membership role, not a token permission: a token's write or admin permission does not grant it. Ask a workspace owner to raise this principal's role, or call with a credential belonging to an owner or admin of this workspace."
 	if err.Error() != want {
 		t.Errorf("mint 403 rendered\n  %q\nwant\n  %q", err.Error(), want)
 	}

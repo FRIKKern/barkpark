@@ -79,9 +79,13 @@ export const BARKUI_NAMES = [
   ["--ui-muted", "muted-surface"],
   ["--ui-muted-foreground", "muted-text"],
   ["--ui-border", "border"],
-  // No 1:1 slot. Barkpark draws control edges with --border (as shadcn, whose
-  // --input equals --border), so the input edge takes the border slot.
-  ["--ui-input", "border"],
+  // The edge of anything a person operates (outlined button, text field,
+  // select, checkbox), so it must stand at 3:1 on the ground (WCAG 1.4.11);
+  // --ui-border stays the hairline for dividers and panel outlines. Studio's
+  // field edge is the hairline (1.01 to 1.34:1), so the edge takes the nearest
+  // slot that clears 3:1 on the base, raised and sunken grounds of every skin:
+  // fg-dim, Studio's dim neutral (3.84 to 5.28:1), still far quieter than text.
+  ["--ui-input", "studioChrome.fg-dim"],
   // UI SDK draws --ui-ring as a 4px solid halo around a focused control, pale
   // on the ground (its defaults: 1.30:1 light, 1.64:1 dark). The halo is the
   // ring at the soft-tint alpha, the --ring-soft the cloud and login regions

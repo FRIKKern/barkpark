@@ -86,7 +86,7 @@ defmodule BarkparkWeb.MemberControllerTest do
 
   describe "the admin gate" do
     # OBSERVED SHAPE, not a preference: a bearer-less request is denied by the
-    # workspace-ROLE gate (403 "token lacks required permission"), not by
+    # workspace-ROLE gate (403 reason "workspace_role_required"), not by
     # RequireToken (401). That is the whole `:scoped_admin` pipeline's existing
     # behaviour — every route on it answers the same way — so this suite pins
     # what the pipeline does rather than asserting a 401 it has never returned.

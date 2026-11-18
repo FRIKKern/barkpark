@@ -10,7 +10,9 @@ defmodule Barkpark.Content.ReferenceIntegrity do
     * a reference object `{"_ref": "<id>"}` anywhere — top level, nested in an
       object, or inside an array — unless it is marked `"_weak": true`; or
     * a bare-id value in a field the schema declares as `reference` (the older
-      shape `Content.find_referencing_docs/3` already reads).
+      shape `Content.find_referencing_docs/3` already reads). That scan runs
+      with `bare_only: true`: a `{"_ref", "_weak": true}` object in such a field
+      is a weak reference and does not count.
 
   It reads live document content, not the `content_edges` table: edges are
   projected by a background job and can lag a write, which would let a delete
@@ -83,7 +85,7 @@ defmodule Barkpark.Content.ReferenceIntegrity do
 
     bare_ids =
       pub_id
-      |> Content.find_referencing_docs(dataset, opts)
+      |> Content.find_referencing_docs(dataset, Keyword.put(opts, :bare_only, true))
       |> Enum.reject(&(&1.doc_id in self_ids))
       |> Enum.map(&%{id: &1.doc_id, type: &1.type})
 
@@ -134,7 +136,13 @@ defmodule Barkpark.Content.ReferenceIntegrity do
     limit = Keyword.get(opts, :limit, @default_limit)
 
     ref_objects_by_target = ref_objects_for_ids(pub_ids, excluded_all, dataset, opts)
-    bare_by_target = Content.Edges.find_referencing_docs_for_ids(pub_ids, dataset, opts)
+
+    bare_by_target =
+      Content.Edges.find_referencing_docs_for_ids(
+        pub_ids,
+        dataset,
+        Keyword.put(opts, :bare_only, true)
+      )
 
     for pub_id <- pub_ids, into: %{} do
       bare =
