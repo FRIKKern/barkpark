@@ -17,6 +17,7 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
   @moduletag :requires_plugins
 
   import Ecto.Query, only: [from: 2]
+  import Phoenix.LiveViewTest, only: [live: 2, render_click: 3]
 
   alias Barkpark.Auth
   alias Barkpark.ChatHosts
@@ -339,6 +340,69 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
 
   # rev26731 round 4, N1/N2: a lease the sweep can never end must not hold its
   # asks at 503 forever. Past the grace, it no longer holds the turn.
+  # task-e281a8aab02a0aad: Studio's reopen took "no local Recorder" for "no
+  # runtime" and canceled every pending ask (D11). After a restart a registered
+  # host's turn is still blocked on them, so the reopen keeps them pending, as
+  # the answer routes do, and cancels only when no Recorder and no held turn
+  # remain.
+  describe "a Studio reopen while the host's turn is held but no Recorder runs" do
+    setup do
+      prev = Application.get_env(:barkpark, :claude_chat)
+      Application.put_env(:barkpark, :claude_chat, Keyword.put(prev || [], :enabled, true))
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
+      end)
+    end
+
+    test "keeps the asks pending in the store and on the cards",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      kill_recorder!(sid)
+      assert ChatHosts.turn_held?(sid)
+
+      view = reopen!(raw, sid)
+
+      assert_pending_and_unleased(host, sid)
+      assert StudioChat.get_session(sid).pending_approvals == 2
+      assert card_statuses(view) == %{"ask-b1" => :pending, "ask-b1q" => :pending}
+
+      # No runtime here yet: an Allow says so, sends nothing, keeps it pending.
+      assert render_click(view, "approve", %{"rid" => "ask-b1"}) =~ "Send a message to reconnect"
+      assert_pending_and_unleased(host, sid)
+      assert card_statuses(view)["ask-b1"] == :pending
+    end
+
+    test "with no Recorder and no held turn it still cancels them",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+      refute ChatHosts.turn_held?(sid)
+
+      view = reopen!(raw, sid)
+
+      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "approval")
+      assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "question")
+      assert card_statuses(view) == %{"ask-b1" => :canceled, "ask-b1q" => :canceled}
+    end
+  end
+
+  defp reopen!(raw, sid) do
+    conn = Phoenix.ConnTest.init_test_session(scoped_conn(), %{"api_token" => raw})
+    {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+    view
+  end
+
+  defp card_statuses(view) do
+    :sys.get_state(view.pid).socket.assigns.messages
+    |> Enum.filter(&(&1.role in [:approval, :question]))
+    |> Map.new(&{&1.request_id, &1.approval_status})
+  end
+
   describe "an answer on a lease past the grace that the sweep can never end" do
     test "N1, a lease created before the sweep's floor: both routes cancel the asks",
          %{raw: raw, sid: sid, host: host} do

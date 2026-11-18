@@ -30,6 +30,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   date-time, a list with several member types or of references, and every
   other type.
 
+  A copied document's fields are read one by one the same way (`value/5`,
+  for `Desk.DocClip`).
+
   Nothing here writes. `plan/4` answers with the `doc` params a typed edit of
   that field would post; the caller hands them to the Studio's `autosave`, so
   the schema's coercion (`Barkpark.Content.Forms.coerce_params/2`), the write
@@ -83,6 +86,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   end
 
   def plan(_field, _current, _clip, _ref?), do: :nothing
+
+  @doc """
+  One field of a copied document, said to be `sig` and to hold `value`, read
+  against `field` (now storing `current`) exactly as a pasted field is: the
+  value as the field's input would post it, `:nothing` for an empty one (or
+  an object that sets no subfield), or `{:error, why}`. The document's own
+  account of the field is no more trusted than a field item's.
+  """
+  @spec value(map(), term(), term(), term(), (String.t(), String.t() -> boolean())) ::
+          {:ok, term()} | :nothing | {:error, String.t() | nil}
+  def value(field, current, sig, value, ref?) when is_binary(sig) and is_function(ref?, 2) do
+    with {:ok, item} <- entry(sig, value, false),
+         {:ok, clean} when clean != %{} <- transfer(item, field, current, ref?) do
+      {:ok, clean}
+    else
+      {:ok, _nothing} -> :nothing
+      other -> other
+    end
+  end
+
+  def value(_field, _current, _sig, _value, _ref?), do: {:error, nil}
 
   # ── The item ────────────────────────────────────────────────────────────
 

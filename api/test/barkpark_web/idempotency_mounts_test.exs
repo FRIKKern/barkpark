@@ -74,6 +74,52 @@ defmodule Barkpark.Test.IdempotencyMountsTest do
     end
   end
 
+  # task-13f09b2af9408e48: a `:*` route is asked as a POST, because a POST is
+  # what the plug sees. Asked as "*", no POST route can shadow it, so a forward
+  # an earlier POST route hides would read as resolved, and its pipelines would
+  # be read for a request that never reaches it.
+  describe "route_info/2" do
+    setup do
+      n = System.unique_integer([:positive])
+      plug = Module.concat(Barkpark.Test, "ShadowPlug#{n}")
+      router = Module.concat(Barkpark.Test, "ShadowRouter#{n}")
+
+      Code.compile_string("""
+      defmodule #{inspect(plug)} do
+        def init(opts), do: opts
+        def call(conn, _opts), do: conn
+      end
+
+      defmodule #{inspect(router)} do
+        use Phoenix.Router
+
+        scope "/v1/plugins" do
+          post "/fwd", #{inspect(plug)}, :create
+          forward "/fwd", #{inspect(plug)}
+        end
+      end
+      """)
+
+      %{router: router}
+    end
+
+    test "a forward a POST route shadows is unresolved", %{router: router} do
+      [post] = for route <- router.__routes__(), route.verb == :post, do: route
+      [forward] = for route <- router.__routes__(), route.verb == :*, do: route
+
+      assert %{route: "/v1/plugins/fwd"} = IdempotencyMounts.route_info(router, post)
+
+      as_any = Phoenix.Router.route_info(router, "*", "/v1/plugins/fwd", "localhost")
+
+      assert is_map(as_any) and not is_atom(as_any.plug_opts),
+             "CONTROL: asked as \"*\", the forward resolves, so the fixture tells the two " <>
+               "apart. Got: #{inspect(as_any)}"
+
+      assert IdempotencyMounts.route_info(router, forward) == nil,
+             "the forward was asked as \"*\": a POST to its path reaches the POST route"
+    end
+  end
+
   describe "module/2" do
     test "a name through an alias, or by full name" do
       aliases = IdempotencyMounts.aliases(Code.string_to_quoted!("alias Barkpark.Media"))

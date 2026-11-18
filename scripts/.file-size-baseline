@@ -39,7 +39,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 5758 api/priv/static/assets/bp-paper-editor-hooks.js
 5461 api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex
 5351 api/lib/barkpark/plugins/capabilities.ex
-4908 internal/cli/run.go
+4905 internal/cli/run.go
 4841 scripts/pds-pull-proof.sh
 4805 api/lib/barkpark/cycle_fleet.ex
 4784 internal/cloudclient/client.go

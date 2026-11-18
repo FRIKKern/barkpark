@@ -15398,6 +15398,16 @@ msgstr "Hva er nytt"
 msgid "Workspace %{workspace}, project %{project}, dataset %{dataset}. Switch"
 msgstr "Arbeidsområde %{workspace}, prosjekt %{project}, datasett %{dataset}. Bytt"
 
+#: lib/barkpark_web/live/studio/desk/doc_clip.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document"
+msgstr "Kopier dokument"
+
+#: lib/barkpark_web/live/studio/desk/doc_clip.ex
+#, elixir-autogen, elixir-format
+msgid "Paste document"
+msgstr "Lim inn dokument"
+
 #: lib/barkpark_web/studio_locale.ex
 #, elixir-autogen, elixir-format
 msgid "Open image edit dialog"

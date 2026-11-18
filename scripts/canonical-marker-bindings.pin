@@ -30,6 +30,7 @@ github-mirror-reconcile	reconcile
 github-projects-sync	sync
 github-reporter-acknowledgement	criterion
 github-reporter-resolution-notice	compose
+go-grapheme-byte-cut	Prefix
 grapheme-byte-cut	prefix
 heat-quantile-bin	HeatQuantileBins
 http-redirect-policy	CheckRedirect

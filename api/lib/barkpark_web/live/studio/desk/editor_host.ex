@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.DeleteDialog
   alias BarkparkWeb.Studio.Desk.Discarded
   alias BarkparkWeb.Studio.Desk.DocDialog
+  alias BarkparkWeb.Studio.Desk.DocClip
   alias BarkparkWeb.Studio.Desk.DocMenu
   alias BarkparkWeb.Studio.Desk.DocStatus
   alias BarkparkWeb.Studio.Desk.FocusMode
@@ -742,6 +743,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
                   )
                 )
                 |> DocMenu.with_refs(ref_items(assigns))
+                |> DocClip.with_items()
                 |> HistoryPanel.with_item(
                   @chain,
                   @view.index,
