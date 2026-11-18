@@ -267,12 +267,15 @@ export interface BarkparkSlug {
   current: string
 }
 
-/** An image value (flat, structurally an ImageRef the core resolver reads). */
+/** An image value (structurally an ImageRef the core resolver reads): the legacy
+ * flat url/assetId, or the reference shape asset._ref. */
 export interface BarkparkImage {
   _type: 'image'
   _ref?: string
   _id?: string
   url?: string
+  assetId?: string
+  asset?: { _ref?: string; _type?: string; url?: string }
 }
 
 /** A reference value (no target generic). */
