@@ -9,7 +9,8 @@
     "build": "node build/showroom.mjs",
     "test": "vitest run",
     "check": "node check/run.mjs",
-    "shots": "node check/shots.mjs"
+    "shots": "node check/shots.mjs",
+    "check:selftest": "node check/selftest.mjs"
   },
   "dependencies": {
     "@ui-sdk/core": "0.1.0-beta.10",

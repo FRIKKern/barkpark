@@ -143,6 +143,8 @@ jobs:
   test:
     name: Build + test + gates
     runs-on: ubuntu-latest
+    # Runs take 2 to 7 minutes; a hung step must not hold every js PR for hours.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: js
@@ -391,9 +393,11 @@ jobs:
       # BarkUI's showroom check: builds js/packages/barkui's static page and
       # presses every part with real keys in the Chromium installed above, then
       # proves each skin, light and dark, a 390px window and a script-free print.
-      # About 10 seconds. Reds on a part folder missing a file, a failed press
-      # step, a light that does not come on, or any page error or network request.
+      # About 20 seconds. Reds on a part folder missing a file, a failed press
+      # step, a light that does not come on, any page error or network request,
+      # or a step or part past its time limit (check/proofs.mjs, check/check.mjs).
       - name: "BarkUI showroom check (real keys in Chromium)"
+        timeout-minutes: 5
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check 2>&1)"
@@ -403,6 +407,27 @@ jobs:
           case "$out" in
             *"No projects matched the filters"*)
               echo "barkui check FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
+              exit 1
+              ;;
+          esac
+          exit "$status"
+
+      # The check's own proof that it can still lose: it plants one break per
+      # case in a scratch copy of a part (a step that never settles, an element
+      # frozen across skins, a focus ring lost on its ground, hidden or clipped
+      # no-script content, a nameless icon button, a console error, a missing
+      # file) and reds unless each one turns the right light off. About 90 s.
+      - name: "BarkUI showroom check selftest (each planted break turns its light off)"
+        timeout-minutes: 8
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          case "$out" in
+            *"No projects matched the filters"*)
+              echo "barkui selftest FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
               exit 1
               ;;
           esac

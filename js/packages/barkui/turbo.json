@@ -5,7 +5,7 @@
       "cache": false
     },
     "test": {
-      "inputs": ["build/**", "css/**", "parts/**", "tests/**", "vitest.config.ts"]
+      "inputs": ["build/**", "check/**", "css/**", "parts/**", "tests/**", "vitest.config.ts"]
     }
   }
 }
