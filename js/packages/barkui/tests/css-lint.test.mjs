@@ -37,6 +37,8 @@ describe('lintPartCss', () => {
     'tint made in the part': 'a { background: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground)); }',
     'own focus ring': 'a:focus-visible { border-color: var(--ui-ring-border); }',
     'own outline': 'a { outline: 2px solid var(--ui-ring); }',
+    'url image': 'a { background-image: url("photo.png"); }',
+    'data svg with its own colour': "a { background-image: url(\"data:image/svg+xml,%3Csvg fill='black'/%3E\"); }",
   }
   for (const [what, css] of Object.entries(bad)) {
     it(`refuses a ${what}`, () => {
@@ -51,6 +53,7 @@ describe('lintPartCss', () => {
         background: var(--bark-primary-hover);
         border-color: transparent;
         fill: currentColor;
+        --bark-button-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='currentColor'/%3E");
         --bark-button-height: 2rem;
         height: var(--bark-button-height);
       }`

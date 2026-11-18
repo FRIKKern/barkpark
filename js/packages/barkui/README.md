@@ -19,7 +19,7 @@ parts/<name>/
 Adding a part is adding a folder. The build, the check and the tests find parts by reading `parts/`;
 no other file changes.
 
-`css/base.css` holds what every part shares: the state tints (`--bark-hover`, `--bark-primary-hover`,
+`css/base.css` holds what every part shares: the state tints (`--bark-hover`, `--bark-hover-primary`,
 `--bark-destructive-*` and so on, computed once from the skin until the sheet owns them) and the one
 focus ring (a 2px gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `--ui-ring` halo).
 

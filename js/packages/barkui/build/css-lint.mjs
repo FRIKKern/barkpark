@@ -45,6 +45,12 @@ export function lintPartCss(css) {
     if (HEX_RE.test(value) || /%23[0-9a-f]{3,8}\b/i.test(value)) found.push(`${at}: ${prop} uses a hex colour (${value})`)
     const fn = value.match(FUNC_RE)
     if (fn) found.push(`${at}: ${prop} uses ${fn[1]}() (${value})`)
+    for (const u of value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) {
+      const src = decodeURIComponent((u[1] ?? u[2] ?? u[3]).replace(/%(?![0-9a-f]{2})/gi, '%25'))
+      const own = /\b(fill|stroke|stop-color|flood-color|color)\s*=\s*['"]?(?!currentColor|none)[\w#]/i.test(src)
+      if (!/^data:image\/svg\+xml/i.test(src)) found.push(`${at}: ${prop} loads an image; only a data: SVG drawn in currentColor is allowed`)
+      else if (own || !/currentColor/i.test(src)) found.push(`${at}: ${prop} has an SVG with its own colour; draw it in currentColor`)
+    }
     if (/color-mix\s*\(/i.test(value)) found.push(`${at}: ${prop} mixes a tint; state tints are computed once in base.css`)
     if (/^outline/.test(prop)) found.push(`${at}: ${prop}: the focus ring is drawn once, in base.css`)
     const named = value.match(NAMED_RE)

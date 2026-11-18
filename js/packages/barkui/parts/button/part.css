@@ -46,10 +46,10 @@
     --bark-button-bg: var(--ui-primary);
     --bark-button-fg: var(--ui-primary-foreground);
     --bark-button-edge: var(--ui-primary);
-    --bark-button-hover-bg: var(--bark-primary-hover);
+    --bark-button-hover-bg: var(--bark-hover-primary);
     --bark-button-hover-fg: var(--ui-primary-foreground);
-    --bark-button-hover-edge: var(--bark-primary-hover);
-    --bark-button-press-bg: var(--bark-primary-press);
+    --bark-button-hover-edge: var(--bark-hover-primary);
+    --bark-button-press-bg: var(--bark-press-primary);
     --bark-button-press-fg: var(--ui-primary-foreground);
   }
   &[data-variant="ghost"] {
@@ -58,13 +58,13 @@
     --bark-button-hover-edge: transparent;
   }
   &[data-variant="destructive"] {
-    --bark-button-bg: var(--bark-destructive-ground);
+    --bark-button-bg: var(--bark-ground-destructive);
     --bark-button-fg: var(--bark-danger-text);
-    --bark-button-edge: var(--bark-destructive-edge);
-    --bark-button-hover-bg: var(--bark-destructive-hover);
+    --bark-button-edge: var(--bark-edge-destructive);
+    --bark-button-hover-bg: var(--bark-hover-destructive);
     --bark-button-hover-fg: var(--bark-danger-text);
-    --bark-button-hover-edge: var(--bark-destructive-hover-edge);
-    --bark-button-press-bg: var(--bark-destructive-press);
+    --bark-button-hover-edge: var(--bark-hover-edge-destructive);
+    --bark-button-press-bg: var(--bark-press-destructive);
     --bark-button-press-fg: var(--bark-danger-text);
   }
 

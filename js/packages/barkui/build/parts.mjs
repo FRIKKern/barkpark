@@ -51,6 +51,9 @@ function readPart(dir, name) {
   const demo = existsSync(join(dir, 'demo.mjs')) ? join(dir, 'demo.mjs') : null
   if (demo && !/export\s+default\s+(async\s+)?function\s*\w*\s*\(\s*root\b/.test(readFileSync(demo, 'utf8')))
     throw new Error(`${where}: demo.mjs must \`export default function (root)\` and work inside that root`)
+  const exampleText = readFileSync(join(dir, 'example.html'), 'utf8')
+  const refused = lintExample(exampleText)
+  if (refused) throw new Error(`${where}/example.html line ${refused.line}: ${refused.why}`)
   const files = [...REQUIRED_FILES, ...OPTIONAL_FILES].filter((f) => existsSync(join(dir, f)))
   return {
     name,
@@ -62,6 +65,23 @@ function readPart(dir, name) {
     demo,
     hash: hashFiles(files.map((f) => [f, readFileSync(join(dir, f))])),
   }
+}
+
+// An example is markup only: looks live in part.css, behaviour in demo.mjs.
+const EXAMPLE_RULES = [
+  [/<style\b/i, 'a <style> element; the look belongs in part.css'],
+  [/<script\b/i, 'a <script> element; behaviour belongs in demo.mjs'],
+  [/<[^>]*\sstyle\s*=/i, 'a style= attribute; the look belongs in part.css'],
+  [/<[^>]*\son[a-z]+\s*=/i, 'an on*= handler; behaviour belongs in demo.mjs'],
+]
+
+/** The first line of an example that holds a look or a behaviour, or null. */
+export function lintExample(html) {
+  const lines = html.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    for (const [re, why] of EXAMPLE_RULES) if (re.test(lines[i])) return { line: i + 1, why }
+  }
+  return null
 }
 
 /** sha256 over named contents, order-independent of the caller. */

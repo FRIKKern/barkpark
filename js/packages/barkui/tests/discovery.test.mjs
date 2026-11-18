@@ -92,4 +92,17 @@ describe('discoverParts', () => {
     writeFileSync(join(dir, 'demo.mjs'), "for (const el of document.querySelectorAll('ui-button')) el.remove()\n")
     expect(() => discoverParts(root)).toThrow(/parts\/aa: demo\.mjs must `export default function \(root\)`/)
   })
+
+  for (const [what, line] of [
+    ['a <style> element', '<style>button { background-image: linear-gradient(red, red) }</style>'],
+    ['a style= attribute', '<ui-button><button id="aa-x" data-slot="button" style="background: #fff">X</button></ui-button>'],
+    ['an on*= handler', '<ui-button><button id="aa-x" data-slot="button" onclick="go()">X</button></ui-button>'],
+    ['a <script> element', '<script>document.body.remove()</script>'],
+  ]) {
+    it(`refuses an example.html with ${what}, naming the file and line`, () => {
+      const root = scratch()
+      plantPart(root, 'aa', [], `<p>fine</p>\n${line}\n`)
+      expect(() => discoverParts(root)).toThrow(/parts\/aa\/example\.html line 2: /)
+    })
+  }
 })

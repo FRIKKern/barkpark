@@ -30,4 +30,10 @@ describe('renderPage proof lights', () => {
     const strong = page({ hash: 'h1', lights: allOn, measures: { controlEdge: { min: needs + 0.2, max: 9 } } })
     expect(strong).not.toContain('waiting on the sheet')
   })
+
+  it('counts the elements that carry no paint, from the proof', () => {
+    const paintFree = [{ selector: '#aa-a', why: 'w' }, { selector: '#aa-b', why: 'w' }]
+    expect(page({ hash: 'h1', lights: allOn, paintFree })).toContain('2 elements carry no paint')
+    expect(page({ hash: 'h1', lights: allOn, paintFree: [] })).not.toContain('carry no paint')
+  })
 })

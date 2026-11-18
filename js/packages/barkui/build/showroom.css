@@ -63,10 +63,10 @@ body {
   gap: 20px;
   margin-top: 20px;
   padding: 28px;
-  border: 1px solid var(--sr-line);
+  /* Ground, text and hairline come from the tokens sheet: the stage carries data-surface. */
+  border-width: 1px;
+  border-style: solid;
   border-radius: 10px;
-  background: var(--ui-background);
-  color: var(--ui-foreground);
 }
 [data-width="phone"] .sr-stage { width: 390px; max-width: 100%; padding: 16px; }
 [data-demo-row] { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

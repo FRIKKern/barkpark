@@ -1,6 +1,9 @@
 // The showroom page as one string. Parts arrive from discovery; proof lights
 // arrive from dist/proof.json, written by the check. A light is on only when
 // the last run proved it for this exact part folder and foundation.
+/** The sheet's surfaces; the switch sets data-surface on every part's stage. */
+export const SURFACES = ['base', 'raised', 'sunken', 'primary', 'inverse']
+
 export const LIGHTS = [
   ['pressed', 'Pressed by real keys'],
   ['skins', 'Every skin'],
@@ -38,6 +41,8 @@ function waits(part, proof) {
   const lines = Object.entries(SHEET_WAITS)
     .filter(([key, w]) => measures[key] && measures[key].min < w.needs)
     .map(([key, w]) => `<p class="sr-wait">waiting on the sheet: ${esc(w.label)} ${measures[key].min.toFixed(2)}:1, needs ${w.needs}:1</p>`)
+  const free = proof?.parts?.[part.name]?.paintFree ?? []
+  if (free.length) lines.push(`<p class="sr-wait">${free.length} element${free.length === 1 ? '' : 's'} carry no paint: ${free.map((f) => esc(f.selector)).join(', ')}</p>`)
   return lines.join('')
 }
 
@@ -58,7 +63,7 @@ function partSection(part, ctx) {
     ${lights(part, ctx)}
     ${waits(part, ctx.proof)}
   </header>
-  <div class="sr-stage" data-part="${name}">
+  <div class="sr-stage" data-part="${name}" data-surface="base">
 ${part.example}
   </div>
   <details class="sr-source"><summary>Markup: parts/${name}/example.html</summary><pre><code>${esc(part.example)}</code></pre></details>
@@ -93,6 +98,7 @@ export function renderPage({ parts, proof, skins, foundation, uiSdkVersion }) {
   <form class="sr-controls" data-controls hidden aria-label="View">
     ${radios('skin', 'Skin', skins, skins[0])}
     ${radios('scheme', 'Scheme', ['light', 'dark', 'system'], 'system')}
+    ${radios('surface', 'Surface', SURFACES, 'base')}
     ${radios('width', 'Width', ['desktop', 'phone'], 'desktop')}
   </form>
 </header>
