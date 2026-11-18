@@ -36,4 +36,19 @@ describe('renderPage proof lights', () => {
     expect(page({ hash: 'h1', lights: allOn, paintFree })).toContain('2 elements carry no paint')
     expect(page({ hash: 'h1', lights: allOn, paintFree: [] })).not.toContain('carry no paint')
   })
+
+  it('says the lights were proved on the base surface, so other surfaces can show them as not proved', () => {
+    const html = page({ hash: 'h1', lights: Object.fromEntries(Object.entries(allOn).map(([k, l]) => [k, { ...l, surface: 'base' }])) })
+    expect(html).toContain('data-proved-on="base"')
+    expect(html).toMatch(/proved on base/)
+  })
+
+  it('prints a sheet wait per surface from the measured numbers, and drops it when the sheet delivers', () => {
+    const at = 'button#aa-d "Delete"'
+    const weak = page({ hash: 'h1', lights: allOn, measures: { 'text:primary': { min: 2.1, max: 9, at } } })
+    expect(weak).toContain(`waiting on the sheet: text on primary 2.10:1 at ${at.replaceAll('"', '&quot;')}, needs 4.5:1`)
+    const strong = page({ hash: 'h1', lights: allOn, measures: { 'text:primary': { min: 4.6, max: 9, at } } })
+    expect(strong).not.toContain('text on primary')
+    expect(Object.keys(SHEET_WAITS)).toEqual(expect.arrayContaining(['text:raised', 'text:sunken', 'text:primary', 'text:inverse', 'controlEdge:primary']))
+  })
 })

@@ -53,6 +53,11 @@ body {
 .sr-light[data-on="true"] { color: var(--sr-ink); }
 .sr-dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid currentColor; align-self: center; }
 .sr-light[data-on="true"] .sr-dot { background: var(--sr-on); border-color: var(--sr-on); }
+.sr-proved { color: var(--sr-quiet); }
+/* Another surface than the one proved: every light plain grey, none reads as on. */
+.sr-lights[data-unproved] .sr-light { color: var(--sr-quiet); }
+.sr-lights[data-unproved] .sr-dot { background: var(--sr-line); border-color: var(--sr-line); }
+.sr-lights[data-unproved] .sr-why { display: none; }
 .sr-why:empty { display: none; }
 .sr-why { font-size: 13px; }
 .sr-why::before { content: "("; }

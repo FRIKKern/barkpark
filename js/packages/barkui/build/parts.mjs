@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { lintDemo } from './demo-lint.mjs'
 
 export const REQUIRED_FILES = ['part.json', 'part.css', 'example.html', 'press.mjs']
 // Optional: demo.mjs, bundled into the showroom when present: `export default function (root)`,
@@ -51,6 +52,10 @@ function readPart(dir, name) {
   const demo = existsSync(join(dir, 'demo.mjs')) ? join(dir, 'demo.mjs') : null
   if (demo && !/export\s+default\s+(async\s+)?function\s*\w*\s*\(\s*root\b/.test(readFileSync(demo, 'utf8')))
     throw new Error(`${where}: demo.mjs must \`export default function (root)\` and work inside that root`)
+  if (demo) {
+    const styled = lintDemo(readFileSync(demo, 'utf8'), readFileSync(join(dir, 'part.css'), 'utf8'))
+    if (styled) throw new Error(`${where}/demo.mjs line ${styled.line}: ${styled.why}`)
+  }
   const exampleText = readFileSync(join(dir, 'example.html'), 'utf8')
   const refused = lintExample(exampleText)
   if (refused) throw new Error(`${where}/example.html line ${refused.line}: ${refused.why}`)

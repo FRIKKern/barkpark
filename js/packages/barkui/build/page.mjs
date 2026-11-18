@@ -12,7 +12,7 @@ export const LIGHTS = [
   ['noscript', 'Printed with no script'],
 ]
 
-import { SHEET_WAITS } from './sheet-waits.mjs'
+import { PROVED_ON, SHEET_WAITS } from './sheet-waits.mjs'
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
@@ -32,7 +32,8 @@ function lights(part, ctx) {
     const text = key === 'skins' ? `${ctx.skins.length} skins` : label
     return `<li class="sr-light" data-light="${key}" data-on="${on}"><span class="sr-dot" aria-hidden="true"></span><span>${esc(text)}</span><span class="sr-state">${on ? 'on' : 'off'}</span><span class="sr-why">${on ? '' : esc(why)}</span></li>`
   })
-  return `<ul class="sr-lights" aria-label="Proof from the last check run">${items.join('')}</ul>`
+  // The switch in controls.mjs greys these and says "not proved on <surface>" on any other surface.
+  return `<ul class="sr-lights" data-proved-on="${PROVED_ON}" aria-label="Proof from the last check run">${items.join('')}<li class="sr-proved">proved on ${PROVED_ON}</li></ul>`
 }
 
 /** Plain lines for what the sheet does not deliver yet, from the numbers the check measured. */
@@ -40,7 +41,7 @@ function waits(part, proof) {
   const measures = proof?.parts?.[part.name]?.measures ?? {}
   const lines = Object.entries(SHEET_WAITS)
     .filter(([key, w]) => measures[key] && measures[key].min < w.needs)
-    .map(([key, w]) => `<p class="sr-wait">waiting on the sheet: ${esc(w.label)} ${measures[key].min.toFixed(2)}:1, needs ${w.needs}:1</p>`)
+    .map(([key, w]) => `<p class="sr-wait">waiting on the sheet: ${esc(w.label)} ${measures[key].min.toFixed(2)}:1${measures[key].at ? ` at ${esc(measures[key].at)}` : ''}, needs ${w.needs}:1</p>`)
   const free = proof?.parts?.[part.name]?.paintFree ?? []
   if (free.length) lines.push(`<p class="sr-wait">${free.length} element${free.length === 1 ? '' : 's'} carry no paint: ${free.map((f) => esc(f.selector)).join(', ')}</p>`)
   return lines.join('')

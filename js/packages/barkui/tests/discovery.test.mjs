@@ -105,4 +105,40 @@ describe('discoverParts', () => {
       expect(() => discoverParts(root)).toThrow(/parts\/aa\/example\.html line 2: /)
     })
   }
+
+  const withDemo = (line, css = '') => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    writeFileSync(join(dir, 'demo.mjs'), `export default function demo(root) {\n  ${line}\n}\n`)
+    if (css) writeFileSync(join(dir, 'part.css'), readFileSync(join(dir, 'part.css'), 'utf8') + css)
+    return root
+  }
+  for (const [what, line] of [
+    ['an inline style', "root.querySelector('button').style.color = '#ff0000'"],
+    ['a style attribute', "root.querySelector('button').setAttribute('style', 'color: red')"],
+    ['cssText', "root.firstElementChild.cssText"],
+    ['a typed inline style', "root.querySelector('button').attributeStyleMap.set('color', 'red')"],
+    ['a new <style>', "document.head.append(document.createElement('style'))"],
+    ['a new <link>', 'document.head.append(document.createElement("link"))'],
+    ['markup with a style', "root.insertAdjacentHTML('beforeend', '<b style=\"color:red\">x</b>')"],
+    ['insertRule', 'document.styleSheets[0].insertRule("b{}")'],
+    ['an adopted sheet', 'document.adoptedStyleSheets = []'],
+    ['a constructed sheet', 'new CSSStyleSheet()'],
+    ['a script animation', "root.querySelector('button').animate([{ opacity: 0 }], 9)"],
+    ['a class part.css never declares', "root.querySelector('button').classList.add('loud')"],
+    ['a class set by name', "root.querySelector('button').className = 'aa-x'"],
+    ['a class set as an attribute', "root.querySelector('button').setAttribute('class', 'aa-x')"],
+    ['a class from a variable', "root.querySelector('button').classList.toggle(name)"],
+    ['reaching into the check', 'window.__barkCheck = null'],
+    ['patching a prototype', 'Element.prototype.getAttribute = () => null'],
+    ['replacing getComputedStyle', 'window.getComputedStyle = () => ({})'],
+  ]) {
+    it(`refuses a demo.mjs with ${what}, naming the file and line`, () => {
+      expect(() => discoverParts(withDemo(line))).toThrow(/parts\/aa\/demo\.mjs line 2: /)
+    })
+  }
+
+  it('lets a demo add a class that part.css declares', () => {
+    expect(() => discoverParts(withDemo("root.querySelector('button').classList.add('aa-open')", '\n.aa-open { gap: 4px; }\n'))).not.toThrow()
+  })
 })
