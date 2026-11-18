@@ -1,15 +1,15 @@
-// Real-key steps for the button. Each `expect` runs in the page with the part's
-// example element and the check's helpers (`h`); it returns true or a reason.
+// Real-key steps for the button. `setup` and each `expect` run inside the page
+// with the part's example element and the check's helpers (`h`), so they may
+// not reach anything else in this file. An expect returns true or a reason.
 // Keys go through the browser's own input pipeline, so focus-visible, Space and
-// Enter behave as they do for a person.
+// Enter behave as they do for a person. The check focuses the part's heading
+// first; the first Tab lands on the first control of the example.
 
-/** Runs once in the page before the steps: log every action by its button id. */
-export function setup(root) {
-  window.__buttonActions = []
-  root.addEventListener('action', (e) => window.__buttonActions.push(e.target.querySelector('button')?.id ?? '?'))
+/** Log every action by its button id. UI SDK's action event does not bubble. */
+export function setup(root, h) {
+  h.state.actions = []
+  for (const el of root.querySelectorAll('ui-button')) el.addEventListener('action', () => h.state.actions.push(el.querySelector('button')?.id ?? '?'))
 }
-
-const actions = () => window.__buttonActions.join(',')
 
 export const steps = [
   {
@@ -27,8 +27,8 @@ export const steps = [
       return true
     },
   },
-  { name: 'Space activates it', keys: ['Space'], expect: () => actions() === 'button-primary' || `actions: ${actions()}` },
-  { name: 'Enter activates it', keys: ['Enter'], expect: () => actions() === 'button-primary,button-primary' || `actions: ${actions()}` },
+  { name: 'Space activates it', keys: ['Space'], expect: (root, h) => h.state.actions.join() === 'button-primary' || `actions: ${h.state.actions}` },
+  { name: 'Enter activates it', keys: ['Enter'], expect: (root, h) => h.state.actions.join() === 'button-primary,button-primary' || `actions: ${h.state.actions}` },
   {
     name: 'Tab walks secondary, quiet, destructive',
     keys: ['Tab', 'Tab', 'Tab'],
@@ -43,19 +43,19 @@ export const steps = [
     name: 'Tab, Enter: the save button goes pending',
     keys: ['Tab', 'Enter'],
     wait: 100,
-    expect: (root) => {
+    expect: (root, h) => {
       const b = root.querySelector('#button-save')
       if (document.activeElement !== b) return 'focus left the save button'
       if (!b.hasAttribute('data-pending') || b.getAttribute('aria-busy') !== 'true') return 'not pending'
       const spin = b.querySelector('[data-slot="spinner"]')
       if (getComputedStyle(spin).display === 'none') return 'spinner hidden while pending'
-      return actions().endsWith('button-save') || `actions: ${actions()}`
+      return h.state.actions.at(-1) === 'button-save' || `actions: ${h.state.actions}`
     },
   },
   {
     name: 'Enter while pending is refused',
     keys: ['Enter', 'Space'],
-    expect: () => actions().split(',').filter((a) => a === 'button-save').length === 1 || `actions: ${actions()}`,
+    expect: (root, h) => h.state.actions.filter((a) => a === 'button-save').length === 1 || `actions: ${h.state.actions}`,
   },
   {
     name: 'Pending ends and the spinner hides',
@@ -69,6 +69,6 @@ export const steps = [
   {
     name: 'A real click on the disabled button fires nothing',
     click: '#button-disabled',
-    expect: () => !actions().includes('button-disabled') || `actions: ${actions()}`,
+    expect: (root, h) => !h.state.actions.includes('button-disabled') || `actions: ${h.state.actions}`,
   },
 ]

@@ -28,9 +28,8 @@
   font-size: var(--bark-button-text);
   font-weight: 500;
   line-height: 1;
-  transition-property: background-color, border-color, color;
-  transition-duration: 120ms;
-  transition-timing-function: ease-out;
+  /* The shorthand on purpose: it also clears the 0.3s delay UI SDK's sheet sets for its pending fade. */
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 
   &[data-size="sm"] {
     --bark-button-height: calc(var(--ui-spacing) * 7);
@@ -59,13 +58,13 @@
     --bark-button-hover-edge: transparent;
   }
   &[data-variant="destructive"] {
-    --bark-button-bg: color-mix(in oklab, var(--ui-destructive) 7%, var(--ui-background));
+    --bark-button-bg: color-mix(in oklab, var(--ui-destructive) 6%, var(--ui-background));
     --bark-button-fg: var(--bark-danger-text);
     --bark-button-edge: color-mix(in oklab, var(--ui-destructive) 35%, var(--ui-background));
-    --bark-button-hover-bg: color-mix(in oklab, var(--ui-destructive) 13%, var(--ui-background));
+    --bark-button-hover-bg: color-mix(in oklab, var(--ui-destructive) 10%, var(--ui-background));
     --bark-button-hover-fg: var(--bark-danger-text);
     --bark-button-hover-edge: color-mix(in oklab, var(--ui-destructive) 50%, var(--ui-background));
-    --bark-button-press-bg: color-mix(in oklab, var(--ui-destructive) 19%, var(--ui-background));
+    --bark-button-press-bg: color-mix(in oklab, var(--ui-destructive) 14%, var(--ui-background));
     --bark-button-press-fg: var(--bark-danger-text);
   }
 
