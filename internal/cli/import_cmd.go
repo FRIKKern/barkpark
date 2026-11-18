@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -23,13 +24,21 @@ import (
 // batch_too_large above it).
 const importMaxMutations = 1000
 
-// importDefaultBatchBytes is the default /v1/data body cap. The endpoint caps a
+// importMaxRequestBytes is the default /v1/data body cap. The endpoint caps a
 // /v1/data body at three documents at the per-document cap
 // (endpoint.ex data_body_length/0: min(DocumentSize.max_bytes() * 3, 100 MB)),
 // and the per-document default is 10_000_000 bytes, so the default body cap is
 // 30_000_000 bytes. A server configured with a smaller document cap has a
 // smaller body cap; --batch-bytes lowers the client side to match.
-const importDefaultBatchBytes = 30_000_000
+const importMaxRequestBytes = 30_000_000
+
+// importDefaultBatchBytes is the size a batch is packed to when --batch-bytes
+// is not given. It is well under importMaxRequestBytes on purpose
+// (task-1e302921c7545cb0): on 2026-11-06 and 2026-11-18 the first 30 MB batch
+// to a new Azure box stalled, and both runs finished with --batch-bytes
+// 5000000. A single document bigger than this still goes alone in its own
+// request, up to importMaxRequestBytes.
+const importDefaultBatchBytes = 5_000_000
 
 // importServerOwnedKeys are the envelope keys the server writes and a restore
 // must not send back: Barkpark.Content.Envelope's reserved set minus _id and
@@ -82,7 +91,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	dryRun := g.dryRun
 	yes := g.yes
 	fromLine := 0
-	batchBytes := importDefaultBatchBytes
+	batchBytes, requestCap := importDefaultBatchBytes, importMaxRequestBytes
 	mediaDir := ""
 	schemasPath := ""
 	replaceMedia := false
@@ -137,7 +146,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			if err != nil || n < 1024 {
 				return usageErrf(out, func() { usageImport(out, false) }, "invalid --batch-bytes %q (want a byte count, 1024 or more)", v)
 			}
-			batchBytes = n
+			batchBytes, requestCap = n, n
 			i = ni
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
@@ -270,7 +279,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 
-	batches, err := importBatches(ordered, batchBytes, 0)
+	batches, err := importBatches(ordered, batchBytes, requestCap, 0)
 	if err != nil {
 		return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
 	}
@@ -348,7 +357,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 					err, path, sanityAssetsSuffix), exitGeneric)
 		}
 		sanity.resolve(ordered)
-		if batches, err = importBatches(ordered, batchBytes, 0); err != nil {
+		if batches, err = importBatches(ordered, batchBytes, requestCap, 0); err != nil {
 			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
 		}
 	}
@@ -363,7 +372,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		if err := media.resolve(ordered); err != nil {
 			return useError(out, "validation_failed", fmt.Sprintf("import: %v. No document was written.", err), exitValidation)
 		}
-		if batches, err = importBatches(ordered, batchBytes, 0); err != nil {
+		if batches, err = importBatches(ordered, batchBytes, requestCap, 0); err != nil {
 			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
 		}
 	}
@@ -373,22 +382,39 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// the smaller size. The rows still to send are packed again each time, so
 	// the run stays in apply order and --from-line still names the first row
 	// that was not confirmed.
+	//
+	// A timed-out request leaves its connection behind, and over HTTP/2 every
+	// later request shares that one connection. When the connection itself
+	// stalled, each smaller batch then timed out too (task-1e302921c7545cb0),
+	// so the sender drops its connections after every transport error and the
+	// next request opens a new one. A single document that times out is sent
+	// once more on a new connection before the run stops.
 	u := ctxScopedURL(ctx, "/v1/data/mutate/"+url.PathEscape(dataset))
+	sender := newImportSender()
+	defer sender.close()
 	total := 0
 	for _, b := range batches {
 		total += len(b.rows)
 	}
-	applied, sent, maxRows := 0, 0, 0
+	applied, sent, maxRows, retriedLine := 0, 0, 0, 0
 	for len(batches) > 0 {
 		b := batches[0]
-		code, failed, slow := importWriteBatch(out, u, ctx, b, len(b.rows) > 1)
+		code, failed, slow, timedOut := importWriteBatch(out, sender, u, ctx, b, len(b.rows) > 1, retriedLine != b.rows[0].Line)
+		if timedOut {
+			sender.reset()
+		}
 		if slow != "" {
+			if len(b.rows) == 1 {
+				retriedLine = b.rows[0].Line
+				out.errf("import: the document at line %d did not finish: %s. Sending it again on a new connection.", b.rows[0].Line, slow)
+				continue
+			}
 			maxRows = len(b.rows) / 2
 			var rest []*importRow
 			for _, pending := range batches {
 				rest = append(rest, pending.rows...)
 			}
-			if batches, err = importBatches(rest, batchBytes, maxRows); err != nil {
+			if batches, err = importBatches(rest, batchBytes, requestCap, maxRows); err != nil {
 				return useError(out, "validation_failed", fmt.Sprintf("import: %v", err), exitValidation)
 			}
 			out.errf("import: the batch at line %d (%d documents) did not finish: %s. Sending %d documents per batch from here.",
@@ -626,10 +652,14 @@ func importCollides(r *importRow, existing map[string]bool) bool {
 
 // importBatches packs the rows that are not skipped into requests of at most
 // importMaxMutations mutations, maxBytes body bytes and, when maxRows > 0,
-// maxRows documents. The body is built here from the encoded mutations, so the
-// size checked is the size sent. The order inside a batch is set by
-// importBatchBody.
-func importBatches(rows []*importRow, maxBytes, maxRows int) ([]importBatch, error) {
+// maxRows documents. A document bigger than maxBytes goes alone in its own
+// request when that request fits capBytes, the most the server reads. The body
+// is built here from the encoded mutations, so the size checked is the size
+// sent. The order inside a batch is set by importBatchBody.
+func importBatches(rows []*importRow, maxBytes, capBytes, maxRows int) ([]importBatch, error) {
+	if capBytes < maxBytes {
+		capBytes = maxBytes
+	}
 	var batches []importBatch
 	var cur importBatch
 	curBytes := 0
@@ -642,9 +672,9 @@ func importBatches(rows []*importRow, maxBytes, maxRows int) ([]importBatch, err
 		for _, m := range r.mutations {
 			rowBytes += len(m) + 1 // +1 for the separating comma
 		}
-		if envelope+rowBytes > maxBytes {
+		if envelope+rowBytes > capBytes {
 			return nil, fmt.Errorf("the document on line %d (%s) needs %d bytes, over the %d-byte request cap; raise --batch-bytes if the server allows it",
-				r.Line, r.ID, envelope+rowBytes, maxBytes)
+				r.Line, r.ID, envelope+rowBytes, capBytes)
 		}
 		if len(cur.rows) > 0 && (cur.mutations+len(r.mutations) > importMaxMutations || curBytes+rowBytes > maxBytes ||
 			(maxRows > 0 && len(cur.rows) >= maxRows)) {
@@ -664,8 +694,12 @@ func importBatches(rows []*importRow, maxBytes, maxRows int) ([]importBatch, err
 	}
 	for k := range batches {
 		batches[k].body = importBatchBody(batches[k].rows)
-		if len(batches[k].body) > maxBytes {
-			return nil, fmt.Errorf("batch %d is %d bytes, over the %d-byte cap", k+1, len(batches[k].body), maxBytes)
+		limit := maxBytes
+		if len(batches[k].rows) == 1 {
+			limit = capBytes
+		}
+		if len(batches[k].body) > limit {
+			return nil, fmt.Errorf("batch %d is %d bytes, over the %d-byte cap", k+1, len(batches[k].body), limit)
 		}
 	}
 	return batches, nil
@@ -714,36 +748,39 @@ func importBatchBody(rows []*importRow) []byte {
 // When canShrink is set and the server could not finish the batch in time (a
 // client timeout, a 413 or 504, or storage_unavailable), it renders nothing and
 // returns the reason as slow, for the caller to send the rows again in smaller
-// batches. Sending them again is safe even if a timed-out batch did commit:
-// createOrReplace and publish write the same content a second time.
-func importWriteBatch(out *writer, u string, ctx manifest.Context, b importBatch, canShrink bool) (code int, failed bool, slow string) {
+// batches. canRetry does the same for a single document that timed out, so the
+// caller can send it once more on a new connection. Sending them again is safe
+// even if a timed-out batch did commit: createOrReplace and publish write the
+// same content a second time. timedOut reports a transport error, after which
+// the caller drops the sender's connections.
+func importWriteBatch(out *writer, sender *importSender, u string, ctx manifest.Context, b importBatch, canShrink, canRetry bool) (code int, failed bool, slow string, timedOut bool) {
 	headers := ctxAuthHeaders(ctx)
 	headers["Content-Type"] = "application/json"
-	status, respBody, err := doRequest("POST", u, headers, b.body)
+	status, respBody, err := sender.send(http.MethodPost, u, headers, b.body)
 	if err != nil {
 		var ne net.Error
-		if canShrink && errors.As(err, &ne) && ne.Timeout() {
-			return 0, true, "the request timed out"
+		if errors.As(err, &ne) && ne.Timeout() && (canShrink || canRetry) {
+			return 0, true, "the request timed out", true
 		}
 		useError(out, "request_failed", fmt.Sprintf("import: request failed: %v. The server may or may not have applied this batch; if it did, the resume needs --overwrite.", err), exitGeneric)
-		return exitGeneric, true, ""
+		return exitGeneric, true, "", true
 	}
 	if status < 200 || status >= 300 {
 		ae := classifyError(status, respBody)
 		if canShrink && (status == 413 || status == 504 || ae.code == "storage_unavailable") {
 			if ae.code != "" {
-				return 0, true, fmt.Sprintf("HTTP %d %s", status, ae.code)
+				return 0, true, fmt.Sprintf("HTTP %d %s", status, ae.code), false
 			}
-			return 0, true, fmt.Sprintf("HTTP %d", status)
+			return 0, true, fmt.Sprintf("HTTP %d", status), false
 		}
 		renderError(out, ae)
-		return ae.exit, true, ""
+		return ae.exit, true, "", false
 	}
 	if rc, handled := screenBuiltinWriteReceipt(out, "import mutate", status, respBody); handled {
 		if rc == exitOK {
 			rc = exitGeneric
 		}
-		return rc, true, ""
+		return rc, true, "", false
 	}
 	if !importRestoreWarned && bytes.Contains(respBody, []byte("mutate.unknown_key")) && bytes.Contains(respBody, []byte("restore")) {
 		importRestoreWarned = true
@@ -752,14 +789,14 @@ func importWriteBatch(out *writer, u string, ctx manifest.Context, b importBatch
 	written, werr := migrateBatchWritten(respBody)
 	if werr != nil {
 		useError(out, "unreadable_write_receipt", "import: "+werr.Error(), exitGeneric)
-		return exitGeneric, true, ""
+		return exitGeneric, true, "", false
 	}
 	if written != b.mutations {
 		useError(out, "unreadable_write_receipt",
 			fmt.Sprintf("import: the server confirmed %d of %d mutations in this batch", written, b.mutations), exitGeneric)
-		return exitGeneric, true, ""
+		return exitGeneric, true, "", false
 	}
-	return exitOK, false, ""
+	return exitOK, false, "", false
 }
 
 // importRestoreWarned keeps the old-server note to one line per run.
@@ -844,8 +881,10 @@ func usageImport(out *writer, toStdout bool) {
 	p("                     the import refuses and names the ids that exist")
 	p("  --from-line N      resume a failed import: skip every row applied before the row")
 	p("                     on line N. A failed batch prints the line to resume from")
-	p("  --batch-bytes N    request body cap (default 30000000, the server default for")
-	p("                     /v1/data). Lower it for a server with a smaller document cap")
+	p("  --batch-bytes N    request body cap. By default batches are packed to 5000000")
+	p("                     bytes, and one bigger document goes alone up to 30000000, the")
+	p("                     server default for /v1/data. Lower it for a server with a")
+	p("                     smaller document cap")
 	p("  --media <dir>      upload the files a `bp export --media <dir>` wrote, with their")
 	p("                     asset ids, before the documents. The mediaAsset rows then")
 	p("                     overwrite the asset documents the uploads made, with fileInfo")
@@ -867,6 +906,8 @@ func usageImport(out *writer, toStdout bool) {
 	p("transaction, so a refused batch applies nothing from that batch. A batch the")
 	p("server cannot finish in time (a timeout, 413, 504 or storage_unavailable) is")
 	p("sent again at half its documents, down to one, and later batches keep that size.")
+	p("After a timeout the next request opens a new connection, and a single document")
+	p("that timed out is sent once more before the import stops.")
 	p("")
 	p("A `sanity dataset export` tarball (.tar.gz or .tgz) imports its data.ndjson. Each")
 	p("asset file uploads once as Barkpark media and every image/file value pointing at")
