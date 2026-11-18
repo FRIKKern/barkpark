@@ -310,10 +310,13 @@ const BARKUI_CLOUD_SOURCES = { "--ui-ring": "--ring-soft" };
 // --bark-<surface>-depth-<k>; the axis rules point the names parts read
 // (--ui-<role>, --bark-accent, --bark-selected, --bark-depth-<k>) at one surface.
 const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
+const TONES = ["success", "warning", "danger", "info"];
 const ROLES = ["background", "foreground", "muted", "muted-foreground", "border", "input",
-  "primary", "primary-foreground", "ring", "ring-border", "accent", "selected"];
+  "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
+  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`]), "destructive"];
 const DEPTHS = [["-2", "m2"], ["-1", "m1"], ["1", "1"], ["2", "2"], ["3", "3"]];
-const pointed = (role) => (["accent", "selected"].includes(role) ? `--bark-${role}` : `--ui-${role}`);
+const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`])]);
+const pointed = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 // Where a table name lives in the skin rule: a pointed name as --bark-base-<role>.
 const skinVar = (name) => { const r = ROLES.find((x) => pointed(x) === name); return r ? `--bark-base-${r}` : name; };
 const SKIN_NAMES = [
@@ -480,6 +483,76 @@ test("BarkUI sheet: every surface reads in every skin and mode, raised and sunke
       // Inverse is the other mode's base: a dark band on a light page and the reverse.
       const other = mode === "light" ? "dark" : "light";
       assert.equal(get("--bark-inverse-background"), arms(v["--bark-base-background"])[other], `${name}/${mode}: inverse is not the other mode's ground`);
+    }
+  }
+});
+
+// The one colour form the sheet writes: hsl(H S% L%), optionally with an alpha.
+const COLOUR = String.raw`hsl\([\d.]+ [\d.]+% [\d.]+%(?: / [\d.]+)?\)`;
+const VALUE = new RegExp(`^(?:light-dark\\(${COLOUR}, ${COLOUR}\\)|${COLOUR}|var\\(--[\\w-]+\\))$`);
+
+test("BarkUI sheet: every declared value is a colour pair, a colour or a pointer, and every surface has every role", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  let seen = 0;
+  for (const r of rules)
+    for (const [prop, value] of Object.entries(r.vars)) {
+      if (prop === "color-scheme") continue;
+      assert.match(value, VALUE, `${r.selectors.join(", ")}: ${prop} is not a colour the sheet writes`);
+      seen++;
+    }
+  assert.ok(seen > 0, "no declarations read; the check above would be vacuous");
+  for (const { name } of themes) {
+    const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
+    for (const s of SURFACES) for (const r of ROLES) assert.ok(`--bark-${s}-${r}` in v, `${name}: ${s} has no ${r}`);
+  }
+});
+
+// Pairs whose two colours both come unchanged from the colour source: the
+// status fill and its onStatus foreground. onStatus is warm white for every
+// tone, so on light fills (warning, info in light) and every dark-mode fill it
+// is under 4.5:1. That is the colour source's to fix; here it is held at its
+// measured floor (1.94:1, evergreen dark warning) so it cannot fall further.
+const SOURCE_TONE_FLOOR = 1.9;
+
+test("BarkUI sheet: tones and fills read on every surface, in every skin and mode", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  const studio = cssRules(build("layouts/root.html.heex", themes));
+  // Every (status fill, onStatus foreground) pair the colour source writes, as Studio writes them.
+  const sourcePairs = new Set();
+  for (const { name } of themes)
+    for (const sel of [`html[data-bp-theme="${name}"]`, `html[data-bp-theme="${name}"][data-theme="dark"]`]) {
+      const sv = ruleFor(studio, sel).vars;
+      for (const role of ["ok", "warn", "danger", "info"])
+        sourcePairs.add(`${resolveStudio(sv, `--${role}`)}|${resolveStudio(sv, `--${role}-fg`)}`);
+    }
+  for (const { name } of themes) {
+    const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
+    for (const mode of ["light", "dark"]) {
+      const get = (s, r) => arms(v[`--bark-${s}-${r}`])[mode];
+      for (const s of SURFACES) {
+        const at = `${name}/${mode}/${s}`;
+        const bg = get(s, "background");
+        const pairs = [
+          [get(s, "foreground"), get(s, "selected"), 4.5, "foreground on selected"],
+          [get(s, "muted-foreground"), get(s, "muted"), 4.5, "muted foreground on muted"],
+          [get(s, "destructive"), bg, 4.5, "destructive"],
+          ...TONES.flatMap((t) => [
+            [get(s, `${t}-text`), bg, 4.5, `${t}-text`],
+            [get(s, t), bg, 3, `${t} fill`],
+            [get(s, `${t}-foreground`), get(s, t), sourcePairs.has(`${get(s, t)}|${get(s, `${t}-foreground`)}`) ? SOURCE_TONE_FLOOR : 4.5, `${t}-foreground on its fill`],
+          ]),
+        ];
+        for (const [fg, ground, floor, what] of pairs) {
+          const c = contrast(fg, ground);
+          assert.ok(c >= floor, `${at}: ${what} is ${c.toFixed(2)}, under ${floor}`);
+        }
+      }
     }
   }
 });

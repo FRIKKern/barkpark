@@ -28,16 +28,18 @@
 //
 // The surface and depth axes (the BarkUI base's names and semantics)
 //   Five surfaces, base, raised, sunken, primary and inverse, each carry every
-//   role above but the tones and --ui-destructive, as --bark-<surface>-<role>;
+//   role above, as --bark-<surface>-<role> (--ui-destructive as
+//   --bark-<surface>-destructive);
 //   each also has five depth grounds, --bark-<surface>-depth-<m2|m1|1|2|3>.
 //   design/emit/barkui-surfaces.mjs says where each value comes from. Base is
 //   the name table below.
 //
 // The rules
 //   Each skin is one rule, `[data-skin="<name>"], [data-bp-theme="<name>"]`,
-//   that writes every --bark-<surface>-* value and every tone once as
+//   that writes every --bark-<surface>-* value once as
 //   `light-dark(<light>, <dark>)`. The base arms are the Studio region's strings
-//   for that slot in each mode. The default skin also takes `:root`, so a page
+//   for that slot in each mode. The build refuses an arm that is not an hsl()
+//   colour, naming the skin, surface, role and mode. The default skin also takes `:root`, so a page
 //   with no skin attribute draws it.
 //   The axis rules point the names parts read at one surface:
 //     :root, [data-skin], [data-bp-theme], [data-surface="base"] -> base
@@ -46,8 +48,9 @@
 //       depth of the current surface
 //   A surface nests inside skin, scheme and another surface. A skin element
 //   starts its subtree on its own base surface, as in the BarkUI base. Paint
-//   rules in :where() give skin, surface and depth elements their ground, text
-//   and edge colour, and depth 1 to 3 the --ui-shadow; any app rule wins over
+//   rules in :where() give data-skin, surface and depth elements their ground,
+//   text and edge colour (not data-bp-theme, which Studio pages carry today and
+//   paint themselves), and depth 1 to 3 the --ui-shadow; any app rule wins over
 //   them. (The base gets the same effect from cascade layers; this sheet has no
 //   layers.)
 //   The scheme is a separate axis that only sets `color-scheme`:
@@ -115,25 +118,31 @@ function slotValue(color, slot, mode, soft) {
 const SKINS = (name) => [`[data-skin="${name}"]`, `[data-bp-theme="${name}"]`];
 
 const ROLE_BY_NAME = new Map(SURFACE_ROLES.map((r) => [pointedName(r), r]));
-const DIRECT = BARKUI_NAMES.filter(([n]) => !ROLE_BY_NAME.has(n));
+for (const [n] of BARKUI_NAMES)
+  if (!ROLE_BY_NAME.has(n)) throw new Error(`barkui: ${n} is in the name table but is no surface role`);
+// The one colour form the sheet writes: hsl(H S% L%), optionally with an alpha.
+const COLOUR = /^hsl\([\d.]+ [\d.]+% [\d.]+%(?: \/ [\d.]+)?\)$/;
 
 function skinRule(name, spec) {
   const color = themePalette(spec).color;
   const selectors = [...(name === DEFAULT_THEME ? [":root"] : []), ...SKINS(name)];
   const perMode = (f) => ({ light: f("light"), dark: f("dark") });
-  const base = perMode((mode) => Object.fromEntries(BARKUI_NAMES.filter(([n]) => ROLE_BY_NAME.has(n))
-    .map(([n, slot, soft]) => [ROLE_BY_NAME.get(n), slotValue(color, slot, mode, soft)])));
+  const base = perMode((mode) => Object.fromEntries(BARKUI_NAMES.map(([n, slot, soft]) => [ROLE_BY_NAME.get(n), slotValue(color, slot, mode, soft)])));
   const v = surfaceValues(base, perMode((m) => slotValue(color, "studioChrome.surface-raised", m)),
     perMode((m) => slotValue(color, "primary-fg", m, "soft")));
-  const pair = (prop, pick) => `  ${prop}: light-dark(${pick(v.light)}, ${pick(v.dark)});`;
-  const body = [
-    ...SURFACES.flatMap((s) => [
-      ...SURFACE_ROLES.map((r) => pair(`--bark-${s}-${r}`, (m) => m[s][r])),
-      ...DEPTHS.map(depthKey).map((k) => pair(`--bark-${s}-depth-${k}`, (m) => m[s].depth[k])),
-    ]),
-    ...DIRECT.map(([n, slot, soft]) =>
-      `  ${n}: light-dark(${slotValue(color, slot, "light", soft)}, ${slotValue(color, slot, "dark", soft)});`),
-  ];
+  const pair = (s, key, pick) => {
+    const arm = (mode) => {
+      const c = pick(v[mode]);
+      if (typeof c !== "string" || !COLOUR.test(c))
+        throw new Error(`barkui: skin ${name}, surface ${s}, ${key}, ${mode}: ${JSON.stringify(c)} is not an hsl() colour`);
+      return c;
+    };
+    return `  --bark-${s}-${key}: light-dark(${arm("light")}, ${arm("dark")});`;
+  };
+  const body = SURFACES.flatMap((s) => [
+    ...SURFACE_ROLES.map((r) => pair(s, r, (m) => m[s][r])),
+    ...DEPTHS.map(depthKey).map((k) => pair(s, `depth-${k}`, (m) => m[s].depth[k])),
+  ]);
   return `${selectors.join(",\n")} {\n${body.join("\n")}\n}`;
 }
 
@@ -141,8 +150,10 @@ function skinRule(name, spec) {
 // base is also the default on the root and on every skin element, so a skin set
 // inside a surface starts its subtree on its own base, as in the BarkUI base.
 // Each depth rule moves only the background, to the current surface's step.
-// The paint rules give a skin, surface or depth element its ground, text and
-// edge colour; they sit in :where() so any rule an app writes wins over them.
+// The paint rules give a data-skin, surface or depth element its ground, text
+// and edge colour; they sit in :where() so any rule an app writes wins over them.
+// data-bp-theme gets the variables but no paint: Studio pages carry it today
+// and paint their own ground.
 function axisRules() {
   const point = (s) => [
     ...SURFACE_ROLES.map((r) => `  ${pointedName(r)}: var(--bark-${s}-${r});`),
@@ -152,7 +163,7 @@ function axisRules() {
     `:root,\n[data-skin],\n[data-bp-theme],\n[data-surface="base"] {\n${point("base")}\n}`,
     ...SURFACES.slice(1).map((s) => `[data-surface="${s}"] {\n${point(s)}\n}`),
     ...DEPTHS.map((n) => `[data-depth="${n}"] {\n  --ui-background: var(--bark-depth-${depthKey(n)});\n}`),
-    ":where([data-skin], [data-bp-theme], [data-surface], [data-depth]) {\n  background-color: var(--ui-background);\n  color: var(--ui-foreground);\n  border-color: var(--ui-border);\n}",
+    ":where([data-skin], [data-surface], [data-depth]) {\n  background-color: var(--ui-background);\n  color: var(--ui-foreground);\n  border-color: var(--ui-border);\n}",
     ':where([data-depth="1"], [data-depth="2"], [data-depth="3"]) {\n  box-shadow: var(--ui-shadow);\n}',
   ];
 }
