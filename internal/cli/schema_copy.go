@@ -83,32 +83,29 @@ func fetchSchemaList(ctx manifest.Context, dataset, query string) ([]json.RawMes
 	return out, env.Definition, nil
 }
 
-// exportSchemas writes the dataset's schemas to path, or only the schemas of
-// types when it names any. It writes a temporary file next to path and
-// renames it, so a failed run leaves an earlier file as it was.
+// exportSchemas writes the dataset's schemas to path. When types names any,
+// it writes their schemas and every schema they reach (schemaClosure), so the
+// file recreates working types on the target (task-5b5fdb17a8a70795). It
+// writes a temporary file next to path and renames it, so a failed run leaves
+// an earlier file as it was.
 func exportSchemas(out *writer, ctx manifest.Context, dataset, path string, types []string) int {
 	schemas, err := fetchDatasetSchemas(ctx, dataset)
 	if err != nil {
 		return useError(out, "request_failed", fmt.Sprintf("export --schemas: reading the schemas of %s: %v", exportScope(ctx), err), exitGeneric)
 	}
+	total := len(schemas)
 	if len(types) > 0 {
-		kept := schemas[:0]
-		found := map[string]bool{}
-		for _, s := range schemas {
-			if name := schemaCopyName(s); containsString(types, name) {
-				kept = append(kept, s)
-				found[name] = true
-			}
-		}
-		schemas = kept
-		var missing []string
-		for _, t := range types {
-			if !found[t] {
-				missing = append(missing, t)
-			}
-		}
+		var reached, missing []string
+		schemas, reached, missing = schemaClosure(schemas, types)
 		if len(missing) > 0 {
 			out.errf("export --schemas: %s has no schema for type %s, so the file leaves it out", exportScope(ctx), strings.Join(missing, ", "))
+		}
+		if len(reached) > 0 {
+			out.errf("export --schemas: the named types use %d more schema(s), written too: %s", len(reached), strings.Join(reached, ", "))
+		}
+		if len(schemas) < total {
+			out.errf("export --schemas: the file holds %d of the %d schemas in %s, so datasetSchemaContentHash matches the source only when the source holds these %d alone",
+				len(schemas), total, exportScope(ctx), len(schemas))
 		}
 	}
 	body, err := json.MarshalIndent(schemaCopyFile{Scope: exportScope(ctx), Types: types, Schemas: schemas}, "", "  ")
@@ -197,4 +194,86 @@ func applySchemas(out *writer, ctx manifest.Context, dataset string, f *schemaCo
 		out.errf("import: the target answered 429 to %d schema write(s) and the import waited %s in total", pacer.throttled, pacer.waited)
 	}
 	return nil
+}
+
+// schemaClosure keeps the schemas of types and every schema they reach: the
+// object types a field names (namedType, at any depth: array members, block
+// members, nested fields) and the document types a reference field points at
+// (to[].type and refType). Each schema reached is searched the same way until
+// nothing new turns up. The schemas keep the order the server listed them in.
+// reached names the schemas added beyond types; missing names the types with
+// no schema.
+func schemaClosure(schemas []json.RawMessage, types []string) (kept []json.RawMessage, reached, missing []string) {
+	byName := make(map[string]json.RawMessage, len(schemas))
+	for _, s := range schemas {
+		byName[schemaCopyName(s)] = s
+	}
+	keep := map[string]bool{}
+	var queue []string
+	for _, t := range types {
+		if _, ok := byName[t]; !ok {
+			missing = append(missing, t)
+			continue
+		}
+		if !keep[t] {
+			keep[t] = true
+			queue = append(queue, t)
+		}
+	}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		var def any
+		if err := json.Unmarshal(byName[name], &def); err != nil {
+			continue
+		}
+		for _, used := range schemaTypeNames(def, nil) {
+			if _, ok := byName[used]; ok && !keep[used] {
+				keep[used] = true
+				queue = append(queue, used)
+			}
+		}
+	}
+	for _, s := range schemas {
+		name := schemaCopyName(s)
+		if !keep[name] {
+			continue
+		}
+		kept = append(kept, s)
+		if !containsString(types, name) {
+			reached = append(reached, name)
+		}
+	}
+	return kept, reached, missing
+}
+
+// schemaTypeNames collects the type names one schema definition uses.
+func schemaTypeNames(v any, acc []string) []string {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			switch k {
+			case "namedType", "refType":
+				if name, ok := child.(string); ok && name != "" {
+					acc = append(acc, name)
+				}
+			case "to":
+				if targets, ok := child.([]any); ok {
+					for _, t := range targets {
+						if m, ok := t.(map[string]any); ok {
+							if name, ok := m["type"].(string); ok && name != "" {
+								acc = append(acc, name)
+							}
+						}
+					}
+				}
+			}
+			acc = schemaTypeNames(child, acc)
+		}
+	case []any:
+		for _, child := range x {
+			acc = schemaTypeNames(child, acc)
+		}
+	}
+	return acc
 }

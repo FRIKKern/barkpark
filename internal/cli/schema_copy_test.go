@@ -326,3 +326,83 @@ func TestExportTypeRefusesAnEmptyName(t *testing.T) {
 		t.Fatalf("export exit = 0, want a usage error")
 	}
 }
+
+// task-5b5fdb17a8a70795: with --type, --schemas writes the named types and
+// every schema they reach. The shapes are the ones the gyl schemas use: an
+// object field (namedType), array and block members (of[].namedType,
+// blocks.of[].namedType), a reference annotation inside a block
+// (blocks.annotations[].fields[].to[].type) and a reference array (of.refType).
+// Objects that name each other end the walk, and a schema nothing reaches
+// stays out.
+func TestExportTypedSchemasIncludeEverySchemaTheTypesUse(t *testing.T) {
+	src := newSchemaFakeServer(t)
+	obj := func(name string, fields ...any) map[string]any {
+		return map[string]any{"name": name, "kind": "object", "fields": fields}
+	}
+	src.schemas["book"] = map[string]any{"name": "book", "kind": "document", "fields": []any{
+		map[string]any{"name": "cover", "type": "object", "namedType": "coverImage"},
+		map[string]any{"name": "parts", "type": "array", "of": []any{map[string]any{"type": "object", "namedType": "part"}}},
+		map[string]any{"name": "body", "type": "richText", "blocks": map[string]any{
+			"of": []any{map[string]any{"namedType": "callout"}},
+			"annotations": []any{map[string]any{"name": "link", "fields": []any{
+				map[string]any{"name": "target", "type": "reference", "to": []any{map[string]any{"type": "author"}}},
+			}}},
+		}},
+		map[string]any{"name": "related", "type": "array", "of": map[string]any{"type": "reference", "refType": "series"}},
+	}}
+	src.schemas["coverImage"] = obj("coverImage", map[string]any{"name": "alt", "type": "string"})
+	src.schemas["part"] = obj("part", map[string]any{"name": "next", "type": "object", "namedType": "section"})
+	src.schemas["section"] = obj("section", map[string]any{"name": "back", "type": "object", "namedType": "part"})
+	src.schemas["callout"] = obj("callout", map[string]any{"name": "tone", "type": "string"})
+	src.schemas["author"] = map[string]any{"name": "author", "kind": "document", "fields": []any{
+		map[string]any{"name": "bio", "type": "object", "namedType": "bioBlock"},
+	}}
+	src.schemas["bioBlock"] = obj("bioBlock", map[string]any{"name": "text", "type": "string"})
+	src.schemas["series"] = map[string]any{"name": "series", "kind": "document", "fields": []any{}}
+	src.schemas["unrelated"] = obj("unrelated", map[string]any{"name": "x", "type": "string"})
+	src.schemas["pensumCatalogue"] = map[string]any{"name": "pensumCatalogue", "kind": "document", "fields": []any{
+		map[string]any{"name": "title", "type": "string"},
+	}}
+	src.seed("book-1", "book", map[string]any{"title": "One"})
+
+	dir := t.TempDir()
+	schemasPath := filepath.Join(dir, "schemas.json")
+	var so, se strings.Builder
+	code := runExport(newWriter(&so, &se), globals{}, src.ctx(),
+		[]string{"--out", filepath.Join(dir, "backup.ndjson"), "--schemas", schemasPath, "--type", "book"})
+	if code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+	sc, err := readSchemaCopy(schemasPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range sc.Schemas {
+		names = append(names, schemaCopyName(s))
+	}
+	sort.Strings(names)
+	want := "author,bioBlock,book,callout,coverImage,part,section,series"
+	if strings.Join(names, ",") != want {
+		t.Errorf("schema file holds %v, want %s", names, want)
+	}
+	if !strings.Contains(se.String(), "use 7 more schema(s), written too") {
+		t.Errorf("stderr does not name the schemas added: %s", se.String())
+	}
+	if !strings.Contains(se.String(), "holds 8 of the 10 schemas") {
+		t.Errorf("stderr does not say the file is a subset: %s", se.String())
+	}
+
+	// A type that uses no other schema still writes only itself, and a
+	// file with every schema says nothing about a subset.
+	var so2, se2 strings.Builder
+	code = runExport(newWriter(&so2, &se2), globals{}, src.ctx(),
+		[]string{"--out", filepath.Join(dir, "cat.ndjson"), "--schemas", schemasPath, "--type", "pensumCatalogue"})
+	if code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se2.String())
+	}
+	sc, _ = readSchemaCopy(schemasPath)
+	if len(sc.Schemas) != 1 || strings.Contains(se2.String(), "more schema") {
+		t.Errorf("pensumCatalogue alone wrote %d schemas; stderr=%s", len(sc.Schemas), se2.String())
+	}
+}

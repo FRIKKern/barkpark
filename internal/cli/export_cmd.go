@@ -102,10 +102,12 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("")
 		out.outf("--type <t> exports only documents of type <t>. Name several types with a")
 		out.outf("comma list or a repeated --type: bp export --type post,author. Each type is")
-		out.outf("one request, written in the order named. --schemas then writes only the")
-		out.outf("schemas of those types. The filter does not follow references into other")
-		out.outf("types, so name every type the copied documents point at. --media still")
-		out.outf("writes every media file of the dataset.")
+		out.outf("one request, written in the order named. --schemas then writes the schemas")
+		out.outf("of those types and every schema they use: the object types their fields")
+		out.outf("name and the document types their references point at, followed until")
+		out.outf("nothing new turns up. The document filter does not follow references into")
+		out.outf("other types, so name every type the copied documents point at. --media")
+		out.outf("still writes every media file of the dataset.")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts
