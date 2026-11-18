@@ -258,8 +258,8 @@ defmodule Barkpark.Api.OpenApi do
   ]
 
   # Templates whose mount binds the request (query and body) into the key
-  # (`bind_request: true`), so the spec also states the 422. Every mount binds
-  # today; a mount without `bind_request` lists its templates apart.
+  # (`bind_request: true`), so the spec also states the 422. Every mount binds:
+  # the plug's `init/1` refuses an unbound one.
   @request_bound_templates @idempotent_templates
 
   @doc """
