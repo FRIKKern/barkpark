@@ -53,6 +53,39 @@ func Prefix(s string, maxBytes int) string {
 	return oversized(validPrefix(s[:maxBytes]))
 }
 
+// Ellipsis is Prefix with "…" after a cut: s itself when it fits in maxBytes.
+func Ellipsis(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	return Prefix(s, maxBytes) + "…"
+}
+
+// PrefixRunes is Prefix with the budget in runes: the longest prefix of s that
+// holds at most maxRunes runes and ends on a grapheme boundary of s. The budget
+// stays a rune count, not a grapheme count, so it still bounds the size: one
+// grapheme can carry any number of combining marks. A byte that is not UTF-8
+// counts as one rune, as it does in []rune(s).
+func PrefixRunes(s string, maxRunes int) string {
+	i := 0
+	for n := 0; n < maxRunes && i < len(s); n++ {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+	}
+	if i >= len(s) {
+		return s
+	}
+	return Prefix(s, i)
+}
+
+// EllipsisRunes is PrefixRunes with "…" after a cut: s itself when it fits.
+func EllipsisRunes(s string, maxRunes int) string {
+	if p := PrefixRunes(s, maxRunes); len(p) < len(s) {
+		return p + "…"
+	}
+	return s
+}
+
 // The end of the whole rune that holds byte i of s (i < len(s)): the rune that
 // crosses the budget, or the one that starts right at it. Byte i is always
 // inside: when it is a stray byte, no rune before it reaches it, and the

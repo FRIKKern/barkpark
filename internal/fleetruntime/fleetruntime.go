@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // RawRoot is the repo's raw-content root WITHOUT a ref, so the runtime can be
@@ -95,11 +96,7 @@ func ResolveMainSHA(ctx context.Context) (string, error) {
 }
 
 func trim(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return s
+	return textcut.Ellipsis(strings.TrimSpace(string(b)), 200)
 }
 
 // FilesStep writes the runtime from origin/main CONTENT (never an operator

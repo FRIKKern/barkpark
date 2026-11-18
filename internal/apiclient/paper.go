@@ -14,6 +14,7 @@ import (
 	"net/url"
 
 	"github.com/FRIKKern/barkpark/internal/apierr"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // PaperTeachErr is one structured teaching error from the BPML parser —
@@ -169,11 +170,7 @@ func decodePaperErr(status int, body []byte) *PaperAPIErr {
 }
 
 func trimForErr(body []byte) string {
-	s := string(body)
-	if len(s) > 200 {
-		return s[:200] + "…"
-	}
-	return s
+	return textcut.Ellipsis(string(body), 200)
 }
 
 // PaperExport is one paper retrieved in PUBLISH SHAPE: the exact body

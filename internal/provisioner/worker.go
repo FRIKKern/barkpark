@@ -35,6 +35,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // DefaultInterval is the claim-poll cadence when Worker.Interval is zero.
@@ -1638,13 +1640,9 @@ func (w *Worker) claimSupport(ctx context.Context) (SupportJobSpec, bool, error)
 	return spec, true, nil
 }
 
-// truncate caps s at n runes for error messages.
+// truncate caps s at n runes for error messages, on a grapheme boundary.
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
+	return textcut.EllipsisRunes(s, n)
 }
 func (w *Worker) RunEnableApply(ctx context.Context) error {
 	return w.RunEnableApplyWith(ctx, nil)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/textcut"
 	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
@@ -288,11 +289,7 @@ func (a *Agent) do(req *http.Request, out any) error {
 	return nil
 }
 
-// truncate caps s at n runes for error messages.
+// truncate caps s at n runes for error messages, on a grapheme boundary.
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
+	return textcut.EllipsisRunes(s, n)
 }
