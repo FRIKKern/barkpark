@@ -3,9 +3,12 @@
 //
 // BarkUI, the shared UI foundation, reads UI SDK's `--ui-*` colour names plus a
 // few `--bark-*` names of its own. This module writes every skin in
-// design/themes/ under those names, for light and dark, from the same derived
-// slots the other surfaces read. Each value is the exact string the Studio
-// region writes for its source slot (`hsl(<channels>)`), so the two cannot drift.
+// design/themes/ under those names from the same derived slots the other
+// surfaces read. Each skin writes every colour once as `light-dark(<light>,
+// <dark>)`; each arm is the exact string an existing region writes for that
+// slot and mode, so the two cannot drift. That is the Studio region's
+// `hsl(<channels>)` for every name but --ui-ring, which is the cloud and login
+// regions' --ring-soft, `hsl(<ring channels> / <soft alpha>)`.
 // Nothing reads the sheet yet; it changes no page.
 //
 // The names
@@ -36,14 +39,17 @@
 //   a scheme on any ancestor reaches every skin below it, and a skin on any
 //   element works under any scheme, with either naming or a mix. The scheme
 //   rules come last so an explicit scheme on the root beats the root's default.
+//   When one element carries both scheme attributes and they disagree, dark wins,
+//   because the dark rule comes after the light one.
 
 import { DEFAULT_THEME, loadThemes, themePalette } from "./source.mjs";
-import { hsl, STATUS_ROLES } from "./vocab.mjs";
+import { alpha, hsl, softAlpha, STATUS_ROLES } from "./vocab.mjs";
 
 const TONE_NAMES = { ok: "success", warn: "warning", danger: "danger", info: "info" };
 
-// [BarkUI name, source slot under tokens.color]. A slot is a dotted path; the
-// value at `<slot>.<mode>` is an HSL channel string.
+// [BarkUI name, source slot under tokens.color, "soft"?]. A slot is a dotted
+// path; the value at `<slot>.<mode>` is an HSL channel string. "soft" writes it
+// at the soft-tint alpha of that mode.
 export const BARKUI_NAMES = [
   ["--ui-background", "bg"],
   ["--ui-foreground", "text"],
@@ -53,7 +59,11 @@ export const BARKUI_NAMES = [
   // No 1:1 slot. Barkpark draws control edges with --border (as shadcn, whose
   // --input equals --border), so the input edge takes the border slot.
   ["--ui-input", "border"],
-  ["--ui-ring", "ring"],
+  // UI SDK draws --ui-ring as a 4px solid halo around a focused control, pale
+  // on the ground (its defaults: 1.30:1 light, 1.64:1 dark). The halo is the
+  // ring at the soft-tint alpha, the --ring-soft the cloud and login regions
+  // already write: 1.20 to 1.49:1 against --ui-background across the skins.
+  ["--ui-ring", "ring", "soft"],
   // No 1:1 slot. UI SDK draws a focused control's edge in --ui-ring-border;
   // Barkpark draws its focused edges and outlines in --ring.
   ["--ui-ring-border", "ring"],
@@ -73,13 +83,13 @@ export const BARKUI_NAMES = [
   ]),
 ];
 
-function slotValue(color, slot, mode) {
+function slotValue(color, slot, mode, soft) {
   let node = color;
   for (const key of slot.split(".")) node = node?.[key];
   const v = node?.[mode];
   if (typeof v !== "string" || !/^[\d.]+ [\d.]+% [\d.]+%$/.test(v))
     throw new Error(`barkui: color.${slot}.${mode} is ${JSON.stringify(v)}, not HSL channels`);
-  return hsl(v);
+  return soft ? `hsl(${v} / ${alpha(softAlpha[mode])})` : hsl(v);
 }
 
 const SKINS = (name) => [`[data-skin="${name}"]`, `[data-bp-theme="${name}"]`];
@@ -87,8 +97,8 @@ const SKINS = (name) => [`[data-skin="${name}"]`, `[data-bp-theme="${name}"]`];
 function skinRule(name, spec) {
   const color = themePalette(spec).color;
   const selectors = [...(name === DEFAULT_THEME ? [":root"] : []), ...SKINS(name)];
-  const body = BARKUI_NAMES.map(([v, slot]) =>
-    `  ${v}: light-dark(${slotValue(color, slot, "light")}, ${slotValue(color, slot, "dark")});`);
+  const body = BARKUI_NAMES.map(([v, slot, soft]) =>
+    `  ${v}: light-dark(${slotValue(color, slot, "light", soft)}, ${slotValue(color, slot, "dark", soft)});`);
   return `${selectors.join(",\n")} {\n${body.join("\n")}\n}`;
 }
 

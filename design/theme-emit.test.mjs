@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
+import { contrast, hexToRgb, hslToHex, rgbToHex } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -285,7 +286,6 @@ const BARKUI_SOURCES = {
   "--ui-muted-foreground": "--muted-text",
   "--ui-border": "--border",
   "--ui-input": "--border",
-  "--ui-ring": "--ring",
   "--ui-ring-border": "--ring",
   "--ui-primary": "--primary",
   "--ui-primary-foreground": "--primary-fg",
@@ -300,6 +300,10 @@ const BARKUI_SOURCES = {
     ]),
   ),
 };
+
+// Names whose source is a value the cloud region writes and Studio does not:
+// the focus halo is the ring at the soft-tint alpha, `--ring-soft`.
+const BARKUI_CLOUD_SOURCES = { "--ui-ring": "--ring-soft" };
 
 // Every `selectors { body }` rule in a stylesheet, comments stripped, as
 // { selectors: [...], vars: { property: value } }. Custom properties and
@@ -338,12 +342,13 @@ test("BarkUI sheet: every skin carries exactly the table's names, each a light-d
 
   const rules = cssRules(sheet.build(themes));
   const studio = cssRules(build("layouts/root.html.heex", themes));
+  const cloud = cssRules(build("static/app.css", themes));
   let compared = 0;
   for (const { name } of themes) {
     const found = rulesFor(rules, `[data-skin="${name}"]`);
     assert.equal(found.length, 1, `${name}: expected one skin rule, found ${found.length}`);
     const [rule] = found;
-    assert.deepEqual(Object.keys(rule.vars).sort(), Object.keys(BARKUI_SOURCES).sort(),
+    assert.deepEqual(Object.keys(rule.vars).sort(), Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).sort(),
       `${name}: the rule declares names outside the table, or lacks some`);
     const studioLight = ruleFor(studio, `html[data-bp-theme="${name}"]`);
     const studioDark = ruleFor(studio, `html[data-bp-theme="${name}"][data-theme="dark"]`);
@@ -354,8 +359,54 @@ test("BarkUI sheet: every skin carries exactly the table's names, each a light-d
       assert.equal(dark, resolveStudio(studioDark.vars, source), `${name}/dark: ${barkui} differs from Studio's ${source}`);
       compared += 2;
     }
+    const cloudLight = ruleFor(cloud, `html[data-bp-theme="${name}"]`);
+    const cloudDark = ruleFor(cloud, `html[data-bp-theme="${name}"][data-theme="dark"]`);
+    assert.ok(cloudLight && cloudDark, `${name}: the cloud region lacks a light or dark block to compare against`);
+    for (const [barkui, source] of Object.entries(BARKUI_CLOUD_SOURCES)) {
+      const { light, dark } = arms(rule.vars[barkui]);
+      assert.equal(light, resolveStudio(cloudLight.vars, source), `${name}/light: ${barkui} differs from the cloud's ${source}`);
+      assert.equal(dark, resolveStudio(cloudDark.vars, source), `${name}/dark: ${barkui} differs from the cloud's ${source}`);
+      compared += 2;
+    }
   }
-  assert.equal(compared, themes.length * 2 * Object.keys(BARKUI_SOURCES).length);
+  assert.equal(compared, themes.length * 2 * Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).length);
+});
+
+// `hsl(H S% L%)` or `hsl(H S% L% / a)` -> sRGB 0..255 and alpha.
+function hslRgba(value) {
+  const m = /^hsl\(([\d.]+ [\d.]+% [\d.]+%)(?: \/ ([\d.]+))?\)$/.exec(value);
+  assert.ok(m, `not an hsl() value: ${value}`);
+  return { rgb: hexToRgb(hslToHex(m[1])), a: m[2] === undefined ? 1 : Number(m[2]) };
+}
+// WCAG contrast of `fg` drawn over `ground` (an opaque colour), alpha composited.
+function contrastOver(fg, ground) {
+  const f = hslRgba(fg), g = hslRgba(ground);
+  const mixed = f.rgb.map((c, i) => Math.round(c * f.a + g.rgb[i] * (1 - f.a)));
+  return contrast(rgbToHex(mixed), rgbToHex(g.rgb));
+}
+
+// UI SDK draws --ui-ring as a 4px solid halo around a focused control and
+// --ui-ring-border as the control's edge. Its own defaults give the halo 1.30:1
+// (light) and 1.64:1 (dark) against --ui-background, the edge 2.68:1 and 3.88:1.
+// The halo bounds keep it visible (> 1.1) and pale (< 1.7, which admits UI SDK's
+// own dark halo). The edge must reach 3:1, the WCAG floor for a control's
+// boundary; Barkpark's ring clears it in every skin.
+test("BarkUI sheet: --ui-ring is a pale halo and --ui-ring-border the strong edge, in every skin and mode", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  for (const { name } of themes) {
+    const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
+    for (const mode of ["light", "dark"]) {
+      const bg = arms(v["--ui-background"])[mode];
+      const halo = contrastOver(arms(v["--ui-ring"])[mode], bg);
+      const edge = contrastOver(arms(v["--ui-ring-border"])[mode], bg);
+      assert.ok(halo > 1.1 && halo < 1.7, `${name}/${mode}: halo contrast ${halo.toFixed(2)} is outside 1.1..1.7`);
+      assert.ok(edge >= 3, `${name}/${mode}: edge contrast ${edge.toFixed(2)} is under 3`);
+      assert.ok(halo < edge, `${name}/${mode}: the halo is not paler than the edge`);
+    }
+  }
 });
 
 test("BarkUI sheet: one rule per skin under both namings, and the scheme attributes set color-scheme", () => {
