@@ -971,8 +971,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page
-                    showed (bp-array-focus.js; `RemoteValues`). --%>
-              <input type="hidden" name="_bp_seen" id={"bp-seen-" <> Barkpark.Content.published_id(@editor_doc.doc_id)} value="{}" phx-update="ignore" />
+                    showed (bp-array-focus.js; `RemoteValues.seen_value/1`
+                    when the form is drawn). --%>
+              <input type="hidden" name="_bp_seen" id={"bp-seen-" <> Barkpark.Content.published_id(@editor_doc.doc_id)} value={BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues.seen_value(@parent_assigns)} phx-update="ignore" />
               <%!-- The desk's one Field actions menu, opened by each field's button. --%>
               <BarkparkWeb.Studio.Desk.FieldActions.shared_menu :if={desk?(@parent_assigns)} />
               <%!-- The synthetic Title input backs the `title` column every
