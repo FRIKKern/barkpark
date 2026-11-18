@@ -54,14 +54,16 @@ func Prefix(s string, maxBytes int) string {
 }
 
 // The end of the whole rune that holds byte i of s (i < len(s)): the rune that
-// crosses the budget, or the one that starts right at it.
+// crosses the budget, or the one that starts right at it. Byte i is always
+// inside: when it is a stray byte, no rune before it reaches it, and the
+// segmenter must still see it (a Prepend joins to it, GB9b).
 func runeEnd(s string, i int) int {
 	start := i
 	for start > 0 && i-start < utf8.UTFMax && !utf8.RuneStart(s[start]) {
 		start--
 	}
 	_, size := utf8.DecodeRuneInString(s[start:])
-	return max(start+size, i)
+	return max(start+size, i+1)
 }
 
 // The first grapheme is larger than the budget: keep its rune prefix, unless

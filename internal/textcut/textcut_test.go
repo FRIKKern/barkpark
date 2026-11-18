@@ -42,6 +42,12 @@ func TestPrefix(t *testing.T) {
 		{"an emoji before a bad byte is kept whole", "a🏴\xffbc", 5, "a🏴"},
 		{"an emoji cut before a bad byte is dropped", "🐕\xffx", 2, ""},
 		{"a flag letter cut before a bad byte is dropped", "a🇳🇴\xff", 6, "a"},
+		// U+0600 is a Prepend: GB9b joins it to the bad byte after it, so a
+		// cut right after it lands inside a grapheme of the whole text.
+		{"a prepend joined to the bad byte at the budget is dropped", "a؀\x80zz", 3, "a"},
+		// With nothing before it, that grapheme is the first and oversized:
+		// its valid rune prefix is kept, as for any oversized grapheme.
+		{"an oversized prepend grapheme keeps its rune prefix", "؀\x80zz", 2, "؀"},
 	}
 	for _, c := range cases {
 		if got := Prefix(c.in, c.max); got != c.want {
@@ -78,7 +84,7 @@ func TestPrefixEndsOnTheWholeTextsBoundaries(t *testing.T) {
 
 func TestPrefixFuzzWithBadBytes(t *testing.T) {
 	pool := []string{"a", "b", " ", "\r", "\n", "é", mark, "🐕", "‍", "🇳", "🇴", "🏴",
-		"\U000E0067", "\U000E007F", "中", "\xff", "\xc3"}
+		"\U000E0067", "\U000E007F", "中", "؀", "\xff", "\xc3", "\x80"}
 	rng := rand.New(rand.NewSource(7))
 	for i := 0; i < 5000; i++ {
 		var b strings.Builder
@@ -94,12 +100,46 @@ func TestPrefixFuzzWithBadBytes(t *testing.T) {
 		if len(text) > max && len(got) > max {
 			t.Fatalf("Prefix(%q, %d) = %q is over the budget", text, max, got)
 		}
-		// A valid rune is never split: the cut is a rune start (or the end).
-		if len(got) < len(text) && !utf8.RuneStart(text[len(got)]) {
+		if splitsValidRune(text, len(got)) {
 			t.Fatalf("Prefix(%q, %d) = %q splits a rune", text, max, got)
 		}
 		if utf8.ValidString(text) && !utf8.ValidString(got) {
 			t.Fatalf("Prefix(%q, %d) = %q is not UTF-8", text, max, got)
 		}
+		// When a grapheme of the whole text ends within the budget, the cut is
+		// the last such end. (Otherwise the first grapheme is oversized, and
+		// its own rule applies.)
+		if want := lastBoundary(text, max); want > 0 && len(got) != want {
+			t.Fatalf("Prefix(%q, %d) = %q, want the whole text's boundary at %d", text, max, got, want)
+		}
 	}
+}
+
+// Does a cut at `at` fall inside a valid multi-byte rune of text? A stray
+// continuation byte is no rune start, but no valid rune holds it either.
+func splitsValidRune(text string, at int) bool {
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r != utf8.RuneError || size > 1 {
+			if i < at && at < i+size {
+				return true
+			}
+		}
+		i += size
+	}
+	return false
+}
+
+// The last grapheme boundary of the whole of text at or before max.
+func lastBoundary(text string, max int) int {
+	last, end, state := 0, 0, -1
+	for rest := text; rest != ""; {
+		var cluster string
+		cluster, rest, _, state = uniseg.FirstGraphemeClusterInString(rest, state)
+		if end += len(cluster); end > max {
+			break
+		}
+		last = end
+	}
+	return last
 }
