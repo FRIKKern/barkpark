@@ -32,6 +32,22 @@ func TestPrefixRunesCutsOnAGraphemeBoundary(t *testing.T) {
 	}
 }
 
+// Text exactly at its budget is not cut, so it gets no "…" (task-71fb04465850fd41).
+func TestEllipsisLeavesAnExactFitUnchanged(t *testing.T) {
+	s := strings.Repeat("a", 200)
+	if got := Ellipsis(s, 200); got != s {
+		t.Errorf("Ellipsis of exactly 200 bytes at 200 = …%q, want the input unchanged", got[195:])
+	}
+	// 200 runes, 400 bytes: the rune budget, not the byte length, decides.
+	r := strings.Repeat("æ", 200)
+	if got := EllipsisRunes(r, 200); got != r {
+		t.Errorf("EllipsisRunes of exactly 200 runes at 200 = …%q, want the input unchanged", got[390:])
+	}
+	if got := PrefixRunes(r, 200); got != r {
+		t.Errorf("PrefixRunes of exactly 200 runes at 200 cut it to %d bytes", len(got))
+	}
+}
+
 func TestPrefixRunesKeepsTheRuneBudget(t *testing.T) {
 	// One letter with 500 combining marks is one grapheme. A grapheme count
 	// would keep it all; the rune budget keeps 200 runes of it.
