@@ -25,7 +25,7 @@ import { contrast, oklchToSrgb, srgbToOklch, toHslTriplet } from "../derive.mjs"
 
 export const STATE_STEP = 1.06;
 // A label needs this much contrast on a fill to leave room for both steps
-// toward it: 4.5:1 after two steps, with the walk's margin.
+// toward it: 4.5:1 after two steps, with a margin for the steps' rounding.
 export const LABEL_ROOM = 4.5 * (STATE_STEP + 0.004) ** 2;
 export const stateNames = (fill) => [`${fill}-hover`, `${fill}-pressed`];
 // Under this OKLCH chroma a fill is neutral: it has no hue to keep.
@@ -39,15 +39,15 @@ const css = (rgb) => `hsl(${toHslTriplet(rgb)})`;
 function twoSteps(rest, label, ground, dir) {
   const { C, h } = srgbToOklch(rest);
   const edged = contrast(rest, ground) >= 3;
-  // Near black or white a written hsl() can drift off the hue; such a step does not fit.
-  const offHue = (c) => { const d = Math.abs(srgbToOklch(c).h - h); return C >= HUED && Math.min(d, 360 - d) > 0.5; };
+  // Near black or white a written hsl() can drift off the hue; a step more than 1 degree off does not fit.
+  const offHue = (c) => { const d = Math.abs(srgbToOklch(c).h - h); return C >= HUED && Math.min(d, 360 - d) > 1; };
   const out = [];
   let from = rest, l = L(rest);
   for (let k = 0; k < 2; k++) {
     let step = null;
     for (let x = l + dir * 0.001; x >= 0 && x <= 1; x += dir * 0.001) {
       const c = css(oklchToSrgb(x, C, h));
-      if (contrast(c, from) >= STATE_STEP + 0.003) { step = { c, x }; break; }
+      if (contrast(c, from) >= STATE_STEP) { step = { c, x }; break; }
     }
     if (!step || contrast(label, step.c) < 4.5 || (edged && contrast(step.c, ground) < 3) || offHue(step.c)) return null;
     out.push(step.c);

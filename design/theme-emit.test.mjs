@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
-import { contrast, hexToRgb, hslToHex, rgbToHex, srgbToOklch } from "./derive.mjs";
+import { contrast, hexToRgb, hslToHex, oklchToSrgb, rgbToHex, srgbToOklch, toHslTriplet } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -680,6 +680,9 @@ test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, w
 // too); and a fill that stands 3:1 off its ground at rest still does.
 // STATE_STEP is the most every case holds: a soft fill under its own label on a
 // white ground, which has about 1.135:1 of room for two steps.
+// The direction: states deepen a fill (move it further from its ground) and
+// move back toward the ground only where deepening has no room for two steps:
+// the range ends, the fill's hue does not hold, or its label would drop under 4.5.
 const STATE_STEP = 1.06, STATE_FILLS = [["primary", "primary-foreground"], ["muted", "foreground"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`])];
 test("BarkUI sheet: every control fill has a visible hover and pressed state that keeps its label, hue and edge", () => {
   const misses = [];
@@ -698,6 +701,19 @@ test("BarkUI sheet: every control fill has a visible hover and pressed state tha
         if (r.C >= 0.02 && dh > 1) miss(`${n} is ${dh.toFixed(1)} degrees off the fill's hue`);
         if (r.C < 0.02 && o.C >= 0.02) miss(`${n} gains chroma ${o.C.toFixed(3)} on a neutral fill`);
         if (contrast(rest, bg) >= 3 && contrast(c, bg) < 3) miss(`${n} is ${contrast(c, bg).toFixed(2)}:1 off the ground, under 3`);
+      }
+      const deepen = r.L >= srgbToOklch(bg).L ? 1 : -1;
+      if (Math.sign(h.L - r.L) !== deepen) {
+        // the furthest colour on the fill's hue that way, and the label's limit
+        let far = rest;
+        for (let x = r.L + deepen * 0.001; x > 0 && x < 1; x += deepen * 0.001) {
+          const c = `hsl(${toHslTriplet(oklchToSrgb(x, r.C, r.h))})`, o = srgbToOklch(c);
+          if (r.C >= 0.02 && Math.min(Math.abs(o.h - r.h), 360 - Math.abs(o.h - r.h)) > 1) break;
+          far = c;
+        }
+        const labelThatWay = (srgbToOklch(label).L - r.L) * deepen > 0;
+        const room = Math.min(contrast(rest, far), labelThatWay ? contrast(label, rest) / 4.5 : Infinity);
+        if (room >= STATE_STEP ** 2) miss(`moves toward the ground with ${room.toFixed(3)}:1 of room to deepen`);
       }
     }
   });
