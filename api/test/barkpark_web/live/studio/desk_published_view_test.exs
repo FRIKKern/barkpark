@@ -339,6 +339,16 @@ defmodule BarkparkWeb.Studio.DeskPublishedViewTest do
     refute has_element?(view, ~s(#{@pane} [data-desk-published-form]))
     assert title_value(view) == "Draft title"
 
+    # The live form comes back in a new box, not morphed into the published
+    # version's: Chrome drew a morphed-back form with no layout box (blank).
+    # The fieldset around it keeps its id.
+    holder = ~s(#{@pane} fieldset.dk-revision-form[id$="-form-holder"])
+    assert has_element?(view, ~s|#{holder}:not([disabled]) > [id$="-form-box"] #editor-form|)
+    view |> element(published, "Published") |> render_click()
+    render_async(view, 5_000)
+    assert has_element?(view, ~s(#{holder}[disabled] > [id$="-form-box-published"] #editor-form))
+    refute has_element?(view, ~s(#{holder} > [id$="-form-box"]))
+
     # Never published: the Published pill is a greyed-out span, no button.
     draft_id = "pv-never-#{c.n}"
     {:ok, _} = Content.create_document(c.type, %{"doc_id" => draft_id, "title" => "D"}, @dataset)

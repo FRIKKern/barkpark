@@ -639,6 +639,20 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       else: Panes.perspective(assigns[:desk_uri])
   end
 
+  # The form's box is keyed by what it draws: a locked version (an old
+  # revision, the published version) or the live form. Going back to the live
+  # form, the box is a new element, so the form is drawn as on a first load.
+  # Morphed back into the same box, Chrome gave the live form's new body no
+  # layout box: the pane read blank until reloaded. The fieldset around it
+  # keeps its id, so the holders after it, and a History row's focus, stay.
+  defp form_key(assigns) do
+    cond do
+      RevisionView.shown?(assigns) -> "-revision"
+      PublishedView.shown?(assigns) -> "-published"
+      true -> ""
+    end
+  end
+
   # `inspect=on` is the Inspect dialog, drawn over the form, not an inspector.
   defp inspector(pane), do: if(pane[:inspect] == "on", do: nil, else: pane[:inspect])
 
@@ -918,7 +932,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               So is the published version in the published perspective
               (`PublishedView`). The live form sits in the same fieldset,
               enabled: the holders after it keep their place when a History
-              row is picked, so the row keeps the focus. --%>
+              row is picked, so the row keeps the focus. Inside it, the form's
+              box is keyed by what it draws (`form_key/1`). --%>
         <fieldset
           id={"#{@view.id}-form-holder"}
           class="dk-revision-form"
@@ -926,6 +941,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           data-desk-revision-form={RevisionView.shown?(assigns)}
           data-desk-published-form={PublishedView.shown?(assigns)}
         >
+          <div id={"#{@view.id}-form-box#{form_key(assigns)}"} class="dk-form-box" data-desk-form-box>
           <%= cond do %>
             <% @edit_failed or gone?(assigns) -> %>
             <% RevisionView.shown?(assigns) -> %>
@@ -943,6 +959,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
                 |> HistoryPanel.waiting()
               )}
           <% end %>
+          </div>
         </fieldset>
         <%!-- The inspector's holder (TanStack's `aside` beside the form:
               validation, history, incoming references). Hidden until an
