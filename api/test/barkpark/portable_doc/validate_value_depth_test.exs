@@ -9,7 +9,7 @@ defmodule Barkpark.PortableDoc.ValidateValueDepthTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Validate
-  alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack
+  alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity.{Limits, Pack}
 
   @fixture Path.join(Pack.dir(), "limits/value-too-deep.json")
 
@@ -84,6 +84,24 @@ defmodule Barkpark.PortableDoc.ValidateValueDepthTest do
 
     assert {:error, errors} = Validate.validate(%{"blocks" => [deep]})
     assert Enum.map(errors, & &1.code) == [:too_deep]
+  end
+
+  # The renderer stops nesting marks at `max_depth/0` (100). The docs at that
+  # limit are the mark edges, and they validate; `nested strong` (20000 marks)
+  # is a render stress doc, refused like `@portable-doc/validate` refuses it.
+  test "every mark edge at the renderer's mark-nesting limit validates" do
+    marks = ~w(strong em link marks) ++ ["table cell marks"]
+
+    at =
+      for {name, block} <- Limits.edges(),
+          name in Enum.map(marks, &(&1 <> " at the depth limit")),
+          do: {name, block}
+
+    assert length(at) == 5
+
+    for {name, block} <- at do
+      assert Validate.validate(%{"blocks" => [block]}) == :ok, name
+    end
   end
 
   test "check_top_block reports a block's value-depth error after its own" do
