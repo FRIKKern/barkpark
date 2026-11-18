@@ -233,11 +233,18 @@ defmodule Barkpark.Api.OpenApi do
   # (`bind_request: true`), so the spec also states the 422.
   @request_bound_templates ["/v1/data/mutate/:dataset", "/v1/chat/sessions/:id/messages"]
 
+  @doc """
+  Does the spec declare `Idempotency-Key` on a write to this router path
+  template? The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
+  template) rides `:scoped_mutate`, which mounts the same plug, so both
+  spellings of an allowlisted route count.
+  """
+  @spec idempotent?(String.t()) :: boolean()
+  def idempotent?(template),
+    do: Enum.any?(@idempotent_templates, &String.ends_with?(template, &1))
+
   defp idempotency_param(template, method) when method in ~w(POST PUT PATCH DELETE) do
-    # The scoped mirror (`/w/:workspace_slug/p/:project_slug` + the flat
-    # template) rides `:scoped_mutate`, which mounts the same plug — so both
-    # spellings of an allowlisted route get the header.
-    if Enum.any?(@idempotent_templates, &String.ends_with?(template, &1)) do
+    if idempotent?(template) do
       [
         %{
           "name" => "Idempotency-Key",
