@@ -302,15 +302,17 @@ const BARKUI_SOURCES = {
 };
 
 // Every `selectors { body }` rule in a stylesheet, comments stripped, as
-// { selectors: [...], vars: { name: value } }.
+// { selectors: [...], vars: { property: value } }. Custom properties and
+// `color-scheme` both land in `vars`.
 function cssRules(text) {
   const bare = text.replace(/\/\*[\s\S]*?\*\//g, "");
   return [...bare.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sel, body]) => ({
     selectors: sel.split(",").map((s) => s.trim()).filter(Boolean),
-    vars: Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()])),
+    vars: Object.fromEntries([...body.matchAll(/(--[\w-]+|color-scheme):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()])),
   }));
 }
 const ruleFor = (rules, selector) => rules.find((r) => r.selectors.includes(selector));
+const rulesFor = (rules, selector) => rules.filter((r) => r.selectors.includes(selector));
 
 // Studio writes some roles as var() of another var in the same block
 // (`--ok: hsl(var(--ok-hsl))`); resolve those to the plain string they stand for.
@@ -320,7 +322,15 @@ function resolveStudio(vars, name) {
   return v.replace(/var\((--[\w-]+)\)/g, (_, inner) => resolveStudio(vars, inner));
 }
 
-test("BarkUI sheet: every skin x {light, dark} carries every --ui-* and tone name, valued as Studio writes its source slot", () => {
+// One sheet value is `light-dark(<light>, <dark>)`. The arms are hsl() strings,
+// which carry no comma, so the split is exact.
+function arms(value) {
+  const m = /^light-dark\(([^,]+), ([^,]+)\)$/.exec(value);
+  assert.ok(m, `not a light-dark() pair: ${value}`);
+  return { light: m[1], dark: m[2] };
+}
+
+test("BarkUI sheet: every skin carries exactly the table's names, each a light-dark() of Studio's light and dark strings", () => {
   const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
   assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
   const themes = loadThemes();
@@ -330,46 +340,51 @@ test("BarkUI sheet: every skin x {light, dark} carries every --ui-* and tone nam
   const studio = cssRules(build("layouts/root.html.heex", themes));
   let compared = 0;
   for (const { name } of themes) {
-    const scopes = [
-      ["light", `[data-skin="${name}"]`, `html[data-bp-theme="${name}"]`],
-      ["dark", `[data-skin="${name}"][data-color-scheme="dark"]`, `html[data-bp-theme="${name}"][data-theme="dark"]`],
-    ];
-    for (const [mode, selector, studioSelector] of scopes) {
-      const rule = ruleFor(rules, selector);
-      assert.ok(rule, `${name}/${mode}: no rule for ${selector}`);
-      const studioRule = ruleFor(studio, studioSelector);
-      assert.ok(studioRule, `${name}/${mode}: Studio has no ${studioSelector} block to compare against`);
-      assert.deepEqual(Object.keys(rule.vars).sort(), Object.keys(BARKUI_SOURCES).sort(),
-        `${name}/${mode}: the rule declares names outside the table, or lacks some`);
-      for (const [barkui, source] of Object.entries(BARKUI_SOURCES)) {
-        assert.ok(barkui in rule.vars, `${name}/${mode}: ${barkui} missing`);
-        assert.equal(rule.vars[barkui], resolveStudio(studioRule.vars, source),
-          `${name}/${mode}: ${barkui} differs from Studio's ${source}`);
-        compared++;
-      }
+    const found = rulesFor(rules, `[data-skin="${name}"]`);
+    assert.equal(found.length, 1, `${name}: expected one skin rule, found ${found.length}`);
+    const [rule] = found;
+    assert.deepEqual(Object.keys(rule.vars).sort(), Object.keys(BARKUI_SOURCES).sort(),
+      `${name}: the rule declares names outside the table, or lacks some`);
+    const studioLight = ruleFor(studio, `html[data-bp-theme="${name}"]`);
+    const studioDark = ruleFor(studio, `html[data-bp-theme="${name}"][data-theme="dark"]`);
+    assert.ok(studioLight && studioDark, `${name}: Studio lacks a light or dark block to compare against`);
+    for (const [barkui, source] of Object.entries(BARKUI_SOURCES)) {
+      const { light, dark } = arms(rule.vars[barkui]);
+      assert.equal(light, resolveStudio(studioLight.vars, source), `${name}/light: ${barkui} differs from Studio's ${source}`);
+      assert.equal(dark, resolveStudio(studioDark.vars, source), `${name}/dark: ${barkui} differs from Studio's ${source}`);
+      compared += 2;
     }
   }
   assert.equal(compared, themes.length * 2 * Object.keys(BARKUI_SOURCES).length);
 });
 
-test("BarkUI sheet: both selector namings reach every skin and mode, and the default skin needs no attribute", () => {
+test("BarkUI sheet: one rule per skin under both namings, and the scheme attributes set color-scheme", () => {
   const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
   assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
   const themes = loadThemes();
   const rules = cssRules(sheet.build(themes));
   for (const { name } of themes) {
-    const light = ruleFor(rules, `[data-skin="${name}"]`);
-    assert.ok(light && light.selectors.includes(`[data-bp-theme="${name}"]`), `${name}: light rule lacks [data-bp-theme]`);
-    const dark = ruleFor(rules, `[data-skin="${name}"][data-color-scheme="dark"]`);
-    assert.ok(dark && dark.selectors.includes(`[data-bp-theme="${name}"][data-theme="dark"]`),
-      `${name}: dark rule lacks [data-bp-theme][data-theme="dark"]`);
+    const rule = ruleFor(rules, `[data-skin="${name}"]`);
+    assert.ok(rule && rule.selectors.includes(`[data-bp-theme="${name}"]`), `${name}: skin rule lacks [data-bp-theme]`);
   }
-  // No attribute at all: the default skin, light on :root and dark on the scheme alone.
+  // One form: no selector ties a skin to a scheme.
+  for (const r of rules)
+    for (const s of r.selectors)
+      assert.ok(!(/data-(skin|bp-theme)=/.test(s) && /data-(color-scheme|theme)=/.test(s)), `paired skin+scheme selector: ${s}`);
+  // No skin attribute: :root carries the default skin.
   const [first] = themes;
-  assert.ok(ruleFor(rules, ":root") === ruleFor(rules, `[data-skin="${first.name}"]`), ":root does not carry the default skin");
-  const dark = ruleFor(rules, `[data-skin="${first.name}"][data-color-scheme="dark"]`);
-  for (const s of [':root[data-color-scheme="dark"]', ':root[data-theme="dark"]'])
-    assert.ok(dark.selectors.includes(s), `default dark rule lacks ${s}`);
+  assert.ok(ruleFor(rules, `[data-skin="${first.name}"]`).selectors.includes(":root"), ":root does not carry the default skin");
+  // The scheme axis: both namings, plus system and the bare root following the OS.
+  const scheme = (selector) => rulesFor(rules, selector).map((r) => r.vars["color-scheme"]).find(Boolean);
+  for (const [selector, want] of [
+    ['[data-color-scheme="dark"]', "dark"], ['[data-theme="dark"]', "dark"],
+    ['[data-color-scheme="light"]', "light"], ['[data-theme="light"]', "light"],
+    ['[data-color-scheme="system"]', "light dark"], [":root", "light dark"],
+  ]) assert.equal(scheme(selector), want, `${selector} should set color-scheme: ${want}`);
+  // An explicit scheme on the root must beat the root's system default: later in the sheet, same weight.
+  const at = (selector, prop) => rules.findIndex((r) => r.selectors.includes(selector) && prop in r.vars);
+  assert.ok(at('[data-theme="dark"]', "color-scheme") > at(":root", "color-scheme"), "dark scheme rule must follow the :root default");
+  assert.ok(at('[data-theme="light"]', "color-scheme") > at(":root", "color-scheme"), "light scheme rule must follow the :root default");
   // A skin design/themes/ does not ship must be absent.
   assert.equal(ruleFor(rules, '[data-skin="__no_such_theme__"]'), undefined);
 });
