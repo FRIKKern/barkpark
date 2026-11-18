@@ -69,6 +69,10 @@ on:
       # change it exists to catch — the stylesheet could drift from the shipped
       # asset and every js PR after it would stay green on the stale copy.
       - "api/assets/paper-surface/**"
+      # The BarkUI skins. js/packages/barkui builds its showroom from this sheet
+      # and its browser check proves every part paints each skin's values, so a
+      # regenerated sheet must run that check here.
+      - "api/priv/barkui/**"
   pull_request:
     paths:
       - "js/**"
@@ -124,6 +128,10 @@ on:
       # change it exists to catch — the stylesheet could drift from the shipped
       # asset and every js PR after it would stay green on the stale copy.
       - "api/assets/paper-surface/**"
+      # The BarkUI skins. js/packages/barkui builds its showroom from this sheet
+      # and its browser check proves every part paints each skin's values, so a
+      # regenerated sheet must run that check here.
+      - "api/priv/barkui/**"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
@@ -379,6 +387,26 @@ jobs:
         # coverage artifact ever existed. One blocking run, no coverage flag;
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
+
+      # BarkUI's showroom check: builds js/packages/barkui's static page and
+      # presses every part with real keys in the Chromium installed above, then
+      # proves each skin, light and dark, a 390px window and a script-free print.
+      # About 10 seconds. Reds on a part folder missing a file, a failed press
+      # step, a light that does not come on, or any page error or network request.
+      - name: "BarkUI showroom check (real keys in Chromium)"
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/barkui run check 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          case "$out" in
+            *"No projects matched the filters"*)
+              echo "barkui check FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
+              exit 1
+              ;;
+          esac
+          exit "$status"
 
       # REGISTRATION for js/scripts/check-vitest-projects.mjs, added by the PR
       # that creates it. Execution floor for every project js/vitest.config.mts
