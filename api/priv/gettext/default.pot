@@ -15166,3 +15166,94 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Validation error: %{message}"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgctxt "change bar"
+msgid "Review changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Current draft"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "There are no changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Edit the document or select an older version in the timeline to see a list of changes appear in this panel."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Revert changes to %{field}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Revert change"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Revert all"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to revert the change?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to revert all %{count} changes?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "changed to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Moved"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Before"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "After"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Alternative text"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Formatting changed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Added by %{author}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Removed by %{author}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Formatting changed by %{author}"
+msgstr ""

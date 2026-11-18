@@ -61,11 +61,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
   @doc "The fields whose values differ between `before` and `after` (`values/1`)."
   @spec changes([map()], map(), map()) :: [change()]
   def changes(fields, before, after_) do
-    for %{"name" => name} = field <- fields,
-        b = Map.get(before, name),
-        a = Map.get(after_, name),
-        not same?(b, a),
-        do: %{field: field, name: name, before: b, after: a}
+    Enum.flat_map(fields, fn %{"name" => name} = field ->
+      {b, a} = {Map.get(before, name), Map.get(after_, name)}
+      if same?(b, a), do: [], else: [%{field: field, name: name, before: b, after: a}]
+    end)
   end
 
   @doc "Whether two stored values are the same, emptiness set aside."
@@ -77,7 +76,14 @@ defmodule BarkparkWeb.Studio.Desk.FieldDiff do
   defp norm([]), do: nil
 
   defp norm(%{} = map) do
-    kept = for {k, v} <- map, n = norm(v), n != nil, into: %{}, do: {k, n}
+    kept =
+      Enum.reduce(map, %{}, fn {k, v}, acc ->
+        case norm(v) do
+          nil -> acc
+          n -> Map.put(acc, k, n)
+        end
+      end)
+
     if kept == %{}, do: nil, else: kept
   end
 

@@ -310,7 +310,12 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
   end
 
   defp posted(field, value) do
-    if FieldDiff.empty?(value), do: empty(field), else: value
+    cond do
+      FieldDiff.empty?(value) -> empty(field)
+      # A yes/no as its input posts it.
+      is_boolean(value) -> to_string(value)
+      true -> value
+    end
   end
 
   defp empty(%{"type" => type}) when type in ~w(string text url email slug number date datetime),
