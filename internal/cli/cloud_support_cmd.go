@@ -64,6 +64,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 	"github.com/FRIKKern/barkpark/internal/fleetruntime"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // supportCtx is the context every support bring-up call runs under. A package
@@ -2305,10 +2306,7 @@ func supportParseSizeClass(out string) string {
 // supportTrim renders a response body into an error message: single line,
 // bounded, never empty.
 func supportTrim(b []byte) string {
-	s := strings.Join(strings.Fields(string(b)), " ")
-	if len(s) > 300 {
-		s = s[:300] + "…"
-	}
+	s := textcut.Ellipsis(strings.Join(strings.Fields(string(b)), " "), 300)
 	if s == "" {
 		return "(empty body)"
 	}

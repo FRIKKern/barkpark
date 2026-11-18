@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // tasks_history_events.go — the SECOND store `bp task history` reads
@@ -204,10 +206,7 @@ func (s httpTaskEventSource) fetchOne(docID string, limit int) ([]taskEvent, boo
 		return nil, false, fmt.Errorf("task events transport: %w", err)
 	}
 	if status < 200 || status >= 300 {
-		snippet := string(body)
-		if len(snippet) > 512 {
-			snippet = snippet[:512]
-		}
+		snippet := textcut.Prefix(string(body), 512)
 		return nil, false, fmt.Errorf("task events error %d: %s", status, snippet)
 	}
 	return decodeTaskEvents(body)

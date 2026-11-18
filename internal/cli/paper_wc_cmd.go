@@ -21,6 +21,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 
 	"github.com/FRIKKern/barkpark/internal/apierr"
 )
@@ -545,10 +546,7 @@ func runPaperPushCheck(out *writer, ctx manifest.Context, slug, bpml string) int
 func decodePaperCheckErr(status int, body []byte) *apiclient.PaperAPIErr {
 	env, ok := apierr.Parse(body)
 	if !ok || env.Code == "" {
-		msg := strings.TrimSpace(string(body))
-		if len(msg) > 200 {
-			msg = msg[:200] + "…"
-		}
+		msg := textcut.Ellipsis(strings.TrimSpace(string(body)), 200)
 		return &apiclient.PaperAPIErr{Status: status, Code: fmt.Sprintf("http_%d", status), Message: msg}
 	}
 	var teach struct {

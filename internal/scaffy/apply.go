@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // assertCmdTimeout is the default per-CMD wall clock (D38 — the floor
@@ -986,7 +988,7 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + " …[truncated]"
+	return textcut.Prefix(s, n) + " …[truncated]"
 }
 
 // treeDiffs renders the overlay's pending mutations as per-file -/+
