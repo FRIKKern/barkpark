@@ -59,7 +59,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
         _ -> :error
       end
 
-    if is_list(blocks) and Validate.validate(blocks) == :ok,
+    if is_list(blocks) and Validate.validate(%{"blocks" => blocks}) == :ok,
       do: blocks,
       else: fallback(markdown)
   rescue

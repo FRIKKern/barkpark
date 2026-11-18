@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Limits do
 
       limit-docs.json              the fixture verbatim: worst-case `docs` and `edges`
       limits/<name>.golden.json    each edge rendered by the Elixir reader (`goldens/0`)
+      limits/value-too-deep.json   the value-depth limit of validate (`value_depth/0`)
 
   The fixture writes long docs with four macros (see its `_comment`); `expand/1`
   is the reference expansion.
@@ -36,6 +37,50 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Limits do
   end
 
   def slug(name), do: String.replace(name, " ", "-")
+
+  @doc """
+  `limits/value-too-deep.json`: a chart whose series item nests an open field
+  so the whole doc is exactly `Validate.max_value_depth/0` JSON levels deep
+  (valid), and one level more (`too_deep` at the first path past it). The doc is
+  level 1, `blocks` 2, the chart 3, `series` 4, the item 5, `x` 6. Each case is
+  `{"name", "doc", "expect"}`, `expect` the `{code, path}` errors as in
+  portable-doc's `fixtures/broken`.
+  """
+  def value_depth do
+    max = Barkpark.PortableDoc.Validate.max_value_depth()
+
+    {"limits/value-too-deep.json",
+     %{
+       "maxValueDepth" => max,
+       "cases" => [
+         %{"name" => "series at the value-depth limit", "doc" => chart_at(max), "expect" => []},
+         %{
+           "name" => "series one level past the value-depth limit",
+           "doc" => chart_at(max + 1),
+           "expect" => [
+             %{
+               "code" => "too_deep",
+               "path" => "/blocks/0/series/0/x" <> String.duplicate("/0", max + 1 - 6)
+             }
+           ]
+         }
+       ]
+     }}
+  end
+
+  defp chart_at(total) do
+    x = Enum.reduce(6..(total - 1)//1, [], fn _, inner -> [inner] end)
+
+    %{
+      "blocks" => [
+        %{
+          "type" => "chart",
+          "kind" => "line",
+          "series" => [%{"label" => "s", "points" => [1], "x" => x}]
+        }
+      ]
+    }
+  end
 
   def expand(%{"$repeat" => n, "of" => x}), do: List.duplicate(expand(x), n)
   def expand(%{"$text" => s, "times" => n}), do: String.duplicate(s, n)

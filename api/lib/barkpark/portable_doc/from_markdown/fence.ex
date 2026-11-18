@@ -8,8 +8,9 @@ defmodule Barkpark.PortableDoc.FromMarkdown.Fence do
       `slots`), of an allowed display type: never fields, forms, embeds or
       other bound blocks, whose renderers assume editor- or resolver-provided
       invariants,
-    * nested no deeper than 100 levels,
-    * valid by `Barkpark.PortableDoc.Validate`,
+    * valid by `Barkpark.PortableDoc.Validate` as the blocks of a doc, which
+      also caps how deep any value nests (`Validate.max_value_depth/0`, counted
+      inside the doc's `%{"blocks" => ...}` envelope),
     * linking only to URLs the renderer allows (`Render.Util.safe_url/1`), and
     * reusing no block id from an earlier fence in the same import.
 
@@ -22,7 +23,6 @@ defmodule Barkpark.PortableDoc.FromMarkdown.Fence do
   alias Barkpark.PortableDoc.Validate
 
   @max_blocks 50
-  @max_depth 100
 
   @allowed_types ~w(
     heading paragraph list code table callout divider diagram
@@ -40,9 +40,9 @@ defmodule Barkpark.PortableDoc.FromMarkdown.Fence do
   def splice(source, seen_ids) do
     with {:ok, blocks} when is_list(blocks) and blocks != [] <- Jason.decode(source),
          true <- length(blocks) <= @max_blocks,
-         {:ok, ids} <- scan([{blocks, 0}], []),
+         :ok <- Validate.validate(%{"blocks" => blocks}),
+         {:ok, ids} <- scan([blocks], []),
          true <- Enum.all?(blocks, &allowed_block?/1),
-         :ok <- Validate.validate(blocks),
          false <- Enum.any?(ids, &MapSet.member?(seen_ids, &1)) do
       {:ok, blocks, MapSet.union(seen_ids, MapSet.new(ids))}
     else
@@ -78,22 +78,16 @@ defmodule Barkpark.PortableDoc.FromMarkdown.Fence do
   defp map_of(_), do: %{}
 
   # Every non-blank block id in the fence, or :error when an `href` in it is
-  # unsafe or it nests deeper than @max_depth. Iterative, so depth costs no stack.
+  # unsafe. Iterative; Validate has already capped the depth.
   defp scan([], ids), do: {:ok, ids}
 
-  defp scan([{value, depth} | rest], ids) when is_map(value) or is_list(value) do
-    cond do
-      depth > @max_depth ->
-        :error
-
-      is_map(value) and Map.has_key?(value, "href") and
-          Url.safe(value["href"]) != value["href"] ->
-        :error
-
-      true ->
-        children = if is_map(value), do: Map.values(value), else: value
-        pushed = Enum.reduce(children, rest, &[{&1, depth + 1} | &2])
-        scan(pushed, add_id(value, ids))
+  defp scan([value | rest], ids) when is_map(value) or is_list(value) do
+    if is_map(value) and Map.has_key?(value, "href") and
+         Url.safe(value["href"]) != value["href"] do
+      :error
+    else
+      children = if is_map(value), do: Map.values(value), else: value
+      scan(Enum.reduce(children, rest, &[&1 | &2]), add_id(value, ids))
     end
   end
 

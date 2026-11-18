@@ -24,6 +24,7 @@ const RENDERED = [
   "api/lib/barkpark/portable_doc/text_diff.ex",
   "api/lib/barkpark/portable_doc/tiers.ex",
   "api/lib/barkpark/portable_doc/validate.ex",
+  "api/lib/barkpark/portable_doc/validate/value_depth.ex",
   "api/lib/barkpark/chat/tool_rows.ex",
 ];
 // The golden pack wraps rendered blocks in the Bulldocs reader page for each

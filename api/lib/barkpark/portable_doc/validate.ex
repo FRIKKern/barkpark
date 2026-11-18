@@ -16,6 +16,13 @@ defmodule Barkpark.PortableDoc.Validate do
   (`portable_text_block?/1`, which `Content.Validation` uses too) and
   `duplicate_block_id`.
 
+  Two depth limits, each `too_deep` at the first path past it: blocks nest at
+  most `max_depth/0` (100) block levels, and any JSON value at most
+  `max_value_depth/0` (1000) JSON levels from the doc root
+  (`Barkpark.PortableDoc.Validate.ValueDepth`, which also reaches open fields).
+  The value-depth errors follow the schema walk's, before `duplicate_block_id`,
+  as in the JS.
+
   The walk reaches only what the schema describes; open fields are not checked.
   Every error is reported. Top-level blocks are depth 0; a block reached at
   depth `max_depth/0` gets only `too_deep` and nothing in or under it is
@@ -27,6 +34,7 @@ defmodule Barkpark.PortableDoc.Validate do
 
   alias Barkpark.PortableDoc.Spec
   alias Barkpark.PortableDoc.Validate.Schema
+  alias Barkpark.PortableDoc.Validate.ValueDepth
 
   @codes ~w(not_a_doc block_not_object portable_text_block missing_required_field
             unknown_block_type wrong_field_type value_not_allowed duplicate_block_id too_deep)a
@@ -56,6 +64,10 @@ defmodule Barkpark.PortableDoc.Validate do
   @spec max_depth() :: pos_integer()
   def max_depth, do: @max_depth
 
+  @doc "How many JSON levels any value may nest from the doc root (`MAX_VALUE_DEPTH`)."
+  @spec max_value_depth() :: pos_integer()
+  def max_value_depth, do: ValueDepth.max()
+
   @doc "A Sanity Portable Text block: `_type: \"block\"` with `children`, `markDefs` or `listItem`."
   @spec portable_text_block?(term()) :: boolean()
   def portable_text_block?(%{"_type" => "block"} = value),
@@ -67,10 +79,10 @@ defmodule Barkpark.PortableDoc.Validate do
   @spec validate(term(), Schema.t()) :: :ok | {:error, [error()]}
   def validate(doc, schema \\ @schema)
 
-  def validate(blocks, schema) when is_list(blocks), do: walk(blocks, "", schema)
+  def validate(blocks, schema) when is_list(blocks), do: walk(blocks, blocks, "", schema)
 
-  def validate(%{"blocks" => blocks}, schema) when is_list(blocks),
-    do: walk(blocks, "/blocks", schema)
+  def validate(%{"blocks" => blocks} = doc, schema) when is_list(blocks),
+    do: walk(doc, blocks, "/blocks", schema)
 
   def validate(doc, _schema) when is_map(doc),
     do: {:error, [%{code: :not_a_doc, path: "/blocks"}]}
@@ -79,22 +91,26 @@ defmodule Barkpark.PortableDoc.Validate do
 
   @doc """
   The errors and block ids (`{id, path}`) of the one top-level block at
-  `/blocks/<index>`, in walk order, without `duplicate_block_id`: the one rule
-  that spans blocks (`duplicate_errors/1`). `validate/2` on a doc is every
-  block's errors in order, then `duplicate_errors/1` of every block's ids.
+  `/blocks/<index>` of a `%{"blocks" => ...}` doc, in walk order, without
+  `duplicate_block_id`: the one rule that spans blocks (`duplicate_errors/1`).
+  Its value-depth errors (the block is 3 JSON levels deep) follow its schema
+  errors. `validate/2` on a doc is every block's schema errors in order, then
+  the value-depth errors, then `duplicate_errors/1` of every block's ids.
   """
   @spec check_top_block(term(), non_neg_integer(), Schema.t()) ::
           {[error()], [{String.t(), String.t()}]}
   def check_top_block(block, index, schema \\ @schema) do
-    {errors, ids} = check(block, schema.root, pointer("/blocks", index), 0, schema, {[], []})
-    {Enum.reverse(errors), Enum.reverse(ids)}
+    path = pointer("/blocks", index)
+    {errors, ids} = check(block, schema.root, path, 0, schema, {[], []})
+    errors = Enum.reverse(errors)
+    {errors ++ ValueDepth.errors(block, path, 3, stopped(errors)), Enum.reverse(ids)}
   end
 
   @doc "A `duplicate_block_id` error at every later `{id, path}` of an id seen before."
   @spec duplicate_errors([{String.t(), String.t()}]) :: [error()]
   def duplicate_errors(ids), do: duplicates(ids)
 
-  defp walk(blocks, base, schema) do
+  defp walk(doc, blocks, base, schema) do
     {errors, ids} =
       blocks
       |> Enum.with_index()
@@ -102,11 +118,19 @@ defmodule Barkpark.PortableDoc.Validate do
         check(block, schema.root, pointer(base, i), 0, schema, acc)
       end)
 
-    case Enum.reverse(errors, duplicates(Enum.reverse(ids))) do
+    errors = Enum.reverse(errors)
+    too_deep = ValueDepth.errors(doc, "", 1, stopped(errors))
+
+    case errors ++ too_deep ++ duplicates(Enum.reverse(ids)) do
       [] -> :ok
       errors -> {:error, errors}
     end
   end
+
+  # The blocks the schema walk stopped at max_depth: only check_block/5 says
+  # too_deep there, and the value-depth walk does not count them again.
+  defp stopped(errors),
+    do: for(%{code: :too_deep, path: path} <- errors, into: MapSet.new(), do: path)
 
   defp duplicates(ids) do
     {dups, _first} =
