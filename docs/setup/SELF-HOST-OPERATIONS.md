@@ -1,15 +1,21 @@
 <!-- doc-tier: human | canonical-for: self-host-operations | budget: 2500tok -->
 # Operate a Barkpark instance
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md). The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md). Updates, rollbacks and token and secret rotation are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md).
+The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md). Updates, rollbacks and token and secret rotation are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md).
 
 ## Scheduled backups and the restore drill
 
-Barkpark schedules no backup. On a single VM, run `bp instance backup` as root from a daily cron job and copy the directory off the host. With no `--database-url`, bp reads `DATABASE_URL` from `/opt/barkpark/.env` and backs up `/opt/barkpark/uploads`, so the cron line holds no password. bp 1.26.25 and newer do this:
+Barkpark schedules no backup. On a single VM, run `bp instance backup` from cron, keep 14 days and copy each backup off the host. With no `--database-url`, bp reads `DATABASE_URL` from `/opt/barkpark/.env` and backs up `/opt/barkpark/uploads`, so the cron line holds no password:
 
 ```bash
-sudo bp instance backup --out /var/backups/barkpark/$(date +%F)
+# /etc/cron.d/barkpark-backup on the VM
+30 2 * * * root /usr/local/bin/bp instance backup --out /var/backups/barkpark/$(date +\%F)
+45 2 * * * root find /var/backups/barkpark -mindepth 1 -maxdepth 1 -mtime +13 -exec rm -rf {} +
+# daily on your machine, where bp instance up ran
+bp instance backup fetch --to ~/barkpark-backups
 ```
+
+`fetch` copies the newest backup over ssh and keeps it only when both sha256 sums match the manifest.
 
 The backup holds no key. Keep a copy of the keys in `/opt/barkpark/.env` in a password manager, apart from the backups.
 
@@ -24,11 +30,11 @@ az containerapp job execution list -g <rg> -n barkpark-ops -o table
 
 Set arguments with `job update`. Overrides on `job start` drop the job's settings and mounts. The output and the app's logs are in Log Analytics, table `ContainerAppConsoleLogs_CL`. To copy backups to or from your machine, add your address to `operatorIpRanges`, redeploy and use `az storage file download-batch` or `upload-batch` on the `backups` share. Flexible Server also keeps point-in-time restore for 7 days, which Azure lets you raise to 35. Turn on purge protection on the Key Vault.
 
-Once a month, restore a `bp instance backup` of the live instance into a scratch database of the same major with the extensions allowed. On Container Apps, create it with `az postgres flexible-server db create -g <rg> --server-name <server> -n barkpark_restore` and run the restore above. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, the times and the result against the RTO, then delete the scratch server.
+Once a month, restore a `bp instance backup` of the live instance into a scratch database of the same major with the extensions allowed. On Container Apps, create it with `az postgres flexible-server db create -g <rg> --server-name <server> -n barkpark_restore` and run the restore above. The drill passes when `bp instance restore` exits 0, as it checks every count and checksum. Point a scratch app with the live keys at it and check `/readyz`. Record the date, the times and the result against the RTO, then delete the scratch server.
 
 ## Moving an instance
 
-The backup holds the database and media but no key, so the keys move by hand. [SELF-HOST-MOVE.md](SELF-HOST-MOVE.md) moves a single VM onto Container Apps, with the times of a rehearsal. On any target, restore into an empty database with the extensions allowed, on the backup's PostgreSQL major or, with bp 1.26.2 and newer, a newer one. Load the source's keys before the first start.
+The keys move by hand. [SELF-HOST-MOVE.md](SELF-HOST-MOVE.md) moves a single VM onto Container Apps, with the times of a rehearsal. On any target, restore into an empty database with the extensions allowed, on the backup's PostgreSQL major or, with bp 1.26.2 and newer, a newer one. Load the source's keys before the first start.
 
 ## Rotate keys
 
@@ -67,7 +73,7 @@ The KEK wraps the data keys, not the content, so a rotation re-encrypts no conte
 
 ## VM size and region
 
-A build from source on the VM needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) shows how to check sizes and quota first.
+A build from source on the VM needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) shows how to check sizes and quota first.
 
 ## Database TLS
 

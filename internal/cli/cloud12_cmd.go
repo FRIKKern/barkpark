@@ -2022,7 +2022,7 @@ USAGE
   bp instance studio-token --workspace <ws> [--dataset <d>] [--label <l>]
   bp instance backup  [--database-url <url> --media-dir <dir> | --env-file <f>]
                       --out <dir>
-  bp instance restore <dir> [--database-url <url> --media-dir <dir> |
+` + instanceBackupFetchUsageHelp + `  bp instance restore <dir> [--database-url <url> --media-dir <dir> |
                       --env-file <f>]
   bp instance init  [--out <file>] [--target containerapps|vm] [--host <h>]
                     [--studio-origin <o>] [--owner-email <e>]
@@ -2062,7 +2062,7 @@ WHAT IT DOES
                /opt/barkpark/.env and /opt/barkpark/uploads; run it with sudo.
                Needs pg_dump, pg_restore and psql for the server's Postgres
                major on PATH.
-  restore      restore <dir> into an EMPTY database on the same Postgres major
+` + instanceBackupFetchWhatHelp + `  restore      restore <dir> into an EMPTY database on the same Postgres major
                and an empty media directory. Checks both checksums first, then
                after pg_restore compares every media file and per-type document
                count with the manifest and exits 1 on any difference.
