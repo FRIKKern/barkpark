@@ -44,6 +44,7 @@
 
 import { DEFAULT_THEME, loadThemes, themePalette } from "./source.mjs";
 import { alpha, hsl, softAlpha, STATUS_ROLES } from "./vocab.mjs";
+import { depthKey, DEPTHS, pointedName, SURFACE_ROLES, SURFACES, surfaceValues } from "./barkui-surfaces.mjs";
 
 const TONE_NAMES = { ok: "success", warn: "warning", danger: "danger", info: "info" };
 
@@ -94,12 +95,47 @@ function slotValue(color, slot, mode, soft) {
 
 const SKINS = (name) => [`[data-skin="${name}"]`, `[data-bp-theme="${name}"]`];
 
+const ROLE_BY_NAME = new Map(SURFACE_ROLES.map((r) => [pointedName(r), r]));
+const DIRECT = BARKUI_NAMES.filter(([n]) => !ROLE_BY_NAME.has(n));
+
 function skinRule(name, spec) {
   const color = themePalette(spec).color;
   const selectors = [...(name === DEFAULT_THEME ? [":root"] : []), ...SKINS(name)];
-  const body = BARKUI_NAMES.map(([v, slot, soft]) =>
-    `  ${v}: light-dark(${slotValue(color, slot, "light", soft)}, ${slotValue(color, slot, "dark", soft)});`);
+  const perMode = (f) => ({ light: f("light"), dark: f("dark") });
+  const base = perMode((mode) => Object.fromEntries(BARKUI_NAMES.filter(([n]) => ROLE_BY_NAME.has(n))
+    .map(([n, slot, soft]) => [ROLE_BY_NAME.get(n), slotValue(color, slot, mode, soft)])));
+  const v = surfaceValues(base, perMode((m) => slotValue(color, "studioChrome.surface-raised", m)),
+    perMode((m) => slotValue(color, "primary-fg", m, "soft")));
+  const pair = (prop, pick) => `  ${prop}: light-dark(${pick(v.light)}, ${pick(v.dark)});`;
+  const body = [
+    ...SURFACES.flatMap((s) => [
+      ...SURFACE_ROLES.map((r) => pair(`--bark-${s}-${r}`, (m) => m[s][r])),
+      ...DEPTHS.map(depthKey).map((k) => pair(`--bark-${s}-depth-${k}`, (m) => m[s].depth[k])),
+    ]),
+    ...DIRECT.map(([n, slot, soft]) =>
+      `  ${n}: light-dark(${slotValue(color, slot, "light", soft)}, ${slotValue(color, slot, "dark", soft)});`),
+  ];
   return `${selectors.join(",\n")} {\n${body.join("\n")}\n}`;
+}
+
+// The axes. One rule per surface points the names parts read at that surface;
+// base is also the default on the root and on every skin element, so a skin set
+// inside a surface starts its subtree on its own base, as in the BarkUI base.
+// Each depth rule moves only the background, to the current surface's step.
+// The paint rules give a skin, surface or depth element its ground, text and
+// edge colour; they sit in :where() so any rule an app writes wins over them.
+function axisRules() {
+  const point = (s) => [
+    ...SURFACE_ROLES.map((r) => `  ${pointedName(r)}: var(--bark-${s}-${r});`),
+    ...DEPTHS.map(depthKey).map((k) => `  --bark-depth-${k}: var(--bark-${s}-depth-${k});`),
+  ].join("\n");
+  return [
+    `:root,\n[data-skin],\n[data-bp-theme],\n[data-surface="base"] {\n${point("base")}\n}`,
+    ...SURFACES.slice(1).map((s) => `[data-surface="${s}"] {\n${point(s)}\n}`),
+    ...DEPTHS.map((n) => `[data-depth="${n}"] {\n  --ui-background: var(--bark-depth-${depthKey(n)});\n}`),
+    ":where([data-skin], [data-bp-theme], [data-surface], [data-depth]) {\n  background-color: var(--ui-background);\n  color: var(--ui-foreground);\n  border-color: var(--ui-border);\n}",
+    ':where([data-depth="1"], [data-depth="2"], [data-depth="3"]) {\n  box-shadow: var(--ui-shadow);\n}',
+  ];
 }
 
 const SCHEME_RULES = [
@@ -116,6 +152,7 @@ export function barkuiSheet(themes = loadThemes()) {
     "   Do not edit; regenerate: node design/emit.mjs --write",
     "   Every skin under BarkUI's variable names (UI SDK's --ui-* plus --bark-*), each colour a light-dark() pair. */",
     ...themes.map(({ name, spec }) => skinRule(name, spec)),
+    ...axisRules(),
     ...SCHEME_RULES,
     "",
   ].join("\n");

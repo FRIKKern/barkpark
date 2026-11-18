@@ -28,6 +28,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ARTIFACTS, loadThemes } from "./emit.mjs";
+import { srgbToOklch } from "./derive.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SHEET = readFileSync(join(REPO, "api/priv/barkui/tokens.css"), "utf8");
@@ -88,7 +89,7 @@ function cases(def, x) {
 function page(list) {
   const json = JSON.stringify(list).replace(/</g, "\\u003c");
   return `<!doctype html><html><head><meta charset="utf-8"><style>${SHEET}
-.probe { display: block; background-color: var(--ui-background); }</style></head><body>
+.probe { display: block; background-color: var(--ui-background); color: var(--ui-foreground); }</style></head><body>
 <div id="stage"></div><b id="ref"></b><pre id="out"></pre>
 <script type="application/json" id="cases">${json}</script>
 <script>
@@ -99,7 +100,9 @@ for (const c of JSON.parse(document.getElementById("cases").textContent)) {
   for (const [k, v] of Object.entries(c.root)) root.setAttribute(k, v);
   stage.innerHTML = c.html;
   ref.style.backgroundColor = c.want;
-  rows.push({ id: c.id, got: getComputedStyle(stage.querySelector(".probe")).backgroundColor, want: getComputedStyle(ref).backgroundColor });
+  ref.style.color = c.wantFg || "";
+  const probe = getComputedStyle(stage.querySelector(".probe")), r = getComputedStyle(ref);
+  rows.push({ id: c.id, got: probe.backgroundColor, want: r.backgroundColor, ...(c.wantFg ? { gotFg: probe.color, wantFg: r.color } : {}) });
 }
 document.getElementById("out").textContent = JSON.stringify({ systemDark: matchMedia("(prefers-color-scheme: dark)").matches, rows });
 </script></body></html>`;
@@ -155,6 +158,61 @@ test("BarkUI sheet: the scheme reaches skins on any element, under both namings,
       assert.equal(result.systemDark, systemDark, `the system setting did not take in Chrome (wanted ${sys})`);
       assert.equal(result.rows.length, list.length);
       for (const r of result.rows) assert.equal(r.got, r.want, r.id);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The sheet's own value for a skin, a name and a mode: one arm of its light-dark().
+function sheetValue(skin, name, mode) {
+  const at = SHEET.indexOf(`[data-skin="${skin}"]`);
+  assert.ok(at >= 0, `the sheet has no [data-skin="${skin}"] rule`);
+  const body = SHEET.slice(at, SHEET.indexOf("}", at));
+  const m = new RegExp(`${name}: light-dark\\(([^,]+), ([^;]+)\\);`).exec(body);
+  assert.ok(m, `[data-skin="${skin}"] has no ${name}`);
+  return mode === "light" ? m[1] : m[2];
+}
+
+test("BarkUI sheet: surfaces and depth nest inside skin, scheme and each other", { skip }, async () => {
+  assert.ok(chrome, "no Chrome found under CI: install google-chrome or set BARKUI_CHROME");
+  const def = loadThemes()[0].name, x = "ember";
+  assert.ok(loadThemes().some((t) => t.name === x), `${x} is not a shipped skin`);
+  const P = '<i class="probe"></i>';
+  const bg = (skin, s, mode) => sheetValue(skin, `--bark-${s}-background`, mode);
+  const fg = (skin, s, mode) => sheetValue(skin, `--bark-${s}-foreground`, mode);
+  // The inverse band on a light page must be a dark ground with light text.
+  assert.ok(srgbToOklch(bg(def, "inverse", "light")).L < 0.4 && srgbToOklch(fg(def, "inverse", "light")).L > 0.7,
+    "the default skin's inverse band on a light page is not dark with light text");
+  const list = [
+    ["raised under ember in a dark page", { "data-color-scheme": "dark" },
+      `<div data-skin="${x}"><div data-surface="raised">${P}</div></div>`, bg(x, "raised", "dark")],
+    ["same, old names", { "data-theme": "dark" },
+      `<div data-bp-theme="${x}"><div data-surface="raised">${P}</div></div>`, bg(x, "raised", "dark")],
+    ["sunken well inside a raised panel", { "data-color-scheme": "light", "data-skin": x },
+      `<div data-surface="raised"><div data-surface="sunken">${P}</div></div>`, bg(x, "sunken", "light")],
+    ["inverse band in a light page", { "data-color-scheme": "light" },
+      `<section data-surface="inverse">${P}</section>`, bg(def, "inverse", "light"), fg(def, "inverse", "light")],
+    ["primary fill in a dark page", { "data-color-scheme": "dark", "data-skin": x },
+      `<div data-surface="primary">${P}</div>`, bg(x, "primary", "dark"), fg(x, "primary", "dark")],
+    ["a skin inside a surface starts on its own base", { "data-color-scheme": "light" },
+      `<div data-surface="raised"><div data-skin="${x}">${P}</div></div>`, bg(x, "base", "light")],
+    ["depth on a raised panel", { "data-color-scheme": "dark", "data-skin": x },
+      `<div data-surface="raised"><div data-depth="2">${P}</div></div>`, sheetValue(x, "--bark-raised-depth-2", "dark")],
+    ["depth and surface on one element", { "data-color-scheme": "dark", "data-skin": x },
+      `<div data-surface="sunken" data-depth="-1">${P}</div>`, sheetValue(x, "--bark-sunken-depth-m1", "dark")],
+    ["scheme island inside a surface", { "data-color-scheme": "dark", "data-skin": x },
+      `<div data-surface="raised"><section data-color-scheme="light">${P}</section></div>`, bg(x, "raised", "light")],
+  ].map(([id, root, html, want, wantFg]) => ({ id, root, html, want, ...(wantFg ? { wantFg } : {}) }));
+  const dir = mkdtempSync(join(tmpdir(), "barkui-surface-page-"));
+  try {
+    const file = join(dir, "page.html");
+    writeFileSync(file, page(list));
+    const result = await dumpDom(chrome, file, false);
+    assert.equal(result.rows.length, list.length);
+    for (const r of result.rows) {
+      assert.equal(r.got, r.want, r.id);
+      if (r.wantFg) assert.equal(r.gotFg, r.wantFg, `${r.id} (text)`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
