@@ -26,11 +26,30 @@
 //   The scheme follows UI SDK: `X-foreground` is what is drawn on an `X` fill.
 //   Barkpark's own role names (ok, warn) become success and warning.
 //
+// The surface and depth axes (the BarkUI base's names and semantics)
+//   Five surfaces, base, raised, sunken, primary and inverse, each carry every
+//   role above but the tones and --ui-destructive, as --bark-<surface>-<role>;
+//   each also has five depth grounds, --bark-<surface>-depth-<m2|m1|1|2|3>.
+//   design/emit/barkui-surfaces.mjs says where each value comes from. Base is
+//   the name table below.
+//
 // The rules
 //   Each skin is one rule, `[data-skin="<name>"], [data-bp-theme="<name>"]`,
-//   that writes every colour once as `light-dark(<light>, <dark>)`. The two arms
-//   are the Studio region's strings for that slot in each mode. The default skin
-//   also takes `:root`, so a page with no skin attribute draws it.
+//   that writes every --bark-<surface>-* value and every tone once as
+//   `light-dark(<light>, <dark>)`. The base arms are the Studio region's strings
+//   for that slot in each mode. The default skin also takes `:root`, so a page
+//   with no skin attribute draws it.
+//   The axis rules point the names parts read at one surface:
+//     :root, [data-skin], [data-bp-theme], [data-surface="base"] -> base
+//     [data-surface="raised" | "sunken" | "primary" | "inverse"]  -> that surface
+//     [data-depth="-2" | "-1" | "1" | "2" | "3"] -> --ui-background moves to that
+//       depth of the current surface
+//   A surface nests inside skin, scheme and another surface. A skin element
+//   starts its subtree on its own base surface, as in the BarkUI base. Paint
+//   rules in :where() give skin, surface and depth elements their ground, text
+//   and edge colour, and depth 1 to 3 the --ui-shadow; any app rule wins over
+//   them. (The base gets the same effect from cascade layers; this sheet has no
+//   layers.)
 //   The scheme is a separate axis that only sets `color-scheme`:
 //     :root, [data-color-scheme="system"]               -> light dark (the system setting)
 //     [data-color-scheme="light"], [data-theme="light"] -> light
