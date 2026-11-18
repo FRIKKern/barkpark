@@ -89,7 +89,15 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnseenFieldTest do
     do:
       Map.take(:sys.get_state(view.pid).socket.assigns.editor_form, ["title", "excerpt", "kicker"])
 
-  defp send_post(view, target, changes, seen) do
+  # What the page's bp-array-focus.js posts: its numbers and its `v`.
+  defp send_post(view, target, changes, seen),
+    do: post(view, target, changes, Map.put(seen, "v", 2))
+
+  # A tab still running the JS from before this change: no number for a
+  # field it did not draw, and no `v`.
+  defp old_js_post(view, target, changes), do: post(view, target, changes, %{})
+
+  defp post(view, target, changes, seen) do
     view
     |> element("#editor-form")
     |> render_change(%{
@@ -143,6 +151,29 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnseenFieldTest do
 
         assert stored(c)["excerpt"] == "Short. word"
       end
+    end
+  end
+
+  # Review r2 of #26988: the same posts from a tab loaded before the deploy
+  # (old JS: "{}") store what main stores.
+  for {surface, typed, want} <- [
+        {:studio, "Short. word", "Short. word"},
+        {:desk, "Short. word", "Short. word"},
+        {:studio, "Short.", "Short."}
+      ] do
+    test "R1 from a tab running the old JS: #{inspect(typed)} stores as on main (#{surface})",
+         c do
+      at = if unquote(surface) == :desk, do: c.desk, else: c.url
+      a = open(c, at)
+      b = open(c, at)
+      render_click(a, "select-group", %{"group" => "main"})
+
+      send_post(b, "excerpt", %{"excerpt" => "Short. world"}, %{})
+      told(a)
+      render_click(a, "select-group", %{"group" => "seo"})
+      old_js_post(a, "excerpt", %{"excerpt" => unquote(typed)})
+
+      assert stored(c)["excerpt"] == unquote(want)
     end
   end
 

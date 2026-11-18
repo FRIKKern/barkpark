@@ -80,7 +80,14 @@ defmodule BarkparkWeb.Studio.TwoEditorsInFlightTest do
   defp form_of(view),
     do: Map.take(:sys.get_state(view.pid).socket.assigns.editor_form, ["title", "excerpt"])
 
-  defp send_post(view, target, changes, seen \\ %{}) do
+  # `v` is what bp-array-focus.js writes into `_bp_seen` (it numbers every
+  # value it shows); `old_js_post/3` is a tab still running the file before it.
+  defp send_post(view, target, changes, seen \\ %{}),
+    do: post(view, target, changes, Map.put(seen, "v", 2))
+
+  defp old_js_post(view, target, changes), do: post(view, target, changes, %{})
+
+  defp post(view, target, changes, seen) do
     view
     |> element("#editor-form")
     |> render_change(%{
@@ -251,11 +258,26 @@ defmodule BarkparkWeb.Studio.TwoEditorsInFlightTest do
 
       socket = :sys.get_state(a.pid).socket
 
-      assert RemoteValues.put_bases(socket, ["title"], "{}").assigns.editor_field_bases == %{
-               "title" => "Fixture post 14 A"
-             }
+      assert RemoteValues.put_bases(socket, ["title"], ~s({"v":2})).assigns.editor_field_bases ==
+               %{"title" => "Fixture post 14 A"}
 
       assert RemoteValues.put_bases(socket, ["title"], nil).assigns.editor_field_bases == %{}
+    end
+
+    # A tab loaded before this change keeps its old bp-array-focus.js across a
+    # deploy. It does not number a field it does not draw, so "no number" from
+    # it is not a crossing: its post stands, as before (review r2 of #26988).
+    for surface <- [:desk, :studio] do
+      test "a crossing post from a tab running the old JS stands, as before (#{surface})", c do
+        at = if unquote(surface) == :desk, do: c.desk, else: c.url
+        a = open(c, at)
+        b = open(c, at)
+
+        send_post(b, "title", %{"title" => "bbb Fixture post 14"})
+        old_js_post(a, "title", %{"title" => "Fixture post 14 aaa"})
+
+        assert stored(c)["title"] == "Fixture post 14 aaa"
+      end
     end
   end
 end

@@ -221,17 +221,48 @@
     return String(text).replace(/\r\n?/g, "\n");
   }
 
-  function recordSeen(values, seqs) {
-    var form = document.getElementById("editor-form");
-    var input = form && form.querySelector('input[name="_bp_seen"]');
-    if (!input) return;
+  function readSeen(input) {
     var seen;
     try {
       seen = JSON.parse(input.value || "{}");
     } catch (_) {
       seen = {};
     }
-    if (!seen || typeof seen !== "object") seen = {};
+    return seen && typeof seen === "object" ? seen : {};
+  }
+
+  // task-f18af43e26e46ff4: `v` says this page numbers every value it shows,
+  // a field not drawn included, so a post with no number for a field left
+  // before that field's push arrived and the server may merge it. A tab still
+  // running an older copy of this file never writes it, and its posts are
+  // not merged without a number. Written by this file only, never drawn.
+  var SEEN_VERSION = 2;
+
+  function markSeen(form) {
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    if (seen.v === SEEN_VERSION) return;
+    seen.v = SEEN_VERSION;
+    input.value = JSON.stringify(seen);
+  }
+
+  // Before LiveView reads the form for the post (capture, on window).
+  window.addEventListener(
+    "input",
+    function (e) {
+      var form = e.target && e.target.form;
+      if (form && form.id === "editor-form") markSeen(form);
+    },
+    true,
+  );
+
+  function recordSeen(values, seqs) {
+    var form = document.getElementById("editor-form");
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    seen.v = SEEN_VERSION;
     Object.keys(seqs).forEach(function (name) {
       var pair = seqs[name];
       var change = values[name];

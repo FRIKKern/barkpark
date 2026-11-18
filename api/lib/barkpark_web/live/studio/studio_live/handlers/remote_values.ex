@@ -43,8 +43,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   its own landed post, or the value the first push says it showed
   (`:origin`), which is what the page reports for it once that push
   arrives. Once the kept history has dropped that entry, nothing tells, and
-  the post stands. A change the server built itself (no `_bp_seen` at all)
-  is never merged. Nor is any field that is not free text: a date or a
+  the post stands. That reading needs a page that numbers every value it
+  shows, an undrawn field included: bp-array-focus.js says so with `v` in
+  `_bp_seen` (`@seen_version`), written by the page, never drawn by the
+  server. A tab still running an older copy of that file (loaded before a
+  deploy) sends no `v`, and its posts with no number stand, as before. A
+  change the server built itself (no `_bp_seen` at all) is never merged. Nor is any field that is not free text: a date or a
   select is a choice, not text two people type into.
   """
 
@@ -54,6 +58,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   alias Barkpark.Content
 
   @event "bp:form-remote-values"
+
+  # The `v` bp-array-focus.js writes into `_bp_seen` (its SEEN_VERSION).
+  @seen_version 2
 
   # Entries kept per field. A page that reports a number older than these is
   # not merged.
@@ -103,13 +110,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     seen = decode_seen(seen)
     history = history(socket)
     schema = socket.assigns[:editor_schema]
+    crossing? = Map.get(seen, "v") == @seen_version
 
     bases =
       for key <- keys,
           free_text?(schema, key),
           # A generator, not `n = ...`: a nil filter would drop the field.
           n <- [Map.get(seen, "doc[#{key}]")],
-          is_integer(n) or is_nil(n),
+          is_integer(n) or (is_nil(n) and crossing?),
           {_seq, value, _kind} <- List.wrap(base_entry(Map.get(history, key, []), n)),
           into: %{},
           do: {key, value}
