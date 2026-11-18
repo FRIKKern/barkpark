@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
-import { contrast, hexToRgb, hslToHex, oklchToSrgb, rgbToHex, srgbToOklch } from "./derive.mjs";
+import { contrast, hexToRgb, hslToHex, rgbToHex, srgbToOklch } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -574,18 +574,6 @@ test("BarkUI sheet: tones and fills read on every surface, in every skin and mod
   }
 });
 
-// The control edge (--ui-input): the edge of anything a person operates, an
-// outlined button, a text field, a select, a checkbox. It must stand at 3:1
-// against the ground it sits on (WCAG 1.4.11), on every surface, and stay
-// clearly quieter than text: the foreground's contrast is at least 1.5 times
-// the edge's, so a field is not drawn in ink. --ui-border stays the hairline.
-// `a` mixed `pct`% into `b` in Oklab, as CSS color-mix(in oklab, a pct%, b).
-function mixOklab(a, b, pct) {
-  const lab = (c) => { const { L, C, h } = srgbToOklch(c); const r = (h * Math.PI) / 180; return [L, C * Math.cos(r), C * Math.sin(r)]; };
-  const A = lab(a), B = lab(b), t = pct / 100;
-  const [L, x, y] = A.map((v, i) => v * t + B[i] * (1 - t));
-  return oklchToSrgb(L, Math.hypot(x, y), (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360);
-}
 // Every skin, mode and surface of the built sheet: calls f(at, mode, surface, get).
 function eachSurface(f) {
   const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
@@ -606,14 +594,20 @@ function eachSurface(f) {
 
 // A soft tone control (a destructive button, a soft badge) draws its tone's
 // -soft as its fill and the tone's -text as its label. The sheet writes -soft
-// per surface and tone, so the label reads on it everywhere, and -soft stands
-// off the ground by SOFT_STEP so the control is visibly tinted.
-const SOFT_STEP = 1.1;
-test("BarkUI sheet: every tone's text reads on its own soft fill, and the fill is visibly tinted", () => {
+// per surface and tone. It must still be its tone: within SOFT_HUE degrees of
+// the tone fill's OKLCH hue on that surface, at OKLCH chroma SOFT_CHROMA or
+// more; it stands SOFT_STEP off the ground so the control is visibly tinted;
+// and the label reads on it at 4.5:1. SOFT_CHROMA is the most every case can
+// hold: a red tint 1.1:1 below a white ground ends at the sRGB gamut, 0.0167.
+const SOFT_STEP = 1.1, SOFT_HUE = 1, SOFT_CHROMA = 0.016;
+test("BarkUI sheet: every tone's soft fill keeps its tone, is visibly tinted, and its text reads on it", () => {
   eachSurface((at, mode, s, get) => {
     const bg = get("background");
     for (const t of TONES) {
-      const soft = get(`${t}-soft`);
+      const soft = get(`${t}-soft`), o = srgbToOklch(soft), tone = srgbToOklch(get(t));
+      const dh = Math.min(Math.abs(o.h - tone.h), 360 - Math.abs(o.h - tone.h));
+      assert.ok(o.C >= SOFT_CHROMA, `${at}: ${t}-soft has chroma ${o.C.toFixed(3)}, under ${SOFT_CHROMA}`);
+      assert.ok(dh <= SOFT_HUE, `${at}: ${t}-soft is ${dh.toFixed(1)} degrees off the ${t} hue, over ${SOFT_HUE}`);
       const label = contrast(get(`${t}-text`), soft), step = contrast(soft, bg);
       assert.ok(label >= 4.5, `${at}: ${t}-text on ${t}-soft is ${label.toFixed(2)}, under 4.5`);
       assert.ok(step >= SOFT_STEP, `${at}: ${t}-soft is ${step.toFixed(3)}:1 off the ground, under ${SOFT_STEP}`);
@@ -641,30 +635,39 @@ test("BarkUI sheet: the muted fill reads as inactive on every surface", () => {
   });
 });
 
-// In dark the depth shadow does not show, so raised stands off base by its
-// ground alone (1.1:1). A sunken well is marked by an inset 1px rim on every
-// skin and in both modes, the mirror of raised's shadow, so its ground step can
-// be smaller: 1.05:1 in dark, which every skin holds above the depth steps
-// below it. The rim stands RIM_STEP off the base ground it is cut into.
-const DARK_RAISED_STEP = 1.1, DARK_SUNKEN_STEP = 1.05, RIM_STEP = 1.25;
-test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim", () => {
-  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
-  assert.ok(sheet.build(loadThemes()).includes(
-    ':where([data-surface="sunken"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim);\n}'),
-    "no inset rim paint rule for the sunken surface");
+// A sunken well stands SUNKEN_STEP off base in both modes and is marked by an
+// inset 1px rim on every skin, the mirror of raised's shadow; the rim stands
+// RIM_STEP off the base ground it is cut into. Raised stands DARK_RAISED_STEP
+// off base in dark, where no shadow shows.
+// Raised in light is left out: its shadow marks it (the light raised panel is its own task).
+const DARK_RAISED_STEP = 1.1, SUNKEN_STEP = 1.05, RIM_STEP = 1.25;
+test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, with or without a depth", () => {
+  const css = ARTIFACTS.find((a) => a.path === BARKUI_PATH).build(loadThemes());
+  const rim = ':where([data-surface="sunken"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim);\n}';
+  const both = ':where([data-surface="sunken"][data-depth="1"], [data-surface="sunken"][data-depth="2"], [data-surface="sunken"][data-depth="3"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim), var(--ui-shadow, 0 0 #0000);\n}';
+  const shadow = css.indexOf(':where([data-depth="1"], [data-depth="2"], [data-depth="3"]) {');
+  assert.ok(css.includes(rim), "no inset rim paint rule for the sunken surface");
+  assert.ok(css.includes(both), "no rule giving a sunken surface with depth 1 to 3 both its rim and the depth shadow");
+  assert.ok(shadow >= 0 && css.indexOf(rim) < shadow && shadow < css.indexOf(both),
+    "the paint rules are out of order: rim, then depth shadow, then the combined rule");
   eachSurface((at, mode, s, get) => {
     const base = get("background", "base");
     if (s === "sunken") {
-      const rim = contrast(get("rim"), base);
-      assert.ok(rim >= RIM_STEP, `${at}: rim is ${rim.toFixed(3)}:1 off the base ground, under ${RIM_STEP}`);
+      const r = contrast(get("rim"), base);
+      assert.ok(r >= RIM_STEP, `${at}: rim is ${r.toFixed(3)}:1 off the base ground, under ${RIM_STEP}`);
     }
-    if (mode !== "dark" || !["raised", "sunken"].includes(s)) return;
-    const floor = s === "raised" ? DARK_RAISED_STEP : DARK_SUNKEN_STEP;
+    const floor = s === "sunken" ? SUNKEN_STEP : s === "raised" && mode === "dark" ? DARK_RAISED_STEP : 0;
+    if (!floor) return;
     const step = contrast(get("background"), base);
     assert.ok(step >= floor, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${floor}`);
   });
 });
 
+// The control edge (--ui-input): the edge of anything a person operates, an
+// outlined button, a text field, a select, a checkbox. It must stand at 3:1
+// against the ground it sits on (WCAG 1.4.11), on every surface, and stay
+// clearly quieter than text: the foreground's contrast is at least 1.5 times
+// the edge's, so a field is not drawn in ink. --ui-border stays the hairline.
 test("BarkUI sheet: the control edge stands at 3:1 on every surface and stays quieter than text", () => {
   const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
   assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);

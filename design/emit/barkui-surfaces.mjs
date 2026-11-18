@@ -63,7 +63,7 @@
 // lighter, so positive depth there equals the ground and the elevation comes
 // from the depth shadow, as in the base.
 
-import { aaWalk, contrast, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
+import { aaWalk, contrast, maxChroma, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
 
 export const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 export const TONES = ["success", "warning", "danger", "info"];
@@ -83,7 +83,8 @@ const SUNKEN_LIGHT = 0.028;
 const DARK_SUNKEN_STEP = 1.05; // a dark sunken ground off base; its rim does the rest
 const RIM_STEP = 1.25; // a sunken well's inset rim off the base ground it is cut into
 const SOFT_STEP = 1.1; // a tone's soft fill off its ground: visibly tinted
-const SOFT_MIX = 12; // the soft fill's hue and chroma: its tone mixed this % into the ground
+const SOFT_CHROMA = 0.06; // a soft fill's OKLCH chroma, where the gamut allows it
+const SOFT_CHROMA_SIDE = 0.025; // a side whose tint keeps this much chroma is taken
 const MUTED_STEP = 1.2; // the primary surface's disabled fill off its ground
 const DEPTH_STEP = { light: { up: 0.02, down: 0.022 }, dark: { up: 0.045, down: 0.02 } };
 const DARK_FLOOR = 0.145;
@@ -114,14 +115,6 @@ function quiet(fg, into, fills, ground) {
     if (fills.every((f) => contrast(c, f) >= 4.5) && contrast(c, ground) >= 3) return c;
   }
   return fg;
-}
-
-// `a` mixed `pct`% into `b` in Oklab, as CSS color-mix(in oklab, a pct%, b).
-function mixOklab(a, b, pct) {
-  const lab = (c) => { const { L: l, C, h } = srgbToOklch(c); const r = (h * Math.PI) / 180; return [l, C * Math.cos(r), C * Math.sin(r)]; };
-  const A = lab(a), B = lab(b), t = pct / 100;
-  const [l, x, y] = A.map((v, i) => v * t + B[i] * (1 - t));
-  return css(oklchToSrgb(l, Math.hypot(x, y), (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360));
 }
 
 // `ground` walked at its hue and chroma, `dir` (+1 lighter, -1 darker), until it
@@ -172,20 +165,24 @@ function tonesOn(b, ground) {
   return out;
 }
 
-// A tone's soft fill on `ground`, for the label `text`: the hue and chroma of
-// the tone mixed SOFT_MIX% into the ground, at the lightness that stands
-// SOFT_STEP:1 off the ground, on the side away from the label where the
-// lightness range allows it (else toward it), so the tint never pulls the
-// ground toward its label where it need not.
+// A tone's soft fill on `ground`, for the label `text`: the tone's own OKLCH
+// hue at chroma SOFT_CHROMA (less where the gamut ends), at the lightness that
+// stands SOFT_STEP:1 off the ground. It takes the side away from the label if
+// the tint keeps at least SOFT_CHROMA_SIDE there, else the side where it does
+// (on a white ground only darker keeps any colour); the label is walked after.
 function softOn(fill, text, ground) {
+  const { h } = srgbToOklch(fill);
+  const at = (dir) => {
+    for (let l = L(ground) + dir * 0.002; l >= 0 && l <= 1; l += dir * 0.002) {
+      const rgb = oklchToSrgb(l, SOFT_CHROMA, h);
+      if (contrast(rgb, ground) >= SOFT_STEP + 0.005) return { rgb, c: Math.min(SOFT_CHROMA, maxChroma(l, h)) };
+    }
+    return null;
+  };
   const away = L(text) >= L(ground) ? -1 : 1;
-  const { C, h } = srgbToOklch(mixOklab(fill, ground, SOFT_MIX));
-  let last;
-  for (const dir of [away, -away]) {
-    last = aaWalk(L(ground), C, h, ground, { target: SOFT_STEP + 0.005, step: dir * 0.002, maxIter: 600, minL: 0, maxL: 1 });
-    if (last.hit) break;
-  }
-  return css(last.rgb);
+  const sides = [at(away), at(-away)].filter(Boolean);
+  const pick = sides.find((x) => x.c >= SOFT_CHROMA_SIDE) ?? sides.sort((x, y) => y.c - x.c)[0];
+  return css(pick.rgb);
 }
 
 // Each tone's -soft on surface `s`; on a computed surface (`walk`), a -text

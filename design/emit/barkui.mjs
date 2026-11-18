@@ -175,6 +175,9 @@ function axisRules() {
     ":where([data-skin], [data-surface], [data-depth]) {\n  background-color: var(--ui-background);\n  color: var(--ui-foreground);\n  border-color: var(--ui-border);\n}",
     ':where([data-surface="sunken"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim);\n}',
     ':where([data-depth="1"], [data-depth="2"], [data-depth="3"]) {\n  box-shadow: var(--ui-shadow);\n}',
+    // A sunken well with a depth keeps its rim (in dark its only marker) under
+    // the depth shadow; with no --ui-shadow on the page the rim still draws.
+    ':where([data-surface="sunken"][data-depth="1"], [data-surface="sunken"][data-depth="2"], [data-surface="sunken"][data-depth="3"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim), var(--ui-shadow, 0 0 #0000);\n}',
   ];
 }
 
