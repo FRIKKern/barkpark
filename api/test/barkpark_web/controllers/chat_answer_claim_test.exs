@@ -120,5 +120,5 @@ defmodule BarkparkWeb.ChatAnswerClaimTest do
     assert {:ok, :ok} = Task.await(holder, 10_000)
   end
 
-  defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+  defp unboxed(fun), do: Barkpark.Unboxed.run(Repo, fun)
 end

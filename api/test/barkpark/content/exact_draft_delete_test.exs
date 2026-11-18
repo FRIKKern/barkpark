@@ -132,13 +132,13 @@ defmodule Barkpark.Content.ExactDraftDeleteTest do
 
     # Independent database connections: a rollback cannot make this pass by
     # rolling back the simulated human write along with the failed deletion.
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       {:ok, d} =
         Content.create_document("note", %{"_id" => id, "title" => "Original"}, "production")
 
       writer =
         Task.async(fn ->
-          Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+          Barkpark.Unboxed.run(Repo, fn ->
             receive do
               {:write_now, caller, doc} ->
                 rev = "human-#{System.unique_integer([:positive])}"
@@ -190,7 +190,7 @@ defmodule Barkpark.Content.ExactDraftDeleteTest do
   # with `session_replication_role = replica` (same instrument as
   # cycle_fleet_test) inside one transaction, children before the document.
   # It then asserts the committed counts are back to the pre-test values.
-  defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+  defp unboxed(fun), do: Barkpark.Unboxed.run(Repo, fun)
 
   @committed_tables ~w(documents revisions mutation_events audit_events oban_jobs)
 

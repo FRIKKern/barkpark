@@ -276,7 +276,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
   test "a committed doc id and type rename after prefetch rejects history on the same row" do
     Barkpark.DeletedWorkspaceResidue.purge_on_exit()
 
-    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
       {slug, paper} = seed!(nil, workspace_id: workspace.id, project_id: project.id)
@@ -318,7 +318,7 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
               if_rev: forward.rev,
               after_idempotency_claim: fn ->
                 Task.async(fn ->
-                  Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+                  Barkpark.Unboxed.run(Repo, fn ->
                     Repo.get!(Barkpark.Content.Document, paper.id)
                     |> Ecto.Changeset.change(doc_id: renamed_doc_id, type: renamed_type)
                     |> Repo.update!()
