@@ -110,7 +110,8 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
   @doc """
   The page's assigns for drawing the Studio's form over the revision: its
-  values, no findings, the classic form with every field and no dialog.
+  values, no findings, no change bars, the classic form with every field
+  and no dialog.
   """
   def shell_assigns(%{desk_revision: %{doc: doc, form: form}} = assigns) do
     assigns
@@ -123,7 +124,8 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
       validation_warnings: %{},
       cross_violations: [],
       show_delete: false,
-      show_unpublish_guard: false
+      show_unpublish_guard: false,
+      desk_changes: nil
     )
     |> HistoryPanel.waiting()
   end

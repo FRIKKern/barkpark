@@ -74,8 +74,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); --dk-fill-soft: #eeeef1; --dk-badge-fg: #4c536a; --dk-badge-lit-bg: #e6e6ea; --dk-badge-lit-fg: #4a5068; }
       html[data-theme="dark"] .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(121, 127, 154, 0.4), 0 3px 5px -2px rgba(0, 0, 0, 0.2), 0 6px 10px 0 rgba(0, 0, 0, 0.14), 0 1px 18px 1px rgba(0, 0, 0, 0.12); --dk-fill-soft: #21232f; --dk-badge-fg: #9da2b7; --dk-badge-lit-bg: #262837; --dk-badge-lit-fg: #9fa4ba; }
       /* The History inspector's avatars and badges, and an old revision's footer (TanStack's tokens). */
-      .dk { --dk-avatar-blue: #4f66fb; --dk-avatar-green: #0db97a; --dk-avatar-yellow: #d28a12; --dk-avatar-orange: #fa6412; --dk-warn-fg: #6b5300; --dk-caution-card-bg: #fefae1; --dk-caution-card-fg: #3b2212; }
-      html[data-theme="dark"] .dk { --dk-avatar-blue: #7898ff; --dk-avatar-green: #15f0a5; --dk-avatar-yellow: #f9be1e; --dk-avatar-orange: #ff9149; --dk-warn-fg: #f2d36b; --dk-caution-card-bg: #1e1a1b; --dk-caution-card-fg: #f9ea98; }
+      .dk { --dk-avatar-blue: #4f66fb; --dk-avatar-green: #0db97a; --dk-avatar-yellow: #d28a12; --dk-avatar-orange: #fa6412; --dk-warn-fg: #6b5300; --dk-caution-card-bg: #fefae1; --dk-caution-card-fg: #3b2212; --dk-diff-bg: #fde6d8; --dk-diff-fg: #8a3a12; }
+      html[data-theme="dark"] .dk { --dk-avatar-blue: #7898ff; --dk-avatar-green: #15f0a5; --dk-avatar-yellow: #f9be1e; --dk-avatar-orange: #ff9149; --dk-warn-fg: #f2d36b; --dk-caution-card-bg: #1e1a1b; --dk-caution-card-fg: #f9ea98; --dk-diff-bg: #4a2a17; --dk-diff-fg: #ffc9a8; }
       .dk fieldset.dk-revision-form { display: contents; margin: 0; padding: 0; border: 0; min-width: 0; }
       /* TanStack's --critical-icon: a field's error mark (`SlugInUse`). */
       .dk { --dk-critical-icon: #ef3d2f; }
