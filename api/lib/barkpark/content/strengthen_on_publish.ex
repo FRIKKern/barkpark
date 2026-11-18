@@ -23,7 +23,8 @@ defmodule Barkpark.Content.StrengthenOnPublish do
       is `_weak: true`: a weak reference the author chose stays weak.
 
   All targets in one document are looked up in ONE query. A document with no
-  waiting reference runs no query at all.
+  waiting reference runs no query at all. Targets are read once at the
+  publish door, before the publish transaction.
 
   ## Whose targets count
 
@@ -33,16 +34,6 @@ defmodule Barkpark.Content.StrengthenOnPublish do
   the shared layer (`workspace_id IS NULL`); a publish whose opts name no
   workspace strengthens nothing. Failing closed leaves the reference weak,
   which is what it was before this module existed.
-
-  ## When the target is read
-
-  Once, at the publish door, before the publish transaction opens, next to
-  the other door gates. The read takes no lock. A concurrent unpublish or
-  delete of the target can commit after it, and the publish then stores a
-  strong reference to a target that has no published version. That is the
-  state an unpublish of a strongly referenced target already produces (the
-  unpublish door does not check referrers), and the delete door's referrer
-  check reads unlocked in the same way.
   """
 
   import Ecto.Query, only: [from: 2]
