@@ -1,7 +1,7 @@
 // node build/showroom.mjs: writes dist/showroom/, one static page that opens
 // from disk with no server and no network. Every part comes from discovery;
 // nothing here names a part.
-import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import * as esbuild from 'esbuild'
@@ -24,12 +24,15 @@ export function skinNames(tokensCss) {
   return [...new Set([...tokensCss.matchAll(/\[data-skin="([\w-]+)"\]/g)].map((m) => m[1]))]
 }
 
-/** What every part's look also rests on; a proof is stale when this moves. */
+/** What every part's look and proof also rest on; a proof is stale when this moves. */
 export function foundationHash() {
+  const check = readdirSync(join(root, 'check')).filter((f) => f.endsWith('.mjs') && f !== 'shots.mjs')
   return hashFiles([
     ['tokens.css', readFileSync(tokensPath)],
     ['base.css', readFileSync(join(root, 'css', 'base.css'))],
     ['ui-sdk', uiSdkVersion],
+    ['sheet-waits.mjs', readFileSync(join(root, 'build', 'sheet-waits.mjs'))],
+    ...check.map((f) => [`check/${f}`, readFileSync(join(root, 'check', f))]),
   ])
 }
 
@@ -38,30 +41,32 @@ export function pinStates(css) {
   return css.replace(/(?<!\(\s*(?:any-)?hover\s*):(hover|active|focus-visible)(?![-\w])/g, (_, s) => `:is(:${s}, [data-pin~="${s}"])`)
 }
 
-export async function buildShowroom({ dir = partsDir, quiet = false } = {}) {
+export async function buildShowroom({ dir = partsDir, out = outDir, proof: proofFile = proofPath, quiet = false } = {}) {
   const parts = discoverParts(dir)
   const lint = parts.flatMap((p) => lintPartCss(p.css).map((f) => `parts/${p.name}/part.css ${f}`))
   if (lint.length) throw new Error(`part.css may only read --ui-* and --bark-* colours:\n  ${lint.join('\n  ')}`)
 
-  mkdirSync(outDir, { recursive: true })
+  mkdirSync(out, { recursive: true })
   const tokens = readFileSync(tokensPath, 'utf8')
-  copyFileSync(tokensPath, join(outDir, 'tokens.css'))
+  copyFileSync(tokensPath, join(out, 'tokens.css'))
 
   const layered = [
-    '@layer ui-sdk, bark-base, bark-parts;',
+    '@layer ui-sdk, bark-base, bark-parts, bark-focus;',
     readFileSync(join(uiSdkDir, 'browser', 'web.css'), 'utf8'),
     readFileSync(join(root, 'css', 'base.css'), 'utf8'),
     ...parts.map((p) => `/* parts/${p.name}/part.css */\n@layer bark-parts {\n${p.css}\n}`),
   ].join('\n')
-  writeFileSync(join(outDir, 'barkui.css'), pinStates(layered))
-  writeFileSync(join(outDir, 'showroom.css'), readFileSync(join(root, 'build', 'showroom.css')))
+  writeFileSync(join(out, 'barkui.css'), pinStates(layered))
+  writeFileSync(join(out, 'showroom.css'), readFileSync(join(root, 'build', 'showroom.css')))
 
   // Classic script so the page runs from file://. Part imports first, so every
   // element is defined before the controls and demos run.
   const imports = [...new Set(parts.flatMap((p) => p.json.imports))]
+  const demos = parts.filter((p) => p.demo)
   const entry = [
     ...imports.map((i) => `import ${JSON.stringify(i)}`),
-    ...parts.filter((p) => p.demo).map((p) => `import ${JSON.stringify(p.demo)}`),
+    ...demos.map((p, i) => `import demo${i} from ${JSON.stringify(p.demo)}`),
+    ...demos.map((p, i) => `demo${i}(document.querySelector(${JSON.stringify(`[data-part="${p.name}"]`)}))`),
     `import ${JSON.stringify(join(root, 'build', 'controls.mjs'))}`,
   ].join('\n')
   await esbuild.build({
@@ -71,15 +76,18 @@ export async function buildShowroom({ dir = partsDir, quiet = false } = {}) {
     minify: true,
     target: 'es2022',
     legalComments: 'none',
-    outfile: join(outDir, 'showroom.js'),
+    outfile: join(out, 'showroom.js'),
     logLevel: 'warning',
   })
 
-  const proof = existsSync(proofPath) ? JSON.parse(readFileSync(proofPath, 'utf8')) : null
+  const proof = existsSync(proofFile) ? JSON.parse(readFileSync(proofFile, 'utf8')) : null
   const html = renderPage({ parts, proof, skins: skinNames(tokens), foundation: foundationHash(), uiSdkVersion })
-  writeFileSync(join(outDir, 'index.html'), html)
-  if (!quiet) console.log(`showroom: ${parts.length} part(s) -> ${join('dist', 'showroom', 'index.html')}${proof ? `, proof from ${proof.ranAt}` : ', no check run yet'}`)
-  return { parts, file: join(outDir, 'index.html') }
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1])
+  const twice = ids.filter((id, i) => ids.indexOf(id) !== i)
+  if (twice.length) throw new Error(`the showroom page prints id "${twice[0]}" more than once`)
+  writeFileSync(join(out, 'index.html'), html)
+  if (!quiet) console.log(`showroom: ${parts.length} part(s) -> ${join(out, 'index.html')}${proof ? `, proof from ${proof.ranAt}` : ', no check run yet'}`)
+  return { parts, file: join(out, 'index.html') }
 }
 
 if (process.argv[1] === import.meta.filename) {

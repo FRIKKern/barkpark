@@ -26,6 +26,17 @@ describe('lintPartCss', () => {
     'named in shorthand': 'a { border: 1px solid rebeccapurple; }',
     'foreign variable': 'a { color: var(--brand-ink); }',
     'variable fallback literal': 'a { color: var(--ui-primary, #000); }',
+    'capitalised property': 'a { Color: #fff; }',
+    'capitalised background': 'a { BACKGROUND: #ffffff; }',
+    'hex inside a url': "a { background-image: url(\"data:image/svg+xml,%3Csvg fill='%23ff0000'/%3E\"); }",
+    'skin rule': '[data-skin="fjord"] a { background: var(--ui-muted); }',
+    'old skin rule': '[data-bp-theme=ember] a { color: var(--ui-foreground); }',
+    'scheme rule': '[data-color-scheme="dark"] a { color: var(--ui-foreground); }',
+    'theme rule': '[data-theme="dark"] a { color: var(--ui-foreground); }',
+    'scheme media query': '@media (prefers-color-scheme: dark) { a { color: var(--ui-foreground); } }',
+    'tint made in the part': 'a { background: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground)); }',
+    'own focus ring': 'a:focus-visible { border-color: var(--ui-ring-border); }',
+    'own outline': 'a { outline: 2px solid var(--ui-ring); }',
   }
   for (const [what, css] of Object.entries(bad)) {
     it(`refuses a ${what}`, () => {
@@ -33,13 +44,13 @@ describe('lintPartCss', () => {
     })
   }
 
-  it('allows variables, color-mix of variables, keywords and comments that name colours', () => {
-    const css = `/* red on #fff is wrong */
+  it('allows variables, keywords and comments that name colours or skins', () => {
+    const css = `/* red on #fff in [data-skin="x"] is wrong */
       [data-slot="button"] {
         color: var(--ui-foreground);
-        background: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground));
+        background: var(--bark-primary-hover);
         border-color: transparent;
-        outline-color: currentColor;
+        fill: currentColor;
         --bark-button-height: 2rem;
         height: var(--bark-button-height);
       }`

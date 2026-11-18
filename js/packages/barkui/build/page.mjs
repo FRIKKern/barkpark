@@ -9,13 +9,16 @@ export const LIGHTS = [
   ['noscript', 'Printed with no script'],
 ]
 
+import { SHEET_WAITS } from './sheet-waits.mjs'
+
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 export function lightState(part, proof, foundation, key) {
   const run = proof?.parts?.[part.name]
   if (!run?.lights?.[key]) return { on: false, why: 'not run yet' }
   if (run.hash !== part.hash) return { on: false, why: 'stale: the part folder changed after the run' }
-  if (proof.foundation !== foundation) return { on: false, why: 'stale: tokens, base styles or UI SDK changed after the run' }
+  if (proof.foundation !== foundation) return { on: false, why: 'stale: tokens, base styles, UI SDK or the check changed after the run' }
+  if (run.failed || proof.errors?.length) return { on: false, why: 'the last run failed' }
   const l = run.lights[key]
   return { on: l.pass === true, why: l.detail || (l.pass ? 'proved' : 'failed') }
 }
@@ -24,9 +27,18 @@ function lights(part, ctx) {
   const items = LIGHTS.map(([key, label]) => {
     const { on, why } = lightState(part, ctx.proof, ctx.foundation, key)
     const text = key === 'skins' ? `${ctx.skins.length} skins` : label
-    return `<li class="sr-light" data-light="${key}" data-on="${on}"><span class="sr-dot" aria-hidden="true"></span><span>${esc(text)}</span><span class="sr-why">${on ? '' : esc(why)}</span></li>`
+    return `<li class="sr-light" data-light="${key}" data-on="${on}"><span class="sr-dot" aria-hidden="true"></span><span>${esc(text)}</span><span class="sr-state">${on ? 'on' : 'off'}</span><span class="sr-why">${on ? '' : esc(why)}</span></li>`
   })
   return `<ul class="sr-lights" aria-label="Proof from the last check run">${items.join('')}</ul>`
+}
+
+/** Plain lines for what the sheet does not deliver yet, from the numbers the check measured. */
+function waits(part, proof) {
+  const measures = proof?.parts?.[part.name]?.measures ?? {}
+  const lines = Object.entries(SHEET_WAITS)
+    .filter(([key, w]) => measures[key] && measures[key].min < w.needs)
+    .map(([key, w]) => `<p class="sr-wait">waiting on the sheet: ${esc(w.label)} ${measures[key].min.toFixed(2)}:1, needs ${w.needs}:1</p>`)
+  return lines.join('')
 }
 
 function radios(name, label, values, checked) {
@@ -44,6 +56,7 @@ function partSection(part, ctx) {
     <p class="sr-meta">${esc(json.family)} · <code>&lt;${esc(json.element)}&gt;</code></p>
     <p class="sr-summary">${esc(json.summary)}</p>
     ${lights(part, ctx)}
+    ${waits(part, ctx.proof)}
   </header>
   <div class="sr-stage" data-part="${name}">
 ${part.example}
@@ -54,7 +67,10 @@ ${part.example}
 
 export function renderPage({ parts, proof, skins, foundation, uiSdkVersion }) {
   const ctx = { proof, skins, foundation }
-  const run = proof
+  const failed = proof && [...Object.entries(proof.parts ?? {}).filter(([, r]) => r.failed).map(([n, r]) => `${n}: ${r.failed}`), ...(proof.errors ?? [])]
+  const run = failed?.length
+    ? `The last check run failed at <time datetime="${esc(proof.ranAt)}">${esc(proof.ranAt.replace('T', ' ').slice(0, 16))} UTC</time>, so no light is on: ${esc(failed[0])}.`
+    : proof
     ? `Proof lights from the check run at <time datetime="${esc(proof.ranAt)}">${esc(proof.ranAt.replace('T', ' ').slice(0, 16))} UTC</time> in ${esc(proof.browser)}.`
     : 'No check run yet, so every proof light is off. Run <code>pnpm run check</code>.'
   return `<!doctype html>

@@ -2,7 +2,7 @@
    Variant by data-variant: none = secondary, "solid" = primary, "ghost" = quiet,
    "destructive". Size by data-size: "sm", none, "lg" (28, 36, 44px on a 4px grid).
    States come in pairs: a state that changes the ground names its text colour too.
-   One focus ring: the pale --ui-ring halo outside, the --ui-ring-border edge on the border. */
+   State tints come from base.css; the focus ring is base.css's, drawn once for every part. */
 [data-slot="button"] {
   --bark-button-height: calc(var(--ui-spacing) * 9);
   --bark-button-pad: calc(var(--ui-spacing) * 3.5);
@@ -11,10 +11,10 @@
   --bark-button-bg: var(--ui-background);
   --bark-button-fg: var(--ui-foreground);
   --bark-button-edge: var(--ui-input);
-  --bark-button-hover-bg: var(--ui-muted);
+  --bark-button-hover-bg: var(--bark-hover);
   --bark-button-hover-fg: var(--ui-foreground);
   --bark-button-hover-edge: var(--ui-input);
-  --bark-button-press-bg: var(--bark-selected);
+  --bark-button-press-bg: var(--bark-press);
   --bark-button-press-fg: var(--ui-foreground);
 
   height: var(--bark-button-height);
@@ -46,10 +46,10 @@
     --bark-button-bg: var(--ui-primary);
     --bark-button-fg: var(--ui-primary-foreground);
     --bark-button-edge: var(--ui-primary);
-    --bark-button-hover-bg: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground));
+    --bark-button-hover-bg: var(--bark-primary-hover);
     --bark-button-hover-fg: var(--ui-primary-foreground);
-    --bark-button-hover-edge: var(--bark-button-hover-bg);
-    --bark-button-press-bg: color-mix(in oklab, var(--ui-primary) 78%, var(--ui-foreground));
+    --bark-button-hover-edge: var(--bark-primary-hover);
+    --bark-button-press-bg: var(--bark-primary-press);
     --bark-button-press-fg: var(--ui-primary-foreground);
   }
   &[data-variant="ghost"] {
@@ -58,13 +58,13 @@
     --bark-button-hover-edge: transparent;
   }
   &[data-variant="destructive"] {
-    --bark-button-bg: color-mix(in oklab, var(--ui-destructive) 6%, var(--ui-background));
+    --bark-button-bg: var(--bark-destructive-ground);
     --bark-button-fg: var(--bark-danger-text);
-    --bark-button-edge: color-mix(in oklab, var(--ui-destructive) 35%, var(--ui-background));
-    --bark-button-hover-bg: color-mix(in oklab, var(--ui-destructive) 10%, var(--ui-background));
+    --bark-button-edge: var(--bark-destructive-edge);
+    --bark-button-hover-bg: var(--bark-destructive-hover);
     --bark-button-hover-fg: var(--bark-danger-text);
-    --bark-button-hover-edge: color-mix(in oklab, var(--ui-destructive) 50%, var(--ui-background));
-    --bark-button-press-bg: color-mix(in oklab, var(--ui-destructive) 14%, var(--ui-background));
+    --bark-button-hover-edge: var(--bark-destructive-hover-edge);
+    --bark-button-press-bg: var(--bark-destructive-press);
     --bark-button-press-fg: var(--bark-danger-text);
   }
 
@@ -76,12 +76,6 @@
   &:active:not([data-disabled], [data-pending]) {
     background: var(--bark-button-press-bg);
     color: var(--bark-button-press-fg);
-  }
-
-  &:focus-visible {
-    border-color: var(--ui-ring-border);
-    outline: 4px solid var(--ui-ring);
-    outline-offset: 0;
   }
 
   &[data-disabled] {

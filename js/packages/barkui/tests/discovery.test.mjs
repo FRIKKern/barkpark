@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -17,9 +17,12 @@ afterEach(() => {
 })
 
 // A folder that is a valid part, written from nothing but its own files.
-function plantPart(root, name, skip = []) {
+function plantPart(root, name, skip = [], example) {
   const dir = join(root, name)
   cpSync(join(realParts, 'button'), dir, { recursive: true })
+  // The button's ids, moved under this part's own prefix.
+  const html = readFileSync(join(dir, 'example.html'), 'utf8').replaceAll('id="button-', `id="${name}-`)
+  writeFileSync(join(dir, 'example.html'), example ?? html)
   writeFileSync(
     join(dir, 'part.json'),
     JSON.stringify({ name, family: 'test', element: 'ui-button', imports: ['@ui-sdk/web/button'], summary: 'A planted part.' }),
@@ -68,5 +71,25 @@ describe('discoverParts', () => {
     const a = discoverParts(root)[0].hash
     writeFileSync(join(dir, 'example.html'), '<p>changed</p>')
     expect(discoverParts(root)[0].hash).not.toBe(a)
+  })
+
+  it('refuses an example id outside the part\'s own prefix', () => {
+    const root = scratch()
+    plantPart(root, 'aa', [], '<ui-button><button id="save" data-slot="button">Save</button></ui-button>')
+    expect(() => discoverParts(root)).toThrow(/parts\/aa: example\.html id "save" must start with "aa-"/)
+  })
+
+  it('refuses two parts that print the same id', () => {
+    const root = scratch()
+    plantPart(root, 'aa', [], '<ui-button><button id="aa-x-1" data-slot="button">One</button></ui-button>')
+    plantPart(root, 'aa-x', [], '<ui-button><button id="aa-x-1" data-slot="button">Two</button></ui-button>')
+    expect(() => discoverParts(root)).toThrow(/id "aa-x-1" is printed by both parts\/aa and parts\/aa-x/)
+  })
+
+  it('refuses a demo.mjs that is not one function of its part\'s root', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    writeFileSync(join(dir, 'demo.mjs'), "for (const el of document.querySelectorAll('ui-button')) el.remove()\n")
+    expect(() => discoverParts(root)).toThrow(/parts\/aa: demo\.mjs must `export default function \(root\)`/)
   })
 })

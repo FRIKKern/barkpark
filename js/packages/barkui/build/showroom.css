@@ -83,3 +83,5 @@ body {
   .sr-main { padding: 0 16px 48px; }
   .sr-stage { padding: 16px; }
 }
+.sr-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sr-wait { margin: 10px 0 0; color: var(--sr-quiet); font-size: 13px; }

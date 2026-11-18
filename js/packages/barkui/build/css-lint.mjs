@@ -18,21 +18,35 @@ const NAMED_RE = new RegExp(`(^|[\\s,(])(${NAMED.join('|')})(?=$|[\\s,);!])`, 'i
 const FUNC_RE = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|light-dark)\s*\(/i
 const HEX_RE = /#[0-9a-f]{3,8}\b/i
 
+// A part never branches on skin or scheme, and never draws its own focus ring
+// (base.css draws one ring for every part) or mixes its own state tints (base.css
+// computes them once from the skin).
+const SELECTOR_RULES = [
+  [/\[\s*data-(skin|bp-theme|color-scheme|theme)\b/i, (m) => `a [data-${m[1]}] rule: parts never branch on skin or scheme`],
+  [/prefers-color-scheme/i, () => 'a prefers-color-scheme query: parts never branch on scheme'],
+  [/:focus(-visible|-within)?\b/i, (m) => `a :focus${m[1] ?? ''} rule: the focus ring is drawn once, in base.css`],
+]
+
 export function lintPartCss(css) {
   const found = []
   const text = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
   const lineOf = (i) => text.slice(0, i).split('\n').length
-  // Declarations: `prop: value` up to ; or }. Selectors never hold a colon-value pair outside [].
-  const decl = /(^|[{;\s])(--?[\w-]+|[a-z-]+)\s*:\s*([^;{}]+)(?=[;}])/g
+  for (const [re, say] of SELECTOR_RULES) {
+    for (const m of text.matchAll(new RegExp(re.source, 'gi'))) found.push(`line ${lineOf(m.index)}: ${say(m)}`)
+  }
+  // Declarations: `prop: value` ending at ; or }. Property names are case-insensitive.
+  const decl = /(^|[{;\s])(--?[\w-]+|[a-z-]+)\s*:\s*([^;{}]+)(?=[;}])/gi
   for (let m; (m = decl.exec(text)); ) {
-    const [, , prop, raw] = m
+    const [, , rawProp, raw] = m
+    const prop = rawProp.startsWith('--') ? rawProp : rawProp.toLowerCase()
     const value = raw.trim()
-    if (/^[\w-]+\s*\(/.test(prop) || !value) continue
-    // A selector like `a:hover {` never matches: a value must end at `;` or `}`.
+    if (!value) continue
     const at = `line ${lineOf(m.index + m[1].length)}`
-    if (HEX_RE.test(value)) found.push(`${at}: ${prop} uses a hex colour (${value})`)
+    if (HEX_RE.test(value) || /%23[0-9a-f]{3,8}\b/i.test(value)) found.push(`${at}: ${prop} uses a hex colour (${value})`)
     const fn = value.match(FUNC_RE)
     if (fn) found.push(`${at}: ${prop} uses ${fn[1]}() (${value})`)
+    if (/color-mix\s*\(/i.test(value)) found.push(`${at}: ${prop} mixes a tint; state tints are computed once in base.css`)
+    if (/^outline/.test(prop)) found.push(`${at}: ${prop}: the focus ring is drawn once, in base.css`)
     const named = value.match(NAMED_RE)
     if (named) found.push(`${at}: ${prop} uses the named colour "${named[2]}"`)
     for (const v of value.matchAll(/var\(\s*(--[\w-]+)\s*(,[^)]*)?\)/g)) {
