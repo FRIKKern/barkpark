@@ -322,4 +322,42 @@ defmodule BarkparkWeb.SecretController do
     BarkparkWeb.Plugs.DatasetBoundAdminWrites,
     [surface: "secrets_write"] when action in [:update, :delete]
   )
+
+  # The SCOPED tier needs the `admin` PERMISSION as well as an admin seat
+  # (task-23ed7ba485104620). `:scoped_admin` checks the seat ROLE, so a token
+  # holding only `read` or `read`+`write`, raised to an admin seat, revealed
+  # secret values here while the flat tier (RequireAdmin) refused it. Every
+  # action — list, reveal, audit, put, delete — now asks
+  # `TenancyAuth.authorize(token, ws, :admin)`, the predicate the scoped
+  # workspace audit (`AuditController.index/2`) already uses. The flat tier
+  # carries no `workspace_slug` and is untouched. In-process readers
+  # (`Barkpark.Secrets.get/2`) never pass through this controller.
+  plug(:require_scoped_admin_permission)
+
+  defp require_scoped_admin_permission(
+         %Plug.Conn{path_params: %{"workspace_slug" => _}} = conn,
+         _
+       ) do
+    with %{id: id} <- conn.assigns[:current_workspace],
+         ws_id when is_binary(ws_id) <- Barkpark.Repo.uuid_or_nil(id) do
+      case Barkpark.Tenancy.Auth.authorize(conn.assigns[:api_token], ws_id, :admin) do
+        :ok ->
+          conn
+
+        _ ->
+          env = Barkpark.Content.Errors.to_envelope({:error, :forbidden_capability}, conn)
+
+          conn
+          |> put_status(env.status)
+          |> json(%{error: Map.delete(env, :status)})
+          |> halt()
+      end
+    else
+      # No usable workspace: `resolve_scope/1` answers the opaque 404 (D199),
+      # never `:global`, so passing through here still fails closed.
+      _ -> conn
+    end
+  end
+
+  defp require_scoped_admin_permission(conn, _opts), do: conn
 end
