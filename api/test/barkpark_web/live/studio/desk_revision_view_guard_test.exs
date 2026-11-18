@@ -206,7 +206,8 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       assert revision =~ "Seed published"
     end
 
-    test "Paste field, Revert, a label, the editor mode and Duplicate write nothing", c do
+    test "Paste field, Paste document, Revert, a label, the editor mode and Duplicate write nothing",
+         c do
       d =
         doc!(
           [%{"name" => "summary", "title" => "Summary", "type" => "text"}],
@@ -232,6 +233,22 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
         "desk-field-paste",
         Map.merge(own_mark(d), %{"field" => "title", "clip" => clip})
       )
+
+      # Paste document, with a copied document that would fill both fields.
+      doc_clip =
+        Jason.encode!(%{
+          "type" => "sanityClipboardItem",
+          "isDocument" => true,
+          "barkpark" => %{
+            "kind" => "document",
+            "fields" => [
+              %{"name" => "title", "sig" => "string", "value" => "PASTED DOC"},
+              %{"name" => "summary", "sig" => "string", "value" => "PASTED DOC"}
+            ]
+          }
+        })
+
+      render_hook(view, "desk-doc-paste", Map.merge(own_mark(d), %{"clip" => doc_clip}))
 
       # Review changes' Revert of one field, and of all.
       for params <- [%{"field" => "title"}, %{"field" => "summary"}, %{"all" => "true"}],
@@ -266,11 +283,16 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       menu = ~s([data-pane-editing] [role="menu"][id$="-editor-actions"])
       actions = view |> element(menu) |> render()
 
-      for write <- ~w(publish discard-draft duplicate-doc delete-doc) do
+      for write <- ~w(publish discard-draft duplicate-doc delete-doc paste-document) do
         refute actions =~ ~s(data-desk-doc-action="#{write}"), write
       end
 
       assert actions =~ ~s(data-desk-doc-action="show-history")
+      # Copy document is a read: it stays, and copies the revision shown.
+      assert actions =~ ~s(data-desk-doc-action="copy-document")
+      render_hook(view, "desk-doc-copy", %{})
+      assert_push_event(view, "desk:doc-copied", %{json: json})
+      assert Jason.decode!(json)["value"]["title"] == "Post published"
       # Ctrl+Alt+P and Ctrl+Alt+D press these in the pane: there are none.
       refute has_element?(view, ~s([data-pane-editing] [data-desk-doc-action="publish"]))
       refute has_element?(view, ~s([data-pane-editing] [data-desk-doc-action="delete-doc"]))
