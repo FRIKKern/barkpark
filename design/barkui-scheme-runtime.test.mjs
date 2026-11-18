@@ -77,6 +77,8 @@ function cases(def, x) {
     ["explicit light root, old name", { "data-theme": "light" }, P, def, "light"],
     ["explicit dark root, no skin", { "data-color-scheme": "dark" }, P, def, "dark"],
     ["explicit dark root, no skin, old name", { "data-theme": "dark" }, P, def, "dark"],
+    // One element with both scheme attributes that disagree: dark wins.
+    ["both scheme attributes disagree on one element", { "data-color-scheme": "light", "data-theme": "dark" }, `<div data-skin="${x}">${P}</div>`, x, "dark"],
   ];
 }
 
