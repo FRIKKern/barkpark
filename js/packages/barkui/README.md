@@ -32,7 +32,8 @@ focus ring (a 2px gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `
   incomplete folder, a failed step, an unlit light, any page error or network request, or a step
   (5s) or part (120s) past its time limit.
 - `pnpm run check:selftest` plants one break per case in a scratch copy of a part and fails unless the
-  check turns the right light off.
+  check fails for the right reason. Breaks in paint go in through a sheet only the selftest can add
+  (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route.
 - In CI (`js-tests.yml`) the fast tests and the showroom check run on every js-tests run; the selftest
   runs only when a change touches `js/packages/barkui/**` (either side of a move), `api/priv/barkui/**`,
   that workflow, `js/pnpm-lock.yaml`, `js/pnpm-workspace.yaml` or `js/package.json`, and whenever the
@@ -49,10 +50,26 @@ background, no border, shadow, outline or image, and its parent's text colour; o
 fails and names it. Every such element is listed in `proof.json` and counted under the part. Every other
 light applies to it.
 
-`example.html` is markup only: no `<style>`, `<script>`, `style=` or `on*=` (looks go in part.css,
-behaviour in demo.mjs). The check reads every paint an element can show: text, background colour and
-gradients, all four borders, outline, shadows, SVG fill and stroke, decoration, caret and accent colour.
+The rule: **nothing a person can see inside a part's stage goes unread, and nothing but `part.css`
+and the base styles can style it.**
 
-The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage, so
-every part can be seen on every surface. The check proves the base surface today; it will run every
-surface.
+- Read: the check walks every element in the stage (not only `[data-slot]`) and every `::before`,
+  `::after`, `::marker` and `::placeholder` that draws. Each colour it shows must be one skin variable
+  in every skin and scheme: text and its fill, background colour and gradients, all four borders,
+  outline, column rule, shadows (box, text, drop), decoration, emphasis, text stroke, caret, accent,
+  scrollbar, SVG fill, stroke, stop, flood and lighting colours. Each run of text is measured in the
+  colour it is filled with, at the opacity it is drawn at, against the ground actually behind it.
+- Styled only by part.css: `example.html` is markup only (no `<style>`, `<script>`, `style=` or
+  `on*=`), and `demo.mjs` wires behaviour only. Its lint refuses inline styles, style attributes, new
+  `<style>`/`<link>`, stylesheet edits, adopted sheets, script animations, classes part.css does not
+  declare, and reaching into the page or the check, naming the line. At run time a guard, reading from
+  an isolated world the page cannot touch, compares the page with the same build run without any demo:
+  after the demo has run, after every press step and at the end of each light's run, no element in a
+  stage may carry a `style` attribute, the stylesheets, their rules and the adopted sheets must be the
+  build's own, and no animation may run from script. A failure names what changed.
+
+The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage.
+The lights are proved on base and say so; on any other surface they show grey, "not proved on
+<surface>", never on. The check also measures text and the control edge on the other four surfaces
+and records them per surface in `proof.json`; a short one prints as a "waiting on the sheet" line and
+turns no light off until its `hard` switch is set. It will prove every surface.

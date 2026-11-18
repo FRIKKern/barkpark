@@ -41,7 +41,10 @@ export function pinStates(css) {
   return css.replace(/(?<!\(\s*(?:any-)?hover\s*):(hover|active|focus-visible)(?![-\w])/g, (_, s) => `:is(:${s}, [data-pin~="${s}"])`)
 }
 
-export async function buildShowroom({ dir = partsDir, out = outDir, proof: proofFile = proofPath, quiet = false } = {}) {
+// `bare` leaves every demo out of the script: the check's baseline for what the
+// build itself puts on the page. `plantCss` is for the selftest alone: a sheet
+// added after the lint, so it can plant breaks in paint that part.css may not.
+export async function buildShowroom({ dir = partsDir, out = outDir, proof: proofFile = proofPath, quiet = false, bare = false, plantCss = '' } = {}) {
   const parts = discoverParts(dir)
   const lint = parts.flatMap((p) => lintPartCss(p.css).map((f) => `parts/${p.name}/part.css ${f}`))
   if (lint.length) throw new Error(`part.css may only read --ui-* and --bark-* colours:\n  ${lint.join('\n  ')}`)
@@ -56,13 +59,13 @@ export async function buildShowroom({ dir = partsDir, out = outDir, proof: proof
     readFileSync(join(root, 'css', 'base.css'), 'utf8'),
     ...parts.map((p) => `/* parts/${p.name}/part.css */\n@layer bark-parts {\n${p.css}\n}`),
   ].join('\n')
-  writeFileSync(join(out, 'barkui.css'), pinStates(layered))
+  writeFileSync(join(out, 'barkui.css'), pinStates(layered) + (plantCss ? `\n/* selftest plant */\n${plantCss}\n` : ''))
   writeFileSync(join(out, 'showroom.css'), readFileSync(join(root, 'build', 'showroom.css')))
 
   // Classic script so the page runs from file://. Part imports first, so every
   // element is defined before the controls and demos run.
   const imports = [...new Set(parts.flatMap((p) => p.json.imports))]
-  const demos = parts.filter((p) => p.demo)
+  const demos = bare ? [] : parts.filter((p) => p.demo)
   const entry = [
     ...imports.map((i) => `import ${JSON.stringify(i)}`),
     ...demos.map((p, i) => `import demo${i} from ${JSON.stringify(p.demo)}`),

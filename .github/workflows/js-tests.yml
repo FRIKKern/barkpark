@@ -450,7 +450,7 @@ jobs:
       # Skipped only when the step above says, for certain, BarkUI was not touched.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
         if: steps.barkui.outputs.run != 'false'
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"

@@ -1,6 +1,9 @@
 // node check/selftest.mjs: proves the check can still lose. Each case copies
 // the button into a scratch parts folder, plants one break, runs the check on
-// it and asserts the light that should go off does, for the right reason.
+// it and asserts the run fails for the right reason. A part's own files may not
+// style the stage except through part.css, so breaks in paint go in through
+// `css`, a sheet the check adds to the build for the selftest alone; other cases
+// prove that demo.mjs cannot be that route.
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,10 +11,14 @@ import { partsDir } from '../build/parts.mjs'
 import { runCheck } from './check.mjs'
 
 const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
-// Runs `code` at the start of the part's demo, with `root` in scope (example.html holds markup only).
+// Runs `code` at the start of the part's demo, with `root` in scope.
 const inDemo = (d, code) => edit(join(d, 'demo.mjs'), (s) => s.replace('export default function demo(root) {', `export default function demo(root) {\n${code}`))
 const mark = (d) => edit(join(d, 'example.html'), (s) => s.replace('id="button-after"', 'id="button-after" data-paint-free'))
+// The "Duplicate" label, wrapped in a plain span.
+const wrap = (d) => edit(join(d, 'example.html'), (s) => s.replace('type="button">Duplicate</button>', 'type="button"><span>Duplicate</span></button>'))
 const skinsSay = (re) => (p) => re.test(p.parts.button.lights.skins.detail)
+const failedSay = (re) => (p) => re.test(p.parts.button.failed ?? '')
+const refused = (re) => (p, html, ok, logs) => !ok && p === null && re.test(logs.join('\n'))
 const CASES = [
   {
     name: 'a press step that never settles fails by name within its time limit',
@@ -22,25 +29,21 @@ const CASES = [
   {
     name: 'one element frozen across skins turns "every skin" off',
     only: ['skins', 'schemes'],
-    plant: (d) => inDemo(d, "root.querySelector('#button-after').style.cssText = 'background-color: #ffffff; color: #111111'"),
+    css: '#button-after { background-color: #ffffff; color: #111111; }',
     expect: skinsSay(/button#button-after .* is not one skin variable/),
   },
   {
     name: 'a paint-free element with its own fill and text turns "every skin" off, by name',
     only: ['skins', 'schemes'],
-    plant: (d) => {
-      mark(d)
-      inDemo(d, "root.querySelector('#button-after').style.cssText = 'background-color: #ffffff; color: #eeeeee'")
-    },
+    plant: mark,
+    css: '#button-after { background-color: #ffffff; color: #eeeeee; }',
     expect: skinsSay(/paint-free button#button-after .* carries its own background/),
   },
   {
     name: 'a paint-free wrapper does not hide the button inside it',
     only: ['skins', 'schemes'],
-    plant: (d) => {
-      edit(join(d, 'example.html'), (s) => s.replace('<ui-button><button id="button-after"', '<ui-button data-paint-free><button id="button-after"'))
-      inDemo(d, "root.querySelector('#button-after').style.cssText = 'background-color: #ffffff; color: #eeeeee'")
-    },
+    plant: (d) => edit(join(d, 'example.html'), (s) => s.replace('<ui-button><button id="button-after"', '<ui-button data-paint-free><button id="button-after"')),
+    css: '#button-after { background-color: #ffffff; color: #eeeeee; }',
     expect: skinsSay(/button#button-after .* is not one skin variable/),
   },
   {
@@ -53,20 +56,20 @@ const CASES = [
     expect: (p) => /button#button-after .* is hidden/.test(p.parts.button.lights.noscript.detail),
   },
   ...[
-    ['a gradient', "style.backgroundImage = 'linear-gradient(#ff0000, #ff0000)'", /background-image #1 is not one skin variable/],
-    ['a shadow colour', "style.boxShadow = '0 0 0 3px #ff0000'", /box-shadow #1 is not one skin variable/],
-    ['a bitmap image', "style.backgroundImage = 'url(data:image/gif;base64,R0lGODlhAQABAAAAACw=)'", /shows an image that is not a data: SVG/],
-    ['a right border colour', "style.borderRightColor = '#ff0000'", /border-right-color is not one skin variable/],
-  ].map(([what, code, re]) => ({
-    name: `${what} set on a button turns "every skin" off`,
+    ['a gradient', 'background-image: linear-gradient(#ff0000, #ff0000)', /background-image #1 is not one skin variable/],
+    ['a shadow colour', 'box-shadow: 0 0 0 3px #ff0000', /box-shadow #1 is not one skin variable/],
+    ['a bitmap image', 'background-image: url(data:image/gif;base64,R0lGODlhAQABAAAAACw=)', /shows an image that is not a data: SVG/],
+    ['a right border colour', 'border-right-color: #ff0000', /border-right-color is not one skin variable/],
+  ].map(([what, decl, re]) => ({
+    name: `${what} on a button turns "every skin" off`,
     only: ['skins', 'schemes'],
-    plant: (d) => inDemo(d, `root.querySelector('#button-after').${code}`),
+    css: `#button-after { ${decl}; }`,
     expect: skinsSay(re),
   })),
   {
     name: 'an icon drawn in its own fill turns "every skin" off',
     only: ['skins', 'schemes'],
-    plant: (d) => inDemo(d, "root.querySelector('#button-more svg').style.fill = '#ff0000'"),
+    css: '#button-more svg { fill: #ff0000; }',
     expect: skinsSay(/svg .* fill is not one skin variable/),
   },
   {
@@ -75,10 +78,97 @@ const CASES = [
     plant: (d) => edit(join(d, 'example.html'), (s) => `<style>button { background-image: linear-gradient(#ff0000, #ff0000) }</style>\n${s}`),
     expect: (p, html, ok) => !ok && p === null,
   },
+  // Round 3: nothing a person can see in the stage goes unread.
+  {
+    name: 'a label in a plain span, painted the ground colour by part.css, turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      wrap(d)
+      appendFileSync(join(d, 'part.css'), '\n#button-after > span { color: var(--ui-background); }\n')
+    },
+    expect: skinsSay(/text [\d.]+:1 at span "Duplicate"/),
+  },
+  {
+    name: 'a label in a plain span, painted by part.css through its text fill, turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      wrap(d)
+      appendFileSync(join(d, 'part.css'), '\n#button-after > span { -webkit-text-fill-color: var(--ui-background); }\n')
+    },
+    expect: skinsSay(/text [\d.]+:1 at span "Duplicate"/),
+  },
+  {
+    name: 'a label in a plain span, faded out by part.css, turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      wrap(d)
+      appendFileSync(join(d, 'part.css'), '\n#button-after > span { opacity: 0.12; }\n')
+    },
+    expect: skinsSay(/text [\d.]+:1 at span "Duplicate"/),
+  },
+  {
+    name: 'a plain span with a ground of its own turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: wrap,
+    css: '#button-after > span { background-color: #ff0000; }',
+    expect: skinsSay(/span "Duplicate" background-color is not one skin variable/),
+  },
+  {
+    name: 'a red ::before reaching the page turns "every skin" off',
+    only: ['skins', 'schemes'],
+    css: '#button-after::before { content: "\\25CF  "; color: #ff0000; }',
+    expect: skinsSay(/button#button-after "Duplicate"::before color is not one skin variable/),
+  },
+  {
+    name: 'an ::after label painted the ground colour by part.css turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => appendFileSync(join(d, 'part.css'), '\n#button-after::after { content: " now"; color: var(--ui-background); }\n'),
+    expect: skinsSay(/text [\d.]+:1 at button#button-after "Duplicate"::after/),
+  },
+  // demo.mjs cannot style: the lint names the line, and the run-time guard catches what dodges the lint.
+  {
+    name: 'a span coloured by demo.mjs is refused at discovery',
+    only: ['phone'],
+    plant: (d) => {
+      wrap(d)
+      inDemo(d, "root.querySelector('#button-after > span').style.color = '#ff0000'")
+    },
+    expect: refused(/demo\.mjs line 3: sets an inline style/),
+  },
+  {
+    name: 'a class part.css never declares, added by demo.mjs, is refused at discovery',
+    only: ['phone'],
+    plant: (d) => inDemo(d, "root.querySelector('#button-after').classList.add('loud')"),
+    expect: refused(/demo\.mjs line 3: classList\.add uses "loud"/),
+  },
+  ...[
+    ['an inline style spelled to dodge the lint', "root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000'", /button#button-after carries a style attribute/],
+    ['a <style> spelled to dodge the lint', "document.head.append(Object.assign(document.createElement('sty' + 'le'), { textContent: '#button-after::before { content: \"x\"; color: #ff0000 }' }))", /a stylesheet the build did not put there/],
+    ['a rule slipped into the UI SDK sheet', "const s = [...document['style' + 'Sheets']].find((x) => !x.href); s['insert' + 'Rule']('#button-after { color: #ff0000 }')", /rules changed/],
+    ['an adopted sheet', "const S = window['CSS' + 'StyleSheet']; const s = new S(); s['replace' + 'Sync']('#button-after { color: #ff0000 }'); document['adopted' + 'StyleSheets'] = [s]", /adopted/],
+    ['a script animation', "root.querySelector('#button-after')['ani' + 'mate']([{ color: '#ff0000' }, { color: '#ff0000' }], { duration: 1e7 })", /a script animation/],
+  ].map(([what, code, re]) => ({
+    name: `${what} in demo.mjs fails the run, naming what changed`,
+    only: ['phone'],
+    plant: (d) => inDemo(d, code),
+    expect: failedSay(re),
+  })),
+  {
+    name: 'styling at the top of demo.mjs, outside its function, fails the run',
+    only: ['phone'],
+    plant: (d) => appendFileSync(join(d, 'demo.mjs'), "\ndocument.head.append(Object.assign(document.createElement('sty' + 'le'), { textContent: '#button-after { color: #ff0000 }' }))\n"),
+    expect: failedSay(/a stylesheet the build did not put there/),
+  },
+  {
+    name: 'styling that waits until after the demo has run is caught after a press step',
+    only: ['pressed'],
+    plant: (d) => inDemo(d, "setTimeout(() => { root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000' }, 2500)"),
+    expect: failedSay(/after step .*button#button-after carries a style attribute/),
+  },
   {
     name: 'a focus ring that cannot be seen against its ground turns the skins off',
     only: ['skins', 'schemes'],
-    plant: (d) => inDemo(d, "const b = root.querySelector('#button-primary').parentElement; const w = document.createElement('span'); w.style.cssText = 'padding: 12px; background: var(--ui-primary)'; b.before(w); w.append(b)"),
+    css: 'ui-button:has(> #button-primary) { display: inline-block; padding: 12px; background-color: var(--ui-primary); }',
     expect: (p) => /focus on button#button-primary.*edge [\d.]+:1 against the ground/.test(p.parts.button.lights.skins.detail),
   },
   ...[
@@ -117,21 +207,24 @@ const CASES = [
 ]
 
 let failures = 0
-for (const c of CASES) {
+// node check/selftest.mjs <words>: only the cases whose name holds those words.
+const pick = process.argv.slice(2).join(' ')
+const run = CASES.filter((c) => c.name.includes(pick))
+for (const c of run) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   try {
     const dir = join(scratch, 'parts')
     cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
-    c.plant(join(dir, 'button'))
+    c.plant?.(join(dir, 'button'))
     const t0 = Date.now()
     const logs = []
-    const { ok, proof } = await runCheck({ dir, out: join(scratch, 'out'), proofFile: join(scratch, 'proof.json'), only: c.only, log: (l) => logs.push(l) })
+    const { ok, proof } = await runCheck({ dir, out: join(scratch, 'out'), proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: false, plantCss: c.css, log: (l) => logs.push(l) })
     const secs = (Date.now() - t0) / 1000
     let html = ''
     try {
       html = readFileSync(join(scratch, 'out', 'index.html'), 'utf8')
     } catch {}
-    const held = !ok && c.expect(proof, html, ok) && secs < 60
+    const held = !ok && c.expect(proof, html, ok, logs) && secs < 60
     if (!held) failures++
     console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
     if (!held) console.log(logs.map((l) => `    ${l}`).join('\n'))
@@ -139,5 +232,5 @@ for (const c of CASES) {
     rmSync(scratch, { recursive: true, force: true })
   }
 }
-console.log(`selftest: ${CASES.length - failures} of ${CASES.length} breaks caught`)
+console.log(`selftest: ${run.length - failures} of ${run.length} breaks caught`)
 process.exit(failures ? 1 : 0)

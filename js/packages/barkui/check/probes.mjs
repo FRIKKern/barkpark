@@ -30,8 +30,12 @@ export function installHelpers() {
     const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
     return (x + 0.05) / (y + 0.05)
   }
-  /** A colour seen over a ground, against that ground. */
-  const against = (css, ground) => contrast(over(rgba(css), ground), ground)
+  /** A colour seen over a ground, against that ground; `fade` is the opacity it is drawn at. */
+  const against = (css, ground, fade = 1) => {
+    const c = rgba(css)
+    c[3] *= fade
+    return contrast(over(c, ground), ground)
+  }
   const resolve = (name, within = document.body) => {
     const probe = document.createElement('span')
     probe.style.color = `var(${name})`
@@ -42,7 +46,30 @@ export function installHelpers() {
   }
   const describe = (el) => (el ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"` : 'nothing')
   const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-  const carries = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || !!el.querySelector(':scope > svg')
+  const hasText = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+  const carries = (el) => hasText(el) || !!el.querySelector(':scope > svg')
+  /** Every element in the stage with a box: the part's elements, all that is inside them, the demo frame. */
+  const shown = (root) => [...root.querySelectorAll('*')].filter((el) => el.getClientRects().length)
+  /** The pseudo-elements of an element that draw something, as [name, style, shows text]. */
+  const pseudos = (el) =>
+    ['::before', '::after', '::marker', '::placeholder'].flatMap((p) => {
+      if (p === '::marker' && getComputedStyle(el).display !== 'list-item') return []
+      if (p === '::placeholder' && !(el.hasAttribute('placeholder') && !el.value)) return []
+      const s = getComputedStyle(el, p)
+      if ((p === '::before' || p === '::after') && /^(none|normal)$/.test(s.content)) return []
+      if (s.display === 'none') return []
+      return [[p, s, p === '::marker' || p === '::placeholder' || /["'][^"']*\S|counter|attr\(/.test(s.content)]]
+    })
+  /** How faded an element is drawn: its opacity times its ancestors', up to the ground behind it. */
+  const fadeOf = (el) => {
+    let f = 1
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const s = getComputedStyle(n)
+      f *= parseFloat(s.opacity)
+      if (rgba(s.backgroundColor)[3] >= 1) break
+    }
+    return f
+  }
   /** Every part element with a box. data-paint-free never hides one from any light. */
   const painted = (root) => [...root.querySelectorAll('[data-slot]')].filter((el) => el.getClientRects().length)
   const selectorOf = (el, root) => {
@@ -69,9 +96,38 @@ export function installHelpers() {
       return { selector, why: 'no background, border, shadow, outline or image; text colour inherited' }
     })
 
-  // Every property through which an element can show a colour.
-  const COLOUR_PROPS = ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'text-decoration-color', 'caret-color', 'accent-color', 'fill', 'stroke']
   const COLOUR_IN = /(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)/g
+  const drawn = (s, side) => parseFloat(s.getPropertyValue(`${side}-width`)) > 0 && s.getPropertyValue(`${side}-style`) !== 'none'
+
+  /** Every colour an element (or a pseudo-element) shows, by the property that shows it. A value that is
+      transparent, or the element's own text colour (for anything but text), takes no paint of its own. */
+  const colours = (el, s, text) => {
+    const props = {}
+    const put = (key, v, isText) => (props[key] = { v, clear: rgba(v)[3] === 0 || (!isText && v === s.color) })
+    const svg = el instanceof SVGElement
+    if (text) put('color', s.color, true)
+    if (text) put('-webkit-text-fill-color', s.webkitTextFillColor)
+    put('background-color', s.backgroundColor)
+    for (const side of ['top', 'right', 'bottom', 'left']) if (drawn(s, `border-${side}`)) put(`border-${side}-color`, s.getPropertyValue(`border-${side}-color`))
+    if (drawn(s, 'outline')) put('outline-color', s.outlineColor)
+    if (drawn(s, 'column-rule')) put('column-rule-color', s.columnRuleColor)
+    if (text && s.textDecorationLine !== 'none') put('text-decoration-color', s.textDecorationColor)
+    if (text && s.textEmphasisStyle !== 'none') put('text-emphasis-color', s.textEmphasisColor)
+    if (text && parseFloat(s.webkitTextStrokeWidth) > 0) put('-webkit-text-stroke-color', s.webkitTextStrokeColor)
+    put('caret-color', s.caretColor)
+    put('accent-color', s.accentColor)
+    if (svg) for (const prop of ['fill', 'stroke']) put(prop, s.getPropertyValue(prop))
+    if (el.localName === 'stop') put('stop-color', s.stopColor)
+    if (/^fe(flood|dropshadow)$/i.test(el.localName)) put('flood-color', s.floodColor)
+    if (/^fe(diffuse|specular)lighting$/i.test(el.localName)) put('lighting-color', s.lightingColor)
+    for (const [prop, value] of [['box-shadow', s.boxShadow], ['text-shadow', text ? s.textShadow : 'none'], ['filter', s.filter], ['background-image', s.backgroundImage], ['scrollbar-color', s.scrollbarColor]])
+      (value.match(COLOUR_IN) ?? []).forEach((v, i) => put(`${prop} #${i + 1}`, v))
+    for (const [, url] of s.backgroundImage.matchAll(/url\("?([^")]*)"?\)/g)) {
+      const image = decodeURIComponent(url)
+      if (!/^data:image\/svg\+xml/.test(image) || !/currentColor/i.test(image)) props['background-image url'] = { v: 'image', image: true }
+    }
+    return props
+  }
 
   /** Names that hold a colour (an invalid colour falls back to the parent's, whatever it is). */
   const colourVars = (names) => {
@@ -88,30 +144,16 @@ export function installHelpers() {
     return keep
   }
 
-  /** This view's value of every colour variable, and every colour each element shows. A value that is
-      transparent, or the element's own currentColor (for anything but text), takes no paint of its own. */
+  /** This view's value of every colour variable, and every colour each element in the stage and each of
+      its pseudo-elements shows. A paint-free element is left out; its pseudo-elements are not. */
   const trace = (root, names) => {
     const vars = Object.fromEntries(names.map((n) => [n, resolve(n, root)]))
-    const els = [...painted(root).filter((el) => !el.hasAttribute('data-paint-free')), ...root.querySelectorAll('[data-slot] svg, [data-slot] svg *')]
-    return { vars, els: els.map((el) => {
-      const s = getComputedStyle(el)
-      const props = {}
-      const put = (key, v, prop) => (props[key] = { v, clear: rgba(v)[3] === 0 || (prop !== 'color' && v === s.color) })
-      for (const prop of COLOUR_PROPS) {
-        if (prop.startsWith('border-') && !(parseFloat(s.getPropertyValue(prop.replace('-color', '-width'))) > 0)) continue
-        if (prop === 'outline-color' && s.outlineStyle === 'none') continue
-        if (prop === 'color' && !carries(el)) continue
-        if ((prop === 'fill' || prop === 'stroke') && !(el instanceof SVGElement)) continue
-        put(prop, s.getPropertyValue(prop), prop)
-      }
-      ;(s.boxShadow.match(COLOUR_IN) ?? []).forEach((v, i) => put(`box-shadow #${i + 1}`, v))
-      ;(s.backgroundImage.match(COLOUR_IN) ?? []).forEach((v, i) => put(`background-image #${i + 1}`, v))
-      for (const [, url] of s.backgroundImage.matchAll(/url\("?([^")]*)"?\)/g)) {
-        const svg = decodeURIComponent(url)
-        if (!/^data:image\/svg\+xml/.test(svg) || !/currentColor/i.test(svg)) props['background-image url'] = { v: 'image', image: true }
-      }
-      return { at: describe(el), props }
-    }) }
+    const els = []
+    for (const el of shown(root)) {
+      if (!el.hasAttribute('data-paint-free')) els.push({ at: describe(el), props: colours(el, getComputedStyle(el), carries(el)) })
+      for (const [p, ps, text] of pseudos(el)) els.push({ at: `${describe(el)}${p}`, props: colours(el, ps, text) })
+    }
+    return { vars, els }
   }
 
   /** Colours named in part.json, and the weakest readable text. */
@@ -134,9 +176,24 @@ export function installHelpers() {
     for (const el of painted(root)) {
       const s = getComputedStyle(el)
       signature.push(`${s.color}|${s.backgroundColor}|${s.borderTopColor}`)
-      if (!carries(el) || el.matches('[data-disabled], :disabled')) continue
-      const ratio = against(s.color, effectiveBg(el))
-      if (ratio < weakest.ratio) weakest = { ratio, at: describe(el) }
+    }
+    // Every run of text in the stage, in the colour it is filled with, at the opacity it is drawn at,
+    // against the ground actually behind it. Disabled controls and text no one can see are left out.
+    const weigh = (fill, ground, fade, at) => {
+      const ratio = against(fill, ground, fade)
+      if (ratio < weakest.ratio) weakest = { ratio, at }
+    }
+    for (const el of shown(root)) {
+      if (el.closest('[data-disabled], :disabled') || !el.checkVisibility({ visibilityProperty: true })) continue
+      const s = getComputedStyle(el)
+      const ground = effectiveBg(el)
+      const fade = fadeOf(el)
+      if (hasText(el)) weigh(s.webkitTextFillColor, ground, fade, describe(el))
+      for (const [p, ps, text] of pseudos(el)) {
+        if (!text || ps.visibility === 'hidden') continue
+        const own = rgba(ps.backgroundColor)
+        weigh(ps.webkitTextFillColor, own[3] > 0 ? over(own, ground) : ground, fade * parseFloat(ps.opacity), `${describe(el)}${p}`)
+      }
     }
     return { wrong, weakest, signature: signature.join(';') }
   }
@@ -224,7 +281,7 @@ export function installHelpers() {
     }
   }
 
-  window.__barkCheck = { settle, paintFree, selectorOf, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, controlEdges, ring, seen, state: {} }
+  window.__barkCheck = { settle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, controlEdges, ring, seen, state: {} }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

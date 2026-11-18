@@ -7,9 +7,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
+import { PROVED_ON } from '../build/sheet-waits.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
 import { limit } from './limit.mjs'
-import { noscript, phone, pressed, skinsAndSchemes } from './proofs.mjs'
+import { noscript, phone, pressed, skinsAndSchemes, styleBaseline } from './proofs.mjs'
 
 export const PART_MS = 120000
 export const LIGHT_NAMES = ['pressed', 'skins', 'schemes', 'phone', 'noscript']
@@ -20,20 +21,32 @@ function variableNames() {
   return [...new Set([...text.matchAll(/(--(?:ui|bark)-[\w-]+)\s*:/g)].map((m) => m[1]))]
 }
 
-export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log } = {}) {
+// `surfaces: false` skips measuring the four unproved surfaces (the selftest does);
+// `plantCss` is the selftest's planted sheet (see buildShowroom).
+export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, plantCss = '' } = {}) {
   let built
+  let bare
   try {
-    built = await buildShowroom({ dir, out, proof: proofFile, quiet: true })
+    built = await buildShowroom({ dir, out, proof: proofFile, quiet: true, plantCss })
+    bare = await buildShowroom({ dir, out: `${out}-bare`, proof: proofFile, quiet: true, plantCss, bare: true })
   } catch (e) {
     log(`check: ${e.message}`)
     return { ok: false, proof: null }
   }
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
   const browser = await chromium.launch()
+  let styles
+  try {
+    styles = await styleBaseline(browser, pathToFileURL(bare.file).href)
+  } catch (e) {
+    await browser.close()
+    log(`check: reading the build's own styles: ${e.message}`)
+    return { ok: false, proof: null }
+  }
   const proof = { ranAt: new Date().toISOString(), browser: `Chromium ${browser.version()}`, uiSdk: uiSdkVersion, foundation: foundationHash(), parts: {}, errors: [] }
   try {
     for (const part of built.parts) {
-      const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames() }
+      const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces }
       log(part.name)
       const lights = {}
       let measures = {}
@@ -60,6 +73,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
       for (const [k, l] of Object.entries(lights)) log(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
       for (const [k, m] of Object.entries(measures)) if (m) log(`  measured ${k}: ${m.min} to ${m.max}:1`)
       if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
+      for (const l of Object.values(lights)) l.surface = PROVED_ON
       proof.parts[part.name] = { hash: part.hash, lights, measures, paintFree, steps, ...(failed ? { failed } : {}) }
       proof.errors.push(...ctx.errors)
     }
