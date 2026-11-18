@@ -9,6 +9,9 @@ defmodule Barkpark.Search.IdWordInALongerQueryTest do
   # every-word pass finds nothing in the task. The id arm, OR-ed around the whole
   # word match, still let the tag in on the one word that was its id, and one
   # hit is not zero, so the any-word recovery that finds the task never ran.
+  #
+  # The id arm stays (a task row often names another task's id): only when the
+  # text alone finds nothing does the recovery run.
   use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
@@ -47,6 +50,21 @@ defmodule Barkpark.Search.IdWordInALongerQueryTest do
       )
 
     {:ok, _} = Content.publish_document("zebra", "tag", @dataset)
+
+    for {id, title} <- [
+          {"task-abc123", "Parser crash on empty input"},
+          {"task-def456", "Fix for task-abc123 in the parser"}
+        ] do
+      {:ok, _} =
+        Content.create_document(
+          "note",
+          %{"doc_id" => "drafts." <> id, "title" => title},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document(id, "note", @dataset)
+    end
+
     :ok
   end
 
@@ -68,6 +86,17 @@ defmodule Barkpark.Search.IdWordInALongerQueryTest do
     assert "task-1" in found,
            "the full title answered #{inspect(found)}: the tag whose id is one word of it " <>
              "stood in for the task"
+  end
+
+  test "an id and a word its document lacks, while another document holds every word, finds both" do
+    # task-abc123 lacks "fix"; task-def456 holds both words. The text found a
+    # document, so no recovery ran, and the id's document stays next to it.
+    {found, recovery} = search("task-abc123 fix")
+
+    assert Enum.sort(found) == ["task-abc123", "task-def456"],
+           "\"task-abc123 fix\" answered #{inspect(found)}"
+
+    assert recovery == nil
   end
 
   test "CONTROL: a query that IS a document's id still finds that document by its id" do

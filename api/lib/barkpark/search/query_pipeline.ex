@@ -259,8 +259,12 @@ defmodule Barkpark.Search.QueryPipeline do
     # zero-hit chain.
     words_found = Map.get(engine_meta, :text_count)
 
+    # Hits that only the document-id arm found, for a query of many words, are
+    # no answer to the words: the any-word recovery runs, and they stay when it
+    # finds nothing (`IdOnlyHits`, task-5985afa7b6e7454f).
     {total_for_recovery, filter_narrowed?} =
       cond do
+        Map.get(engine_meta, :ids_only) == true -> {0, false}
         not is_integer(words_found) -> {total, false}
         words_found >= low_hit_threshold -> {total, true}
         total == 0 and words_found > 0 -> {words_found, false}
