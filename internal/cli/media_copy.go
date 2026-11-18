@@ -54,8 +54,10 @@ type mediaCopyFile struct {
 	Assets []mediaCopyAsset `json:"assets"`
 }
 
-// exportMedia writes every media file of the dataset to dir.
-func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
+// exportMedia writes the media files of the dataset to dir: every file, or
+// when wanted is set only the files it names (a filtered export,
+// task-c3df8afd76b35c2f).
+func exportMedia(out *writer, ctx manifest.Context, dataset, dir string, wanted *mediaWanted) int {
 	if err := os.MkdirAll(filepath.Join(dir, "files"), 0o755); err != nil {
 		return useError(out, "failed", fmt.Sprintf("export --media: %v", err), exitGeneric)
 	}
@@ -67,6 +69,16 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 		ae := classifyError(status, body)
 		renderError(out, ae)
 		return ae.exit
+	}
+	listed := len(assets)
+	if wanted != nil {
+		kept := assets[:0]
+		for _, a := range assets {
+			if wanted.wants(a) {
+				kept = append(kept, a)
+			}
+		}
+		assets = kept
 	}
 
 	// The files are read from the same scope the list came from, which
@@ -116,7 +128,12 @@ func exportMedia(out *writer, ctx manifest.Context, dataset, dir string) int {
 	if err := os.WriteFile(filepath.Join(dir, mediaCopyManifest), append(manifestBody, '\n'), 0o644); err != nil {
 		return useError(out, "failed", fmt.Sprintf("export --media: %v", err), exitGeneric)
 	}
-	out.errf("exported %d media file(s) to %s (%d read now, %d already there)", len(assets), dir, fetched, len(assets)-fetched)
+	if wanted != nil {
+		out.errf("exported %d of the %d media file(s) in %s to %s, the ones the exported documents use (%d read now, %d already there)",
+			len(assets), listed, exportScope(ctx), dir, fetched, len(assets)-fetched)
+	} else {
+		out.errf("exported %d media file(s) to %s (%d read now, %d already there)", len(assets), dir, fetched, len(assets)-fetched)
+	}
 	if sizeOnly > 0 {
 		out.errf("export: %d of %d media file(s) have no SHA-1 on the source and were checked by size only. The source can hash them with bp barkparks backfill-media-sha1 <instance> --apply", sizeOnly, len(assets))
 	}
