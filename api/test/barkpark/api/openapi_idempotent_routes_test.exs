@@ -147,6 +147,19 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
     refute {:post, "/v1/open/stream"} in undeclared, "a route with no mount is not covered"
   end
 
+  # A `forward` or a `match :*` takes POST too, so the plug runs on it; its verb
+  # is `:*`, and a forward carries plug options, not an action atom.
+  test "MUTANT: a forward or a match :* in an Idempotency scope reds",
+       %{fixture: fixture} do
+    undeclared = undeclared(fixture.router, fixture.lib_root)
+
+    for route <- [{:*, "/v1/plugins/fwd"}, {:*, "/v1/plugins/any"}, {:*, "/v1/open/selffwd"}] do
+      assert route in undeclared,
+             "#{inspect(route)} runs the plug on a POST; a derivation that keeps only " <>
+               "post/put/patch/delete with an action atom drops it. Got: #{inspect(undeclared)}"
+    end
+  end
+
   test "the spec declares the header on at least one operation" do
     refute Enum.empty?(spec_ops()),
            "no operation declares Idempotency-Key — the behavioural test below would pass " <>
