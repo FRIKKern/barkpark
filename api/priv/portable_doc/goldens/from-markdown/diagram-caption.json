@@ -1,0 +1,10 @@
+{
+  "blocks": [
+    {
+      "caption": "The flow",
+      "source": "graph TD\n  A-->B",
+      "type": "diagram"
+    }
+  ],
+  "markdown": "```mermaid\ngraph TD\n  A-->B\n```\n\n*The flow*"
+}

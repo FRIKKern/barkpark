@@ -1,0 +1,228 @@
+{
+  "diagram-caption": {
+    "markdown": "```mermaid\ngraph TD\n  A-->B\n```\n\n*The flow*",
+    "blocks": [
+      {
+        "type": "diagram",
+        "source": "graph TD\n  A-->B",
+        "caption": "The flow"
+      }
+    ]
+  },
+  "fence-must-validate": {
+    "markdown": "```portabledoc\n[{\"type\":\"table\",\"rows\":\"nope\"}]\n```",
+    "blocks": [
+      {
+        "type": "code",
+        "value": "[{\"type\":\"table\",\"rows\":\"nope\"}]"
+      }
+    ]
+  },
+  "fence-nested-block-type": {
+    "markdown": "```portabledoc\n[{\"type\":\"list\",\"ordered\":false,\"items\":[{\"content\":[{\"type\":\"text\",\"value\":\"a\"}],\"children\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}]}]\n```\n\n```portabledoc\n[{\"type\":\"callout\",\"tone\":\"info\",\"content\":[{\"type\":\"text\",\"value\":\"b\"}],\"slots\":{\"body\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}}]\n```",
+    "blocks": [
+      {
+        "type": "code",
+        "value": "[{\"type\":\"list\",\"ordered\":false,\"items\":[{\"content\":[{\"type\":\"text\",\"value\":\"a\"}],\"children\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}]}]"
+      },
+      {
+        "type": "code",
+        "value": "[{\"type\":\"callout\",\"tone\":\"info\",\"content\":[{\"type\":\"text\",\"value\":\"b\"}],\"slots\":{\"body\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}}]"
+      }
+    ]
+  },
+  "fence-repeated-id": {
+    "markdown": "```portabledoc\n[{\"type\":\"divider\",\"id\":\"a\"}]\n```\n\n```portabledoc\n[{\"type\":\"divider\",\"id\":\"a\"}]\n```",
+    "blocks": [
+      {
+        "type": "divider",
+        "id": "a"
+      },
+      {
+        "type": "code",
+        "value": "[{\"type\":\"divider\",\"id\":\"a\"}]"
+      }
+    ]
+  },
+  "fence-unsafe-href": {
+    "markdown": "```portabledoc\n[{\"type\":\"paragraph\",\"content\":[{\"type\":\"link\",\"href\":\"javascript:x\",\"children\":[{\"type\":\"text\",\"value\":\"y\"}]}]}]\n```",
+    "blocks": [
+      {
+        "type": "code",
+        "value": "[{\"type\":\"paragraph\",\"content\":[{\"type\":\"link\",\"href\":\"javascript:x\",\"children\":[{\"type\":\"text\",\"value\":\"y\"}]}]}]"
+      }
+    ]
+  },
+  "hard-break-newline": {
+    "markdown": "one  \ntwo\\\nthree",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "one\ntwo\nthree"
+          }
+        ]
+      }
+    ]
+  },
+  "html-visible-text-only": {
+    "markdown": "<div>block <style>p{}</style>text<!-- note --></div>\n\nsay <b>hi</b> <script>bad()</script>there",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "block text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "say hi there"
+          }
+        ]
+      }
+    ]
+  },
+  "list-item-paragraphs-space": {
+    "markdown": "- one\n\n  two\n- three",
+    "blocks": [
+      {
+        "type": "list",
+        "ordered": false,
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "one two"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "three"
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "nested-list-children": {
+    "markdown": "- a\n  1. b\n  2. c\n- d",
+    "blocks": [
+      {
+        "type": "list",
+        "ordered": false,
+        "items": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "a"
+              }
+            ],
+            "children": [
+              {
+                "type": "list",
+                "ordered": true,
+                "items": [
+                  [
+                    {
+                      "type": "text",
+                      "value": "b"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "text",
+                      "value": "c"
+                    }
+                  ]
+                ]
+              }
+            ]
+          },
+          [
+            {
+              "type": "text",
+              "value": "d"
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "quote-cite": {
+    "markdown": "> Less is more.\n>\n> — Mies",
+    "blocks": [
+      {
+        "type": "blockquote",
+        "content": [
+          {
+            "type": "text",
+            "value": "Less is more."
+          }
+        ],
+        "cite": "Mies"
+      }
+    ]
+  },
+  "soft-break-space": {
+    "markdown": "one\ntwo",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "one two"
+          }
+        ]
+      }
+    ]
+  },
+  "unsafe-image-keeps-text": {
+    "markdown": "![logo](javascript:alert(1))",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "logo"
+          }
+        ]
+      }
+    ]
+  },
+  "unsafe-link-keeps-text": {
+    "markdown": "[click](javascript:alert(1)) and [ok](https://example.com)",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "click and "
+          },
+          {
+            "type": "link",
+            "href": "https://example.com",
+            "children": [
+              {
+                "type": "text",
+                "value": "ok"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
