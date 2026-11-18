@@ -69,6 +69,7 @@ import { errorPageBlock, sessionAuthBlock, sheetsBlock, statusChromeBlock } from
 import { bulldocsBlock } from "./emit/bulldocs.mjs";
 import { bpThemesList, graphPaletteBlock } from "./emit/graph.mjs";
 import { auditActionLabels } from "./emit/audit.mjs";
+import { BARKUI_SHEET_PATH, barkuiSheet } from "./emit/barkui.mjs";
 import { attribute, lostLines, MANIFEST_PATH, readManifest, regionDigest, regionKey, writeManifest } from "./emit/fence.mjs";
 
 // The emitter's code lives in design/emit/, one module per concern, in the order
@@ -93,7 +94,7 @@ const RAW_SURFACE_SINK = "api/assets/paper-surface/paper-surface.css";
 //                          artifact may override with markerBegin/markerEnd to
 //                          own a DISTINCT marker in a file that also carries the
 //                          tokens block elsewhere (the cloud SPA's app.js).
-// kind "go"/"ts"/"elixir": the build() is the WHOLE file.
+// kind "go"/"ts"/"elixir"/"stylesheet": the build() is the WHOLE file.
 export const ARTIFACTS = [
   { name: "cloud SPA", path: "cloud/priv/static/app.css", kind: "css", build: cloudBlock },
   { name: "cloud SPA theme ids", path: "cloud/priv/static/app.js", kind: "css",
@@ -133,6 +134,7 @@ export const ARTIFACTS = [
     markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
   { name: "bp-graph palette (4/4)", path: "templates/astro-search-starter/public/bp-graph.js", kind: "css",
     markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "BarkUI sheet", path: BARKUI_SHEET_PATH, kind: "stylesheet", build: barkuiSheet },
 ];
 
 // Tolerant of leading indentation on the marker lines (Studio's markers sit

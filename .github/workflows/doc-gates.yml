@@ -115,6 +115,8 @@ on:
       # dispatched this workflow on NEITHER arm — the byte-parity/attribution
       # check never ran on the one change it exists to catch.
       - "cloud/priv/static/styleguide.html"
+      # the BarkUI sheet, a whole generated file no other glob here reaches.
+      - "api/priv/barkui/tokens.css"
       # check.mjs's own negative half. Without this glob a change that breaks the
       # selftest — or the selftest itself — never runs the step that executes it.
       - "design/check-selftest.mjs"
@@ -526,6 +528,8 @@ on:
       # dispatched this workflow on NEITHER arm — the byte-parity/attribution
       # check never ran on the one change it exists to catch.
       - "cloud/priv/static/styleguide.html"
+      # the BarkUI sheet, a whole generated file no other glob here reaches.
+      - "api/priv/barkui/tokens.css"
       # check.mjs's own negative half. Without this glob a change that breaks the
       # selftest — or the selftest itself — never runs the step that executes it.
       - "design/check-selftest.mjs"
