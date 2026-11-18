@@ -164,6 +164,9 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .field-actions > .icon-btn { box-sizing: border-box; display: grid; place-items: center; width: 25px; height: 25px; margin: 0; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }
       .dk .dk-edit .field-actions > .icon-btn::before { content: ""; width: 2.5px; height: 2.5px; border-radius: 50%; background: currentColor; box-shadow: -5px 0 currentColor, 5px 0 currentColor; }
       .dk .dk-edit .field-actions > .icon-btn:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-edit .field > button.change-bar { position: absolute; top: 34px; bottom: 0; right: -5px; width: 1px; padding: 0; border: 0; border-radius: .5px; background: var(--dk-caution-dot); opacity: .5; cursor: pointer; }
+      .dk .dk-edit .field > button.change-bar:is(:hover, :focus-visible), .dk .dk-edit .field:focus-within > button.change-bar { opacity: 1; outline: none; }
+      .dk .dk-edit .field > button.change-bar::before { content: ""; position: absolute; top: 0; bottom: 0; left: -7px; width: 15px; }
       .dk .dk-edit .field-actions > .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
       .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-anchor: --dk-field-actions; position-area: right center; position-try-fallbacks: top; }
       @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }

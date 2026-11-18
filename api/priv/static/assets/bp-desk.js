@@ -734,6 +734,8 @@
       deskScript("data-desk-bulk", window.BarkparkDeskBulk);
       // An array item's handle, "…" menu and dialog (bp-desk-array-menu.js).
       deskScript("data-desk-array-menu", window.BarkparkDeskArrayMenu);
+      // The navbar's menus (bp-desk-navbar.js), when a live navigation came here.
+      deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.

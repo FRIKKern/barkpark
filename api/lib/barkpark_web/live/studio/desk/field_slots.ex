@@ -3,8 +3,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
   The two places every field of the desk's form holds, under the names the
   TanStack Studio gives them (`Fields.tsx` `FieldActions`, `ChangeBar`):
 
-  - `.change-bar`: where the mark of a changed field is drawn. Empty and
-    hidden.
+  - `.change-bar`: the mark of a top-level field the draft changed since
+    it was published, a button named "Review changes" that opens Review
+    changes (`ReviewChanges.bar/2`). An unchanged field keeps the place,
+    empty and hidden.
   - `.field-actions` with a button named "Field actions": the field's menu
     (`FieldActions`: copy, paste). Drawn for a field with a name. `of/2`
     is what the shared wrapper is handed: the field and the editor's
@@ -18,8 +20,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
   desk only.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Studio.Desk.FieldActions
+  alias BarkparkWeb.Studio.Desk.ReviewChanges
   alias BarkparkWeb.Studio.Desk.SlugInUse
 
   attr :field, :any, default: nil, doc: "the schema field the menu is for; none draws no menu"
@@ -30,12 +34,26 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
 
   attr :problem, :map, default: nil, doc: "the field's taken slug (`SlugInUse.problem/2`)"
 
+  attr :review, :string,
+    default: nil,
+    doc: "where the change bar leads; nil: the field is unchanged"
+
   @doc "The change bar's place and the Field actions menu, as children of a `.field`."
   def slots(assigns) do
     assigns = assign(assigns, :name, name(assigns.field))
 
     ~H"""
-    <span class="change-bar" data-desk-change-bar hidden></span>
+    <button
+      :if={@review}
+      type="button"
+      class="change-bar"
+      aria-label={pgettext("change bar", "Review changes")}
+      title={pgettext("change bar", "Review changes")}
+      phx-click={Phoenix.LiveView.JS.patch(@review)}
+      data-desk-change-bar
+    >
+    </button>
+    <span :if={!@review} class="change-bar" data-desk-change-bar hidden></span>
     <FieldActions.menu :if={@name} name={@name} paste={FieldActions.paste?(@field, @caps)} />
     """
   end
@@ -43,6 +61,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
   attr :field, :any, default: nil
   attr :caps, :any, default: nil
   attr :problem, :map, default: nil
+  attr :review, :string, default: nil
 
   @doc "The mark in the field's label, when its slug is in use."
   def mark(assigns), do: SlugInUse.mark(assigns)
@@ -53,7 +72,8 @@ defmodule BarkparkWeb.Studio.Desk.FieldSlots do
     %{
       field: field,
       caps: Map.get(parent_assigns, :caps),
-      problem: SlugInUse.problem(parent_assigns, name(field))
+      problem: SlugInUse.problem(parent_assigns, name(field)),
+      review: ReviewChanges.bar(parent_assigns, name(field))
     }
   end
 

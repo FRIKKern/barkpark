@@ -441,7 +441,7 @@
   var WRITES = [
     "array_op", "slug-generate", "select-ref", "clear-ref", "select-media", "clear-image", "upload-image",
     "publish", "unpublish", "confirm-unpublish", "delete-doc", "confirm-delete", "discard-draft",
-    "confirm-discard", "duplicate-doc", "restore-revision", "paper-publish"
+    "confirm-discard", "duplicate-doc", "restore-revision", "paper-publish", "desk-field-revert"
   ];
 
   // Whether a binding (an event name, or LiveView's JSON commands) sends one.
