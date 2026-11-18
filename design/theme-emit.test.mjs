@@ -313,9 +313,10 @@ const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 const TONES = ["success", "warning", "danger", "info"];
 const ROLES = ["background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
-  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]), "destructive"];
+  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]), "destructive",
+  ...["primary", "muted", ...TONES.map((t) => `${t}-soft`)].flatMap((f) => [`${f}-hover`, `${f}-pressed`])];
 const DEPTHS = [["-2", "m2"], ["-1", "m1"], ["1", "1"], ["2", "2"], ["3", "3"]];
-const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`])]);
+const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`, `${t}-soft-hover`, `${t}-soft-pressed`])]);
 const pointed = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 // Where a table name lives in the skin rule: a pointed name as --bark-base-<role>.
 const skinVar = (name) => { const r = ROLES.find((x) => pointed(x) === name); return r ? `--bark-base-${r}` : name; };
@@ -667,6 +668,40 @@ test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, w
     const step = contrast(get("background"), base);
     assert.ok(step >= floor, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${floor}`);
   });
+});
+
+// Hover and pressed come from the sheet: every fill a control can have (the
+// primary fill, the muted fill a secondary control takes, each tone's soft fill;
+// a destructive control is the danger tone's soft fill) has -hover and
+// -pressed on every surface. Each step stands STATE_STEP off the one before
+// (rest, hover, pressed), both in the same direction; the fill's label keeps
+// 4.5:1 on every state; a state keeps its fill's OKLCH hue within 1 degree
+// (a fill under chroma 0.02 has no hue to keep and its states stay under 0.02
+// too); and a fill that stands 3:1 off its ground at rest still does.
+// STATE_STEP is the most every case holds: a soft fill under its own label on a
+// white ground, which has about 1.135:1 of room for two steps.
+const STATE_STEP = 1.06, STATE_FILLS = [["primary", "primary-foreground"], ["muted", "foreground"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`])];
+test("BarkUI sheet: every control fill has a visible hover and pressed state that keeps its label, hue and edge", () => {
+  const misses = [];
+  eachSurface((at, mode, s, get) => {
+    const bg = get("background");
+    for (const [f, lab] of STATE_FILLS) {
+      const rest = get(f), hover = get(`${f}-hover`), pressed = get(`${f}-pressed`), label = get(lab);
+      const [r, h, p] = [rest, hover, pressed].map((c) => srgbToOklch(c));
+      const miss = (m) => misses.push(`${at}: ${f} ${m}`);
+      if (contrast(hover, rest) < STATE_STEP) miss(`hover is ${contrast(hover, rest).toFixed(3)}:1 off rest, under ${STATE_STEP}`);
+      if (contrast(pressed, hover) < STATE_STEP) miss(`pressed is ${contrast(pressed, hover).toFixed(3)}:1 off hover, under ${STATE_STEP}`);
+      if (Math.sign(h.L - r.L) !== Math.sign(p.L - h.L)) miss("hover and pressed move in different directions");
+      for (const [n, c, o] of [["hover", hover, h], ["pressed", pressed, p]]) {
+        if (contrast(label, c) < 4.5) miss(`${lab} on ${n} is ${contrast(label, c).toFixed(2)}, under 4.5`);
+        const dh = Math.min(Math.abs(o.h - r.h), 360 - Math.abs(o.h - r.h));
+        if (r.C >= 0.02 && dh > 1) miss(`${n} is ${dh.toFixed(1)} degrees off the fill's hue`);
+        if (r.C < 0.02 && o.C >= 0.02) miss(`${n} gains chroma ${o.C.toFixed(3)} on a neutral fill`);
+        if (contrast(rest, bg) >= 3 && contrast(c, bg) < 3) miss(`${n} is ${contrast(c, bg).toFixed(2)}:1 off the ground, under 3`);
+      }
+    }
+  });
+  assert.deepEqual(misses, []);
 });
 
 // The control edge (--ui-input): the edge of anything a person operates, an

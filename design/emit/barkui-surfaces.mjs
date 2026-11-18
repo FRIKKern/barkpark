@@ -64,19 +64,25 @@
 // from the depth shadow, as in the base.
 
 import { aaWalk, contrast, maxChroma, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
+import { LABEL_ROOM, stateNames, withStates } from "./barkui-states.mjs";
 
 export const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 export const TONES = ["success", "warning", "danger", "info"];
 const TONE_ROLES = TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]);
+// Every fill a control can have, with its label: the primary fill, the muted
+// fill a secondary control takes, and each tone's soft fill (a destructive
+// control is the danger tone's soft fill). Each gets -hover and -pressed.
+const STATE_FILLS = [["primary", "primary-foreground"], ["muted", "foreground"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`])];
 export const SURFACE_ROLES = [
   "background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
   ...TONE_ROLES, "destructive",
+  ...STATE_FILLS.flatMap(([fill]) => stateNames(fill)),
 ];
 export const DEPTHS = [-2, -1, 1, 2, 3];
 export const depthKey = (n) => (n < 0 ? `m${-n}` : String(n));
 // The name a part reads for a role: UI SDK's --ui-* or BarkUI's --bark-*.
-const BARK_ROLES = new Set(["accent", "selected", ...TONE_ROLES]);
+const BARK_ROLES = new Set(["accent", "selected", ...TONE_ROLES, ...TONES.flatMap((t) => stateNames(`${t}-soft`))]);
 export const pointedName = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 
 const SUNKEN_LIGHT = 0.028;
@@ -232,14 +238,18 @@ export function surfaceValues(base, raisedGround, primaryRing) {
     const pBorder = atL(ground, L(ground) + towardFg * Math.abs(offset("border")));
     const primary = {
       background: ground, foreground: fg, muted: pMuted, "muted-foreground": quiet(fg, pMuted, [pMuted, pSelected], ground),
-      border: pBorder, input: walkTo(pBorder, ground, 3), primary: fg, "primary-foreground": ground,
+      border: pBorder, input: walkTo(pBorder, ground, 3), primary: fg,
+      // The inverted fill sits at the end of the lightness range, so its states
+      // can only move toward its label: the label is the ground walked away
+      // from the fill until it leaves room for both steps.
+      "primary-foreground": walkTo(ground, fg, LABEL_ROOM, -towardFg),
       ring: primaryRing[mode], "ring-border": fg, accent: fg, selected: pSelected,
       ...tonesOn(b, ground),
     };
     const rg = raisedGround[mode];
     const raised = { ...b, background: rg, input: walkTo(b.input, rg, 3), ...tonesOn(b, rg) };
     const out = { base: withSofts(b, false), raised: withSofts(raised, true), sunken: withSofts(sunken, true), primary: withSofts(primary, true) };
-    for (const s of Object.keys(out)) out[s] = { ...out[s], depth: depths(out[s].background, mode) };
+    for (const s of Object.keys(out)) out[s] = { ...withStates(out[s], STATE_FILLS, `${mode}/${s}`), depth: depths(out[s].background, mode) };
     return out;
   };
   const light = one("light"), dark = one("dark");
