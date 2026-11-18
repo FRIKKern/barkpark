@@ -334,6 +334,7 @@ web/lib/status-ladder.gen.ts
 apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts
 templates/search-starter/app/globals.css
 templates/astro-search-starter/src/styles/globals.css
+api/priv/barkui/tokens.css
 scripts/console-path-escape-check.sh
 scripts/console-path-escape-check.test.sh
 scripts/console-pins.sh'

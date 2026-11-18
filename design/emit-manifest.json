@@ -1,8 +1,8 @@
 {
   "$comment": "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact, keyed `<path>#<artifact name>` (NOT path alone: one file may carry two generated regions, and each owns its own slot), taken over the GENERATED REGION ONLY (the marker interior for css/html surfaces, the whole file for go/ts/elixir). design/emit.mjs --write refuses to replace a region whose digest does not match, because those bytes were never emitted and replacing them destroys hand-written work (see commit 1d928b3bf). Rewritten by `node design/emit.mjs --write`; re-bless the tree with --adopt.",
   "regions": {
-    "api/assets/paper-editor/src/styles/theme.css#paper-editor mirror": "1fd2cebd4e7679e1330c88feca7b921971e0183c78143de2d84e4303101530a8",
     "api/assets/paper-editor/src/paper-surface/01-components-generated-theme.css#paper-surface": "ff093056b03d47fd3e91ab88fbe9380ca8ce8f927c2af5659df3443a9323a7dd",
+    "api/assets/paper-editor/src/styles/theme.css#paper-editor mirror": "1fd2cebd4e7679e1330c88feca7b921971e0183c78143de2d84e4303101530a8",
     "api/lib/barkpark/portable_doc/render/tokens_gen.ex#Elixir render tokens": "6c183b93f342bd5b77fef615640377d81bc0ec53fb27d0879ffbe328a4f4f048",
     "api/lib/barkpark_web/controllers/error_html.ex#error page (error_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
     "api/lib/barkpark_web/controllers/session_html.ex#login (session_html)": "31667638d81efd9762630e7e8f79bd038c70c91c777ac612fdc45ffaf76e8e11",
@@ -12,6 +12,7 @@
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
     "api/lib/barkpark_web/plugs/studio_refusal_html.ex#studio refusal page (studio_refusal_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
+    "api/priv/barkui/tokens.css#BarkUI sheet": "49ec84a1bdd06ca559cff689eb73b049402ae3dab6372ca6ba7dbec14004c0f1",
     "api/priv/static/assets/bp-graph.js#bp-graph palette (1/4)": "50af139633f57cbf0ec9670f0dc2d37ca7e681d46764974f1014a042ba168a22",
     "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts#mobile status vocabulary": "55b5be377acdae12c6ada4b2cc925c0cb261cb7992398803637cfd4b7c90f64a",
     "cloud/priv/static/app.css#cloud SPA": "d125c806bc483c5622acaac5fb85debc179df9d41d6cc987bfb0a7c46072a1b8",
