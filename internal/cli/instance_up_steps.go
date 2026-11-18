@@ -431,7 +431,22 @@ func stepUpVM(u *instanceUp) error {
 			PublicIPAddress string `json:"publicIpAddress"`
 			FQDNs           string `json:"fqdns"`
 		}
-		if err := u.az(&created, args...); err != nil {
+		err := u.retryAuth("az vm create", func() error {
+			err := u.azOnce(&created, args...)
+			if err == nil || !authFailed(err) {
+				return err
+			}
+			// az reads the NIC and the IP after the deployment. A refused
+			// read leaves a VM that exists, which a retry would create again.
+			var got instanceUpVMInfo
+			if serr := u.azOnce(&got, "vm", "show", "-d", "-g", st.ResourceGroup, "-n", name); serr == nil && got.PublicIPs != "" {
+				u.out.errf("        az vm create answered AuthorizationFailed, but the VM %s exists; going on with it", name)
+				created.PublicIPAddress, created.FQDNs = got.PublicIPs, got.FQDNs
+				return nil
+			}
+			return err
+		})
+		if err != nil {
 			if strings.Contains(cmdOutput(err), "DnsRecordInUse") || strings.Contains(cmdOutput(err), "DnsLabel") {
 				return fmt.Errorf("the DNS label %s is taken in %s. Choose another --host with a new --state file.\n%v", st.dnsLabel(), st.Region, err)
 			}

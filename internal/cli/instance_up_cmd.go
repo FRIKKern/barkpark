@@ -607,8 +607,15 @@ func (u *instanceUp) run(c instanceUpCmd) (string, error) {
 	return instanceUpRun(u.ctx, u.out.stderr, c)
 }
 
-// az runs az with JSON output and decodes it into v when v is not nil.
+// az runs az with JSON output and decodes it into v when v is not nil. It
+// waits out AuthorizationFailed while a new role reaches Azure
+// (instance_up_authwait.go).
 func (u *instanceUp) az(v any, args ...string) error {
+	return u.retryAuth(azWhat(args), func() error { return u.azOnce(v, args...) })
+}
+
+// azOnce runs az once, as az does.
+func (u *instanceUp) azOnce(v any, args ...string) error {
 	stdout, err := u.run(instanceUpCmd{name: "az", args: append(args, "-o", "json")})
 	if err != nil {
 		return err

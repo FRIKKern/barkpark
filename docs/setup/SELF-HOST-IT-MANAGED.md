@@ -30,6 +30,8 @@ What these flags change:
 
 The VM runs Ubuntu 24.04 LTS. up saves the instance in bp and leaves the active server as it was.
 
+On 2026-11-18, Azure answered AuthorizationFailed on and off for about 20 minutes after a PIM activation. up runs such a call again after 15 s, 30 s, 60 s and then every 2 minutes, and says so. After 30 minutes it stops and names what to check. The same command resumes.
+
 ## Import on a larger size, then resize
 
 The 2026-11-18 import of 40,458 documents on 4 vCPU used a median of 45 % user CPU and peaked at 86 %. Daily use needs far less. Create the VM on the larger size, import, then move to the daily size in the same directory:
