@@ -349,6 +349,29 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert StudioChat.get_session(sid).pending_approvals == 0
   end
 
+  # task-e09b1a6507c8f232 (rev26735's probe (b) on #27084): the refused close
+  # ends the Recorder's turn but keeps A's ask tracked, so a third lease's turn
+  # was no split, its turn_started untracked the ask, and A's later close was
+  # ignored (C took the turn from A): a live card for good.
+  test "a third lease's turn after a refused close cancels the asking run's ask as displaced",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-third"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, lease!(ctx, "c"), 1, %{"kind" => "turn_started", "turn_id" => "t-c"})
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
   test "the asking run's own close cancels its pending ask", %{sid: sid} = ctx do
     a = lease!(ctx, "a")
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
