@@ -116,12 +116,13 @@ type ambiguousWrite struct {
 //
 // The title is quoted for a POSIX shell, not with Go's %q: the person pastes
 // this line, and inside double quotes a `$` or a backtick in the title expands
-// (task-5985afa7b6e7454f).
+// (task-5985afa7b6e7454f). The title comes last, after "--", so a title that
+// starts with "--" is still the query, not a flag (task-379127ebdf341017).
 func (a ambiguousWrite) checkCommand() string {
 	if id := strings.TrimPrefix(a.docID, "drafts."); id != "" {
 		return "bp task get " + id
 	}
-	return "bp search query " + shQuote(a.title) + " --perspective drafts"
+	return "bp search query --perspective drafts -- " + shQuote(a.title)
 }
 
 // renderAmbiguousWrite is the single seam every ambiguous `bp task create`

@@ -150,6 +150,12 @@ func parseGlobals(args []string) (globals, []string, error) {
 	for i < len(args) {
 		a := args[i]
 
+		// "--" ends the flags: it and the rest pass through untouched, so the
+		// command's own parser sees it too (task-379127ebdf341017).
+		if a == "--" {
+			return g, append(rest, args[i:]...), nil
+		}
+
 		// Plain positional or bare "-": passes through to rest.
 		if a == "" || a[0] != '-' || a == "-" {
 			rest = append(rest, a)

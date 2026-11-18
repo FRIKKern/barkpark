@@ -1182,6 +1182,20 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 		return tail[i+1], i + 1, nil
 	}
 
+	// A bare positional is the title (first one wins; a second is an error so a
+	// typo'd flag is not silently swallowed as the title).
+	title := func(a string) error {
+		if t, _ := body["title"].(string); t != "" {
+			return fmt.Errorf("unexpected extra argument %q (title already set)", a)
+		}
+		body["title"] = a
+		return nil
+	}
+
+	// After "--" every argument is positional, so a title may start with "--"
+	// (task-379127ebdf341017).
+	tail, afterFlags := cutAtEndOfFlags(tail)
+
 	for i := 0; i < len(tail); i++ {
 		a := tail[i]
 		key, inline, hasInline := a, "", false
@@ -1249,16 +1263,17 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			i = ni
 		case !strings.HasPrefix(a, "-"):
-			// A bare positional is the title (first one wins; a second is an error
-			// so a typo'd flag is not silently swallowed as the title).
-			if _, ok := body["title"]; ok {
-				if t, _ := body["title"].(string); t != "" {
-					return nil, false, fmt.Errorf("unexpected extra argument %q (title already set)", a)
-				}
+			if err := title(a); err != nil {
+				return nil, false, err
 			}
-			body["title"] = a
 		default:
 			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --execution-policy JSON, --disposition, --reopen-trigger, --disposition-rerun, --set k=v, --publish)", a)
+		}
+	}
+
+	for _, a := range afterFlags {
+		if err := title(a); err != nil {
+			return nil, false, err
 		}
 	}
 
