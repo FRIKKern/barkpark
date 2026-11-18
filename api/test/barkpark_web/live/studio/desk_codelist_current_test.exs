@@ -108,7 +108,13 @@ defmodule BarkparkWeb.Studio.DeskCodelistCurrentTest do
     refute has_element?(view, ~s(#{@form} .codelist-current))
 
     view = desk(c, "cl-gone-#{c.n}")
-    assert has_element?(view, ~s(#{@form} .codelist-current[data-unknown]), "ZZZ")
+    assert has_element?(view, ~s(#{@form} .codelist-current .mono), "ZZZ")
+
+    assert has_element?(
+             view,
+             ~s(#{@form} .codelist-current .codelist-label.invalid),
+             "Not in the list"
+           )
   end
 
   test "the old Studio's tree codelist has neither mark", c do

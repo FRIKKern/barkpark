@@ -410,6 +410,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       else: message |> StudioLive.handle_info(socket) |> ours()
   end
 
+  # A tree codelist's pick: the press went to its component
+  # (`TreeCodelistField`), past `handle_event/3`'s guards, and comes here as a
+  # message. It meets the same ones: nothing is written while an old revision
+  # is shown, into a document deleted elsewhere, or from the form of a draft
+  # discarded elsewhere.
+  def handle_info({:tree_codelist_pick, _msg} = message, socket) do
+    cond do
+      gone?(socket.assigns) or RevisionView.shown?(socket.assigns) -> {:noreply, socket}
+      Discarded.drop?(socket.assigns) -> {:noreply, Discarded.drop(socket)}
+      true -> message |> StudioLive.handle_info(socket) |> ours()
+    end
+  end
+
   def handle_info(message, socket), do: message |> StudioLive.handle_info(socket) |> ours()
 
   # The Studio's panes are not drawn here; its editor is.
