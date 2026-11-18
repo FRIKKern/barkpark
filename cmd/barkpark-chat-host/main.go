@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/chathost"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 func main() {
@@ -127,7 +128,7 @@ const maxProviderVersionBytes = 200
 
 // providerVersion is a CLI's --version output as the host reports it: trimmed,
 // valid UTF-8, with U+0000 stored as U+FFFD as the server's EventText stores
-// it, and cut to maxProviderVersionBytes on a rune boundary. The server
+// it, and cut to maxProviderVersionBytes on a grapheme boundary. The server
 // refuses U+0000 (#26735) and a version over 200 bytes with a 422 the host
 // takes as final, so either would stop the host from enrolling and from
 // running (task-060e49b6007abbab, task-d72dce0e2765f44a). The cut counts the
@@ -137,14 +138,7 @@ func providerVersion(output []byte) string {
 	replacement := string(utf8.RuneError)
 	version := strings.ToValidUTF8(strings.TrimSpace(string(output)), replacement)
 	version = strings.ReplaceAll(version, "\x00", replacement)
-	if len(version) > maxProviderVersionBytes {
-		cut := maxProviderVersionBytes
-		for cut > 0 && !utf8.RuneStart(version[cut]) {
-			cut--
-		}
-		version = version[:cut]
-	}
-	return version
+	return textcut.Prefix(version, maxProviderVersionBytes)
 }
 
 // authReady reports whether a provider CLI holds a usable credential, from the
