@@ -38,10 +38,10 @@ defmodule Barkpark.Plugins.Capabilities do
 
   ## Auth-tier ladder
 
-  The six closed tiers (`docs/cli/manifest.schema.json#/$defs/auth_tier`) split
-  into a totally-ordered GLOBAL ladder used by `project/2`'s default-deny
-  visibility test, plus two side channels (`scoped_admin`, `ingest`) that are
-  NOT on the global ladder:
+  The eight closed tiers (`docs/cli/manifest.schema.json#/$defs/auth_tier`): a
+  totally-ordered GLOBAL ladder for `project/2`'s default-deny visibility test,
+  side channels `scoped_admin` / `ingest` off that ladder, and `scoped_read` /
+  `scoped_write`, which rank as `read` / `write` but are routed ONLY scoped:
 
       none < read < write < admin
 
@@ -83,7 +83,7 @@ defmodule Barkpark.Plugins.Capabilities do
 
   require Logger
 
-  @typedoc "The six closed auth tiers from the frozen schema enum."
+  @typedoc "The eight closed auth tiers from the frozen schema enum."
   @type tier :: String.t()
 
   # Global ladder rank. Higher = more authority. `scoped_admin` / `ingest`
@@ -215,7 +215,7 @@ defmodule Barkpark.Plugins.Capabilities do
 
   Rules (see moduledoc "Auth-tier ladder"):
 
-    * global tiers (`none/read/write/admin`): caller rank >= required rank;
+    * global tiers (`none/read/write/admin`, and `scoped_read/write` as read/write): caller rank >= required;
     * `scoped_admin`: visible to any caller above `none` (rule #2 — never
       blanket-deny a token that MIGHT hold a per-workspace role);
     * `ingest`: visible only to an `admin`/`ingest` caller (never to anon).
@@ -233,7 +233,7 @@ defmodule Barkpark.Plugins.Capabilities do
     do: caller_rank(caller_tier) >= @global_rank["admin"]
 
   def visible?(required_tier, caller_tier) do
-    case Map.fetch(@global_rank, required_tier) do
+    case Map.fetch(@global_rank, String.replace_prefix(required_tier, "scoped_", "")) do
       {:ok, required_rank} -> caller_rank(caller_tier) >= required_rank
       # Unknown required tier → default-deny.
       :error -> false
@@ -2206,7 +2206,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "The masters an author may insert into paper :slug.",
         "GET",
         "/v1/papers/:slug/masters",
-        "read",
+        "scoped_read",
         args: [arg("slug", true, "string", "Paper slug.")],
         writes: false,
         default_output: "table",
@@ -2219,7 +2219,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Save a block of paper :slug as a master, published immediately.",
         "POST",
         "/v1/papers/:slug/masters",
-        "write",
+        "scoped_write",
         args: [arg("slug", true, "string", "Paper slug.")],
         flags: [
           flag(
@@ -2239,7 +2239,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Insert master :master_id into paper :slug, detached (a copy) or linked (follows latest).",
         "POST",
         "/v1/papers/:slug/masters/:master_id/insert",
-        "write",
+        "scoped_write",
         args: [
           arg("slug", true, "string", "Paper slug."),
           arg("master_id", true, "string", "Master document id.")
@@ -2262,7 +2262,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Pin (or unpin) linked instance :block_id in paper :slug to the master's latest published revision.",
         "POST",
         "/v1/papers/:slug/masters/blocks/:block_id/pin",
-        "write",
+        "scoped_write",
         args: [
           arg("slug", true, "string", "Paper slug."),
           arg("block_id", true, "string", "Linked instance block id.")
@@ -2285,7 +2285,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Detach linked instance :block_id in paper :slug to a plain, no-longer-following copy.",
         "POST",
         "/v1/papers/:slug/masters/blocks/:block_id/detach",
-        "write",
+        "scoped_write",
         args: [
           arg("slug", true, "string", "Paper slug."),
           arg("block_id", true, "string", "Linked instance block id.")
@@ -2310,7 +2310,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Apply an ifRev-fenced batch of block ops to paper :slug, atomically.",
         "POST",
         "/v1/papers/:slug/ops",
-        "write",
+        "scoped_write",
         args: [arg("slug", true, "string", "Paper slug.")],
         flags: [
           flag(
@@ -2334,7 +2334,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Server-rendered HTML for paper :slug's fleet blocks (task list/board/detail, roadmap, …), by block id.",
         "GET",
         "/v1/papers/:slug/fleet-blocks",
-        "read",
+        "scoped_read",
         args: [arg("slug", true, "string", "Paper slug.")],
         writes: false,
         default_output: "table",
@@ -3117,7 +3117,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
         "GET",
         "/v1/workspace/locale",
-        "read",
+        "scoped_read",
         writes: false,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

@@ -164,10 +164,10 @@ func TestBuildURLScopedMirrorStillComposesFlatTiers(t *testing.T) {
 	}
 }
 
-// TestIsScopedTier locks the tier classifier: exactly the two per-workspace-role
-// tiers compose; every global tier and any unknown string does not.
+// TestIsScopedTier locks the tier classifier: exactly the three scoped tiers
+// compose; every global tier and any unknown string does not.
 func TestIsScopedTier(t *testing.T) {
-	compose := []string{"scoped_admin", "scoped_read"}
+	compose := []string{"scoped_admin", "scoped_read", "scoped_write"}
 	flat := []string{"none", "read", "write", "admin", "ingest", "", "scoped", "SCOPED_ADMIN"}
 	for _, tier := range compose {
 		if !isScopedTier(tier) {
@@ -178,5 +178,30 @@ func TestIsScopedTier(t *testing.T) {
 		if isScopedTier(tier) {
 			t.Errorf("isScopedTier(%q) = true, want false", tier)
 		}
+	}
+}
+
+// TestBuildURLPaperApplyOpsDefaultScopeComposes (task-967f2dbbc1e9131f): the
+// papers routes are mounted ONLY under /w/:ws/p/:project, and the server now
+// ships paper.apply-ops as scoped_write. On the DEFAULT scope (no -w/-p, no
+// mirror) BuildURL must still compose the prefix; the flat
+// /v1/papers/:slug/ops it sent before is a 404.
+func TestBuildURLPaperApplyOpsDefaultScopeComposes(t *testing.T) {
+	m := &Manifest{}
+	ctx := Context{Server: "https://api.barkpark.cloud", Workspace: "default", Project: "default"}
+	cmd := Command{
+		ID:           "paper.apply-ops",
+		AuthTier:     "scoped_write",
+		HTTP:         HTTP{Method: "POST", PathTemplate: "/v1/papers/:slug/ops"},
+		ScopedPrefix: strPtr("/w/:workspace_slug/p/:project_slug"),
+	}
+
+	got, err := m.BuildURL(cmd, ctx, map[string]string{"slug": "launch-plan"})
+	if err != nil {
+		t.Fatalf("BuildURL: %v", err)
+	}
+	want := "https://api.barkpark.cloud/w/default/p/default/v1/papers/launch-plan/ops"
+	if got != want {
+		t.Errorf("paper.apply-ops on the default scope:\n got %s\nwant %s (the flat path is a 404)", got, want)
 	}
 }
