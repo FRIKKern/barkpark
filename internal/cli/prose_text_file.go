@@ -198,15 +198,22 @@ func proseFieldByInlineFlag(flag string) (proseField, bool) {
 // Every failure returns an error and NOTHING is forwarded: a write that cannot
 // read its own prose must not fall back to sending a truncated field.
 func resolveProseTextFiles(tail []string, only map[string]bool, warn func(string, ...any)) ([]string, error) {
+	return resolveProseTextFilesFor(tail, only, nil, warn)
+}
+
+// resolveProseTextFilesFor also takes the command's other flags that take a
+// value (task create: taskCreateValueFlags), so it ends the flags exactly where
+// the command's own parser does.
+func resolveProseTextFilesFor(tail []string, only, valueFlags map[string]bool, warn func(string, ...any)) ([]string, error) {
 	inScope := func(name string) bool { return only == nil || only[name] }
 
 	// After "--" every argument is positional: a title spelled "--title-file"
 	// is a title, not a file to read (task-379127ebdf341017). A "--" right
-	// after --title or --description (no "=") is that flag's value, not the end.
+	// after a flag that takes a value (no "=") is that value, not the end.
 	end := endOfFlags(tail, func(a string) bool {
 		name, _, inline := splitFlagToken(a)
 		_, prose := proseFieldByInlineFlag(name)
-		return prose && !inline
+		return (prose || valueFlags[name]) && !inline
 	})
 	tail, afterFlags := tail[:end], afterEndOfFlags(tail, end)
 
