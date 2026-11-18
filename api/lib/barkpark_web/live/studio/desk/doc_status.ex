@@ -118,7 +118,8 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   def state(_assigns), do: %{draft?: false, published?: false, presences: []}
 
   # "Ada Lovelace" is AL, "ada.lovelace@x.no" is AL, "Ada" is A.
-  defp initials(name) do
+  @doc "A name's initials, first and last word, as the avatars draw them."
+  def initials(name) do
     words =
       name
       |> to_string()

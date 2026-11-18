@@ -155,6 +155,33 @@ defmodule BarkparkWeb.Studio.DeskLiveUpdatesGoneTest do
            "the notice still shows for a document that was written again"
   end
 
+  # TanStack's DeletedBanner: "Restore most recent revision" writes the newest
+  # revision that is the document itself back. On the old code the pane said
+  # the document was deleted and offered nothing.
+  test "the open document deleted by someone else: Restore most recent revision brings it back",
+       %{conn: conn, base: base, a: a} do
+    view = open(conn, "#{base}/#{@type_name};#{a}")
+    {:ok, _} = Content.delete_document(a, @type_name, @dataset)
+    assert heard?(a, "delete"), "precondition: the page's topics never carried the delete"
+
+    # The desk's refresh tick, which follows every change it is told of.
+    send(view.pid, :desk_refresh)
+    button = "[data-pane-editing] [data-desk-edit-gone] button[data-desk-restore-latest]"
+    assert has_element?(view, button, "Restore most recent revision")
+
+    BarkparkWeb.EditorPost.press_on(view, element(view, button))
+
+    restored = Content.get_document(Content.draft_id(a), @type_name, @dataset)
+    assert match?({:ok, %{title: "Alpha note"}}, restored), "the restore wrote no draft"
+    render_async(view, 5_000)
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing] #editor-form input[name="doc[title]"][value="Alpha note"])
+           ),
+           "the restored document is not in the form"
+  end
+
   test "a document deleted elsewhere, not on the desk, is not noted", %{
     conn: conn,
     base: base,
