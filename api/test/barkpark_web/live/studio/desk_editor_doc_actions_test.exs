@@ -208,14 +208,18 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
 
     landed = assert_patch(view, 2_000)
 
+    # The TanStack Studio's copy: a uuid, the source's title as it is.
     copy =
-      ~r"^#{Regex.escape("#{c.base}/#{c.post};#{c.one};#{c.author}-")}[0-9a-f]+,type=#{c.author}$"
+      ~r"^#{Regex.escape("#{c.base}/#{c.post};#{c.one};")}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12},type=#{c.author}$"
 
     assert landed =~ copy, "the copy opened at #{landed}"
     refute landed =~ c.lone, "the copy opened at #{landed}, still naming the original"
 
     assert poll(view, fn ->
-             has_element?(view, ~s|[data-pane-editing] input[name="doc[title]"][value*="(copy)"]|)
+             has_element?(
+               view,
+               ~s|[data-pane-editing] input[name="doc[title]"][value="Lone Unreferenced"]|
+             )
            end),
            "the copy at #{landed} did not open in the editor"
   end

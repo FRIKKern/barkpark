@@ -73,6 +73,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       html[data-theme="dark"] .dk { --dk-menu-fg: #bdbfcb; --dk-menu-hover-fg: #0d0e12; --dk-menu-hover-icon: #303c7a; --dk-menu-danger: #fdafa8; --dk-menu-danger-icon: #c38885; --dk-menu-danger-hover: #f77a6f; --dk-menu-danger-hover-icon: #6c312f; --dk-popover-shadow: 0 0 0 0.5px rgba(117, 123, 150, 0.4), 0 7px 8px -4px rgba(0, 0, 0, 0.2), 0 12px 17px 2px rgba(0, 0, 0, 0.14), 0 5px 22px 4px rgba(0, 0, 0, 0.12); }
       .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); --dk-fill-soft: #eeeef1; --dk-badge-fg: #4c536a; --dk-badge-lit-bg: #e6e6ea; --dk-badge-lit-fg: #4a5068; }
       html[data-theme="dark"] .dk { --dk-toast-shadow: 0 0 0 0.5px rgba(121, 127, 154, 0.4), 0 3px 5px -2px rgba(0, 0, 0, 0.2), 0 6px 10px 0 rgba(0, 0, 0, 0.14), 0 1px 18px 1px rgba(0, 0, 0, 0.12); --dk-fill-soft: #21232f; --dk-badge-fg: #9da2b7; --dk-badge-lit-bg: #262837; --dk-badge-lit-fg: #9fa4ba; }
+      /* TanStack's --critical-icon: a field's error mark (`SlugInUse`). */
+      .dk { --dk-critical-icon: #ef3d2f; }
+      html[data-theme="dark"] .dk { --dk-critical-icon: #f3503e; }
       /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
       .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
       html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
@@ -384,6 +387,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.BulkBar.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.SlugInUse.css()) %>
     </style>
     """
   end

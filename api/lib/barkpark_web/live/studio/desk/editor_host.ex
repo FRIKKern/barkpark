@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.ShareMenu
+  alias BarkparkWeb.Studio.Desk.SlugInUse
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.Desk.UnpublishDialog
   alias BarkparkWeb.Studio.Desk.ValidationPanel
@@ -309,8 +310,10 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         {:noreply, Discarded.drop(socket)}
 
       true ->
-        case NewDoc.guard(event, params, socket) do
-          :cont -> event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+        with :cont <- NewDoc.guard(event, params, socket),
+             :cont <- SlugInUse.guard(event, socket) do
+          event |> StudioLive.handle_event(params, written(socket, event)) |> ours()
+        else
           {:halt, socket} -> {:noreply, socket}
         end
     end
@@ -376,6 +379,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> form_only()
       |> DocDialog.follow()
       |> NewDoc.settle()
+      |> SlugInUse.refresh()
       |> assign(:panes, [])
 
   # A document the desk opens from a document node of its own (an
