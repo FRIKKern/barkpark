@@ -1640,14 +1640,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> Enum.reject(&is_nil/1)
       |> combine_clauses(match)
 
-    id_arm =
-      groups
-      |> Enum.flat_map(& &1.members)
-      |> Enum.map(&id_match/1)
-      |> combine_clauses(:any)
-
-    combine_clauses(Enum.reject([text_arm, id_arm], &is_nil/1), :any)
+    combine_clauses(Enum.reject([text_arm, id_arm(groups, match)], &is_nil/1), :any)
   end
+
+  # Under `:all` an id answers a one-word query only, never one word of many (task-5985afa7b6e7454f).
+  defp id_arm([_, _ | _], :all), do: nil
+
+  defp id_arm(groups, _),
+    do: groups |> Enum.flat_map(& &1.members) |> Enum.map(&id_match/1) |> combine_clauses(:any)
 
   # The suggestion fallback: the words of the first step, where a word that
   # `TypoPolicy` admits may also be a near miss (`<%`) of a word of the search
