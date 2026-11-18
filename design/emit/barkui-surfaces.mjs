@@ -25,6 +25,9 @@
 //            would leave the foreground under 4.5:1 on the fill.
 //            muted-foreground is the palest mix of the foreground into the
 //            ground that still reads at 4.5:1 on the ground and both fills.
+//            input (the control edge) is that border walked toward the
+//            foreground with the deriver's contrast walk until it stands at 3:1
+//            on the ground; no slot is drawn for the brand ground.
 //   inverse  the other mode's base, role for role: a dark band on a light page
 //            and a light band on a dark page, in the skin's own designed values.
 //            (The BarkUI base uses the ink as the ground instead; the other
@@ -152,7 +155,7 @@ export function surfaceValues(base, raisedGround, primaryRing) {
     const pBorder = atL(ground, L(ground) + towardFg * Math.abs(offset("border")));
     const primary = {
       background: ground, foreground: fg, muted: pMuted, "muted-foreground": quiet(fg, ground, [ground, pMuted, pSelected]),
-      border: pBorder, input: pBorder, primary: fg, "primary-foreground": ground,
+      border: pBorder, input: walkTo(pBorder, ground, 3), primary: fg, "primary-foreground": ground,
       ring: primaryRing[mode], "ring-border": fg, accent: fg, selected: pSelected,
       ...tonesOn(b, ground),
     };
