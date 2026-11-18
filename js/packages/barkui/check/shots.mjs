@@ -1,7 +1,8 @@
 // node check/shots.mjs <dir>: light and dark shots of the built showroom, 1440
 // wide; close crops of a focused primary and a focused secondary button
 // (focused by real Tab presses), side by side; and the button's first rows on
-// every surface, stacked.
+// every surface, stacked; and the part's lights after picking the primary
+// surface on the Surface control (they show as not proved there).
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -48,6 +49,10 @@ try {
     const ink = scheme === 'dark' ? '#9a9a9a' : '#5f5f5f'
     await sheet.setContent(`<body style="margin:0;padding:16px;display:inline-flex;flex-direction:column;gap:8px;background:${ground};color:${ink};font:13px system-ui">${rows.map(([n, c]) => `<div>${n}</div><img src="${c}" style="width:720px">`).join('')}</body>`)
     await sheet.locator('body').screenshot({ path: join(dir, `surfaces-${scheme}.png`) })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.click('label.sr-radio:has(input[name="surface"][value="primary"])')
+    const head = await page.locator('#part-button .sr-part-head').boundingBox()
+    await page.screenshot({ path: join(dir, `unproved-${scheme}.png`), clip: { x: head.x - 12, y: head.y - 12, width: Math.min(head.width, 900) + 24, height: head.height + 24 } })
     await page.close()
     await sheet.close()
   }
