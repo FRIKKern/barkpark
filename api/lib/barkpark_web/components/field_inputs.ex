@@ -474,7 +474,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
         desk: desk?,
         stored: stored,
         hotspot: image_option?(f, "hotspot"),
-        alt: if(desk?, do: nil, else: image_option?(f, "alt")),
+        # An `alt` subfield is drawn under the image instead of the picker's box.
+        alt: if(desk? and ImageParts.part?(f, "alt"), do: nil, else: image_option?(f, "alt")),
         value_shape: image_value_shape(f) || (desk? && ImageParts.value_shape(stored)) || nil
       )
 

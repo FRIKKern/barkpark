@@ -72,6 +72,10 @@ defmodule BarkparkWeb.Studio.Desk.ImageParts do
 
   def parts(_field), do: []
 
+  @doc "Whether the image declares `name` as one of the subfields drawn under it."
+  @spec part?(map(), String.t()) :: boolean()
+  def part?(field, name), do: Enum.any?(parts(field), &(&1["name"] == name))
+
   attr :field, :map, required: true, doc: "the image field's schema"
   attr :value, :any, required: true, doc: "the stored image value (a map or its JSON)"
   attr :locked, :boolean, default: false, doc: "the image field is read-only here"
