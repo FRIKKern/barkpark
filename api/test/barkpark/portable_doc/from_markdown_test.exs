@@ -215,6 +215,36 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
     end
   end
 
+  # The from-markdown case `entities` pins the main rule; these are the edges.
+  describe "entity references" do
+    test "a link URL and image alt are decoded, a code span and fence info are not" do
+      [%{"content" => [link, _space, image]}] =
+        FromMarkdown.blocks("[a](https://x.example/?a=1&amp;b=2) ![&lt;](https://x.example/i)")
+
+      assert link["href"] == "https://x.example/?a=1&b=2"
+      assert image["children"] == [%{"type" => "text", "value" => "<"}]
+      assert [%{"lang" => "&#x6a;s"}] = FromMarkdown.blocks("```&#x6a;s\nx\n```")
+    end
+
+    test "an encoded javascript: URL is still refused" do
+      assert [%{"content" => [%{"type" => "text", "value" => "x"}]}] =
+               FromMarkdown.blocks("[x](javascript&#58;alert(1))")
+    end
+
+    test "an invalid code point is U+FFFD and a backslash escapes the ampersand" do
+      assert [%{"content" => [%{"value" => "� � &amp;"}]}] =
+               FromMarkdown.blocks("&#0; &#xD800; \\&amp;")
+    end
+
+    test "raw HTML text and table cells are decoded" do
+      assert [%{"content" => [%{"value" => "a & b"}]}] =
+               FromMarkdown.blocks("<div>a &amp; b</div>")
+
+      assert [%{"head" => [[%{"value" => "a &"}]], "rows" => [[[%{"value" => "<"}]]]}] =
+               FromMarkdown.blocks("| a &amp; |\n|---|\n| &lt; |")
+    end
+  end
+
   describe "fail-soft" do
     test "model-supplied HTML never reaches the rendered output unescaped" do
       html =

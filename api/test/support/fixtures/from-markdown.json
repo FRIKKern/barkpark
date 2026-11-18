@@ -9,6 +9,24 @@
       }
     ]
   },
+  "entities": {
+    "markdown": "Fish &amp; chips &copy; &#35; &#x41; &nosuch; &amp;amp; `&amp;`",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "Fish & chips © # A &nosuch; &amp; "
+          },
+          {
+            "type": "code",
+            "value": "&amp;"
+          }
+        ]
+      }
+    ]
+  },
   "fence-must-validate": {
     "markdown": "```portabledoc\n[{\"type\":\"table\",\"rows\":\"nope\"}]\n```",
     "blocks": [

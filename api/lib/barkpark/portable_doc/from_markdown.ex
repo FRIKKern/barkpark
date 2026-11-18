@@ -23,6 +23,8 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
       keeps its text (`FromMarkdown.Url`);
     * a hard line break is `"\\n"` in the text, a soft one a space;
     * raw HTML keeps its visible text only (`FromMarkdown.Html`);
+    * entity references in text, link URLs and raw HTML are decoded, once
+      (`FromMarkdown.Entities`); code spans and code blocks keep them as typed;
     * a quote whose last paragraph is `— Name` gets `cite`, and an emphasised
       paragraph right after a mermaid fence is the diagram's `caption`;
     * a list item's blocks join with one space, and a nested list stays a
@@ -34,7 +36,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   downstream in the render walk, exactly as for persisted paper blocks.
   """
 
-  alias Barkpark.PortableDoc.FromMarkdown.{Fence, Html, Url}
+  alias Barkpark.PortableDoc.FromMarkdown.{Entities, Fence, Html, Url}
   alias Barkpark.PortableDoc.Validate
 
   # A list nested deeper than this is kept as its item's plain text.
@@ -137,6 +139,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
       children
       |> Enum.map_join("\n", &flatten_text/1)
       |> Html.block_text()
+      |> Entities.decode()
       |> String.trim()
       |> text_paragraph()
     end
@@ -245,7 +248,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   defp child_text({:comment, _, _, _}), do: ""
 
   defp child_text({_tag, _, children, %{verbatim: true}}),
-    do: children |> Enum.map_join("\n", &flatten_text/1) |> Html.block_text()
+    do: children |> Enum.map_join("\n", &flatten_text/1) |> Html.block_text() |> Entities.decode()
 
   defp child_text({tag, _, children, _}) when tag in ["ul", "ol"] do
     children
@@ -421,13 +424,14 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
 
   # Inline nodes as PortableDoc inline content: raw inline HTML keeps its visible
   # text (Html.inline_text/2), a soft line break is a space, a hard one "\n",
-  # and neighbouring text nodes join.
+  # entity references are decoded (Entities, after the breaks, so `&#10;` stays
+  # a newline), and neighbouring text nodes join.
   defp inline(children) when is_list(children) do
     children
     |> Enum.flat_map_reduce(nil, fn
       text, skipping when is_binary(text) ->
         {visible, skipping} = Html.inline_text(text, skipping)
-        {[text_node(soft_breaks(visible))], skipping}
+        {[text_node(visible |> soft_breaks() |> Entities.decode())], skipping}
 
       _node, skipping when is_binary(skipping) ->
         {[], skipping}
@@ -453,14 +457,15 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   defp inline_node({"code", _attrs, children, _meta}),
     do: [%{"type" => "code", "value" => flatten_text(children)}]
 
-  defp inline_node({"a", attrs, children, _meta}), do: link(attr(attrs, "href"), inline(children))
+  defp inline_node({"a", attrs, children, _meta}),
+    do: link(Entities.decode(attr(attrs, "href")), inline(children))
 
   # Images from model output render as a link (the chat has no asset pipeline).
   defp inline_node({"img", attrs, _children, _meta}) do
-    src = attr(attrs, "src")
+    src = Entities.decode(attr(attrs, "src"))
 
     label =
-      case attr(attrs, "alt") do
+      case Entities.decode(attr(attrs, "alt")) do
         "" -> src
         alt -> alt
       end

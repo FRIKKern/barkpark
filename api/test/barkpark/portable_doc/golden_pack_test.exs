@@ -94,7 +94,7 @@ defmodule Barkpark.PortableDoc.GoldenPackTest do
     assert count.("pages/") == 2 * locales
     assert count.("i18n/") == locales
     assert count.("ops/") == 9
-    assert count.("from-markdown/") == 13
+    assert count.("from-markdown/") == 14
 
     for path <- ~w(stamp.json fragments.json email.html css/paper-surface.css css/code-tokens.css
                    nested-list-carriers.json canvas-forbidden-classes.json),

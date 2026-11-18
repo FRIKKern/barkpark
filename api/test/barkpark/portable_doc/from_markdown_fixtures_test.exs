@@ -25,7 +25,7 @@ defmodule Barkpark.PortableDoc.FromMarkdownFixturesTest do
   end
 
   test "the pack holds the from-markdown cases" do
-    assert length(cases()) == 13
+    assert length(cases()) == 14
   end
 
   test "FromMarkdown gives each case's blocks" do
