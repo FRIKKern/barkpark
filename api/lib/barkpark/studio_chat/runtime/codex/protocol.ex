@@ -269,7 +269,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
   A provider's text, cut to 2,000 graphemes and 8,000 bytes. A grapheme can be
   any number of bytes (one letter and 200,000 combining marks is one), so the
   grapheme cut alone does not bound the size (task-ed920e5459df0ab5). The byte
-  cut comes first and backs off to the last whole character, so the answer is
+  cut comes first and backs off to the last whole grapheme, so the answer is
   valid UTF-8 whenever the text was. Shared with the failure line a registered
   host's codex error gets (BarkparkWeb.Studio.CodexFailureLine).
   """
@@ -279,18 +279,12 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
   @text_bytes 8_000
 
   @doc """
-  `text` cut to 8,000 bytes, backing off to the last whole character: the
-  byte half of `cut_text/1`, for text made of pieces that were each cut.
+  `text` cut to 8,000 bytes, backing off to the last whole grapheme
+  (`Barkpark.ByteCut`), so a flag is never cut to one boxed letter: the byte
+  half of `cut_text/1`, for text made of pieces that were each cut.
   """
   @spec cut_bytes(String.t()) :: String.t()
-  def cut_bytes(text) when byte_size(text) <= @text_bytes, do: text
-
-  def cut_bytes(text) do
-    case :unicode.characters_to_binary(binary_part(text, 0, @text_bytes)) do
-      whole when is_binary(whole) -> whole
-      {_incomplete_or_error, whole, _rest} -> whole
-    end
-  end
+  def cut_bytes(text), do: Barkpark.ByteCut.prefix(text, @text_bytes)
 
   defp clean_text(value) when is_binary(value) and value != "", do: value
   defp clean_text(_), do: nil

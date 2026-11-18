@@ -1,10 +1,12 @@
 defmodule BarkparkWeb.ChatApprovalDeliveryTest do
   @moduledoc """
-  `POST /v1/chat/sessions/:id/approval` flips the stored ask before it delivers
-  the answer (task-035d3495dae536cf). When the delivery then fails or exits,
-  the flip is undone, so the ask is pending again and a resend delivers it
-  (rev26731, #26895 probes R2 and R3). Before, the ask stayed "allowed" with
-  nothing delivered, and every resend was a no-op.
+  `POST /v1/chat/sessions/:id/approval` and `/answer` claim the stored ask,
+  deliver the answer, and only then flip it (`ApprovalAnswer`,
+  task-035d3495dae536cf). When the delivery fails or exits, the claim is
+  dropped, so the ask is still pending, the route answers 503, and a resend
+  delivers it once (rev26731, #26895 probes R2 and R3; task-2300a8d1ccb6a4d2).
+  Before, the ask was stored "allowed" with nothing delivered, and every resend
+  was a no-op.
 
   The runtime is a scripted adapter: each `answer_approval/3` call takes the
   next step off a script (`:error`, `:exit` or `:ok`) and reports a delivery

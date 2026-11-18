@@ -211,6 +211,88 @@ try {
     }
   }
 
+  // The desk's rows (ArrayStringRow, ArrayItemDialog): Remove is an item of
+  // the row's "…" menu, not a row button. The row and its menu go with the
+  // press; focus went to <body>.
+  {
+    const deskRow = (i, value, count) =>
+      `<li class="bp-array-row dk-array-row dk-string-row" data-row-index="${i}" data-item-path="highlights[${i}]">` +
+      `<button type="button" class="icon-btn dk-drag-handle" aria-label="Move item ${i + 1}" data-desk-item-handle${count < 2 ? " disabled" : ""}></button>` +
+      `<div class="dk-string-value"><input type="text" class="bp-input" id="highlights[${i}]" value="${value}"></div>` +
+      `<div class="dk-item-actions"><button type="button" id="highlights[${i}]-menuButton" class="icon-btn dk-item-menu-button"></button>` +
+      `<div id="highlights[${i}]-menu" popover role="menu" data-desk-item-menu>` +
+      `<button type="button" role="menuitem" tabindex="-1" phx-click="array_op" phx-value-action="remove_row" phx-value-index="${i}" data-desk-item-action="remove">Remove</button>` +
+      `<button type="button" role="menuitem" tabindex="-1" phx-click="desk-item-copy" phx-value-index="${i}" data-desk-item-action="copy">Copy</button>` +
+      `</div></div></li>`;
+    const renderDesk = (fieldset, values) => {
+      fieldset.querySelector("ol.bp-array-rows").innerHTML = values.map((v, i) => deskRow(i, v, values.length)).join("");
+    };
+    const mountDesk = (values, add) => {
+      document.body.innerHTML =
+        `<fieldset class="bp-field bp-field-array" id="bp-array-highlights" data-array-path="doc[highlights]" data-desk-items>` +
+        `<legend>Highlights</legend><ol class="bp-array-rows" id="highlights"></ol>${add}</fieldset>`;
+      const el = document.getElementById("bp-array-highlights");
+      renderDesk(el, values);
+      return el;
+    };
+    const ADD = `<button type="button" class="bp-array-btn bp-array-btn-add" phx-value-action="add_row">+ Add item</button>`;
+    const pressMenu = async (el, i, action, next) => {
+      const item = el.querySelector(`li[data-row-index="${i}"] [data-desk-item-action="${action}"]`);
+      item.focus();
+      item.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      renderDesk(el, next);
+      await settle();
+      return document.activeElement;
+    };
+
+    {
+      const el = mountDesk(["a", "b", "c"], ADD);
+      const active = await pressMenu(el, 1, "remove", ["a", "c"]);
+      assert.notEqual(active, document.body, "the menu's Remove never drops focus to body");
+      assert.equal(active.closest("li").dataset.rowIndex, "1", "…it focuses the row now in that place");
+      assert.ok(active.matches("[data-desk-item-handle]"), "…on its first control, the handle");
+    }
+
+    {
+      const el = mountDesk(["a", "b", "c"], ADD);
+      const active = await pressMenu(el, 2, "remove", ["a", "b"]);
+      assert.equal(active.closest("li").dataset.rowIndex, "1", "removing the last row focuses the row before it");
+    }
+
+    {
+      // One row left: its handle is disabled, so the input.
+      const el = mountDesk(["a", "b"], ADD);
+      const active = await pressMenu(el, 0, "remove", ["b"]);
+      assert.equal(active.id, "highlights[0]", "one row left: focus in its input");
+    }
+
+    {
+      const el = mountDesk(["only"], ADD);
+      const active = await pressMenu(el, 0, "remove", []);
+      assert.ok(active.matches(".bp-array-btn-add"), "removing the only row from its menu focuses Add item");
+    }
+
+    {
+      // An array of several item types adds through the desk's "Add item" menu.
+      const typedAdd =
+        `<div class="dk-add-item"><button type="button" id="bp-array-highlights-add" class="bp-array-btn bp-array-btn-add" aria-haspopup="menu">+ Add item</button>` +
+        `<div popover role="menu" data-desk-item-menu></div></div>`;
+      const el = mountDesk(["only"], typedAdd);
+      const active = await pressMenu(el, 0, "remove", []);
+      assert.equal(active.id, "bp-array-highlights-add", "no rows left: the desk's Add item menu button");
+    }
+
+    {
+      // Copy writes nothing and changes no row: no focus move.
+      const el = mountDesk(["a", "b"], ADD);
+      const item = el.querySelector('li[data-row-index="0"] [data-desk-item-action="copy"]');
+      item.focus();
+      item.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await settle();
+      assert.equal(document.activeElement, item, "Copy moves no focus");
+    }
+  }
+
   console.log("array focus: all checks passed");
 } finally {
   window.close();

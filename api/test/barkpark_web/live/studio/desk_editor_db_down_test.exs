@@ -109,10 +109,15 @@ defmodule BarkparkWeb.Studio.DeskEditorDbDownTest do
     assert eventually(fn -> has_element?(ctx.view, card) end)
     refute has_element?(ctx.view, "section[data-pane-editing] [data-desk-left-out]")
 
-    # Read again, the note is back over the document it is about.
+    refute has_element?(ctx.view, "section[data-pane-editing] [data-desk-revision-missing]")
+
+    # Read again, the revision it names is looked for: there is none, so the
+    # pane says so in the form's place (`RevisionView`).
     restore!()
     ctx.view |> element("#{card} button", "Retry") |> render_click()
-    assert eventually(fn -> has_element?(ctx.view, "[data-pane-editing] #editor-form") end)
-    assert has_element?(ctx.view, "section[data-pane-editing] [data-desk-left-out]")
+
+    assert eventually(fn ->
+             has_element?(ctx.view, "section[data-pane-editing] [data-desk-revision-missing]")
+           end)
   end
 end

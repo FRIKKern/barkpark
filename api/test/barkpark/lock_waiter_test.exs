@@ -29,6 +29,70 @@ defmodule Barkpark.LockWaiterTest do
     end
   end
 
+  # task-23b6ba92b28c809a: `unboxed_run` checks in whatever its process holds,
+  # so an `await_lock!/1` that ran one inside a race test's own `unboxed_run`
+  # released the test's connection. The rest of the test ran in the sandbox:
+  # its cleanup rolled back and the rows it had committed stayed behind.
+  test "a wait inside the caller's unboxed_run leaves its cleanup committed, so nothing stays" do
+    slug = "lock-waiter-residue-#{System.unique_integer([:positive])}"
+    assert committed_workspaces(slug) == 0
+
+    unboxed(fn ->
+      ws = Barkpark.TenancyFixtures.create_workspace!(slug)
+
+      try do
+        holder = hold_row(ws.id)
+        {waiter, backend} = LockWaiter.start(fn -> lock_row(ws.id) end)
+        LockWaiter.await_lock!(backend)
+        send(holder.pid, :release)
+        Task.await(holder, 10_000)
+        Task.await(waiter, 10_000)
+      after
+        {:ok, _} = Barkpark.Tenancy.delete_workspace(ws)
+      end
+    end)
+
+    assert committed_workspaces(slug) == 0, "the caller's cleanup rolled back: residue committed"
+  end
+
+  defp unboxed(fun), do: Barkpark.Unboxed.run(Repo, fun)
+
+  defp lock_row(id),
+    do: Repo.one!(from w in Barkpark.Tenancy.Workspace, where: w.id == ^id, lock: "FOR UPDATE")
+
+  defp hold_row(id) do
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        unboxed(fn ->
+          Repo.transaction(fn ->
+            lock_row(id)
+            send(parent, :held)
+
+            receive do
+              :release -> :ok
+            after
+              10_000 -> :timeout
+            end
+          end)
+        end)
+      end)
+
+    assert_receive :held, 5_000
+    holder
+  end
+
+  # Read on a connection of its own, so only committed rows count.
+  defp committed_workspaces(slug) do
+    Task.async(fn ->
+      unboxed(fn ->
+        Repo.aggregate(from(w in Barkpark.Tenancy.Workspace, where: w.slug == ^slug), :count)
+      end)
+    end)
+    |> Task.await()
+  end
+
   defp with_foreign_waiter(where, fun) do
     database = if where == :this_database, do: Repo.config()[:database], else: "postgres"
 

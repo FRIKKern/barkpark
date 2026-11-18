@@ -16,6 +16,8 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
 
   @moduletag :requires_plugins
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Auth
   alias Barkpark.ChatHosts
   alias Barkpark.ChatHosts.RegisteredHost
@@ -236,6 +238,223 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
     end
   end
 
+  # task-dc4980982da790c9, rev26731 on #26937: "no local Recorder" and "the
+  # Recorder did not answer" are not "no runtime". The host's turn is still
+  # blocked on the ask, so an answer must leave it pending (503), never cancel it.
+  describe "an answer while the host's lease is live but no Recorder answers" do
+    test "after a restart (no Recorder, lease live) both routes 503 and keep the asks; after a send they deliver once",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_unavailable(answer(raw, sid, "ask-b1q"))
+      assert_pending_and_unleased(host, sid)
+      assert ChatHosts.lease_live?(turn_lease)
+
+      send_resp =
+        json_conn(raw)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "still there?"}))
+
+      assert send_resp.status == 202
+      assert_delivered_once(raw, host, sid)
+    end
+
+    test "a Recorder that does not answer in time is a 503 on both routes; after it resumes they deliver once",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      recorder = Recorder.whereis(sid)
+      :ok = :sys.suspend(recorder)
+
+      try do
+        assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+        assert_unavailable(answer(raw, sid, "ask-b1q"))
+      after
+        :sys.resume(recorder)
+      end
+
+      assert_pending_and_unleased(host, sid)
+      assert_delivered_once(raw, host, sid)
+    end
+
+    # rev26731 round 2, H3: past `expires_at` but inside `end_expired_turns`'
+    # grace the lease is still `running`, and the host's next heartbeat renews
+    # it. The turn is still blocked on the ask, so it must not be canceled.
+    test "a lease past expires_at but inside the sweep's grace keeps the asks: both routes 503",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -30)
+
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_unavailable(answer(raw, sid, "ask-b1q"))
+      assert_pending_and_unleased(host, sid)
+      assert ChatHosts.end_expired_turns() == 0
+    end
+
+    # rev26731 round 3, H4: the sweeper runs `end_expired_turns` only every few
+    # minutes, and `heartbeat/2` revives any `leased`/`running` lease until it
+    # does. Past the grace but not yet swept, the turn can still come back.
+    test "a lease past the grace that the sweep has not ended keeps the asks: 503, then a heartbeat and a send deliver each once",
+         %{raw: raw, sid: sid, host: host} do
+      turn_started!(host, sid)
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_unavailable(answer(raw, sid, "ask-b1q"))
+      assert_pending_and_unleased(host, sid)
+
+      {:ok, _} = ChatHosts.heartbeat(host, %{"protocol_version" => 1})
+      assert ChatHosts.lease_live?(turn_lease)
+
+      send_resp =
+        json_conn(raw)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "back?"}))
+
+      assert send_resp.status == 202
+      assert_delivered_once(raw, host, sid)
+    end
+
+    test "a lease the sweep has ended no longer holds the turn: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      turn_started!(host, sid)
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -120)
+
+      # Past the grace, still held until the sweep ends it.
+      assert_unavailable(approve(raw, sid, "ask-b1", "allow"))
+      assert_pending_and_unleased(host, sid)
+      assert ChatHosts.end_expired_turns() >= 1
+      refute ChatHosts.turn_held?(sid)
+      assert_canceled(raw, host, sid)
+    end
+  end
+
+  # rev26731 round 4, N1/N2: a lease the sweep can never end must not hold its
+  # asks at 503 forever. Past the grace, it no longer holds the turn.
+  describe "an answer on a lease past the grace that the sweep can never end" do
+    test "N1, a lease created before the sweep's floor: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      turn_started!(host, sid)
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+      created_before_floor!(turn_lease)
+
+      assert ChatHosts.end_expired_turns() == 0
+      assert_canceled(raw, host, sid)
+    end
+
+    test "N2, a lease whose session is not working: both routes cancel the asks",
+         %{raw: raw, sid: sid, host: host} do
+      asks!(host, sid)
+      [%{lease_id: turn_lease}] = host_commands(host, sid, :send_turn)
+      kill_recorder!(sid)
+      expire!(turn_lease, -200)
+
+      assert StudioChat.get_session(sid).status == "active"
+      assert ChatHosts.end_expired_turns() == 0
+      assert_canceled(raw, host, sid)
+    end
+  end
+
+  defp assert_canceled(raw, host, sid) do
+    assert approve(raw, sid, "ask-b1", "allow").status == 409
+    assert answer(raw, sid, "ask-b1q").status == 404
+    assert host_commands(host, sid, :answer_approval) == []
+    assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "approval")
+    assert [%{metadata: %{"approval_status" => "canceled"}}] = rows(sid, "question")
+  end
+
+  # Older than the sweep's default floor (`@expired_turn_floor`, 2026-11-14).
+  defp created_before_floor!(lease_id) do
+    {1, _} =
+      Repo.update_all(
+        from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^lease_id),
+        set: [inserted_at: ~U[2026-11-01 00:00:00.000000Z]]
+      )
+  end
+
+  # Move the lease's expiry `seconds` from now, as a host that stopped
+  # heartbeating would leave it; its status stays `leased`/`running`.
+  defp expire!(lease_id, seconds) do
+    at = DateTime.add(DateTime.utc_now(), seconds)
+
+    {1, _} =
+      Repo.update_all(
+        from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^lease_id),
+        set: [expires_at: at]
+      )
+
+    refute ChatHosts.lease_live?(lease_id)
+  end
+
+  defp asks!(host, sid) do
+    post_ask!(host, sid, "ask-b1", "Write", %{"file_path" => "/tmp/b1.txt"})
+    assert_receive {:claude_chat_permission, %{request_id: "ask-b1"}}, 1_000
+    post_ask!(host, sid, "ask-b1q", "AskUserQuestion", @ask_input)
+    assert_receive {:claude_chat_permission, %{request_id: "ask-b1q"}}, 1_000
+  end
+
+  # As on a deploy: the Recorder dies with no teardown, the host's lease lives on.
+  defp kill_recorder!(sid) do
+    recorder = Recorder.whereis(sid)
+    ref = Process.monitor(recorder)
+    Process.exit(recorder, :kill)
+    assert_receive {:DOWN, ^ref, _, _, _}, 1_000
+    await_unregistered(sid)
+  end
+
+  # A Registry drops a dead owner's name asynchronously.
+  defp await_unregistered(sid, tries \\ 100) do
+    cond do
+      Recorder.whereis(sid) == nil -> :ok
+      tries == 0 -> flunk("the killed Recorder stayed registered")
+      true -> Process.sleep(10) && await_unregistered(sid, tries - 1)
+    end
+  end
+
+  defp assert_unavailable(resp) do
+    assert resp.status == 503, "answered #{resp.status}: #{resp.resp_body}"
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "runtime_unavailable"
+  end
+
+  defp assert_pending_and_unleased(host, sid) do
+    assert host_commands(host, sid, :answer_approval) == []
+    assert [%{metadata: %{"approval_status" => "pending"}}] = rows(sid, "approval")
+    assert [%{metadata: %{"approval_status" => "pending"}}] = rows(sid, "question")
+  end
+
+  defp assert_delivered_once(raw, host, sid) do
+    assert approve(raw, sid, "ask-b1", "allow").status == 204
+    assert answer(raw, sid, "ask-b1q").status == 204
+
+    leased = host |> host_commands(sid, :answer_approval) |> Enum.map(& &1.command.approval_id)
+    assert Enum.sort(leased) == ["ask-b1", "ask-b1q"]
+
+    assert [%{metadata: %{"approval_status" => "allowed"}}] = rows(sid, "approval")
+    assert [%{metadata: %{"approval_status" => "allowed"}}] = rows(sid, "question")
+  end
+
+  defp answer(raw, sid, request_id) do
+    json_conn(raw)
+    |> post(
+      "/v1/chat/sessions/#{sid}/answer",
+      Jason.encode!(%{
+        request_id: request_id,
+        answers: %{@question => "Postgres", @multi => ["Auth"]}
+      })
+    )
+  end
+
   defp approve(raw, sid, request_id, decision) do
     json_conn(raw)
     |> post(
@@ -273,6 +492,24 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
   # The Go host's approval_requested event for a Claude can_use_tool request,
   # posted on the send_turn lease at the next cursor.
   defp post_ask!(host, sid, approval_id, tool_name, input, title \\ nil) do
+    post_event!(host, sid, approval_id, %{
+      "kind" => "approval_requested",
+      "approval_id" => approval_id,
+      "tool_name" => tool_name,
+      "input" => input,
+      "title" => title
+    })
+  end
+
+  # The host's turn_started, which the Recorder records as the session
+  # `working`: the state `end_expired_turns/2` sweeps.
+  defp turn_started!(host, sid) do
+    post_event!(host, sid, "turn", %{"kind" => "turn_started"})
+    :sys.get_state(Recorder.whereis(sid))
+    assert StudioChat.get_session(sid).status == "working"
+  end
+
+  defp post_event!(host, sid, key, event) do
     assert [%{lease_id: lease_id, epoch: epoch, last_cursor: last}] =
              host_commands(host, sid, :send_turn)
 
@@ -283,14 +520,8 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
                lease_id: lease_id,
                epoch: epoch,
                cursor: cursor,
-               idempotency_key: "#{approval_id}-#{cursor}",
-               event: %{
-                 "kind" => "approval_requested",
-                 "approval_id" => approval_id,
-                 "tool_name" => tool_name,
-                 "input" => input,
-                 "title" => title
-               }
+               idempotency_key: "#{key}-#{cursor}",
+               event: event
              })
   end
 

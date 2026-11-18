@@ -120,7 +120,9 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           api_token_raw: Map.get(assigns, :api_token_raw, ""),
           # The document a nested `visibleWhen` reads by default (task-9905a69475b1ff3b).
           root: Map.get(assigns, :editor_form),
-          id_base: id_base
+          id_base: id_base,
+          # The desk's titles of the items' reference targets (`Desk.ItemRefs`).
+          ref_titles: Map.get(assigns, :desk_item_refs) || %{}
         })
 
       "codelist" ->

@@ -15029,3 +15029,369 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "this token is bound to one dataset and cannot change workspace members, access, tokens or secrets"
 msgstr ""
+
+#: lib/barkpark_web/components/fields/tags_field.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{tag}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tags_field.ex
+#, elixir-autogen, elixir-format
+msgid "Enter tag and press ENTER…"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Item actions"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Add item before"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Add item after"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Close dialog"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Move item %{n}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "Drag to re-order"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "sortable"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_item_dialog.ex
+#, elixir-autogen, elixir-format
+msgid "To pick up an item, press Space or Enter on its handle. Use the arrow keys to move it, Space or Enter to drop, Escape to cancel."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Inspector"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Review changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Close history"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the history for the %{draft} version of this document."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Document revisions"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Expand"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Discarded draft"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/history_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Draft created"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Revision from"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Revert to revision"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Restore this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to restore this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/revision_view.ex
+#, elixir-autogen, elixir-format
+msgid "Restore most recent revision"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/editor_host.ex
+#, elixir-autogen, elixir-format
+msgid "This revision can't be found. Pick another entry in the history."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex
+#, elixir-autogen, elixir-format
+msgid "The document was successfully duplicated"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/slug_in_use.ex
+#, elixir-autogen, elixir-format
+msgid "Slug is already in use"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/slug_in_use.ex
+#, elixir-autogen, elixir-format
+msgid "Validation error: %{message}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/field_slots.ex
+#, elixir-autogen, elixir-format
+msgctxt "change bar"
+msgid "Review changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Current draft"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "There are no changes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Edit the document or select an older version in the timeline to see a list of changes appear in this panel."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Revert changes to %{field}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Revert change"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Revert all"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to revert the change?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_changes.ex
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to revert all %{count} changes?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "changed to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Moved"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Before"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "After"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Alternative text"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Formatting changed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Added by %{author}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Removed by %{author}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/review_diff.ex
+#, elixir-autogen, elixir-format
+msgid "Formatting changed by %{author}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Built %{date}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Changelog"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Could not open that place. It does not exist, or you do not have access to it."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Dark"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Documentation"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Full changelog on GitHub"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Help and resources"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Light"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "New version available"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No changes are listed in this build."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "OK"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open commit %{commit} on GitHub"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open user menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Reload to update to %{version}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Reload to update"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Report a problem"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Saving, then reloading…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Studio version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Switch workspace, project or dataset"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "System"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "This token can only open the dataset %{dataset}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Up to date"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use dark appearance"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use light appearance"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use system appearance"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "What's new"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Workspace %{workspace}, project %{project}, dataset %{dataset}. Switch"
+msgstr ""

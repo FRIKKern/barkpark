@@ -23,6 +23,11 @@ defmodule Barkpark.ChatHosts.ExecutionLease do
     # Server-written only, never cast: the first poll that handed this lease
     # to a host (`ChatHosts.next_commands/1`).
     field :handed_out_at, :utc_datetime_usec
+    # An approval answer's lease only: the approval it answers and the lease
+    # that asked it (`AskingLease`), so a host's refusal names one ask
+    # (task-746c02d760f26ce7). NULL on every other lease.
+    field :approval_id, :string
+    field :asked_lease_id, :binary_id
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -38,7 +43,9 @@ defmodule Barkpark.ChatHosts.ExecutionLease do
       :last_cursor,
       :status,
       :expires_at,
-      :revoked_at
+      :revoked_at,
+      :approval_id,
+      :asked_lease_id
     ])
     |> validate_required([
       :host_id,

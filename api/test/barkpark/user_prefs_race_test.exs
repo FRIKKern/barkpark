@@ -218,7 +218,7 @@ defmodule Barkpark.UserPrefsRaceTest do
   defp push_front(user, ws, id),
     do: UserPrefs.apply_list_op(user.id, ws.id, @dataset, @key, {:push_front, "ids", id, 20})
 
-  defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+  defp unboxed(fun), do: Barkpark.Unboxed.run(Repo, fun)
 
   # Each op on its own connection, reporting its backend; every one of them
   # must be waiting on the holder's lock before the holder lets go.

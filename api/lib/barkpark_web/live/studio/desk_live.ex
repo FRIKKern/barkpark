@@ -42,15 +42,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
+  alias BarkparkWeb.Studio.Desk.NewDocMenu
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Rows
+  alias BarkparkWeb.Studio.Desk.ScopeSwitch
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
   alias BarkparkWeb.Studio.Desk.DocStyle
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.StructureCopy
+  alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   defmodule NotFound do
@@ -97,6 +100,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
+      # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
+      |> assign(:desk_scope, nil)
       |> Bulk.init()
       # The search's hits: up to 50, as the TanStack Studio's text search,
       # the first 40 drawn, then more as the list's end scrolls near (`Search`).
@@ -332,10 +337,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-field-" <> _ = event, params, socket),
     do: FieldActions.handle_event(event, params, socket)
 
+  # An array item's Copy (`Handlers.ArrayItems`): it writes nothing.
+  def handle_event("desk-item-copy", params, socket),
+    do: ArrayItems.copy(params, socket)
+
   # A list's selection and its bulk publish and unpublish (`Bulk`). They are
   # the page's events, so the Studio's capability gate has passed them.
   def handle_event("bulk-" <> _ = event, params, socket),
     do: Bulk.handle_event(event, params, socket)
+
+  # The navbar's workspace, project and dataset switcher (`ScopeSwitch`).
+  def handle_event("desk-scope-" <> _ = event, params, socket),
+    do: ScopeSwitch.handle_event(event, params, socket)
 
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
@@ -460,6 +473,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     ~H"""
     <Style.sheet />
     <DocStyle.sheet />
+    <BarkparkWeb.Studio.Desk.NavbarStyle.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <%!-- The search is a dialog, as the TanStack Studio's: the navbar's
           search button (`data-desk-search-open`), Cmd+K and "/" open it
@@ -478,6 +492,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
       />
     </dialog>
+    <%!-- The navbar's Create new (J37): its button is the layout's. --%>
+    <NewDocMenu.picker picks={NewDocMenu.picks(@desk.new)} />
     <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
@@ -492,8 +508,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
       data-desk-field-actions={BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")}
+      data-desk-tags={BarkparkWeb.StaticAssets.path("bp-desk-tags.js")}
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
+      data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}
+      data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >
@@ -523,6 +542,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         scope={@scope}
         list_sort={ListMenu.kept(@list_sorts, @desk.menus, view.pane[:type])}
         orderings={menu(@desk, view).orderings}
+        choices={@desk.new[view.pane[:type]] || []}
         sorts={menu(@desk, view).sorts}
         default={menu(@desk, view).default}
         focus={FocusMode.of(assigns, view)}
@@ -553,6 +573,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       root: root,
       nodes: Tree.index(root),
       menus: ListMenu.menus(dataset, scope),
+      new: NewDocMenu.all(dataset, scope),
       targets: LiveRefresh.targets(dataset, scope)
     }
   end

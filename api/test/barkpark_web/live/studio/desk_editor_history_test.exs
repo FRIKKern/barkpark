@@ -214,7 +214,128 @@ defmodule BarkparkWeb.Studio.DeskEditorHistoryTest do
     end
   end
 
-  describe "J16 history" do
+  # J16 as the TanStack Studio has it (`HistoryPanel.tsx`): History is an
+  # inspector beside the form, not a dialog. On the old code the menu's
+  # History opened the Studio's dialog, and the URL's inspector drew nothing.
+  describe "J16 history inspector" do
+    @history ",changesInspectorTab=history,inspect=sanity%2Fstructure%2Fhistory"
+
+    defp at(ctx, params \\ ""), do: "#{ctx.base}/#{ctx.post_type};#{ctx.post}#{params}"
+
+    defp revisions(ctx), do: Content.list_revisions(ctx.post, ctx.post_type, @dataset, limit: 30)
+
+    test "the menu's History opens the inspector, a list of the document's revisions", ctx do
+      {:ok, view, _} = live(ctx.conn, at(ctx))
+      settle(view)
+
+      item =
+        view
+        |> element(
+          ~s([data-pane-editing] [role="menu"][id$="-editor-actions"] [data-desk-doc-action="show-history"])
+        )
+        |> render()
+
+      assert item =~ "inspect=sanity%2Fstructure%2Fhistory",
+             "History is no patch to the inspector: #{item}"
+
+      refute item =~ ~s(phx-click="show-history"), "History still opens the Studio's dialog"
+
+      {:ok, view, _} = live(ctx.conn, at(ctx, @history))
+      settle(view)
+
+      list =
+        ~s([data-pane-editing] aside[aria-label="History"] ul[aria-label="Document revisions"])
+
+      assert has_element?(view, list), "no list named Document revisions in a History inspector"
+
+      assert has_element?(view, ~s(#{list} li button[aria-current="true"])),
+             "the newest entry is not the current one"
+
+      assert has_element?(view, "#{list} li button", "Published")
+
+      assert has_element?(
+               view,
+               ~s([data-pane-editing] [role="tab"][aria-selected="true"]),
+               "History"
+             )
+
+      refute has_element?(view, "[data-pane-editing] [data-desk-left-out]")
+      refute has_element?(view, "#history-modal-dialog")
+    end
+
+    test "an old revision shows read-only at its URL, writes nothing, and Confirm restores it",
+         ctx do
+      rev = Enum.find(revisions(ctx), &(&1.action == "publish"))
+      url = at(ctx, @history <> ",rev=#{rev.id}")
+      {:ok, view, _} = live(ctx.conn, url)
+      settle(view)
+
+      assert editor_shows?(view, "title", "Post published"), "the form does not show the revision"
+      assert has_element?(view, ~s([data-pane-editing] fieldset[disabled] #editor-form))
+
+      assert has_element?(
+               view,
+               "[data-pane-editing] [data-desk-revision-footer]",
+               "Revert to revision"
+             )
+
+      refute has_element?(view, "[data-pane-editing] [data-desk-publish]")
+
+      # A post from the shown form is dropped: the draft keeps its title.
+      BarkparkWeb.EditorPost.change(view, %{"doc" => %{"title" => "Typed over a revision"}})
+      settle(view)
+      {:ok, draft} = Content.get_document(Content.draft_id(ctx.post), ctx.post_type, @dataset)
+      assert draft.title == "Post draft", "the revision's form wrote the draft"
+
+      BarkparkWeb.EditorPost.press_on(view, element(view, "[data-desk-revert-confirm]"))
+
+      {:ok, draft} = Content.get_document(Content.draft_id(ctx.post), ctx.post_type, @dataset)
+      assert draft.title == "Post published", "Confirm did not write the revision back"
+      assert_patch(view, at(ctx, @history))
+    end
+
+    test "a revision of another document is not shown", ctx do
+      other = ctx.author |> Content.list_revisions(ctx.author_type, @dataset, limit: 1) |> hd()
+      {:ok, view, _} = live(ctx.conn, at(ctx, @history <> ",rev=#{other.id}"))
+      settle(view)
+
+      assert has_element?(view, "[data-pane-editing] [data-desk-revision-missing]")
+      refute has_element?(view, "[data-pane-editing] [data-desk-revision-footer]")
+      refute has_element?(view, "[data-pane-editing] #editor-form")
+    end
+
+    test "the footer's status opens Review changes, the group tabs waiting", ctx do
+      {:ok, view, _} = live(ctx.conn, at(ctx))
+      settle(view)
+
+      status =
+        view |> element("[data-pane-editing] .doc-footer [data-desk-footer-status]") |> render()
+
+      refute status =~ "disabled", "the footer's status is still a disabled button"
+      assert status =~ "changesInspectorTab=review", "the status opens no Review changes"
+
+      {:ok, view, _} =
+        live(
+          ctx.conn,
+          at(
+            ctx,
+            ",since=@lastPublished,changesInspectorTab=review,inspect=sanity%2Fstructure%2Fhistory"
+          )
+        )
+
+      settle(view)
+
+      assert has_element?(
+               view,
+               ~s([data-pane-editing] aside[aria-label="History"] [role="tab"][aria-selected="true"]),
+               "Review changes"
+             )
+
+      assert has_element?(view, ~s([data-pane-editing][data-desk-inspecting]))
+    end
+  end
+
+  describe "J16 history dialog (the Studio's own, outside the desk's menu)" do
     test "History opens in the pane, and restoring a revision loads it into the editor", ctx do
       {:ok, view, _} = live(ctx.conn, "#{ctx.base}/#{ctx.post_type};#{ctx.post}")
       settle(view)

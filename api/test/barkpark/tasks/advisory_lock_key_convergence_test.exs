@@ -276,7 +276,7 @@ defmodule Barkpark.Tasks.AdvisoryLockKeyConvergenceTest do
   describe "two-connection race — the converged key actually blocks" do
     @tag :slow
     test "close, claim and the compaction restore all wait on the key a holder holds" do
-      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      Barkpark.Unboxed.run(Repo, fn ->
         suffix = System.unique_integer([:positive])
         workspace = Barkpark.TenancyFixtures.create_workspace!("lockconv-#{suffix}")
         project = Barkpark.TenancyFixtures.create_project!(workspace, "lockconv-#{suffix}")
@@ -303,7 +303,7 @@ defmodule Barkpark.Tasks.AdvisoryLockKeyConvergenceTest do
           # ── Connection A: hold the converged key, and say so ──────────────
           holder =
             Task.async(fn ->
-              Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+              Barkpark.Unboxed.run(Repo, fn ->
                 Repo.transaction(fn ->
                   Repo.query!(@lock_sql, [LockKey.task(held.id)])
                   send(parent, :task_lock_held)

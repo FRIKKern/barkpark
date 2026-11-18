@@ -183,10 +183,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <.dynamic_tag tag_name={if @fieldset, do: "fieldset", else: "div"} class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
       <%= if @fieldset do %><legend class="editor-field-label">
         <%= @label %>
+        <BarkparkWeb.Studio.Desk.FieldSlots.mark :if={@slots} {@slots} />
         <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </legend><% else %><label class="editor-field-label" for={@for}>
         <%= @label %>
+        <BarkparkWeb.Studio.Desk.FieldSlots.mark :if={@slots} {@slots} />
         <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label><% end %>
@@ -225,6 +227,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   defp desk?(%{desk_base: base}) when is_binary(base), do: true
   defp desk?(_assigns), do: false
+
+  # The desk's History inspector is open: the form shows every field and its
+  # group tabs wait, as Sanity's (`Desk.HistoryPanel.waiting/1`).
+  defp desk_groups_waiting?(%{desk_groups_waiting: true}), do: true
+  defp desk_groups_waiting?(_assigns), do: false
 
   @doc false
   # Extract the ONIX element name from a field. Handles both atom-keyed
@@ -909,6 +916,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   :if={desk?(@parent_assigns)}
                   type="button"
                   id="bp-group-tab-all-fields"
+                  disabled={desk_groups_waiting?(@parent_assigns)}
                   phx-click="select-group"
                   phx-value-group=""
                   role="tab"
@@ -921,6 +929,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   <button
                     type="button"
                     id={"bp-group-tab-" <> grp["name"]}
+                    disabled={desk_groups_waiting?(@parent_assigns)}
                     phx-click="select-group"
                     phx-value-group={grp["name"]}
                     role="tab"

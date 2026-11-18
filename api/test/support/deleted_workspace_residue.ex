@@ -20,7 +20,6 @@ defmodule Barkpark.DeletedWorkspaceResidue do
   """
 
   alias Barkpark.Repo
-  alias Ecto.Adapters.SQL.Sandbox
 
   @orphaned %{
     "audit_events" =>
@@ -33,7 +32,7 @@ defmodule Barkpark.DeletedWorkspaceResidue do
 
   def purge_on_exit do
     marks =
-      Sandbox.unboxed_run(Repo, fn ->
+      Barkpark.Unboxed.run(Repo, fn ->
         Map.new(@orphaned, fn {table, _where} ->
           %{rows: [[n]]} = Repo.query!("SELECT coalesce(max(id), 0) FROM #{table}")
           {table, n}
@@ -44,7 +43,7 @@ defmodule Barkpark.DeletedWorkspaceResidue do
   end
 
   defp purge!(marks) do
-    Sandbox.unboxed_run(Repo, fn ->
+    Barkpark.Unboxed.run(Repo, fn ->
       {:ok, _} =
         Repo.transaction(fn ->
           Repo.query!("SET LOCAL session_replication_role = replica")

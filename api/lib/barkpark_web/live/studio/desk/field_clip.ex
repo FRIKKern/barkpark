@@ -117,6 +117,46 @@ defmodule BarkparkWeb.Studio.Desk.FieldClip do
     %{json: json, html: html, text: text}
   end
 
+  @doc """
+  The copy of one item, at `index`, of the array `field`: a one-item list
+  under the array's signature, marked to be appended (the TanStack Studio's
+  `copyItem`), so a Paste field on an array of that kind adds it at the end
+  with a new `_key` (`Handlers.FieldPaste`).
+  """
+  @spec item_copy(map(), term(), non_neg_integer(), String.t() | nil, String.t() | nil) :: copy()
+  def item_copy(%{"name" => name} = field, item, index, doc_id, doc_type) do
+    sig = sig(field)
+    step = if is_map(item) and is_binary(item["_key"]), do: %{"_key" => item["_key"]}, else: index
+
+    clip = %{
+      "type" => "sanityClipboardItem",
+      "documentId" => doc_id,
+      "documentType" => doc_type,
+      "isDocument" => false,
+      "schemaTypeName" => sanity_type(sig),
+      "valuePath" => [name, step],
+      "value" => [item],
+      "patchType" => "append",
+      "barkpark" => %{
+        "kind" => "field",
+        "field" => %{
+          "name" => "#{name}[#{index}]",
+          "sig" => sig,
+          "value" => [item],
+          "append" => true
+        }
+      }
+    }
+
+    json = Jason.encode!(clip)
+    text = as_text(item)
+
+    html =
+      ~s(<div data-sanity-clipboard-base64="#{Base.encode64(json)}"><p>#{escape(text)}</p></div>)
+
+    %{json: json, html: html, text: text}
+  end
+
   # Sanity's schema type name for a signature.
   defp sanity_type("reference:" <> _types), do: "reference"
   defp sanity_type("array:" <> _member), do: "array"

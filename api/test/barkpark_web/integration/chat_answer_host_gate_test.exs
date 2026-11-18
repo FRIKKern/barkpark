@@ -39,6 +39,24 @@ defmodule BarkparkWeb.Integration.ChatAnswerHostGateTest do
     end
   end
 
+  # Holds a session's Recorder name, so the route sees a live runtime.
+  defmodule RecorderStub do
+    @moduledoc false
+    use GenServer
+
+    def start_link(sid),
+      do:
+        GenServer.start_link(__MODULE__, nil,
+          name: {:via, Registry, {Barkpark.StudioChat.RecorderRegistry, sid}}
+        )
+
+    @impl true
+    def init(_), do: {:ok, nil}
+
+    @impl true
+    def handle_call(:session_pid, _from, state), do: {:reply, {:ok, :stub_ref}, state}
+  end
+
   @ask %{
     "questions" => [
       %{"question" => "Which color?", "options" => [%{"label" => "Blue"}, %{"label" => "Red"}]}
@@ -211,8 +229,19 @@ defmodule BarkparkWeb.Integration.ChatAnswerHostGateTest do
       )
 
     pending_question!(sid, "q-3")
+    # A live runtime to deliver to: with none, the route cancels the question
+    # and 404s (D11, task-dc4980982da790c9), which would hide the gate.
+    start_supervised!({RecorderStub, sid})
+    adapters = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat_runtime_adapters,
+      Map.put(adapters, :claude, EchoCodex)
+    )
 
     assert answer(seat, sid, "q-3").status == 204
+    assert_receive {:answered, "q-3", {:allow, _}}, 1_000
     assert status_of(sid) == "allowed"
   end
 end

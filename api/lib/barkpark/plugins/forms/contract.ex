@@ -130,14 +130,16 @@ defmodule Barkpark.Plugins.Forms.Contract do
   # Source metadata is descriptive, not user content, so it is the one place a
   # long value is shortened rather than refused: a long Referer must not make
   # an otherwise valid submission fail.
+  # Bytes that are not UTF-8 are dropped first, then the cut backs off to a
+  # grapheme boundary, so a flag never ends as one boxed letter.
   defp truncate_bytes(s, max) when byte_size(s) <= max, do: s
 
   defp truncate_bytes(s, max) do
     s
-    |> binary_part(0, max)
     |> String.chunk(:valid)
     |> Enum.filter(&String.valid?/1)
     |> Enum.join()
+    |> Barkpark.ByteCut.prefix(max)
   end
 
   # ── intake: the posted field map ──────────────────────────────────────────

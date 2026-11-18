@@ -78,7 +78,8 @@
   // A strip is drawn 1 px wider than the accounting above, as the TanStack
   // Studio draws it (`calc(var(--strip) + 1px)`): 52 px, its border included.
   var STRIP_DRAWN = STRIP + 1;
-  var MIN = { types: 320, menu: 320, list: 320, doc: 600 };
+  // A document with an inspector open needs 600 + 320 (TanStack's docInspect).
+  var MIN = { types: 320, menu: 320, list: 320, doc: 600, docInspect: 920 };
 
   function collapsed(kinds, width, focus) {
     var n = kinds.length;
@@ -257,7 +258,8 @@
       return !el.hasAttribute("data-desk-leaving");
     });
     var kinds = shown.map(function (el) {
-      return el.getAttribute("data-pane-kind");
+      var kind = el.getAttribute("data-pane-kind");
+      return kind === "doc" && el.hasAttribute("data-desk-inspecting") ? "docInspect" : kind;
     });
     var at = shown.findIndex(function (el) {
       return focus !== null && Number(el.getAttribute("data-pane-index")) === focus;
@@ -722,10 +724,18 @@
         return deskScript("data-desk-field-actions", window.BarkparkDeskFieldActions);
       };
       fieldScript();
+      // A tags field's Enter (bp-desk-tags.js), pushed through here: LiveView
+      // drops a click on a button whose last press is still unanswered.
+      deskScript("data-desk-tags", window.BarkparkDeskTags);
+      root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
       // A list's selection (bp-desk-bulk.js): the modified clicks, Escape, the toast.
       deskScript("data-desk-bulk", window.BarkparkDeskBulk);
+      // An array item's handle, "…" menu and dialog (bp-desk-array-menu.js).
+      deskScript("data-desk-array-menu", window.BarkparkDeskArrayMenu);
+      // The navbar's menus (bp-desk-navbar.js), when a live navigation came here.
+      deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.

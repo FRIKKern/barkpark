@@ -15,11 +15,18 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
 
     * the Idempotency-mounting pipelines are read out of `router.ex`'s AST, so a
       THIRD mount joins the scan automatically;
-    * the routes are read out of `BarkparkWeb.Router.routes/0`;
+    * the routes are read out of `BarkparkWeb.Router.__routes__/0`, and each
+      route's pipelines out of `Phoenix.Router.route_info/4` on the compiled
+      router. So a route a macro emits counts the same as a hand-written one:
+      `plugin_routes(scope: ...)` inside a scope that pipes through an
+      Idempotency pipeline is covered (task-7f9b31e4cc83419e);
     * the streaming actions are read out of each controller's own AST;
     * a controller that mounts the plug itself for some actions
       (`plug ... when action == :x`, as ChatController does for the chat send,
       because router.ex may not grow) is read out of the controllers' AST too.
+      Every file under `lib/` that names the plug is read, so a plugin's own
+      controller (`lib/barkpark/plugins/*/web/`) counts like one under
+      `lib/barkpark_web/controllers/` (task-7f9b31e4cc83419e).
       Such a module may stream in OTHER actions, so the check there is per
       action: from each mounted action, follow the module's own local calls,
       and red if any of them reaches `send_chunked/2` or `send_file/3..5`;
@@ -53,14 +60,14 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   alias Barkpark.Test.IdempotencyMounts
 
   @router_source Path.join(__DIR__, "../../lib/barkpark_web/router.ex") |> Path.expand()
-  @controllers_dir Path.join(__DIR__, "../../lib/barkpark_web/controllers") |> Path.expand()
+  @lib_dir Path.join(__DIR__, "../../lib") |> Path.expand()
   @mutating_verbs ~w(post put patch delete)a
   @api_root Path.expand("../..", __DIR__)
 
   # ── the scan ────────────────────────────────────────────────────────────
 
-  defp idempotency_pipelines do
-    {:ok, ast} = @router_source |> File.read!() |> Code.string_to_quoted()
+  defp idempotency_pipelines(router \\ BarkparkWeb.Router) do
+    {:ok, ast} = router |> router_source() |> File.read!() |> Code.string_to_quoted()
     aliases = IdempotencyMounts.aliases(ast)
 
     {_, acc} =
@@ -109,13 +116,23 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   # `{module, actions, ast}` for every controller whose own body mounts the
   # plug. `actions` is `:all` for an unguarded mount, else the actions named in
   # its `when action == :x` / `when action in [...]` guard.
-  defp controller_mounts do
-    for path <- Path.wildcard(Path.join(@controllers_dir, "**/*.ex")),
+  defp controller_mounts(lib_root \\ @lib_dir) do
+    for path <- mount_candidates(lib_root),
         {:ok, ast} = path |> File.read!() |> Code.string_to_quoted(),
         actions = mounted_actions(ast),
         actions != [] do
       {module_name(ast), actions, ast}
     end
+  end
+
+  # Every source file under `lib_root` that names the plug, the router's own
+  # pipelines excepted (those are read by `idempotency_pipelines/1`). The name
+  # check is only a filter: `mounted_actions/1` decides what a file mounts.
+  defp mount_candidates(lib_root) do
+    for path <- Path.wildcard(Path.join(lib_root, "**/*.ex")),
+        path != @router_source,
+        File.read!(path) =~ "Idempotency",
+        do: path
   end
 
   defp module_name(ast) do
@@ -330,10 +347,10 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
   end
 
   # Mutating routes whose controller mounts the plug for that action.
-  defp controller_covered_routes do
-    mounts = controller_mounts()
+  defp controller_covered_routes(router \\ BarkparkWeb.Router, lib_root \\ @lib_dir) do
+    mounts = controller_mounts(lib_root)
 
-    for route <- BarkparkWeb.Router.__routes__(),
+    for route <- router.__routes__(),
         route.verb in @mutating_verbs and is_atom(route.plug_opts),
         {module, actions, ast} <- mounts,
         route.plug == module,
@@ -580,18 +597,148 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
     refute streaming_module?(Barkpark.Test.MutantRouterHarmlessController)
   end
 
+  # ── plugin routes and plugin controllers (task-7f9b31e4cc83419e) ────────
+
+  test "CONTROL: every mutating route resolves to itself, so its pipelines can be read" do
+    router = BarkparkWeb.Router
+
+    unresolved =
+      for route <- router.__routes__(),
+          route.verb in @mutating_verbs and is_atom(route.plug_opts),
+          route_info(router, route) == nil,
+          do: {route.verb, route.path}
+
+    assert unresolved == [],
+           "route_info/4 answers another route for these, so their pipelines go unread: " <>
+             inspect(unresolved)
+  end
+
+  # Compiled once for the module: the mutant modules have fixed names, and a
+  # second compile would only redefine them.
+  setup_all do
+    dir =
+      Path.join(System.tmp_dir!(), "bp-idem-plugin-mutant-#{System.unique_integer([:positive])}")
+
+    on_exit(fn -> File.rm_rf(dir) end)
+    %{mutant_plugin: compile_mutant_plugin_router!(dir)}
+  end
+
+  # A MUTANT router, compiled from files under a temporary dir. Its
+  # `plugin_routes/1` is a stand-in macro that emits two routes, as the real
+  # one emits a plugin's specs, inside a scope that pipes through
+  # `:idempotent`. A plugin controller under `barkpark/plugins/mutant/web/`
+  # mounts the plug itself. Returns the router and the lib root to scan.
+  defp compile_mutant_plugin_router!(dir) do
+    files = [
+      {"mutant_plugin_routes.ex",
+       """
+       defmodule Barkpark.Test.MutantPluginRoutes do
+         defmacro plugin_routes(_opts) do
+           quote do
+             post "/stream", Barkpark.Test.MutantPluginStreamController, :create
+             post "/calm", Barkpark.Test.MutantPluginCalmController, :create
+           end
+         end
+       end
+       """},
+      {"mutant_plugin_stream_controller.ex",
+       """
+       defmodule Barkpark.Test.MutantPluginStreamController do
+         use Plug.Builder
+         def create(conn, _params), do: send_chunked(conn, 200)
+       end
+       """},
+      {"mutant_plugin_calm_controller.ex",
+       """
+       defmodule Barkpark.Test.MutantPluginCalmController do
+         use Plug.Builder
+         def create(conn, _params), do: send_resp(conn, 200, "ok")
+       end
+       """},
+      {"barkpark/plugins/mutant/web/mutant_self_mount_controller.ex",
+       """
+       defmodule Barkpark.Test.MutantSelfMountController do
+         use Plug.Builder
+         plug BarkparkWeb.Plugs.Idempotency, bind_request: true
+         def create(conn, _params), do: send_chunked(conn, 200)
+       end
+       """},
+      {"mutant_plugin_router.ex",
+       """
+       defmodule Barkpark.Test.MutantPluginRouter do
+         use Phoenix.Router
+         import Barkpark.Test.MutantPluginRoutes
+
+         pipeline :idempotent do
+           plug(BarkparkWeb.Plugs.Idempotency, bind_request: true)
+         end
+
+         scope "/v1/plugins" do
+           pipe_through(:idempotent)
+           plugin_routes(scope: :token)
+         end
+
+         scope "/v1/direct" do
+           pipe_through(BarkparkWeb.Plugs.Idempotency)
+           post "/stream", Barkpark.Test.MutantPluginStreamController, :create
+         end
+
+         scope "/v1/open" do
+           post "/stream", Barkpark.Test.MutantPluginStreamController, :create
+           post "/self", Barkpark.Test.MutantSelfMountController, :create
+         end
+       end
+       """}
+    ]
+
+    for {file, source} <- files do
+      path = Path.join(dir, file)
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, source)
+      Code.compile_file(path)
+    end
+
+    {Barkpark.Test.MutantPluginRouter, dir}
+  end
+
+  test "MUTANT: a plugin route under an Idempotency scope whose controller streams reds",
+       %{mutant_plugin: {router, lib_root}} do
+    offenders = offenders(router, lib_root)
+
+    assert {:post, "/v1/plugins/stream", Barkpark.Test.MutantPluginStreamController, :create} in offenders,
+           "plugin_routes(scope: ...) emitted a streaming route into an :idempotent scope; " <>
+             "a scan that reads only the router's literal verb calls passes it. Got: " <>
+             inspect(offenders)
+
+    refute Enum.any?(offenders, &match?({_, "/v1/plugins/calm", _, _}, &1)),
+           "a plugin route under the same scope that answers with send_resp/3 is fine"
+
+    refute Enum.any?(offenders, &match?({_, "/v1/open/stream", _, _}, &1)),
+           "the same streaming controller off the Idempotency scope is fine"
+  end
+
+  test "MUTANT: a scope that pipes through the plug module itself, not a pipeline, reds",
+       %{mutant_plugin: {router, lib_root}} do
+    assert {:post, "/v1/direct/stream", Barkpark.Test.MutantPluginStreamController, :create} in offenders(
+             router,
+             lib_root
+           )
+  end
+
+  test "MUTANT: a plugin controller that mounts the plug itself and streams reds",
+       %{mutant_plugin: {router, lib_root}} do
+    assert {:post, "/v1/open/self", Barkpark.Test.MutantSelfMountController, :create} in offenders(
+             router,
+             lib_root
+           ),
+           "a controller under barkpark/plugins/*/web/ mounts Idempotency and streams; " <>
+             "a mount scan that reads only barkpark_web/controllers/ passes it"
+  end
+
   # ── the assertion ───────────────────────────────────────────────────────
 
   test "no chunked or file-sending controller sits under an Idempotency mount" do
-    offenders =
-      covered_mutating_routes()
-      |> Enum.filter(fn {_verb, _path, module, _action} -> streaming_module?(module) end)
-
-    offenders =
-      offenders ++
-        for {verb, path, module, action, ast} <- controller_covered_routes(),
-            action_streams?(ast, action),
-            do: {verb, path, module, action}
+    offenders = offenders(BarkparkWeb.Router, @lib_dir)
 
     assert offenders == [],
            """
@@ -610,69 +757,61 @@ defmodule BarkparkWeb.IdempotentRoutesHaveNoStreamingActionTest do
            """
   end
 
-  # `__routes__/0` does NOT retain `pipe_through`, so the mount↔route join is
-  # made in the router's own AST: every `scope` block whose `pipe_through` names
-  # an Idempotency pipeline contributes its verb calls (and its NESTED scopes',
-  # which inherit that pipe_through in Phoenix). The AST gives an unqualified
-  # controller alias, so the triple {verb, last alias segment, action} is joined
-  # back against `__routes__/0` to recover the fully-qualified module.
-  defp covered_mutating_routes do
-    pipelines = idempotency_pipelines()
-    {:ok, ast} = @router_source |> File.read!() |> Code.string_to_quoted()
+  # Routes under an Idempotency mount whose controller streams: through a
+  # pipeline (the whole controller module is read), or through the
+  # controller's own mount (per action).
+  defp offenders(router, lib_root) do
+    by_pipeline =
+      router
+      |> covered_mutating_routes()
+      |> Enum.filter(fn {_verb, _path, module, _action} -> streaming_module?(module) end)
 
-    triples =
-      Macro.prewalk(ast, [], fn
-        {:scope, _, args} = node, acc ->
-          case Enum.find(args, &match?([{:do, _}], &1)) do
-            [{:do, body}] ->
-              if pipes_through_idempotency?(body, pipelines),
-                do: {node, verb_calls(body) ++ acc},
-                else: {node, acc}
-
-            _ ->
-              {node, acc}
-          end
-
-        node, acc ->
-          {node, acc}
-      end)
-      |> elem(1)
-      |> MapSet.new()
-
-    BarkparkWeb.Router.__routes__()
-    |> Enum.filter(fn route ->
-      route.verb in @mutating_verbs and is_atom(route.plug_opts) and
-        MapSet.member?(
-          triples,
-          {route.verb, route.plug |> Module.split() |> List.last(), route.plug_opts}
-        )
-    end)
-    |> Enum.map(&{&1.verb, &1.path, &1.plug, &1.plug_opts})
+    by_pipeline ++
+      for {verb, path, module, action, ast} <- controller_covered_routes(router, lib_root),
+          action_streams?(ast, action),
+          do: {verb, path, module, action}
   end
 
-  defp pipes_through_idempotency?(body, pipelines) do
-    Macro.prewalk(body, false, fn
-      {:pipe_through, _, [names]} = node, acc when is_list(names) ->
-        {node, acc or Enum.any?(names, &(is_atom(&1) and MapSet.member?(pipelines, &1)))}
+  # `__routes__/0` does NOT retain `pipe_through`, but `Phoenix.Router.route_info/4`
+  # does: it is asked for each mutating route, at a path made from the route's
+  # own pattern. That reads the COMPILED router, so a route a macro emits
+  # (`plugin_routes(scope: ...)`) is seen with the pipelines of the scope it
+  # was emitted into, exactly like a hand-written one. A route whose path
+  # resolves to another route is reported by a CONTROL, not skipped quietly.
+  defp covered_mutating_routes(router \\ BarkparkWeb.Router) do
+    pipelines = idempotency_pipelines(router)
 
-      {:pipe_through, _, [name]} = node, acc when is_atom(name) ->
-        {node, acc or MapSet.member?(pipelines, name)}
-
-      node, acc ->
-        {node, acc}
-    end)
-    |> elem(1)
+    for route <- router.__routes__(),
+        route.verb in @mutating_verbs and is_atom(route.plug_opts),
+        %{pipe_through: pipes} <- [route_info(router, route)],
+        Enum.any?(pipes, &(&1 == BarkparkWeb.Plugs.Idempotency or MapSet.member?(pipelines, &1))) do
+      {route.verb, route.path, route.plug, route.plug_opts}
+    end
   end
 
-  defp verb_calls(body) do
-    Macro.prewalk(body, [], fn
-      {verb, _, [_path, {:__aliases__, _, segments}, action | _]} = node, acc
-      when verb in @mutating_verbs and is_atom(action) ->
-        {node, [{verb, to_string(List.last(segments)), action} | acc]}
+  # The route_info for `route`, or nil when its pattern resolves to another route.
+  defp route_info(router, route) do
+    method = route.verb |> to_string() |> String.upcase()
 
-      node, acc ->
-        {node, acc}
-    end)
-    |> elem(1)
+    case Phoenix.Router.route_info(router, method, concrete_path(route.path), "localhost") do
+      %{route: path, plug: plug, plug_opts: opts} = info
+      when path == route.path and plug == route.plug and opts == route.plug_opts ->
+        info
+
+      _other ->
+        nil
+    end
   end
+
+  defp concrete_path(pattern) do
+    pattern
+    |> String.split("/")
+    |> Enum.map_join("/", fn
+      ":" <> _ -> "p1"
+      "*" <> _ -> "g1"
+      segment -> segment
+    end)
+  end
+
+  defp router_source(router), do: router.module_info(:compile)[:source] |> to_string()
 end

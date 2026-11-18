@@ -430,7 +430,7 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+  defp unboxed(fun), do: Barkpark.Unboxed.run(Repo, fun)
 
   defp waits_on_advisory_lock?(pid, tries \\ 100)
   defp waits_on_advisory_lock?(_pid, 0), do: false

@@ -44,7 +44,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 4805 api/lib/barkpark/cycle_fleet.ex
 4784 internal/cloudclient/client.go
 4627 internal/cli/cloud_site_cmd.go
-4639 api/lib/barkpark_web/router.ex
+4645 api/lib/barkpark_web/router.ex
 4561 api/lib/barkpark_web/live/studio/studio_live/blocks.ex
 4542 deploy/site-deploy-node.sh
 4414 api/lib/barkpark/content/query.ex
@@ -91,7 +91,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2575 api/lib/barkpark/studio_chat/provider/claude.ex
 2562 api/lib/barkpark/tenancy.ex
 2557 api/lib/barkpark/auth.ex
-2571 api/lib/barkpark/studio_chat/recorder.ex
+2537 api/lib/barkpark/studio_chat/recorder.ex
 2540 api/priv/static/assets/bp-sheet-grid.js
 2527 api/lib/barkpark/plugins/tasks.ex
 2486 api/assets/paper-surface/paper-surface.css
