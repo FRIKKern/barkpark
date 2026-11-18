@@ -78,7 +78,8 @@
   // A strip is drawn 1 px wider than the accounting above, as the TanStack
   // Studio draws it (`calc(var(--strip) + 1px)`): 52 px, its border included.
   var STRIP_DRAWN = STRIP + 1;
-  var MIN = { types: 320, menu: 320, list: 320, doc: 600 };
+  // A document with an inspector open needs 600 + 320 (TanStack's docInspect).
+  var MIN = { types: 320, menu: 320, list: 320, doc: 600, docInspect: 920 };
 
   function collapsed(kinds, width, focus) {
     var n = kinds.length;
@@ -257,7 +258,8 @@
       return !el.hasAttribute("data-desk-leaving");
     });
     var kinds = shown.map(function (el) {
-      return el.getAttribute("data-pane-kind");
+      var kind = el.getAttribute("data-pane-kind");
+      return kind === "doc" && el.hasAttribute("data-desk-inspecting") ? "docInspect" : kind;
     });
     var at = shown.findIndex(function (el) {
       return focus !== null && Number(el.getAttribute("data-pane-index")) === focus;

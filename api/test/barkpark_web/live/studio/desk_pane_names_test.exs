@@ -85,11 +85,19 @@ defmodule BarkparkWeb.Studio.DeskPaneNamesTest do
 
   test "the inspector's holder is beside the form, hidden and empty", c do
     view = open(c)
-    holder = ~s([data-pane-editing] .pane-body > aside[data-desk-inspector][hidden])
+
+    holder =
+      ~s([data-pane-editing] .pane-body > aside[data-desk-inspector][hidden][id$="-editor-inspector"])
 
     assert has_element?(view, holder)
     assert view |> element(holder) |> render() =~ ~r{<aside[^>]*>\s*</aside>}
     refute view |> element(holder) |> render() =~ "data-inspect"
+
+    # History's holder (`HistoryPanel`) sits beside it, hidden and empty too.
+    history =
+      ~s([data-pane-editing] .pane-body > aside[data-desk-inspector][hidden][id$="-editor-history"])
+
+    assert view |> element(history) |> render() =~ ~r{<aside[^>]*>\s*</aside>}
   end
 
   test "the holder says which inspector the URL asks for; Inspect (inspect=on) is not one", c do
