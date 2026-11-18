@@ -180,6 +180,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   @doc """
+  The `_bp_seen` a form starts from when it is drawn (task-f18af43e26e46ff4):
+  per free-text field, the number of the latest value the server holds for
+  it, which is what a form drawn now shows. A form that was not on the page
+  when a push came (a document view was open in its place) started from
+  "{}", and its next post was merged from an older value than the one the
+  person saw. The input is `phx-update="ignore"`: a form already on the page
+  keeps the numbers bp-array-focus.js wrote.
+  """
+  def seen_value(assigns) do
+    assigns
+    |> history()
+    |> Enum.flat_map(fn {key, entries} ->
+      case latest(entries) do
+        {seq, _value, _kind} -> [{"doc[#{key}]", seq}]
+        nil -> []
+      end
+    end)
+    |> Map.new()
+    |> Jason.encode!()
+  end
+
+  @doc """
   Keeps `before`'s history on `socket`, which `Shared.rebuild_panes/1` built
   from it: for a rebuild that tells the page what changed with `push/3`.
   """
@@ -245,9 +267,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   # The history belongs to one document; another document's is empty.
-  defp history(socket) do
-    case socket.assigns[:editor_remote_history] do
-      {key, history} -> if key == doc_key(socket), do: history, else: %{}
+  defp history(%{assigns: assigns}), do: history(assigns)
+
+  defp history(assigns) do
+    case assigns[:editor_remote_history] do
+      {key, history} -> if key == doc_key(assigns), do: history, else: %{}
       _ -> %{}
     end
   end
@@ -257,9 +281,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     assign(socket, :editor_remote_history, {doc_key(socket), history})
   end
 
-  defp doc_key(socket) do
-    case socket.assigns[:editor_doc] do
-      %{doc_id: id} when is_binary(id) -> {socket.assigns[:editor_type], Content.published_id(id)}
+  defp doc_key(%{assigns: assigns}), do: doc_key(assigns)
+
+  defp doc_key(assigns) do
+    case assigns[:editor_doc] do
+      %{doc_id: id} when is_binary(id) -> {assigns[:editor_type], Content.published_id(id)}
       _ -> nil
     end
   end

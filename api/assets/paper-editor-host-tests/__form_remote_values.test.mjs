@@ -128,6 +128,16 @@ check("a field with typing not sent reports the value it was typed from, and kee
   assert.deepEqual(seen(), { "doc[title]": 1 }, "a later value it did not take changes nothing");
 });
 
+// task-f18af43e26e46ff4: a field on another group tab (or hidden) is drawn
+// later from the server's form, with the new value: that is its number.
+check("a field not drawn reports the new number, and the next one too", () => {
+  mount("Fixture post", "First");
+  push({ "doc[kicker]": { value: "K B", was: "K" } }, { "doc[kicker]": [1, 2] });
+  assert.deepEqual(seen(), { "doc[kicker]": 2 });
+  push({ "doc[kicker]": { value: "K B2", was: "K B" } }, { "doc[kicker]": [2, 3] });
+  assert.deepEqual(seen(), { "doc[kicker]": 3 });
+});
+
 check("a push without numbers (not free text) reports nothing", () => {
   mount("Old", "First");
   push({ "doc[title]": { value: "New", was: "Old" } });

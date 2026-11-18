@@ -236,7 +236,16 @@
       var pair = seqs[name];
       var change = values[name];
       var field = form.elements.namedItem(name);
-      if (!Array.isArray(pair) || !change || !field || typeof field.value !== "string") return;
+      if (!Array.isArray(pair) || !change) return;
+      // A field not drawn now (another group tab, hidden by visibleWhen) is
+      // drawn later from the server's form, which holds the new value.
+      // task-f18af43e26e46ff4: left unnumbered, its next post was merged
+      // from an older value than the one the person saw.
+      if (!field) {
+        seen[name] = pair[1];
+        return;
+      }
+      if (typeof field.value !== "string") return;
       // A textarea's value has its line breaks as "\n" only.
       if (lf(field.value) === lf(change.value)) seen[name] = pair[1];
       else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = pair[0];
