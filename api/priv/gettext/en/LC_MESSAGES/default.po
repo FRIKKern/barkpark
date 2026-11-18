@@ -15260,3 +15260,138 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Formatting changed by %{author}"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Built %{date}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Changelog"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Could not open that place. It does not exist, or you do not have access to it."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Dark"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Documentation"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Full changelog on GitHub"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Help and resources"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Light"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "New version available"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No changes are listed in this build."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "OK"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open commit %{commit} on GitHub"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Open user menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Reload to update to %{version}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Reload to update"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Report a problem"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Saving, then reloading…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Studio version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Switch workspace, project or dataset"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "System"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "This token can only open the dataset %{dataset}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Up to date"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use dark appearance"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use light appearance"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/user_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Use system appearance"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/help_menu.ex
+#, elixir-autogen, elixir-format
+msgid "What's new"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/scope_switch.ex
+#, elixir-autogen, elixir-format
+msgid "Workspace %{workspace}, project %{project}, dataset %{dataset}. Switch"
+msgstr ""

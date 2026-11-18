@@ -424,6 +424,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                   data-selected={selected?(@panes, @index, entry.next)}
                   data-desk-row
               data-desk-opens={entry.next.kind}
+              data-testid={@pane.kind == :list && entry.next.kind == :doc && "pane-item"}
             >
               <%!-- The title is an element of its own, as the TanStack row's
                    `.t`: a spec finds a row by its title alone. --%>

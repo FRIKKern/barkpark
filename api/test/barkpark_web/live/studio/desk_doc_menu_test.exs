@@ -127,8 +127,17 @@ defmodule BarkparkWeb.Studio.DeskDocMenuTest do
     view = open(c, c.type, c.id)
 
     assert has_element?(view, @footer_button)
-    # Not a header icon button: J57 counts only those.
-    refute has_element?(view, ~s(#{@footer_button}.icon-btn))
+    # TanStack's `.doc-footer .menu-wrap > .icon-btn` (J46 measures it), and
+    # not in the header: J57 counts the header's icon buttons.
+    assert has_element?(
+             view,
+             ~s([data-pane-editing] .doc-footer .menu-wrap > button.icon-btn[aria-label="Open document actions"])
+           )
+
+    refute has_element?(
+             view,
+             ~s([data-pane-editing] .pane-header button[aria-label="Open document actions"])
+           )
 
     menu_id =
       view

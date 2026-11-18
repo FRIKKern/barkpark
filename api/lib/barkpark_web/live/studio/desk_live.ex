@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Rows
+  alias BarkparkWeb.Studio.Desk.ScopeSwitch
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
   alias BarkparkWeb.Studio.Desk.DocStyle
@@ -99,6 +100,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
+      # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
+      |> assign(:desk_scope, nil)
       |> Bulk.init()
       # The search's hits: up to 50, as the TanStack Studio's text search,
       # the first 40 drawn, then more as the list's end scrolls near (`Search`).
@@ -343,6 +346,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("bulk-" <> _ = event, params, socket),
     do: Bulk.handle_event(event, params, socket)
 
+  # The navbar's workspace, project and dataset switcher (`ScopeSwitch`).
+  def handle_event("desk-scope-" <> _ = event, params, socket),
+    do: ScopeSwitch.handle_event(event, params, socket)
+
   def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
 
   # The lit hit's index from the form: one of the hits, else the first.
@@ -466,6 +473,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     ~H"""
     <Style.sheet />
     <DocStyle.sheet />
+    <BarkparkWeb.Studio.Desk.NavbarStyle.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <%!-- The search is a dialog, as the TanStack Studio's: the navbar's
           search button (`data-desk-search-open`), Cmd+K and "/" open it
@@ -504,6 +512,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
       data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}
+      data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

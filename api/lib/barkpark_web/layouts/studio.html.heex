@@ -22,7 +22,7 @@
         plumb; renders nothing on prod/dev. Layout chrome, outside the diff. --%>
   <BarkparkWeb.StudioComponents.Nav.studio_env_banner />
 
-  <.studio_topbar>
+  <.studio_topbar class={is_binary(assigns[:desk_base]) && "navbar"}>
     <:brand>
       <div class="studio-bar-brand">
         <a
@@ -42,22 +42,32 @@
               so the standalone brand square + wordmark only show without one. --%>
         <div :if={!assigns[:current_workspace]} class="sidebar-brand-icon">B</div>
         <span :if={!assigns[:current_workspace]} style="font-weight: 700; font-size: 15px;">Barkpark</span>
-        <%= if assigns[:current_workspace] do %>
-          <BarkparkWeb.Studio.WorkspaceSwitcher.switcher
-            current_workspace={assigns[:current_workspace]}
-            current_project={assigns[:current_project]}
-            current_dataset={assigns[:dataset]}
-            menu={assigns[:scope_menu]}
-            can_create={BarkparkWeb.Studio.ScopeResolver.principal_from_assigns(assigns) != nil}
-            create_open={assigns[:create_open]}
-          />
-        <% else %>
-          <%= if assigns[:dataset] do %>
+        <%!-- The desk draws the TanStack Studio's brand: the logo, then the
+              workspace's name as the switcher's button (`Desk.ScopeSwitch`). --%>
+        <%= cond do %>
+          <% is_binary(assigns[:desk_base]) and assigns[:current_workspace] != nil -> %>
+            <span class="logo" aria-hidden="true">{BarkparkWeb.Studio.Desk.ScopeSwitch.brand_initials(assigns[:current_workspace].name)}</span>
+            <BarkparkWeb.Studio.Desk.ScopeSwitch.switcher
+              workspace={assigns[:current_workspace]}
+              project={assigns[:current_project]}
+              dataset={@dataset}
+              menu={assigns[:desk_scope]}
+            />
+          <% assigns[:current_workspace] -> %>
+            <BarkparkWeb.Studio.WorkspaceSwitcher.switcher
+              current_workspace={assigns[:current_workspace]}
+              current_project={assigns[:current_project]}
+              current_dataset={assigns[:dataset]}
+              menu={assigns[:scope_menu]}
+              can_create={BarkparkWeb.Studio.ScopeResolver.principal_from_assigns(assigns) != nil}
+              create_open={assigns[:create_open]}
+            />
+          <% assigns[:dataset] -> %>
             <BarkparkWeb.Studio.DatasetSwitcher.switcher
               current={@dataset}
               current_path={assigns[:current_path]}
             />
-          <% end %>
+          <% true -> %>
         <% end %>
         <%!-- The desk's search (LOOKS A4): a dialog the desk draws, opened
               here, by Cmd+K and by "/" (bp-desk.js), as the TanStack
@@ -129,12 +139,16 @@
         >
           <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={16} /></span>
         </button>
-        <.studio_theme_toggle />
+        <%!-- The desk's Help and resources (`Desk.HelpMenu`), as the
+              TanStack navbar's. --%>
+        <BarkparkWeb.Studio.Desk.HelpMenu.menu :if={is_binary(assigns[:desk_base])} />
+        <.studio_theme_toggle :if={!is_binary(assigns[:desk_base])} />
         <%!-- A token session (`:api_token`) OR an account session
               (`:current_user`) can sign out; an anonymous public-demo socket
               has neither and nothing to end. Keyed on the token alone, an
-              editor signed in with email + password had no Sign out. --%>
-        <%= if assigns[:api_token] || assigns[:current_user] do %>
+              editor signed in with email + password had no Sign out. On the
+              desk both live in the user menu (`Desk.UserMenu`). --%>
+        <%= if (assigns[:api_token] || assigns[:current_user]) && !is_binary(assigns[:desk_base]) do %>
           <.studio_signout_button />
         <% end %>
         <%!-- Sanity-style: the avatar sits at the far right edge. --%>
@@ -152,6 +166,12 @@
             grant_scoped_read={assigns[:grant_scoped_read] == true}
           />
         <% end %>
+        <BarkparkWeb.Studio.Desk.UserMenu.menu
+          :if={is_binary(assigns[:desk_base])}
+          current_user={assigns[:current_user]}
+          api_token={assigns[:api_token]}
+          workspace={assigns[:current_workspace]}
+        />
       </div>
     </:actions>
   </.studio_topbar>
