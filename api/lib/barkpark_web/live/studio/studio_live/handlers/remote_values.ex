@@ -47,9 +47,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   shows, an undrawn field included: bp-array-focus.js says so with `v` in
   `_bp_seen` (`@seen_version`), written by the page, never drawn by the
   server. A tab still running an older copy of that file (loaded before a
-  deploy) sends no `v`, and its posts with no number stand, as before. A
-  change the server built itself (no `_bp_seen` at all) is never merged. Nor is any field that is not free text: a date or a
-  select is a choice, not text two people type into.
+  deploy) sends no `v`: its posts with no number stand, and the numbers the
+  server drew into its form (`seen_value/1`) are not read, as before. Only
+  the numbers that copy wrote itself count. A change the server built
+  itself (no `_bp_seen` at all) is never merged. Nor is any field that is
+  not free text: a date or a select is a choice, not text two people type
+  into.
   """
 
   import Phoenix.Component, only: [assign: 3]
@@ -61,6 +64,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
 
   # The `v` bp-array-focus.js writes into `_bp_seen` (its SEEN_VERSION).
   @seen_version 2
+
+  # The `_bp_seen` key the server draws its numbers under (`seen_value/1`).
+  @drawn_key "drawn"
 
   # Entries kept per field. A page that reports a number older than these is
   # not merged.
@@ -111,12 +117,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     history = history(socket)
     schema = socket.assigns[:editor_schema]
     crossing? = Map.get(seen, "v") == @seen_version
+    # The numbers the server drew into the form (`seen_value/1`) count only
+    # for a page that keeps them current: an older copy of the JS posts them
+    # back unchanged after it skipped a push for an undrawn field.
+    drawn = if crossing?, do: drawn_numbers(seen), else: %{}
 
     bases =
       for key <- keys,
           free_text?(schema, key),
+          name <- ["doc[#{key}]"],
           # A generator, not `n = ...`: a nil filter would drop the field.
-          n <- [Map.get(seen, "doc[#{key}]")],
+          n <- [Map.get(seen, name) || Map.get(drawn, name)],
           is_integer(n) or (is_nil(n) and crossing?),
           {_seq, value, _kind} <- List.wrap(base_entry(Map.get(history, key, []), n)),
           into: %{},
@@ -195,6 +206,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   "{}", and its next post was merged from an older value than the one the
   person saw. The input is `phx-update="ignore"`: a form already on the page
   keeps the numbers bp-array-focus.js wrote.
+
+  The numbers sit under their own key (`"drawn"`), read only beside `v`: an
+  older copy of the JS keeps the key but never updates it, so after it skips
+  a push for a field it does not draw, the drawn number is stale (#26988
+  review, round 3). A number the page wrote under the field's own name wins.
   """
   def seen_value(assigns) do
     assigns
@@ -206,7 +222,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
       end
     end)
     |> Map.new()
-    |> Jason.encode!()
+    |> case do
+      drawn when drawn == %{} -> "{}"
+      drawn -> Jason.encode!(%{@drawn_key => drawn})
+    end
   end
 
   @doc """
@@ -306,4 +325,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   defp decode_seen(_seen), do: %{}
+
+  defp drawn_numbers(seen) do
+    case Map.get(seen, @drawn_key) do
+      drawn when is_map(drawn) -> drawn
+      _ -> %{}
+    end
+  end
 end

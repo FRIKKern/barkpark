@@ -12,7 +12,9 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnseenFieldTest do
       new number: the field is drawn later from the server's form.
     * R2: a document view was open, so the form (and `_bp_seen`) was not on
       the page; it came back as "{}". The server now draws `_bp_seen` with the
-      number of each field's latest value (`RemoteValues.seen_value/1`).
+      number of each field's latest value (`RemoteValues.seen_value/1`),
+      under "drawn": read only beside `v`, since an older copy of the JS
+      posts those numbers back stale (X1).
 
   Each post here is what the page sends after that change.
   """
@@ -209,10 +211,49 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnseenFieldTest do
 
     # A deletes " and B" from the title it sees, posting the drawn numbers.
     seen = drawn_seen(a)
-    assert is_integer(seen["doc[title]"])
+    assert is_integer(seen["drawn"]["doc[title]"])
     send_post(a, "title", %{"title" => "Hello A"}, seen)
 
     assert stored(c)["title"] == "Hello A"
+  end
+
+  # Review r3 of #26988 (X1): the form is drawn again with the server's
+  # numbers (a document view closed), then another editor saves the field
+  # while it is on another group tab. An older copy of the JS skips that push
+  # (no input), so the drawn number it posts back is stale; the new JS writes
+  # the field's own number, which wins.
+  for surface <- [:desk, :studio], js <- [:old, :new] do
+    test "X1 #{surface}, #{js} JS: a drawn number gone stale merges nothing", c do
+      a = open(c, if(unquote(surface) == :desk, do: c.desk, else: c.url))
+      b = open(c, if(unquote(surface) == :desk, do: c.desk, else: c.url))
+
+      render_click(a, "select-view", %{"view" => "refs"})
+      refute has_element?(a, "#editor-form")
+      send_post(b, "excerpt", %{"excerpt" => "Short. world"}, %{})
+      _ = told(a)
+      render_click(a, "select-view", %{"view" => "refs"})
+      # An older copy of the JS keeps the drawn value as it is.
+      seen = drawn_seen(a)
+
+      render_click(a, "select-group", %{"group" => "main"})
+      refute render(a) =~ ~s(name="doc[excerpt]")
+      send_post(b, "excerpt", %{"excerpt" => "Short. world now"}, %{})
+      {_values, seqs} = told(a)
+
+      render_click(a, "select-group", %{"group" => "seo"})
+      assert render(a) =~ "Short. world now"
+
+      case unquote(js) do
+        :old ->
+          post(a, "excerpt", %{"excerpt" => "Short. world new"}, seen)
+
+        :new ->
+          seen = Map.put(seen, "doc[excerpt]", List.last(seqs["doc[excerpt]"]))
+          send_post(a, "excerpt", %{"excerpt" => "Short. world new"}, seen)
+      end
+
+      assert stored(c)["excerpt"] == "Short. world new"
+    end
   end
 
   test "a form drawn before any push starts from {}", c do
