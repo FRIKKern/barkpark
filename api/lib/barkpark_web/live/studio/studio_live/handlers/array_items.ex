@@ -15,7 +15,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems do
       object with a `_key` gets a new one, so the list keeps one key per
       item; everything else in it is kept as it is, as Sanity's does.
     * `insert_row`: a new empty item at `index`, the one Add item makes
-      (`Fields.add_row/4`), so it has the same `_key` and `_type` rule.
+      (`Fields.add_row/4`), so it has the same `_key` and `_type` rule. In
+      a list of strings it is the empty string, the TanStack Studio's
+      blank row, so the list stays a list of strings.
     * `move_row`: the item at `index` taken out and put at `to`.
 
   OPENING THE NEW ITEM. A press with `open=item` that adds an object item
@@ -57,7 +59,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems do
       when is_list(current) and idx >= 0 and idx <= length(current) do
     case Fields.add_row(current, field, params["member"], keyed?) do
       added when length(added) == length(current) + 1 ->
-        List.insert_at(current, idx, typed(List.last(added), field, params["kind"]))
+        List.insert_at(current, idx, blank(typed(List.last(added), field, params["kind"]), field))
 
       _ ->
         current
@@ -89,6 +91,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems do
   end
 
   defp typed(row, _field, _kind), do: row
+
+  defp blank(nil, %{"of" => %{"type" => type}}) when type in ["string", "text"], do: ""
+  defp blank(row, _field), do: row
 
   # A copy keeps everything but its `_key`, which is new.
   defp rekey(%{"_key" => _} = item), do: Map.put(item, "_key", StudioLive.Path.new_key())

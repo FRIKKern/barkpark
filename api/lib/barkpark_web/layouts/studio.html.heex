@@ -63,6 +63,9 @@
               here, by Cmd+K and by "/" (bp-desk.js), as the TanStack
               Studio's navbar search. Only the desk (the one host with a
               `:desk_base`) has it; every other page is unchanged. --%>
+        <%!-- The desk's Create new (J37): a list of the ways to start a
+              document, which the desk draws (`Desk.NewDocMenu`). --%>
+        <BarkparkWeb.Studio.Desk.NewDocMenu.open :if={is_binary(assigns[:desk_base])} />
         <button
           :if={is_binary(assigns[:desk_base])}
           type="button"

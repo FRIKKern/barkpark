@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
   alias BarkparkWeb.Studio.Desk.LiveRefresh
+  alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.Refs
@@ -73,7 +74,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
        desk_used_in: nil,
        desk_history: nil,
        desk_revision: nil,
-       desk_gone_latest: nil
+       desk_gone_latest: nil,
+       desk_new: nil
      )
      # The open Incoming references panel reads again when someone saves.
      |> attach_hook(:desk_incoming_refs, :handle_info, &on_info/2)
@@ -136,7 +138,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       desk_incoming: nil,
       desk_history: nil,
       desk_revision: nil,
-      desk_gone_latest: nil
+      desk_gone_latest: nil,
+      desk_new: nil
     )
     |> PostIdentity.close_dialogs()
     |> DocDialog.follow()
@@ -158,7 +161,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     try do
       {:noreply, loaded} =
         %{"dataset" => dataset, "path" => path}
-        |> StudioLive.handle_params(uri, assign(socket, :desk_nav, path))
+        |> StudioLive.handle_params(uri, socket |> assign(:desk_nav, path) |> NewDoc.prepare())
         |> ours(:settled)
 
       {:noreply,
@@ -257,8 +260,20 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   # The Studio's `nav_path` says nothing about the pane a "+" was pressed in,
   # so a new document is placed by the event (and an optional `desk-pane`).
-  def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type),
-    do: "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
+  # One that waits for its first edit (`NewDoc`) is only opened: its URL
+  # names the way it was started; a type built at once is the Studio's.
+  def handle_event("new-document", %{"type" => type} = params, socket) when is_binary(type) do
+    case NewDoc.start(type, params, socket) do
+      %{} = next ->
+        {:noreply,
+         socket
+         |> repatch(place(socket.assigns, next, params))
+         |> Phoenix.LiveView.push_event("bp:focus-new-doc", %{id: next.id})}
+
+      nil ->
+        "new-document" |> StudioLive.handle_event(params, socket) |> ours({:new, type, params})
+    end
+  end
 
   # Sent by hand with no type: nothing to create.
   def handle_event("new-document", _params, socket), do: {:noreply, socket}
@@ -276,10 +291,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   }
 
   def handle_event(event, params, socket) when is_map_key(@picks, event) do
-    if is_map_key(socket.assigns, :editor_form) and not RevisionView.shown?(socket.assigns) and
-         Enum.all?(@picks[event], &is_map_key(params, &1)),
-       do: event |> StudioLive.handle_event(params, socket) |> ours(),
-       else: {:noreply, socket}
+    with true <- is_map_key(socket.assigns, :editor_form),
+         false <- RevisionView.shown?(socket.assigns),
+         true <- Enum.all?(@picks[event], &is_map_key(params, &1)),
+         :cont <- NewDoc.guard(event, params, socket) do
+      event |> StudioLive.handle_event(params, socket) |> ours()
+    else
+      {:halt, socket} -> {:noreply, socket}
+      _ -> {:noreply, socket}
+    end
   end
 
   # The Studio's events that write the open document from its form.
@@ -312,12 +332,18 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         {:noreply, Discarded.drop(socket)}
 
       true ->
-        before = socket.assigns[:editor_doc]
+        case NewDoc.guard(event, params, socket) do
+          :cont ->
+            before = socket.assigns[:editor_doc]
 
-        event
-        |> StudioLive.handle_event(params, written(socket, event))
-        |> ours()
-        |> after_restore(event, before)
+            event
+            |> StudioLive.handle_event(params, written(socket, event))
+            |> ours()
+            |> after_restore(event, before)
+
+          {:halt, socket} ->
+            {:noreply, socket}
+        end
     end
   end
 
@@ -335,10 +361,16 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         {:noreply, Discarded.drop(socket)}
 
       true ->
-        params
-        |> Fields.autosave_built(written(socket, "autosave"))
-        |> Scope.settle_group()
-        |> ours()
+        case NewDoc.room(socket) do
+          :cont ->
+            params
+            |> Fields.autosave_built(written(socket, "autosave"))
+            |> Scope.settle_group()
+            |> ours()
+
+          {:halt, socket} ->
+            {:noreply, socket}
+        end
     end
   end
 
@@ -381,6 +413,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       |> form_only()
       |> DocDialog.follow()
       |> HistoryPanel.follow()
+      |> NewDoc.settle()
       |> assign(:panes, [])
 
   # A document the desk opens from a document node of its own (an
@@ -436,20 +469,12 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # last pane's place when that is a document, after it when it is a list, or
   # after the pane the "+" names (`desk-pane`). Its id is the Studio's last
   # segment.
-  defp route(socket, [_ | _] = asked, {:new, type, params}) do
-    %{chain: chain, base: base} = socket.assigns
-    next = %{kind: :doc, id: List.last(asked), type: type}
-    last = length(chain) - 1
-
-    to =
-      case {desk_pane(params, chain), List.last(chain)} do
-        {index, _} when is_integer(index) -> Panes.open_after(chain, index, next, base)
-        {nil, %{kind: :doc}} -> Panes.to_path(Enum.take(chain, last) ++ [next], base)
-        {nil, _} -> Panes.open_after(chain, last, next, base)
-      end
-
-    repatch(socket, to)
-  end
+  defp route(socket, [_ | _] = asked, {:new, type, params}),
+    do:
+      repatch(
+        socket,
+        place(socket.assigns, %{kind: :doc, id: List.last(asked), type: type}, params)
+      )
 
   defp route(socket, _asked, {:new, _type, _params}), do: socket
 
@@ -497,6 +522,21 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   end
 
   defp route(socket, _asked, _how), do: socket
+
+  # Where a new document opens. From the navbar (`at=root`): its type's list
+  # and it, as the TanStack Studio's navbar "+".
+  defp place(%{base: base}, %{type: type} = next, %{"at" => "root"}),
+    do: Panes.to_path([%{kind: :types}, %{kind: :list, type: type}, next], base)
+
+  defp place(%{chain: chain, base: base}, next, params) do
+    last = length(chain) - 1
+
+    case {desk_pane(params, chain), List.last(chain)} do
+      {index, _} when is_integer(index) -> Panes.open_after(chain, index, next, base)
+      {nil, %{kind: :doc}} -> Panes.to_path(Enum.take(chain, last) ++ [next], base)
+      {nil, _} -> Panes.open_after(chain, last, next, base)
+    end
+  end
 
   defp repatch(socket, to), do: push_patch(%{socket | redirected: nil}, to: to)
 
@@ -677,6 +717,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
               else:
                 assigns
                 |> DocMenu.items()
+                |> NewDoc.offered(assigns)
                 |> DocMenu.with_incoming(
                   IncomingRefs.menu_item(
                     @chain,
@@ -934,7 +975,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       <% items =
         if @edit_failed or gone?(assigns) or RevisionView.shown?(assigns),
           do: [],
-          else: DocMenu.items(assigns) %>
+          else: NewDoc.offered(DocMenu.items(assigns), assigns) %>
       <div :if={items != []} id={"#{@view.id}-footer"} class="dk-edit-footer doc-footer">
         <BarkparkWeb.Studio.Desk.DocFooter.bar
           id={"#{@view.id}-footer"}

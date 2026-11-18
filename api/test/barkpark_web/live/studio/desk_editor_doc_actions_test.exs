@@ -237,9 +237,9 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
 
   # ── J18: a new document from the desk ────────────────────────────────────
 
-  # NOT REACHABLE in the desk yet (its list panes draw no "+"). The Studio's
-  # own "new-document", hosted by the desk: the new doc takes the open doc's
-  # place after the list it belongs to, typed, and opens in the editor.
+  # "new-document", hosted by the desk: the new doc takes the open doc's
+  # place after the list it belongs to, typed, and opens in the editor, not
+  # stored until its first edit (`Desk.NewDoc`).
   test "new-document from the desk opens the new doc in the editor after its list", c do
     view = open(c.conn, "#{c.base}/#{c.post};#{c.one}")
 
@@ -247,7 +247,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     landed = assert_patch(view, 2_000)
     settle(view)
 
-    assert landed =~ ~r"^#{Regex.escape(c.base)}/#{c.post};#{c.post}-[0-9a-f]+",
+    assert landed =~ ~r"^#{Regex.escape(c.base)}/#{c.post};[0-9a-f-]{36},template=#{c.post}",
            "the new document landed on #{landed}"
 
     assert poll(view, fn -> has_element?(view, "[data-pane-editing] #editor-form") end)
@@ -261,7 +261,7 @@ defmodule BarkparkWeb.Studio.DeskEditorDocActionsTest do
     render_hook(view, "new-document", %{"type" => c.post, "desk-pane" => "1"})
     landed = assert_patch(view, 2_000)
 
-    assert landed =~ ~r"^#{Regex.escape(c.base)}/#{c.post};#{c.post}-[0-9a-f]+$",
+    assert landed =~ ~r"^#{Regex.escape(c.base)}/#{c.post};[0-9a-f-]{36},template=#{c.post}$",
            "the new document landed on #{landed}"
   end
 
