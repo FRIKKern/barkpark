@@ -419,6 +419,39 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert StudioChat.get_session(sid).pending_approvals == 0
   end
 
+  # rev26735's probe 172-b1 on #27172: the held asks come back BEFORE
+  # boundary/3 reads the state, so a third lease's turn splits A's turn and
+  # cancels them as displaced. Put back after the boundary, the split cancels
+  # nothing and the asks return under C, canceled later as turn_ended.
+  test "a third lease's turn after the asker's own turn_started cancels its held ask as displaced",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-held"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, a, 3, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    c = lease!(ctx, "c")
+    accept!(ctx, c, 1, %{"kind" => "turn_started", "turn_id" => "t-c"})
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+
+    state = :sys.get_state(Recorder.whereis(sid))
+    assert MapSet.size(state.pending_asks) == 0, "nothing comes back under C"
+    assert Map.get(state, :asks_held) == nil
+    assert state.runtime_lease == c.lease_id
+
+    accept!(ctx, c, 2, @dead_close)
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+  end
+
   test "the asking run's own close cancels its pending ask", %{sid: sid} = ctx do
     a = lease!(ctx, "a")
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
