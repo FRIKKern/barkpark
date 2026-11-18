@@ -138,10 +138,11 @@
       return;
     }
 
-    var opener = target.closest("[data-desk-dialog]");
-    if (opener) return openDialog(doc, opener, opener.getAttribute("data-desk-dialog"));
+    // Its own attribute: `data-desk-dialog` marks the desk's document dialogs.
+    var opener = target.closest("[data-desk-nav-dialog]");
+    if (opener) return openDialog(doc, opener, opener.getAttribute("data-desk-nav-dialog"));
 
-    var close = target.closest("[data-desk-dialog-close]");
+    var close = target.closest("[data-desk-nav-dialog-close]");
     if (close) {
       var dialog = close.closest("dialog");
       if (dialog) dialog.close();

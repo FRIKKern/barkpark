@@ -79,7 +79,7 @@ defmodule BarkparkWeb.Studio.Desk.HelpMenu do
         <Menu.separator />
         <Menu.item href={"#{@repo}#readme"} target="_blank" rel="noreferrer" role="menuitem" tabindex="-1">{gettext("Documentation")}</Menu.item>
         <Menu.item href={"#{@repo}/blob/main/CHANGELOG.md"} target="_blank" rel="noreferrer" role="menuitem" tabindex="-1">{gettext("Changelog")}</Menu.item>
-        <button type="button" role="menuitem" tabindex="-1" class="dk-menu-item" data-desk-dialog="dk-whats-new">{gettext("What's new")}</button>
+        <button type="button" role="menuitem" tabindex="-1" class="dk-menu-item" data-desk-nav-dialog="dk-whats-new">{gettext("What's new")}</button>
       </div>
       <dialog id="dk-version-dialog" class="dk-nav-dialog version-dialog" aria-label={gettext("Studio version")}>
         <div class="dialog-body version-body">
@@ -101,13 +101,13 @@ defmodule BarkparkWeb.Studio.Desk.HelpMenu do
           </p>
         </div>
         <footer>
-          <button type="button" class="dk-publish publish" autofocus data-desk-dialog-close>{gettext("OK")}</button>
+          <button type="button" class="dk-publish publish" autofocus data-desk-nav-dialog-close>{gettext("OK")}</button>
         </footer>
       </dialog>
       <dialog id="dk-whats-new" class="dk-nav-dialog whats-new-dialog" aria-label={gettext("What's new")}>
         <header>
           <h2>{gettext("What's new")}</h2>
-          <button type="button" class="icon-btn" aria-label={gettext("Close")} data-tip={gettext("Close")} data-desk-dialog-close>
+          <button type="button" class="icon-btn" aria-label={gettext("Close")} data-tip={gettext("Close")} data-desk-nav-dialog-close>
             <BarkparkWeb.Icons.desk_icon name="close" size={21} />
           </button>
         </header>

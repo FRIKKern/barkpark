@@ -1,9 +1,8 @@
 defmodule BarkparkWeb.Studio.Desk.Navbar do
   @moduledoc """
   The Studio top bar's tabs on the desk, drawn as the TanStack Studio's navbar:
-  text tabs (Structure, Vision, Media, API) and every other tab in one "More"
-  popover at the end of the bar. Vision is the TanStack Studio's tool, the
-  desk's own: no Studio tab of its name exists.
+  three text tabs (Structure, Media, API) and every other tab in one "More"
+  popover at the end of the bar.
 
   The tabs are the ones `BarkparkWeb.StudioComponents.Nav.top_menu_tabs/1`
   resolves for the old bar, the same list in the same order, so the nav-parity
@@ -36,7 +35,7 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
 
   def tabs(assigns) do
     {main, more} = split(assigns)
-    assigns = assign(assigns, main: with_tools(main, assigns), more: more)
+    assigns = assign(assigns, main: main, more: more)
 
     ~H"""
     <div class="studio-bar-tabs dk-nav" role="navigation" aria-label={gettext("Studio sections")}>
@@ -45,7 +44,7 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
         href={tab.href}
         class={["studio-tab dk-nav-tab", tab.active && "active"]}
         aria-current={tab.active && "page"}
-        data-test-id={!tab[:tool] && "top-menu-tab"}
+        data-test-id="top-menu-tab"
       >{tab.label}</a>
       <button
         :if={@main != [] or @more != []}
@@ -93,32 +92,6 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
     </div>
     """
   end
-
-  # The TanStack Studio's tools after Structure (`Navbar.tsx` `ALL_TOOLS`):
-  # Vision. A tool is the desk's own, not one of the Studio's tabs, so it
-  # carries no `data-test-id`: the page's tab set stays the Studio's.
-  defp with_tools([structure | rest], assigns) do
-    href =
-      BarkparkWeb.Studio.StudioLive.Paths.studio_path(
-        assigns[:scope_prefix] || "",
-        ["vision"],
-        assigns.dataset
-      )
-
-    vision = %{
-      label: gettext("Vision"),
-      href: href,
-      in_bar: true,
-      tool: true,
-      active: assigns[:current_path] == href,
-      disabled: false,
-      reason: nil
-    }
-
-    [structure, vision | rest]
-  end
-
-  defp with_tools([], _assigns), do: []
 
   @doc """
   The resolved tabs split in two: the built-in Structure, Media and API (in

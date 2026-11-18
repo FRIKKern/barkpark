@@ -1,8 +1,7 @@
 defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
   @moduledoc """
   The desk navbar as the TanStack Studio's (J37, J46, J53, B02): the brand
-  (the workspace's name as the switcher's button), the Vision tool link, Help
-  and resources with its version dialog and What's new, and the user menu.
+  (the workspace's name as the switcher's button), Help and resources with its version dialog and What's new, and the user menu.
   The switcher offers only the principal's own places and checks a pick
   again on the server. The old Studio's bar keeps its own pieces.
   """
@@ -80,8 +79,7 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
   end
 
   describe "the brand and the tools" do
-    test "the bar is TanStack's .navbar: the logo, the workspace's name as the switcher, Vision after Structure",
-         c do
+    test "the bar is TanStack's .navbar: the logo, the workspace's name as the switcher", c do
       {:ok, view, _html} = live(c.conn, c.base)
 
       assert has_element?(view, "#studio-bar.navbar .studio-bar-brand > .logo")
@@ -94,23 +92,9 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
                ~s(.navbar button.scope-button[aria-haspopup="dialog"][aria-label="#{label}"])
              )
 
-      # Vision is the TanStack Studio's tool: a link in the bar's navigation,
-      # after Structure, and no Studio tab (the tab set stays the Studio's).
-      vision = c.studio <> "/vision"
-
-      assert has_element?(
-               view,
-               ~s|[role="navigation"] a.dk-nav-tab[href="#{vision}"]:not([data-test-id])|,
-               "Vision"
-             )
-
-      html = render(view)
-
-      [structure, vision_at, media] =
-        for name <- ["Structure", "Vision", "Media"],
-            do: :binary.match(html, ">#{name}</a>") |> elem(0)
-
-      assert structure < vision_at and vision_at < media
+      # No Vision link until the desk has the Vision tool: a link to a page
+      # that is not there is worse than none.
+      refute has_element?(view, ~s([role="navigation"] a[href$="/vision"]))
     end
 
     test "the old Studio keeps its own bar: no .navbar, the old switcher, the theme toggle and Sign out",
@@ -225,7 +209,7 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
 
       assert has_element?(
                view,
-               ~s(#{menu} [role="menuitem"][data-desk-dialog="dk-whats-new"]),
+               ~s(#{menu} [role="menuitem"][data-desk-nav-dialog="dk-whats-new"]),
                "What's new"
              )
 
@@ -235,13 +219,20 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
                "Up to date"
              )
 
-      assert has_element?(view, ~s(dialog#dk-version-dialog button[data-desk-dialog-close]), "OK")
+      assert has_element?(
+               view,
+               ~s(dialog#dk-version-dialog button[data-desk-nav-dialog-close]),
+               "OK"
+             )
 
       assert has_element?(
                view,
                ~s(dialog#dk-whats-new[aria-label="What's new"] a[href^="https://github.com/"]),
                "Full changelog"
              )
+
+      # Its own attribute: `data-desk-dialog` marks an open document dialog.
+      refute has_element?(view, "[data-desk-dialog]")
 
       # The script that opens them and asks for a newer build, for the first load.
       assert has_element?(view, ~s(#{wrap} script[data-desk-navbar][src*="bp-desk-navbar.js"]))

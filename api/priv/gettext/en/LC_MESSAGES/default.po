@@ -15295,10 +15295,6 @@ msgstr ""
 msgid "Use system appearance"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/navbar.ex
-#, elixir-autogen, elixir-format
-msgid "Vision"
-msgstr ""
 
 #: lib/barkpark_web/live/studio/desk/help_menu.ex
 #, elixir-autogen, elixir-format
