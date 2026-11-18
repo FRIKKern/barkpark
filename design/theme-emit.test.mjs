@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
-import { contrast, hexToRgb, hslToHex, rgbToHex, srgbToOklch } from "./derive.mjs";
+import { contrast, hexToRgb, hslToHex, oklchToSrgb, rgbToHex, srgbToOklch } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -578,6 +578,93 @@ test("BarkUI sheet: tones and fills read on every surface, in every skin and mod
 // against the ground it sits on (WCAG 1.4.11), on every surface, and stay
 // clearly quieter than text: the foreground's contrast is at least 1.5 times
 // the edge's, so a field is not drawn in ink. --ui-border stays the hairline.
+// `a` mixed `pct`% into `b` in Oklab, as CSS color-mix(in oklab, a pct%, b).
+function mixOklab(a, b, pct) {
+  const lab = (c) => { const { L, C, h } = srgbToOklch(c); const r = (h * Math.PI) / 180; return [L, C * Math.cos(r), C * Math.sin(r)]; };
+  const A = lab(a), B = lab(b), t = pct / 100;
+  const [L, x, y] = A.map((v, i) => v * t + B[i] * (1 - t));
+  return oklchToSrgb(L, Math.hypot(x, y), (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360);
+}
+// Every skin, mode and surface of the built sheet: calls f(at, mode, surface, get).
+function eachSurface(f) {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  let n = 0;
+  for (const { name } of themes) {
+    const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
+    for (const mode of ["light", "dark"])
+      for (const s of SURFACES) {
+        f(`${name}/${mode}/${s}`, mode, s, (r, surface = s) => arms(v[`--bark-${surface}-${r}`])[mode]);
+        n++;
+      }
+  }
+  assert.equal(n, themes.length * 2 * SURFACES.length);
+}
+
+// A soft tone control (BarkUI's destructive button: --ui-destructive mixed 6%
+// into the ground as its fill, danger-text as its label; UI SDK's mixes 8%)
+// must read on every surface: each tone's -text at 4.5:1 on its own tone's
+// tint at 8%, and danger-text on the destructive tint at 8%.
+// The one physical limit: --ui-destructive is also a text colour, so on a mid
+// ground it sits on the light side and its tint lifts the ground toward a light
+// label. There the label must read as well as the ground's own text side
+// allows: pure white or black on that tint, whichever reads on the ground.
+const SOFT_TINT = 8;
+test("BarkUI sheet: every tone's text reads on its own soft tint, on every surface", () => {
+  let capped = 0;
+  eachSurface((at, mode, s, get) => {
+    const bg = get("background");
+    for (const t of TONES) {
+      const c = contrast(get(`${t}-text`), mixOklab(get(t), bg, SOFT_TINT));
+      assert.ok(c >= 4.5, `${at}: ${t}-text on the ${SOFT_TINT}% ${t} tint is ${c.toFixed(2)}, under 4.5`);
+    }
+    const tint = mixOklab(get("destructive"), bg, SOFT_TINT);
+    const side = contrast("#ffffff", bg) >= contrast("#000000", bg) ? "#ffffff" : "#000000";
+    const floor = Math.min(4.5, contrast(side, tint) - 0.01);
+    if (floor < 4.5) capped++;
+    const c = contrast(get("danger-text"), tint);
+    assert.ok(c >= floor, `${at}: danger-text on the ${SOFT_TINT}% destructive tint is ${c.toFixed(2)}, under ${floor.toFixed(2)}`);
+  });
+  assert.ok(capped <= 1, `${capped} surfaces hold danger-text under 4.5 on the destructive tint; one was measured`);
+});
+
+// Disabled controls draw on the muted fill with muted-foreground. They read as
+// inactive when that fill sits close to the ground, its text is readable but
+// clearly weaker than the foreground, and the fill can never be taken for the
+// primary fill. On the primary surface the muted fill is computed, so it is
+// held between 1.1 and 1.6:1 from the ground; the base muted fill is the colour
+// source's own and is not held to that band.
+test("BarkUI sheet: the muted fill reads as inactive on every surface", () => {
+  eachSurface((at, mode, s, get) => {
+    const bg = get("background"), muted = get("muted");
+    if (s === "primary") {
+      const step = contrast(muted, bg);
+      assert.ok(step >= 1.1 && step <= 1.6, `${at}: muted fill is ${step.toFixed(2)}:1 from the ground, outside 1.1 to 1.6`);
+    }
+    const quiet = contrast(get("muted-foreground"), muted), loud = contrast(get("foreground"), muted);
+    assert.ok(loud >= 1.2 * quiet, `${at}: muted-foreground ${quiet.toFixed(2)}:1 is not clearly weaker than the foreground ${loud.toFixed(2)}:1 on the muted fill`);
+    const vsPrimary = contrast(get("primary"), muted);
+    assert.ok(vsPrimary >= 3, `${at}: the muted fill is ${vsPrimary.toFixed(2)}:1 from --ui-primary, under 3`);
+  });
+});
+
+// In dark the depth shadow does not show, so raised and sunken must stand off
+// the base ground by themselves: 1.1:1. A dark sunken well can only go as far
+// as black at the ground's hue; where the base ground is too near black for
+// 1.1:1 (contrast to black under 1.1), the well must reach black.
+const DARK_STEP = 1.1;
+test("BarkUI sheet: in dark, raised and sunken stand off the base ground", () => {
+  eachSurface((at, mode, s, get) => {
+    if (mode !== "dark" || !["raised", "sunken"].includes(s)) return;
+    const base = get("background", "base");
+    const step = contrast(get("background"), base);
+    const room = s === "sunken" ? Math.min(DARK_STEP, contrast(base, "#000000") - 0.005) : DARK_STEP;
+    assert.ok(step >= room, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${room.toFixed(3)}`);
+  });
+});
+
 test("BarkUI sheet: the control edge stands at 3:1 on every surface and stays quieter than text", () => {
   const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
   assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
