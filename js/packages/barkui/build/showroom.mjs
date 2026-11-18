@@ -1,0 +1,90 @@
+// node build/showroom.mjs: writes dist/showroom/, one static page that opens
+// from disk with no server and no network. Every part comes from discovery;
+// nothing here names a part.
+import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import * as esbuild from 'esbuild'
+import { lintPartCss } from './css-lint.mjs'
+import { discoverParts, hashFiles, partsDir } from './parts.mjs'
+import { renderPage } from './page.mjs'
+
+export const root = join(import.meta.dirname, '..')
+export const outDir = join(root, 'dist', 'showroom')
+export const proofPath = join(root, 'dist', 'proof.json')
+// The one source of the skins. Copied into dist at build time, never committed twice.
+export const tokensPath = join(root, '..', '..', '..', 'api', 'priv', 'barkui', 'tokens.css')
+
+const require = createRequire(import.meta.url)
+const uiSdkDir = dirname(require.resolve('@ui-sdk/web/package.json'))
+export const uiSdkVersion = JSON.parse(readFileSync(join(uiSdkDir, 'package.json'), 'utf8')).version
+
+/** Skin names, read from the sheet itself. */
+export function skinNames(tokensCss) {
+  return [...new Set([...tokensCss.matchAll(/\[data-skin="([\w-]+)"\]/g)].map((m) => m[1]))]
+}
+
+/** What every part's look also rests on; a proof is stale when this moves. */
+export function foundationHash() {
+  return hashFiles([
+    ['tokens.css', readFileSync(tokensPath)],
+    ['base.css', readFileSync(join(root, 'css', 'base.css'))],
+    ['ui-sdk', uiSdkVersion],
+  ])
+}
+
+/** Showroom only: `data-pin="hover"` (or active, focus-visible) holds that state for viewing. */
+export function pinStates(css) {
+  return css.replace(/(?<!\(\s*(?:any-)?hover\s*):(hover|active|focus-visible)(?![-\w])/g, (_, s) => `:is(:${s}, [data-pin~="${s}"])`)
+}
+
+export async function buildShowroom({ dir = partsDir, quiet = false } = {}) {
+  const parts = discoverParts(dir)
+  const lint = parts.flatMap((p) => lintPartCss(p.css).map((f) => `parts/${p.name}/part.css ${f}`))
+  if (lint.length) throw new Error(`part.css may only read --ui-* and --bark-* colours:\n  ${lint.join('\n  ')}`)
+
+  mkdirSync(outDir, { recursive: true })
+  const tokens = readFileSync(tokensPath, 'utf8')
+  copyFileSync(tokensPath, join(outDir, 'tokens.css'))
+
+  const layered = [
+    '@layer ui-sdk, bark-base, bark-parts;',
+    readFileSync(join(uiSdkDir, 'browser', 'web.css'), 'utf8'),
+    readFileSync(join(root, 'css', 'base.css'), 'utf8'),
+    ...parts.map((p) => `/* parts/${p.name}/part.css */\n@layer bark-parts {\n${p.css}\n}`),
+  ].join('\n')
+  writeFileSync(join(outDir, 'barkui.css'), pinStates(layered))
+  writeFileSync(join(outDir, 'showroom.css'), readFileSync(join(root, 'build', 'showroom.css')))
+
+  // Classic script so the page runs from file://. Part imports first, so every
+  // element is defined before the controls and demos run.
+  const imports = [...new Set(parts.flatMap((p) => p.json.imports))]
+  const entry = [
+    ...imports.map((i) => `import ${JSON.stringify(i)}`),
+    ...parts.filter((p) => p.demo).map((p) => `import ${JSON.stringify(p.demo)}`),
+    `import ${JSON.stringify(join(root, 'build', 'controls.mjs'))}`,
+  ].join('\n')
+  await esbuild.build({
+    stdin: { contents: entry, resolveDir: root, sourcefile: 'showroom-entry.js' },
+    bundle: true,
+    format: 'iife',
+    minify: true,
+    target: 'es2022',
+    legalComments: 'none',
+    outfile: join(outDir, 'showroom.js'),
+    logLevel: 'warning',
+  })
+
+  const proof = existsSync(proofPath) ? JSON.parse(readFileSync(proofPath, 'utf8')) : null
+  const html = renderPage({ parts, proof, skins: skinNames(tokens), foundation: foundationHash(), uiSdkVersion })
+  writeFileSync(join(outDir, 'index.html'), html)
+  if (!quiet) console.log(`showroom: ${parts.length} part(s) -> ${join('dist', 'showroom', 'index.html')}${proof ? `, proof from ${proof.ranAt}` : ', no check run yet'}`)
+  return { parts, file: join(outDir, 'index.html') }
+}
+
+if (process.argv[1] === import.meta.filename) {
+  buildShowroom().catch((e) => {
+    console.error(`showroom: ${e.message}`)
+    process.exit(1)
+  })
+}
