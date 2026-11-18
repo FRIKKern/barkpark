@@ -21,6 +21,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/httpx"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // DefaultTimeout is the per-request HTTP timeout when Config.Timeout is zero.
@@ -496,10 +497,7 @@ func humanAPIError(status int, body []byte) error {
 	if env, ok := apierr.Parse(body); ok {
 		return fmt.Errorf("%s", env.Summary())
 	}
-	raw := strings.TrimSpace(string(body))
-	if r := []rune(raw); len(r) > 200 {
-		raw = string(r[:200]) + "…"
-	}
+	raw := textcut.EllipsisRunes(strings.TrimSpace(string(body)), 200)
 	return fmt.Errorf("error %d: %s", status, raw)
 }
 
@@ -1237,11 +1235,7 @@ func (s PaperSource) DocumentJSON(fallbackID string) ([]byte, error) {
 // bodyPreview trims an error-body to a short single-line preview so a non-2xx
 // status surfaces the server's reason without dumping a whole HTML error page.
 func bodyPreview(body []byte) string {
-	s := strings.TrimSpace(string(body))
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return s
+	return textcut.Ellipsis(strings.TrimSpace(string(body)), 200)
 }
 
 // Upsert creates or updates a document via the API.

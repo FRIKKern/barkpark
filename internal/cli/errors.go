@@ -13,6 +13,7 @@ import (
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // apiError is the decoded outcome of a non-2xx (or error-shaped) API response.
@@ -845,8 +846,8 @@ func capBody(body []byte) string {
 	if msg == "" {
 		return "request failed"
 	}
-	if r := []rune(msg); len(r) > maxOpaqueRunes {
-		return strings.TrimSpace(string(r[:maxOpaqueRunes])) + "…"
+	if p := textcut.PrefixRunes(msg, maxOpaqueRunes); len(p) < len(msg) {
+		return strings.TrimSpace(p) + "…"
 	}
 	return msg
 }
@@ -873,11 +874,11 @@ func capBody(body []byte) string {
 // redirects rather than hides: -o json/-o yaml carry `details` byte-verbatim
 // and never route through here.
 func capDetailLine(line string) string {
-	r := []rune(line)
-	if len(r) <= maxOpaqueRunes {
+	p := textcut.PrefixRunes(line, maxOpaqueRunes)
+	if len(p) == len(line) {
 		return line
 	}
-	kept := strings.TrimSpace(string(r[:maxOpaqueRunes]))
+	kept := strings.TrimSpace(p)
 	return fmt.Sprintf("%s… (+%d more bytes; -o json for the full details)",
 		kept, len(line)-len(kept))
 }

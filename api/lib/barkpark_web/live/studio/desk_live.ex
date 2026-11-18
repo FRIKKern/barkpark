@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.Bulk
+  alias BarkparkWeb.Studio.Desk.DocClip
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
@@ -337,6 +338,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-field-" <> _ = event, params, socket),
     do: FieldActions.handle_event(event, params, socket)
 
+  # The header menu's Copy document and Paste document (`DocClip`).
+  def handle_event("desk-doc-" <> _ = event, params, socket),
+    do: DocClip.handle_event(event, params, socket)
+
   # An array item's Copy (`Handlers.ArrayItems`): it writes nothing.
   def handle_event("desk-item-copy", params, socket),
     do: ArrayItems.copy(params, socket)
@@ -508,6 +513,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-expand={gettext("Expand %{title}", title: "%{title}")}
       data-desk-resize={gettext("Resize pane")}
       data-desk-field-actions={BarkparkWeb.StaticAssets.path("bp-desk-field-actions.js")}
+      data-desk-doc-clip={BarkparkWeb.StaticAssets.path("bp-desk-doc-clip.js")}
       data-desk-tags={BarkparkWeb.StaticAssets.path("bp-desk-tags.js")}
       data-desk-codelist={BarkparkWeb.StaticAssets.path("bp-desk-codelist.js")}
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}

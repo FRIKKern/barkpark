@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 const snapshotFetchAttempts = 3
@@ -448,11 +449,7 @@ func bodyHint(body []byte) string {
 	if s == "" {
 		return ""
 	}
-	const max = 120
-	if len(s) > max {
-		s = s[:max] + "…"
-	}
-	return ": " + s
+	return ": " + textcut.Ellipsis(s, 120)
 }
 
 // fetchPrime asks for prime at the clamp maximum — which buys the deepest ready

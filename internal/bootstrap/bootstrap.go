@@ -64,6 +64,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/template"
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // Project is the Barkpark project slug a fresh workspace bootstraps with — the
@@ -742,12 +743,7 @@ func mintRefusal(body []byte) string {
 // snippet truncates a response body for error messages (and never carries a
 // request token — only server responses land here).
 func snippet(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	r := []rune(s)
-	if len(r) > 200 {
-		return string(r[:200]) + "…"
-	}
-	return s
+	return textcut.EllipsisRunes(strings.TrimSpace(string(b)), 200)
 }
 
 // logf is nil-safe step narration.

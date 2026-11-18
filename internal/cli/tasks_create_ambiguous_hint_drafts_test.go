@@ -37,17 +37,12 @@ func TestTaskCreateAmbiguousHintFindsADraftOnlyRow(t *testing.T) {
 	}
 	check := env.Error.Details.CheckCommand
 
-	// The command, parsed the way a shell would: bp search query "<title>" flags…
+	// The command, parsed by a shell: bp search query '<title>' flags…
 	rest, ok := strings.CutPrefix(check, "bp search query ")
 	if !ok {
 		t.Fatalf("check command %q is not a bp search query", check)
 	}
-	quoted, err := strconv.QuotedPrefix(rest)
-	if err != nil {
-		t.Fatalf("check command %q does not quote the title: %v", check, err)
-	}
-	q, _ := strconv.Unquote(quoted)
-	tail := append([]string{q}, strings.Fields(rest[len(quoted):])...)
+	tail := shellWords(t, rest)
 
 	// A search door holding only the DRAFT of that row: the published
 	// perspective (the default) does not see it.

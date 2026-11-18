@@ -34,6 +34,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // esc URL-encodes a single dynamic path segment (an id / siteID) before it is
@@ -879,10 +881,7 @@ func cloudError(status int, body []byte) error {
 		}
 	}
 	if msg == "" {
-		raw := strings.TrimSpace(string(body))
-		if r := []rune(raw); len(r) > 200 {
-			raw = string(r[:200]) + "…"
-		}
+		raw := textcut.EllipsisRunes(strings.TrimSpace(string(body)), 200)
 		if raw == "" {
 			msg = http.StatusText(status)
 		} else {

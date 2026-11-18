@@ -22,6 +22,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/textcut"
 )
 
 // Banned lists hostnames that must not appear anywhere in the tree.
@@ -95,10 +97,7 @@ func Scan(root string, banned []string) ([]Hit, error) {
 			line := sc.Text()
 			for _, host := range banned {
 				if strings.Contains(line, host) {
-					text := strings.TrimSpace(line)
-					if len(text) > 160 {
-						text = text[:160] + "…"
-					}
+					text := textcut.Ellipsis(strings.TrimSpace(line), 160)
 					hits = append(hits, Hit{Path: rel, Line: n, Host: host, Text: text})
 				}
 			}

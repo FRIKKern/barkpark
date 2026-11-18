@@ -325,6 +325,30 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert StudioChat.get_session(sid).pending_approvals == 1
   end
 
+  # task-fe4832b24ab1c40b: the refused close kept A's ask pending but stopped
+  # tracking it, so A's own close, when it came, had nothing to cancel, and the
+  # ask stayed a live card for a turn that had ended.
+  test "a refused newer send_turn's close, then the asking run's own close, cancels the ask",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-later"))
+    b = lease!(ctx, "b")
+
+    accept!(ctx, b, 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    assert ask_status(sid) == "pending"
+    accept!(ctx, a, 3, @dead_close)
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
   test "the asking run's own close cancels its pending ask", %{sid: sid} = ctx do
     a = lease!(ctx, "a")
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})

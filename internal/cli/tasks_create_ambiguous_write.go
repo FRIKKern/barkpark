@@ -113,11 +113,15 @@ type ambiguousWrite struct {
 // landed is a DRAFT (the publish never ran), and search reads published rows
 // by default, so a bare search answers "not found" for exactly that row
 // (task-e897b05667403f28).
+//
+// The title is quoted for a POSIX shell, not with Go's %q: the person pastes
+// this line, and inside double quotes a `$` or a backtick in the title expands
+// (task-5985afa7b6e7454f).
 func (a ambiguousWrite) checkCommand() string {
 	if id := strings.TrimPrefix(a.docID, "drafts."); id != "" {
 		return "bp task get " + id
 	}
-	return fmt.Sprintf("bp search query %q --perspective drafts", a.title)
+	return "bp search query " + shQuote(a.title) + " --perspective drafts"
 }
 
 // renderAmbiguousWrite is the single seam every ambiguous `bp task create`

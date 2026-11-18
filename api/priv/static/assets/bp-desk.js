@@ -724,6 +724,8 @@
         return deskScript("data-desk-field-actions", window.BarkparkDeskFieldActions);
       };
       fieldScript();
+      // The header menu's Copy and Paste document (bp-desk-doc-clip.js).
+      deskScript("data-desk-doc-clip", window.BarkparkDeskDocClip);
       // A tags field's Enter (bp-desk-tags.js), pushed through here: LiveView
       // drops a click on a button whose last press is still unanswered.
       deskScript("data-desk-tags", window.BarkparkDeskTags);
