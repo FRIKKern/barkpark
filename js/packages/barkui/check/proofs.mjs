@@ -5,14 +5,16 @@ import { PROVED_ON, SHEET_WAITS } from '../build/sheet-waits.mjs'
 import { SURFACES } from '../build/page.mjs'
 import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
+import { installDrawn } from './drawn.mjs'
 import { installHelpers, source } from './probes.mjs'
 
 export const STEP_MS = 5000
 const light = (pass, detail, extra = {}) => ({ pass: !!pass, detail, ...extra })
 const fmt = (n) => n.toFixed(2)
 
-export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false } = {}) {
-  const context = await ctx.browser.newContext({ viewport: { width, height }, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile })
+// `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
+export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1 } = {}) {
+  const context = await ctx.browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile })
   const page = await context.newPage()
   const where = `${ctx.part}, ${width}px${js ? '' : ', no script'}`
   page.on('pageerror', (e) => ctx.errors.push(`${where}: ${String(e).slice(0, 200)}`))
@@ -28,6 +30,9 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   // patch what the check calls. press.mjs runs in a second one, so it cannot reach the check either.
   page.barkCheck = await isolate(page, 'barkui-check')
   await page.barkCheck(installHelpers)
+  await page.barkCheck(installDrawn)
+  page.barkCdp = await page.context().newCDPSession(page)
+  page.barkScale = scale
   page.barkPress = await isolate(page, 'barkui-press')
   await page.barkPress(installHelpers)
   return page
@@ -44,6 +49,43 @@ export async function styleBaseline(browser, url) {
   } finally {
     await context.close()
   }
+}
+
+/** Every run of text in the stage, read from pixels: the stage as drawn against the stage with its glyphs
+    unpainted (see check/drawn.mjs). Both captures and the comparison go through the check's own world and CDP. */
+async function drawnText(page, part, { quietly = false } = {}) {
+  const rootOf = `[data-part="${part.name}"]`
+  const clip = await page.barkCheck((sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect()
+    return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height }
+  }, rootOf)
+  const list = await page.barkCheck((sel) => window.__barkCheck.runs(document.querySelector(sel)), rootOf)
+  const shoot = async () => (await page.barkCdp.send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: page.barkScale }, captureBeyondViewport: true })).data
+  const pause = () => (quietly ? new Promise((r) => setTimeout(r, 60)) : settle(page))
+  const drawn = await shoot()
+  await page.barkCheck(() => window.__barkCheck.glyphs(false))
+  try {
+    await pause()
+    const bare = await shoot()
+    return await page.barkCheck(([a, b, c, k, l]) => window.__barkCheck.compare(a, b, c, k, l), [drawn, bare, clip, page.barkScale, list])
+  } finally {
+    await page.barkCheck(() => window.__barkCheck.glyphs(true))
+    await pause()
+  }
+}
+
+/** Failures among drawn runs, and the weakest readable run. Disabled text must draw but is not held to 4.5:1. */
+function judgeDrawn(runs, where) {
+  const fails = []
+  let weakest = { ratio: Infinity, at: '' }
+  for (const r of runs) {
+    if (!r.draws) fails.push(`${where}text does not draw at ${r.at}`)
+    else if (!r.quiet) {
+      if (r.ratio < weakest.ratio) weakest = { ratio: r.ratio, at: r.at }
+      if (r.ratio < 4.5) fails.push(`${where}drawn text ${fmt(r.ratio)}:1 at ${r.at}`)
+    }
+  }
+  return { fails, weakest }
 }
 
 /** At the end of a page's run: nothing has styled the stage since it opened. */
@@ -140,13 +182,23 @@ function frozen(traces) {
 }
 
 export async function skinsAndSchemes(ctx, part, skins) {
-  const page = await open(ctx)
+  const page = await open(ctx, { scale: 2, height: 1600 })
   const traces = {}
   const sig = {}
   const bad = { light: [], dark: [] }
   const text = { light: Infinity, dark: Infinity }
+  const drawnWeakest = { light: Infinity, dark: Infinity }
   const focus = { min: Infinity, max: 0 }
-  const edges = []
+  const bounds = { min: Infinity, max: 0, at: '' }
+  const bare = new Map()
+  const keepBounds = (into, b, at) => {
+    for (const c of b.read) {
+      if (c.ratio < into.min) Object.assign(into, { min: c.ratio, at: `${c.at} by its ${c.by} (${at})` })
+      into.max = Math.max(into.max, c.ratio)
+    }
+  }
+  const textOnly = part.json.textOnly ?? []
+  let controls = 0
   const other = {}
   const disabled = {}
   const keepDisabled = (surface, list) => {
@@ -171,21 +223,29 @@ export async function skinsAndSchemes(ctx, part, skins) {
         text[scheme] = Math.min(text[scheme], r.weakest.ratio)
         if (r.wrong.length) bad[scheme].push(`${at}: ${r.wrong[0]}`)
         if (r.weakest.ratio < 4.5) bad[scheme].push(`${at}: text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
+        // The light rests on what is drawn: every run must draw, and draw at 4.5:1.
+        const d = judgeDrawn(await drawnText(page, part), `${at}: `)
+        bad[scheme].push(...d.fails)
+        drawnWeakest[scheme] = Math.min(drawnWeakest[scheme], d.weakest.ratio)
+        const b = await page.barkCheck(([n, t]) => window.__barkCheck.boundaries(document.querySelector(`[data-part="${n}"]`), t), [part.name, textOnly])
+        keepBounds(bounds, b, at)
+        for (const x of b.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
+        controls = Math.max(controls, b.count)
         traces[at] = await page.barkCheck(([n, list]) => window.__barkCheck.trace(document.querySelector(`[data-part="${n}"]`), list), [part.name, names])
-        edges.push(...(await page.barkCheck((n) => window.__barkCheck.controlEdges(document.querySelector(`[data-part="${n}"]`)), part.name)))
         keepDisabled(PROVED_ON, await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name))
         // The unproved surfaces: measured, recorded, never a light (see SHEET_WAITS).
         for (const surface of ctx.surfaces === false ? [] : SURFACES.filter((x) => x !== PROVED_ON)) {
           await page.barkCheck(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, surface])
           await settle(page)
-          const m = await page.barkCheck(([n, spec]) => {
+          const m = await page.barkCheck(([n, t]) => {
             const root = document.querySelector(`[data-part="${n}"]`)
-            return { text: window.__barkCheck.paint(root, spec).weakest, edges: window.__barkCheck.controlEdges(root), disabled: window.__barkCheck.disabledFill(root) }
-          }, [part.name, part.json.paint ?? []])
-          const o = (other[surface] ??= { text: { min: Infinity, max: 0, at: '' }, edges: [] })
-          if (m.text.ratio < o.text.min) Object.assign(o.text, { min: m.text.ratio, at: `${m.text.at} (${at})` })
-          o.text.max = Math.max(o.text.max, m.text.ratio)
-          o.edges.push(...m.edges)
+            return { bounds: window.__barkCheck.boundaries(root, t), disabled: window.__barkCheck.disabledFill(root) }
+          }, [part.name, textOnly])
+          const w = judgeDrawn(await drawnText(page, part), '').weakest
+          const o = (other[surface] ??= { text: { min: Infinity, max: 0, at: '' }, bounds: { min: Infinity, max: 0, at: '' } })
+          if (w.ratio < o.text.min) Object.assign(o.text, { min: w.ratio, at: `${w.at} (${at})` })
+          if (w.ratio < Infinity) o.text.max = Math.max(o.text.max, w.ratio)
+          keepBounds(o.bounds, m.bounds, at)
           keepDisabled(surface, m.disabled)
         }
         await page.barkCheck(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, PROVED_ON])
@@ -214,12 +274,15 @@ export async function skinsAndSchemes(ctx, part, skins) {
   const still = frozen(traces)
   const measures = {
     focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null,
-    controlEdge: edges.length ? { min: +fmt(Math.min(...edges)), max: +fmt(Math.max(...edges)) } : null,
+    boundary: bounds.max ? { min: +fmt(bounds.min), max: +fmt(bounds.max), at: bounds.at } : null,
   }
   for (const [surface, o] of Object.entries(other)) {
     if (o.text.max) measures[`text:${surface}`] = { min: +fmt(o.text.min), max: +fmt(o.text.max), at: o.text.at }
-    if (o.edges.length) measures[`controlEdge:${surface}`] = { min: +fmt(Math.min(...o.edges)), max: +fmt(Math.max(...o.edges)) }
+    if (o.bounds.max) measures[`boundary:${surface}`] = { min: +fmt(o.bounds.min), max: +fmt(o.bounds.max), at: o.bounds.at }
   }
+  // A part with controls prints a boundary line for them, or names every one text-only.
+  const named = new Set([...bare.values()].flat()).size
+  if (controls > named && !measures.boundary) bad.light.push(`${controls - named} control(s) and no boundary reading`)
   // Numbers only, no light and no wait line yet: how far a disabled fill sits from its ground and from the primary fill.
   const span = (xs) => ({ min: +fmt(Math.min(...xs)), max: +fmt(Math.max(...xs)) })
   for (const [surface, d] of Object.entries(disabled)) if (d.ground.length) measures[`disabled:${surface}`] = { againstGround: span(d.ground), againstPrimary: span(d.primary) }
@@ -229,6 +292,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
   }
   const distinct = new Set(skins.map((k) => sig[`${k} light`])).size
   const sameAcross = skins.filter((k) => sig[`${k} light`] === sig[`${k} dark`])
+  const boundNote = measures.boundary ? `; control boundary ${measures.boundary.min}:1 or more` : ''
   const focusNote = measures.focusEdge ? `; focus edge ${measures.focusEdge.min} to ${measures.focusEdge.max}:1` : ''
   const skinsLight = still.length
     ? light(false, still[0])
@@ -236,15 +300,15 @@ export async function skinsAndSchemes(ctx, part, skins) {
       ? light(false, bad.light[0])
       : distinct < skins.length
         ? light(false, `only ${distinct} of ${skins.length} skins paint differently`)
-        : light(true, `every element takes each of ${skins.length} skins' values; weakest text ${fmt(text.light)}:1${focusNote}`)
+        : light(true, `every element takes each of ${skins.length} skins' values; weakest drawn text ${fmt(drawnWeakest.light)}:1${boundNote}${focusNote}`)
   const schemesLight = still.length
     ? light(false, still[0])
     : bad.dark.length
       ? light(false, bad.dark[0])
       : sameAcross.length
         ? light(false, `light and dark paint the same in ${sameAcross.join(', ')}`)
-        : light(true, `dark paints its own values in every skin; weakest text ${fmt(text.dark)}:1${focusNote}`)
-  return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })) }
+        : light(true, `dark paints its own values in every skin; weakest drawn text ${fmt(drawnWeakest.dark)}:1${boundNote}${focusNote}`)
+  return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })), textOnly: [...bare].map(([selector, list]) => ({ selector, controls: list })) }
 }
 
 export async function phone(ctx, part) {
@@ -265,7 +329,7 @@ export async function phone(ctx, part) {
 }
 
 export async function noscript(ctx, part) {
-  const page = await open(ctx, { js: false })
+  const page = await open(ctx, { js: false, scale: 2, height: 1600 })
   try {
     const shown = await inCheck(page, (root, h) => {
       // Every element in the stage that carries text or an icon must be seen (an idle spinner carries neither).
@@ -281,7 +345,9 @@ export async function noscript(ctx, part) {
     const r = await page.barkCheck(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
     if (r.wrong.length) return light(false, r.wrong[0])
     if (r.weakest.ratio < 4.5) return light(false, `text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
-    return light(true, `${shown} elements printed, seen and painted with no script`)
+    const d = judgeDrawn(await drawnText(page, part, { quietly: true }), '')
+    if (d.fails.length) return light(false, d.fails[0])
+    return light(true, `${shown} elements printed, seen and painted with no script; weakest drawn text ${fmt(d.weakest.ratio)}:1`)
   } finally {
     await page.context().close()
   }

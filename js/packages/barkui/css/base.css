@@ -22,11 +22,8 @@
     --bark-press: var(--bark-selected);
     --bark-hover-primary: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground));
     --bark-press-primary: color-mix(in oklab, var(--ui-primary) 78%, var(--ui-foreground));
-    --bark-ground-destructive: color-mix(in oklab, var(--ui-destructive) 6%, var(--ui-background));
     --bark-hover-destructive: color-mix(in oklab, var(--ui-destructive) 10%, var(--ui-background));
     --bark-press-destructive: color-mix(in oklab, var(--ui-destructive) 14%, var(--ui-background));
-    --bark-edge-destructive: color-mix(in oklab, var(--ui-destructive) 35%, var(--ui-background));
-    --bark-hover-edge-destructive: color-mix(in oklab, var(--ui-destructive) 50%, var(--ui-background));
   }
 
   *, *::before, *::after { box-sizing: border-box; }

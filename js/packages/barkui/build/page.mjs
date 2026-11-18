@@ -42,6 +42,12 @@ function waits(part, proof) {
   const lines = Object.entries(SHEET_WAITS)
     .filter(([key, w]) => measures[key] && measures[key].min < w.needs)
     .map(([key, w]) => `<p class="sr-wait">waiting on the sheet: ${esc(w.label)} ${measures[key].min.toFixed(2)}:1${measures[key].at ? ` at ${esc(measures[key].at)}` : ''}, needs ${w.needs}:1</p>`)
+  // Proof lines: what the check holds every control to, and the controls that say they draw no boundary.
+  const run = proof?.parts?.[part.name]
+  const bound = measures.boundary
+  if (bound && bound.min >= SHEET_WAITS.boundary.needs) lines.push(`<p class="sr-wait">control boundary ${bound.min.toFixed(2)}:1 or more on every control, needs ${SHEET_WAITS.boundary.needs}:1</p>`)
+  const bare = (run?.textOnly ?? []).flatMap((t) => t.controls)
+  if (bare.length) lines.push(`<p class="sr-wait">text-only, no boundary, label held to text rules: ${bare.map(esc).join(', ')}</p>`)
   const free = proof?.parts?.[part.name]?.paintFree ?? []
   if (free.length) lines.push(`<p class="sr-wait">${free.length} element${free.length === 1 ? '' : 's'} carry no paint: ${free.map((f) => esc(f.selector)).join(', ')}</p>`)
   return lines.join('')

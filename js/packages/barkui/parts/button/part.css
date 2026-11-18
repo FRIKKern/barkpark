@@ -2,6 +2,8 @@
    Variant by data-variant: none = secondary, "solid" = primary, "ghost" = quiet,
    "destructive". Size by data-size: "sm", none, "lg" (28, 36, 44px on a 4px grid).
    States come in pairs: a state that changes the ground names its text colour too.
+   The destructive look is the sheet's soft fill with its tone's text (--bark-danger-soft, --bark-danger-text);
+   its edge is that text too, the one tone token that marks the control at 3:1 or more against the ground.
    State tints come from base.css; the focus ring is base.css's, drawn once for every part. */
 [data-slot="button"] {
   --bark-button-height: calc(var(--ui-spacing) * 9);
@@ -58,12 +60,12 @@
     --bark-button-hover-edge: transparent;
   }
   &[data-variant="destructive"] {
-    --bark-button-bg: var(--bark-ground-destructive);
+    --bark-button-bg: var(--bark-danger-soft);
     --bark-button-fg: var(--bark-danger-text);
-    --bark-button-edge: var(--bark-edge-destructive);
+    --bark-button-edge: var(--bark-danger-text);
     --bark-button-hover-bg: var(--bark-hover-destructive);
     --bark-button-hover-fg: var(--bark-danger-text);
-    --bark-button-hover-edge: var(--bark-hover-edge-destructive);
+    --bark-button-hover-edge: var(--bark-danger-text);
     --bark-button-press-bg: var(--bark-press-destructive);
     --bark-button-press-fg: var(--bark-danger-text);
   }

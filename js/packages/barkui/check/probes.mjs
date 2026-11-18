@@ -198,13 +198,6 @@ export function installHelpers() {
     return { wrong, weakest, signature: signature.join(';') }
   }
 
-  /** The control edge (a border in --ui-input, as it resolves where the element sits) against the ground. */
-  const controlEdges = (root) =>
-    painted(root)
-      .filter((el) => !el.matches('[data-disabled], :disabled, :focus-visible, [data-pin]'))
-      .filter((el) => parseFloat(getComputedStyle(el).borderTopWidth) > 0 && getComputedStyle(el).borderTopColor === resolve('--ui-input', el.parentElement))
-      .map((el) => against(getComputedStyle(el).borderTopColor, effectiveBg(el.parentElement)))
-
   /** Does a disabled control look live? Its fill against the ground, and against the primary fill. Numbers only. */
   const disabledFill = (root) =>
     painted(root)
@@ -289,7 +282,7 @@ export function installHelpers() {
     }
   }
 
-  window.__barkCheck = { settle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, controlEdges, disabledFill, ring, seen, state: {} }
+  window.__barkCheck = { settle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state: {} }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

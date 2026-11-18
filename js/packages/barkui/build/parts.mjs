@@ -47,6 +47,8 @@ function readPart(dir, name) {
     const ok = type === 'array' ? Array.isArray(json[key]) : typeof json[key] === type && json[key].trim() !== ''
     if (!ok) throw new Error(`${where}: part.json needs "${key}" (${type})`)
   }
+  if (json.textOnly !== undefined && !(Array.isArray(json.textOnly) && json.textOnly.every((x) => typeof x === 'string' && x)))
+    throw new Error(`${where}: part.json "textOnly" must be a list of selectors (controls that draw no boundary)`)
   if (json.name !== name) throw new Error(`${where}: part.json names the part ${JSON.stringify(json.name)}; it must be the folder name`)
   // A demo is handed its own part's root and works inside it only.
   const demo = existsSync(join(dir, 'demo.mjs')) ? join(dir, 'demo.mjs') : null
@@ -78,6 +80,8 @@ const EXAMPLE_RULES = [
   [/<script\b/i, 'a <script> element; behaviour belongs in demo.mjs'],
   [/<[^>]*\sstyle\s*=/i, 'a style= attribute; the look belongs in part.css'],
   [/<[^>]*\son[a-z]+\s*=/i, 'an on*= handler; behaviour belongs in demo.mjs'],
+  [/<font\b|<[^>]*\s(bgcolor|color|text|link|vlink|alink|background)\s*=/i, 'a presentational colour; the look belongs in part.css'],
+  [/<[^>]*\sshadowroot(mode)?\s*=/i, 'a declared shadow root; the check reads the stage, not inside a shadow root'],
 ]
 
 /** The first line of an example that holds a look or a behaviour, or null. */

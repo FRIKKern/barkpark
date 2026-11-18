@@ -24,10 +24,10 @@ describe('renderPage proof lights', () => {
   })
 
   it('prints the sheet wait from the measured number, and drops it when the sheet delivers', () => {
-    const needs = SHEET_WAITS.controlEdge.needs
-    const weak = page({ hash: 'h1', lights: allOn, measures: { controlEdge: { min: 1.01, max: 1.34 } } })
-    expect(weak).toContain(`waiting on the sheet: control edge 1.01:1, needs ${needs}:1`)
-    const strong = page({ hash: 'h1', lights: allOn, measures: { controlEdge: { min: needs + 0.2, max: 9 } } })
+    const needs = SHEET_WAITS['boundary:primary'].needs
+    const weak = page({ hash: 'h1', lights: allOn, measures: { 'boundary:primary': { min: 1.01, max: 1.34 } } })
+    expect(weak).toContain(`waiting on the sheet: control boundary on primary 1.01:1, needs ${needs}:1`)
+    const strong = page({ hash: 'h1', lights: allOn, measures: { 'boundary:primary': { min: needs + 0.2, max: 9 } } })
     expect(strong).not.toContain('waiting on the sheet')
   })
 
@@ -49,7 +49,7 @@ describe('renderPage proof lights', () => {
     expect(weak).toContain(`waiting on the sheet: text on primary 2.10:1 at ${at.replaceAll('"', '&quot;')}, needs 4.5:1`)
     const strong = page({ hash: 'h1', lights: allOn, measures: { 'text:primary': { min: 4.6, max: 9, at } } })
     expect(strong).not.toContain('text on primary')
-    expect(Object.keys(SHEET_WAITS)).toEqual(expect.arrayContaining(['text:raised', 'text:sunken', 'text:primary', 'text:inverse', 'controlEdge:primary']))
+    expect(Object.keys(SHEET_WAITS)).toEqual(expect.arrayContaining(['text:raised', 'text:sunken', 'text:primary', 'text:inverse', 'boundary:primary']))
   })
 
   it('holds the control boundary as proof on every surface the sheet carries at 3:1', () => {

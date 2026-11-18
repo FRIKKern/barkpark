@@ -51,6 +51,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
       const lights = {}
       let measures = {}
       let paintFree = []
+      let textOnly = []
       let steps = []
       try {
         await limit((async () => {
@@ -60,6 +61,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
             Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
             measures = looks.measures
             paintFree = looks.paintFree
+            textOnly = looks.textOnly
           }
           if (only.includes('phone')) lights.phone = await phone(ctx, part)
           if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
@@ -76,7 +78,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
         else if (m) log(`  measured ${k}: ${m.min} to ${m.max}:1`)
       if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
       for (const l of Object.values(lights)) l.surface = PROVED_ON
-      proof.parts[part.name] = { hash: part.hash, lights, measures, paintFree, steps, ...(failed ? { failed } : {}) }
+      proof.parts[part.name] = { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(failed ? { failed } : {}) }
       proof.errors.push(...ctx.errors)
     }
   } finally {
