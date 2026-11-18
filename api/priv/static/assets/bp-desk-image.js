@@ -259,7 +259,13 @@
     });
 
     closer.addEventListener("click", function () { close(true); });
-    layer.addEventListener("mousedown", function (e) { if (e.target === layer) close(true); });
+    // A press on the backdrop closes it. Its default action would move the
+    // focus to <body> after `close` gave it back to the opener: prevent it.
+    layer.addEventListener("mousedown", function (e) {
+      if (e.target !== layer) return;
+      e.preventDefault();
+      close(true);
+    });
     var onKey = function (e) {
       if (e.key === "Escape") {
         e.preventDefault();

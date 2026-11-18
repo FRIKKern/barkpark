@@ -460,8 +460,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # session via LiveAuth.:fetch_api_token (empty string disables uploads).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
   # See docs/studio/web-components.md for the full contract.
-  # In the desk (id_prefix "") the image's own fields (alt) are drawn under it
-  # and a new image is stored in the reference shape (`Desk.ImageParts`).
+  # In the desk (id_prefix "") the image's own fields (alt) are drawn under it,
+  # and a new image takes the reference shape only where `CanonicalShapes`
+  # writes canonical shapes for the type (`Desk.ImageParts.value_shape/2`).
   def input(%{field: %{"type" => "image", "name" => name} = f} = assigns) do
     stored = Map.get(assigns.editor_form, name, "")
     val = image_form_value(stored)
@@ -476,7 +477,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
         hotspot: image_option?(f, "hotspot"),
         # An `alt` subfield is drawn under the image instead of the picker's box.
         alt: if(desk? and ImageParts.part?(f, "alt"), do: nil, else: image_option?(f, "alt")),
-        value_shape: image_value_shape(f) || (desk? && ImageParts.value_shape(stored)) || nil
+        value_shape:
+          image_value_shape(f) || (desk? && ImageParts.value_shape(stored, assigns[:doc_type])) ||
+            nil
       )
 
     ~H"""

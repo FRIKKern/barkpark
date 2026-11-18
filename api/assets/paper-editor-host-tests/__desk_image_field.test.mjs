@@ -14,7 +14,8 @@
 //
 // THE DIALOG. "Edit hotspot and crop": the hotspot and the crop are sliders;
 // arrows move them by 0.5% of the image, Shift+arrows by 2.5%, and every key
-// press is written. Escape closes it and the focus goes back to its button.
+// press is written. Escape or a press on the backdrop closes it and the focus
+// goes back to its button.
 // An input marked `data-desk-image-part` writes its picker's field.
 //
 // Runs the TRACKED static assets under jsdom.
@@ -149,6 +150,22 @@ assert.equal(keyed.hotspot.width, small.width, "the keys move, never resize");
 document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 assert.equal(document.querySelector('[role="dialog"]'), null, "Escape closes it");
 assert.equal(document.activeElement, picker.querySelector(".bp-mp-crop"), "and the focus is back on its button, not <body>");
+
+// A press on the backdrop closes it too, and the focus is back on its button:
+// the press's default action (focus to <body>) is prevented.
+btn.click();
+const layer = document.querySelector(".dk-crop-layer");
+const press = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+layer.dispatchEvent(press);
+assert.equal(document.querySelector('[role="dialog"]'), null, "a press on the backdrop closes it");
+assert.equal(press.defaultPrevented, true, "and its default action, which would focus <body>, is prevented");
+assert.equal(document.activeElement, picker.querySelector(".bp-mp-crop"), "the focus is back on its button");
+
+// A press inside the dialog does not close it.
+btn.click();
+document.querySelector(".dk-crop-dialog").dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+assert.ok(document.querySelector('[role="dialog"]'), "a press inside the dialog keeps it open");
+desk.close();
 
 // The geometry keeps the hotspot inside the crop.
 const g = desk.geometry;

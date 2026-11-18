@@ -2,7 +2,10 @@ defmodule BarkparkWeb.Studio.DeskImageFieldTest do
   @moduledoc """
   The desk's image field, as the TanStack Studio's `ImageInput` (J12,
   task-dfc583637385c120): an empty field asks its picker for Sanity's
-  reference shape, a schema with `hotspot` gets the "Edit hotspot and crop"
+  reference shape only where `CanonicalShapes` writes canonical shapes (the
+  box's flag, on in tests; off by default) or the schema asks for it
+  (`valueShape: "assetRef"`), else the legacy `{url, assetId}`; a schema with
+  `hotspot` gets the "Edit hotspot and crop"
   dialog, and the image's own fields (alt) are fields of their own under
   it. What it writes — the hotspot `{x, y, width, height}`, the crop `{top,
   bottom, left, right}` and alt on the image object — goes through the
@@ -140,6 +143,50 @@ defmodule BarkparkWeb.Studio.DeskImageFieldTest do
 
     assert words["crop_hotspot_value"] ==
              "centre %{x} across, %{y} down; %{width} wide, %{height} high"
+  end
+
+  describe "with the box's canonical_shape_writes flag off (the default)" do
+    setup do
+      before = Application.get_env(:barkpark, :canonical_shape_writes)
+      Application.put_env(:barkpark, :canonical_shape_writes, false)
+      on_exit(fn -> Application.put_env(:barkpark, :canonical_shape_writes, before) end)
+    end
+
+    test "an empty field keeps writing the legacy {url, assetId}: no value-shape", c do
+      view = open(c)
+      refute has_element?(view, ~s(#editor-form bp-media-picker[id="mainImage"][value-shape]))
+      # The rest of the field is the same.
+      assert has_element?(view, ~s(#editor-form bp-media-picker[id="mainImage"][hotspot]))
+      assert has_element?(view, ~s(#editor-form .dk-image-part input[id="mainImage.alt"]))
+    end
+
+    test "a schema that asks for the reference shape (valueShape: assetRef) gets it", c do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => c.type,
+            "title" => "Image field",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{
+                "name" => "mainImage",
+                "title" => "Main image",
+                "type" => "image",
+                "options" => %{"hotspot" => true, "valueShape" => "assetRef"}
+              }
+            ]
+          },
+          @dataset
+        )
+
+      view = open(c)
+
+      assert has_element?(
+               view,
+               ~s(#editor-form bp-media-picker[id="mainImage"][value-shape="asset-ref"])
+             )
+    end
   end
 
   test "a field already in the legacy shape keeps it", c do

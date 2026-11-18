@@ -909,10 +909,28 @@ defmodule BarkparkWeb.SearchController do
             dataset,
             scope_opts(conn),
             schema_resolver(conn, dataset),
-            ctx
+            ctx,
+            image_ref: preview_image_ref(conn, dataset)
           )
     }
   end
 
   defp maybe_preview(envelope, _conn, _dataset, _params, _ctx), do: envelope
+
+  # An image in the reference shape has no `url`: its media is the
+  # dataset's image route under this request's scope (`ImageRefUrl`).
+  defp preview_image_ref(conn, dataset) do
+    params = conn.path_params
+
+    prefix =
+      BarkparkWeb.Studio.StudioLive.Paths.scope_prefix(
+        params["workspace_slug"],
+        params["project_slug"]
+      )
+
+    BarkparkWeb.Studio.ImageRefUrl.resolver(
+      dataset,
+      BarkparkWeb.Studio.ImageRefUrl.prefix(prefix, scope_opts(conn))
+    )
+  end
 end

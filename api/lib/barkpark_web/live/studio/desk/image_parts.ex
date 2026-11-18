@@ -5,11 +5,17 @@ defmodule BarkparkWeb.Studio.Desk.ImageParts do
   fields under the image, and the look of its "Edit hotspot and crop"
   dialog.
 
-  THE SHAPE. A new image in an empty field is Sanity's canonical value,
+  THE SHAPE. A new image in an empty field takes Sanity's canonical value,
   `{_type: "image", asset: {_type: "reference", _ref}}` (TanStack's
-  `pickedImage`), so the picker is asked for the reference shape. A field
-  already holding the legacy `{url, assetId, …}` shape (migrated content)
-  keeps it: the picker would otherwise write a reference it has no ref for.
+  `pickedImage`), only where `Barkpark.Content.CanonicalShapes` writes the
+  canonical shapes for the document's type: the box's
+  `:canonical_shape_writes` flag is on and the type is not plugin-owned.
+  Off (the default), a new image is written as `{url, assetId, …}`, as
+  before, until the box's readers take both shapes. A schema's own
+  `valueShape: "assetRef"` asks for the reference shape either way
+  (`FieldInputs.image_value_shape/1`). A field already holding the legacy
+  shape keeps it: the picker would otherwise write a reference it has no ref
+  for. A field already holding the reference shape keeps that.
   The hotspot `{x, y, width, height}`, the crop `{top, bottom, left,
   right}` and the declared fields (`alt`) sit on the image object in either
   shape, as Sanity stores them (docs/contracts/schema-v2.md "Stored value
@@ -28,6 +34,7 @@ defmodule BarkparkWeb.Studio.Desk.ImageParts do
   """
   use Phoenix.Component
 
+  alias Barkpark.Content.CanonicalShapes
   alias BarkparkWeb.Studio.Desk.FieldActions
 
   @part_types ~w(string text)
@@ -35,13 +42,15 @@ defmodule BarkparkWeb.Studio.Desk.ImageParts do
   @no_form "dk-image-part-no-form"
 
   @doc """
-  The value shape an image field asks its picker for in the desk:
-  `"asset-ref"` unless the stored value is the legacy shape (a URL string,
-  or a map naming `url` or `assetId` without an `asset`).
+  The value shape an image field of a `type` document asks its picker for in
+  the desk: `"asset-ref"` when `CanonicalShapes` writes canonical shapes for
+  `type` and the stored value is not the legacy shape (a URL string, or a map
+  naming `url` or `assetId` without an `asset`); else nil, the picker's
+  `{url, assetId}`.
   """
-  @spec value_shape(term()) :: String.t() | nil
-  def value_shape(stored) do
-    if legacy?(stored), do: nil, else: "asset-ref"
+  @spec value_shape(term(), String.t() | nil) :: String.t() | nil
+  def value_shape(stored, type) do
+    if CanonicalShapes.canonical_write?(type) and not legacy?(stored), do: "asset-ref"
   end
 
   defp legacy?(%{"asset" => %{}}), do: false
