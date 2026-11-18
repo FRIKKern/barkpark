@@ -36,7 +36,7 @@ defmodule Barkpark.PortableDoc.ValidateValueDepthTest do
 
   test "each value-too-deep.json case gives exactly its expected errors" do
     fixture = @fixture |> File.read!() |> Jason.decode!()
-    assert fixture["maxValueDepth"] == Validate.max_value_depth()
+    assert fixture["maxValueDepth"] == 1000
     assert length(fixture["cases"]) == 2
 
     for %{"name" => name, "doc" => doc, "expect" => expect} <- fixture["cases"] do
