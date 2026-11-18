@@ -16,7 +16,8 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
     * an object holding `_strengthenOnPublish` whose `_ref` names a document
       with a published version, in the same dataset and tenant, loses `_weak`
-      and `_strengthenOnPublish`. Its other keys stay;
+      and `_strengthenOnPublish`. Its other keys stay. When the marker names
+      a `type`, the published target must be of that type;
     * when the target has no published version, the object is left exactly
       as it was;
     * an object without `_strengthenOnPublish` is never touched, even when it
@@ -57,9 +58,9 @@ defmodule Barkpark.Content.StrengthenOnPublish do
         draft
 
       refs ->
-        published = published_ids(refs, dataset, opts)
+        published = published_types(refs, dataset, opts)
 
-        if MapSet.size(published) == 0,
+        if map_size(published) == 0,
           do: draft,
           else: %{draft | content: strong(content, published)}
     end
@@ -83,9 +84,9 @@ defmodule Barkpark.Content.StrengthenOnPublish do
 
   defp waiting_refs(_leaf, acc), do: acc
 
-  defp strong(%{@marker => _, "_ref" => ref} = node, published) when is_binary(ref) do
+  defp strong(%{@marker => marker, "_ref" => ref} = node, published) when is_binary(ref) do
     node =
-      if MapSet.member?(published, ref),
+      if published?(published, ref, marker),
         do: Map.drop(node, @dropped),
         else: node
 
@@ -98,27 +99,33 @@ defmodule Barkpark.Content.StrengthenOnPublish do
   defp strong(list, published) when is_list(list), do: Enum.map(list, &strong(&1, published))
   defp strong(leaf, _published), do: leaf
 
-  # The published rows among `refs`, in the publish's dataset and tenant. A row
-  # whose id has no `drafts.` prefix IS the published version, so a `drafts.`
-  # ref is never looked up.
-  defp published_ids(refs, dataset, opts) do
+  # A marker that names a type only matches a published target of that type.
+  defp published?(published, ref, %{"type" => type}) when is_binary(type),
+    do: type in Map.get(published, ref, [])
+
+  defp published?(published, ref, _marker), do: Map.has_key?(published, ref)
+
+  # The published rows among `refs`, in the publish's dataset and tenant, as
+  # `%{doc_id => [type]}`. A row whose id has no `drafts.` prefix IS the
+  # published version, so a `drafts.` ref is never looked up.
+  defp published_types(refs, dataset, opts) do
     ids = Enum.reject(refs, &String.starts_with?(&1, "drafts."))
 
     case {ids, scope(opts)} do
       {[], _} ->
-        MapSet.new()
+        %{}
 
       {_, :none} ->
-        MapSet.new()
+        %{}
 
       {ids, {workspace_id, project_id}} ->
         from(d in Document,
           where: d.dataset == ^dataset and d.doc_id in ^ids,
-          select: d.doc_id
+          select: {d.doc_id, d.type}
         )
         |> scope_to_workspace(workspace_id, project_id)
         |> Repo.all()
-        |> MapSet.new()
+        |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
     end
   end
 

@@ -149,6 +149,24 @@ defmodule Barkpark.Content.StrengthenOnPublishTest do
     assert published_content("sop-unpub", opts)["editor"] == waiting("cid")
   end
 
+  test "a published target of another type than the marker names leaves it waiting",
+       %{opts: opts} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "sop_other", "title" => "Other", "visibility" => "public", "fields" => []},
+        @ds,
+        opts
+      )
+
+    {:ok, _} = Content.create_document("sop_other", %{"doc_id" => "pat", "title" => "pat"}, @ds, opts)
+    {:ok, _} = Content.publish_document("pat", "sop_other", @ds, opts)
+
+    draft!("sop-wrong-type", %{"editor" => waiting("pat")}, opts)
+    {:ok, _} = Content.publish_document("sop-wrong-type", @post, @ds, opts)
+
+    assert published_content("sop-wrong-type", opts)["editor"] == waiting("pat")
+  end
+
   test "a weak reference without _strengthenOnPublish stays weak", %{opts: opts} do
     chosen = %{"_type" => "reference", "_ref" => "ann", "_weak" => true}
     draft!("sop-chosen", %{"editor" => chosen}, opts)
