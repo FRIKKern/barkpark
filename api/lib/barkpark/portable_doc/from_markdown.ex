@@ -574,9 +574,13 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
     end
   end
 
+  # The first word of a fence's info string, as typed: EarmarkParser escapes
+  # `&` and `<` in it (`_attribute_escape/1`), so that is undone here.
   defp fence_language(attrs) do
     attrs
     |> attr("class")
+    |> String.replace("&lt;", "<")
+    |> String.replace("&amp;", "&")
     |> String.split(" ", trim: true)
     |> Enum.at(0, "")
   end
