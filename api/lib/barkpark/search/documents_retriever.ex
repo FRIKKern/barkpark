@@ -14,7 +14,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.Search.{Fold, SearchRefresh, TypoPolicy}
+  alias Barkpark.Search.{Fold, IdOnlyHits, SearchRefresh, TypoPolicy}
 
   # Default ranking-pool size (Barkpark Cloud P4 / Move B). The expensive
   # per-row ranking computation (`ts_rank` + `similarity`) runs only on this
@@ -203,22 +203,25 @@ defmodule Barkpark.Search.DocumentsRetriever do
         where_match(q, parsed, groups, config, relaxed, index, match, arms)
       end
 
-      {base, count, facets, near_miss?, text_count, arms} =
+      {base, count, facets, near_miss?, text_count, arms, ids_only?} =
         if browse? do
           {count, facets} = count_fun.(base)
-          {base, count, facets, false, nil, nil}
+          {base, count, facets, false, nil, nil, false}
         else
           words = match_on.(base, :words)
           {count, facets} = if relaxed, do: {0, %{}}, else: count_fun.(words)
           text_count = text_probe.(count, fn -> match_on.(text_base, :words) end)
 
+          ids_only? =
+            IdOnlyHits.ids_only?(count, groups, match, suggest?, fn -> match_on.(base, :text) end)
+
           if count > 0 or (is_integer(text_count) and text_count > 0) do
-            {words, count, facets, false, text_count, :words}
+            {words, count, facets, false, text_count, :words, ids_only?}
           else
             wider = match_on.(base, fallback_arms)
             {count, facets} = count_fun.(wider)
             text_count = text_probe.(count, fn -> match_on.(text_base, fallback_arms) end)
-            {wider, count, facets, true, text_count, fallback_arms}
+            {wider, count, facets, true, text_count, fallback_arms, false}
           end
         end
 
@@ -328,6 +331,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
       meta = %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}
       meta = if is_integer(text_count), do: Map.put(meta, :text_count, text_count), else: meta
+      meta = if ids_only?, do: Map.put(meta, :ids_only, true), else: meta
 
       meta =
         if is_binary(collapse),
@@ -1568,6 +1572,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     include_dyn =
       case arms do
         :words -> words_dynamic(groups, index, match)
+        :text -> words_dynamic(groups, index, match, false)
         :broad -> include_dynamic(groups, config, index, match)
         :names_typo -> names_typo_dynamic(groups, config, index, match)
       end
@@ -1601,7 +1606,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # step: a `:*` query against the full vector costs the planner a scan of the
   # vectors of the whole table (measured 609 ms for `lydbok:*` over 47,361
   # documents, against 13 ms for the whole word).
-  defp words_dynamic(groups, index, match) do
+  defp words_dynamic(groups, index, match, ids? \\ true) do
     {prefix_groups, word_groups} = Enum.split_with(groups, & &1.prefix?)
 
     # Under `:all` each word is its own arm (a BitmapAnd of the words), so a
@@ -1640,13 +1645,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> Enum.reject(&is_nil/1)
       |> combine_clauses(match)
 
-    id_arm =
-      groups
-      |> Enum.flat_map(& &1.members)
-      |> Enum.map(&id_match/1)
-      |> combine_clauses(:any)
-
-    combine_clauses(Enum.reject([text_arm, id_arm], &is_nil/1), :any)
+    id_arm = if ids?, do: groups |> Enum.flat_map(& &1.members) |> Enum.map(&id_match/1)
+    combine_clauses(Enum.reject([text_arm, combine_clauses(id_arm || [], :any)], &is_nil/1), :any)
   end
 
   # The suggestion fallback: the words of the first step, where a word that
