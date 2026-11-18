@@ -179,13 +179,7 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
 
       view = open(c, d, @history <> ",rev=#{d.rev}")
 
-      revision =
-        view |> element("[data-pane-editing] fieldset[data-desk-revision-form]") |> render()
-
-      refute revision =~ "bp-fc-wrap-"
-      refute revision =~ "bp-paper-canvas"
-      assert revision =~ "Seed published"
-
+      # The canvas's ops, sent by hand: the server refuses them.
       rev = :sys.get_state(view.pid).socket.assigns.editor_doc.rev
 
       render_hook(view, "field-block-ops", %{
@@ -202,6 +196,14 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
 
       render_async(view, 5_000)
       refute draft(d).content["description"]["html"] =~ "TYPED"
+
+      # And none is drawn: the revision's value shows, with nothing to type in.
+      revision =
+        view |> element("[data-pane-editing] fieldset[data-desk-revision-form]") |> render()
+
+      refute revision =~ "bp-fc-wrap-"
+      refute revision =~ "bp-paper-canvas"
+      assert revision =~ "Seed published"
     end
 
     test "Paste field, a label, the editor mode and Duplicate write nothing", c do
