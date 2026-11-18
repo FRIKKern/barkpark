@@ -15,7 +15,8 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   is here too, in the Studio's order: Preview, Show or Hide preview, Diff,
   Open another, Close reference, View blast radius, a schema's own actions (a
   link, or a dialog for an admin, as the toolbar drew them) and the switch to
-  the Beta editor.
+  the Beta editor. The header's menu adds Copy document and Paste document
+  (`DocClip`); an item's `data` attributes are the ones its script reads.
 
   It is drawn in the desk's one menu look (`Desk.Menu`), each action with
   its glyph, Delete in red under a line. The menu is an HTML popover, as the
@@ -40,7 +41,8 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
           optional(:href) => String.t(),
           optional(:target) => String.t() | nil,
           optional(:rel) => String.t() | nil,
-          optional(:patch) => boolean()
+          optional(:patch) => boolean(),
+          optional(:data) => keyword()
         }
 
   @doc "The open document's menu items, in the Studio's order; none without a document."
@@ -226,6 +228,7 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
             phx-click={item.event}
             data-desk-doc-action={item.name}
             {values(item)}
+            {item[:data] || []}
           >{item.label}</Menu.item>
         <% end %>
       </div>
@@ -233,8 +236,10 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
     """
   end
 
-  # A line before Delete, and before the first reference link.
+  # A line before Delete, before the first reference link and before Copy
+  # document (`DocClip`), as TanStack's menu has one there.
   defp separated?(%{name: "delete-doc"}, _prev), do: true
+  defp separated?(%{name: "copy-document"}, _prev), do: true
   defp separated?(%{name: "open-reference"}, %{name: "open-reference"}), do: false
   defp separated?(%{name: "open-reference"}, _prev), do: true
   defp separated?(_item, _prev), do: false
@@ -256,6 +261,8 @@ defmodule BarkparkWeb.Studio.Desk.DocMenu do
   defp icon("editor-set-mode"), do: "sparkles"
   defp icon("open-reference"), do: "link"
   defp icon("incoming-references"), do: "sync"
+  defp icon("copy-document"), do: "copy"
+  defp icon("paste-document"), do: "clipboard"
   defp icon(_name), do: nil
 
   # Each value as its phx-value attribute. The keys are this module's own

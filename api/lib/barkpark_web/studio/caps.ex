@@ -193,8 +193,9 @@ defmodule BarkparkWeb.Studio.Caps do
   # presence meta, for the other sessions on that paper to draw.
   # `desk-item-copy` writes nothing either: it answers the browser with an
   # item of the open document's array, read from this socket's own editor
-  # buffer (`Handlers.ArrayItems.copy/2`), for the clipboard.
-  @read_events ~w(airdrop-open airdrop-create paper-selection desk-item-copy)
+  # buffer (`Handlers.ArrayItems.copy/2`), for the clipboard. So does
+  # `desk-doc-copy`, with the open document (`Desk.DocClip`).
+  @read_events ~w(airdrop-open airdrop-create paper-selection desk-item-copy desk-doc-copy)
 
   # Admin (tenant-control): the network-shares panel + per-item share popover,
   # plus STRUCTURAL mutation — schema-declared doc actions and bulk
@@ -225,7 +226,7 @@ defmodule BarkparkWeb.Studio.Caps do
     array_op select-media clear-image upload-image select-ref clear-ref
     restore-revision save-profile delete-doc confirm-delete
     discard-draft confirm-discard
-    duplicate-doc toggle-doc-checkbox
+    duplicate-doc toggle-doc-checkbox desk-doc-paste
     paper-edit-block paper-block-autosave sidebar-slug-change
     paper-op paper-ops paper-history-step field-block-ops valueref-accept-baseline paper-add-block
     paper-materialize-slot paper-slash-insert paper-add-property

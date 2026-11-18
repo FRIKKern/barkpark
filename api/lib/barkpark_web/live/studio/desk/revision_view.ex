@@ -159,15 +159,22 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
   @doc "Whether `event` is refused because a revision is shown in the form's place."
   def refuses?(event, assigns), do: shown?(assigns) and event not in @reads
 
+  # The header menu's items that send an event and write nothing: Copy
+  # document copies the revision shown (`DocClip`).
+  @menu_reads ~w(desk-doc-copy)
+
   @doc """
   The header menu's items while a revision is shown: only those that open
   something or link somewhere (History, Incoming references, the
-  document's links). An item that sends the Studio an event (Publish,
-  Discard draft, Duplicate, Delete, a schema action) is left out, as
-  TanStack's revision view has none.
+  document's links), and Copy document. An item that sends the Studio an
+  event that writes (Publish, Discard draft, Duplicate, Delete, Paste
+  document, a schema action) is left out, as TanStack's revision view has
+  none.
   """
   def menu(items, assigns) do
-    if shown?(assigns), do: Enum.reject(items, &is_binary(&1.event)), else: items
+    if shown?(assigns),
+      do: Enum.reject(items, &(is_binary(&1.event) and &1.event not in @menu_reads)),
+      else: items
   end
 
   @doc """

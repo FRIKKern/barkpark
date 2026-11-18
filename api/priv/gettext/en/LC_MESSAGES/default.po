@@ -15395,3 +15395,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Workspace %{workspace}, project %{project}, dataset %{dataset}. Switch"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_clip.ex
+#, elixir-autogen, elixir-format
+msgid "Copy document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/doc_clip.ex
+#, elixir-autogen, elixir-format
+msgid "Paste document"
+msgstr ""

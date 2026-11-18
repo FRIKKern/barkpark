@@ -14,7 +14,8 @@ defmodule BarkparkWeb.Studio.Desk.FieldClip do
 
   A field's signature (`sig/1`) is its type reduced to what decides whether a
   value fits it: `string`, `number`, `reference:author`, `array:string`,
-  `object:url=string`. Nothing here reads or writes a document.
+  `object:url=string`. A copied document (`doc_copy/3`) carries each of its
+  fields with its signature. Nothing here reads or writes a document.
   """
 
   @string_types ~w(string text url email select)
@@ -150,6 +151,52 @@ defmodule BarkparkWeb.Studio.Desk.FieldClip do
 
     json = Jason.encode!(clip)
     text = as_text(item)
+
+    html =
+      ~s(<div data-sanity-clipboard-base64="#{Base.encode64(json)}"><p>#{escape(text)}</p></div>)
+
+    %{json: json, html: html, text: text}
+  end
+
+  @doc """
+  The copy of a whole document of `doc_type`: each of its `fields` that holds
+  a value, as `{field, value}`, under Sanity's document item (`isDocument`,
+  the values under their names, the document's `_type`) with Barkpark's own
+  copy inside it, each field with its signature (the TanStack Studio's
+  `copy` of `{kind: 'document'}`). The words are every value's, in order.
+  """
+  @spec doc_copy([{map(), term()}], String.t() | nil, String.t() | nil) :: copy()
+  def doc_copy(fields, doc_id, doc_type) do
+    held =
+      for {%{"name" => name} = field, value} <- fields,
+          not is_nil(value),
+          do: {name, field, value}
+
+    clip = %{
+      "type" => "sanityClipboardItem",
+      "documentId" => doc_id,
+      "documentType" => doc_type,
+      "isDocument" => true,
+      "schemaTypeName" => doc_type,
+      "valuePath" => [],
+      "value" =>
+        Map.new([{"_type", doc_type} | for({name, _f, value} <- held, do: {name, value})]),
+      "patchType" => "replace",
+      "barkpark" => %{
+        "kind" => "document",
+        "docType" => doc_type,
+        "fields" =>
+          for({name, f, value} <- held, do: %{"name" => name, "sig" => sig(f), "value" => value})
+      }
+    }
+
+    json = Jason.encode!(clip)
+
+    text =
+      held
+      |> Enum.map(fn {_name, _f, value} -> as_text(value) end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join(", ")
 
     html =
       ~s(<div data-sanity-clipboard-base64="#{Base.encode64(json)}"><p>#{escape(text)}</p></div>)
