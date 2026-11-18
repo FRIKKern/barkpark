@@ -412,12 +412,42 @@ jobs:
           esac
           exit "$status"
 
+      # Whether this change touches BarkUI: the selftest below costs about 90 s,
+      # so it runs only then. PR: the diff from the merge base (fetch-depth 0).
+      # Push: the diff from the previous head, fetched here (the clone is
+      # shallow). Any failure to work out the diff RUNS the selftest.
+      - name: "BarkUI: did this change touch it?"
+        id: barkui
+        run: |
+          set +e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(git -C .. diff --name-only "origin/${{ github.base_ref }}...HEAD")
+            status=$?
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            git -C .. fetch --quiet --depth=1 origin "${{ github.event.before }}" &&
+              files=$(git -C .. diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+            status=$?
+          else
+            status=1
+          fi
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the selftest"; exit 0
+          fi
+          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|\.github/workflows/js-tests\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the selftest"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the selftest"
+          fi
+
       # The check's own proof that it can still lose: it plants one break per
       # case in a scratch copy of a part (a step that never settles, an element
       # frozen across skins, a focus ring lost on its ground, hidden or clipped
       # no-script content, a nameless icon button, a console error, a missing
       # file) and reds unless each one turns the right light off. About 90 s.
+      # Skipped only when the step above says, for certain, BarkUI was not touched.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
+        if: steps.barkui.outputs.run != 'false'
         timeout-minutes: 8
         run: |
           set +e

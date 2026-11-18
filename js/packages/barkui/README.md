@@ -33,6 +33,9 @@ focus ring (a 2px gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `
   (5s) or part (120s) past its time limit.
 - `pnpm run check:selftest` plants one break per case in a scratch copy of a part and fails unless the
   check turns the right light off.
+- In CI (`js-tests.yml`) the fast tests and the showroom check run on every js-tests run; the selftest
+  runs only when a change touches `js/packages/barkui/**`, `api/priv/barkui/**` or that workflow, and
+  also whenever the changed files cannot be worked out.
 - `build/sheet-waits.mjs` lists values the tokens sheet does not deliver yet. The check records each
   measure; the page prints "waiting on the sheet: ..." while it is short, and `hard: true` makes it fail.
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css colour lint.
