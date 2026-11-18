@@ -22,12 +22,11 @@
 //            role is base's.
 //   primary  a brand fill. background is the primary slot, foreground and the
 //            strong edges are primary-fg, and --ui-primary flips to primary-fg
-//            with primary as its text. muted, selected and border are the ground
-//            stepped by base's own offsets (bg-accent and border against bg):
-//            toward the foreground, or away from it where toward would leave
-//            the foreground under 4.5:1 on the fill. muted, the disabled fill,
+//            with primary as its text. border is the ground stepped toward the
+//            foreground by base's own border offset. muted, the disabled fill,
 //            is the ground walked away from the foreground to 1.2:1, close to
-//            the ground and never like the primary fill; muted-foreground is
+//            the ground and never like the primary fill, and selected one step
+//            further (1.44:1), so the foreground gains room on both; muted-foreground is
 //            the palest mix of the foreground into the muted fill that reads at
 //            4.5:1 on both fills and 3:1 on the ground, so disabled text is
 //            readable and clearly weaker than the foreground.
@@ -205,11 +204,6 @@ export function surfaceValues(base, raisedGround, primaryRing) {
     };
     const ground = b.primary, fg = b["primary-foreground"];
     const towardFg = Math.sign(L(fg) - L(ground));
-    const step = (role) => {
-      const d = Math.abs(offset(role));
-      const toward = atL(ground, L(ground) + towardFg * d);
-      return contrast(fg, toward) >= 4.5 ? toward : atL(ground, L(ground) - towardFg * d);
-    };
     // Disabled (muted) and selected fills step away from the foreground, so
     // both give its text more room; selected one step past muted.
     const pMuted = stepOff(ground, -towardFg, MUTED_STEP), pSelected = stepOff(ground, -towardFg, MUTED_STEP ** 2);
