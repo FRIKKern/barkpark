@@ -98,6 +98,9 @@ describe('discoverParts', () => {
     ['a style= attribute', '<ui-button><button id="aa-x" data-slot="button" style="background: #fff">X</button></ui-button>'],
     ['an on*= handler', '<ui-button><button id="aa-x" data-slot="button" onclick="go()">X</button></ui-button>'],
     ['a <script> element', '<script>document.body.remove()</script>'],
+    ['a <font> element', '<font color="red">X</font>'],
+    ['a bgcolor= attribute', '<table bgcolor="#ff0000"><tr><td>X</td></tr></table>'],
+    ['a declared shadow root', '<div><template shadowrootmode="open"><b>Ghost</b></template></div>'],
   ]) {
     it(`refuses an example.html with ${what}, naming the file and line`, () => {
       const root = scratch()
@@ -137,5 +140,13 @@ describe('discoverParts', () => {
 
   it('lets a demo add a class that part.css declares', () => {
     expect(() => discoverParts(withDemo("root.querySelector('button').classList.add('aa-open')", '\n.aa-open { gap: 4px; }\n'))).not.toThrow()
+  })
+
+  it('refuses a part.json whose textOnly is not a list of selectors', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+    writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, textOnly: '[data-variant="ghost"]' }))
+    expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
   })
 })

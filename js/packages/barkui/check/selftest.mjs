@@ -18,6 +18,7 @@ const mark = (d) => edit(join(d, 'example.html'), (s) => s.replace('id="button-a
 const wrap = (d) => edit(join(d, 'example.html'), (s) => s.replace('type="button">Duplicate</button>', 'type="button"><span>Duplicate</span></button>'))
 const skinsSay = (re) => (p) => re.test(p.parts.button.lights.skins.detail)
 const failedSay = (re) => (p) => re.test(p.parts.button.failed ?? '')
+const inCss = (rule) => (d) => appendFileSync(join(d, 'part.css'), `\n${rule}\n`)
 const refused = (re) => (p, html, ok, logs) => !ok && p === null && re.test(logs.join('\n'))
 const CASES = [
   {
@@ -196,10 +197,38 @@ const CASES = [
     expect: skinsSay(/button#button-after "Duplicate" color is not one skin variable/),
   },
   {
-    name: 'a control edge under 3:1 turns "every skin" off, now the line is hard',
+    name: 'a control edge under 3:1 turns "every skin" off',
     only: ['skins', 'schemes'],
     css: '[data-part="button"] ui-button { --ui-input: var(--ui-muted); }',
-    expect: skinsSay(/control edge [\d.]+:1, needs 3:1/),
+    expect: skinsSay(/control boundary [\d.]+:1 at button.*, needs 3:1/),
+  },
+  // Round 5: text is judged by what is drawn; a control's boundary is measured whatever token draws it.
+  // Every one of these is ordinary part.css that the lint lets through.
+  ...[
+    ['a full-size ::after filled with the ground over a label',
+      '[data-slot="button"][data-size="lg"] { position: relative; }\n[data-slot="button"][data-size="lg"]::after { content: ""; position: absolute; inset: 0; background-color: var(--ui-background); }',
+      /text does not draw at button "Large"/],
+    ['filter: brightness(0.25) on hover', '[data-slot="button"]:not([data-variant]):hover { filter: brightness(0.25); }', /drawn text [\d.]+:1 at button "Hover"/],
+    ['mix-blend-mode on a button', '[data-slot="button"]:not([data-variant]) { mix-blend-mode: screen; }', /(text does not draw|drawn text [\d.]+:1) at button/],
+    ['font-size: 0 on a size', '[data-slot="button"][data-size="sm"] { font-size: 0; }', /text does not draw at button "Small"/],
+    ['opacity on an ancestor', 'ui-button:has(> #button-secondary) { opacity: 0.15; }', /drawn text [\d.]+:1 at button#button-secondary/],
+    ['a clip-path that hides the label', '[data-slot="button"][data-size="lg"] { clip-path: inset(50%); }', /text does not draw at button "Large"/],
+    ['a mask that hides the label', '#button-quiet { mask-image: linear-gradient(transparent, transparent); }', /text does not draw at button#button-quiet/],
+    ['a control with no edge and no fill', '#button-after { --bark-button-edge: transparent; --bark-button-bg: transparent; }', /control boundary 1(\.00)?:1 at button#button-after/],
+  ].map(([what, rule, re]) => ({
+    name: `${what} in part.css turns "every skin" off`,
+    only: ['skins', 'schemes'],
+    plant: inCss(rule),
+    expect: skinsSay(re),
+  })),
+  {
+    name: 'an edge in --ui-border, with the paint entry that pinned it removed, turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      edit(join(d, 'part.css'), (s) => s.replace('--bark-button-edge: var(--ui-input);', '--bark-button-edge: var(--ui-border);'))
+      edit(join(d, 'part.json'), (s) => s.replace(', "border-top-color": "--ui-input"', ''))
+    },
+    expect: skinsSay(/control boundary [\d.]+:1 at button/),
   },
   {
     name: 'a focus ring that cannot be seen against its ground turns the skins off',

@@ -52,9 +52,22 @@ describe('renderPage proof lights', () => {
     expect(Object.keys(SHEET_WAITS)).toEqual(expect.arrayContaining(['text:raised', 'text:sunken', 'text:primary', 'text:inverse', 'controlEdge:primary']))
   })
 
-  it('holds the control edge as proof on every surface, now the sheet delivers 3:1', () => {
-    const edges = Object.entries(SHEET_WAITS).filter(([k]) => k.startsWith('controlEdge'))
-    expect(edges.map(([k]) => k).sort()).toEqual(['controlEdge', 'controlEdge:inverse', 'controlEdge:primary', 'controlEdge:raised', 'controlEdge:sunken'])
-    expect(edges.every(([, w]) => w.hard && w.needs === 3)).toBe(true)
+  it('holds the control boundary as proof on every surface the sheet carries at 3:1', () => {
+    const lines = Object.entries(SHEET_WAITS).filter(([k]) => k.startsWith('boundary'))
+    expect(lines.map(([k]) => k).sort()).toEqual(['boundary', 'boundary:inverse', 'boundary:primary', 'boundary:raised', 'boundary:sunken'])
+    expect(lines.every(([, w]) => w.needs === 3)).toBe(true)
+    expect(SHEET_WAITS.boundary.hard).toBe(true)
+    expect(Object.keys(SHEET_WAITS).some((k) => k.startsWith('controlEdge'))).toBe(false)
+  })
+
+  it('prints the control boundary it proved, and names the controls that are text-only', () => {
+    const html = page({
+      hash: 'h1',
+      lights: allOn,
+      measures: { boundary: { min: 4.61, max: 9.2, at: 'button#aa-s "Save draft"' } },
+      textOnly: [{ selector: '[data-variant="ghost"]', controls: ['Cancel', 'Rest'] }],
+    })
+    expect(html).toContain('control boundary 4.61:1 or more on every control, needs 3:1')
+    expect(html).toContain('text-only, no boundary, label held to text rules: Cancel, Rest')
   })
 })
