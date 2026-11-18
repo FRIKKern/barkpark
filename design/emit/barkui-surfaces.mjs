@@ -13,13 +13,16 @@
 //   sunken   a well below the ground. No slot sits below the ground in both
 //            modes for every skin, so the ground is computed, hue and chroma
 //            held: in light, base's background stepped down in OKLCH lightness
-//            by 0.028 (the BarkUI base's step); in dark, where the depth shadow
-//            does not show, walked down until it stands 1.1:1 off base, or to
-//            black where base is too near black for that. Its muted and
-//            selected fills keep base's lightness offsets from the ground, its
-//            muted-foreground is walked until it reads at 4.5:1 on that muted
-//            fill, and its control edge until 3:1 on the ground; every other
-//            role is base's.
+//            by 0.028 (the BarkUI base's step); in dark, walked down until it
+//            stands 1.05:1 off base, stopping at OKLCH lightness 0.04 so the
+//            depth steps below it still fit. The well is marked by an inset
+//            1px rim in every skin and mode, the mirror of raised's shadow: its
+//            own rim role, the hairline walked until it stands 1.25:1 off the
+//            base ground (the hairline alone is 1.01:1 there on two dark
+//            skins). Its muted and selected fills keep base's lightness offsets
+//            from the ground, its muted-foreground is walked until it reads at
+//            4.5:1 on that muted fill, and its control edge until 3:1 on the
+//            ground; every other role is base's.
 //   primary  a brand fill. background is the primary slot, foreground and the
 //            strong edges are primary-fg, and --ui-primary flips to primary-fg
 //            with primary as its text. border is the ground stepped toward the
@@ -45,9 +48,14 @@
 // (aaWalk: OKLCH lightness moved, hue and chroma held) moves it until
 // destructive reads at 4.5:1 and the fill stands at 3:1 against the ground, and
 // a walked fill takes the deriver's on-accent pick (warm white or near ink) as
-// its -foreground. Each -text reads at 4.5:1 on the ground and on its tone's
-// soft tint (the tone mixed 8% into the ground, as a soft control draws it;
-// danger-text also on the destructive tint).
+// its -foreground. Each -text reads at 4.5:1 on the ground.
+//
+// Each tone also has a soft fill, -soft, for soft controls (a destructive
+// button, a soft badge) that draw the tone's -text on it: the tone's hue and
+// chroma at a lightness 1.1:1 off the ground, on the side away from the label
+// where the lightness range allows (else toward it). On every computed surface
+// a -text that does not read at 4.5:1 on its -soft is walked until it does;
+// base's own -text values read on base's -soft as they are.
 //
 // Depth is the BarkUI base's: each surface's ground moved in OKLCH lightness by
 // n x 0.02 up / 0.022 down (light) or n x 0.045 up / 0.02 down (dark), hue and
@@ -59,7 +67,7 @@ import { aaWalk, contrast, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOk
 
 export const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 export const TONES = ["success", "warning", "danger", "info"];
-const TONE_ROLES = TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`]);
+const TONE_ROLES = TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]);
 export const SURFACE_ROLES = [
   "background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
@@ -72,8 +80,10 @@ const BARK_ROLES = new Set(["accent", "selected", ...TONE_ROLES]);
 export const pointedName = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 
 const SUNKEN_LIGHT = 0.028;
-const DARK_STEP = 1.1; // a dark raised or sunken ground off base, where no shadow shows
-const SOFT_TINT = 8; // a soft control's fill: its tone mixed this % into the ground
+const DARK_SUNKEN_STEP = 1.05; // a dark sunken ground off base; its rim does the rest
+const RIM_STEP = 1.25; // a sunken well's inset rim off the base ground it is cut into
+const SOFT_STEP = 1.1; // a tone's soft fill off its ground: visibly tinted
+const SOFT_MIX = 12; // the soft fill's hue and chroma: its tone mixed this % into the ground
 const MUTED_STEP = 1.2; // the primary surface's disabled fill off its ground
 const DEPTH_STEP = { light: { up: 0.02, down: 0.022 }, dark: { up: 0.045, down: 0.02 } };
 const DARK_FLOOR = 0.145;
@@ -121,12 +131,6 @@ function stepOff(ground, dir, target, minL = 0) {
   return css(aaWalk(l, C, h, ground, { target: target + 0.005, step: dir * 0.002, maxIter: 600, minL, maxL: 1 }).rgb);
 }
 
-// `color` at its hue and chroma, as far toward `side` as lightness goes.
-function farthest(color, side) {
-  const { C, h } = srgbToOklch(color);
-  return css(oklchToSrgb(side > 0 ? 1 : 0, C, h));
-}
-
 // The side text reads best on `ground`: +1 lighter, -1 darker.
 const textSide = (ground) => (contrast("#ffffff", ground) >= contrast("#000000", ground) ? 1 : -1);
 
@@ -155,8 +159,7 @@ function walkTo(color, ground, target, prefer) {
 
 // The tone roles and destructive of base `b`, made to read on `ground`. Text
 // (each -text, destructive) walks toward the side text reads best on; a fill
-// walks to the other side where it can reach 3:1 there, so its soft tint moves
-// the ground away from its text, not toward it.
+// walks to the other side where it can reach 3:1 there.
 function tonesOn(b, ground) {
   const side = textSide(ground);
   const out = { destructive: walkTo(b.destructive, ground, 4.5, side) };
@@ -164,17 +167,34 @@ function tonesOn(b, ground) {
     const fill = walkTo(b[t], ground, 3, -side);
     out[t] = fill;
     out[`${t}-foreground`] = fill === b[t] ? b[`${t}-foreground`] : css(parseColor(onAccent(fill).color));
-    const on = [ground, mixOklab(fill, ground, SOFT_TINT)];
-    out[`${t}-text`] = walkTo(b[`${t}-text`], on, 4.5, side);
-    if (t === "danger") {
-      // danger-text also labels the soft destructive control (the destructive
-      // tint). Where destructive is a light text colour on a mid ground, its
-      // tint lifts the ground toward the label and 4.5:1 cannot be reached;
-      // the label then goes as far toward its side as its hue allows.
-      const all = [...on, mixOklab(out.destructive, ground, SOFT_TINT)];
-      const both = walkTo(out[`${t}-text`], all, 4.5, side);
-      out[`${t}-text`] = all.every((g) => contrast(both, g) >= 4.5) ? both : farthest(out[`${t}-text`], side);
-    }
+    out[`${t}-text`] = walkTo(b[`${t}-text`], ground, 4.5, side);
+  }
+  return out;
+}
+
+// A tone's soft fill on `ground`, for the label `text`: the hue and chroma of
+// the tone mixed SOFT_MIX% into the ground, at the lightness that stands
+// SOFT_STEP:1 off the ground, on the side away from the label where the
+// lightness range allows it (else toward it), so the tint never pulls the
+// ground toward its label where it need not.
+function softOn(fill, text, ground) {
+  const away = L(text) >= L(ground) ? -1 : 1;
+  const { C, h } = srgbToOklch(mixOklab(fill, ground, SOFT_MIX));
+  let last;
+  for (const dir of [away, -away]) {
+    last = aaWalk(L(ground), C, h, ground, { target: SOFT_STEP + 0.005, step: dir * 0.002, maxIter: 600, minL: 0, maxL: 1 });
+    if (last.hit) break;
+  }
+  return css(last.rgb);
+}
+
+// Each tone's -soft on surface `s`; on a computed surface (`walk`), a -text
+// that does not read at 4.5:1 on its soft fill is walked until it does.
+function withSofts(s, walk) {
+  const out = { ...s };
+  for (const t of TONES) {
+    out[`${t}-soft`] = softOn(s[t], s[`${t}-text`], s.background);
+    if (walk) out[`${t}-text`] = walkTo(s[`${t}-text`], [s.background, out[`${t}-soft`]], 4.5, L(s[`${t}-text`]) >= L(s.background) ? 1 : -1);
   }
   return out;
 }
@@ -191,7 +211,7 @@ export function surfaceValues(base, raisedGround, primaryRing) {
     const offset = (role) => L(b[role]) - L(b.background);
     const sunkGround = mode === "light"
       ? atL(b.background, L(b.background) - SUNKEN_LIGHT)
-      : stepOff(b.background, -1, DARK_STEP, -DEPTHS[0] * DEPTH_STEP.dark.down);
+      : stepOff(b.background, -1, DARK_SUNKEN_STEP, -DEPTHS[0] * DEPTH_STEP.dark.down);
     const sunkMuted = atL(b.muted, L(sunkGround) + offset("muted"));
     const sunken = {
       ...b,
@@ -199,6 +219,9 @@ export function surfaceValues(base, raisedGround, primaryRing) {
       muted: sunkMuted,
       "muted-foreground": walkTo(b["muted-foreground"], sunkMuted, 4.5),
       input: walkTo(b.input, sunkGround, 3),
+      // The inset rim that marks the well: the hairline, walked off the base
+      // ground the well is cut into until it stands RIM_STEP:1 there.
+      rim: walkTo(b.border, b.background, RIM_STEP, textSide(b.background)),
       selected: atL(b.selected, L(sunkGround) + offset("selected")),
       ...tonesOn(b, sunkGround),
     };
@@ -216,7 +239,7 @@ export function surfaceValues(base, raisedGround, primaryRing) {
     };
     const rg = raisedGround[mode];
     const raised = { ...b, background: rg, input: walkTo(b.input, rg, 3), ...tonesOn(b, rg) };
-    const out = { base: b, raised, sunken, primary };
+    const out = { base: withSofts(b, false), raised: withSofts(raised, true), sunken: withSofts(sunken, true), primary: withSofts(primary, true) };
     for (const s of Object.keys(out)) out[s] = { ...out[s], depth: depths(out[s].background, mode) };
     return out;
   };

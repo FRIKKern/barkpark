@@ -22,7 +22,8 @@
 //   Tones, one set per tone in success, warning, danger, info:
 //     --bark-<tone>             the tone itself (a dot, an icon, a solid fill)
 //     --bark-<tone>-foreground  text on a solid --bark-<tone> fill
-//     --bark-<tone>-text        the tone as text on the ground or its own soft tint
+//     --bark-<tone>-text        the tone as text on the ground or on its -soft fill
+//     --bark-<tone>-soft        a soft fill for a control labelled in -text
 //   The scheme follows UI SDK: `X-foreground` is what is drawn on an `X` fill.
 //   Barkpark's own role names (ok, warn) become success and warning.
 //
@@ -50,7 +51,8 @@
 //   starts its subtree on its own base surface, as in the BarkUI base. Paint
 //   rules in :where() give data-skin, surface and depth elements their ground,
 //   text and edge colour (not data-bp-theme, which Studio pages carry today and
-//   paint themselves), and depth 1 to 3 the --ui-shadow; any app rule wins over
+//   paint themselves), a sunken surface an inset 1px rim in --bark-sunken-rim
+//   (written once per skin), and depth 1 to 3 the --ui-shadow; any app rule wins over
 //   them. (The base gets the same effect from cascade layers; this sheet has no
 //   layers.)
 //   The scheme is a separate axis that only sets `color-scheme`:
@@ -143,10 +145,13 @@ function skinRule(name, spec) {
     };
     return `  --bark-${s}-${key}: light-dark(${arm("light")}, ${arm("dark")});`;
   };
-  const body = SURFACES.flatMap((s) => [
-    ...SURFACE_ROLES.map((r) => pair(s, r, (m) => m[s][r])),
-    ...DEPTHS.map(depthKey).map((k) => pair(s, `depth-${k}`, (m) => m[s].depth[k])),
-  ]);
+  const body = [
+    ...SURFACES.flatMap((s) => [
+      ...SURFACE_ROLES.map((r) => pair(s, r, (m) => m[s][r])),
+      ...DEPTHS.map(depthKey).map((k) => pair(s, `depth-${k}`, (m) => m[s].depth[k])),
+    ]),
+    pair("sunken", "rim", (m) => m.sunken.rim),
+  ];
   return `${selectors.join(",\n")} {\n${body.join("\n")}\n}`;
 }
 
@@ -168,6 +173,7 @@ function axisRules() {
     ...SURFACES.slice(1).map((s) => `[data-surface="${s}"] {\n${point(s)}\n}`),
     ...DEPTHS.map((n) => `[data-depth="${n}"] {\n  --ui-background: var(--bark-depth-${depthKey(n)});\n}`),
     ":where([data-skin], [data-surface], [data-depth]) {\n  background-color: var(--ui-background);\n  color: var(--ui-foreground);\n  border-color: var(--ui-border);\n}",
+    ':where([data-surface="sunken"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim);\n}',
     ':where([data-depth="1"], [data-depth="2"], [data-depth="3"]) {\n  box-shadow: var(--ui-shadow);\n}',
   ];
 }

@@ -313,15 +313,16 @@ const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 const TONES = ["success", "warning", "danger", "info"];
 const ROLES = ["background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
-  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`]), "destructive"];
+  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]), "destructive"];
 const DEPTHS = [["-2", "m2"], ["-1", "m1"], ["1", "1"], ["2", "2"], ["3", "3"]];
-const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`])]);
+const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`])]);
 const pointed = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 // Where a table name lives in the skin rule: a pointed name as --bark-base-<role>.
 const skinVar = (name) => { const r = ROLES.find((x) => pointed(x) === name); return r ? `--bark-base-${r}` : name; };
 const SKIN_NAMES = [
   ...SURFACES.flatMap((s) => [...ROLES.map((r) => `--bark-${s}-${r}`), ...DEPTHS.map(([, k]) => `--bark-${s}-depth-${k}`)]),
   ...Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).filter((n) => skinVar(n) === n),
+  "--bark-sunken-rim",
 ];
 
 // Every `selectors { body }` rule in a stylesheet, comments stripped, as
@@ -603,31 +604,21 @@ function eachSurface(f) {
   assert.equal(n, themes.length * 2 * SURFACES.length);
 }
 
-// A soft tone control (BarkUI's destructive button: --ui-destructive mixed 6%
-// into the ground as its fill, danger-text as its label; UI SDK's mixes 8%)
-// must read on every surface: each tone's -text at 4.5:1 on its own tone's
-// tint at 8%, and danger-text on the destructive tint at 8%.
-// The one physical limit: --ui-destructive is also a text colour, so on a mid
-// ground it sits on the light side and its tint lifts the ground toward a light
-// label. There the label must read as well as the ground's own text side
-// allows: pure white or black on that tint, whichever reads on the ground.
-const SOFT_TINT = 8;
-test("BarkUI sheet: every tone's text reads on its own soft tint, on every surface", () => {
-  let capped = 0;
+// A soft tone control (a destructive button, a soft badge) draws its tone's
+// -soft as its fill and the tone's -text as its label. The sheet writes -soft
+// per surface and tone, so the label reads on it everywhere, and -soft stands
+// off the ground by SOFT_STEP so the control is visibly tinted.
+const SOFT_STEP = 1.1;
+test("BarkUI sheet: every tone's text reads on its own soft fill, and the fill is visibly tinted", () => {
   eachSurface((at, mode, s, get) => {
     const bg = get("background");
     for (const t of TONES) {
-      const c = contrast(get(`${t}-text`), mixOklab(get(t), bg, SOFT_TINT));
-      assert.ok(c >= 4.5, `${at}: ${t}-text on the ${SOFT_TINT}% ${t} tint is ${c.toFixed(2)}, under 4.5`);
+      const soft = get(`${t}-soft`);
+      const label = contrast(get(`${t}-text`), soft), step = contrast(soft, bg);
+      assert.ok(label >= 4.5, `${at}: ${t}-text on ${t}-soft is ${label.toFixed(2)}, under 4.5`);
+      assert.ok(step >= SOFT_STEP, `${at}: ${t}-soft is ${step.toFixed(3)}:1 off the ground, under ${SOFT_STEP}`);
     }
-    const tint = mixOklab(get("destructive"), bg, SOFT_TINT);
-    const side = contrast("#ffffff", bg) >= contrast("#000000", bg) ? "#ffffff" : "#000000";
-    const floor = Math.min(4.5, contrast(side, tint) - 0.01);
-    if (floor < 4.5) capped++;
-    const c = contrast(get("danger-text"), tint);
-    assert.ok(c >= floor, `${at}: danger-text on the ${SOFT_TINT}% destructive tint is ${c.toFixed(2)}, under ${floor.toFixed(2)}`);
   });
-  assert.ok(capped <= 1, `${capped} surfaces hold danger-text under 4.5 on the destructive tint; one was measured`);
 });
 
 // Disabled controls draw on the muted fill with muted-foreground. They read as
@@ -650,18 +641,27 @@ test("BarkUI sheet: the muted fill reads as inactive on every surface", () => {
   });
 });
 
-// In dark the depth shadow does not show, so raised and sunken must stand off
-// the base ground by themselves: 1.1:1. A dark sunken well can only go as far
-// as black at the ground's hue; where the base ground is too near black for
-// 1.1:1 (contrast to black under 1.1), the well must reach black.
-const DARK_STEP = 1.1;
-test("BarkUI sheet: in dark, raised and sunken stand off the base ground", () => {
+// In dark the depth shadow does not show, so raised stands off base by its
+// ground alone (1.1:1). A sunken well is marked by an inset 1px rim on every
+// skin and in both modes, the mirror of raised's shadow, so its ground step can
+// be smaller: 1.05:1 in dark, which every skin holds above the depth steps
+// below it. The rim stands RIM_STEP off the base ground it is cut into.
+const DARK_RAISED_STEP = 1.1, DARK_SUNKEN_STEP = 1.05, RIM_STEP = 1.25;
+test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim", () => {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet.build(loadThemes()).includes(
+    ':where([data-surface="sunken"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim);\n}'),
+    "no inset rim paint rule for the sunken surface");
   eachSurface((at, mode, s, get) => {
-    if (mode !== "dark" || !["raised", "sunken"].includes(s)) return;
     const base = get("background", "base");
+    if (s === "sunken") {
+      const rim = contrast(get("rim"), base);
+      assert.ok(rim >= RIM_STEP, `${at}: rim is ${rim.toFixed(3)}:1 off the base ground, under ${RIM_STEP}`);
+    }
+    if (mode !== "dark" || !["raised", "sunken"].includes(s)) return;
+    const floor = s === "raised" ? DARK_RAISED_STEP : DARK_SUNKEN_STEP;
     const step = contrast(get("background"), base);
-    const room = s === "sunken" ? Math.min(DARK_STEP, contrast(base, "#000000") - 0.005) : DARK_STEP;
-    assert.ok(step >= room, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${room.toFixed(3)}`);
+    assert.ok(step >= floor, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${floor}`);
   });
 });
 
