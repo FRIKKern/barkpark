@@ -183,10 +183,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <.dynamic_tag tag_name={if @fieldset, do: "fieldset", else: "div"} class={"editor-field field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
       <%= if @fieldset do %><legend class="editor-field-label">
         <%= @label %>
+        <BarkparkWeb.Studio.Desk.FieldSlots.mark :if={@slots} {@slots} />
         <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </legend><% else %><label class="editor-field-label" for={@for}>
         <%= @label %>
+        <BarkparkWeb.Studio.Desk.FieldSlots.mark :if={@slots} {@slots} />
         <%= if @required do %><span class="field-required" aria-hidden={@mark_hidden && "true"}>*</span><span :if={@mark_hidden} class="sr-only"><%= gettext("required") %></span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
       </label><% end %>

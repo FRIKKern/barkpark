@@ -77,6 +77,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk { --dk-avatar-blue: #4f66fb; --dk-avatar-green: #0db97a; --dk-avatar-yellow: #d28a12; --dk-avatar-orange: #fa6412; --dk-warn-fg: #6b5300; --dk-caution-card-bg: #fefae1; --dk-caution-card-fg: #3b2212; }
       html[data-theme="dark"] .dk { --dk-avatar-blue: #7898ff; --dk-avatar-green: #15f0a5; --dk-avatar-yellow: #f9be1e; --dk-avatar-orange: #ff9149; --dk-warn-fg: #f2d36b; --dk-caution-card-bg: #1e1a1b; --dk-caution-card-fg: #f9ea98; }
       .dk fieldset.dk-revision-form { display: contents; margin: 0; padding: 0; border: 0; min-width: 0; }
+      /* TanStack's --critical-icon: a field's error mark (`SlugInUse`). */
+      .dk { --dk-critical-icon: #ef3d2f; }
+      html[data-theme="dark"] .dk { --dk-critical-icon: #f3503e; }
       /* ::backdrop may not inherit the --dk-* properties: TanStack's --backdrop, as values. */
       .dk-search-dialog::backdrop { background: rgba(227, 228, 232, 0.5); }
       html[data-theme="dark"] .dk-search-dialog::backdrop { background: rgba(19, 20, 27, 0.5); }
@@ -388,6 +391,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .studio-shell:has(.dk) .dk-nav-more-list .dk-nav-item.dk-nav-narrow { display: flex; }
       }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.BulkBar.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.SlugInUse.css()) %>
     </style>
     """
   end
