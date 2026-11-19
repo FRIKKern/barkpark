@@ -121,6 +121,18 @@ defmodule BarkparkWeb.Studio.DeskValidationUrlTest do
 
     # The press names the row, for the jump to open its dialog.
     assert view |> element(@problem) |> render() =~ ~s(&quot;item&quot;:&quot;0&quot;)
+
+    # The jump's target: in the item's dialog, the input is named by the
+    # problem's path, as Sanity's Studio names it.
+    assert has_element?(
+             view,
+             ~s|#{@pane} dialog[data-desk-item-dialog] input[id='links[_key=="l1"].url'][value="not a url"]|
+           )
+
+    assert has_element?(
+             view,
+             ~s|#{@pane} dialog[data-desk-item-dialog] label[for='links[_key=="l1"].url']|
+           )
   end
 
   test "an address that is not http or https, or carries a password, in TanStack's words", c do
@@ -144,13 +156,16 @@ defmodule BarkparkWeb.Studio.DeskValidationUrlTest do
     refute has_element?(view, ~s(#{@publish}[disabled]))
   end
 
-  test "the words are Norwegian under nb_NO", c do
+  test "the words are Norwegian in an nb-NO workspace", c do
     id = draft(c, "nb", %{"links" => links("not a url")})
+    {:ok, _} = Tenancy.set_workspace_locale(Tenancy.get_default_workspace(), "nb-NO")
 
-    Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
-      view = open(c, id, ",#{@inspect_param}")
-      assert view |> element(@problem) |> render() |> text() =~ "Ikke en gyldig URL"
-    end)
+    view = open(c, id, ",#{@inspect_param}")
+    # The panel's own name is Norwegian too, so it is found by its class.
+    entry =
+      ~s|#{@pane} aside.validation button.problem[data-desk-problem='links[_key=="l1"].url']|
+
+    assert view |> element(entry) |> render() |> text() =~ "Ikke en gyldig URL"
   end
 
   test "the save path does not refuse it: the rule is the desk's, as TanStack's browser rule" do
