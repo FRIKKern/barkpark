@@ -176,13 +176,17 @@
           error.textContent = bad ? (strings.invalid || "Not a valid date. Use the format %{format}.").replace("%{format}", "2026-09-06 11:00") : "";
         }
       };
+      // Only what was typed is written: a box that was only focused shows
+      // what the server holds (`_sync`), so leaving it never writes back a
+      // value another editor has changed since.
       var commit = function () {
         var hidden = self._hidden();
-        if (!hidden || text.readOnly) return;
-        if (text.value === toText(hidden.value)) return mark(false);
-        if (text.value.trim() === "") return mark(false), self._set("");
+        if (!hidden || text.readOnly || !self._typed) return;
+        if (text.value === toText(hidden.value)) return (self._typed = false), mark(false);
+        if (text.value.trim() === "") return (self._typed = false), mark(false), self._set("");
         var d = fromText(text.value);
         if (!d) return mark(true);
+        self._typed = false;
         mark(false);
         self._set(d.toISOString());
       };
@@ -191,7 +195,10 @@
       var onInput = function (e) {
         if (e.target === self._hidden()) return;
         e.stopPropagation();
-        if (e.target === text) mark(false);
+        if (e.target === text) {
+          self._typed = true;
+          mark(false);
+        }
       };
       var onKey = function (e) {
         if (e.target === text && e.key === "Enter") {
@@ -215,6 +222,7 @@
           locale: self.el.getAttribute("data-locale") || "en",
           strings: strings,
           onPick: function (d) {
+            self._typed = false;
             mark(false);
             self._set(d.toISOString());
           }
@@ -279,12 +287,15 @@
       if (hidden.value !== held.value) hidden.value = held.value;
     },
 
-    // Show the stored value in local time, unless the editor is typing.
+    // Show the stored value in local time, unless the editor is typing. A
+    // box that has the focus but no typing shows a new value from the server
+    // too (another editor's), as the TanStack Studio's does.
     _sync: function () {
       var text = this._text && this._text();
       var hidden = this._hidden();
       if (text && hidden) {
-        if (typeof document === "undefined" || document.activeElement !== text) text.value = toText(hidden.value);
+        if (typeof document === "undefined" || document.activeElement !== text || !this._typed)
+          text.value = toText(hidden.value);
         return;
       }
       var picker = this._picker();

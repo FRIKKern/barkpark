@@ -19,6 +19,10 @@ defmodule BarkparkWeb.Studio.Desk.ChoiceStyle do
       tinted, the chosen day filled), and a ruled foot with the time and
       "Set to current time".
 
+  On a touch screen (`pointer: coarse`) every control is at least 44 px:
+  a radio's row, Clear, the calendar button, the month and year, the days,
+  the time and "Set to current time".
+
   `DocStyle.sheet/1` draws these rules with the rest of the edit pane's.
   """
 
@@ -67,6 +71,17 @@ defmodule BarkparkWeb.Studio.Desk.ChoiceStyle do
     .dk .dk-edit .dp-time input { width: 99px; height: 34px; box-sizing: border-box; font: inherit; font-size: 15px; line-height: 22px; padding: 6px 12px; border: 0; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--dk-line); background: var(--dk-bg); color: var(--dk-input-fg); }
     .dk .dk-edit .dp-foot .btn-text { padding: 3px 8px; font: inherit; font-size: 13px; line-height: 19px; border: 0; border-radius: 3px; background: none; color: var(--dk-menu-fg); cursor: pointer; }
     .dk .dk-edit .dp-foot .btn-text:hover { background: var(--dk-icon-btn-hover); }
+    @media (pointer: coarse) {
+      .dk .dk-edit .radio { min-height: 44px; min-width: 44px; }
+      .dk .dk-edit .radio-box .icon-btn, .dk .dk-edit .dp-head .icon-btn { width: 44px; height: 44px; }
+      .dk .dk-edit .radio-box[data-direction=vertical] .radio-row .icon-btn { margin: 0 -1px 0 auto; }
+      .dk .dk-edit .datetime-box .form-input { min-height: 44px; padding-right: 50px; }
+      .dk .dk-edit .datetime-box .icon-btn { width: 44px; }
+      .dk .dk-edit .dp-month select, .dk .dk-edit .dp-year { min-height: 44px; }
+      .dk .dk-edit .dp-grid { grid-auto-rows: 44px; }
+      .dk .dk-edit .dp-grid button { height: 44px; }
+      .dk .dk-edit .dp-time input, .dk .dk-edit .dp-foot .btn-text { min-height: 44px; }
+    }
     """
   end
 end

@@ -25,6 +25,7 @@
   if (window.BarkparkDatePicker) return;
 
   var current = null;
+  var FOCUSABLE = "input, select, textarea, button, a[href], label, summary, [tabindex], [contenteditable]";
 
   function pad(n) { return String(n).padStart(2, "0"); }
   function sameDay(a, b) {
@@ -171,7 +172,15 @@
         trap(root, e);
       }
     });
-    st.away = function (e) { if (!root.contains(e.target) && !opts.button.contains(e.target)) close(true); };
+    // A press outside closes it and gives the focus back to the button. On a
+    // spot that takes no focus, the press's own default then moved the focus
+    // to <body>, so that default is stopped; a press on a control or a label
+    // moves the focus there, as it would anyway.
+    st.away = function (e) {
+      if (root.contains(e.target) || opts.button.contains(e.target)) return;
+      close(true);
+      if (!(e.target.closest && e.target.closest(FOCUSABLE))) e.preventDefault();
+    };
     doc.addEventListener("mousedown", st.away, true);
 
     opts.host.appendChild(root);

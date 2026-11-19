@@ -28,6 +28,7 @@ defmodule Barkpark.Content.Forms do
     Labels,
     PatchLock,
     PortableText,
+    SelectOptions,
     SlugValue,
     TextRebase
   }
@@ -192,20 +193,13 @@ defmodule Barkpark.Content.Forms do
 
       # An OPTIONAL select whose stored value matches no option renders the
       # "Select…" placeholder (value "") — the only choice that posts "". So a
-      # posted "" beside a non-empty stored value means "never touched": keep
-      # the stored value instead of letting an edit of ANOTHER field erase it.
-      %{"type" => "select", "name" => key, "options" => opts}, acc
-      when is_binary(key) and is_list(opts) ->
-        stored = Map.get(base_content, key)
-        valid = Enum.map(Barkpark.Content.SelectOptions.normalize(opts), & &1.value)
-
-        case Map.fetch(acc, key) do
-          {:ok, ""} when is_binary(stored) and stored != "" ->
-            if stored in valid, do: acc, else: Map.put(acc, key, stored)
-
-          _ ->
-            acc
-        end
+      # posted "" beside a stored value that is no option means "never
+      # touched": keep the stored value (a string, a number, a boolean)
+      # instead of letting an edit of ANOTHER field erase it. The options are
+      # a list or Sanity's `options.list` (`SelectOptions.list/1`). A number
+      # or boolean posted back as its own text is kept as stored, as below.
+      %{"type" => "select", "name" => key, "options" => opts}, acc when is_binary(key) ->
+        keep_select(acc, key, Map.get(base_content, key), opts)
 
       # A REFERENCE stored as an object (`{"_ref": id, …}` — what `bp seed`, the
       # SDK and `--set 'author:={"_ref":…}'` write) renders through the picker's
@@ -254,6 +248,28 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp preserve_datetime_values(params, _base_content, _schema), do: params
+
+  defp keep_select(acc, key, stored, opts) do
+    valid = opts |> SelectOptions.list() |> List.wrap() |> SelectOptions.values()
+
+    case Map.fetch(acc, key) do
+      {:ok, ""} when is_nil(stored) or stored == "" ->
+        acc
+
+      {:ok, ""} ->
+        if scalar?(stored) and to_string(stored) in valid,
+          do: acc,
+          else: Map.put(acc, key, stored)
+
+      {:ok, posted} when is_number(stored) or is_boolean(stored) ->
+        if posted == to_string(stored), do: Map.put(acc, key, stored), else: acc
+
+      _ ->
+        acc
+    end
+  end
+
+  defp scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
 
   # An EDITED datetime is written in the stored value's format
   # (task-cf45242ef3477fba). The picker posts a UTC instant with seconds,

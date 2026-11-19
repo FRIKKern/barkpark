@@ -13,6 +13,10 @@
 //   * A typed date commits on leaving the box; a typo is marked and
 //     an alert says the format, and nothing posts; an emptied box posts "".
 //   * Only the hidden input's events reach the form.
+//   * Only a typed change is written: a box that only has the focus shows
+//     another editor's value and leaving it writes nothing.
+//   * A press outside closes the calendar; the focus goes to its button,
+//     never <body>.
 //   * In Norwegian the week starts on Monday and the days are named in
 //     Norwegian.
 //
@@ -83,6 +87,22 @@ const press = (el, key, init = {}) => {
 const dialog = () => doc.querySelector('[role="dialog"]');
 const active = () => doc.activeElement;
 const leave = (el) => el.dispatchEvent(new window.FocusEvent("focusout", { bubbles: true }));
+const type = (el, value) => {
+  el.value = value;
+  el.dispatchEvent(new window.Event("input", { bubbles: true }));
+};
+// What a LiveView patch does when the server holds a new value: the hidden
+// input and the wrapper's data-value change, then the hook's updated() runs.
+const remote = (f, value) => {
+  f.hidden.value = value;
+  f.el.setAttribute("data-value", value);
+  f.hook.updated();
+};
+const mousedown = (el) => {
+  const e = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  el.dispatchEvent(e);
+  return e;
+};
 
 // The box shows local time; the calendar opens on the selected day.
 {
@@ -163,12 +183,12 @@ const leave = (el) => el.dispatchEvent(new window.FocusEvent("focusout", { bubbl
   f.text.value = "2026-12-24 18:3";
   f.text.dispatchEvent(new window.Event("input", { bubbles: true }));
   assert.equal(f.posts.length, 0, "the box's own input never reaches the form");
-  f.text.value = "2026-12-24 18:30";
+  type(f.text, "2026-12-24 18:30");
   leave(f.text);
   assert.equal(f.hidden.value, "2026-12-24T17:30:00.000Z", "a typed date is stored at leaving");
   assert.deepEqual(f.posts, ["doc[publishedAt]"]);
 
-  f.text.value = "2026-13-40 10:00";
+  type(f.text, "2026-13-40 10:00");
   leave(f.text);
   assert.equal(f.hidden.value, "2026-12-24T17:30:00.000Z", "a typo is not stored");
   assert.equal(f.posts.length, 1);
@@ -177,13 +197,13 @@ const leave = (el) => el.dispatchEvent(new window.FocusEvent("focusout", { bubbl
   assert.equal(f.error.hidden, false);
   assert.equal(f.error.textContent, "Not a valid date. Use the format 2026-09-06 11:00.");
 
-  f.text.value = "2026-12-25 08:00";
+  type(f.text, "2026-12-25 08:00");
   assert.ok(press(f.text, "Enter").defaultPrevented, "Enter commits");
   assert.equal(f.hidden.value, "2026-12-25T07:00:00.000Z");
   assert.ok(!f.el.hasAttribute("data-invalid"), "the mark goes");
   assert.equal(f.error.hidden, true);
 
-  f.text.value = "";
+  type(f.text, "");
   leave(f.text);
   assert.equal(f.hidden.value, "", "an emptied box clears the field");
   assert.equal(f.posts.length, 3);
@@ -192,6 +212,60 @@ const leave = (el) => el.dispatchEvent(new window.FocusEvent("focusout", { bubbl
   const g = mount("2026-09-06T09:00:00Z");
   leave(g.text);
   assert.equal(g.posts.length, 0);
+}
+
+// Another editor's date while the box only has the focus: the box shows it,
+// and leaving the box writes nothing. Only a typed change is written.
+{
+  const f = mount("2026-09-06T09:00:00.000Z");
+  f.text.focus();
+  remote(f, "2026-10-10T08:10:00Z");
+  assert.equal(f.text.value, "2026-10-10 10:10", "the focused, untyped box shows the new value");
+  leave(f.text);
+  assert.equal(f.hidden.value, "2026-10-10T08:10:00Z", "the other editor's date stays");
+  assert.equal(f.posts.length, 0, "leaving an untyped box posts nothing");
+  assert.equal(press(f.text, "Enter").defaultPrevented, true);
+  assert.equal(f.posts.length, 0, "Enter in an untyped box posts nothing");
+
+  // Typing, then a remote value: the typed text stays and is written.
+  type(f.text, "2026-11-01 12:00");
+  remote(f, "2026-10-11T08:10:00Z");
+  assert.equal(f.text.value, "2026-11-01 12:00", "the box keeps what is being typed");
+  leave(f.text);
+  assert.equal(f.hidden.value, "2026-11-01T11:00:00.000Z");
+  assert.deepEqual(f.posts, ["doc[publishedAt]"]);
+
+  // After the write, the box follows the server again.
+  f.text.focus();
+  remote(f, "2026-12-01T08:00:00Z");
+  assert.equal(f.text.value, "2026-12-01 09:00");
+}
+
+// A press outside the calendar closes it and the focus goes back to its
+// button: on a spot that takes no focus the press's default is stopped (it
+// moved the focus to <body>); a press on a control is left alone.
+{
+  const f = mount("2026-09-06T09:00:00Z");
+  const blank = doc.createElement("div");
+  doc.getElementById("editor-form").appendChild(blank);
+  f.button.click();
+  assert.ok(dialog());
+  const e = mousedown(blank);
+  assert.equal(dialog(), null, "a press outside closes it");
+  assert.equal(e.defaultPrevented, true, "a blank spot's press does not move the focus");
+  assert.equal(active(), f.button, "the focus is on the button");
+
+  f.button.click();
+  const after = doc.getElementById("after");
+  const onControl = mousedown(after);
+  assert.equal(dialog(), null);
+  assert.equal(onControl.defaultPrevented, false, "a press on a control moves the focus there");
+
+  f.button.click();
+  const inside = mousedown(dialog().querySelector(".dp-grid button"));
+  assert.ok(dialog(), "a press inside keeps it open");
+  assert.equal(inside.defaultPrevented, false);
+  press(active(), "Escape");
 }
 
 // Norwegian: the week starts on Monday, the days are named in Norwegian.
