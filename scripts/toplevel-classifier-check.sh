@@ -152,7 +152,7 @@ cloud cloud the cloud control plane; cloud.yml dispatches on it
 cmd none Go entry points
 connectors none connector definitions
 deploy cloud deploy scripts the cloud suite reads
-deploy.sh none the legacy single-box deploy entry point
+deploy.sh go the legacy single-box deploy entry point; go-tests.yml dispatches on it because deploy/apt_lock_wait_test.go scans it (task-aa4ef6ce7298ef70)
 design elixir design fixtures the Elixir suite reads
 docker-compose.yml none the compose stack
 docs none agent and human documentation; doc-gates reads it
