@@ -295,23 +295,26 @@ export async function phone(ctx, part, skins) {
     let text = Infinity
     let edge = Infinity
     let weakest = NONE
+    const fails = []
     for (const scheme of ['light', 'dark']) {
       for (const skin of skins) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
         await settle(page)
-        const v = await readView(page, part)
-        const d = verdict(v, `${at}: `)
-        if (d.fails.length) return light(false, d.fails[0])
+        const waits = waitsFor(skin, scheme, 'base')
+        const v = await readView(page, part, waits)
+        const d = verdict(v, `${at}: `, waits)
+        fails.push(...d.fails)
         text = Math.min(text, d.weakest.text.ratio)
         weakest = least(weakest, d.weakest)
         for (const c of v.bounds.read) {
-          if (c.ratio < 3) return light(false, `${at}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
+          if (c.ratio < 3) fails.push(`${at}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
           edge = Math.min(edge, c.ratio)
         }
       }
     }
     await stillStyled(ctx, page, 'phone')
+    if (fails.length) return light(false, fails[0], { fails })
     return light(true, `nothing scrolls sideways at 390px; weakest drawn text ${fmt(text)}:1; ${drawsAll(weakest)}; control boundary ${fmt(edge)}:1 or more`)
   } finally {
     await page.context().close()

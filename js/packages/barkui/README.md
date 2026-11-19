@@ -7,8 +7,7 @@ Private; not published.
 ```
 parts/<name>/
   part.json     name (= folder), family, element, imports, summary, paint (selector -> variable per property),
-                optional textOnly (selectors of controls that draw no boundary, such as a ghost button),
-                optional allow (property -> one-line reason, for a property outside the vocabulary)
+                optional textOnly (selectors of controls that draw no boundary, such as a ghost button)
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only
@@ -29,21 +28,22 @@ neither base.css nor a part mixes a tint of its own.
 
 - `pnpm run build` writes `dist/showroom/index.html`, which opens from disk with no server and no network.
 - `pnpm run check` builds, presses every part in headless Chromium, and writes `dist/proof.json`:
-  pressed by real keys, every skin (each element takes one skin variable in every skin and scheme;
-  the focus ring's edge is at least 3:1 on every Tab stop), light and dark, a 390px window read in full
-  in every skin and scheme, printed and seen with no script. The page shows a light only when the last run passed and proved it for the
-  same part folder, tokens, base styles, UI SDK version and check code. It exits non-zero on an
-  incomplete folder, a failed step, an unlit light, any page error or network request, or a step
-  (5s) or part (120s) past its time limit.
-- `pnpm run check:selftest` plants one break per case in a scratch copy of a part and fails unless the
-  check fails for the right reason. Breaks in paint go in through a sheet only the selftest can add
+  pressed by real keys, every skin (each element takes one skin variable in every skin and scheme, and
+  everything in the stage is drawn in full, as itself, at contrast, on every surface; the focus ring's
+  edge is at least 3:1 on every Tab stop), light and dark (the same, in dark), a 390px window read in
+  full in every skin and scheme, printed and seen with no script. The page shows a light only when the
+  last run passed and proved it for the same part folder, tokens, base styles, UI SDK version and check
+  code. It exits non-zero on an incomplete folder, a failed step, an unlit light, any page error or
+  network request, or a step (5s) or part (120s) past its time limit.
+- `pnpm run check:selftest` plants breaks in a scratch copy of a part and fails unless the check fails
+  for the right reason, naming the planted control. One plant per reading; plants on different controls
+  share a run. Breaks in paint go in through a sheet only the selftest can add
   (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route.
-- In CI (`js-tests.yml`) the fast tests and the showroom check run on every js-tests run; the selftest
-  runs only when a change touches `js/packages/barkui/**` (either side of a move), `api/priv/barkui/**`,
-  that workflow, `js/pnpm-lock.yaml`, `js/pnpm-workspace.yaml` or `js/package.json`, and whenever the
-  changed files cannot be worked out.
-- `build/sheet-waits.mjs` lists values the tokens sheet does not deliver yet. The check records each
-  measure; the page prints "waiting on the sheet: ..." while it is short, and `hard: true` makes it fail.
+- In CI (`js-tests.yml`) the showroom check and the selftest run only when a change touches
+  `js/packages/barkui/**` (either side of a move) or the sheet, `api/priv/barkui/**`, and whenever the
+  changed files cannot be worked out. The fast tests run with the rest of the js suite.
+- `build/sheet-waits.mjs` lists the contrast the tokens sheet does not deliver yet, each wait bound to one
+  skin, scheme, surface and pair of tokens, with the ratio measured there (see "Surfaces" below).
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css lint.
 - `node check/shots.mjs <dir>` writes light and dark shots of the built page.
 
@@ -62,23 +62,29 @@ and the base styles can style it.**
   in every skin and scheme: text and its fill, background colour and gradients, all four borders,
   outline, column rule, shadows (box, text, drop), decoration, emphasis, text stroke, caret, accent,
   scrollbar, SVG fill, stroke, stop, flood and lighting colours.
-- Drawn in full. Every visible thing in the stage is read from pixels: each run of text, and each
-  graphic (an `svg`, an `img`, a `::before` or `::after` with a box; `content: ""` is a graphic, not
-  text). The check captures the stage over CDP as drawn, with every glyph unpainted, and with every
-  graphic unpainted (each a first-layer `!important` sheet put there from the isolated world), once per
-  skin, scheme and surface, and at 390px. A thing's ink is the pixels that differ with it toggled off,
-  and its footprint those that moved at least half as far as the most any moved (the outline at half
-  cover), so a colour, a fade, a text gamma or an anti-aliasing mode does not change it; the browser
-  draws text in grayscale, never LCD. It must be at
-  least 90% of the same thing drawn alone by the check, unclipped and uncovered (the same string in the
-  same font, or a copy of the node, in its own colours on its own ground and at its own place within
-  a device pixel, so both rasterise alike); under that it fails as "label is cut: 41% of it draws". Contrast
-  is the core of the ink (the strongest tenth, not the anti-aliased rim) against what is drawn there
-  without it: 4.5:1 for text, 3:1 for a graphic. A run with text and no ink fails as "text does not
-  draw", and a control whose text and graphics add up to nothing fails as "control has nothing to
-  show". Covers, filters, blend modes, opacity anywhere above, masks, clips, overflow, transforms and
-  font sizes all show in the pixels. Disabled things must draw in full but are not held to contrast.
-  The computed-colour reading stays as a fast first pass; a light goes on only from the drawn one.
+- Drawn in full, as itself. Every visible thing in the stage is read from pixels: each line of text,
+  and each graphic (an `svg`, an `img`, a `::before` or `::after` with a box). The check captures the
+  stage as drawn, with every glyph unpainted, and with every graphic unpainted (each a first-layer
+  `!important` sheet put there from the isolated world), once per skin, scheme and surface, and at
+  390px, at a pixel ratio of 2; the browser draws text in grayscale, never LCD. For reference it draws
+  each thing alone, in a blank tab of its own: the same words in the same font, or a copy of the node,
+  in its own colours, on its own ground, at its own place within a pixel.
+  - A label (each line a text node is laid out in) is its picture against its reference. The picture is
+    every pixel in the line's box, padded by 1px, that differs from the label's ground: all that is
+    painted there, by anyone. A pixel counts when it moved at least half as far as the most any pixel
+    there moved (the outline at half cover), in the picture and in the reference alike, so a colour, a
+    fade or a text gamma does not change it. The score is the pixels in both over the pixels in either;
+    a pixel is in both when the other has ink there or one device pixel to its side (where a glyph
+    lands within a pixel is rounded per glyph). Missing ink lowers it (cut, clipped, covered, shrunk,
+    mirrored) and so does extra ink (a bar, a box, another word, a ghost copy). Under 0.975
+    (`MATCH_MIN`, `check/reading.mjs`) it fails as "label is not drawn as itself".
+  - A graphic, or the text of a pseudo-element, must draw at least 90% of its footprint drawn alone,
+    or it fails as "graphic is cut: 41% of it draws" ("label is cut" for a pseudo-element's text).
+  - Contrast is the core of the ink (the strongest tenth, not the anti-aliased rim) against what is
+    drawn there without it: 4.5:1 for text, 3:1 for a graphic. A thing with no ink fails as "does not
+    draw", and a control whose text and graphics add up to nothing fails as "control has nothing to
+    show". Disabled things must draw in full but are not held to contrast. The computed-colour reading
+    stays as a fast first pass; a light goes on only from the drawn one.
 - A control's boundary is measured whatever token draws it. Every interactive element in the stage
   (button, input, select, textarea, summary, a link, anything with a control role or a tabindex) must
   mark where it is at 3:1 or more against the ground next to it: the best of its fill and its drawn
@@ -95,9 +101,13 @@ and the base styles can style it.**
   other condition are refused.
 - part.css keeps to a small vocabulary, `build/vocabulary.mjs`: layout, type, paint and motion
   properties. A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
-  no type tokens yet). Anything else (filter, mix-blend-mode, clip-path, mask, text-indent, visibility,
-  `-webkit-text-fill-color`, background-clip, zoom and the like) needs an entry in part.json's `allow`
-  with a one-line reason, and the showroom prints it beside the part.
+  no type tokens yet). A part cannot excuse itself: anything else (mix-blend-mode, clip-path, mask,
+  text-indent, visibility, `-webkit-text-fill-color`, background-clip, text-shadow,
+  text-decoration-thickness, zoom and the like) is refused. The one way past is `EXTRA` in that shared
+  file, a property with the exact values it may take, today one row: `filter` may be `none`. A row comes
+  with a selftest plant showing the lights still see the property misused. `content` may only be `""`
+  or `none`, so words live in `example.html`, and the `text-decoration` shorthand may not set a
+  thickness.
 - Read where the page cannot reach: every reading the lights rest on (computed styles, boxes, text,
   pseudo-elements, the paint trace, contrast, focus, the phone width) runs in an isolated world over
   CDP. It shares the DOM with the page but none of its script, so a demo that patches
@@ -116,11 +126,25 @@ and the base styles can style it.**
   stage may carry a `style` attribute, the stylesheets, their rules and the adopted sheets must be the
   build's own, and no animation may run from script. A failure names what changed.
 
+## Surfaces
+
 The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage.
-The lights are proved on base and say so; on any other surface they show grey, "not proved on
-<surface>", never on. The check also measures drawn text and every control's boundary on the other
-four surfaces and records them per surface in `proof.json`; a short one prints as a "waiting on the
-sheet" line and turns no light off until its `hard` switch is set. The boundary is hard on every
-surface, so a control under 3:1 anywhere turns "every skin" off. Text on the other surfaces still
-waits until every surface clears it. For each surface the check also records, as numbers only, a disabled
-control's fill against its ground and against the primary fill. It will prove every surface.
+The check reads every surface in every skin and scheme, and the lights are proved on all five; the
+page says so. A drawn text under 4.5:1 is let through only by a wait in `build/sheet-waits.mjs` that
+names its skin, scheme and surface, whose two tokens its fill and ground resolve to, and only while it
+measures no worse than the wait records. Any other text under 4.5:1, any control boundary under 3:1, and
+any label gone, cut or not drawn as itself, on any surface, turns "every skin" (light views) or "light
+and dark" (dark views) off. Each wait prints as "waiting on the sheet" with what the last run measured,
+and the sheet's work that ends it. Today eight wait, all `--ui-muted-foreground` on `--ui-background` on
+primary (the demo labels), at 3.75 to 3.78:1. For each surface the check also records, as numbers only,
+a disabled control's fill against its ground and against the primary fill.
+
+## What the check proves about a label, and no more
+
+Every label in the showroom, as built, matches its reference at 1.00 on macOS and on Linux, on every
+surface and at 390px. A label must match at 0.975 or more. What that limit costs is measured by the
+selftest's ladder, which cuts and covers one label step by step, and the selftest fails until this
+sentence moves with it: a ten-letter label 74 px wide (in CI, on Linux; 70 px on macOS) turns the
+lights off when its last 3 px are cut away, when a 5 px square of its ground covers its end, or when a
+4 px square of its ink is laid over its end; 2 px, 4 px and 3 px leave them on. A smaller loss or gain
+than that, and a way of hiding a label that leaves its pixels as they are, is outside this claim.
