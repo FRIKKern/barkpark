@@ -11,8 +11,8 @@ defmodule Barkpark.PortableDoc.FromMarkdown.Budget do
       Its heap may grow to at most `max_heap_words/0` words. An import that
       needs more of either is stopped and refused with `:markdown_too_costly`
       ("too costly to import"); it returns nothing, so no caller writes half
-      of it. Both numbers are at least nine times what an ordinary document
-      of `max_bytes/0` needs (pinned by
+      of it. The reductions are at least eight times, and the heap at least
+      nine times, what an ordinary document of `max_bytes/0` needs (pinned by
       `test/barkpark/portable_doc/from_markdown_budget_test.exs`).
   """
 

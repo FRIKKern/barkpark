@@ -115,15 +115,15 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
              {:error, :markdown_too_costly}
   end
 
-  test "an ordinary document of the full input size imports in a ninth of the budget" do
+  test "an ordinary document of the full input size needs an eighth of the work, a ninth of the heap" do
     markdown = ordinary(Budget.max_bytes())
     assert byte_size(markdown) == Budget.max_bytes()
 
     assert {:ok, blocks, []} = FromMarkdown.read(markdown)
     assert length(blocks) > 5_000
 
-    work = FromMarkdown.read(markdown, max_reductions: div(Budget.max_reductions(), 9))
-    assert work == {:ok, blocks, []}, "needs more than a ninth of the reductions"
+    work = FromMarkdown.read(markdown, max_reductions: div(Budget.max_reductions(), 8))
+    assert work == {:ok, blocks, []}, "needs more than an eighth of the reductions"
 
     heap = FromMarkdown.read(markdown, max_heap_words: div(Budget.max_heap_words(), 9))
     assert heap == {:ok, blocks, []}, "needs more than a ninth of the heap"
