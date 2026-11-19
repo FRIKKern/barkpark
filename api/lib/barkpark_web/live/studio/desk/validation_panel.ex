@@ -15,10 +15,10 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   document the editor holds (`editor_doc`) and its schema: the same walk the
   save runs, read again when the pane renders. So a document that is opened
   with a bad value lists it before any edit, and a typed value is listed once
-  its autosave has landed. Nothing is validated here that the save does not
-  validate: a rule the server does not have (TanStack checks a `url` field's
-  shape in the browser) is not listed. A slug another document has
-  (`SlugInUse`) is listed with them.
+  its autosave has landed. A value of the wrong shape for its type (a `url`
+  field that holds no web address: `Content.TypeShape`, which TanStack checks
+  in the browser) and a slug another document has (`SlugInUse`) are listed
+  with them; neither refuses a save.
 
   Errors block Publish (`DocFooter`); warnings are listed and never block.
   The server reads an `info` rule as a warning, so it is listed as one.
@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias Barkpark.Content.TypeShape
   alias Barkpark.Content.Validation
   alias BarkparkWeb.Studio.Desk.FieldGroups
   alias BarkparkWeb.Studio.Desk.Panes
@@ -59,6 +60,7 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
     content = Map.get(doc, :content) || %{}
     fields = fields(schema)
     %{errors: errors, warnings: warnings} = Validation.check_findings(content, doc.title, schema)
+    errors = errors ++ TypeShape.findings(content, schema)
 
     found =
       for {level, findings} <- [{"error", errors}, {"warning", warnings}],
@@ -210,6 +212,9 @@ defmodule BarkparkWeb.Studio.Desk.ValidationPanel do
     do: gettext("Must have at least %{min} items", min: min)
 
   defp words(%{code: :list_not_unique}), do: gettext("Can't be a duplicate")
+  defp words(%{code: :url_invalid}), do: gettext("Not a valid URL")
+  defp words(%{code: :url_scheme}), do: gettext("Does not match allowed protocols/schemes")
+  defp words(%{code: :url_credentials}), do: gettext("Username/password not allowed")
 
   # The server's own sentence, without the path it puts before a nested one.
   defp words(%{message: message}) do
