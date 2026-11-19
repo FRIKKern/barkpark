@@ -35,7 +35,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive.Style do
       .ch-hosts { display: flex; flex-direction: column; gap: 12px; }
       .ch-host { --ch-tone: var(--fg-dim); padding: 16px 18px; border: 1px solid var(--border-muted); border-left: 3px solid var(--ch-tone); border-radius: var(--radius-lg); background: var(--bg-card); }
       .ch-host--online { --ch-tone: var(--ok); }
-      .ch-host--waiting { --ch-tone: var(--primary); }
+      .ch-host--waiting { --ch-tone: var(--info); }
       .ch-host--expired { --ch-tone: var(--warning); }
       .ch-host--offline { --ch-tone: var(--fg-dim); }
       .ch-host-head { display: flex; align-items: center; gap: 10px; }
@@ -44,7 +44,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive.Style do
       .ch-host-name { margin: 0; font-size: var(--text-base); font-weight: 600; }
       .ch-pill { margin-left: auto; padding: 2px 10px; border-radius: 999px; background: var(--bg-muted); font-size: var(--text-xs); font-weight: 600; color: var(--fg-muted); white-space: nowrap; }
       .ch-host--online .ch-pill { background: var(--ok-soft); color: var(--ok-text); }
-      .ch-host--waiting .ch-pill { background: var(--primary-soft); color: var(--primary-text); }
+      .ch-host--waiting .ch-pill { background: var(--info-soft); color: var(--info-text); }
       .ch-host--expired .ch-pill { background: var(--warn-soft); color: var(--warn-text); }
       .ch-host-meta { margin: 6px 0 0 18px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: var(--text-sm); color: var(--fg-muted); }
       .ch-path { font-family: var(--font-mono); font-size: var(--text-xs); padding: 1px 6px; border-radius: var(--radius-sm); background: var(--bg-muted); color: var(--fg); }
@@ -55,7 +55,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive.Style do
       .ch-code-lead, .ch-code-next { margin: 0; font-size: var(--text-sm); color: var(--fg-muted); line-height: 1.5; }
       .ch-code-next { margin-top: 10px; }
       .ch-command { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; }
-      .ch-command textarea { flex: 1; min-width: 0; resize: none; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border-muted); color: var(--fg); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.6; word-break: break-all; }
+      .ch-command textarea { flex: 1; min-width: 0; resize: none; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border-muted); color: var(--fg); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
       .ch-host-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
       .ch-revoked { margin-top: 28px; font-size: var(--text-sm); color: var(--fg-muted); }
       .ch-revoked h3 { margin: 0 0 6px; font-size: var(--text-sm); font-weight: 600; color: var(--fg-muted); }
