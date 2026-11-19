@@ -122,6 +122,8 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     # 25 px (3 + 19 + 3) and 10 px above and below: 45.
     assert coarse =~ "border-style: solid; border-color: transparent; border-width: 10px 0;"
     assert coarse =~ "background-clip: padding-box;"
+    # A 390 px phone squeezes the pills to their dot; they keep a 44 px floor.
+    assert coarse =~ "min-width: 44px;"
   end
 
   test "a document never published greys out the Published pill", c do
