@@ -1,0 +1,23 @@
+{
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "block text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "say hi there"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "markdown": "<div>block <style>p{}</style>text<!-- note --></div>\n\nsay <b>hi</b> <script>bad()</script>there"
+}

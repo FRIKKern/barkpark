@@ -548,9 +548,11 @@ defmodule BarkparkWeb.PortableDocRatchetDoorsTest do
       assert %{violations: [%{code: :value_not_allowed, path: path}]} = plan_warning()
       assert path =~ ~r"^/blocks/\d+/level$"
 
+      # The importer keeps the bad fence back as a code block; the plan door
+      # reports its error, and the report-only write lands.
       assert Enum.any?(
                Content.get_paper(slug, "production").content["blocks"],
-               &(&1["id"] == "h")
+               &(&1["type"] == "code" and &1["value"] =~ ~s("level": 9))
              )
     end
 

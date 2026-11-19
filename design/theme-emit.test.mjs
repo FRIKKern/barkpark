@@ -15,7 +15,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
-import { contrast, hexToRgb, hslToHex, rgbToHex, srgbToOklch } from "./derive.mjs";
+import { BRAND_SURFACES, softSides } from "./emit/barkui-surfaces.mjs";
+import { stepsFor } from "./emit/barkui-states.mjs";
+import { contrast, hexToRgb, hslToHex, oklchToSrgb, parseColor, rgbToHex, srgbToOklch, toHslTriplet } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -282,8 +284,6 @@ const BARKUI_PATH = "api/priv/barkui/tokens.css";
 const BARKUI_SOURCES = {
   "--ui-background": "--bg",
   "--ui-foreground": "--text",
-  "--ui-muted": "--muted-surface",
-  "--ui-muted-foreground": "--muted-text",
   "--ui-border": "--border",
   "--ui-input": "--fg-dim",
   "--ui-ring-border": "--ring",
@@ -296,10 +296,17 @@ const BARKUI_SOURCES = {
     [["success", "ok"], ["warning", "warn"], ["danger", "danger"], ["info", "info"]].flatMap(([tone, role]) => [
       [`--bark-${tone}`, `--${role}`],
       [`--bark-${tone}-foreground`, `--${role}-fg`],
-      [`--bark-${tone}-text`, `--${role}-text`],
     ]),
   ),
 };
+// A tone's text starts from Studio's and gives way where a soft fill's hover and
+// pressed need it (the states test); the tone text test holds it to its tone.
+const TONE_TEXT_SOURCES = { success: "--ok-text", warning: "--warn-text", danger: "--danger-text", info: "--info-text" };
+
+// Names whose light arm is Studio's and whose dark arm is not: in dark, muted
+// sits above the page (a fill on a dark ground sits on its lighter side), and
+// muted-foreground is walked on it.
+const BARKUI_LIGHT_SOURCES = { "--ui-muted": "--muted-surface", "--ui-muted-foreground": "--muted-text" };
 
 // Names whose source is a value the cloud region writes and Studio does not:
 // the focus halo is the ring at the soft-tint alpha, `--ring-soft`.
@@ -313,15 +320,16 @@ const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 const TONES = ["success", "warning", "danger", "info"];
 const ROLES = ["background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
-  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]), "destructive"];
+  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]), "destructive",
+  ...["primary", "muted", ...TONES.map((t) => `${t}-soft`)].flatMap((f) => [`${f}-hover`, `${f}-pressed`])];
 const DEPTHS = [["-2", "m2"], ["-1", "m1"], ["1", "1"], ["2", "2"], ["3", "3"]];
-const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`])]);
+const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`, `${t}-soft-hover`, `${t}-soft-pressed`])]);
 const pointed = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 // Where a table name lives in the skin rule: a pointed name as --bark-base-<role>.
 const skinVar = (name) => { const r = ROLES.find((x) => pointed(x) === name); return r ? `--bark-base-${r}` : name; };
 const SKIN_NAMES = [
   ...SURFACES.flatMap((s) => [...ROLES.map((r) => `--bark-${s}-${r}`), ...DEPTHS.map(([, k]) => `--bark-${s}-depth-${k}`)]),
-  ...Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).filter((n) => skinVar(n) === n),
+  ...Object.keys({ ...BARKUI_SOURCES, ...BARKUI_LIGHT_SOURCES, ...BARKUI_CLOUD_SOURCES }).filter((n) => skinVar(n) === n),
   "--bark-sunken-rim",
 ];
 
@@ -379,6 +387,10 @@ test("BarkUI sheet: every skin carries exactly the table's names, each a light-d
       assert.equal(dark, resolveStudio(studioDark.vars, source), `${name}/dark: ${barkui} differs from Studio's ${source}`);
       compared += 2;
     }
+    for (const [barkui, source] of Object.entries(BARKUI_LIGHT_SOURCES)) {
+      assert.equal(arms(rule.vars[skinVar(barkui)]).light, resolveStudio(studioLight.vars, source), `${name}/light: ${barkui} differs from Studio's ${source}`);
+      compared += 1;
+    }
     const cloudLight = ruleFor(cloud, `html[data-bp-theme="${name}"]`);
     const cloudDark = ruleFor(cloud, `html[data-bp-theme="${name}"][data-theme="dark"]`);
     assert.ok(cloudLight && cloudDark, `${name}: the cloud region lacks a light or dark block to compare against`);
@@ -389,7 +401,7 @@ test("BarkUI sheet: every skin carries exactly the table's names, each a light-d
       compared += 2;
     }
   }
-  assert.equal(compared, themes.length * 2 * Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).length);
+  assert.equal(compared, themes.length * (2 * Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).length + Object.keys(BARKUI_LIGHT_SOURCES).length));
 });
 
 // `hsl(H S% L%)` or `hsl(H S% L% / a)` -> sRGB 0..255 and alpha.
@@ -667,6 +679,122 @@ test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, w
     const step = contrast(get("background"), base);
     assert.ok(step >= floor, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${floor}`);
   });
+});
+
+// Hover and pressed come from the sheet: every fill a control can have (the
+// primary fill, the muted fill a secondary control takes, each tone's soft fill;
+// a destructive control is the danger tone's soft fill) has -hover and -pressed
+// on every surface. Every reading is taken on the 8-bit colour a screen paints.
+//   - Hover and pressed move the fill away from its ground, by contrast, pressed
+//     furthest. Only a fill at the end of the lightness range (no room for two
+//     steps away from its ground) moves toward its ground, and then it still
+//     stands 3:1 off the ground when pressed. No state is closer to its ground
+//     than 1.1:1.
+//   - Each step (rest to hover, hover to pressed) is at least 1.12:1 and at
+//     least 0.03 in OKLCH lightness.
+//   - One label for all three states, reading 4.5:1 on each.
+//   - Soft states keep the soft fill's hue within 1 degree and at least 0.016
+//     chroma; primary states keep its hue within 1 degree; muted states gain at
+//     most 0.002 chroma.
+//   - A fill that stands 3:1 off its ground at rest still does in both states.
+const STATE = { step: 1.12, stepL: 0.03, ground: 1.1, hue: 1, softC: 0.016, greyGain: 0.002 };
+const STATE_FILLS = [["primary", "primary-foreground", "primary"], ["muted", "foreground", "muted"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`, "soft"])];
+const paint = (c) => parseColor(c).map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255) / 255);
+const hueOff = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+test("BarkUI sheet: every control fill has a visible hover and pressed state that keeps its label, colour and ground", () => {
+  const misses = [];
+  eachSurface((at, mode, s, get) => {
+    const bg = paint(get("background"));
+    for (const [f, lab, kind] of STATE_FILLS) {
+      const fills = ["", "-hover", "-pressed"].map((x) => paint(get(`${f}${x}`)));
+      const [rest] = fills, label = paint(get(lab));
+      const o = fills.map((c) => srgbToOklch(c)), g = fills.map((c) => contrast(c, bg));
+      const miss = (m) => misses.push(`${at}: ${f} ${m}`);
+      for (const k of [1, 2]) {
+        const n = k === 1 ? "hover" : "pressed";
+        if (contrast(fills[k], fills[k - 1]) < STATE.step) miss(`${n} is ${contrast(fills[k], fills[k - 1]).toFixed(3)}:1 off the state before, under ${STATE.step}`);
+        if (Math.abs(o[k].L - o[k - 1].L) < STATE.stepL) miss(`${n} is ${Math.abs(o[k].L - o[k - 1].L).toFixed(3)} lightness off the state before, under ${STATE.stepL}`);
+        if (g[k] < STATE.ground) miss(`${n} is ${g[k].toFixed(3)}:1 off the ground, under ${STATE.ground}`);
+        if (g[0] >= 3 && g[k] < 3) miss(`${n} is ${g[k].toFixed(2)}:1 off the ground, under 3`);
+        if (contrast(label, fills[k]) < 4.5) miss(`${lab} on ${n} is ${contrast(label, fills[k]).toFixed(2)}, under 4.5`);
+        if (kind !== "muted" && hueOff(o[k].h, o[0].h) > STATE.hue) miss(`${n} is ${hueOff(o[k].h, o[0].h).toFixed(1)} degrees off the fill's hue`);
+        if (kind === "soft" && o[k].C < STATE.softC) miss(`${n} has chroma ${o[k].C.toFixed(4)}, under ${STATE.softC}`);
+        if (kind === "muted" && o[k].C > o[0].C + STATE.greyGain) miss(`${n} gains chroma ${(o[k].C - o[0].C).toFixed(4)}`);
+      }
+      if (contrast(label, rest) < 4.5) miss(`${lab} on rest is ${contrast(label, rest).toFixed(2)}, under 4.5`);
+      if (Math.sign(o[1].L - o[0].L) !== Math.sign(o[2].L - o[1].L)) miss("hover and pressed move in different directions");
+      if (g[1] < g[0]) {
+        const end = contrast(rest, contrast(rest, [0, 0, 0]) >= contrast(bg, [0, 0, 0]) ? [1, 1, 1] : [0, 0, 0]);
+        if (end >= STATE.step ** 2) miss(`moves toward its ground with ${end.toFixed(3)}:1 of room away from it`);
+        if (g[2] < 3) miss(`moves toward its ground and ends ${g[2].toFixed(2)}:1 off it, under 3`);
+      }
+    }
+  });
+  assert.deepEqual(misses, []);
+});
+
+// On one ground the muted fill and every soft fill sit on one side, so every
+// such button there presses the same way: the side away from the label (the
+// foreground) if every one of them fits there with both its steps, else the
+// label's side. Sides are by the painted luminance; a colour that paints the
+// same as the ground is on neither side. The muted fill's candidate on the
+// other side is itself mirrored across the ground in OKLCH lightness; a soft
+// fill's is the generator's soft fill on that side (softSides); "fits" is the
+// step rule (stepsFor), which the states test holds.
+test("BarkUI sheet: on each ground the muted and soft fills sit on one side, away from the label only where all of them fit", () => {
+  const misses = [];
+  const side = (c, g) => Math.sign(contrast(paint(c), [0, 0, 0]) - contrast(paint(g), [0, 0, 0]));
+  eachSurface((at, mode, s, get) => {
+    const ground = get("background"), labelSide = side(get("foreground"), ground);
+    const mirror = (c) => { const o = srgbToOklch(c); return `hsl(${toHslTriplet(oklchToSrgb(2 * srgbToOklch(ground).L - o.L, o.C, o.h))})`; };
+    const fills = [["muted", "muted", get("muted"), (c) => mirror(c)], ...TONES.map((t) => [`${t}-soft`, "soft", get(`${t}-soft`), (c) => softSides(get(t), ground).find((x) => x && side(x, ground) === -side(c, ground))])];
+    const sides = fills.map(([, , c]) => side(c, ground));
+    if (new Set(sides).size !== 1 || sides[0] === 0) { misses.push(`${at}: the fills sit on sides ${sides.join(" ")}`); return; }
+    if (sides[0] === labelSide) {
+      const far = fills.map(([, kind, c, other]) => [kind, other(c)]);
+      if (far.every(([kind, c]) => c && side(c, ground) === -labelSide && stepsFor(kind, c, ground))) misses.push(`${at}: every fill fits away from the label, but they sit on its side`);
+    } else for (const [role, kind, c] of fills) if (!stepsFor(kind, c, ground)) misses.push(`${at}: ${role} sits away from the label without room for its steps`);
+  });
+  assert.deepEqual(misses, []);
+});
+
+// A tone's text walks only to read on its soft fill's states (and, on a brand
+// ground, on the ground). On a neutral ground it keeps its tone: OKLCH hue
+// within 1 degree of Studio's tone text, at least TONE_TEXT_CHROMA of its
+// chroma (the least any walk keeps is charple's light sunken warning text,
+// 0.91), and at least Studio's contrast on the ground. On a brand ground
+// (BRAND_SURFACES, from the generator) status is carried by the fill: every
+// tone's soft fill keeps its tone (hue within 1 degree, chroma at least 0.016)
+// and the text reads 4.5:1 on it and on the ground; its own chroma is not held.
+const TONE_TEXT_CHROMA = 0.9;
+test("BarkUI sheet: a tone's text keeps its tone on a neutral ground; on a brand ground the soft fill carries it", () => {
+  const themes = loadThemes();
+  const studio = cssRules(build("layouts/root.html.heex", themes));
+  const misses = [];
+  eachSurface((at, mode, s, get) => {
+    const [name] = at.split("/");
+    const from = s === "inverse" ? (mode === "light" ? "dark" : "light") : mode;
+    const block = ruleFor(studio, from === "light" ? `html[data-bp-theme="${name}"]` : `html[data-bp-theme="${name}"][data-theme="dark"]`);
+    const bg = paint(get("background"));
+    for (const t of TONES) {
+      const text = paint(get(`${t}-text`));
+      if (BRAND_SURFACES.includes(s)) {
+        // the soft fill's tone is read as the soft fill test reads it, on the written value
+        const soft = paint(get(`${t}-soft`)), tone = srgbToOklch(get(t)), o = srgbToOklch(get(`${t}-soft`));
+        if (hueOff(o.h, tone.h) > 1) misses.push(`${at}: ${t}-soft is ${hueOff(o.h, tone.h).toFixed(2)} degrees off its tone`);
+        if (o.C < STATE.softC) misses.push(`${at}: ${t}-soft has chroma ${o.C.toFixed(4)}`);
+        for (const [n, c] of [["soft fill", soft], ["ground", bg]])
+          if (contrast(text, c) < 4.5) misses.push(`${at}: ${t}-text reads ${contrast(text, c).toFixed(2)} on the ${n}`);
+        continue;
+      }
+      const src = paint(resolveStudio(block.vars, TONE_TEXT_SOURCES[t]));
+      const a = srgbToOklch(src), b = srgbToOklch(text);
+      if (hueOff(a.h, b.h) > 1) misses.push(`${at}: ${t}-text is ${hueOff(a.h, b.h).toFixed(2)} degrees off Studio's`);
+      if (b.C < a.C * TONE_TEXT_CHROMA) misses.push(`${at}: ${t}-text keeps ${(b.C / a.C).toFixed(2)} of Studio's chroma`);
+      if (contrast(text, bg) < contrast(src, bg) - 0.005) misses.push(`${at}: ${t}-text reads ${contrast(text, bg).toFixed(2)} on the ground, under Studio's ${contrast(src, bg).toFixed(2)}`);
+    }
+  });
+  assert.deepEqual(misses, []);
 });
 
 // The control edge (--ui-input): the edge of anything a person operates, an

@@ -1,0 +1,14 @@
+{
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "logo"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "markdown": "![logo](javascript:alert(1))"
+}

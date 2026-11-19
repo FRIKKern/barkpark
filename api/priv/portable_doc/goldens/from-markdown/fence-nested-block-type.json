@@ -1,0 +1,13 @@
+{
+  "blocks": [
+    {
+      "type": "code",
+      "value": "[{\"type\":\"list\",\"ordered\":false,\"items\":[{\"content\":[{\"type\":\"text\",\"value\":\"a\"}],\"children\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}]}]"
+    },
+    {
+      "type": "code",
+      "value": "[{\"type\":\"callout\",\"tone\":\"info\",\"content\":[{\"type\":\"text\",\"value\":\"b\"}],\"slots\":{\"body\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}}]"
+    }
+  ],
+  "markdown": "```portabledoc\n[{\"type\":\"list\",\"ordered\":false,\"items\":[{\"content\":[{\"type\":\"text\",\"value\":\"a\"}],\"children\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}]}]\n```\n\n```portabledoc\n[{\"type\":\"callout\",\"tone\":\"info\",\"content\":[{\"type\":\"text\",\"value\":\"b\"}],\"slots\":{\"body\":[{\"type\":\"embed\",\"url\":\"https://example.com\"}]}}]\n```"
+}

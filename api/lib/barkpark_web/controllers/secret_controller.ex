@@ -322,4 +322,16 @@ defmodule BarkparkWeb.SecretController do
     BarkparkWeb.Plugs.DatasetBoundAdminWrites,
     [surface: "secrets_write"] when action in [:update, :delete]
   )
+
+  # The SCOPED tier needs the `admin` PERMISSION as well as an admin seat
+  # (task-23ed7ba485104620). `:scoped_admin` checks the seat ROLE, so a token
+  # holding only `read` or `read`+`write`, raised to an admin seat, revealed
+  # secret values here while the flat tier (RequireAdmin) refused it. Every
+  # action — list, reveal, audit, put, delete — now asks
+  # `TenancyAuth.authorize(token, ws, :admin)`, the predicate the scoped
+  # workspace audit (`AuditController.index/2`) already uses. The flat tier
+  # carries no `workspace_slug` and is untouched. This controller is the only
+  # HTTP reader of the secret store. A missing or forged workspace passes
+  # through to `resolve_scope/1`'s opaque 404 (D199).
+  plug(BarkparkWeb.Plugs.RequireScopedAdminPermission)
 end

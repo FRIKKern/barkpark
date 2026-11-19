@@ -1,0 +1,23 @@
+{
+  "blocks": [
+    {
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "one two"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "three"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    }
+  ],
+  "markdown": "- one\n\n  two\n- three"
+}

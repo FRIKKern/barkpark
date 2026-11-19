@@ -79,6 +79,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # remedies, so if this row ever collapses into the one above, the envelope
       # has gone back to telling an insider it is a stranger.
       {"forbidden_capability", {:error, :forbidden_capability}, "forbidden", 403, [:reason]},
+      {"forbidden_capability_admin", {:error, {:forbidden_capability, :admin}}, "forbidden", 403,
+       [:reason]},
       {"forbidden_workspace_role", {:error, :forbidden_workspace_role}, "forbidden", 403,
        [:reason]},
       {"forbidden_token_write", {:error, :forbidden_token_write}, "forbidden", 403, [:reason]},
