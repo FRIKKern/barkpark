@@ -68,8 +68,112 @@ defmodule BarkparkWeb.Studio.ChatHostsLiveTest do
       })
       |> render_submit()
 
-    assert html =~ "One-time enrollment token"
-    assert [%{name: "laptop"}] = ChatHosts.list_hosts(workspace.id)
+    # The command to run on the machine, the code on stdin (never in argv),
+    # and a copy button: the code is shown here, once, to its owner.
+    assert html =~ "| barkpark-chat-host enroll --url"
+    assert html =~ "printf &#39;%s\\n&#39;"
+    assert html =~ ~s(data-copied="Copied")
+    refute html =~ "One-time enrollment token"
+    assert [%{name: "laptop", enrolled: false}] = ChatHosts.list_hosts(workspace.id)
+    assert html =~ "Waiting"
+  end
+
+  test "the code is not shown again after a reload; the page offers a new code instead", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    {:ok, %{enrollment_token: code}} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "vm", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, _view, html} = live(as(conn, raw), path)
+
+    refute html =~ code
+    refute html =~ "| barkpark-chat-host enroll --url"
+    assert html =~ "Waiting"
+    assert html =~ "min left"
+    assert html =~ "Make a new code"
+  end
+
+  test "Make a new code shows a fresh command and the old code is refused as replaced", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    {:ok, %{host: host, enrollment_token: old}} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "vm", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, view, _html} = live(as(conn, raw), path)
+    html = render_click(view, "new_code", %{"id" => host.id})
+
+    assert html =~ "The old code no longer works"
+    assert html =~ "| barkpark-chat-host enroll --url"
+    refute html =~ old
+    assert {:error, _} = ChatHosts.enroll(old, %{})
+    assert Barkpark.ChatHosts.Enrollment.refusal(old) == :replaced
+  end
+
+  test "Revoke asks first, in the page, and only the confirm revokes", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    {:ok, %{host: host}} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "vm", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, view, _html} = live(as(conn, raw), path)
+    html = render_click(view, "ask_revoke", %{"id" => host.id})
+
+    assert html =~ "Remove vm?"
+    assert [%{id: id}] = ChatHosts.list_hosts(workspace.id)
+    assert id == host.id
+
+    html = render_click(view, "cancel_revoke", %{})
+    refute html =~ "Remove vm?"
+    assert [_] = ChatHosts.list_hosts(workspace.id)
+
+    render_click(view, "ask_revoke", %{"id" => host.id})
+    html = render_click(view, "revoke", %{})
+
+    assert html =~ "Removed vm. Its code no longer works."
+    assert ChatHosts.list_hosts(workspace.id) == []
+  end
+
+  test "an enrolled host reads as online or offline, with its providers in words", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    {:ok, %{host: host, enrollment_token: code}} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "mac", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, _} = ChatHosts.enroll(code)
+    seen = DateTime.add(DateTime.utc_now(), -3 * 3600)
+
+    Barkpark.Repo.get!(RegisteredHost, host.id)
+    |> Ecto.Changeset.change(
+      last_seen_at: seen,
+      capabilities: %{
+        "providers" => %{
+          "claude" => %{"installed" => true, "auth_ready" => true, "version" => "2.1.328"},
+          "codex" => %{"installed" => true, "auth_ready" => false}
+        }
+      }
+    )
+    |> Barkpark.Repo.update!()
+
+    {:ok, _view, html} = live(as(conn, raw), path)
+
+    assert html =~ "Offline"
+    assert html =~ "last seen 3 h ago"
+    assert html =~ "signed in · 2.1.328"
+    assert html =~ "installed, not signed in"
+    refute html =~ "credential v"
+    refute html =~ "auth true"
   end
 
   test "a second Create for a waiting machine's name says to make a new code for it", %{
@@ -139,16 +243,23 @@ defmodule BarkparkWeb.Studio.ChatHostsLiveTest do
 
     {:ok, view, _html} = live(as(conn, raw), path)
 
+    # The page shows an admin no register form, so the event is sent the way
+    # a crafted client would: the seat check on the write is what refuses it.
+    refute render(view) =~ ~s(phx-submit="enroll")
+
     html =
-      view
-      |> form("form[phx-submit=enroll]", %{
+      render_submit(view, "enroll", %{
         "host" => %{"name" => "laptop", "approved_roots" => [System.tmp_dir!()]}
       })
-      |> render_submit()
 
     # DENIED: the flash, and — the load-bearing half — nothing was enrolled.
     assert html =~ "Only the workspace owner can enroll a trusted machine"
-    refute html =~ "One-time enrollment token"
+    refute html =~ "| barkpark-chat-host enroll --url"
+
+    # Nor can it make a new code for the waiting host.
+    html = render_click(view, "new_code", %{"id" => seeded.host.id})
+    assert html =~ "Only the workspace owner can enroll a trusted machine"
+    refute html =~ "| barkpark-chat-host enroll --url"
     assert [%{id: only_id}] = ChatHosts.list_hosts(workspace.id)
     assert only_id == seeded.host.id
 
