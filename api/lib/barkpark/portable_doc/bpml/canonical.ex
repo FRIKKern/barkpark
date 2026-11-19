@@ -4,7 +4,7 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   the text carries all of it. It is the one place the printer's rewrites live:
   `Bpml.WriteWall` compares `parse(print(view))` with `normalize(stored)` to
   find what a pull did not show. Each rewrite fires on an exact key set and
-  drops no key. Thirteen rewrites, no others:
+  drops no key. Twenty-three rewrites, no others:
 
     1. `:mark_node` — an inline mark written as a node (`code`, `strong`, `em`, `underline`, `strike`) becomes text carrying that mark, only when the node holds nothing else (exactly type and children, or type, value and its own marks).
     2. `:expandable_children` — an `expandable`'s body key `children` becomes `blocks`.
@@ -19,13 +19,23 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     11. `:byline_value_item` — a byline item `%{"value" => s}` and nothing else becomes the string `s` (the byline value-map shape stored by the wave-5/6 epic Papers).
     12. `:bare_note` — a notes item that is a bare string `s` becomes `%{"text" => s}` (the bare-string notes shape of the heggemsnes-act remedies block).
     13. `:absent_step_children` — a step's `children` holding nil or false is dropped; the printer reads past it to `blocks` or `content`.
+    14. `:object_mark` — a text node's mark written as a map holding only its type (`%{"type" => "bold"}`) is that name.
+    15. `:mark_alias` — a text node's marks `bold` and `italic` are `strong` and `em`: the printer writes both pairs as `<b>` and `<i>`.
+    16. `:typed_text_value` — a text node that is exactly type and value, whose value is a code node holding only type and a string value, is text carrying the `code` mark.
+    17. `:number_value` — a text node's number `value` is the string the printer writes for it.
+    18. `:nil_marks` — a text node's `marks: nil` is dropped.
+    19. `:bare_inline_strings` — a block's inline `content` that is bare strings only becomes text nodes.
+    20. `:bare_list_item` — a list item that is a bare string, or a map holding only `text` (a string), is the one-text-node item.
+    21. `:bare_table_cell` — a table row cell that is a bare string is a one-text-node cell.
+    22. `:empty_step_children` — a step's `children: []` is dropped (rule 8 then gives it an empty `blocks`).
+    23. `:empty_note_content` — a `note` block's `content: []` is dropped; its words are in `text`.
 
   Nothing lost means: no character, no mark on a character, no link, no
   checked state, no block, no item child, no slot. A mark on zero characters
   (rule 7) and an empty `marks` list (rule 9) mark no character, so they are not
   in that list. It never drops a key that holds content (`children`, `slots`,
-  `items`, `blocks`) and never changes a word. A fourteenth rewrite is its own
-  change, with its own careful review.
+  `items`, `blocks`) and never changes a word; an empty list or nil holds no
+  content. Another rewrite is its own change, with its own careful review.
   """
 
   alias Barkpark.PortableDoc.Bpml.Canonical.AliasKey
@@ -43,7 +53,17 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     :inline_shape,
     :byline_value_item,
     :bare_note,
-    :absent_step_children
+    :absent_step_children,
+    :object_mark,
+    :mark_alias,
+    :typed_text_value,
+    :number_value,
+    :nil_marks,
+    :bare_inline_strings,
+    :bare_list_item,
+    :bare_table_cell,
+    :empty_step_children,
+    :empty_note_content
   ]
 
   # The printer's decorator marks (`mark_tag/1`); any other mark is an annotation.
@@ -59,13 +79,13 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   # Inline node types: what `:inline_shape` recognises as inline content.
   @inline_types ~w(text link strong em code underline strike)
 
-  @doc "The thirteen rewrites, by name."
+  @doc "The rewrites, by name."
   @spec rules() :: [atom()]
   def rules, do: @rules
 
   @doc """
   The stored blocks as a BPML print and parse spells them. `rules` limits the
-  rewrites (all thirteen by default); the sweep test counts each one with it.
+  rewrites (all of them by default); a test can name a subset.
   """
   @spec normalize(term(), [atom()]) :: term()
   def normalize(blocks, rules \\ @rules)
@@ -73,7 +93,8 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   def normalize(other, _rules), do: other
 
   defp block(%{} = b, r) do
-    b = if :absent_step_children in r, do: absent_step_children(b), else: b
+    b = if :absent_step_children in r, do: step_children(b, &(&1 in [nil, false])), else: b
+    b = if :empty_step_children in r, do: step_children(b, &(&1 == [])), else: b
     if :alias_key in r, do: b |> AliasKey.rekey() |> shape(r), else: shape(b, r)
   end
 
@@ -111,7 +132,37 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
       else: walk_block(b, r)
   end
 
+  defp shape(%{"type" => "list", "items" => items} = b, r) when is_list(items) do
+    if :bare_list_item in r,
+      do: walk_block(%{b | "items" => Enum.map(items, &bare_list_item/1)}, r),
+      else: walk_block(b, r)
+  end
+
+  defp shape(%{"type" => "table", "rows" => rows} = b, r) when is_list(rows) do
+    if :bare_table_cell in r,
+      do: walk_block(%{b | "rows" => Enum.map(rows, &bare_cells/1)}, r),
+      else: walk_block(b, r)
+  end
+
+  defp shape(%{"type" => "note", "content" => []} = b, r) do
+    if :empty_note_content in r,
+      do: b |> Map.delete("content") |> walk_block(r),
+      else: walk_block(b, r)
+  end
+
   defp shape(b, r), do: walk_block(b, r)
+
+  defp bare_list_item(s) when is_binary(s), do: [string_to_text(s)]
+
+  defp bare_list_item(%{"text" => s} = it) when map_size(it) == 1 and is_binary(s),
+    do: [string_to_text(s)]
+
+  defp bare_list_item(it), do: it
+
+  defp bare_cells(row) when is_list(row),
+    do: Enum.map(row, fn cell -> if is_binary(cell), do: [string_to_text(cell)], else: cell end)
+
+  defp bare_cells(row), do: row
 
   defp byline_item(%{"value" => s} = it) when map_size(it) == 1 and is_binary(s), do: s
   defp byline_item(it), do: it
@@ -119,16 +170,18 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   defp bare_note(s) when is_binary(s), do: %{"text" => s}
   defp bare_note(it), do: it
 
-  defp absent_step_children(%{"type" => "steps", "steps" => steps} = b) when is_list(steps) do
-    %{b | "steps" => Enum.map(steps, &drop_absent_children/1)}
+  # A step's `children` that `drop?` says holds no body is dropped.
+  defp step_children(%{"type" => "steps", "steps" => steps} = b, drop?) when is_list(steps) do
+    %{b | "steps" => Enum.map(steps, &drop_children(&1, drop?))}
   end
 
-  defp absent_step_children(b), do: b
+  defp step_children(b, _drop?), do: b
 
-  defp drop_absent_children(%{"children" => c} = step) when c in [nil, false],
-    do: Map.delete(step, "children")
+  defp drop_children(%{"children" => c} = step, drop?) do
+    if drop?.(c), do: Map.delete(step, "children"), else: step
+  end
 
-  defp drop_absent_children(step), do: step
+  defp drop_children(step, _drop?), do: step
 
   defp empty_step_body(%{} = step) do
     if Enum.any?(["blocks", "children", "content"], &Map.has_key?(step, &1)),
@@ -153,9 +206,13 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
       :inline_shape not in r -> v
       inline_node?(v) -> [v]
       is_list(v) and Enum.any?(v, &inline_node?/1) -> Enum.map(v, &string_to_text/1)
+      bare_strings?(v, r) -> Enum.map(v, &string_to_text/1)
       true -> v
     end
   end
+
+  defp bare_strings?(v, r),
+    do: :bare_inline_strings in r and is_list(v) and v != [] and Enum.all?(v, &is_binary/1)
 
   defp inline_node?(%{"type" => t}), do: t in @inline_types
   defp inline_node?(_), do: false
