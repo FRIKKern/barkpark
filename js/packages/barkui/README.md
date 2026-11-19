@@ -240,17 +240,11 @@ alone, the second branch fails as "a rule nothing read".
 
 ## How many parts the check holds
 
-On CI's hosted runner the check took 131 s for 1 part; a run may take at most 1.5 times its reading, scaled linearly past the most parts read (197 s a part), and stops, failing, once it passes that, so the 15-minute check step in CI holds 4 parts, whose ceiling of 786 s is 87% of it. The ceilings are made from readings
-(`check/capacity.mjs`): each reading is a whole run on CI's hosted runner, with its number of parts, its
-seconds, where it was read and at which commit, and each ceiling is 1.5 times its reading. A run
-stops, failing with this sentence, the moment it passes its ceiling, wherever it is then
-(`check/ceiling.mjs`, the same timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can
-lower a ceiling for a test, never raise it). Past that number of parts the check refuses to run, naming
-this sentence, before any light is read. When a part lands, its hosted reading goes into
-`check/capacity.mjs` and the number moves by measurement; a test holds the step's minutes to
-`js-tests.yml`, the most parts held under it and one more over it. The selftest copies one part, so its
-time does not grow with the parts folder. On CI's hosted runner the selftest took 301 s; it may take at most 1.5 times that, 452 s, 75% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of
-its step; a selftest that outgrows that is split across jobs, never given a longer step.
+<!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->
+On CI's hosted runner the check took 135 s for 1 part; a run may take at most 1.5 times its reading, scaled linearly past the most parts read (203 s a part), and stops, failing, once it passes that, so the 15-minute check step in CI holds 4 parts, whose ceiling of 810 s is 90% of it. The ceilings are made from readings (`check/capacity.mjs`): each is a whole run on CI's hosted runner, and each ceiling is 1.5 times its reading. The readings: the check, 1 part in 135 s (run 44623848758 at ddb4ba55b6); the selftest, 308 s (run 44623848758 at ddb4ba55b6). The check runs 3 parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (`check/ceiling.mjs`, one timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can lower a ceiling, down to 0 s, for a test, never raise it). With more than 4 parts the check refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into `check/capacity.mjs` and the numbers move by measurement; a test holds the steps' minutes to `js-tests.yml`, the ceiling of 4 parts under the check step and of one more over it, and this passage word for word.
+
+The selftest copies one part, so its time does not grow with the parts folder. On CI's hosted runner the selftest took 308 s; it may take at most 1.5 times that, 462 s, 77% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of its step; a selftest that outgrows that is split across jobs, never given a longer step.
+<!-- /capacity -->
 
 ## What the check proves about a label, and no more
 

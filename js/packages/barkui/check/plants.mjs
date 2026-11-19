@@ -89,22 +89,21 @@ export const ladderHolds = async (p, html, ok, logs, out) => {
   return held && width === claim.width
 }
 
-// A ceiling passed fails the run at that moment, wherever it is (ceiling.mjs): a ceiling of 1 s, lowered for
-// the test, against a check run and a selftest case that each take far longer on any runner.
+// A ceiling passed fails the run at that moment, wherever it is (ceiling.mjs): a ceiling of 0 s, lowered for
+// the test, fires at the run's first wait, so a check run and a selftest case are stopped mid-run on any runner.
 export const CEILING_CASES = [
   {
     name: 'a check run that passes its ceiling stops there, failing, with the sentence',
     direct: async () => {
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'run.mjs')], { env: { ...process.env, BARKUI_CEILING_SECONDS: '1' }, encoding: 'utf8', timeout: 60000 })
-      return r.status === 1 && r.stdout.includes(`check: FAIL the run passed its ceiling of 1 s for `) && r.stdout.includes(capacitySentence()) && !/part\(s\); /.test(r.stdout)
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'run.mjs')], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes(`check: FAIL the run passed its ceiling of 0 s for `) && r.stdout.includes(capacitySentence()) && !/part\(s\); /.test(r.stdout)
     },
   },
   {
     name: 'a selftest whose last case passes its ceiling stops there, failing, with the sentence',
     direct: async () => {
-      // The last (and only) case is the full-run state case, about 45 s anywhere, so it is mid-case at 1 s.
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a state on any control of its kind'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '1' }, encoding: 'utf8', timeout: 60000 })
-      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 1 s while "a state on any control of its kind') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a state on any control of its kind'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 0 s while "a state on any control of its kind') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
     },
   },
 ]
