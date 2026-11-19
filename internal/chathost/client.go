@@ -14,7 +14,9 @@ import (
 	"time"
 )
 
-var ErrRevoked = errors.New("chat host credential revoked")
+// ErrRevoked is a 401 on an authenticated call: the server no longer takes
+// this machine's credential (revoked by the owner, or past its 30 days).
+var ErrRevoked = errors.New("chat host credential revoked or expired: ask the workspace owner to register this machine again (Studio > Chat hosts), then run barkpark-chat-host enroll")
 
 // StatusError is a non-2xx answer from the chat host API other than the 401
 // that means ErrRevoked.
@@ -42,6 +44,10 @@ func (e *configError) Unwrap() error { return e.err }
 // local configuration are not transient.
 func Transient(err error) bool {
 	if err == nil || errors.Is(err, ErrRevoked) {
+		return false
+	}
+	var enrollRefused *EnrollRefusedError
+	if errors.As(err, &enrollRefused) {
 		return false
 	}
 	var config *configError
@@ -215,6 +221,13 @@ func (c *Client) send(ctx context.Context, method, path string, authenticate boo
 		return nil, &configError{fmt.Errorf("unsafe redirect: %w", err)}
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
+		// Only enroll is unauthenticated, and its 401 is about the one-time
+		// code, not a credential: the server says why and what to do.
+		if !authenticate {
+			limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return nil, enrollRefusal(limited)
+		}
 		resp.Body.Close()
 		return nil, ErrRevoked
 	}
