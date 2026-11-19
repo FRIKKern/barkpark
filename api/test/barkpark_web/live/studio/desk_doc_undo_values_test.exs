@@ -219,7 +219,7 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
   test "a list: a removed item comes back where it was, another editor's item stays", c do
     view = open(c)
 
-    # live-edit.spec.ts:149, in its order: our pick, theirs over it, and a
+    # live-edit.spec.ts "F7: undo leaves another editor's select value and list item", in its order: our pick, theirs over it, and a
     # Mod+Z that leaves theirs.
     post(view, c, ["choice"], %{"choice" => "c"})
     theirs(c, %{"choice" => "a"})
