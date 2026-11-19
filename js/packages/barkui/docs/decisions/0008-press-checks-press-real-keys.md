@@ -12,12 +12,12 @@ press.mjs step: keys ['Tab'] ─► headless Chromium's own input pipeline ─�
 
 A check can move focus or fire events from a script, or it can press keys the way a person does. A script skips the path a key press takes through the browser, so a part can pass scripted presses and still fail under a real keyboard.
 
-UI SDK has a testing kit of its own that checks keyboard handling, ARIA and the attributes a server prints.
+UI SDK has a testing kit of its own, `@ui-sdk/core/testing`. Its docs say it provides helpers to simulate input, check focus and accessibility attributes, and inspect a primitive's state and server output.
 
 ## Decision
 
-- Each part's `press.mjs` lists steps: keys to press or an element to click, then what must be true. The check runs them in headless Chromium through the browser's own input, the same path a keyboard takes.
-- Each step's expectation and setup run in an isolated world: they share the page's elements but none of its script, so a demo cannot make a step pass.
+- Each part's `press.mjs` lists steps: keys to press or an element to click, then what must be true. The check runs them in headless Chromium. Keys go through the browser's own input, the same path a keyboard takes. A click goes through the browser's input too, but with Playwright's `force` option, which skips its checks that the element is visible, enabled and the one that would receive the click.
+- Each step's setup and expectation run in an isolated world: they share the page's elements but none of its script, so page script cannot patch the check's helpers or the functions a step calls. What a part's demo wires into the page is part of what the steps test.
 - Where a step names them, the role, name and states are read from the browser's accessibility tree, which is what a screen reader gets.
 - The "Pressed by real keys" light is on only when every step passed in the last run ([QUALITY.md](../../QUALITY.md)).
 
@@ -32,4 +32,4 @@ We would add UI SDK's testing kit beside the real presses, not in place of them,
 
 ## Considered
 
-- **UI SDK's testing kit alone.** Not chosen for now: the browser run already presses real keys and reads what a screen reader gets, and one route keeps the light's meaning plain. Whether the kit drives the browser's own input was not checked.
+- **UI SDK's testing kit alone.** Not chosen for now: the kit simulates input, while the browser run presses real keys and reads what a screen reader gets.

@@ -1,8 +1,8 @@
 // node build/status.mjs: writes what the sheet and the UI SDK pin hold into
 // README.md, between <!-- status:start --> and <!-- status:end -->, with the
-// day it was read and a stamp. The daily news run refreshes it with the board
-// block; a PR never has to. When the facts have not moved, the page is left as
-// it is.
+// day its numbers last changed and a stamp. It is run by hand until the daily
+// news run calls it with the board block; a PR never has to. When the facts
+// have not moved, the page is left as it is, date and all.
 //
 // Parts are not counted here: the showroom page is their one home, so adding a
 // part folder changes no other file. The fast tests fail when the block was
@@ -19,7 +19,7 @@ const sheetPath = join(root, '..', '..', '..', 'api', 'priv', 'barkui', 'tokens.
 
 export const HEADER = ['| What | Read from the files |', '|---|---|']
 export const LABELS = ['Skins in the sheet', 'Surfaces a part can sit on', 'Colour names in the sheet', 'UI SDK']
-const READ = /^Read from the sheet and package\.json on \d{4}-\d{2}-\d{2}\.$/
+const READ = /^Read from the sheet and package\.json; last changed on \d{4}-\d{2}-\d{2}\.$/
 
 const unique = (text, re) => [...new Set([...text.matchAll(re)].map((m) => m[1]))]
 
@@ -56,7 +56,7 @@ export function renderRows(f) {
 }
 
 export function renderStatus(f, day) {
-  return stamp([...HEADER, ...renderRows(f), '', `Read from the sheet and package.json on ${day}.`])
+  return stamp([...HEADER, ...renderRows(f), '', `Read from the sheet and package.json; last changed on ${day}.`])
 }
 
 /** The block's rows, or a reason it cannot be trusted. */
@@ -66,8 +66,8 @@ export function readStatus(text) {
   const { body } = r
   if (body[0] !== HEADER[0] || body[1] !== HEADER[1]) return { why: 'the table header changed shape' }
   const rows = body.slice(2, -2)
-  if (rows.length !== LABELS.length || !rows.every((row, i) => row.startsWith(`| ${LABELS[i]} | `) && row.endsWith(' |'))) return { why: 'a row changed shape' }
-  if (body.at(-2) !== '' || !READ.test(body.at(-1))) return { why: 'the "Read from" line changed shape' }
+  if (rows.length !== LABELS.length || !rows.every((row, i) => row.startsWith(`| ${LABELS[i]} | `) && row.endsWith(' |'))) return { why: 'the rows are not the ones the script writes, in its order' }
+  if (body.at(-2) !== '' || !READ.test(body.at(-1))) return { why: 'the "last changed" line changed shape' }
   return { rows }
 }
 

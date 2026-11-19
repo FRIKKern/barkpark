@@ -2,8 +2,8 @@
 // into docs/ROADMAP.md, between <!-- board:start --> and <!-- board:end -->,
 // read from the task board with `bp task get <id> -o json`.
 //
-// It needs a signed-in `bp`, so it runs on a machine or in the daily news job,
-// never in a PR check. The goal's id is given on the command line and kept out
+// It needs a signed-in `bp`, so it runs on a machine, by hand until the daily
+// news run calls it, and never in a PR check. The goal's id is given on the command line and kept out
 // of the repo. The block ends with a stamp over its own lines (build/stamped.mjs);
 // the fast tests fail when the block was edited by hand or no longer has the
 // shape below, never because the board moved.
@@ -29,8 +29,11 @@ export const MILESTONES = [
   ['Beside', /^BarkUI groundwork\b/, 'Groundwork: every shared piece has one source'],
 ]
 export const HEADER = ['| Id | Milestone | Done | In progress | Open |', '|---|---|---|---|---|']
-const ROW = /^\| (M\d+(?:\.\d+)?|Ready|Beside) \| [^|]+ \| \d+ \| \d+ \| \d+ \|$/
-const READ = /^Read from the board on \d{4}-\d{2}-\d{2}\.$/
+const ROW = /^\| ([^|]+) \| ([^|]+) \| \d+ \| \d+ \| \d+ \|$/
+// Where each board status counts. A status the board adds later counts as open until it is named here.
+export const COUNTS = { done: 'done', in_progress: 'in_progress', open: 'open', blocked: 'open', cancelled: null }
+export const countOf = (status) => (status in COUNTS ? COUNTS[status] : 'open')
+const READ = /^Read from the board; numbers last changed on \d{4}-\d{2}-\d{2}\.$/
 
 const bpTask = (id) => JSON.parse(execFileSync('bp', ['task', 'get', id, '-o', 'json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
 
@@ -44,10 +47,8 @@ export function collect(goalId, read = bpTask) {
     for (const t of tasks) {
       const kids = read(t.doc_id).children ?? []
       for (const k of kids.length ? kids : [t]) {
-        const s = k.lifecycle_status
-        if (s === 'done') count.done++
-        else if (s === 'in_progress') count.in_progress++
-        else if (s !== 'cancelled') count.open++
+        const column = countOf(k.lifecycle_status)
+        if (column) count[column]++
       }
     }
     return [{ id, name, ...count }]
@@ -56,7 +57,7 @@ export function collect(goalId, read = bpTask) {
 
 /** The block's lines: the table, the day it was read, and a stamp over both. */
 export function renderBoard(rows, day) {
-  return stamp([...HEADER, ...renderRows(rows), '', `Read from the board on ${day}.`])
+  return stamp([...HEADER, ...renderRows(rows), '', `Read from the board; numbers last changed on ${day}.`])
 }
 
 export const renderRows = (rows) => rows.map((r) => `| ${r.id} | ${r.name} | ${r.done} | ${r.in_progress} | ${r.open} |`)
@@ -69,7 +70,10 @@ export function readBlock(text) {
   if (body[0] !== HEADER[0] || body[1] !== HEADER[1]) return { why: 'the table header changed shape' }
   const rows = body.slice(2, -2)
   if (!rows.length || !rows.every((row) => ROW.test(row))) return { why: 'a row changed shape' }
-  if (body.at(-2) !== '' || !READ.test(body.at(-1))) return { why: 'the "Read from the board" line changed shape' }
+  // Each row names a milestone from MILESTONES, by its id and name, once and in that order.
+  const order = rows.map((row) => MILESTONES.findIndex(([id, , name]) => ROW.exec(row)[1] === id && ROW.exec(row)[2] === name))
+  if (order.some((i, n) => i < 0 || (n > 0 && i <= order[n - 1]))) return { why: 'the rows are not the milestones the script writes, in its order' }
+  if (body.at(-2) !== '' || !READ.test(body.at(-1))) return { why: 'the "last changed" line changed shape' }
   return { rows }
 }
 

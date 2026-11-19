@@ -16,7 +16,7 @@ export function readStamped(text, start, end) {
   const m = STAMP.exec(lines.at(-1) ?? '')
   if (!m) return { why: 'the block has no stamp' }
   const body = lines.slice(0, -1)
-  if (hash(body) !== m[1]) return { why: 'the block was edited by hand' }
+  if (hash(body) !== m[1]) return { why: 'the block was edited by hand, without its script' }
   return { body }
 }
 

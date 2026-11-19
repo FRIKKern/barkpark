@@ -20,8 +20,8 @@ describe('status block', () => {
         '| Colour names in the sheet | 3 `--ui-*` (UI SDK\'s), 4 `--bark-*` (BarkUI\'s own) |',
         '| UI SDK | `@ui-sdk/core` and `@ui-sdk/web` 1.0.0, pinned to that exact version |',
         '',
-        'Read from the sheet and package.json on 2026-01-02.',
-        '<!-- stamp: 3dcf3d3c32314ed7 -->',
+        'Read from the sheet and package.json; last changed on 2026-01-02.',
+        '<!-- stamp: 0153accd1779acc4 -->',
       ].join('\n'),
     )
   })

@@ -56,7 +56,7 @@ Hard parts run beside the batches, two at a time. One folder per part and nothin
 
 ## Where things stand
 
-Done, in progress and open under each milestone, copied from the task board. `node build/board.mjs <goal-task-id>` writes this block from the task board, on a machine signed in to `bp` or in the daily news job; a PR check never reads the board. A milestone with no tasks under it counts as one item itself.
+Done, in progress and open under each milestone, copied from the task board. `node build/board.mjs <goal-task-id>` writes this block from the task board, on a machine signed in to `bp`. It is run by hand until the daily news run calls it; a PR check never reads the board. A milestone with no tasks under it counts as one item itself; a blocked task counts as open, and a cancelled one is left out.
 
 <!-- board:start -->
 | Id | Milestone | Done | In progress | Open |
@@ -71,6 +71,6 @@ Done, in progress and open under each milestone, copied from the task board. `no
 | M6 | Re-imagining | 0 | 0 | 1 |
 | Beside | Groundwork: every shared piece has one source | 1 | 1 | 2 |
 
-Read from the board on 2026-11-19.
-<!-- stamp: fc600f04734394d9 -->
+Read from the board; numbers last changed on 2026-11-19.
+<!-- stamp: 48d3ca53753a53cd -->
 <!-- board:end -->

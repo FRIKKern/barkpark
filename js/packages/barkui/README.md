@@ -36,7 +36,7 @@ The daily news run fills this block from merged work once it covers BarkUI. Noth
 
 ## Where things stand
 
-The showroom is the one home for which parts exist and what is proven for each: `pnpm run build`, then open `dist/showroom/index.html`. How far each milestone has come is on the [roadmap](docs/ROADMAP.md#where-things-stand). The block below is written by `node build/status.mjs`, which the daily news run refreshes; a fast test fails when it is edited by hand.
+The showroom is the one home for which parts exist and what is proven for each: `pnpm run build`, then open `dist/showroom/index.html`. How far each milestone has come is on the [roadmap](docs/ROADMAP.md#where-things-stand). The block below is written by `node build/status.mjs`, run by hand until the daily news run calls it; a fast test fails when it is edited without the script.
 
 <!-- status:start -->
 | What | Read from the files |
@@ -46,8 +46,8 @@ The showroom is the one home for which parts exist and what is proven for each: 
 | Colour names in the sheet | 15 `--ui-*` (UI SDK's), 262 `--bark-*` (BarkUI's own) |
 | UI SDK | `@ui-sdk/core` and `@ui-sdk/web` 0.1.0-beta.10, pinned to that exact version |
 
-Read from the sheet and package.json on 2026-11-19.
-<!-- stamp: cd8b6b5e1498751d -->
+Read from the sheet and package.json; last changed on 2026-11-19.
+<!-- stamp: d530f31c45bd0f58 -->
 <!-- status:end -->
 
 | ember, dark | fjord, light |

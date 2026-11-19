@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { collect, END, readBlock, renderBoard, roadmapPath, START } from '../build/board.mjs'
+import { collect, countOf, END, readBlock, renderBoard, roadmapPath, START } from '../build/board.mjs'
 
 // A board as `bp task get <id> -o json` returns it: the goal, then each milestone.
 const board = {
@@ -13,7 +13,7 @@ const board = {
     { doc_id: 'gx', title: 'BarkUI has a front door', lifecycle_status: 'in_progress' },
   ] },
   g1: { children: [] },
-  g2: { children: [{ lifecycle_status: 'done' }, { lifecycle_status: 'in_progress' }, { lifecycle_status: 'open' }, { lifecycle_status: 'cancelled' }] },
+  g2: { children: ['done', 'in_progress', 'open', 'blocked', 'cancelled', 'review'].map((lifecycle_status) => ({ lifecycle_status })) },
   g3a: { children: [] },
   g3b: { children: [] },
   g6: { children: [] },
@@ -24,7 +24,7 @@ describe('board block', () => {
   it('counts each milestone in roadmap order; a milestone with no tasks under it counts itself', () => {
     expect(collect('goal', read)).toEqual([
       { id: 'M1', name: 'The map', done: 1, in_progress: 0, open: 0 },
-      { id: 'M2', name: 'One skin everywhere', done: 1, in_progress: 1, open: 1 },
+      { id: 'M2', name: 'One skin everywhere', done: 1, in_progress: 1, open: 3 },
       { id: 'M3', name: "Editor menus and Barkdown's tree", done: 0, in_progress: 1, open: 1 },
       { id: 'M6', name: 'Re-imagining', done: 0, in_progress: 0, open: 1 },
     ])
@@ -37,8 +37,8 @@ describe('board block', () => {
         '|---|---|---|---|---|',
         '| M2 | One skin everywhere | 1 | 2 | 3 |',
         '',
-        'Read from the board on 2026-01-02.',
-        '<!-- stamp: c7dc67dcdc3b8bf4 -->',
+        'Read from the board; numbers last changed on 2026-01-02.',
+        '<!-- stamp: 0e8d9587613c38ac -->',
       ].join('\n'),
     )
   })
@@ -54,5 +54,19 @@ describe('board block', () => {
     expect(readBlock(page(good.replace('| 1 | 0 | 0 |', '| 2 | 0 | 0 |'))).why).toMatch(/by hand/)
     expect(readBlock(page(good.split('\n').slice(0, -1).join('\n'))).why).toMatch(/no stamp/)
     expect(readBlock('no block').why).toMatch(/exactly one/)
+  })
+
+  it('counts each board status in one place: blocked is open, cancelled is left out, an unknown status is open', () => {
+    expect(['done', 'in_progress', 'open', 'blocked', 'cancelled', 'review'].map(countOf)).toEqual(['done', 'in_progress', 'open', 'open', null, 'open'])
+  })
+
+  it('refuses rows that are not the script\'s milestones in its order, even with a fresh stamp', () => {
+    const page = (rows) => `x\n${START}\n${renderBoard(rows, '2026-01-02')}\n${END}\n`
+    const row = (id, name) => ({ id, name, done: 16, in_progress: 0, open: 0 })
+    expect(readBlock(page([row('M2', 'One skin everywhere')]))).not.toHaveProperty('why')
+    expect(readBlock(page([row('M9', 'Made up')])).why).toMatch(/not the milestones/)
+    expect(readBlock(page([row('M2', 'Another name')])).why).toMatch(/not the milestones/)
+    expect(readBlock(page([row('M2', 'One skin everywhere'), row('M1', 'The map')])).why).toMatch(/not the milestones/)
+    expect(readBlock(page([row('M1', 'The map'), row('M1', 'The map')])).why).toMatch(/not the milestones/)
   })
 })
