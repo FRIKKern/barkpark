@@ -178,9 +178,15 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     apply_search(socket, query)
   end
 
-  # The desk's search box posts itself on input (`TreeCodelistDesk`).
-  def handle_event("tree_search_input", %{"codelist_search" => query}, socket) do
-    apply_search(socket, query)
+  # The desk's search box posts itself on input (`TreeCodelistDesk`). Its
+  # change posts the whole form, every tree's box with it, so each box is
+  # named for its tree (`codelist_search[<id>]`) and a tree reads only its
+  # own: one name for all would hand every tree the last box's text.
+  def handle_event("tree_search_input", %{"codelist_search" => %{} = boxes}, socket) do
+    case Map.get(boxes, socket.assigns.id) do
+      query when is_binary(query) -> apply_search(socket, query)
+      _ -> {:noreply, socket}
+    end
   end
 
   def handle_event("tree_search_clear", _params, socket) do

@@ -73,6 +73,12 @@ defmodule BarkparkWeb.Studio.DeskCodelistTreeTest do
               "type" => "codelist",
               "codelistId" => list_id
             },
+            %{
+              "name" => "audience",
+              "title" => "Audience (Thema)",
+              "type" => "codelist",
+              "codelistId" => list_id
+            },
             %{"name" => "notes", "title" => "Notes", "type" => "string"}
           ]
         },
@@ -119,13 +125,43 @@ defmodule BarkparkWeb.Studio.DeskCodelistTreeTest do
     doc.content || %{}
   end
 
-  defp tree, do: @form <> " .codelist-tree-field"
-  defp row(code), do: tree() <> ~s( [role="treeitem"][data-code="#{code}"])
+  defp tree(field \\ "subject"),
+    do: @form <> ~s( .codelist-tree-field[data-field-name="#{field}"])
 
-  defp search(view, text) do
-    view
-    |> element(tree() <> ~s( input[type="search"]))
-    |> render_change(%{"codelist_search" => text})
+  defp row(code, field \\ "subject"),
+    do: tree(field) <> ~s( [role="treeitem"][data-code="#{code}"])
+
+  # Text typed in a tree's search box, posted as the browser posts it: a
+  # change on an input in a form sends the form's inputs of that name, so
+  # every box in the form whose name is the typed box's rides along, and the
+  # server reads them as Plug parses the body.
+  defp search(view, text, field \\ "subject") do
+    box = tree(field) <> ~s( input[type="search"])
+
+    typed = view |> element(box) |> render() |> LazyHTML.from_fragment()
+    [typed_name] = LazyHTML.attribute(typed, "name")
+    [typed_id] = LazyHTML.attribute(typed, "id")
+
+    body =
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(@form <> ~s( .codelist-tree-field input[type="search"]))
+      |> Enum.map(fn input ->
+        [name] = LazyHTML.attribute(input, "name")
+        [id] = LazyHTML.attribute(input, "id")
+
+        {name,
+         if(id == typed_id,
+           do: text,
+           else: input |> LazyHTML.attribute("value") |> List.first("")
+         )}
+      end)
+      |> Enum.filter(fn {name, _} -> name == typed_name end)
+      |> URI.encode_query()
+      |> Plug.Conn.Query.decode()
+
+    view |> element(box) |> render_change(body)
   end
 
   # A row's click, named for the open document as the page's script names it.
@@ -217,6 +253,22 @@ defmodule BarkparkWeb.Studio.DeskCodelistTreeTest do
     assert has_element?(view, row("FB"))
   end
 
+  test "with two trees in the form, a search in the first one searches the first tree", c do
+    view = desk(c, :none)
+    search(view, "YFB", "subject")
+
+    assert has_element?(view, tree("subject") <> "[data-searching]")
+    assert has_element?(view, row("YFB", "subject"))
+    refute has_element?(view, tree("audience") <> "[data-searching]")
+
+    search(view, "FBA", "audience")
+    assert has_element?(view, row("FBA", "audience"))
+    refute has_element?(view, row("YFB", "audience"))
+    # The first tree keeps its own search.
+    assert has_element?(view, row("YFB", "subject"))
+    refute has_element?(view, row("FBA", "subject"))
+  end
+
   test "a search over 200 matches shows the first 200, in the list's order, and says so", c do
     view = desk(c, :none)
     search(view, "F")
@@ -225,7 +277,7 @@ defmodule BarkparkWeb.Studio.DeskCodelistTreeTest do
       view
       |> render()
       |> LazyHTML.from_fragment()
-      |> LazyHTML.query(~s(.codelist-tree-field [role="treeitem"]))
+      |> LazyHTML.query(~s(.codelist-tree-field[data-field-name="subject"] [role="treeitem"]))
       |> Enum.flat_map(&LazyHTML.attribute(&1, "data-code"))
 
     # The first 200 matches in the list's own order, depth first: Fiction's

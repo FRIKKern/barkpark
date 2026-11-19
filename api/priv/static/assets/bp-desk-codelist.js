@@ -131,8 +131,11 @@
     rove(field, t);
   }
 
-  // A row left for another element, or for the page by a click on nothing,
-  // lets go; a row the server took away while it had the focus does not.
+  // A row left for something that is not a row of the same tree (the search
+  // box, another field, the page by a click on nothing) lets go. A move to
+  // another row of the tree does not, though this row's blur comes after
+  // that row's focus; nor does a row the server took away while it had the
+  // focus.
   function onBlur(e) {
     var t = e.target;
     if (!t || !t.matches || !t.matches(ROW)) return;
@@ -140,7 +143,10 @@
     if (!field) return;
     var id = field.id;
     setTimeout(function () {
-      if (t.isConnected) delete holding[id];
+      if (!t.isConnected) return;
+      var now = document.activeElement;
+      var tree = document.getElementById(id);
+      if (!(now && tree && now.matches && now.matches(ROW) && tree.contains(now))) delete holding[id];
     }, 0);
   }
 

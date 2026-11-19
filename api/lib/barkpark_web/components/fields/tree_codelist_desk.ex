@@ -112,7 +112,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistDesk do
           id={@search_id}
           class="input form-input"
           type="search"
-          name="codelist_search"
+          name={"codelist_search[" <> @id <> "]"}
           autocomplete="off"
           aria-label={@title}
           aria-controls={@search_id <> "-tree"}
