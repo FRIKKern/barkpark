@@ -51,7 +51,7 @@ export function installDrawn() {
 
   const GLYPHS = `@layer barkui-glyphs { *, *::before, *::after, *::marker, *::placeholder, *::first-letter, *::first-line {
     -webkit-text-fill-color: transparent !important; -webkit-text-stroke-color: transparent !important; text-shadow: none !important;
-    text-decoration-color: transparent !important; text-emphasis-color: transparent !important; } }`
+    text-decoration-color: transparent !important; text-emphasis-color: transparent !important; transition: none !important; } }`
   let unpainted = null
   /** Paint or unpaint every glyph. The sheet goes first in the document, so its layer is the earliest
       and its !important declarations win over any the page's own sheets make. */

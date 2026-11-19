@@ -53,15 +53,16 @@ export async function styleBaseline(browser, url) {
 
 /** Every run of text in the stage, read from pixels: the stage as drawn against the stage with its glyphs
     unpainted (see check/drawn.mjs). Both captures and the comparison go through the check's own world and CDP. */
-async function drawnText(page, part, { quietly = false } = {}) {
+async function drawnText(page, part) {
   const rootOf = `[data-part="${part.name}"]`
   const clip = await page.barkCheck((sel) => {
     const r = document.querySelector(sel).getBoundingClientRect()
     return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height }
   }, rootOf)
   const list = await page.barkCheck((sel) => window.__barkCheck.runs(document.querySelector(sel)), rootOf)
-  const shoot = async () => (await page.barkCdp.send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: page.barkScale }, captureBeyondViewport: true })).data
-  const pause = () => (quietly ? new Promise((r) => setTimeout(r, 60)) : settle(page))
+  const shoot = async () => (await page.barkCdp.send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: page.barkScale }, captureBeyondViewport: true, optimizeForSpeed: true })).data
+  // The glyph sheet turns transitions off, so the change is drawn within two frames.
+  const pause = () => page.barkCheck(() => window.__barkCheck.frame())
   const drawn = await shoot()
   await page.barkCheck(() => window.__barkCheck.glyphs(false))
   try {
@@ -345,7 +346,7 @@ export async function noscript(ctx, part) {
     const r = await page.barkCheck(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
     if (r.wrong.length) return light(false, r.wrong[0])
     if (r.weakest.ratio < 4.5) return light(false, `text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
-    const d = judgeDrawn(await drawnText(page, part, { quietly: true }), '')
+    const d = judgeDrawn(await drawnText(page, part), '')
     if (d.fails.length) return light(false, d.fails[0])
     return light(true, `${shown} elements printed, seen and painted with no script; weakest drawn text ${fmt(d.weakest.ratio)}:1`)
   } finally {
