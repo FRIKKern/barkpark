@@ -2,9 +2,11 @@
 // the input of each block and limit golden in api/priv/portable_doc/goldens, as a one-block
 // Paper, through sourceLoss (src/markdown/carries.js), the one comparison source mode runs
 // before it opens, with the parse settled as the save would store it (settleSourceParse).
-// The list below is what source mode refuses today and why; it is the work queue for the tasks that make Markdown carry those shapes (marks on text:
-// task-5f0ba8904b973a3a; deep lists and other source losses: task-dde1d993de85a6e3). A
-// fixture that starts or stops being refused moves this list, so the change is seen.
+// The list below is what source mode refuses today and why; it is the work queue for
+// the tasks that make Markdown carry those shapes (deep lists, marks nested past the
+// depth limit and other source losses: task-dde1d993de85a6e3). Marks held on text are
+// written since task-5f0ba8904b973a3a. A fixture that starts or stops being refused
+// moves this list, so the change is seen.
 // Run: node src/__source_wall_fixtures.test.mjs
 
 import assert from "node:assert/strict";
@@ -17,14 +19,11 @@ import { settleSourceParse } from "./canvas/source-realign.js";
 const GOLDENS = fileURLToPath(new URL("../../../priv/portable_doc/goldens/", import.meta.url));
 
 const REFUSED = [
-  "blocks/paragraph paragraph content.marks",
   "limits/em-at-the-depth-limit paragraph content[0].value",
   "limits/em-one-level-above-the-depth-limit paragraph content[0].value",
   "limits/heatmap-number-past-what-a-float-holds heatmap cells[0][0]",
   "limits/list-at-the-depth-limit list items[0]",
   "limits/list-one-level-above-the-depth-limit list items[0]",
-  "limits/marks-at-the-depth-limit paragraph content.marks",
-  "limits/marks-one-level-above-the-depth-limit paragraph content.marks",
   "limits/strong-at-the-depth-limit paragraph content[0].value",
   "limits/strong-one-level-above-the-depth-limit paragraph content[0].value",
 ];

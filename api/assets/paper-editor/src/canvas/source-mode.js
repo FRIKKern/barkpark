@@ -1,4 +1,4 @@
-import { blocksToMarkdown, markdownToBlocks, sourceLoss } from "../markdown.js";
+import { blocksToMarkdown, firstLoss, markdownToBlocks, sourceLoss } from "../markdown.js";
 import { t } from "../i18n.js";
 import { docToBlocks } from "./run-convert.js";
 import {
@@ -225,7 +225,14 @@ export function sourceModeExit() {
 export function sourceModeCommit(md) {
     if (this._sourceReadOnly) return false;
     const L0 = this._sourceBaselineBlocks;
-    const L1 = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
+    // A block the Markdown reads back as the same content keeps the spelling it had:
+    // bold held as a mark on text stays a mark, not the strong node the parse writes.
+    const before = new Map(L0.map((block) => [block && block.id, block]));
+    const L1 = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)))
+      .map((block) => {
+        const was = block && before.get(block.id);
+        return was && firstLoss([was], [block]) === null ? was : block;
+      });
     this._editor
       .chain()
       .setContent(this._rt(L1), { emitUpdate: false })

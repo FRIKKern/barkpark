@@ -44,7 +44,9 @@
 // comments through, so a sentinel round-trips byte-lossless. CORRECTNESS BEATS
 // PRETTINESS: any block we cannot serialize+parse faithfully uses the sentinel.
 
+import { markdownToBlocks } from "./parse.js";
 import { clampLevel, EMPTY_PARAGRAPH_MARKER, SENTINEL_CLOSE, SENTINEL_OPEN } from "./shared.js";
+import { holdsMarkedText, marksAsNodes } from "./text-marks.js";
 
 // The prose block kinds with a natural markdown rendering (everything else →
 // sentinel). A prose block STILL falls back to the sentinel when its inline tree
@@ -86,7 +88,86 @@ function serializeBlock(block) {
   if (!NATURAL_BLOCK_TYPES.has(type)) return sentinel(block);
   // Author alignment has no markdown; the sentinel carries the block byte-identically.
   if ((type === "paragraph" || type === "heading") && block.align != null) return sentinel(block);
+  if (holdsMarkedBlock(block)) return serializeMarkedBlock(block);
+  return serializeNatural(block);
+}
 
+// A block whose text carries marks (the editor's spelling) is written with those marks
+// as nodes (markdown/text-marks.js). Where a mark has no node, or the Markdown does not
+// read back to the same nodes (delimiters that run together), the block rides the
+// sentinel as it is, marks and all.
+function serializeMarkedBlock(block) {
+  const written = withMarksAsNodes(block);
+  if (written === null) return sentinel(block);
+  const md = serializeNatural(written);
+  if (md.startsWith(SENTINEL_OPEN)) return sentinel(block);
+  const [back, ...more] = markdownToBlocks(md);
+  if (more.length > 0 || !back || back.type !== written.type) return sentinel(block);
+  if (inlineKey(back) !== inlineKey(written)) return sentinel(block);
+  return md;
+}
+
+const MARKED_INLINE_TYPES = new Set(["paragraph", "callout", "blockquote"]);
+
+function holdsMarkedBlock(block) {
+  if (MARKED_INLINE_TYPES.has(block.type)) return holdsMarkedText(block.content);
+  if (block.type === "list" && Array.isArray(block.items)) {
+    return block.items.some((item) => holdsMarkedText(Array.isArray(item) ? item : item && item.content));
+  }
+  return false;
+}
+
+function withMarksAsNodes(block) {
+  if (block.type !== "list") {
+    const content = marksAsNodes(block.content);
+    return content === null ? null : { ...block, content };
+  }
+  const items = [];
+  for (const item of block.items) {
+    if (Array.isArray(item)) items.push(marksAsNodes(item));
+    else if (item && typeof item === "object" && Array.isArray(item.content)) {
+      const content = marksAsNodes(item.content);
+      items.push(content === null ? null : { ...item, content });
+    } else items.push(item);
+    if (items[items.length - 1] === null) return null;
+  }
+  return { ...block, items };
+}
+
+// The inline a block holds, as one comparable string: adjacent text leaves joined and
+// empty ones dropped, as the parser reads them.
+function inlineKey(block) {
+  const inline = block.type === "list" ? (block.items || []).map(listItemInline) : [block.content || []];
+  return JSON.stringify(inline.map(joinText));
+}
+
+function joinText(inline) {
+  const out = [];
+  for (const node of inline || []) {
+    if (node && node.type === "text" && Object.keys(node).length === 2) {
+      if (node.value === "") continue;
+      const prev = out[out.length - 1];
+      if (prev && prev.type === "text" && Object.keys(prev).length === 2) {
+        out[out.length - 1] = { type: "text", value: prev.value + node.value };
+        continue;
+      }
+      out.push(node);
+    } else if (node && Array.isArray(node.children)) {
+      out.push(sortedKeys({ ...node, children: joinText(node.children) }));
+    } else {
+      out.push(sortedKeys(node));
+    }
+  }
+  return out;
+}
+
+function sortedKeys(node) {
+  if (!node || typeof node !== "object") return node;
+  return Object.fromEntries(Object.keys(node).sort().map((key) => [key, node[key]]));
+}
+
+function serializeNatural(block) {
+  const type = block.type;
   switch (type) {
     case "heading":
       return serializeHeading(block);
