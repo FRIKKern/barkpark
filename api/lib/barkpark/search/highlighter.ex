@@ -55,7 +55,7 @@ defmodule Barkpark.Search.Highlighter do
   @snippet_window 160
   @snippet_lead 60
 
-  @type schema_fun :: (String.t() | nil -> term())
+  @type schema_fun :: (String.t() | nil -> term()) | (String.t() | nil, struct() -> term())
 
   @spec highlight_documents([struct()], map(), map(), CallerContext.t() | nil, schema_fun()) ::
           map()
@@ -75,7 +75,12 @@ defmodule Barkpark.Search.Highlighter do
       # Visibility is per-document — the hit set may span many types, each with
       # its own schema field visibility — so resolve the visible highlight fields
       # against THIS doc's schema.
-      fields = visible_highlight_fields(configured, caller_context, schema_fun.(doc_type(doc)))
+      fields =
+        visible_highlight_fields(
+          configured,
+          caller_context,
+          Barkpark.Content.Envelope.schema_for(schema_fun, doc)
+        )
 
       field_highlights =
         Map.new(fields, fn field ->
@@ -88,9 +93,6 @@ defmodule Barkpark.Search.Highlighter do
       {key, field_highlights}
     end)
   end
-
-  defp doc_type(%{type: t}), do: t
-  defp doc_type(_), do: nil
 
   @doc """
   Plain-text snippets for brief hit cards: `%{doc_id => snippet | nil}`.
@@ -121,7 +123,13 @@ defmodule Barkpark.Search.Highlighter do
     configured = Map.get(config, "snippet_fields", @snippet_fields)
 
     Map.new(docs, fn doc ->
-      fields = visible_highlight_fields(configured, caller_context, schema_fun.(doc_type(doc)))
+      fields =
+        visible_highlight_fields(
+          configured,
+          caller_context,
+          Barkpark.Content.Envelope.schema_for(schema_fun, doc)
+        )
+
       {doc.doc_id, first_snippet(doc, fields, needles)}
     end)
   end

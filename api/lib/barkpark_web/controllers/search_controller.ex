@@ -98,7 +98,7 @@ defmodule BarkparkWeb.SearchController do
     envelope =
       HitEnvelope.build(docs, count, query, meta,
         caller_context: caller_context,
-        schema_resolver: schema_resolver(conn, dataset),
+        schema_resolver: own_tenant_schema_resolver(dataset),
         fields: params["fields"],
         view: params["view"],
         body_chars: body_chars,
@@ -790,6 +790,22 @@ defmodule BarkparkWeb.SearchController do
 
     fn type ->
       case Content.Schema.get_schema_for_redaction(type, dataset, opts) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+    end
+  end
+
+  # The loopback lane resolves no tenant for the caller (`scope_opts/1` gives
+  # it the shared layer only), and its hits may span tenants, so each hit is
+  # redacted by its OWN tenant's schema -- the rule `Papers.reader_schema/4`
+  # holds a Paper to. The caller's schema lookup found none for a tenant's
+  # type, and every field the tenant hides was served.
+  defp own_tenant_schema_resolver(dataset) do
+    fn type, doc ->
+      scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+
+      case Content.Schema.get_schema_for_redaction(type, dataset, scope) do
         {:ok, schema} -> schema
         _ -> nil
       end

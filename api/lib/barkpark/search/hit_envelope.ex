@@ -91,7 +91,8 @@ defmodule Barkpark.Search.HitEnvelope do
     * `:caller_context` (required) — the caller's `%CallerContext{}` (or nil ⇒
       anonymous fail-closed in the brief path; the full path renders with nil
       exactly as the legacy emitters did).
-    * `:schema_resolver` (required) — `(type -> schema | nil)` for per-type
+    * `:schema_resolver` (required) — `(type -> schema | nil)`, or
+      `(type, doc -> schema | nil)` for a read across tenants, for per-type
       field-visibility redaction. Memoised per distinct type here, so brief's
       second consumer (the snippet pass) does not re-query.
     * `:fields` — the `?fields=` projection allowlist (full view only; brief
@@ -265,6 +266,15 @@ defmodule Barkpark.Search.HitEnvelope do
   defp card_slug(%{"slug" => slug}) when is_binary(slug), do: slug
   defp card_slug(_rendered), do: nil
 
+  defp memoised_resolver(docs, schema_resolver) when is_function(schema_resolver, 2) do
+    schema_by_row =
+      docs
+      |> Enum.uniq_by(&row_key/1)
+      |> Map.new(fn doc -> {row_key(doc), schema_resolver.(doc.type, doc)} end)
+
+    fn _type, doc -> Map.get(schema_by_row, row_key(doc)) end
+  end
+
   defp memoised_resolver(docs, schema_resolver) do
     schema_by_type =
       docs
@@ -274,4 +284,6 @@ defmodule Barkpark.Search.HitEnvelope do
 
     fn type -> Map.get(schema_by_type, type) end
   end
+
+  defp row_key(doc), do: {doc.type, Map.get(doc, :workspace_id), Map.get(doc, :project_id)}
 end
