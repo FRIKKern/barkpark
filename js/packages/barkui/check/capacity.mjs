@@ -10,7 +10,8 @@ export const AT_ONCE = 3
 // The check step's limit in .github/workflows/js-tests.yml.
 export const STEP_MINUTES = 15
 // Measured on Linux in a 4-CPU, 6 GB container with copies of the button (1, 3 and 6 parts: 78 s, 97 s and
-// 240 s), rounded up: the whole run with one batch of AT_ONCE parts, and what each further batch adds.
+// 240 s; again with real states held to their pins, 83 s, 95 s and 197 s), the most of each rounded up: the
+// whole run with one batch of AT_ONCE parts, and what each further batch adds.
 export const MEASURED = { firstBatch: 100, eachBatch: 145 }
 // The share of the step limit the parts may plan on; the rest is room for a slower runner.
 export const PLANNED_SHARE = 0.6
@@ -25,7 +26,7 @@ export const capacitySentence = () =>
 // up). It plans on the same share of its step's limit as the check, and stops itself, failing with this
 // sentence, once its run passes that share, so the wall is seen in its own words before CI cuts it off.
 export const SELFTEST_STEP_MINUTES = 10
-export const SELFTEST_MEASURED = 0
+export const SELFTEST_MEASURED = 230
 export const SELFTEST_PLANNED = Math.round(SELFTEST_STEP_MINUTES * 60 * PLANNED_SHARE)
 
 export const selftestSentence = () =>

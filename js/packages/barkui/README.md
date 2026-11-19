@@ -204,7 +204,10 @@ about 145 s more, so the 15-minute check step in CI holds 12 parts with at least
 spare. That is about 48 s for each part past the first three. Past that number the check refuses to run,
 naming this sentence, before any light is read; raise `STEP_MINUTES` in `check/capacity.mjs` and the
 step's limit in `js-tests.yml` together (a test holds them equal), or split the check, and measure
-again. The selftest copies one part, so its time does not grow with the parts folder.
+again. The selftest copies one part, so its time does not grow with the parts folder. The selftest
+takes about 230 s on Linux with 4 CPUs; its 10-minute step in CI plans on 360 s, 60% of it, and the
+selftest stops, failing, once it passes that (`SELFTEST_STEP_MINUTES` and the step's limit move
+together, as above).
 
 ## What the check proves about a label, and no more
 
