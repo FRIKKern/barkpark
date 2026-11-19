@@ -18,8 +18,9 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
 
   The page is the desk's (`DeskLive`, workspace admins only) at
   `…/studio/_desk/_tools/vision`, so it keeps the desk's navbar, drawer and
-  dialogs. `bp-desk-vision.js` runs it; this draws the form and hands the
-  script its words. The form is `phx-update="ignore"`: what the script
+  dialogs. `bp-desk-vision.js` runs it (named here for the first load, and
+  loaded by the desk's hook after a live patch); this draws the form and
+  hands the script its words. The form is `phx-update="ignore"`: what the script
   draws stays through the page's patches.
 
   Not yet here, as TanStack has them: Params, Listen, the dataset and API
@@ -119,6 +120,11 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
         </section>
       </div>
       <div class="sr-only" role="status" data-testid="announcer" data-vision-said></div>
+      <%!-- For the first page load, run as the form is parsed (it is small,
+            and the form is above it), so a query typed at once is not lost
+            while the desk's hook loads it. The hook's load is for a live
+            patch here, where this tag does not run. --%>
+      <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}></script>
     </div>
     """
   end

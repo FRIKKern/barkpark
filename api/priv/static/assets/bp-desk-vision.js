@@ -228,6 +228,8 @@
     var to = target(root.getAttribute("data-api"), root.getAttribute("data-dataset"), query, part(root, "[data-vision-perspective]").value);
     var seq = (root.__seq = (root.__seq || 0) + 1);
     var url = part(root, "[data-vision-url]");
+    // "Copied" was said of the URL before this one.
+    part(root, "[data-vision-copied]").textContent = "";
     if (to.error) {
       url.hidden = true;
       return show(root, { query: query }, { error: word(root, to.error) });
