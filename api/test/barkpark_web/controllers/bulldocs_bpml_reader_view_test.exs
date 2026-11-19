@@ -124,7 +124,8 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
 
     answer = sync(slug, String.replace(bpml, "Visible.", "Edited."), rev) |> json_response(200)
     assert answer["ok"] == true
-    assert [heading(), %{"content" => [%{"value" => "Edited."}]}] = stored_blocks(slug)
+    head = heading()
+    assert [^head, %{"content" => [%{"value" => "Edited."}]}] = stored_blocks(slug)
     answers_the_pull!(slug, answer)
   end
 
