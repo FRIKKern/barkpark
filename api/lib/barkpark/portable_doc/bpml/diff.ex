@@ -28,15 +28,16 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
 
   `shown` is what the pull printed for `old` (`Papers.BpmlView`, after
   redaction and task resolution); a pushed block that spells the same as its
-  shown block was not edited. It defaults to `old` itself.
+  shown block was not edited. There is no default: a caller that has no view
+  refuses the push rather than diff against `old`.
   """
-  @spec derive([map()], [map()], [map()] | nil) ::
+  @spec derive([map()], [map()], [map()]) ::
           {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
-  def derive(old, new, shown \\ nil) when is_list(old) and is_list(new) do
+  def derive(old, new, shown) when is_list(old) and is_list(new) and is_list(shown) do
     new =
       new
       |> BlockIds.ensure_block_ids()
-      |> keep_unedited(old, shown || old)
+      |> keep_unedited(old, shown)
 
     if old == new do
       {:ok, new, []}

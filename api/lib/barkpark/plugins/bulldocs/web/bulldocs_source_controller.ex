@@ -43,8 +43,8 @@ defmodule BarkparkWeb.BulldocsSourceController do
         send_resp(conn, 404, "not found")
 
       paper ->
-        # The reader's view of the row (`Papers.BpmlView`), which every BPML
-        # answer prints.
+        # The reader's view of the row (`Papers.BpmlView`): the pull, push and
+        # create answers print it and refuse alike.
         view = Content.Papers.BpmlView.of(paper, dataset, scope, perspective)
 
         source =
@@ -58,7 +58,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
           {{:error, reason}, _} ->
             conn
             |> put_status(:unprocessable_entity)
-            |> json(%{"error" => %{"code" => to_string(reason)}})
+            |> json(%{"error" => Content.Papers.BpmlView.refusal({:error, reason})})
 
           # BPML is a VIEW of blocks only — an html-source paper has no block
           # truth to print, so the isomorphic format honestly refuses.
@@ -69,14 +69,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
           {%{"kind" => "html"}, "bpml"} ->
             conn
             |> put_status(:unprocessable_entity)
-            |> json(%{
-              "error" => %{
-                "code" => "bpml_unavailable",
-                "message" =>
-                  "this paper was ingested as opaque body_html — it has no block source",
-                "hint" => "re-ingest with blocks (or BPML) to make the isomorphic view available"
-              }
-            })
+            |> json(%{"error" => Content.Papers.BpmlView.refusal(view)})
 
           {source, _json} ->
             title =
@@ -123,14 +116,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
     e in UnprintableError ->
       conn
       |> put_status(:unprocessable_entity)
-      |> json(%{
-        "error" => %{
-          "code" => "bpml_unprintable",
-          "message" => Exception.message(e),
-          "hint" =>
-            "this paper uses a #{e.kind} shape outside the BPML kernel vocabulary; fetch format=json"
-        }
-      })
+      |> json(%{"error" => Content.Papers.BpmlView.refusal({:unprintable, Exception.message(e)})})
   end
 
   # An UNREADABLE op-anchor is a failed READ, never a rev. Refusing here (rather

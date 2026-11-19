@@ -25,7 +25,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 
 32688 cloud/priv/static/app.js
 20118 cloud/lib/barkpark_cloud/web/router.ex
-17652 scripts/pds-elixir-receipt-census.exs
+17649 scripts/pds-elixir-receipt-census.exs
 14925 cloud/priv/static/__preview__/overflow-guard.mjs
 12892 cloud/lib/barkpark_cloud/registry.ex
 8574 api/lib/barkpark_web/live/studio/chat_live.ex
@@ -97,7 +97,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2486 api/assets/paper-surface/paper-surface.css
 2454 scripts/chronicle-paper.py
 2440 internal/cli/cloud_support_cmd.go
-2420 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
+2389 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
 2394 scripts/crown-reconcile.sh
 2354 api/lib/barkpark/search/documents_retriever.ex
 2347 internal/cli/hetzner_lb_cmd.go

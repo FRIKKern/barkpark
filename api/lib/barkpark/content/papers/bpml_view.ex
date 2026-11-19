@@ -1,18 +1,32 @@
 defmodule Barkpark.Content.Papers.BpmlView do
   @moduledoc """
-  What a Paper row shows as BPML: the blocks and label fields that
-  `GET /papers/:slug/source?format=bpml` prints for it.
+  The reader's view of a Paper as BPML: the blocks and label fields an
+  anonymous reader may see, under the Paper's own schema, with task blocks
+  resolved for the perspective.
 
-  It is a function of the row alone: the anonymous reader's redaction under
-  the Paper's own schema (`Content.Papers.reader_source_with_schema/3`), task
-  blocks resolved for the given perspective, and the redacted label fields
-  (`Content.Papers.anonymous_content/2`). The pull, push and create answers
-  print it. A push compares against it,
-  so a block that spells the same as its view block was not edited.
+  ONE builder serves the pull (`GET /papers/:slug/source`), the answers to a
+  push that updates or creates a Paper, and the comparison a push is diffed
+  against (`Bpml.Diff.derive/3`). What it refuses, all four refuse alike, and
+  a push it refuses writes nothing.
+
+  It refuses a Paper whose reader is shown no blocks (the reader's own
+  answer: an HTML source, a redacted source, or nothing), a view with an
+  untyped block, an empty view, and a cache that holds text its stored blocks
+  lack. A refusal names its reason only; it quotes nothing stored.
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{CallerContext, Document, Envelope}
+  alias Barkpark.Content.Papers.Hollow
+  alias Barkpark.PortableDoc.{Bpml, Projection}
+  alias Barkpark.PortableDoc.Bpml.Diff
+
+  @reasons %{
+    ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
+    semantic_empty: "the reader's view of this Paper is empty",
+    redacted_source: "the reader may see none of this Paper's blocks",
+    invalid_blocks: "a block of this Paper has no type"
+  }
 
   @type t ::
           {:blocks, blocks :: [map()], fields :: map()}
@@ -22,44 +36,153 @@ defmodule Barkpark.Content.Papers.BpmlView do
   @doc """
   The view of `paper`. `scope` is the caller's tenant scope (`[]` for a flat
   route; the Paper's own workspace and project fill any gap), and
-  `perspective` decides which task rows a task block resolves to.
+  `perspective` decides which task rows a task block resolves to. Pure but
+  for the schema and label reads: it writes nothing.
   """
   @spec of(Document.t(), String.t(), keyword(), atom()) :: t()
   def of(%Document{} = paper, dataset, scope, perspective) do
-    {reader_source, schema} = Content.Papers.reader_source_with_schema(paper, dataset, scope)
+    schema = Content.Papers.reader_schema(paper, "paper", dataset, scope)
+    content = paper.content || %{}
+    stored = Projection.read_blocks(content)
 
-    case reader_source do
-      {:blocks, blocks} ->
-        resolved =
-          Content.Papers.resolve_tasks_in_blocks(blocks, task_scope(paper, perspective), dataset)
+    case Map.get(Envelope.render(paper, schema, CallerContext.anonymous()), "blocks") do
+      blocks when is_list(blocks) and is_list(stored) ->
+        cond do
+          not Enum.all?(blocks, &typed?/1) ->
+            {:error, :invalid_blocks}
 
-        {:blocks, resolved, Content.Papers.anonymous_content(paper, schema)}
+          Hollow.hollow?(blocks) ->
+            {:error, :semantic_empty}
 
-      other ->
-        other
+          # A cache that holds text its stored blocks lack is refused.
+          Content.Papers.cache_provenance(paper, stored, content["body_html"], dataset) ==
+              :divergent ->
+            {:error, :ambiguous_source}
+
+          true ->
+            resolved =
+              Content.Papers.resolve_tasks_in_blocks(
+                blocks,
+                task_scope(paper, perspective),
+                dataset
+              )
+
+            {:blocks, resolved, Content.Papers.anonymous_content(paper, schema)}
+        end
+
+      _no_blocks_shown ->
+        case Content.Papers.reader_source(paper, dataset, scope) do
+          {:blocks, _blocks} -> {:error, :redacted_source}
+          other -> other
+        end
+    end
+  end
+
+  defp typed?(%{"type" => type}) when is_binary(type), do: String.trim(type) != ""
+  defp typed?(_block), do: false
+
+  @doc """
+  `paper`'s view printed as `bp paper pull` gets it (flat route, published
+  task rows): the bytes the pull, push and create answers carry, or the
+  refusal (`refusal/1`) every one of them gives.
+  """
+  @spec print(Document.t(), String.t()) :: {:ok, String.t()} | {:refused, map()}
+  def print(%Document{} = paper, dataset) do
+    case of(paper, dataset, [], :published) do
+      {:blocks, blocks, fields} -> print(paper, blocks, fields)
+      other -> {:refused, refusal(other)}
+    end
+  end
+
+  defp print(paper, blocks, fields) do
+    {:ok, Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))}
+  rescue
+    e in Bpml.UnprintableError -> {:refused, refusal({:unprintable, Exception.message(e)})}
+  end
+
+  @doc """
+  The ops a push of `pushed` derives against `paper`, compared with the
+  view: a pushed block that spells as the view showed it was not edited.
+  Refused, before anything is written, when the view cannot be built, or when
+  the Paper as the ops would leave it has no view that prints.
+  """
+  @spec push(Document.t(), [map()], String.t()) ::
+          {:ok, [map()]} | {:refused, map()} | {:error, :diff_verification_failed}
+  def push(%Document{} = paper, pushed, dataset) do
+    stored = Projection.read_blocks(paper.content || %{}) || []
+
+    with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
+         {:ok, _bpml} <- print(paper, shown, fields),
+         {:ok, blocks, ops} <- Diff.derive(stored, pushed, shown),
+         nil <- if(ops != [], do: write_refusal(written(paper, blocks), dataset)) do
+      {:ok, ops}
+    else
+      {:error, :diff_verification_failed} = failed -> failed
+      {:refused, _body} = refused -> refused
+      %{} = body -> {:refused, body}
+      view -> {:refused, refusal(view)}
     end
   end
 
   @doc """
-  `paper`'s view printed as `bp paper pull` gets it (flat route, published
-  task rows): the bytes the pull, push and create answers carry. Raises
-  `Bpml.UnprintableError` when the view does not print.
+  The refusal a write of `paper` gets when the Paper it would leave has no
+  view that prints; nil when it has one.
   """
-  @spec print(Document.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def print(%Document{} = paper, dataset) do
-    case of(paper, dataset, [], :published) do
-      {:blocks, blocks, fields} ->
-        {:ok,
-         Barkpark.PortableDoc.Bpml.print_paper(
-           Content.Papers.bpml_paper_map(paper, blocks, fields)
-         )}
-
-      {:html, _html} ->
-        {:error, "the paper has no blocks a pull can print (its source is HTML)"}
-
-      {:error, reason} ->
-        {:error, "the reader cannot show the paper (#{reason})"}
+  @spec write_refusal(Document.t(), String.t()) :: map() | nil
+  def write_refusal(%Document{} = paper, dataset) do
+    case print(paper, dataset) do
+      {:ok, _bpml} -> nil
+      {:refused, body} -> body
     end
+  end
+
+  @doc "The Paper a create of `parsed` at `slug` would store, for `write_refusal/2`."
+  @spec created(String.t(), map(), keyword()) :: Document.t()
+  def created(slug, parsed, scope) do
+    content = Map.take(parsed, ["blocks", "description", "tags", "style"])
+
+    %Document{
+      doc_id: slug,
+      type: "paper",
+      workspace_id: scope[:workspace_id],
+      project_id: scope[:project_id],
+      content: content
+    }
+  end
+
+  # The row as a write of `blocks` leaves it: the cache is rendered from them.
+  defp written(paper, blocks) do
+    content = paper.content |> Map.put("blocks", blocks) |> Map.drop(["body", "body_html"])
+    %{paper | content: content}
+  end
+
+  @doc """
+  The error the pull, a push and a create give when the view cannot be
+  built. It names the reason only and quotes nothing stored.
+  """
+  @spec refusal(t() | {:unprintable, String.t()}) :: map()
+  def refusal({:html, _html}),
+    do: body("this Paper's source is HTML; it has no blocks to show as BPML", "bpml_unavailable")
+
+  def refusal({:unprintable, why}) do
+    "the reader's view of this Paper does not print as BPML (#{why})"
+    |> body("bpml_unprintable")
+    |> Map.put(:hint, "nothing was written; fetch format=json, and edit it with block ops")
+  end
+
+  def refusal({:error, reason}),
+    do:
+      body(
+        @reasons[reason] || "the reader's view of this Paper cannot be built",
+        to_string(reason)
+      )
+
+  defp body(message, code) do
+    %{
+      code: code,
+      message: message <> ", so it cannot be pulled or pushed as text",
+      hint: "nothing was written; bp paper pull answers the same until the Paper changes"
+    }
   end
 
   @doc """
