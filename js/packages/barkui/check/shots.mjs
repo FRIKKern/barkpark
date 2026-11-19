@@ -38,16 +38,16 @@ try {
       await page.keyboard.press('Escape')
       await page.evaluate(() => document.activeElement?.blur())
       await page.waitForTimeout(250)
+      // The whole stage and a margin round it, so the surface's own edge (the sunken rim) shows on every side.
       const clip = await page.evaluate(() => {
         const stage = document.querySelector('[data-part="button"]').getBoundingClientRect()
-        const row = document.querySelectorAll('[data-part="button"] [data-demo-row]')[1].getBoundingClientRect()
-        return { x: stage.x, y: stage.y + window.scrollY, width: 720, height: row.bottom - stage.y + 20 }
+        return { x: stage.x + window.scrollX - 8, y: stage.y + window.scrollY - 8, width: stage.width + 16, height: stage.height + 16 }
       })
       rows.push([surface, `data:image/png;base64,${(await page.screenshot({ clip, fullPage: true })).toString('base64')}`])
     }
     const ground = scheme === 'dark' ? '#000' : '#fff'
     const ink = scheme === 'dark' ? '#9a9a9a' : '#5f5f5f'
-    await sheet.setContent(`<body style="margin:0;padding:16px;display:inline-flex;flex-direction:column;gap:8px;background:${ground};color:${ink};font:13px system-ui">${rows.map(([n, c]) => `<div>${n}</div><img src="${c}" style="width:720px">`).join('')}</body>`)
+    await sheet.setContent(`<body style="margin:0;padding:32px;display:inline-flex;flex-direction:column;gap:16px;background:${ground};color:${ink};font:26px system-ui">${rows.map(([n, c]) => `<div>${n}</div><img src="${c}">`).join('')}</body>`)
     await sheet.locator('body').screenshot({ path: join(dir, `surfaces-${scheme}.png`) })
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.click('label.sr-radio:has(input[name="surface"][value="primary"])')

@@ -64,10 +64,10 @@ describe('renderPage proof lights', () => {
     const html = page({
       hash: 'h1',
       lights: allOn,
-      measures: { boundary: { min: 4.61, max: 9.2, at: 'button#aa-s "Save draft"' } },
+      measures: { boundary: { min: 4.61, max: 9.2, at: 'button#aa-s "Save draft"' }, 'boundary:primary': { min: 3.04, max: 8.9 } },
       textOnly: [{ selector: '[data-variant="ghost"]', controls: ['Cancel', 'Rest'] }],
     })
-    expect(html).toContain('control boundary 4.61:1 or more on every control, needs 3:1')
+    expect(html).toContain('control boundary 3.04:1 or more on every control on all 2 surfaces, needs 3:1')
     expect(html).toContain('text-only, no boundary, label held to text rules: Cancel, Rest')
   })
 })

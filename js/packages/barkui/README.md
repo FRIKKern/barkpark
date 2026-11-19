@@ -6,7 +6,8 @@ Private; not published.
 
 ```
 parts/<name>/
-  part.json     name (= folder), family, element, imports, summary, paint (selector -> variable per property)
+  part.json     name (= folder), family, element, imports, summary, paint (selector -> variable per property),
+                optional textOnly (selectors of controls that draw no boundary, such as a ghost button)
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline
   example.html  the part in each state worth seeing, in UI SDK's printed markup (works with no script);
@@ -20,7 +21,7 @@ Adding a part is adding a folder. The build, the check and the tests find parts 
 no other file changes.
 
 `css/base.css` holds what every part shares: the state tints (`--bark-hover`, `--bark-hover-primary`,
-`--bark-destructive-*` and so on, computed once from the skin until the sheet owns them) and the one
+`--bark-press-destructive` and so on, computed once from the skin until the sheet owns them) and the one
 focus ring (a 2px gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `--ui-ring` halo).
 
 - `pnpm run build` writes `dist/showroom/index.html`, which opens from disk with no server and no network.
@@ -57,16 +58,31 @@ and the base styles can style it.**
   `::after`, `::marker` and `::placeholder` that draws. Each colour it shows must be one skin variable
   in every skin and scheme: text and its fill, background colour and gradients, all four borders,
   outline, column rule, shadows (box, text, drop), decoration, emphasis, text stroke, caret, accent,
-  scrollbar, SVG fill, stroke, stop, flood and lighting colours. Each run of text is measured in the
-  colour it is filled with, at the opacity it is drawn at, against the ground actually behind it.
+  scrollbar, SVG fill, stroke, stop, flood and lighting colours.
+- Text is judged by what is drawn. The check captures the stage twice over CDP, as drawn and with
+  every glyph unpainted (a first-layer `!important` transparent text fill, put there from the isolated
+  world), once per skin, scheme and surface. The pixels that differ inside a run's boxes are its
+  glyphs; its contrast is the core of those pixels (the strongest tenth, not the anti-aliased rim)
+  against what is drawn there without them, and must be 4.5:1. A run with text and no differing pixels
+  fails as "text does not draw". A cover, filter, blend mode, opacity anywhere above, mask, clip or zero
+  font size shows in the pixels, so none of them can answer for the reading. Disabled text must draw
+  but is not held to 4.5:1. The computed-colour reading stays as a fast first pass; a light goes on
+  only from the drawn one. It adds about 10 s to a check run.
+- A control's boundary is measured whatever token draws it. Every interactive element in the stage
+  (button, input, select, textarea, summary, a link, anything with a control role or a tabindex) must
+  mark where it is at 3:1 or more against the ground next to it: the best of its fill and its drawn
+  edge (border, outline, inset ring), at the opacity it is drawn at. Nothing is read from part.json's
+  paint entries. A control meant to have no boundary is named in part.json's `textOnly`; the showroom
+  prints it beside the proof ("text-only, no boundary, label held to text rules"), and its label is
+  still held to the drawn-text rule. A stage with controls and no boundary reading fails.
 - Read where the page cannot reach: every reading the lights rest on (computed styles, boxes, text,
   pseudo-elements, the paint trace, contrast, focus, the phone width) runs in an isolated world over
   CDP. It shares the DOM with the page but none of its script, so a demo that patches
   `getComputedStyle`, a prototype or `querySelector` changes nothing the check reads. press.mjs runs
   in a second isolated world with its own copy of the helpers, so it cannot reach the check either.
   Keys, clicks and the screen-reader tree go through the browser's own CDP domains.
-- Styled only by part.css: `example.html` is markup only (no `<style>`, `<script>`, `style=` or
-  `on*=`), and `demo.mjs` wires behaviour only. Its lint refuses inline styles, style attributes, new
+- Styled only by part.css: `example.html` is markup only (no `<style>`, `<script>`, `style=`,
+  `on*=`, `<font>`, `bgcolor=` or other colour attributes, or a declared shadow root), and `demo.mjs` wires behaviour only. Its lint refuses inline styles, style attributes, new
   `<style>`/`<link>`, stylesheet edits, adopted sheets, script animations and classes part.css does
   not declare, naming the line. (Patching the page's globals is not refused: the check never reads
   through them.) At run time a guard, reading from
@@ -77,9 +93,9 @@ and the base styles can style it.**
 
 The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage.
 The lights are proved on base and say so; on any other surface they show grey, "not proved on
-<surface>", never on. The check also measures text and the control edge on the other four surfaces
-and records them per surface in `proof.json`; a short one prints as a "waiting on the sheet" line and
-turns no light off until its `hard` switch is set. The control edge is hard on every surface (the
-sheet holds `--ui-input` at 3:1 or more), so an edge under 3:1 anywhere turns "every skin" off. Text on
-the other surfaces still waits. For each surface the check also records, as numbers only, a disabled
+<surface>", never on. The check also measures drawn text and every control's boundary on the other
+four surfaces and records them per surface in `proof.json`; a short one prints as a "waiting on the
+sheet" line and turns no light off until its `hard` switch is set. The boundary is hard on every
+surface, so a control under 3:1 anywhere turns "every skin" off. Text on the other surfaces still
+waits. For each surface the check also records, as numbers only, a disabled
 control's fill against its ground and against the primary fill. It will prove every surface.
