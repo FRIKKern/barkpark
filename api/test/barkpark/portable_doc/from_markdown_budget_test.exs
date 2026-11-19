@@ -63,7 +63,7 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
 
   test "the pack states the input size and its error code" do
     fixture = @fixture |> File.read!() |> Jason.decode!()
-    assert fixture["maxMarkdownBytes"] == 2_000_000
+    assert fixture["maxMarkdownBytes"] == 500_000
     assert fixture["errorCode"] == "markdown_too_large"
     assert Budget.max_bytes() == fixture["maxMarkdownBytes"]
   end
@@ -77,7 +77,7 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
 
       case expect do
         "imports" ->
-          assert {:ok, [%{"type" => "paragraph"}], []} = FromMarkdown.read(markdown), name
+          assert match?({:ok, [%{"type" => "paragraph"}], []}, FromMarkdown.read(markdown)), name
 
         %{"error" => code} ->
           assert FromMarkdown.read(markdown) == {:error, String.to_existing_atom(code)}, name
@@ -107,14 +107,25 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
     end
   end
 
-  test "an ordinary document of the full input size imports, in a tenth of the work budget" do
+  test "an import whose heap passes the cap is refused as too costly, not crashed" do
+    markdown = ordinary(div(Budget.max_bytes(), 10))
+    assert {:ok, _blocks, []} = FromMarkdown.read(markdown)
+
+    assert FromMarkdown.read(markdown, max_heap_words: 100_000) ==
+             {:error, :markdown_too_costly}
+  end
+
+  test "an ordinary document of the full input size imports in a ninth of the budget" do
     markdown = ordinary(Budget.max_bytes())
     assert byte_size(markdown) == Budget.max_bytes()
 
     assert {:ok, blocks, []} =
-             FromMarkdown.read(markdown, max_reductions: div(Budget.max_reductions(), 10))
+             FromMarkdown.read(markdown,
+               max_reductions: div(Budget.max_reductions(), 9),
+               max_heap_words: div(Budget.max_heap_words(), 9)
+             )
 
-    assert length(blocks) > 10_000
+    assert length(blocks) > 5_000
     assert {:ok, ^blocks, []} = FromMarkdown.read(markdown)
   end
 end

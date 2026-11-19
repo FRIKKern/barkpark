@@ -124,7 +124,9 @@ defmodule Barkpark.StudioChat.PlanPapersTest do
     end
 
     test "a plan over the Markdown input size is refused and writes no paper" do
-      markdown = "# Plan\n\n" <> String.duplicate("a", Barkpark.PortableDoc.FromMarkdown.Budget.max_bytes())
+      markdown =
+        "# Plan\n\n" <>
+          String.duplicate("a", Barkpark.PortableDoc.FromMarkdown.Budget.max_bytes())
 
       assert PlanPapers.publish("sess-big", "req-1", markdown) == {:error, :markdown_too_large}
       assert paper_rows(PlanPapers.slug_for("sess-big", "req-1")) == []

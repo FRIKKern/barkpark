@@ -156,7 +156,8 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
         Enum.map(from_markdown_cases(), fn {name, fixture} ->
           {"from-markdown/#{name}.json", json(fixture)}
         end),
-        Enum.map([Limits.value_depth(), Limits.markdown_input() | Limits.goldens()], fn {path, golden} ->
+        Enum.map([Limits.value_depth(), Limits.markdown_input() | Limits.goldens()], fn {path,
+                                                                                         golden} ->
           {path, Jason.encode!(ordered(golden)) <> "\n"}
         end),
         [

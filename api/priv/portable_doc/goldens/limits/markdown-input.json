@@ -1,0 +1,1 @@
+{"cases":[{"expect":"imports","markdown":{"$text":"a","times":500000},"name":"markdown at the input size"},{"expect":{"error":"markdown_too_large"},"markdown":{"$text":"a","times":500001},"name":"markdown one byte over the input size"}],"errorCode":"markdown_too_large","maxMarkdownBytes":500000}

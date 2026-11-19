@@ -128,6 +128,7 @@
     "limits/link-one-level-above-the-depth-limit.golden.json": "5c7c9286c4ed280f3dd843d8683bd3de9fd804ded681865c7a317fbf6df5ba25",
     "limits/list-at-the-depth-limit.golden.json": "4a1ad19e17844c446e0381c7d4b337b1150c6c80eb9350175c3ed4be09d4beb5",
     "limits/list-one-level-above-the-depth-limit.golden.json": "89a47ef4acc76f3688af62c8f26d30abb7ae0c4d340ed64aa647f4584dcbeea1",
+    "limits/markdown-input.json": "2b40d009ed6bc863cd8418faf9e95a675f2f927094fcc1a7462c700e24556747",
     "limits/marks-at-the-depth-limit.golden.json": "7793fe78e6e127ce7433af771b99b76a64ed9264dc492dd3fe6ef1d5f5f4c539",
     "limits/marks-one-level-above-the-depth-limit.golden.json": "3370f7f1ed01f98930c2b2a230155f69289434c5fda910b9009ef43c47d4ab0d",
     "limits/record-table-past-the-cap.golden.json": "6ed90920954f9095c91d2b8ea2aa8b415354b6814fa74ce1b94acb067dc67cab",
@@ -184,7 +185,7 @@
     "test/support/fixtures/nested-list-carriers.json",
     "test/support/fixtures/portable-doc-limits.json"
   ],
-  "inputs_sha256": "d6820b3e2bf7218cf231f6a34fb06800fbf56d4940cf4fbe4f0907e1e9de9832",
+  "inputs_sha256": "554bc030524092801f987ebe7b5e43fb98473cf93a589f5d817bc278f9dd6b66",
   "render_version": "ca52a983c9e98fec3a3a817db99b3bec338de42761ebd81a3b56b5749a9b299f",
   "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
 }
