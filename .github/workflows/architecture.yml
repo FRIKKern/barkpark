@@ -164,8 +164,8 @@ jobs:
       - name: Setup Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.0"
-          elixir-version: "1.18.1"
+          version-file: .tool-versions
+          version-type: strict
 
       # ── THE api/_build/dev CACHE, AND WHY IT MAY HOLD OUR OWN .beam FILES ──
       #
@@ -254,14 +254,14 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-boundary-deps-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-boundary-deps-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Restore the api dev build tree
         id: devbuild
         uses: actions/cache/restore@v6
         with:
           path: api/_build/dev
-          key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-boundary-devbuild-v2-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       # `build-index.mjs` (next step) runs `mix compile` + `mix xref graph` to
       # produce the EXACT module graph. It does NOT fetch deps, so fetch them
@@ -285,7 +285,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-boundary-deps-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-boundary-deps-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       # COMPILE EXPLICITLY, over whatever the cache restored. build-index.mjs
       # compiles ONLY when api/_build is absent, so with a restored tree its own
@@ -416,7 +416,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: api/_build/dev
-          key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-boundary-devbuild-v2-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Run boundary gate
         env:

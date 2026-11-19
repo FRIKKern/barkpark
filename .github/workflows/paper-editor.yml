@@ -181,6 +181,7 @@ jobs:
           node ../paper-editor-host-tests/__card_title_contextual_inline.test.mjs
           node ../paper-editor-host-tests/__collection_focus.test.mjs
           node ../paper-editor-host-tests/__desk_codelist_keys.test.mjs
+          node ../paper-editor-host-tests/__desk_drawer_tab_trap.test.mjs
           node ../paper-editor-host-tests/__desk_datepicker.test.mjs
           node ../paper-editor-host-tests/__desk_field_actions.test.mjs
           node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
@@ -207,6 +208,7 @@ jobs:
           node ../paper-editor-host-tests/__desk_slice_keep_link.test.mjs
           node ../paper-editor-host-tests/__desk_slice_keep_header_focus.test.mjs
           node ../paper-editor-host-tests/__desk_saves_pending.test.mjs
+          node ../paper-editor-host-tests/__desk_undo.test.mjs
           node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
           node ../paper-editor-host-tests/__columns_track_controls.test.mjs
           node ../paper-editor-host-tests/__contextual_history.test.mjs

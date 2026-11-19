@@ -6,11 +6,10 @@
 # `api/Dockerfile.dockerignore` is the BuildKit per-Dockerfile ignore file and
 # takes precedence over the root `.dockerignore` (which excludes api/ wholesale
 # for the web image).
-# PINNED to the TESTED toolchain, not a floating minor: `.tool-versions` says
-# elixir 1.18.4-otp-27 and elixir.yml's mix-test / mix-prod-compile matrices run
-# 1.18.4, so the self-host image is built on the Elixir the suite actually
-# exercises (task-729be45412588f07). `elixir:1.19-alpine` was smoke-booted only.
-# scripts/toolchain-skew-check.sh reds if this line and those matrices part ways.
+# PINNED, not a floating minor: the FROM tag below spells
+# deploy/image.tool-versions, the release images' Erlang and Elixir
+# (task-729be45412588f07). Docker cannot read that file, so
+# scripts/toolchain-drift-check.sh reds if this tag and the file part ways.
 #
 # GLIBC, NOT MUSL — and this is the BUILD stage on purpose (task-f4cff88ca65aca30).
 # api/mix.exs sets `include_erts: true`, so the release SHIPS the ERTS assembled
