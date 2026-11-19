@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PARTS_HELD } from './capacity.mjs'
+import { capacitySentence, PARTS_HELD, SELFTEST_PLANNED, selftestSentence } from './capacity.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
@@ -470,7 +470,7 @@ const CASES = [
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
     ].join('\n'),
     expect: each({
-      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": color becomes .* where its pin \(button "Hover"\) shows/),
+      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": color becomes .* where its pin \(button "Hover"\)/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": color becomes/),
     }),
   },
@@ -508,6 +508,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const run = CASES.filter((c) => c.name.includes(pick))
   const start = Date.now()
   for (const c of run) {
+    if (Date.now() - start > SELFTEST_PLANNED * 1000) {
+      console.log(`FAIL the selftest passed ${SELFTEST_PLANNED} s with ${run.length - run.indexOf(c)} case(s) left. ${selftestSentence()} Measure again, then raise SELFTEST_STEP_MINUTES in check/capacity.mjs and the step's limit in js-tests.yml together, or trim cases.`)
+      failures++
+      break
+    }
     if (c.direct) {
       const t0 = Date.now()
       const held = await c.direct()

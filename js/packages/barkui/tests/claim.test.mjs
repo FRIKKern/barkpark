@@ -39,4 +39,14 @@ describe('how many parts the check holds', () => {
     expect(Number.isInteger(PARTS_HELD) && PARTS_HELD >= 1).toBe(true)
     expect(readme).toContain(capacitySentence())
   })
+
+  it("keeps the selftest's measured time and step to its limit in js-tests.yml, and the README to its sentence", async () => {
+    const { SELFTEST_STEP_MINUTES, SELFTEST_MEASURED, SELFTEST_PLANNED, selftestSentence } = await import('../check/capacity.mjs')
+    const workflow = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
+    const step = workflow.slice(workflow.indexOf('name: "BarkUI showroom check selftest'))
+    expect(step.match(/timeout-minutes: (\d+)/)[1]).toBe(String(SELFTEST_STEP_MINUTES))
+    expect(SELFTEST_MEASURED).toBeGreaterThan(0)
+    expect(SELFTEST_MEASURED).toBeLessThan(SELFTEST_PLANNED)
+    expect(readme).toContain(selftestSentence())
+  })
 })

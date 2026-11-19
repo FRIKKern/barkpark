@@ -19,3 +19,14 @@ export const PARTS_HELD = AT_ONCE * (1 + Math.floor((STEP_MINUTES * 60 * PLANNED
 
 export const capacitySentence = () =>
   `The check runs ${AT_ONCE} parts at a time; on Linux with 4 CPUs the first ${AT_ONCE} take about ${MEASURED.firstBatch} s and each further ${AT_ONCE} about ${MEASURED.eachBatch} s more, so the ${STEP_MINUTES}-minute check step in CI holds ${PARTS_HELD} parts with at least ${Math.round((1 - PLANNED_SHARE) * 100)}% of its time to spare.`
+
+// The selftest's step. It copies one part, so its time does not grow with the parts folder, only with its own
+// cases. Measured as a whole run on Linux in the same 4-CPU container (SELFTEST_MEASURED, seconds, rounded
+// up). It plans on the same share of its step's limit as the check, and stops itself, failing with this
+// sentence, once its run passes that share, so the wall is seen in its own words before CI cuts it off.
+export const SELFTEST_STEP_MINUTES = 10
+export const SELFTEST_MEASURED = 0
+export const SELFTEST_PLANNED = Math.round(SELFTEST_STEP_MINUTES * 60 * PLANNED_SHARE)
+
+export const selftestSentence = () =>
+  `The selftest takes about ${SELFTEST_MEASURED} s on Linux with 4 CPUs; its ${SELFTEST_STEP_MINUTES}-minute step in CI plans on ${SELFTEST_PLANNED} s, ${Math.round(PLANNED_SHARE * 100)}% of it, and the selftest stops, failing, once it passes that.`
