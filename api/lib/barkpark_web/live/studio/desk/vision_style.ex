@@ -23,7 +23,8 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-top { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 16px 13px; border-bottom: 1px solid var(--dk-border); }
       .dk .dk-vision-field, .dk .dk-vision-url { display: flex; flex-direction: column; flex: 0 1 228px; min-width: 0; }
       .dk .dk-vision-url { flex: 1 1 320px; }
-      .dk .dk-vision-url[hidden] { display: none; }
+      .dk .dk-vision-url[hidden], .dk .dk-vision-field[hidden] { display: none; }
+      .dk .dk-vision-input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--dk-menu-danger); }
       .dk .dk-vision-label { font-size: 10.8px; line-height: 12px; letter-spacing: .5px; color: var(--dk-muted); }
       .dk .dk-vision-top .dk-vision-label { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; padding: 7px 0 10px; color: var(--dk-fg); }
       .dk .dk-vision-input { box-sizing: border-box; width: 100%; min-width: 0; height: 33px; padding: 0 8px; border: 0; border-radius: 3px; background: var(--dk-bg); box-shadow: inset 0 0 0 1px var(--dk-field-ring); color: var(--dk-fg); font: inherit; font-size: 13px; }
