@@ -55,9 +55,13 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
     * `:codelist_loader` — function `(plugin_name, list_id) -> codelist | nil`;
       defaults to `&Barkpark.Content.Codelists.get/2`. Test seam.
     * `:readonly` — disable the `<select>` (defaults to `false`).
-    * `:kept` — the stored value is not a code (a number, an object), so
-      `:value` is `nil`. The desk's tree then posts no value for the field,
-      and a change to another field keeps what is stored.
+    * `:kept` — the stored value is not a code (a number, an object, a
+      list), so `:value` is `nil`. The desk's tree then posts no value for
+      the field. The select shows "Not a code" as its pick and the combobox
+      as its placeholder; they still post "" with every change of the form,
+      and the save drops it unless the change is this field's
+      (`StudioLive.KeptCodes`), so a change to another field keeps what is
+      stored.
   """
 
   use Phoenix.Component
@@ -179,7 +183,12 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-version={@field.version && to_string(@field.version)}
             data-codelist-combobox="true"
             aria-label={@title}
-            placeholder={gettext("Search %{list}…", list: @plugin_name <> ":" <> @list_id)}
+            data-codelist-kept={@kept && "true"}
+            placeholder={
+              if @kept,
+                do: gettext("Not a code (kept as stored)"),
+                else: gettext("Search %{list}…", list: @plugin_name <> ":" <> @list_id)
+            }
           />
           <datalist id={"datalist-" <> @input_id}>
             <%= for opt <- @options do %>
@@ -197,7 +206,14 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-version={@field.version && to_string(@field.version)}
             aria-label={@title}
           >
-            <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
+            <option value="" selected={not @kept and (is_nil(@value) or @value == "")}><%= gettext("— Select —") %></option>
+            <%!-- A stored value that is no code (a number, an object, a
+                  list) cannot be an option's value; this one says so. Its ""
+                  is not written unless the person changes this field
+                  (`StudioLive.KeptCodes`). --%>
+            <option :if={@kept} value="" selected data-codelist-kept="true">
+              <%= gettext("Not a code (kept as stored)") %>
+            </option>
             <%!-- A stored code the list does not hold is its own selected
                   option, so a change to another field posts it back instead
                   of "" (task-dcc3a1b86c09e869). --%>
