@@ -12,9 +12,9 @@ defmodule BarkparkCloud.Registry.WarmPoolTarget do
 
   How it arrives: every `POST /v1/internal/provision-jobs/claim` (the worker
   polls it about every 5 s when idle) carries the header
-  `x-barkpark-warm-pool-target: <n>`, `0` when the pool is off. The router calls
-  `note/1` after `require_worker` passes, and this module keeps the last value
-  and the time it was seen.
+  `x-barkpark-warm-pool-target: <n>`, `0` when the pool is off. The router pipes
+  the conn through `note/1` after `require_worker`; a halted (refused) conn
+  records nothing. This module keeps the last value and the time it was seen.
 
   It lives in memory only, in a public ETS table owned by this GenServer (the
   same shape as `AgentKeyStash`). A restart empties it. With blue/green control
@@ -26,8 +26,8 @@ defmodule BarkparkCloud.Registry.WarmPoolTarget do
   it has not heard from. A worker built before this header existed also reads
   as unknown.
 
-  A missing or malformed header records nothing, so a bad value cannot
-  overwrite a good one. Reading never changes claim, refill or reconcile
+  A missing or malformed header, or a value outside 0..#{10_000}, records
+  nothing, so a bad value cannot overwrite a good one. Reading never changes claim, refill or reconcile
   behaviour; this module is a report only.
   """
 
@@ -35,6 +35,9 @@ defmodule BarkparkCloud.Registry.WarmPoolTarget do
 
   @table :bp_warm_pool_target
   @header "x-barkpark-warm-pool-target"
+  # Far above any real pool; the bound keeps a junk header from being stored
+  # and reported as "on" (or overflowing a reader's integer).
+  @max_target 10_000
 
   ## Client
 
@@ -45,24 +48,27 @@ defmodule BarkparkCloud.Registry.WarmPoolTarget do
   def header, do: @header
 
   @doc """
-  Record the target from a worker request's `#{@header}` header, when present
-  and a non-negative integer. Any other value records nothing.
+  Record the target from a worker request's `#{@header}` header, when the conn
+  is not halted and the value parses (see `parse/1`). Returns the conn
+  unchanged, so the router can pipe through it.
   """
-  @spec note(Plug.Conn.t()) :: :ok
+  @spec note(Plug.Conn.t()) :: Plug.Conn.t()
+  def note(%Plug.Conn{halted: true} = conn), do: conn
+
   def note(%Plug.Conn{} = conn) do
     with [raw | _] <- Plug.Conn.get_req_header(conn, @header),
          {:ok, n} <- parse(raw) do
       record(n)
-    else
-      _ -> :ok
     end
+
+    conn
   end
 
-  @doc "Parse a header value: a non-negative integer, or `:error`."
+  @doc "Parse a header value: an integer in 0..#{@max_target}, or `:error`."
   @spec parse(term()) :: {:ok, non_neg_integer()} | :error
   def parse(raw) when is_binary(raw) do
     case Integer.parse(String.trim(raw)) do
-      {n, ""} when n >= 0 -> {:ok, n}
+      {n, ""} when n in 0..@max_target -> {:ok, n}
       _ -> :error
     end
   end
@@ -71,7 +77,7 @@ defmodule BarkparkCloud.Registry.WarmPoolTarget do
 
   @doc "Store `n` as the worker's target, seen now."
   @spec record(non_neg_integer()) :: :ok
-  def record(n) when is_integer(n) and n >= 0 do
+  def record(n) when is_integer(n) and n in 0..@max_target do
     if table?(), do: :ets.insert(@table, {:target, n, DateTime.utc_now()})
     :ok
   end

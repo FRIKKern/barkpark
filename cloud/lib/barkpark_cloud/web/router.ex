@@ -332,7 +332,6 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.MediaSha1Backfill
   alias BarkparkCloud.Registry.Adoption
   alias BarkparkCloud.Registry.AgentKeyStash
-  alias BarkparkCloud.Registry.WarmPoolTarget
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -6680,16 +6679,15 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/operator/warm-pool → 200 {ready: n, worker_target, worker_pool,
-  # worker_seen_at, worker_seen_ago_s} — the warm-pool depth (ready +
-  # refreshing) beside the target the worker last reported (WarmPoolTarget).
+  # GET /v1/operator/warm-pool → 200 {ready: n, worker_*} — the warm-pool depth
+  # (ready + refreshing) beside the worker's reported target (WarmPoolTarget).
   get "/v1/operator/warm-pool" do
     conn = Auth.require_platform_operator(conn, [])
 
     if conn.halted do
       conn
     else
-      json(conn, 200, WarmPoolTarget.status(Registry.count_ready_warm_servers()))
+      json(conn, 200, Registry.WarmPoolTarget.status(Registry.count_ready_warm_servers()))
     end
   end
 
@@ -9051,13 +9049,11 @@ defmodule BarkparkCloud.Web.Router do
   # 204 (no body) when none is pending (the worker sleeps + retries). The
   # claim_token is generated here — one per claim, traceable on the job row.
   post "/v1/internal/provision-jobs/claim" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_worker(conn, []) |> Registry.WarmPoolTarget.note()
 
     if conn.halted do
       conn
     else
-      :ok = WarmPoolTarget.note(conn)
-
       case Registry.claim_next_job(generate_claim_token()) do
         nil ->
           send_resp(conn, 204, "")

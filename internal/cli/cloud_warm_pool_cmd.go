@@ -50,11 +50,14 @@ func runCloudWarmPool(out *writer, g globals, args []string) int {
 	}
 
 	st, rerr := cfg.CloudClient().WarmPool(cloudCtx())
-	if rerr != nil {
+	structured := out.output == "json" || out.output == "yaml"
+	// A body that answered 2xx but did not decode still carries Raw: -o json
+	// passes it through rather than hiding what the control plane said.
+	if rerr != nil && !(structured && len(st.Raw) > 0) {
 		return warmPoolFail(out, rerr)
 	}
 
-	if out.output == "json" || out.output == "yaml" {
+	if structured {
 		out.renderRaw(st.Raw)
 		return exitOK
 	}

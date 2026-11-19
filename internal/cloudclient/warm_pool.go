@@ -27,7 +27,9 @@ type WarmPoolStatus struct {
 
 // WarmPool reads GET /v1/operator/warm-pool. Read-only. A 404 (an older
 // control plane) and a 403 (signed in, not a platform operator) surface as
-// *CloudRouteError so the CLI can say which one happened.
+// *CloudRouteError so the CLI can say which one happened. A 2xx body that does
+// not decode comes back WITH its Raw bytes and the decode error, so -o json can
+// still print what the control plane said.
 func (c *Client) WarmPool(ctx context.Context) (WarmPoolStatus, error) {
 	status, body, err := c.do(ctx, "GET", "/v1/operator/warm-pool", true, nil)
 	if err != nil {
@@ -38,7 +40,7 @@ func (c *Client) WarmPool(ctx context.Context) (WarmPoolStatus, error) {
 	}
 	res := WarmPoolStatus{Raw: body}
 	if err := json.Unmarshal(body, &res); err != nil {
-		return WarmPoolStatus{}, fmt.Errorf("decode warm-pool status: %w", err)
+		return WarmPoolStatus{Raw: body}, fmt.Errorf("decode warm-pool status: %w", err)
 	}
 	return res, nil
 }

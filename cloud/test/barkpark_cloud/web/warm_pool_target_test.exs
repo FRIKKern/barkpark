@@ -99,6 +99,15 @@ defmodule BarkparkCloud.Web.WarmPoolTargetTest do
     assert warm_pool(s)["worker_target"] == 3
   end
 
+  test "a target above 10_000 is not stored, so it can never read as on", %{session: s} do
+    worker_poll("99999999999999999999999")
+    worker_poll("10001")
+    assert warm_pool(s)["worker_pool"] == "unknown"
+
+    worker_poll("10000")
+    assert warm_pool(s)["worker_target"] == 10_000
+  end
+
   test "an unauthenticated poll records nothing", %{session: s} do
     conn =
       conn(:post, "/v1/internal/provision-jobs/claim")

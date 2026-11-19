@@ -87,6 +87,22 @@ func TestWarmPoolJSONPassesFieldsThrough(t *testing.T) {
 	}
 }
 
+// A body this client cannot decode (a target too big for an int) still
+// passes through -o json; the human view reports the decode failure.
+func TestWarmPoolJSONPassesUndecodableBodyThrough(t *testing.T) {
+	autoupdateServer(t, 200, `{"ready":2,"worker_target":99999999999999999999999,"worker_pool":"on"}`)
+	stdout, stderr, code := runWarmPool(t, "json")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, `"worker_pool"`) {
+		t.Fatalf("json passthrough dropped the body:\n%s", stdout)
+	}
+	if _, stderr, code := runWarmPool(t, "table"); code == exitOK || !strings.Contains(stderr, "decode warm-pool status") {
+		t.Fatalf("table view: exit %d, stderr %q; want a decode failure", code, stderr)
+	}
+}
+
 func TestWarmPoolForbiddenNamesTheAllowlist(t *testing.T) {
 	autoupdateServer(t, 403, `{"error":"forbidden","required":"platform_operator","scope":"platform"}`)
 	_, stderr, code := runWarmPool(t, "table")
