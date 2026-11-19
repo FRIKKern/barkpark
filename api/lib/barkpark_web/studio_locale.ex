@@ -787,6 +787,8 @@ defmodule BarkparkWeb.StudioLocale do
           "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.",
           number: "%{number}"
         ),
+      "Not saved: source mode could not read this change. Your text is kept." =>
+        gettext("Not saved: source mode could not read this change. Your text is kept."),
       "Note" => gettext("Note"),
       "Notes, one per line" => gettext("Notes, one per line"),
       "Numbered" => gettext("Numbered"),

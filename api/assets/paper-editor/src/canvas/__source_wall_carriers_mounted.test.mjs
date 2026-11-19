@@ -239,7 +239,8 @@ try {
       if (!refused || !named) failed.push(`${name}: refused ${refused}, notice ${JSON.stringify(said)}`);
     }
 
-    // A batch the fold refuses is refused whatever the Paper holds.
+    // A batch the fold refuses is refused whatever the Paper holds (here no block is
+    // shown as JSON), with the notice that names no block.
     {
       const blocks = [p("p0", "Before"), p("p2", "After")];
       const { canvas, batches } = await mount(clone(blocks));
@@ -247,9 +248,12 @@ try {
       canvas.toggleSourceMode();
       canvas._ro = () => [{ op: "patch-block", id: "not-there", patch: {} }];
       const textarea = canvas.querySelector(".bp-canvas-source");
-      watchValueWrites(textarea).type(textarea.value.replace("Before", "Before!"));
+      const next = textarea.value.replace("Before", "Before!");
+      watchValueWrites(textarea).type(next);
       const flushed = canvas.flushPendingChanges();
-      if (flushed !== false || batches.length !== 0 || notice(canvas) === null) {
+      const still = canvas.querySelector(".bp-canvas-source");
+      if (flushed !== false || batches.length !== 0 || !still || still.value !== next ||
+        notice(canvas) !== "Not saved: source mode could not read this change. Your text is kept.") {
         failed.push(`a batch the fold refuses: flushed ${flushed}, ${batches.length} batches, notice ${JSON.stringify(notice(canvas))}`);
       }
     }

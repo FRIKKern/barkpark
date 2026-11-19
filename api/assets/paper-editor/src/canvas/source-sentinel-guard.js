@@ -13,12 +13,12 @@
 //       stays, is a new block like any other.
 //
 // sentinelRefusal(base, shown, text, saved) is null when the save may go, else
-// { index, removal }: the block to name (a block shown as JSON by its place in `shown`,
-// a new block by its place in `saved`), and whether the save deletes a block shown as
-// JSON and does more. Which of the two it is follows the stored result: a block whose
-// id the save still holds counts as edited. A null `saved`, a batch the fold refuses,
-// is refused whatever the Paper holds: nothing proves it safe. sentinelHarm gives the
-// index or -1.
+// { index, kind }: the block to name (a block shown as JSON by its place in `shown`, a
+// new block by its place in `saved`) and why. `kind` is "edit", or "removal" when the
+// save deletes a block shown as JSON and does more; which follows the stored result (a
+// block whose id the save still holds counts as edited). A null `saved`, a batch the
+// fold refuses, is refused whatever the Paper holds, as kind "unread" with index -1:
+// nothing proves it safe. sentinelHarm gives the index or -1 (0 for "unread").
 // `base` is what the save folds onto, `shown` the blocks the textarea was made from,
 // `text` what it held before the edit (a block counts as shown as JSON only when its
 // sentinel line is one of those lines: after a remote change the textarea keeps the
@@ -30,7 +30,7 @@ import { canonicalJSON } from "./projection-json.js";
 
 export function sentinelHarm(base, shown, text, saved) {
   const refusal = sentinelRefusal(base, shown, text, saved);
-  return refusal ? refusal.index : -1;
+  return refusal ? Math.max(refusal.index, 0) : -1;
 }
 
 export function sentinelRefusal(base, shown, text, saved) {
@@ -41,7 +41,7 @@ export function sentinelRefusal(base, shown, text, saved) {
       ? [[block, line.slice(SENTINEL_OPEN.length, line.length - SENTINEL_CLOSE.length)]]
       : [];
   });
-  if (!saved) return { index: sentinels.length ? (shown || []).indexOf(sentinels[0][0]) : 0, removal: false };
+  if (!saved) return { index: -1, kind: "unread" };
   if (!sentinels.length) return null;
   const needles = [SENTINEL_OPEN.trim(), ...sentinels.map(([, payload]) => payload)];
   const byId = (blocks) => new Map((blocks || []).filter((b) => b && b.id).map((b) => [b.id, b]));
@@ -61,7 +61,7 @@ export function sentinelRefusal(base, shown, text, saved) {
     }
     const json = canonicalJSON(saved[at.get(block.id)]);
     if (json !== canonicalJSON(before.get(block.id)) && json !== canonicalJSON(shownById.get(block.id))) {
-      return { index: shown.indexOf(block), removal: false };
+      return { index: shown.indexOf(block), kind: "edit" };
     }
   }
   if (gone.length) {
@@ -75,14 +75,14 @@ export function sentinelRefusal(base, shown, text, saved) {
       last = index;
       return true;
     });
-    return onlyDeletes ? null : { index: shown.indexOf(gone[0]), removal: true };
+    return onlyDeletes ? null : { index: shown.indexOf(gone[0]), kind: "removal" };
   }
   const index = saved.findIndex((block) => {
     if (unchanged(block)) return false;
     const was = block && before.get(block.id);
     return needles.some((needle) => hits(block, needle) > (was ? hits(was, needle) : 0));
   });
-  return index === -1 ? null : { index, removal: false };
+  return index === -1 ? null : { index, kind: "edit" };
 }
 
 // How many times `needle` appears across every string in `value`.

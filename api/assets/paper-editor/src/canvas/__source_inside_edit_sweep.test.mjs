@@ -244,7 +244,7 @@ function sweep(rule) {
           const refusal = sentinelRefusal(stored, live, md, saved);
           if (refusal) {
             counts.guardRefused += 1;
-            if (refusal.removal) counts.removalRefused += 1;
+            if (refusal.kind === "removal") counts.removalRefused += 1;
             continue;
           }
           const ids = saved.map((b) => b.id);

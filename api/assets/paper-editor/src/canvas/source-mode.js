@@ -245,10 +245,11 @@ export function sourceModeCommit(md) {
   // the textarea already held, whole), then sentinelRefusal on the blocks the save would
   // store (no block gains the marker or a shown sentinel's JSON in its words; a block
   // shown as a sentinel is stored unchanged, or deleted by a save that only deletes,
-  // which has a notice of its own; a batch the fold refuses is refused).
+  // which has a notice of its own; a batch the fold refuses is refused, with a notice
+  // that names no block).
 function refuseSentinelEdit(md) {
     const edited = changedSentinel(md, this._sourceOriginalMd);
-    const refusal = edited !== -1 ? { index: edited, removal: false } : storedSentinelHarm.call(this, md);
+    const refusal = edited !== -1 ? { index: edited, kind: "edit" } : storedSentinelHarm.call(this, md);
     if (!refusal) {
       if (this._sourceRefusing) this._clearFigureConstraint();
       this._sourceRefusing = false;
@@ -256,9 +257,11 @@ function refuseSentinelEdit(md) {
     }
     this._sourceRefusing = true;
     const number = refusal.index + 1;
-    this._showFigureConstraint(refusal.removal
-      ? t("Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.", { number })
-      : t("Not saved: block %{number} is shown as JSON, and source mode does not edit it.", { number }));
+    this._showFigureConstraint(refusal.kind === "unread"
+      ? t("Not saved: source mode could not read this change. Your text is kept.")
+      : refusal.kind === "removal"
+        ? t("Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.", { number })
+        : t("Not saved: block %{number} is shown as JSON, and source mode does not edit it.", { number }));
     return true;
   }
 
