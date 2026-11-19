@@ -28,10 +28,17 @@ defmodule Barkpark.Tenancy.AccessRequests do
   Approving a role change goes through `Members.update_role/4`, the path an
   admin uses to change any seat's role, with the approver as `actor:` (so its
   ceiling and last-owner rail apply), never through a hand-written update.
-  It is refused, with nothing changed, when the seat is gone or its role is no
-  longer `from_role` (`:request_stale`), when the granted role does not rank
-  above the current one (`:role_not_higher`), and when the approver is the
-  asker or a token the asker owns (`:self_approval`).
+  Refused with nothing changed: a stale request (`:request_stale`), a granted
+  role that does not rank above the current one (`:role_not_higher`), and an
+  approver who is the asker or a token the asker owns (`:self_approval`).
+
+  ## Stale requests
+
+  A request records the seat its asker held (`from_role`, nil for none). Once
+  the seat is no longer that, by any door (removed, re-roled, seated another
+  way), the request is stale: `stale?/2` decides it, in this module only.
+  Approve refuses it, the admin list marks it `stale: true`, and asking again
+  replaces it instead of answering the old row.
 
   ## How a seat is made
 
@@ -46,8 +53,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
   ## Limits
 
   At most one pending request per user per slug (a partial unique index) and
-  at most 20 pending per user (`max_pending/0`). The per-user rate limit lives at the HTTP
-  door (`BarkparkWeb.AccessRequestController`).
+  at most 20 pending per user (`max_pending/0`). The per-user rate limit
+  lives at the HTTP door (`BarkparkWeb.AccessRequestController`).
   """
 
   import Ecto.Query, warn: false
@@ -87,8 +94,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
   higher `role`.
 
   `{:ok, own_row}` for a new request, a repeat of a pending one (the pending
-  row is the answer; withdraw it to ask for something else), and a slug no
-  workspace has. Refusals: `{:error, :email_unconfirmed}` (approving would
+  row is the answer; withdraw it to ask for something else; a STALE pending
+  one is replaced instead), and a slug no workspace has. Refusals: `{:error, :email_unconfirmed}` (approving would
   hand the seat to whoever holds the password, not to the email's owner),
   `{:error, :already_member}` (a member naming no role),
   `{:error, :role_not_higher}`, `{:error, :unknown_role}`,
@@ -128,15 +135,19 @@ defmodule Barkpark.Tenancy.AccessRequests do
   def request(_user, _slug, _note, _role), do: {:error, :invalid_workspace}
 
   defp seat_request(changeset, user_id, slug, ws) do
+    {live, stale} = pending_for(user_id, slug, nil)
+
     cond do
-      existing = pending(user_id, slug) -> {:ok, own_row(existing)}
-      pending_count(user_id) >= @max_pending -> {:error, :too_many_pending}
-      true -> insert(changeset, user_id, slug, ws)
+      live -> {:ok, own_row(live)}
+      over_cap?(user_id, stale) -> {:error, :too_many_pending}
+      true -> insert(changeset, user_id, slug, ws, stale)
     end
   end
 
   # A member knows the workspace exists, so the role is checked for real here.
   defp member_request(changeset, user_id, slug, ws, %Membership{role: current}, role) do
+    {live, stale} = pending_for(user_id, slug, current)
+
     cond do
       is_nil(role) ->
         {:error, :already_member}
@@ -147,30 +158,53 @@ defmodule Barkpark.Tenancy.AccessRequests do
       not outranks?(role, current, ws.id) ->
         {:error, :role_not_higher}
 
-      existing = pending(user_id, slug) ->
-        {:ok, own_row(existing)}
+      live ->
+        {:ok, own_row(live)}
 
-      pending_count(user_id) >= @max_pending ->
+      over_cap?(user_id, stale) ->
         {:error, :too_many_pending}
 
       true ->
         changeset
         |> Ecto.Changeset.put_change(:from_role, current)
-        |> insert(user_id, slug, ws)
+        |> insert(user_id, slug, ws, stale)
     end
   end
 
   defp outranks?(role, current, ws_id),
     do: TenancyAuth.role_rank(role, ws_id) > TenancyAuth.role_rank(current, ws_id)
 
-  defp insert(changeset, user_id, slug, ws) do
-    ws_id =
-      case ws do
-        %{id: id} -> id
-        nil -> nil
-      end
+  # The pending request for this slug, split by `stale?/2` against the seat
+  # the asker holds now: `{live, nil}`, `{nil, stale}` or `{nil, nil}`.
+  defp pending_for(user_id, slug, current_role) do
+    case pending(user_id, slug) do
+      nil -> {nil, nil}
+      row -> if stale?(row, current_role), do: {nil, row}, else: {row, nil}
+    end
+  end
 
-    case changeset |> Ecto.Changeset.put_change(:workspace_id, ws_id) |> Repo.insert() do
+  # A stale row is about to be replaced, so it does not count against the cap.
+  defp over_cap?(user_id, stale),
+    do: pending_count(user_id) - if(stale, do: 1, else: 0) >= @max_pending
+
+  # Insert the new request, replacing a stale pending one in the same
+  # transaction (the one-pending-per-slug index would refuse it otherwise).
+  defp insert(changeset, user_id, slug, ws, stale) do
+    ws_id = ws && ws.id
+
+    Repo.transaction(fn ->
+      if stale,
+        do:
+          Repo.delete_all(
+            from r in AccessRequest, where: r.id == ^stale.id and r.status == "pending"
+          )
+
+      case changeset |> Ecto.Changeset.put_change(:workspace_id, ws_id) |> Repo.insert() do
+        {:ok, row} -> row
+        {:error, cs} -> Repo.rollback(cs)
+      end
+    end)
+    |> case do
       {:ok, row} ->
         {:ok, own_row(row)}
 
@@ -292,7 +326,9 @@ defmodule Barkpark.Tenancy.AccessRequests do
       with %AccessRequest{} = row <- lock_pending(workspace_id, id),
            %User{email: email} = user <- Repo.get(User, row.user_id),
            :ok <- not_self(row, actor),
-           {:ok, member, granted, meta} <- grant(row, email, role, actor),
+           seat <- lock_seat(row),
+           false <- stale?(row, seat_role(seat)) || {:error, :request_stale},
+           {:ok, member, granted, meta} <- grant(row, seat, email, role, actor),
            {:ok, _} <- drop_invitation(row),
            {:ok, row} <- decide(row, "approved", granted, actor),
            :ok <- audit("access_request_approved", row, user, actor, meta) do
@@ -319,23 +355,21 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   defp not_self(_row, _actor), do: :ok
 
-  # A seat request: the normal seating path.
-  defp grant(%AccessRequest{from_role: nil} = row, email, role, actor) do
+  # A seat request (not stale, so no seat now): the normal seating path.
+  defp grant(%AccessRequest{from_role: nil} = row, _seat, email, role, actor) do
     granted = role || @default_seat_role
 
     with {:ok, member} <- seat(row.workspace_id, email, granted, actor),
          do: {:ok, member, granted, %{"role" => granted}}
   end
 
-  # A role change: judged against the seat as it is NOW, locked for the rest
-  # of the transaction, then changed through the roster's own path.
-  defp grant(%AccessRequest{} = row, _email, role, actor) do
+  # A role change (not stale, so the seat still holds `from_role`, locked for
+  # the rest of the transaction): changed through the roster's own path.
+  defp grant(%AccessRequest{} = row, %Membership{role: current}, _email, role, actor) do
     granted = role || row.requested_role
     ws = row.workspace_id
 
-    with %Membership{role: current} <- lock_seat(row) || {:error, :request_stale},
-         true <- current == row.from_role || {:error, :request_stale},
-         true <- is_binary(granted) || {:error, :unknown_role},
+    with true <- is_binary(granted) || {:error, :unknown_role},
          true <- granted in TenancyAuth.valid_role_names(ws) || {:error, :unknown_role},
          true <- outranks?(granted, current, ws) || {:error, :role_not_higher},
          {:ok, member} <-
@@ -343,6 +377,20 @@ defmodule Barkpark.Tenancy.AccessRequests do
       {:ok, member, granted, %{"role" => granted, "from_role" => current}}
     end
   end
+
+  # THE staleness rule (task-018e79d8734a1b08), the one place it is decided:
+  # a request records the seat its asker held when asking (`from_role`, nil
+  # for none). Once the seat is no longer that (removed, re-roled, or seated
+  # by another path) the request describes a situation that is gone. Approve
+  # refuses it, the admin list marks it, and asking again replaces it. A row
+  # for a missing workspace has no seat to compare and is never stale.
+  defp stale?(%AccessRequest{workspace_id: nil}, _current_role), do: false
+  defp stale?(%AccessRequest{from_role: from}, current_role), do: current_role != from
+
+  defp seat_role(%Membership{role: role}), do: role
+  defp seat_role(nil), do: nil
+
+  defp lock_seat(%AccessRequest{workspace_id: nil}), do: nil
 
   defp lock_seat(%AccessRequest{workspace_id: ws, user_id: uid}) do
     Repo.one(
@@ -453,7 +501,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
   end
 
   # `kind` is "role" for a member's request to change their role, "seat" for
-  # a seatless user's request. `current_role` is the seat's role now.
+  # a seatless user's request. `current_role` is the seat's role now; `stale`
+  # says the seat is no longer what the request recorded (approve refuses it).
   defp admin_row(%AccessRequest{} = r, email, display_name, current_role) do
     %{
       id: r.id,
@@ -463,6 +512,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
       note: r.note,
       status: r.status,
       kind: if(is_nil(r.from_role), do: "seat", else: "role"),
+      stale: r.status == "pending" and stale?(r, current_role),
       requested_role: r.requested_role,
       current_role: current_role,
       role: r.role,

@@ -14,10 +14,10 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
   holds: only an owner grants `owner` (`403 owner_required`).
 
   A member's request for a higher role (`kind: "role"` in the list, with
-  `requested_role` and `current_role`) is approved through
+  `requested_role`, `current_role` and `stale`) is approved through
   `Members.update_role/4`, the same path as `PATCH /v1/members/:ref`, so the
-  same ceiling holds. It is refused with nothing changed when the seat's role
-  moved since the ask (`409 request_stale`), when the role granted does not
+  same ceiling holds. It is refused with nothing changed when the seat moved
+  since the ask (`409 request_stale`, listed as `stale: true`), when the role granted does not
   rank above the current one (`409 role_not_higher`) and when the approver is
   the asker or a token the asker owns (`403 self_approval`).
   """

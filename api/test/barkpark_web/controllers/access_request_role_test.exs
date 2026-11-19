@@ -212,6 +212,8 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     {:ok, _} = Members.update_role(ctx.ws.id, %{type: :user, id: moved.user.id}, "contributor")
     {:ok, _} = Members.remove_member(ctx.ws.id, %{type: :user, id: gone.user.id})
 
+    assert listed(ctx.admin, ctx.base) |> Enum.map(& &1["stale"]) == [true, true]
+
     for id <- [moved_id, gone_id] do
       assert json_response(approve(ctx.admin, ctx.base, id), 409)["error"]["code"] ==
                "request_stale"
@@ -222,6 +224,33 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     assert role_in(ctx.ws, moved) == "contributor"
     assert role_in(ctx.ws, gone) == nil
     assert approved_audit(ctx.ws) == []
+  end
+
+  test "demoted after asking: asking again replaces the stale request", ctx do
+    asker = user!(ctx.ws, "viewer")
+    old = json_response(ask(asker, ctx.ws.slug, "admin"), 202)["access_request"]["id"]
+    {:ok, _} = Members.update_role(ctx.ws.id, %{type: :user, id: asker.user.id}, "contributor")
+
+    new = json_response(ask(asker, ctx.ws.slug, "admin"), 202)["access_request"]["id"]
+    assert new != old
+    assert Repo.get(AccessRequest, old) == nil
+    assert [%AccessRequest{from_role: "contributor"}] = rows_of(asker)
+
+    assert [%{"id" => ^new, "stale" => false, "current_role" => "contributor"}] =
+             listed(ctx.admin, ctx.base)
+  end
+
+  test "removed after asking: asking again is a seat request, not the old role request", ctx do
+    asker = user!(ctx.ws, "viewer")
+    old = json_response(ask(asker, ctx.ws.slug, "member"), 202)["access_request"]["id"]
+    {:ok, _} = Members.remove_member(ctx.ws.id, %{type: :user, id: asker.user.id})
+
+    new = json_response(ask(asker, ctx.ws.slug, nil), 202)["access_request"]["id"]
+    assert new != old
+    assert [%AccessRequest{id: ^new, from_role: nil}] = rows_of(asker)
+    assert [%{"kind" => "seat", "stale" => false}] = listed(ctx.admin, ctx.base)
+
+    assert json_response(approve(ctx.admin, ctx.base, new), 200)["member"]["role"] == "member"
   end
 
   test "approve with a role that would lower or keep the seat is refused", ctx do
