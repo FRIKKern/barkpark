@@ -8,7 +8,9 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     (`.save-state`, `.save-state-text`). As Sanity's, it opens the History
     inspector on Review changes (`review`, a patch); with no words it is
     disabled.
-  - The left says "Edited 5m ago" while there are edits not yet published,
+  - The left says "Saved" for about 3 s after this editor's own save lands
+    (`JustSaved`, TanStack's J04), then "Edited 5m ago" while there are edits
+    not yet published,
     "Last published 2h ago" when there are none, and the save's own words
     when a save went wrong ("Save failed", "Updated by another user"). A
     refused save names its field or its reason (`RefusedSave.status/1`).
@@ -30,11 +32,12 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     `role="status"`, not a button, and a singleton has no Unpublish.
 
   The words are drawn when the pane renders, so "5m ago" moves on with the
-  next change, not with the clock.
+  next change (or the end of "Saved"), not with the clock.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias BarkparkWeb.Studio.Desk.JustSaved
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias Phoenix.LiveView.JS
 
@@ -157,6 +160,9 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
 
       not match?(%DateTime{}, at) ->
         ""
+
+      assigns[:editor_is_draft] == true and JustSaved.on?(assigns) ->
+        gettext("Saved")
 
       assigns[:editor_is_draft] == true ->
         gettext("Edited %{ago}", ago: ago(at, now))

@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
+  alias BarkparkWeb.Studio.Desk.JustSaved
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -364,6 +365,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           |> StudioLive.handle_event(params, written(socket, event))
           |> ours()
           |> after_restore(event, before)
+          |> JustSaved.after_write(before)
         else
           {:halt, socket} -> {:noreply, socket}
         end
@@ -391,6 +393,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             |> Fields.autosave_built(written(socket, "autosave"))
             |> Scope.settle_group()
             |> ours()
+            |> JustSaved.after_write(socket.assigns[:editor_doc])
 
           {:halt, socket} ->
             {:noreply, socket}
