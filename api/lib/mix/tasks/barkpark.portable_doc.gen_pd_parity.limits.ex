@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Limits do
       limit-docs.json              the fixture verbatim: worst-case `docs` and `edges`
       limits/<name>.golden.json    each edge rendered by the Elixir reader (`goldens/0`)
       limits/value-too-deep.json   the value-depth limit of validate (`value_depth/0`)
+      limits/markdown-input.json   the Markdown import's input size (`markdown_input/0`)
 
   The fixture writes long docs with four macros (see its `_comment`); `expand/1`
   is the reference expansion.
@@ -63,6 +64,36 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Limits do
                "path" => "/blocks/0/series/0/x" <> String.duplicate("/0", max + 1 - 6)
              }
            ]
+         }
+       ]
+     }}
+  end
+
+  @doc """
+  `limits/markdown-input.json`: the largest Markdown input every importer takes,
+  in bytes (`FromMarkdown.Budget.max_bytes/0`), and the error code for input
+  over it, refused before parsing. Each case is `{"name", "markdown", "expect"}`;
+  `markdown` uses the `$text` macro of `limit-docs.json`, and `expect` is
+  `"imports"` or `{"error": code}`.
+  """
+  def markdown_input do
+    max = Barkpark.PortableDoc.FromMarkdown.Budget.max_bytes()
+    code = "markdown_too_large"
+
+    {"limits/markdown-input.json",
+     %{
+       "maxMarkdownBytes" => max,
+       "errorCode" => code,
+       "cases" => [
+         %{
+           "name" => "markdown at the input size",
+           "markdown" => %{"$text" => "a", "times" => max},
+           "expect" => "imports"
+         },
+         %{
+           "name" => "markdown one byte over the input size",
+           "markdown" => %{"$text" => "a", "times" => max + 1},
+           "expect" => %{"error" => code}
          }
        ]
      }}

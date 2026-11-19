@@ -122,6 +122,13 @@ defmodule Barkpark.StudioChat.PlanPapersTest do
       assert doc.content["body_html"] =~ "version two body"
       refute doc.content["body_html"] =~ "version one body"
     end
+
+    test "a plan over the Markdown input size is refused and writes no paper" do
+      markdown = "# Plan\n\n" <> String.duplicate("a", Barkpark.PortableDoc.FromMarkdown.Budget.max_bytes())
+
+      assert PlanPapers.publish("sess-big", "req-1", markdown) == {:error, :markdown_too_large}
+      assert paper_rows(PlanPapers.slug_for("sess-big", "req-1")) == []
+    end
   end
 
   # ── publish_approved_plan/3 — the ONE owner of the D49 side effect ──────────

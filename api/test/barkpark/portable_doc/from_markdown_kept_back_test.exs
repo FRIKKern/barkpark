@@ -13,7 +13,7 @@ defmodule Barkpark.PortableDoc.FromMarkdownKeptBackTest do
   @markdown "# Plan\n\nText.\n\n```portabledoc\n#{@bad}\n```\n"
 
   test "read lists the kept-back fence at its code block and keeps blocks/1's output" do
-    {blocks, fences} = KeptBack.read(@markdown)
+    {:ok, blocks, fences} = KeptBack.read(@markdown)
     assert blocks == FromMarkdown.blocks(@markdown)
     assert Enum.at(blocks, 2) == %{"type" => "code", "value" => @bad}
     assert fences == [%{source: @bad, path: "/blocks/2"}]
@@ -21,9 +21,9 @@ defmodule Barkpark.PortableDoc.FromMarkdownKeptBackTest do
 
   test "a spliced fence, a plain code fence and a non-list fence report nothing" do
     good = ~s([{"type": "divider"}])
-    assert {_, []} = KeptBack.read("```portabledoc\n#{good}\n```\n\n```\n#{@bad}\n```\n")
+    assert {:ok, _, []} = KeptBack.read("```portabledoc\n#{good}\n```\n\n```\n#{@bad}\n```\n")
 
-    {_, fences} =
+    {:ok, _, fences} =
       KeptBack.read(
         "```portabledoc\n{\"type\": \"divider\"}\n```\n\n```portabledoc\nnot json\n```"
       )
@@ -34,14 +34,14 @@ defmodule Barkpark.PortableDoc.FromMarkdownKeptBackTest do
 
   test "a fence's errors sit where its blocks would have been" do
     second = ~s([{"type": "divider"}, {"type": "heading", "level": 0, "text": "x"}])
-    {_, fences} = KeptBack.read("Text.\n\n```portabledoc\n#{second}\n```\n")
+    {:ok, _, fences} = KeptBack.read("Text.\n\n```portabledoc\n#{second}\n```\n")
 
     assert [%{code: :value_not_allowed, path: "/blocks/2/level"}] = KeptBack.errors(fences)
   end
 
   test "check reports a new fence error once, and not again over a paper that holds it" do
     Warnings.reset()
-    {blocks, fences} = KeptBack.read(@markdown)
+    {:ok, blocks, fences} = KeptBack.read(@markdown)
 
     assert KeptBack.check([], fences) == :ok
 

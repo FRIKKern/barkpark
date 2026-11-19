@@ -30,13 +30,18 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
     * a list item's blocks join with one space, and a nested list stays a
       list in the item's `children`.
 
+  Every import is bounded (`FromMarkdown.Budget`): input over the size is
+  refused before it is read, and an import that needs more work than the
+  budget is stopped and refused. `read/1` returns the refusal; `blocks/1`, for
+  display, shows the refused text unparsed as one code block.
+
   The converter is fail-soft end to end: unknown AST nodes flatten to text,
   and a parser crash or an invalid result degrades the whole reply to one
   code block. Output blocks contain only data — all HTML escaping happens
   downstream in the render walk, exactly as for persisted paper blocks.
   """
 
-  alias Barkpark.PortableDoc.FromMarkdown.{Entities, Fence, Html, Url}
+  alias Barkpark.PortableDoc.FromMarkdown.{Budget, Entities, Fence, Html, Url}
   alias Barkpark.PortableDoc.Validate
 
   # A list nested deeper than this is kept as its item's plain text.
@@ -49,21 +54,44 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   Convert a markdown string to a PortableDoc block list. Never raises.
 
   The blocks always pass `Barkpark.PortableDoc.Validate`; if they would not, or
-  the parser fails, the whole input comes back as one code block. Non-string
-  input gives `[]`.
+  the parser fails, or the import is refused (`read/1`), the whole input comes
+  back as one code block. Non-string input gives `[]`.
   """
   @spec blocks(term()) :: [map()]
-  def blocks(markdown), do: markdown |> read() |> elem(0)
+  def blocks(markdown) do
+    case read(markdown) do
+      {:ok, blocks, _kept_back} -> blocks
+      {:error, _refusal} -> fallback(markdown)
+    end
+  end
 
   @doc """
-  `blocks/1` with the ` ```portabledoc ` fences it kept back as code blocks,
-  in order: each fence's source and the path of the code block that stands in
-  for it. Only a top-level fence is read as one (a fence in a list item or a
-  quote joins its text). When the whole input falls back to one code block the
-  list is empty.
+  The import within its budget (`FromMarkdown.Budget`): `{:ok, blocks,
+  kept_back}`, or `{:error, :markdown_too_large}` (refused before parsing) or
+  `{:error, :markdown_too_costly}` (stopped; nothing is returned). `kept_back`
+  lists the ` ```portabledoc ` fences kept back as code blocks, in order: each
+  fence's source and the path of the code block that stands in for it. Only a
+  top-level fence is read as one (a fence in a list item or a quote joins its
+  text). When the whole input falls back to one code block the list is empty.
+  `opts` override the budget (`Budget.run/3`).
   """
-  @spec read(term()) :: {[map()], [%{source: String.t(), path: String.t()}]}
-  def read(markdown) when is_binary(markdown) do
+  @spec read(term(), keyword()) ::
+          {:ok, [map()], [%{source: String.t(), path: String.t()}]}
+          | {:error, Budget.refusal()}
+  def read(markdown, opts \\ [])
+
+  def read(markdown, opts) when is_binary(markdown) do
+    case Budget.run(markdown, &convert_checked/1, opts) do
+      {:ok, {blocks, kept_back}} -> {:ok, blocks, kept_back}
+      {:error, :crashed} -> {:ok, fallback(markdown), []}
+      {:error, refusal} -> {:error, refusal}
+    end
+  end
+
+  def read(_markdown, _opts), do: {:ok, [], []}
+
+  # Parse, convert and validate; runs inside the budget's process.
+  defp convert_checked(markdown) do
     converted =
       case EarmarkParser.as_ast(markdown, gfm: true, smartypants: false) do
         {:ok, ast, _messages} -> convert(ast)
@@ -83,8 +111,6 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   rescue
     _ -> {fallback(markdown), []}
   end
-
-  def read(_markdown), do: {[], []}
 
   defp fallback(markdown),
     do: if(String.trim(markdown) == "", do: [], else: [code_block(markdown)])

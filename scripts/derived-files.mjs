@@ -172,6 +172,8 @@ export const STEPS = [
       "api/lib/barkpark/plugins/bulldocs/**",
       "api/lib/barkpark/content/papers/block_ops.ex",
       "api/lib/barkpark/portable_doc/patch.ex",
+      // The Markdown input size in limits/markdown-input.json.
+      "api/lib/barkpark/portable_doc/from_markdown/budget.ex",
       "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity*.ex",
       "api/lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
       "api/test/support/fixtures/from-markdown.json",

@@ -149,12 +149,13 @@ defmodule Barkpark.StudioChat.PlanPapers do
   def publish(session_id, request_id, plan_markdown)
       when is_binary(session_id) and is_binary(request_id) and is_binary(plan_markdown) do
     slug = slug_for(session_id, request_id)
-    {blocks, kept_back} = KeptBack.read(plan_markdown)
-
+    # A plan over the import budget is refused whole (`{:error,
+    # :markdown_too_large | :markdown_too_costly}`), so no paper is written.
     # FromMarkdown keeps back a portabledoc fence whose blocks would not
     # validate, so the upsert's own ratchet sees no error; the fence's errors
     # are judged here instead (report-only or refused, as on every paper door).
-    with :ok <- KeptBack.check(stored_blocks(slug, kept_back), kept_back),
+    with {:ok, blocks, kept_back} <- KeptBack.read(plan_markdown),
+         :ok <- KeptBack.check(stored_blocks(slug, kept_back), kept_back),
          {:ok, _doc} <-
            Content.upsert_paper(
              %{

@@ -22,8 +22,9 @@ defmodule Barkpark.PortableDoc.FromMarkdown.KeptBack do
 
   @type fence :: %{source: String.t(), path: String.t()}
 
-  @doc "`FromMarkdown.read/1`: the blocks and the fences it kept back."
-  @spec read(term()) :: {[map()], [fence()]}
+  @doc "`FromMarkdown.read/1`: the blocks and the fences it kept back, or a refusal."
+  @spec read(term()) ::
+          {:ok, [map()], [fence()]} | {:error, FromMarkdown.Budget.refusal()}
   def read(markdown), do: FromMarkdown.read(markdown)
 
   @doc "The errors of each fence's own blocks, at the fence's place."
