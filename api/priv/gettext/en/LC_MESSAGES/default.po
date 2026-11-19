@@ -15487,3 +15487,23 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "The first 200 matches. Type more to narrow them."
 msgstr ""
+
+#: lib/barkpark_web/components/fields/codelist_field.ex
+#, elixir-autogen, elixir-format
+msgid "Not a code (kept as stored)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Not a valid URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Does not match allowed protocols/schemes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Username/password not allowed"
+msgstr ""

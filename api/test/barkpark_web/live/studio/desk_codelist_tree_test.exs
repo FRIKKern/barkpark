@@ -323,6 +323,26 @@ defmodule BarkparkWeb.Studio.DeskCodelistTreeTest do
     end
   end
 
+  test "a crafted search event searches nothing and the page keeps running", c do
+    view = desk(c, :code)
+    box = element(view, tree() <> ~s( input[type="search"]))
+
+    for params <- [
+          %{"codelist_search" => "YFB"},
+          %{"codelist_search" => ["YFB"]},
+          %{"codelist_search" => %{"tree-f-subject" => ["YFB"]}},
+          %{"value" => ["YFB"]},
+          %{}
+        ] do
+      render_change(box, params)
+      assert Process.alive?(view.pid)
+      refute has_element?(view, tree() <> "[data-searching]")
+    end
+
+    search(view, "YFB")
+    assert has_element?(view, row("YFB"))
+  end
+
   test "a pick pressed in another document, or with no name, writes nothing", c do
     view = desk(c, :code)
     search(view, "YFB")
