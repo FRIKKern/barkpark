@@ -855,11 +855,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # number, an object, a list) is drawn as none and marked kept: put in an
   # input's `value` an object raised, and a list was drawn as its codes run
   # together and posted back as that string (task-ab428bfe4bb189f9). Only a
-  # document path (`doc[meta].code`) qualifies: the save drops that untouched
-  # empty dotted value, so the stored value stays. A paper block's composite
-  # (path `code`) writes whatever its controls post, and a Portable Text
-  # block's dialog (`doc[__object]`, `ObjectBlocks`) keeps a posted value
-  # over a stored one, so both are drawn as before.
+  # document path (`doc[meta].code`) qualifies: the save keeps the stored
+  # value under an empty dotted one unless that field is the post's `_target`
+  # (`Handlers.Fields`), so an edit elsewhere leaves it. A paper block's
+  # composite (path `code`) writes whatever its controls post, and a Portable
+  # Text block's dialog (`doc[__object]`, `ObjectBlocks`) keeps a posted
+  # value over a stored one, so both are drawn as before.
   defp kept_code?("doc[__object]" <> _, _value), do: false
   defp kept_code?("doc[" <> _, value), do: not (is_nil(value) or is_binary(value))
   defp kept_code?(_path, _value), do: false
