@@ -74,6 +74,7 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk :is(.json-brace, .json-count, .json-null) { color: var(--dk-syntax-punctuation); }
       .dk .json-string { color: var(--dk-syntax-string); }
       .dk :is(.json-number, .json-boolean) { color: var(--dk-syntax-constant); }
+      .dk .json-leaf:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; border-radius: 2px; }
       .dk .json-more { font: inherit; border: 0; background: none; padding: 0; color: var(--dk-selected); cursor: pointer; }
       @media (max-width: 600px) {
         .dk .dk-vision { overflow-y: auto; }

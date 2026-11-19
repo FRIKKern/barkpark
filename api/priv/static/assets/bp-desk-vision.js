@@ -297,7 +297,8 @@
 
   var fetchIt = function (root) {
     // One run at a time, as TanStack's Fetch. Not `disabled`: that would take focus off the
-    // button it was pressed with, to the page's body.
+    // button it was pressed with, to the page's body. Fetch is `aria-disabled` while busy,
+    // which Playwright's toBeEnabled() also reads as not enabled.
     if (root.__busy) return;
     init(root);
     remember(root);
