@@ -136,6 +136,8 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     assert row["kind"] == "role"
     assert row["requested_role"] == "member"
     assert row["current_role"] == "viewer"
+    # An untouched seat: the request is fresh.
+    assert row["stale"] == false
 
     # No role in the body: the role asked for is granted.
     body = json_response(approve(ctx.admin, ctx.base, req["id"]), 200)
@@ -226,6 +228,30 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     assert role_in(ctx.ws, moved) == "contributor"
     assert role_in(ctx.ws, gone) == nil
     assert approved_audit(ctx.ws) == []
+  end
+
+  test "same role as asked, but the seat changed since: re-seated, or A -> B -> A", ctx do
+    reseated = user!(ctx.ws, "viewer")
+    bounced = user!(ctx.ws, "viewer")
+    reseated_id = json_response(ask(reseated, ctx.ws.slug, "member"), 202)["access_request"]["id"]
+    bounced_id = json_response(ask(bounced, ctx.ws.slug, "member"), 202)["access_request"]["id"]
+
+    {:ok, _} = Members.remove_member(ctx.ws.id, %{type: :user, id: reseated.user.id})
+    {:ok, _} = TenancyAuth.create_membership(ctx.ws.id, reseated.user.id, "viewer", "user")
+
+    for role <- ["contributor", "viewer"],
+        do: {:ok, _} = Members.update_role(ctx.ws.id, %{type: :user, id: bounced.user.id}, role)
+
+    # Both seats hold `viewer` again, the role each request recorded.
+    assert role_in(ctx.ws, reseated) == "viewer" and role_in(ctx.ws, bounced) == "viewer"
+    assert listed(ctx.admin, ctx.base) |> Enum.map(& &1["stale"]) == [true, true]
+
+    for id <- [reseated_id, bounced_id] do
+      assert json_response(approve(ctx.admin, ctx.base, id), 409)["error"]["code"] ==
+               "request_stale"
+    end
+
+    assert role_in(ctx.ws, reseated) == "viewer" and role_in(ctx.ws, bounced) == "viewer"
   end
 
   test "demoted after asking: asking again replaces the stale request", ctx do

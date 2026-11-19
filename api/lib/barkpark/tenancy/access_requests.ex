@@ -88,8 +88,9 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   `{:ok, own_row}` for a new request, a repeat of a pending one (the pending
   row is the answer; withdraw it to ask for something else; a STALE pending
-  one is replaced instead), and a slug no workspace has. Refusals: `{:error, :email_unconfirmed}` (approving would
-  hand the seat to whoever holds the password, not to the email's owner),
+  one is replaced instead), and a slug no workspace has. Refusals:
+  `{:error, :email_unconfirmed}` (approving would hand the seat to whoever
+  holds the password, not to the email's owner),
   `{:error, :already_member}` (a member naming no role),
   `{:error, :role_not_higher}`, `{:error, :unknown_role}`,
   `{:error, :too_many_pending}` and `{:error, %Ecto.Changeset{}}` for a
@@ -138,8 +139,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
   end
 
   # A member knows the workspace exists, so the role is checked for real here.
-  defp member_request(changeset, user_id, slug, ws, %Membership{role: current}, role) do
-    {live, stale} = pending_for(user_id, slug, current)
+  defp member_request(changeset, user_id, slug, ws, %Membership{role: current} = seat, role) do
+    {live, stale} = pending_for(user_id, slug, seat)
 
     cond do
       is_nil(role) ->
@@ -169,10 +170,10 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   # The pending request for this slug, split by `stale?/2` against the seat
   # the asker holds now: `{live, nil}`, `{nil, stale}` or `{nil, nil}`.
-  defp pending_for(user_id, slug, current_role) do
+  defp pending_for(user_id, slug, seat) do
     case pending(user_id, slug) do
       nil -> {nil, nil}
-      row -> if stale?(row, current_role), do: {nil, row}, else: {row, nil}
+      row -> if stale?(row, seat), do: {nil, row}, else: {row, nil}
     end
   end
 
@@ -286,14 +287,14 @@ defmodule Barkpark.Tenancy.AccessRequests do
                 m.principal_id == r.user_id,
             where: r.workspace_id == ^ws and r.status == "pending",
             order_by: [asc: r.inserted_at, asc: r.id],
-            select: {r, u.email, m.role}
+            select: {r, u.email, m}
           )
           |> Repo.all()
 
         names = rows |> Enum.map(fn {r, _, _} -> r.user_id end) |> Accounts.display_names()
 
-        Enum.map(rows, fn {r, email, current} ->
-          admin_row(r, email, Map.get(names, r.user_id), current)
+        Enum.map(rows, fn {r, email, seat} ->
+          listed_row(r, email, Map.get(names, r.user_id), seat)
         end)
     end
   end
@@ -325,7 +326,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
            {:ok, _} <- drop_invitation(row),
            {:ok, row} <- decide(row, "approved", granted, actor),
            :ok <- audit("access_request_approved", row, user, actor, meta) do
-        %{access_request: admin_row(row, email, nil, member.role), member: member}
+        %{access_request: decided_row(row, email, member.role), member: member}
       else
         {:error, reason} -> Repo.rollback(reason)
         _ -> Repo.rollback(:not_found)
@@ -372,7 +373,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   end
 
   defp fresh(row, seat) do
-    if stale?(row, seat && seat.role), do: {:error, :request_stale}, else: :ok
+    if stale?(row, seat), do: {:error, :request_stale}, else: :ok
   end
 
   defp lock_seat(%AccessRequest{workspace_id: nil}), do: nil
@@ -396,7 +397,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
            %User{email: email} = user <- Repo.get(User, row.user_id),
            {:ok, row} <- decide(row, "denied", nil, actor),
            :ok <- audit("access_request_denied", row, user, actor, %{}) do
-        %{access_request: admin_row(row, email, nil, nil)}
+        %{access_request: decided_row(row, email, nil)}
       else
         {:error, reason} -> Repo.rollback(reason)
         _ -> Repo.rollback(:not_found)
@@ -473,14 +474,15 @@ defmodule Barkpark.Tenancy.AccessRequests do
   defp actor_ref(%User{id: id}), do: "user:" <> id
   defp actor_ref(_), do: nil
 
-  # The stale flag comes from `AccessRequestStaleness`; the row module only shapes.
-  defp admin_row(%AccessRequest{} = r, email, display_name, current_role),
-    do:
-      AccessRequestRows.admin_row(
-        r,
-        email,
-        display_name,
-        current_role,
-        r.status == "pending" and stale?(r, current_role)
-      )
+  # A pending row in the admin list: its stale flag comes from
+  # `AccessRequestStaleness`, against the seat as it is now. The row module
+  # only shapes.
+  defp listed_row(%AccessRequest{} = r, email, display_name, seat) do
+    current_role = if seat, do: seat.role
+    AccessRequestRows.admin_row(r, email, display_name, current_role, stale?(r, seat))
+  end
+
+  # A row just approved or denied: decided, so never stale.
+  defp decided_row(%AccessRequest{} = r, email, current_role),
+    do: AccessRequestRows.admin_row(r, email, nil, current_role, false)
 end

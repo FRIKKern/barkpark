@@ -3062,13 +3062,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/access-requests/:id/approve",
         "scoped_admin",
         args: [arg("id", true, "string", "Access request id.")],
-        flags: [
-          flag(
-            "role",
-            "string",
-            "owner | admin | member | contributor (or a custom role). Default: member for a seat, the asked-for role for a role request."
-          )
-        ],
+        flags: [flag("role", "string", "Role to grant; default: member, or the role asked for")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
