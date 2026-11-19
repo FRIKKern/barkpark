@@ -465,12 +465,19 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
     test "the canonical echo degrades to bpml:nil and keeps the rev anchor" do
       slug = "bpml-echo-degrade-#{System.unique_integer([:positive])}"
 
+      # The visible paragraph keeps the reader's view non-empty, so the echo
+      # reaches the printer and its refusal.
       paper =
         with_blocks!(slug, [
           %{
             "id" => "p1",
             "type" => "paragraph",
             "content" => [%{"type" => "valueref", "ref" => "stats.total"}]
+          },
+          %{
+            "id" => "p2",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Seen."}]
           }
         ])
 
@@ -496,7 +503,14 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
       slug = "bpml-echo-clean-#{System.unique_integer([:positive])}"
 
       paper =
-        with_blocks!(slug, [%{"id" => "h1", "type" => "heading", "level" => 1, "text" => "H"}])
+        with_blocks!(slug, [
+          %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "H"},
+          %{
+            "id" => "p2",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Seen."}]
+          }
+        ])
 
       assert {bpml, nil} = BarkparkWeb.BulldocsIngestController.canonical_echo(paper)
       assert bpml =~ "<h1 id=\"h1\">H</h1>"

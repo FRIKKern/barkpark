@@ -658,7 +658,7 @@ defmodule Barkpark.Content.Papers do
       when is_list(blocks) and is_map(fields) do
     %{
       "slug" => paper.doc_id,
-      "title" => paper.title,
+      "title" => Content.Papers.BpmlView.title(paper, blocks, fields),
       "description" => Map.get(fields, "description"),
       "tags" => Map.get(fields, "tags", []),
       "blocks" => blocks

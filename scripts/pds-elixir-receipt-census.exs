@@ -768,8 +768,11 @@ defmodule PDS.Census do
     # unrouted did not move. Derived from this census's own D448-DRIFT-REFUSES line
     # and `--sites` on this commit's tree (Elixir 1.19.5 · Erlang/OTP 28 (erts
     # 16.3.1) · aarch64-apple-darwin24.6.0).
-    write: 57,
-    read: 36,
+    # 2026-11-19 (task-f08c1d1a0144b4a2): write 57 -> 58, read 36 -> 35. ONE site reclassified, none added (`--sites` vs origin/main):
+    # BulldocsIngestController.sync_apply/6's `unchanged: true` arm [READ] -> [WRITE d6], as it now reads Papers.BpmlView.of/4,
+    # whose reader-source read may refresh a stale body_html cache. The other six rows did not move.
+    write: 58,
+    read: 35,
     unrouted: 13
   }
 
