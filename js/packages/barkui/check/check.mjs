@@ -63,7 +63,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
             paintFree = looks.paintFree
             textOnly = looks.textOnly
           }
-          if (only.includes('phone')) lights.phone = await phone(ctx, part)
+          if (only.includes('phone')) lights.phone = await phone(ctx, part, skins)
           if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
         })(), PART_MS, `part ${part.name}`)
       } catch (e) {

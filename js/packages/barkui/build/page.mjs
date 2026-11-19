@@ -71,6 +71,7 @@ function partSection(part, ctx) {
     <p class="sr-summary">${esc(json.summary)}</p>
     ${lights(part, ctx)}
     ${waits(part, ctx.proof)}
+    ${Object.entries(json.allow ?? {}).map(([prop, why]) => `<p class="sr-wait">uses ${esc(prop)} beyond the vocabulary: ${esc(why)}</p>`).join('')}
   </header>
   <div class="sr-stage" data-part="${name}" data-surface="base">
 ${part.example}

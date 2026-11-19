@@ -58,7 +58,9 @@ export function installHelpers() {
       const s = getComputedStyle(el, p)
       if ((p === '::before' || p === '::after') && /^(none|normal)$/.test(s.content)) return []
       if (s.display === 'none') return []
-      return [[p, s, p === '::marker' || p === '::placeholder' || /["'][^"']*\S|counter|attr\(/.test(s.content)]]
+      // Text only when a quoted string holds something to read (content: "" draws a box, not text), or a counter or attribute.
+      const words = [...s.content.matchAll(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g)].some((m) => /\S/.test(m[1] ?? m[2]))
+      return [[p, s, p === '::marker' || p === '::placeholder' || words || /counter|attr\(/.test(s.content)]]
     })
   /** How faded an element is drawn: its opacity times its ancestors', up to the ground behind it. */
   const fadeOf = (el) => {

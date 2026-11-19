@@ -1,5 +1,9 @@
 // part.css may only read the skin: colours come from --ui-* and --bark-*
-// variables, never from a literal. Returns one message per finding.
+// variables, never from a literal. It keeps to the vocabulary in vocabulary.mjs
+// (anything else is named in part.json "allow" with a reason), and to the views
+// the check renders. Returns one message per finding.
+import { MOTION_ONLY, PHONE, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
+
 const NAMED = `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
 cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen
 darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray
@@ -27,10 +31,36 @@ const SELECTOR_RULES = [
   [/:focus(-visible|-within)?\b/i, (m) => `a :focus${m[1] ?? ''} rule: the focus ring is drawn once, in base.css`],
 ]
 
-export function lintPartCss(css) {
+/** The span of the block that opens at or after `from`: [index of {, index of its }]. */
+function block(text, from) {
+  const open = text.indexOf('{', from)
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    if (text[i] === '}' && !--depth) return [open, i]
+  }
+  return [open, text.length]
+}
+
+export function lintPartCss(css, allow = {}) {
   const found = []
   const text = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
   const lineOf = (i) => text.slice(0, i).split('\n').length
+  // Views: a part may style the phone breakpoint and reduced motion, nothing the check does not render.
+  const motion = []
+  for (const m of text.matchAll(/@([\w-]+)\s*([^{;]*)/g)) {
+    const name = m[1].toLowerCase()
+    const prelude = m[2].trim().replace(/\s+/g, ' ')
+    if (/^(-webkit-)?keyframes$/.test(name)) continue
+    if (name === 'media' && /^\(prefers-reduced-motion: ?(reduce|no-preference)\)$/.test(prelude)) {
+      motion.push(block(text, m.index))
+      continue
+    }
+    if (name === 'media' && prelude === PHONE) continue
+    found.push(`line ${lineOf(m.index)}: @${name} ${prelude} is not a view the check renders; part.css may use @media ${PHONE} and @media (prefers-reduced-motion) only`)
+  }
+  const sizes = new Set()
+  const customs = []
   for (const [re, say] of SELECTOR_RULES) {
     for (const m of text.matchAll(new RegExp(re.source, 'gi'))) found.push(`line ${lineOf(m.index)}: ${say(m)}`)
   }
@@ -41,7 +71,17 @@ export function lintPartCss(css) {
     const prop = rawProp.startsWith('--') ? rawProp : rawProp.toLowerCase()
     const value = raw.trim()
     if (!value) continue
-    const at = `line ${lineOf(m.index + m[1].length)}`
+    const where = m.index + m[1].length
+    const at = `line ${lineOf(where)}`
+    if (prop.startsWith('--')) customs.push({ prop, value, at })
+    else if (!VOCABULARY.has(prop) && !allow[prop]) found.push(`${at}: ${prop} is outside part.css's vocabulary (build/vocabulary.mjs); name it in part.json "allow" with a one-line reason`)
+    if (motion.some(([a, b]) => where > a && where < b) && !MOTION_ONLY.has(prop))
+      found.push(`${at}: ${prop} inside @media (prefers-reduced-motion): only transition, animation and scroll-behavior properties may change there`)
+    if (prop === 'font-size') {
+      const v = value.match(/^var\(\s*(--(?:ui|bark)-[\w-]+)\s*\)$/)
+      if (v) sizes.add(v[1])
+      else found.push(`${at}: font-size ${value}: read the size from a variable, var(--bark-…), set to ${SMALLEST_TEXT_REM}rem or more`)
+    }
     if (HEX_RE.test(value) || /%23[0-9a-f]{3,8}\b/i.test(value)) found.push(`${at}: ${prop} uses a hex colour (${value})`)
     const fn = value.match(FUNC_RE)
     if (fn) found.push(`${at}: ${prop} uses ${fn[1]}() (${value})`)
@@ -59,6 +99,11 @@ export function lintPartCss(css) {
       if (!/^--(ui|bark)-/.test(v[1])) found.push(`${at}: ${prop} reads ${v[1]}; only --ui-* and --bark-* are allowed`)
       if (v[2]) found.push(`${at}: ${prop} gives ${v[1]} a fallback; the sheet sets every variable`)
     }
+  }
+  for (const c of customs) {
+    if (!sizes.has(c.prop)) continue
+    const rem = c.value.match(/^(\d*\.?\d+)rem$/)
+    if (!rem || parseFloat(rem[1]) < SMALLEST_TEXT_REM) found.push(`${c.at}: ${c.prop} sets a font size of ${c.value}; type sizes are rem, ${SMALLEST_TEXT_REM}rem or more`)
   }
   return found
 }
