@@ -24,7 +24,9 @@
 // THE ANSWER. `desk:undone` names the field, its new value and the value it
 // showed. The field takes the new value only while it still shows that one
 // (a LiveView patch leaves the focused input alone), the caret goes to the
-// end of what changed, and the focus goes into the field, as TanStack's.
+// end of what changed, and the focus goes into the field, as TanStack's. A
+// field on a group tab that was not shown arrives drawn, on its tab, with the
+// new value (the server switched the tab first).
 //
 // A document-level listener, no phx-hook: bp-desk.js loads it when the desk
 // mounts (the address is on the desk's root, `data-desk-undo`).
@@ -43,8 +45,10 @@
 
   var FIELD = /^(INPUT|TEXTAREA|SELECT)$/;
 
-  // Whether `el` is a text field the server keeps an undo for.
+  // Whether `el` is a text field the server keeps an undo for, and one the
+  // user can write in now (a read-only one is the browser's).
   function kept(f, el) {
+    if (el.readOnly || el.disabled) return false;
     var text = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type));
     var keys = (f.getAttribute("data-desk-undo-keys") || "").split(/\s+/);
     return text && !!el.name && keys.indexOf(el.name) !== -1;
@@ -110,7 +114,9 @@
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
     if (document.activeElement !== el) el.focus();
-    if (set) {
+    // Drawn with the new value already (the undo switched to its tab): the
+    // caret still goes to the change.
+    if (set || (text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.value))) {
       var at = end(lf(d.was), lf(d.value));
       try {
         el.setSelectionRange(at, at);

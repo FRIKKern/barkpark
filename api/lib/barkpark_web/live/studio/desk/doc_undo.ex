@@ -31,6 +31,8 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   merged by the save onto what the store holds by then. The page is told the
   field, its new value and the value it showed (`desk:undone`): the script
   sets the field when it still shows that value, and puts the focus in it.
+  A field on a group tab that is not shown switches the editor to a tab that
+  draws it first: nothing changes where the user cannot see it.
 
   Nothing is undone over an old revision (`RevisionView`) or in the
   published perspective: both are read-only, as the TanStack Studio's
@@ -43,14 +45,17 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   alias Barkpark.Content
   alias Barkpark.Content.TextRebase
   alias Barkpark.Content.TextUndo
+  alias Barkpark.Content.TitleDerivation
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
+  alias BarkparkWeb.Studio.Desk.FieldGroups
   alias BarkparkWeb.Studio.Desk.Panes
   alias BarkparkWeb.Studio.Desk.PublishedView
   alias BarkparkWeb.Studio.Desk.RevisionView
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
+  alias BarkparkWeb.StudioComponents.Editor
 
   @event "desk:undone"
 
@@ -209,12 +214,55 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
         {:noreply,
          saved
          |> put_state(mark, undo, redo)
+         |> show_field(field)
          |> push_event(@event, %{field: "doc[#{field}]", value: stored(saved, field), was: now})}
       else
         {:noreply, put_state(saved, mark, state.undo, state.redo)}
       end
     end
   end
+
+  # The desk draws the chosen group tab's fields only: a change undone in a
+  # field on another tab switches to a tab that draws it, so the user sees
+  # what changed and the focus can go there (`desk:undone`).
+  defp show_field(%{assigns: assigns} = socket, field) do
+    schema = assigns[:editor_schema]
+    form = assigns[:editor_form]
+
+    case FieldGroups.current(schema, assigns[:nav_group], form) do
+      nil ->
+        socket
+
+      group ->
+        if on_tab?(schema, field, group),
+          do: socket,
+          else: assign(socket, :nav_group, tab_for(schema, field, form))
+    end
+  end
+
+  defp on_tab?(schema, "title", group), do: Editor.title_on_tab?(schema, group)
+
+  defp on_tab?(schema, field, group),
+    do:
+      Enum.any?(
+        schema_fields(schema),
+        &(&1["name"] == field and FieldGroups.in_group?(&1, group))
+      )
+
+  # The first of the field's groups that has a tab; with none, All fields.
+  defp tab_for(schema, field, form) do
+    tabs = schema |> FieldGroups.shown(form) |> Enum.map(& &1["name"])
+
+    spec =
+      if field == "title",
+        do: TitleDerivation.title_field(schema),
+        else: Enum.find(schema_fields(schema), &(&1["name"] == field))
+
+    Enum.find(tabs, &(is_map(spec) and FieldGroups.in_group?(spec, &1)))
+  end
+
+  defp schema_fields(%{fields: fields}) when is_list(fields), do: Enum.filter(fields, &is_map/1)
+  defp schema_fields(_schema), do: []
 
   # An old revision or the published version is shown: nothing is written.
   defp read_only?(assigns),

@@ -130,6 +130,18 @@ check("a field with no undo kept (slug, url, number, nested) keeps the browser's
   assert.deepEqual(pushes, []);
 });
 
+check("a kept field that is read-only now is the browser's", () => {
+  const title = $("title");
+  title.readOnly = true;
+  try {
+    const e = key(title, { key: "z", metaKey: true });
+    assert.equal(e.defaultPrevented, false);
+    assert.deepEqual(pushes, []);
+  } finally {
+    title.readOnly = false;
+  }
+});
+
 check("a button in the form is not a field: the key is the document's", () => {
   const e = key($("add"), { key: "z", metaKey: true });
   assert.equal(e.defaultPrevented, true);
@@ -191,6 +203,16 @@ check("a field showing other text keeps it, and still takes the focus", () => {
   undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 A" });
   assert.equal(title.value, "typed on");
   assert.equal(doc.activeElement, title);
+});
+
+check("a field drawn with the new value already (its tab was switched to) takes the focus and the caret", () => {
+  const excerpt = $("excerpt");
+  excerpt.value = "Short.";
+  $("title").focus();
+  undone({ field: "doc[excerpt]", value: "Short.", was: "Short. E1" });
+  assert.equal(excerpt.value, "Short.");
+  assert.equal(doc.activeElement, excerpt);
+  assert.equal(excerpt.selectionStart, "Short.".length);
 });
 
 check("a field the form does not have is ignored", () => {
