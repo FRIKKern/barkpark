@@ -7,7 +7,8 @@
 // the line still saves. A quote or callout holding only `text` is shown by the editor
 // as empty, so it opens read-only. And a Paper whose unedited save gives back other
 // blocks than stored opens read-only.
-// Run: node src/canvas/__source_wall_carriers_mounted.test.mjs
+// Run: node src/canvas/__source_wall_carriers_mounted.test.mjs (CASE=<shape name> or
+// CASE=refused or CASE=readme runs one case).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -48,9 +49,12 @@ async function typeIn(blocks, at) {
   return { ...mounted, textarea, opened };
 }
 
+const only = process.env.CASE || null;
+const runs = (name) => only === null || only === name;
 const all = [];
 try {
   for (const [name, [block, kind]] of Object.entries(shapes)) {
+    if (!runs(name)) continue;
     const blocks = [paragraph("p0", "Before"), block];
 
     // A key typed in the other paragraph: the reader shows the carrier's words as before.
@@ -91,7 +95,7 @@ try {
 
   // Refused, then put back: the line reads as it was, so leaving sends nothing; and a
   // sentinel line moved or deleted is saved as usual.
-  {
+  if (runs("refused")) {
     const carried = { id: "x", type: "paragraph", text: "carried" };
     const blocks = [paragraph("p0", "Before"), carried, paragraph("p2", "After")];
     const { canvas, batches, server } = await mount(clone(blocks));
@@ -128,7 +132,7 @@ try {
   // readme.json: an unedited save gives back other blocks than stored (its marks, and
   // the editor's own save rewrites block 4's code+strong run as nested nodes,
   // task-7a92f596371dc4c1), so source mode opens read-only and names the first.
-  {
+  if (runs("readme")) {
     const path = fileURLToPath(new URL("../../../../../.demo-content/repo-papers/readme.json", import.meta.url));
     const json = JSON.parse(readFileSync(path, "utf8"));
     const stored = Array.isArray(json) ? json : json.blocks;

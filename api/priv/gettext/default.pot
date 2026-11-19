@@ -4621,13 +4621,13 @@ msgstr ""
 msgid "None"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
-#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4631
-#: lib/barkpark_web/studio_locale.ex:780
+#: lib/barkpark_web/studio_locale.ex:781
 #, elixir-autogen, elixir-format
 msgid "Not saved: block %{number} is shown as JSON, and source mode does not edit it."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4631
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
 #: lib/barkpark_web/studio_locale.ex:625
 #, elixir-autogen, elixir-format
