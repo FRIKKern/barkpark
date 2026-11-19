@@ -8,8 +8,10 @@
 //             quote's >, a callout's [!tone], a list item's marker), or at its end
 //             when it has none; a code line at its start; a fence that opens a code
 //             block, or a diagram with a caption, at its end (the language or the
-//             caption); a block sentinel after the first letter of its first string
-//             that is not an id or a type
+//             caption)
+//   sentinel  a block shown as its JSON sentinel, after the first letter of its first
+//             string that is not an id or a type: source mode does not edit such a
+//             block, so the save must be refused (changedSentinel)
 //   no words  a divider, a closing fence, a blank line, a diagram fence with no
 //             caption, a sentinel with no string to type in: the key changes what
 //             the line is, and the textarea shows that
@@ -20,8 +22,6 @@
 //   - With the callout rule on, nothing is lost: a callout with a body never opens.
 //   - With the rule lifted (here only), the sweep finds the callout body and nothing
 //     else, so the one named rule covers the class.
-// A key typed into a sentinel's punctuation leaves JSON that does not read; source
-// mode refuses to save that (brokenSentinel), and the sweep checks it does.
 // Run: node src/canvas/__source_inside_edit_sweep.test.mjs
 
 import assert from "node:assert/strict";
@@ -31,9 +31,9 @@ import { fileURLToPath } from "node:url";
 import { mount } from "./source-flush-mounted-harness.mjs";
 import { normalizeCanvasDoc } from "./canvas-document.js";
 import { docToBlocks } from "./run-convert.js";
-import { sourceSaved } from "./source-save.js";
+import { sourceSaved, sourceWallLoss } from "./source-save.js";
 import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
-import { blocksToMarkdown, brokenSentinel, firstLoss, markdownToBlockSpans, markdownToBlocks, sourceLoss } from "../markdown.js";
+import { blocksToMarkdown, changedSentinel, firstLoss, markdownToBlockSpans, markdownToBlocks } from "../markdown.js";
 import { readerInline } from "../markdown/reader-inline.js";
 import { SENTINEL_OPEN } from "../markdown/shared.js";
 
@@ -135,8 +135,7 @@ function sweep(rule) {
     counts.papers += 1;
     for (const block of stored) counts.corpusTypes.add(block.type);
     const live = docToBlocks(normalizeCanvasDoc(view.toDoc(stored), stored));
-    const saved = (base) => (parsed) => sourceSaved(base, parsed, view, opts);
-    const wall = sourceLoss(stored, saved(stored)) || sourceLoss(live, saved(live));
+    const wall = sourceWallLoss(stored, live, view, opts);
     if (wall) {
       for (const block of stored) {
         const why = counts.readOnly.get(block.type) || new Set();
@@ -151,6 +150,7 @@ function sweep(rule) {
     assert.equal(live.length, stored.length, `${name}: the editor shows every stored block`);
     const lines = md.split("\n");
     const { blocks: parsed, spans } = markdownToBlockSpans(md);
+    const kept = stored;
     counts.blocks += spans.length;
     const lose = (where, why) => counts.losers.push(`${name} ${where}: ${why}`);
     stored.forEach((block, index) => {
@@ -170,22 +170,22 @@ function sweep(rule) {
       const where = `block ${index + 1} (${type}) line ${line + 1}`;
       counts.lines += 1;
       if (index !== -1) counts.typedTypes.add(type);
-      if (brokenSentinel(typedMd) !== -1) {
-        // The key broke a sentinel's JSON: source mode refuses the save (and the line
-        // must be one the sweep had no words to type in).
+      if (text.startsWith(SENTINEL_OPEN)) {
+        // A block shown as JSON is not edited: source mode must refuse the save.
         counts.refused += 1;
-        if (words) lose(where, "a key typed in a sentinel's words broke its JSON");
+        if (changedSentinel(typedMd, md) === -1) lose(where, "a key typed in a sentinel was not refused");
         return;
       }
-      const after = sourceSaved(stored, markdownToBlocks(typedMd), view, lifted);
+      if (changedSentinel(typedMd, md) !== -1) return lose(where, "a key typed outside any sentinel was refused");
+      const after = sourceSaved(stored, markdownToBlocks(typedMd), view, { ...lifted, realignTo: live });
       if (!JSON.stringify(after).includes(TYPED)) return lose(where, "the typed character was not saved");
       const clean = withoutTyped(after);
       const byId = new Map(clean.map((block) => [block.id, block]));
       if (words) {
         counts.words += 1;
-        const loss = firstLoss(stored, clean);
+        const loss = firstLoss(kept, clean);
         if (loss) return lose(where, `${loss.type} ${loss.path}`);
-        const unread = stored.findIndex((block) => readerDiffers(block, byId.get(block.id)));
+        const unread = kept.findIndex((block) => readerDiffers(block, byId.get(block.id)));
         if (unread !== -1) lose(where, `the reader shows other words for block ${unread + 1}`);
         return;
       }
@@ -196,11 +196,13 @@ function sweep(rule) {
       let tail = 0;
       while (tail < parsed.length - head && tail < now.length - head &&
         sameBlock(parsed[parsed.length - 1 - tail], now[now.length - 1 - tail])) tail++;
-      stored.forEach((block, i) => {
-        if (i >= head && i < stored.length - tail) return;
-        const kept = byId.get(block.id);
-        const loss = kept ? firstLoss([block], [kept]) : { type: block.type, path: "(gone)" };
-        if (loss || readerDiffers(block, kept)) lose(where, `block ${i + 1}, untouched, lost ${loss ? `${loss.type} ${loss.path}` : "its words"}`);
+      // The blocks before and after what the key changed, by position (an id may move
+      // to a neighbour when a line is typed between blocks; that is not a loss).
+      kept.forEach((block, i) => {
+        if (i >= head && i < kept.length - tail) return;
+        const now = i < head ? clean[i] : clean[clean.length - (kept.length - i)];
+        const loss = now ? firstLoss([block], [{ ...now, id: block.id }]) : { type: block.type, path: "(gone)" };
+        if (loss || readerDiffers(block, now)) lose(where, `block ${i + 1}, untouched, lost ${loss ? `${loss.type} ${loss.path}` : "its words"}`);
       });
     });
   }
@@ -209,8 +211,9 @@ function sweep(rule) {
 
 function report(label, c) {
   console.log(`inside-edit sweep, ${label}: ${c.papers} Papers, ${c.writable} writable, ${c.blocks} blocks, ` +
-    `${c.shown} prose blocks showing the reader's words, ${c.lines} lines typed (${c.words} with words, ` +
-    `${c.noWords} without, ${c.refused} refused as broken JSON), ${c.skipped} skipped, ${c.losers.length} losers`);
+    `${c.shown} prose blocks showing the reader's words; ${c.lines} lines typed: ` +
+    `kept ${c.words + c.noWords} (${c.words} with words, ${c.noWords} without), refused ${c.refused}, ` +
+    `skipped ${c.skipped}; ${c.losers.length} losers`);
 }
 
 try {

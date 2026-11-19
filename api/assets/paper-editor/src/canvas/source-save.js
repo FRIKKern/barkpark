@@ -2,6 +2,8 @@
 //
 //   sourceSaved(base, parsed, view) -> the blocks the server would hold after a
 //                                      source commit of `parsed` over `base`
+//   sourceWallLoss(stored, live, view) -> the first loss opening source mode on
+//                                      `stored` (shown as `live`) could make, or null
 //
 // sourceModeCommit gives each surviving block its id back and puts a locked template
 // prefix back, lays the result into the editor, and emits runToOps(stored, editor
@@ -30,16 +32,19 @@
 // (a quote or callout holding only `text`), the save keeps that key and the reader
 // goes on showing it over what was typed, so the block counts as losing that key.
 
-import { firstLoss } from "../markdown/carries.js";
+import { firstLoss, sourceLoss } from "../markdown/carries.js";
+import { markdownToBlocks } from "../markdown/parse.js";
+import { blocksToMarkdown } from "../markdown/serialize.js";
 import { readerInline, readerInlineKey } from "../markdown/reader-inline.js";
 import { normalizeCanvasDoc } from "./canvas-document.js";
 import { applyOps } from "./patch-fold.js";
 import { docToBlocks } from "./run-convert.js";
 import { clampLockedPrefix, deepCloneBlocks, realignAcrossCommits } from "./source-realign.js";
 
-export function sourceSaved(base, parsed, view, { calloutBody = "named" } = {}) {
+export function sourceSaved(base, parsed, view, { calloutBody = "named", realignTo = null } = {}) {
   const stored = deepCloneBlocks(base);
-  const laid = clampLockedPrefix(stored, realignAcrossCommits(stored, stored, parsed));
+  const shownBefore = realignTo ? deepCloneBlocks(realignTo) : stored;
+  const laid = clampLockedPrefix(shownBefore, realignAcrossCommits(shownBefore, shownBefore, parsed));
   const shown = docToBlocks(normalizeCanvasDoc(view.toDoc(laid), stored));
   const doc = view.toDoc(shown);
   let saved;
@@ -51,6 +56,27 @@ export function sourceSaved(base, parsed, view, { calloutBody = "named" } = {}) 
   const shownById = new Map(shown.filter((block) => block && block.id).map((block) => [block.id, block]));
   saved = saved.map((block) => withoutUnshownWords(block, shownById.get(block && block.id)));
   return calloutBody === "lifted" ? saved : saved.map(withoutCalloutBody);
+}
+
+// The wall: the first loss opening source mode could make, or null. `stored` is what
+// the Paper holds, with the ops still in flight (`inflight`) folded on. Its own
+// Markdown is judged for what Markdown cannot carry. Then the live doc's Markdown, the
+// text source mode shows, is saved unedited the way a commit saves it (realigned
+// against the live doc, the editor's projection, ops from the stored blocks) and must
+// give back the stored blocks: a key the editor's own save drops is a loss here too.
+export function sourceWallLoss(stored, live, view, { inflight = null, ...options } = {}) {
+  let base = deepCloneBlocks(stored);
+  if (Array.isArray(inflight) && inflight.length) {
+    try {
+      base = applyOps(base, inflight);
+    } catch (_refused) {
+      // A batch the fold refuses: judge against what is stored.
+    }
+  }
+  const fromStored = sourceLoss(base, (parsed) => sourceSaved(base, parsed, view, options));
+  if (fromStored) return fromStored;
+  const parsed = markdownToBlocks(blocksToMarkdown(live));
+  return firstLoss(base, sourceSaved(base, parsed, view, { ...options, realignTo: live }));
 }
 
 // The saved block with the reader's key dropped when the reader would show other words
