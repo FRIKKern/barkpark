@@ -15504,3 +15504,53 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Username/password not allowed"
 msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Open calendar"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Select date"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Month"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Year"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Go to previous year"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Go to next year"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Select time"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Set to current time"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. %{example}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Not a valid date. Use the format %{format}."
+msgstr ""

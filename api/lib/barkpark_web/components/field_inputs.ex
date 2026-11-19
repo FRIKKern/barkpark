@@ -144,10 +144,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # In the desk a select list is the TanStack Studio's (`Fields.DeskSelect`).
+  def input(%{field: %{"type" => "select", "options" => opts}, id_prefix: ""} = assigns)
+      when is_list(opts) or (is_map(opts) and is_list(:erlang.map_get("list", opts))),
+      do: BarkparkWeb.Components.Fields.DeskSelect.select(assigns)
+
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
-      when is_list(opts) do
+      when is_list(opts) or (is_map(opts) and is_list(:erlang.map_get("list", opts))) do
     val = scalar_text(Map.get(assigns.editor_form, name, ""))
-    options = Barkpark.Content.SelectOptions.normalize(opts)
+    options = Barkpark.Content.SelectOptions.normalize(Barkpark.Content.SelectOptions.list(opts))
     has_selection = val in Enum.map(options, & &1.value)
     required = get_in(f, ["validation", "required"]) == true
 
@@ -315,6 +320,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # draft does not change). The hook keeps an edit the form has not posted yet
   # through a patch only while this and `data-value` stay the same
   # (task-2be7cd2bd845c2da).
+  # In the desk a datetime is the TanStack Studio's (`Fields.DeskDatetime`).
+  def input(%{field: %{"type" => "datetime"}, id_prefix: ""} = assigns),
+    do: BarkparkWeb.Components.Fields.DeskDatetime.datetime(assigns)
+
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     doc = Barkpark.Content.DraftId.published_id(to_string(assigns.doc_key))

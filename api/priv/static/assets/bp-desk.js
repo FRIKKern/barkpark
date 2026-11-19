@@ -731,6 +731,9 @@
       deskScript("data-desk-tags", window.BarkparkDeskTags);
       // A tree codelist's keys (bp-desk-codelist.js).
       deskScript("data-desk-codelist", window.BarkparkDeskCodelist);
+      // A radio list's Clear (bp-desk-select.js); a date-time's calendar (bp-desk-datepicker.js).
+      deskScript("data-desk-select", window.BarkparkDeskSelect);
+      deskScript("data-desk-datepicker", window.BarkparkDatePicker);
       root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
