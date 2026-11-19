@@ -275,7 +275,7 @@ function storedSentinelHarm(md) {
     const laid = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
     const base = this._inflightOps ? this._inflightOps.afterBlocks : (this._debounceBaselineBlocks || this._blocks || []);
     const { saved } = sourceStored(base, laid, sourceView.call(this));
-    return saved ? sentinelHarm(base, L0, saved) : -1;
+    return saved ? sentinelHarm(base, L0, this._sourceOriginalMd, saved) : -1;
 }
 
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the

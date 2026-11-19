@@ -239,7 +239,7 @@ function sweep(rule) {
           counts.edits += 1;
           const laid = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(editedMd)));
           const { saved } = sourceStored(stored, laid, view);
-          if (!saved || sentinelHarm(stored, live, saved) !== -1) { counts.guardRefused += 1; continue; }
+          if (!saved || sentinelHarm(stored, live, md, saved) !== -1) { counts.guardRefused += 1; continue; }
           const ids = saved.map((b) => b.id);
           if (new Set(ids).size !== ids.length) lose(where, `${edit}: two blocks share an id`);
           const same = saved.find((b) => b.id === block.id);
@@ -258,7 +258,7 @@ function sweep(rule) {
       if (changedSentinel(typedMd, md) !== -1) return lose(where, "a key typed outside any sentinel was refused");
       const laidTyped = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(typedMd)));
       const storedTyped = sourceStored(stored, laidTyped, view).saved;
-      if (storedTyped && sentinelHarm(stored, live, storedTyped) !== -1) {
+      if (storedTyped && sentinelHarm(stored, live, md, storedTyped) !== -1) {
         // Refused rightly only when the key opened a fence that takes a sentinel line
         // into its body: that save would store the JSON as the fence's words.
         const whole = (text) => markdownToBlocks(text).filter((b) => b.id && sentinelIds.has(b.id)).length;

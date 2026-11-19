@@ -8,18 +8,21 @@
 //   (b) every block shown as a sentinel is saved unchanged (the same id, the same
 //       bytes as stored or as shown) or not saved at all.
 //
-// sentinelHarm(base, shown, saved) is the index in `saved` of the first block that
-// breaks either rule, or -1. `base` is what the save folds onto, `shown` the blocks the
-// textarea was made from, `saved` the fold.
+// sentinelHarm(base, shown, text, saved) is the index in `saved` of the first block
+// that breaks either rule, or -1. `base` is what the save folds onto, `shown` the blocks
+// the textarea was made from, `text` what it held before the edit (a block counts as
+// shown as JSON only when its sentinel line is one of those lines: after a remote change
+// the textarea keeps the writer's own spelling of a block), `saved` the fold.
 
 import { blocksToMarkdown } from "../markdown/serialize.js";
 import { SENTINEL_CLOSE, SENTINEL_OPEN } from "../markdown/shared.js";
 import { canonicalJSON } from "./projection-json.js";
 
-export function sentinelHarm(base, shown, saved) {
+export function sentinelHarm(base, shown, text, saved) {
+  const held = new Set(String(text || "").split("\n").map((line) => line.trim()));
   const sentinels = (shown || []).flatMap((block) => {
     const line = block && block.id ? blocksToMarkdown([block]).trim() : "";
-    return line.startsWith(SENTINEL_OPEN) && line.endsWith(SENTINEL_CLOSE) && !line.includes("\n")
+    return line.startsWith(SENTINEL_OPEN) && line.endsWith(SENTINEL_CLOSE) && !line.includes("\n") && held.has(line)
       ? [[block, line.slice(SENTINEL_OPEN.length, line.length - SENTINEL_CLOSE.length)]]
       : [];
   });
