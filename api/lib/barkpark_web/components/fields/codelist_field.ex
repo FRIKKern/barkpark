@@ -55,6 +55,13 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
     * `:codelist_loader` — function `(plugin_name, list_id) -> codelist | nil`;
       defaults to `&Barkpark.Content.Codelists.get/2`. Test seam.
     * `:readonly` — disable the `<select>` (defaults to `false`).
+    * `:kept` — the stored value is not a code (a number, an object, a
+      list), so `:value` is `nil`. The desk's tree then posts no value for
+      the field. The select shows "Not a code" as its pick and the combobox
+      as its placeholder; they still post "" with every change of the form,
+      and the save drops it unless the change is this field's
+      (`StudioLive.KeptCodes`), so a change to another field keeps what is
+      stored.
   """
 
   use Phoenix.Component
@@ -85,6 +92,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   attr :tree_loader, :any, default: nil
   attr :readonly, :boolean, default: false
   attr :id_base, :string, default: nil
+  attr :kept, :boolean, default: false
 
   def codelist_field(assigns) do
     assigns =
@@ -98,6 +106,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put_new(:tree_loader, nil)
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:id_base, nil)
+      |> Map.put_new(:kept, false)
 
     list_id = assigns.field.codelist_id || ""
     plugin_name = assigns.plugin_name
@@ -115,6 +124,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put(:plugin_name, plugin_name)
       |> Map.put(:list_id, list_id)
       |> Map.put(:options, options)
+      |> Map.put(:list_name, list_name(codelist))
       |> Map.put(:input_name, assigns.path)
       |> Map.put(:input_id, input_id(assigns.field.name, assigns.path))
       |> Map.put(:errors_list, errors_list(assigns.errors))
@@ -156,6 +166,8 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             input_name={@input_name}
             tree_loader={@tree_loader}
             desk={is_binary(@id_base)}
+            list_name={@list_name}
+            kept={@kept}
           />
         <% @use_combobox -> %>
           <input
@@ -171,7 +183,12 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-version={@field.version && to_string(@field.version)}
             data-codelist-combobox="true"
             aria-label={@title}
-            placeholder={gettext("Search %{list}…", list: @plugin_name <> ":" <> @list_id)}
+            data-codelist-kept={@kept && "true"}
+            placeholder={
+              if @kept,
+                do: gettext("Not a code (kept as stored)"),
+                else: gettext("Search %{list}…", list: @plugin_name <> ":" <> @list_id)
+            }
           />
           <datalist id={"datalist-" <> @input_id}>
             <%= for opt <- @options do %>
@@ -189,7 +206,14 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-version={@field.version && to_string(@field.version)}
             aria-label={@title}
           >
-            <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
+            <option value="" selected={not @kept and (is_nil(@value) or @value == "")}><%= gettext("— Select —") %></option>
+            <%!-- A stored value that is no code (a number, an object, a
+                  list) cannot be an option's value; this one says so. Its ""
+                  is not written unless the person changes this field
+                  (`StudioLive.KeptCodes`). --%>
+            <option :if={@kept} value="" selected data-codelist-kept="true">
+              <%= gettext("Not a code (kept as stored)") %>
+            </option>
             <%!-- A stored code the list does not hold is its own selected
                   option, so a change to another field posts it back instead
                   of "" (task-dcc3a1b86c09e869). --%>
@@ -273,6 +297,9 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   end
 
   defp tree_codelist?(_), do: false
+
+  defp list_name(%{name: name}) when is_binary(name) and name != "", do: name
+  defp list_name(_codelist), do: nil
 
   defp raw_value_count(%{values: values}) when is_list(values), do: length(values)
   defp raw_value_count(_), do: 0

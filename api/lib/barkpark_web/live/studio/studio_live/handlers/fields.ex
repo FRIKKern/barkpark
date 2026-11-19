@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
@@ -255,7 +256,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
-    case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
+    case params
+         |> fold_dot_paths(socket)
+         |> KeptRows.only_stored(base_form(socket))
+         |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -338,19 +342,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   hidden input alone fires no `phx-change`. The code goes into the editor
   buffer at that path and the buffer is saved, as a reference pick does
   (`Refs.select_ref/2`); `Shared.do_autosave/3` asks the write questions.
-  """
-  def tree_codelist_pick(%{name: name, value: code}, socket)
-      when is_binary(name) and is_binary(code) do
-    case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
-      {%{}, [_ | _] = path} ->
-        form = StudioLive.Path.put_value_at(base_form(socket), path, code)
-        socket = socket |> assign(editor_form: form) |> RefusedSave.target(Enum.take(path, 1))
-        saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
-        {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
-      _ ->
-        {:noreply, socket}
-    end
+  `press` is the pressed row's params: the pick is written only into the
+  document it was pressed in (`PostIdentity.pressed/3`). A message without
+  them writes nothing.
+  """
+  def tree_codelist_pick(%{name: name, value: code} = msg, socket)
+      when is_binary(name) and is_binary(code) do
+    PostIdentity.pressed(Map.get(msg, :press), socket, fn _params, socket ->
+      case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
+        {%{}, [_ | _] = path} ->
+          form = StudioLive.Path.put_value_at(base_form(socket), path, code)
+          socket = socket |> assign(editor_form: form) |> RefusedSave.target(Enum.take(path, 1))
+          saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
+          {:noreply, settle_dirty(saved, Enum.take(path, 1))}
+
+        _ ->
+          {:noreply, socket}
+      end
+    end)
   end
 
   def tree_codelist_pick(_msg, socket), do: {:noreply, socket}
@@ -413,7 +423,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
-    case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
+    case params
+         |> fold_dot_paths(socket)
+         |> KeptRows.only_stored(base_form(socket))
+         |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} ->
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).

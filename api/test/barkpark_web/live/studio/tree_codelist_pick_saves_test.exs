@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
   alias Barkpark.Content
   alias Barkpark.Content.Codelists
   alias Barkpark.Tenancy
+  alias BarkparkWeb.EditorPost
 
   @dataset "production"
   @plugin "onixedit"
@@ -100,7 +101,9 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
       |> render_click()
     end
 
-    view |> element(row) |> render_click()
+    # The page's script names the press for the open document
+    # (`bp-array-focus.js`); a press without the name writes nothing.
+    EditorPost.press_on(view, element(view, row))
 
     # The save rides a message the LiveView handles after the click.
     render(view)
@@ -147,7 +150,7 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
     row =
       ~s(#editor-form [data-field-name="subject"] [phx-click="tree_node_select"][phx-value-code="FB042"])
 
-    view |> element(row) |> render_click(%{"code" => "NOPE"})
+    view |> element(row) |> render_click(EditorPost.named(view, %{"code" => "NOPE"}))
     render(view)
 
     assert stored_subject(c) == "FB042"
@@ -173,7 +176,11 @@ defmodule BarkparkWeb.Studio.TreeCodelistPickSavesTest do
       pick(view, unquote(scope), "FB042")
       assert stored_subject(c) == "FB042"
 
-      view |> element(field <> ~s( [data-test-id="tree-codelist-remove"])) |> render_click()
+      EditorPost.press_on(
+        view,
+        element(view, field <> ~s( [data-test-id="tree-codelist-remove"]))
+      )
+
       render(view)
 
       assert stored_subject(c) in [nil, ""]

@@ -53,6 +53,7 @@ defmodule BarkparkWeb.Studio.Plugins.FieldComponents do
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
   attr :codelist_loader, :any, default: nil
+  attr :kept, :boolean, default: false
 
   @doc """
   Render a v2 `codelist` field. For hierarchical codelists (e.g. Thema 93)

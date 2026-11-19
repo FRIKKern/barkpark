@@ -15467,3 +15467,28 @@ msgstr ""
 msgctxt "crop preview"
 msgid "Panorama"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/published_view.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublished %{ago}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Not in the list"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Remove code"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "The first 200 matches. Type more to narrow them."
+msgstr ""
+
+#: lib/barkpark_web/components/fields/codelist_field.ex
+#, elixir-autogen, elixir-format
+msgid "Not a code (kept as stored)"
+msgstr ""

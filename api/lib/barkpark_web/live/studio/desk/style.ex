@@ -77,6 +77,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk { --dk-avatar-blue: #4f66fb; --dk-avatar-green: #0db97a; --dk-avatar-yellow: #d28a12; --dk-avatar-orange: #fa6412; --dk-warn-fg: #6b5300; --dk-caution-card-bg: #fefae1; --dk-caution-card-fg: #3b2212; --dk-diff-bg: #fde6d8; --dk-diff-fg: #8a3a12; }
       html[data-theme="dark"] .dk { --dk-avatar-blue: #7898ff; --dk-avatar-green: #15f0a5; --dk-avatar-yellow: #f9be1e; --dk-avatar-orange: #ff9149; --dk-warn-fg: #f2d36b; --dk-caution-card-bg: #1e1a1b; --dk-caution-card-fg: #f9ea98; --dk-diff-bg: #4a2a17; --dk-diff-fg: #ffc9a8; }
       .dk fieldset.dk-revision-form { display: contents; margin: 0; padding: 0; border: 0; min-width: 0; }
+      .dk fieldset.dk-revision-form > .dk-form-box { display: contents; }
       /* TanStack's --critical-icon: a field's error mark (`SlugInUse`). */
       .dk { --dk-critical-icon: #ef3d2f; }
       html[data-theme="dark"] .dk { --dk-critical-icon: #f3503e; }
@@ -151,8 +152,6 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-close { color: var(--fg-muted); text-decoration: none; padding: 4px 8px; }
       .dk .dk-close:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-doc-menu { margin-left: auto; }
-      .dk .codelist-current { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: var(--text-sm); }
-      .dk .codelist-current .codelist-label { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
       .dk .dk-split { margin-left: auto; display: inline-flex; align-items: center; color: var(--fg-muted); padding: 4px 8px; border-radius: 6px; }
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }

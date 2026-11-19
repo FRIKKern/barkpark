@@ -103,7 +103,7 @@ defmodule BarkparkWeb.Studio.TreeCodelistArrayRowsTest do
       |> render_click()
     end
 
-    view |> element(row) |> render_click()
+    BarkparkWeb.EditorPost.press_on(view, element(view, row))
 
     # The save rides a message the LiveView handles after the click.
     render(view)
