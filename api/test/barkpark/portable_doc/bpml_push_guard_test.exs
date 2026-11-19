@@ -22,8 +22,10 @@ defmodule Barkpark.PortableDoc.BpmlPushGuardTest do
     %{"id" => "c1", "type" => "callout", "content" => [t("Lead.")], "slots" => %{"body" => body}}
   end
 
-  @child [%{"type" => "list", "items" => [[t("child")]]}]
-  @body [para("cb", "Body paragraph.")]
+  @child [%{"type" => "list", "items" => [[%{"type" => "text", "value" => "child"}]]}]
+  @body [
+    %{"id" => "cb", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
+  ]
 
   test "an unmarked copy that drops a block is refused, naming it, with the way out" do
     stored = [para("p1", "One"), para("p2", "Two")]

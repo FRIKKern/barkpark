@@ -29,7 +29,7 @@ defmodule BarkparkWeb.BulldocsBpmlPushMarkTest do
 
   defp stored_blocks(slug), do: get_in(Content.get_paper(slug).content, ["blocks"])
 
-  defp push(conn, slug, payload) do
+  defp sync(conn, slug, payload) do
     conn
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
@@ -54,7 +54,7 @@ defmodule BarkparkWeb.BulldocsBpmlPushMarkTest do
     {copy, rev, _mark} = copy_without_p2(slug)
     before = stored_blocks(slug)
 
-    body = conn |> push(slug, %{"bpml" => copy, "baseRev" => rev}) |> json_response(422)
+    body = conn |> sync(slug, %{"bpml" => copy, "baseRev" => rev}) |> json_response(422)
 
     assert body["error"]["code"] == "bpml_unshown_removal"
     assert body["error"]["message"] =~ "blocks[1]"
@@ -69,7 +69,7 @@ defmodule BarkparkWeb.BulldocsBpmlPushMarkTest do
 
     body =
       conn
-      |> push(slug, %{"bpml" => copy, "baseRev" => rev, "bpmlPrint" => mark})
+      |> sync(slug, %{"bpml" => copy, "baseRev" => rev, "bpmlPrint" => mark})
       |> json_response(200)
 
     assert body["ok"] == true

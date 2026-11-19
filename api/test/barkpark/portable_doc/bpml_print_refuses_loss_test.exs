@@ -90,18 +90,24 @@ defmodule Barkpark.PortableDoc.BpmlPrintRefusesLossTest do
         do: Map.get(c, "marks", [])
   end
 
-  for {name, content, mark} <- [
-        {"a bold link", [link([marked("bold link", ["strong"])])], "strong"},
-        {"an italic link", [link([marked("italic link", ["em"])])], "em"},
-        {"a link inside a bold run",
-         [
-           marked("before ", ["strong"]),
-           link([marked("in", ["strong"])]),
-           marked(" after", ["strong"])
-         ], "strong"}
-      ] do
+  @marked_links [
+    {"a bold link", [{"bold link", ["strong"], :link}], "strong"},
+    {"an italic link", [{"italic link", ["em"], :link}], "em"},
+    {"a link inside a bold run",
+     [{"before ", ["strong"], :text}, {"in", ["strong"], :link}, {" after", ["strong"], :text}],
+     "strong"}
+  ]
+
+  defp runs(spec) do
+    for {v, marks, kind} <- spec do
+      node = marked(v, marks)
+      if kind == :link, do: link([node]), else: node
+    end
+  end
+
+  for {name, spec, mark} <- @marked_links do
     test "#{name} round-trips with the mark on every link character" do
-      blocks = [%{"type" => "paragraph", "content" => unquote(Macro.escape(content))}]
+      blocks = [%{"type" => "paragraph", "content" => runs(unquote(Macro.escape(spec)))}]
       assert {:ok, parsed} = blocks |> Bpml.print_blocks() |> Bpml.parse_blocks()
       assert parsed == Canonical.normalize(blocks)
 

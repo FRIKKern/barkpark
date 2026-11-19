@@ -2499,7 +2499,7 @@ defmodule PDS.Census do
     # unchanged: true` claims nothing was written, and no test re-reads the row to
     # prove the nothing. Unjudged until one does.
     %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.sync_apply/6", "123013536", "126012198"},
+            "BarkparkWeb.BulldocsIngestController.sync_apply/7", "112942044", "126012198"},
       verdict: "UNJUDGED", basis: :unexamined},
     # BPML working-copy sync — the APPLIED receipt.
     %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
