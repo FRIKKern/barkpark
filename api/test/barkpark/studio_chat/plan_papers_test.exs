@@ -131,6 +131,15 @@ defmodule Barkpark.StudioChat.PlanPapersTest do
       assert PlanPapers.publish("sess-big", "req-1", markdown) == {:error, :markdown_too_large}
       assert paper_rows(PlanPapers.slug_for("sess-big", "req-1")) == []
     end
+
+    test "a plan too costly to import is refused and writes no paper" do
+      markdown = "# Plan\n\n" <> String.duplicate("[", 100_000)
+
+      assert PlanPapers.publish("sess-costly", "req-1", markdown) ==
+               {:error, :markdown_too_costly}
+
+      assert paper_rows(PlanPapers.slug_for("sess-costly", "req-1")) == []
+    end
   end
 
   # ── publish_approved_plan/3 — the ONE owner of the D49 side effect ──────────

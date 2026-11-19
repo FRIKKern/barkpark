@@ -107,15 +107,55 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
     end
   end
 
-  test "an import whose heap passes the cap is refused as too costly, not crashed" do
+  test "a heap past the memory cap is refused as too costly, not crashed" do
     markdown = ordinary(div(Budget.max_bytes(), 10))
     assert {:ok, _blocks, []} = FromMarkdown.read(markdown)
 
-    assert FromMarkdown.read(markdown, max_heap_words: 100_000) ==
+    assert FromMarkdown.read(markdown, max_memory_bytes: 800_000) ==
              {:error, :markdown_too_costly}
   end
 
-  test "an ordinary document of the full input size needs an eighth of the work, a ninth of the heap" do
+  test "large binaries the worker holds count toward the memory cap" do
+    hold = fn _ ->
+      binaries = for _ <- 1..40, do: :binary.copy(<<0>>, 1_000_000)
+      Process.sleep(200)
+      length(binaries)
+    end
+
+    assert Budget.run("x", hold, max_memory_bytes: 20_000_000) == {:error, :markdown_too_costly}
+    assert Budget.run("x", hold, max_memory_bytes: 200_000_000) == {:ok, 40}
+  end
+
+  test "a result past the output limit is refused as too costly" do
+    fan = fn _ -> List.duplicate(:binary.copy("x", 1_000_000), 100) end
+    assert Budget.run("x", fan) == {:error, :markdown_too_costly}
+    assert {:ok, [_ | _]} = Budget.run("x", fan, max_output_bytes: 1_000_000_000)
+
+    # One long address, used many times through a reference link.
+    address = "https://example.com/" <> String.duplicate("a", 40_000)
+    markdown = String.duplicate("[x][r]\n\n", 5_000) <> "[r]: " <> address <> "\n"
+    assert byte_size(markdown) < Budget.max_bytes()
+    assert FromMarkdown.read(markdown) == {:error, :markdown_too_costly}
+  end
+
+  test "a caller that goes away takes its import with it, within 500 ms" do
+    test = self()
+
+    caller =
+      spawn(fn ->
+        Budget.run("x", fn _ ->
+          send(test, {:worker, self()})
+          Process.sleep(:infinity)
+        end)
+      end)
+
+    assert_receive {:worker, worker}, 1_000
+    watch = Process.monitor(worker)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^watch, :process, ^worker, _reason}, 500
+  end
+
+  test "an ordinary document of the full input size needs an eighth of each bound" do
     markdown = ordinary(Budget.max_bytes())
     assert byte_size(markdown) == Budget.max_bytes()
 
@@ -125,7 +165,10 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
     work = FromMarkdown.read(markdown, max_reductions: div(Budget.max_reductions(), 8))
     assert work == {:ok, blocks, []}, "needs more than an eighth of the reductions"
 
-    heap = FromMarkdown.read(markdown, max_heap_words: div(Budget.max_heap_words(), 9))
-    assert heap == {:ok, blocks, []}, "needs more than a ninth of the heap"
+    memory = FromMarkdown.read(markdown, max_memory_bytes: div(Budget.max_memory_bytes(), 8))
+    assert memory == {:ok, blocks, []}, "needs more than an eighth of the memory"
+
+    output = FromMarkdown.read(markdown, max_output_bytes: div(Budget.max_output_bytes(), 8))
+    assert output == {:ok, blocks, []}, "needs more than an eighth of the output"
   end
 end
