@@ -128,9 +128,31 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     # A 390 px phone squeezes the pills to their dot; they keep a 44 px floor.
     assert coarse =~ "min-width: 44px;"
 
+    # Round ends of 12.5 px on the drawn 25 px band, not an ellipse.
+    assert coarse =~ "border-radius: 12.5px / 22.5px;"
+
     # The focus ring traces the drawn pill, not the 45 px box.
     assert html =~
              ".dk button.dk-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }"
+
+    # The pills' row never shrinks under them, so Draft never slides under
+    # Share; the header makes the room as TanStack's does on a phone.
+    assert html =~ ".dk .dk-chips { flex-shrink: 0; }"
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing] > .pane-header a.dk-split[data-desk-split-right])
+           )
+
+    css = rendered_to_string(BarkparkWeb.Studio.Desk.Style.sheet(%{}))
+
+    assert css =~
+             ".dk[data-narrow] .dk-doc > .pane-header [data-desk-split-right] { display: none; }"
+
+    assert css =~
+             "@media (max-width: 480px) and (pointer: coarse) { .dk .dk-doc > .pane-header { padding-left: 6px; padding-right: 2px; } }"
+
+    assert css =~ ".dk[data-narrow] .dk-doc > .pane-header .dk-close { margin-right: 0; }"
   end
 
   test "a document never published greys out the Published pill", c do

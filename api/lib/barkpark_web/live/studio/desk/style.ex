@@ -18,7 +18,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
   skeleton bones and pane separators are `--border` (`--border-subtle` is
   near invisible in dark). On a touch screen (`pointer: coarse`) rows, the
   close link and reference chips are at least 44 px; a mouse layout is
-  unchanged.
+  unchanged. As TanStack's (J42), a narrow window (`data-narrow`) has no
+  "Split pane right", and a touch phone's document header is 6 px in on the
+  left and 2 px on the right, so its 44 px pills and buttons fit one row.
+  There the close link is the back link at the front (`bp-desk.js`), so it
+  drops the -12 px it takes at the far right and does not run into the pills.
 
   A titled divider (`.desk-divider`, the root's "Settings") is the TanStack
   Studio's, as Sanity's measures at 1440: its title 11 px under the row above,
@@ -156,6 +160,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
       .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
       .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu, .dk .dk-doc-menu + .dk-doc-menu, .dk .dk-doc-menu + .dk-split { margin-left: 0; }
+      .dk[data-narrow] .dk-doc > .pane-header [data-desk-split-right] { display: none; }
       .dk .dk-share-menu .dk-doc-menu-button { display: inline-flex; align-items: center; }
       .dk button.dk-focus { border: 0; background: none; font: inherit; cursor: pointer; }
       .dk .dk-focus-crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13px; font-weight: 400; color: var(--fg); }
@@ -356,12 +361,14 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .dk-list-search .search-clear { width: 44px; height: 44px; top: -10px; }
         .dk:not([data-narrow]) .dk-pane:not(.dk-doc) > .pane-header .dk-close:not(:focus-visible) { position: static; width: auto; height: auto; min-width: 44px; min-height: 44px; margin: 0 -12px 0 0; padding: 4px 8px; overflow: visible; clip-path: none; white-space: normal; }
         .dk .dk-close { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
+        .dk[data-narrow] .dk-doc > .pane-header .dk-close { margin-right: 0; }
         .dk .dk-split { justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-doc-menu-button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-menu-item { min-height: 44px; }
         .dk .dk-inspect-close, .dk .dk-inspect-tabs [role="tab"] { min-width: 44px; min-height: 44px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
       }
+      @media (max-width: 480px) and (pointer: coarse) { .dk .dk-doc > .pane-header { padding-left: 6px; padding-right: 2px; } }
       /* The desk's navbar (Desk.Navbar): TanStack's .navbar, 52 px, 13/19 w500,
          text tabs, and one More popover at the end. Only where a desk is. */
       .studio-shell:has(.dk) .studio-bar { height: 52px; min-height: 52px; padding-inline: 12px; font-size: 13px; line-height: 19px; font-weight: 500; background: var(--dk-nav-bg); border-bottom: 1px solid var(--dk-nav-border); }
