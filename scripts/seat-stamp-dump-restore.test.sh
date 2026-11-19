@@ -20,8 +20,12 @@
 #      trigger is ENABLE ALWAYS ('A'), and a write after the restore gets a new
 #      stamp, not the one it supplied.
 #
-# SRC and DST are named uniquely for this run and dropped on exit, pass or
-# fail. Nothing else is created, and no other database is written.
+# SRC and DST are named uniquely for this run. A name enters the drop list only
+# after its own createdb succeeded, so a database that already held the name
+# stops the run (createdb refuses) and is never dropped. On exit, pass or fail,
+# only the listed names are dropped. Nothing else is created, and no other
+# database is written. scripts/seat-stamp-dump-restore-drop-guard.test.sh
+# proves that with stand-ins.
 #
 # MANUAL PROOF — not wired: it needs a database already migrated to
 # 20261119090000 and pg_dump/pg_restore of the server's major version. CI's
@@ -60,10 +64,15 @@ DST="bp_seatstamp_${run_id}_dst"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/seatstamp.XXXXXX")" || refuse "mktemp failed"
 DUMP="$WORK/seatstamp.pgdump"
 
+# Databases THIS run created, added only after createdb succeeded.
+CREATED=""
+
 # shellcheck disable=SC2329  # invoked by the EXIT trap
 cleanup() {
-  dropdb --if-exists "$SRC" >/dev/null 2>&1
-  dropdb --if-exists "$DST" >/dev/null 2>&1
+  local db
+  for db in $CREATED; do
+    dropdb --if-exists "$db" >/dev/null 2>&1
+  done
   rm -f "$DUMP"
   rmdir "$WORK" 2>/dev/null
 }
@@ -85,6 +94,7 @@ echo "pg_dump: $(pg_dump --version) · server: $(q "$SCHEMA_DB" 'SHOW server_ver
 echo "databases this run: $SRC, $DST"
 
 createdb "$SRC" || refuse "createdb $SRC failed"
+CREATED="$CREATED $SRC"
 pg_dump --schema-only --no-owner "$SCHEMA_DB" 2>/dev/null \
   | psql -X -q -v ON_ERROR_STOP=1 -d "$SRC" >/dev/null 2>&1 \
   || refuse "could not copy the schema of $SCHEMA_DB into $SRC"
@@ -130,6 +140,7 @@ src_stale="$(stamp "$SRC" "$STALE")"
 
 pg_dump -Fc --no-owner -f "$DUMP" "$SRC" || refuse "pg_dump $SRC failed"
 createdb "$DST" || refuse "createdb $DST failed"
+CREATED="$CREATED $DST"
 pg_restore --no-owner -d "$DST" "$DUMP" || refuse "pg_restore into $DST failed"
 
 check "restore keeps the untouched seat's stamp" "$src_fresh" "$(stamp "$DST" "$FRESH")"

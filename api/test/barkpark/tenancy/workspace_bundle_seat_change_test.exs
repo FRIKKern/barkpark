@@ -227,6 +227,63 @@ defmodule Barkpark.Tenancy.WorkspaceBundleSeatChangeTest do
     end
   end
 
+  # The access-request member is left out whole, so a seat_change it names is
+  # not refused: the import succeeds and none of its rows lands.
+  for mode <- [:merge, :clean] do
+    @mode mode
+
+    test "#{mode}: an access-request member naming seat_change imports, and none of its rows lands" do
+      f = fixture()
+      {:ok, _} = AccessRequests.request(f.u, f.ws.slug, nil, "admin")
+      {:ok, bundle} = WorkspaceBundle.export(f.ws.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+      forged = "00000000-0000-0000-0000-0000000000bb"
+      table = "workspace_access_requests"
+      assert member(manifest, table)["row_count"] == 1
+
+      manifest =
+        Map.update!(manifest, "tables", fn tables ->
+          Enum.map(tables, fn
+            %{"name" => ^table} = m -> Map.update!(m, "columns", &(&1 ++ ["seat_change"]))
+            m -> m
+          end)
+        end)
+
+      dumps =
+        Map.update!(dumps, table, fn body ->
+          body
+          |> String.split("\n", trim: true)
+          |> Enum.map_join("", &(&1 <> "\t" <> forged <> "\n"))
+        end)
+
+      ws_id = Ecto.UUID.dump!(f.ws.id)
+
+      if @mode == :clean do
+        assert {:ok, _} = Tenancy.delete_workspace(f.ws)
+        drop_audit_rows!(f.ws.id)
+      else
+        Repo.query!("DELETE FROM workspace_access_requests WHERE workspace_id = $1", [ws_id])
+      end
+
+      assert {:ok, stats} =
+               WorkspaceBundle.import_bundle(repack(manifest, dumps), mode: @mode)
+
+      assert stats.access_requests_left_out == 1
+
+      assert %{rows: [[0]]} =
+               Repo.query!(
+                 "SELECT count(*) FROM workspace_access_requests WHERE workspace_id = $1",
+                 [ws_id]
+               )
+
+      assert %{rows: [[0]]} =
+               Repo.query!(
+                 "SELECT count(*) FROM workspace_access_requests WHERE seat_change = $1",
+                 [Ecto.UUID.dump!(forged)]
+               )
+    end
+  end
+
   defp repack(manifest, dumps) do
     dir = Archive.spill_dir()
 
