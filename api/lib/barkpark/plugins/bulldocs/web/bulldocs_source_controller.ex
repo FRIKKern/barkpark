@@ -116,6 +116,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
         conn
         |> put_resp_content_type("text/bpml")
         |> put_resp_header("x-paper-rev", to_string(rev))
+        |> put_resp_header("x-bpml-print", Bpml.PushGuard.print_mark())
         |> send_resp(200, bpml)
     end
   rescue

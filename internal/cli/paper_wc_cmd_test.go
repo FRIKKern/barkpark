@@ -23,6 +23,11 @@ type fakePaperServer struct {
 	syncCalls int
 	lastBase  string
 	lastBpml  string
+	// mark is the print mark pull answers (x-bpml-print) and an applied sync
+	// echoes (bpmlPrint); "" plays a server from before the mark.
+	mark      string
+	lastPrint string
+	sentPrint bool
 }
 
 func (f *fakePaperServer) handler() http.Handler {
@@ -35,6 +40,9 @@ func (f *fakePaperServer) handler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/bpml")
 		w.Header().Set("x-paper-rev", f.rev)
+		if f.mark != "" {
+			w.Header().Set("x-bpml-print", f.mark)
+		}
 		_, _ = w.Write([]byte(f.bpml))
 	})
 
@@ -46,12 +54,18 @@ func (f *fakePaperServer) handler() http.Handler {
 		f.syncCalls++
 
 		var body struct {
-			Bpml    string `json:"bpml"`
-			BaseRev string `json:"baseRev"`
+			Bpml    string  `json:"bpml"`
+			BaseRev string  `json:"baseRev"`
+			Print   *string `json:"bpmlPrint"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.lastBase = body.BaseRev
 		f.lastBpml = body.Bpml
+		f.sentPrint = body.Print != nil
+		f.lastPrint = ""
+		if body.Print != nil {
+			f.lastPrint = *body.Print
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 
@@ -72,7 +86,11 @@ func (f *fakePaperServer) handler() http.Handler {
 			// from the client's edit so convergence is observable)
 			f.rev = f.rev + "0"
 			f.bpml = strings.ReplaceAll(body.Bpml, "edited", "edited-canonical")
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "slug": "p1", "rev": f.rev, "op_count": 1, "bpml": f.bpml})
+			answer := map[string]any{"ok": true, "slug": "p1", "rev": f.rev, "op_count": 1, "bpml": f.bpml}
+			if f.mark != "" {
+				answer["bpmlPrint"] = f.mark
+			}
+			_ = json.NewEncoder(w).Encode(answer)
 		}
 	})
 

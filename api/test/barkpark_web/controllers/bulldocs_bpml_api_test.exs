@@ -501,8 +501,11 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
       assert {bpml, nil} = BarkparkWeb.BulldocsIngestController.canonical_echo(paper)
       assert bpml =~ "<h1 id=\"h1\">H</h1>"
 
+      # A printed echo carries the print mark, so the working copy may remove parts.
       payload = %{ok: true, bpml: bpml}
-      assert BarkparkWeb.BulldocsIngestController.maybe_mark_echo(payload, nil) == payload
+
+      assert BarkparkWeb.BulldocsIngestController.maybe_mark_echo(payload, nil) ==
+               Map.put(payload, :bpmlPrint, Barkpark.PortableDoc.Bpml.PushGuard.print_mark())
     end
   end
 

@@ -6,7 +6,7 @@ defmodule Barkpark.PortableDoc.BpmlPrintRefusesLossTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Bpml
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
+  alias Barkpark.PortableDoc.Bpml.{Canonical, UnprintableError}
 
   defp t(v), do: %{"type" => "text", "value" => v}
 
@@ -67,6 +67,48 @@ defmodule Barkpark.PortableDoc.BpmlPrintRefusesLossTest do
     e = refusal([paragraph_child()])
     assert e.kind == :round_trip
     assert e.type =~ ~r/^blocks\[0\]\.items\[0\]/
+  end
+
+  test "the markdown nested list from step 0 is refused at blocks[0].items[0]" do
+    blocks = Barkpark.PortableDoc.FromMarkdown.blocks("- a\n  - b")
+    assert [%{"items" => [%{"children" => [_]}]}] = blocks
+
+    e = refusal(blocks)
+    assert e.kind == :round_trip
+    assert e.type =~ ~r/^blocks\[0\]\.items\[0\]/
+  end
+
+  # Marked links: the mark on every link character survives the round trip.
+  defp marked(v, marks), do: %{"type" => "text", "value" => v, "marks" => marks}
+  defp link(children), do: %{"type" => "link", "href" => "/x", "children" => children}
+
+  defp link_marks(blocks) do
+    for %{"content" => content} <- blocks,
+        %{"type" => "link", "children" => cs} <- content,
+        %{"value" => v} = c <- cs,
+        _char <- String.graphemes(v),
+        do: Map.get(c, "marks", [])
+  end
+
+  for {name, content, mark} <- [
+        {"a bold link", [link([marked("bold link", ["strong"])])], "strong"},
+        {"an italic link", [link([marked("italic link", ["em"])])], "em"},
+        {"a link inside a bold run",
+         [
+           marked("before ", ["strong"]),
+           link([marked("in", ["strong"])]),
+           marked(" after", ["strong"])
+         ], "strong"}
+      ] do
+    test "#{name} round-trips with the mark on every link character" do
+      blocks = [%{"type" => "paragraph", "content" => unquote(Macro.escape(content))}]
+      assert {:ok, parsed} = blocks |> Bpml.print_blocks() |> Bpml.parse_blocks()
+      assert parsed == Canonical.normalize(blocks)
+
+      chars = link_marks(parsed)
+      assert chars != []
+      assert Enum.all?(chars, &(unquote(mark) in &1))
+    end
   end
 
   test "a document the text carries prints as before" do

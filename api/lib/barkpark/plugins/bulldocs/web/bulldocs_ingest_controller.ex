@@ -114,7 +114,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content.Papers.{BlockOps, MixedWriteGuard}
   alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Validate.NewErrors
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
+  alias Barkpark.PortableDoc.Bpml.{PushGuard, UnprintableError}
   alias Barkpark.Tenancy
   alias BarkparkWeb.{ErrorResponse, StudioLocale}
 
@@ -343,9 +343,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
       anchors at rev 0; an EXISTING slug still 412s on a stale anchor). The
       document's own `<paper slug>` must match the pushed path slug (422
       `slug_mismatch` otherwise — the path is the identity);
-    * the paper's CURRENT blocks are unprintable → 422 `bpml_unprintable`
-      BEFORE any op derives (a BPML document cannot describe them, so a sync
-      would silently delete every non-kernel block behind a 200);
+    * CURRENT blocks unprintable (`Bpml.RoundTrip`) → 422 `bpml_unprintable`
+      before any op derives; a copy without the print mark (`bpmlPrint`) that
+      removes a block, item children or a callout body → 422 `bpml_unshown_removal`;
     * applied but the post-write state is unprintable → still 200 with `rev`
       (the write LANDED — a 500 would strand the anchor) and `bpml: nil` plus a
       `bpml_unprintable` marker;
@@ -389,12 +389,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           {:ok, parsed} ->
-            sync_apply(conn, slug, parsed, base_rev, dataset, scope)
+            sync_apply(conn, slug, parsed, base_rev, dataset, scope, params["bpmlPrint"])
         end
     end
   end
 
-  defp sync_apply(conn, slug, parsed, base_rev, dataset, scope) do
+  defp sync_apply(conn, slug, parsed, base_rev, dataset, scope, print) do
     case Content.get_paper(slug, dataset, scope) do
       nil ->
         sync_create(conn, slug, parsed, dataset, scope)
@@ -415,14 +415,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
         unprintable = unprintable_current(current_blocks)
 
         cond do
-          # ENTRY GUARD, before anything derives. If the paper's CURRENT blocks
-          # cannot be printed as BPML, the pushed document cannot describe them
-          # either — and `Diff.derive/2` would faithfully remove every block the
-          # (necessarily kernel-only) parse does not carry: a silent DESTRUCTION
-          # behind a 200. Nothing legitimate breaks, because pull already
-          # refuses such a paper (422) — no client can hold a working copy of
-          # one. Ordered before the rev check on purpose: an unprintable paper
-          # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
+          # ENTRY GUARD: a document cannot describe blocks that do not print, so
+          # `Diff.derive/2` would delete them behind a 200. Pull refuses them too;
+          # before the rev check, since no rev gives an honest sync.
           unprintable != nil ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -455,7 +450,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+            case PushGuard.derive(current_blocks, parsed["blocks"], print) do
+              {:error, %{} = r} ->
+                ErrorResponse.emit_fields(conn, :unprocessable_entity, r)
+
               {:error, :diff_verification_failed} ->
                 conn
                 |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -752,7 +750,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   end
 
   @doc false
-  def maybe_mark_echo(payload, nil), do: payload
+  def maybe_mark_echo(payload, nil), do: PushGuard.mark(payload)
 
   def maybe_mark_echo(payload, refusal) do
     Map.merge(payload, %{

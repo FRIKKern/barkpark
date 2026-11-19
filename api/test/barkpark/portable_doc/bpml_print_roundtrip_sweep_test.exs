@@ -11,35 +11,22 @@ defmodule Barkpark.PortableDoc.BpmlPrintRoundtripSweepTest do
   alias Barkpark.PortableDoc.Bpml
   alias Barkpark.PortableDoc.Bpml.{Canonical, UnprintableError}
 
-  @root Path.expand("../../../..", __DIR__)
-
-  @sources [
-    {"api/priv/portable_doc/goldens/blocks/*.golden.json", :golden},
-    {"api/priv/portable_doc/goldens/limits/*.golden.json", :golden},
-    {"api/test/support/fixtures/bpml/*.json", :blocks},
-    {".demo-content/papers/*.json", :blocks},
-    {".demo-content/repo-papers/*.json", :blocks}
+  # The work queue. Each is a real loss: the stored block holds something the
+  # print does not show. Depth-limit list items belong to task-c4dc5e0c3d253460;
+  # the two span cases store spans no cell can carry.
+  @still_refused [
+    "api/priv/portable_doc/goldens/limits/list-at-the-depth-limit.golden.json blocks[0].items[0] (list)",
+    "api/priv/portable_doc/goldens/limits/list-one-level-above-the-depth-limit.golden.json blocks[0].items[0] (list)",
+    "api/priv/portable_doc/goldens/limits/table-span-with-no-stored-origin.golden.json blocks[0].spans (table)",
+    "api/priv/portable_doc/goldens/limits/table-spans-sharing-an-origin.golden.json blocks[0].spans[1] (table)"
   ]
 
-  defp documents do
-    for {pattern, kind} <- @sources,
-        file <- @root |> Path.join(pattern) |> Path.wildcard() |> Enum.sort() do
-      json = file |> File.read!() |> Jason.decode!()
-
-      blocks =
-        case {kind, json} do
-          {:golden, %{"input" => input}} -> [input]
-          {:blocks, list} when is_list(list) -> list
-          {:blocks, %{"blocks" => blocks}} when is_list(blocks) -> blocks
-          _ -> []
-        end
-
-      {Path.relative_to(file, @root), blocks}
-    end
-  end
+  # Refused by the printer's older kinds (block, inline, mark, head cell); this
+  # check does not move them.
+  @unprintable_already 82
 
   defp verdicts do
-    for {file, blocks} <- documents(),
+    for {file, blocks} <- Barkpark.BpmlStoredDocuments.all(),
         {block, i} <- Enum.with_index(blocks) do
       verdict =
         try do
@@ -82,5 +69,8 @@ defmodule Barkpark.PortableDoc.BpmlPrintRoundtripSweepTest do
         "#{length(lost)} refused, #{count.(&match?({:unprintable, _}, &1))} unprintable already\n" <>
         Enum.join(lost, "\n")
     )
+
+    assert lost == @still_refused
+    assert count.(&match?({:unprintable, _}, &1)) == @unprintable_already
   end
 end

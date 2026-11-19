@@ -193,6 +193,9 @@ defmodule Barkpark.Content.Errors do
                          "bpml",
                          "bpml_unavailable",
                          "bpml_unprintable",
+                         # A push from a copy without the print mark that would
+                         # remove parts it may never have shown (Bpml.PushGuard).
+                         "bpml_unshown_removal",
                          "unknown_format",
                          "hollow_paper",
                          "structure",
