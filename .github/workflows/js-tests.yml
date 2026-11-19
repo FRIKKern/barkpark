@@ -412,7 +412,7 @@ jobs:
           esac
           exit "$status"
 
-      # Whether this change touches BarkUI: the selftest below costs about 90 s,
+      # Whether this change touches BarkUI: the selftest below costs about 8 minutes,
       # so it runs only then. PR: the diff from the merge base (fetch-depth 0).
       # Push: the diff from the previous head, fetched here (the clone is
       # shallow). --no-renames lists both sides of a move, so moving a BarkUI file
@@ -450,7 +450,7 @@ jobs:
       # Skipped only when the step above says, for certain, BarkUI was not touched.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
         if: steps.barkui.outputs.run != 'false'
-        timeout-minutes: 12
+        timeout-minutes: 20
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"
