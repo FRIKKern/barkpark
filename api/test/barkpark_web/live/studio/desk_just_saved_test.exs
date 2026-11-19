@@ -128,6 +128,31 @@ defmodule BarkparkWeb.Studio.DeskJustSavedTest do
     assert mark(b) == nil
   end
 
+  test "both say Saved once the last write lands: another editor's save taken in is no problem",
+       c do
+    a = open(c)
+    b = open(c)
+
+    # B saves, then A (live-edit.spec.ts, before its reset).
+    type(b, "From B")
+    assert eventually(fn -> status(b) == "Saved" end), status(b)
+    type(a, "From A")
+    assert eventually(fn -> status(a) == "Saved" end), status(a)
+
+    # B takes A's save in (no typing of its own waits): still "Saved", not
+    # "Updated by another user".
+    render(b)
+
+    assert_push_event(
+      b,
+      "bp:form-remote-values",
+      %{values: %{"doc[title]" => %{value: "From A"}}},
+      2_000
+    )
+
+    assert status(b) == "Saved"
+  end
+
   test "the words: Saved only for the open document's own mark" do
     now = ~U[2026-11-13 12:00:00Z]
     doc = %{doc_id: "drafts.p", updated_at: ~U[2026-11-13 10:00:00Z], status: "draft"}
@@ -144,5 +169,14 @@ defmodule BarkparkWeb.Studio.DeskJustSavedTest do
     failed = Map.merge(base, %{desk_just_saved: {make_ref(), "p"}, save_status: "Save failed"})
     assert DocFooter.status(failed, now) == "Save failed"
     refute JustSaved.on?(%{desk_just_saved: nil, editor_doc: doc})
+
+    # Another editor's save: a clash with typing here is named, one taken in
+    # cleanly is not.
+    remote = Map.put(base, :save_status, "Updated by another user")
+
+    assert DocFooter.status(Map.put(remote, :doc_conflict, true), now) ==
+             "Updated by another user"
+
+    assert DocFooter.status(Map.put(remote, :doc_conflict, false), now) == "Edited 2h ago"
   end
 end

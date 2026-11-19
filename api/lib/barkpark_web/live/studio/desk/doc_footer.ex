@@ -12,7 +12,9 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     (`JustSaved`, TanStack's J04), then "Edited 5m ago" while there are edits
     not yet published,
     "Last published 2h ago" when there are none, and the save's own words
-    when a save went wrong ("Save failed", "Updated by another user"). A
+    when a save went wrong ("Save failed", "Updated by another user" while
+    another editor's save clashes with typing here; one taken in cleanly is
+    no problem). A
     refused save names its field or its reason (`RefusedSave.status/1`).
   - Publish sends the Studio's own `publish` event. It is greyed out when
     there is nothing to publish (the Studio offers no Publish then), as
@@ -154,8 +156,10 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     doc = assigns[:editor_doc] || %{}
     at = Map.get(doc, :updated_at)
 
+    problem = RefusedSave.token(assigns)
+
     cond do
-      RefusedSave.token(assigns) in @problems ->
+      problem in @problems and not merged?(problem, assigns) ->
         BarkparkWeb.Studio.SaveStatus.label(RefusedSave.status(assigns))
 
       not match?(%DateTime{}, at) ->
@@ -174,6 +178,13 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
         ""
     end
   end
+
+  # Another editor's save the form took in cleanly (no clash with typing
+  # here, `doc_conflict` unset): the Studio still names it "Updated by another
+  # user", but nothing went wrong, so the footer says what it says otherwise,
+  # as TanStack's (which names no remote save).
+  defp merged?("Updated by another user", assigns), do: assigns[:doc_conflict] != true
+  defp merged?(_problem, _assigns), do: false
 
   @doc "How long ago `at` was, in the words the footer and the list rows use (\"5m ago\")."
   def ago(%DateTime{} = at, now) do
