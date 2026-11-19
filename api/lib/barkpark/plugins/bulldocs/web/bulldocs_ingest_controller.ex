@@ -484,7 +484,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
       {:ok, result} ->
         fresh = Content.get_paper(slug, dataset, scope)
-        {canonical, echo_refusal} = if fresh, do: canonical_echo(fresh), else: {nil, nil}
+        {canonical, echo_refusal} = if fresh, do: canonical_echo(fresh, dataset), else: {nil, nil}
 
         payload = %{
           ok: true,
@@ -494,7 +494,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
           rev: to_string(result.rev),
           op_count: result.op_count,
           bpml: canonical,
-          bpmlView: fresh && Content.Papers.BpmlView.hash_of(fresh, dataset)
+          bpmlView: canonical && Content.Papers.BpmlView.hash(canonical)
         }
 
         conn
@@ -656,7 +656,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
-        {canonical, echo_refusal} = canonical_echo(paper)
+        {canonical, echo_refusal} = canonical_echo(paper, dataset)
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 
         payload = %{
@@ -666,7 +666,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
           rev: rev,
           op_count: length(get_in(paper.content || %{}, ["blocks"]) || []),
           bpml: canonical,
-          bpmlView: Content.Papers.BpmlView.hash_of(paper, dataset)
+          bpmlView: canonical && Content.Papers.BpmlView.hash(canonical)
         }
 
         conn
@@ -728,24 +728,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
     e in UnprintableError -> Exception.message(e)
   end
 
-  # The canonical echo AFTER a successful write. The ops already committed, so an
-  # unprintable post-write state must NOT change the verdict: a 500 would strand
-  # the client's rev anchor on a write that landed, and a 422 would simply lie.
-  # It degrades to `bpml: nil` plus an explicit marker, and the rev is still the
-  # anchor to pull from. Only UnprintableError is rescued — a real printer bug
-  # still crashes loudly (charter D3).
-  # Public (not an action — no route names it) so the degrade contract is
-  # directly testable: the sync path itself can no longer REACH an unprintable
-  # post-write state now that the entry guard closes that door, and a rescue
-  # nobody can prove is a rescue nobody should trust.
+  # The echo AFTER a successful write: the row's pull view (`BpmlView.print/2`),
+  # never the raw row, so it carries nothing a pull would not. The ops already
+  # committed, so an unprintable state degrades to `bpml: nil` plus a marker
+  # (a 500 strands the anchor, a 422 lies); only UnprintableError is rescued
+  # (charter D3). Public so the degrade contract stays testable.
   @doc false
-  def canonical_echo(paper) do
-    blocks = get_in(paper.content || %{}, ["blocks"]) || []
-
-    bpml =
-      Barkpark.PortableDoc.Bpml.print_paper(Barkpark.Content.Papers.bpml_paper_map(paper, blocks))
-
-    {bpml, nil}
+  def canonical_echo(paper, dataset \\ "production") do
+    case Content.Papers.BpmlView.print(paper, dataset) do
+      {:ok, bpml} -> {bpml, nil}
+      {:error, why} -> {nil, why}
+    end
   rescue
     e in UnprintableError -> {nil, Exception.message(e)}
   end

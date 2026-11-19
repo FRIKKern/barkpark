@@ -38,13 +38,12 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
   The check runs on the blocks the push would write (`Diff.target/3`), before
   any op derives. The write then puts EVERY block of the Paper, touched or not,
-  through the chokepoint every block write runs: nested id minting, the
-  canonical shapes of `BlockOps.normalize_render_shapes/1` (list items, notes
-  and cards items, text-keyed leaves) and field encryption. Those rescue
-  shapes and keep content; a row a current writer stored is already in them.
-  So a block that must stay byte-equal is persisted as
-  `normalize_render_shapes([s])`, which is `s` itself for such a row; the
-  corpus test asserts exactly that on the row the write left.
+  through the chokepoint every block write runs, whose
+  `BlockOps.normalize_render_shapes/1` rewrites older shapes (list items, notes
+  and cards items, text-keyed leaves). A block that must stay byte-equal and
+  is stored in such a shape would be rewritten, so the push is refused; an
+  edit in the editor brings it to the current shape. The corpus test asserts
+  that every other block leaves the write as `normalize_render_shapes([s])`.
 
   ## Paper fields
 
@@ -75,7 +74,7 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   """
 
   alias Barkpark.Content.Document
-  alias Barkpark.Content.Papers.BpmlView
+  alias Barkpark.Content.Papers.{BlockOps, BpmlView}
   alias Barkpark.PortableDoc.Bpml
   alias Barkpark.PortableDoc.Bpml.{Canonical, Diff}
 
@@ -108,7 +107,7 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
     pushed = parsed["blocks"] || []
 
     with :ok <- same_view(paper, dataset, parsed["bpmlView"]),
-         :ok <- unique_ids(pushed),
+         :ok <- unique_ids(pushed, stored),
          :ok <- check_fields(content, fields, parsed),
          result = Diff.target(stored, pushed, shown),
          :ok <- check(stored, shown, result) do
@@ -140,21 +139,34 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   end
 
   # Two top-level blocks under one id cannot both be the block the id names.
-  defp unique_ids(pushed) do
-    ids = for %{"id" => id} when is_binary(id) <- pushed, do: id
-
-    case ids -- Enum.uniq(ids) do
+  defp unique_ids(pushed, stored) do
+    case repeated(pushed) do
       [] ->
         :ok
 
       [id | _] ->
-        {:error,
-         %{
-           code: "bpml",
-           message: ~s(block id "#{id}" appears twice in the pushed document),
-           hint: "give each block its own id, or leave the id off a new block"
-         }}
+        if id in repeated(stored) do
+          {:error,
+           %{
+             code: "bpml",
+             message:
+               ~s(block id "#{id}" appears twice in the stored paper, so a push cannot tell those blocks apart),
+             hint: "give one of them a new id in the editor, then pull again"
+           }}
+        else
+          {:error,
+           %{
+             code: "bpml",
+             message: ~s(block id "#{id}" appears twice in the pushed document),
+             hint: "give each block its own id, or leave the id off a new block"
+           }}
+        end
     end
+  end
+
+  defp repeated(blocks) do
+    ids = for %{"id" => id} when is_binary(id) <- blocks, do: id
+    ids -- Enum.uniq(ids)
   end
 
   @doc """
@@ -225,13 +237,16 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
         do: Enum.filter(result, &(is_map(&1) and &1["id"] == id)) == [s],
         else: false
 
-    if kept? do
-      nil
-    else
-      case unshown(s, view_block(s, i, matched?, stored, shown)) do
-        [] -> nil
-        [first | _] = paths -> refuse(i, id, first, paths)
-      end
+    cond do
+      kept? and BlockOps.normalize_render_shapes([s]) == [s] ->
+        nil
+
+      true ->
+        case unshown(s, view_block(s, i, matched?, stored, shown)) do
+          [] -> nil
+          [first | _] = paths when kept? -> refuse_reshape(i, id, first, paths)
+          [first | _] = paths -> refuse(i, id, first, paths)
+        end
     end
   end
 
@@ -252,6 +267,20 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
        message:
          "this text cannot show #{where}, so a push may not change #{block}: it would lose what the pull left out",
        hint: "pull again and leave that block as it is, or change it in the editor",
+       paths: Enum.map(paths, &("blocks[#{i}]" <> &1))
+     }}
+  end
+
+  # Kept byte-equal by the push, but stored in an older shape the write's
+  # chokepoint (`BlockOps.normalize_render_shapes/1`) would rewrite.
+  defp refuse_reshape(i, id, first, paths) do
+    {:error,
+     %{
+       code: @code,
+       message:
+         ~s(block "#{id}" is stored in an older shape this write would rewrite, and this text cannot show blocks[#{i}]#{first}),
+       hint:
+         "change the paper once in the editor (any edit there updates the shape), then pull again",
        paths: Enum.map(paths, &("blocks[#{i}]" <> &1))
      }}
   end

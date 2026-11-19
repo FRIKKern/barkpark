@@ -49,18 +49,31 @@ defmodule Barkpark.Content.Papers.BpmlView do
   def hash(bytes) when is_binary(bytes),
     do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
-  @doc "The fingerprint of `paper`'s view as `bp paper pull` prints it; nil when it does not print."
-  @spec hash_of(Document.t(), String.t()) :: String.t() | nil
-  def hash_of(%Document{} = paper, dataset) do
+  @doc """
+  `paper`'s view printed as `bp paper pull` gets it (flat route, published
+  task rows): the bytes every BPML answer about the row carries. Raises
+  `Bpml.UnprintableError` when the view does not print.
+  """
+  @spec print(Document.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def print(%Document{} = paper, dataset) do
     case of(paper, dataset, [], :published) do
       {:blocks, blocks, fields} ->
-        Barkpark.PortableDoc.Bpml.print_paper(
-          Content.Papers.bpml_paper_map(paper, blocks, fields)
-        )
-        |> hash()
+        {:ok,
+         Barkpark.PortableDoc.Bpml.print_paper(
+           Content.Papers.bpml_paper_map(paper, blocks, fields)
+         )}
 
       _ ->
-        nil
+        {:error, "the paper has no blocks a pull can print"}
+    end
+  end
+
+  @doc "The fingerprint of `print/2`'s bytes; nil when the view does not print."
+  @spec hash_of(Document.t(), String.t()) :: String.t() | nil
+  def hash_of(%Document{} = paper, dataset) do
+    case print(paper, dataset) do
+      {:ok, bytes} -> hash(bytes)
+      {:error, _} -> nil
     end
   rescue
     Barkpark.PortableDoc.Bpml.UnprintableError -> nil
