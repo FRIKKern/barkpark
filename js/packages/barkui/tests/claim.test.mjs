@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { MATCH_MIN } from '../check/reading.mjs'
-import { ladderClaim } from '../check/selftest.mjs'
+import { ladderClaim } from '../check/plants.mjs'
 
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
 
