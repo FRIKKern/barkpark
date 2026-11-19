@@ -968,6 +968,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
+              data-desk-undo-keys={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.DocUndo.names(@editor_schema)}
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page

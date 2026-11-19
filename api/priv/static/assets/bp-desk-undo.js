@@ -4,13 +4,17 @@
 // back, across fields, and another editor's words stay. The server keeps
 // the changes and writes the undo (`BarkparkWeb.Studio.Desk.DocUndo`).
 //
-// THE KEY. Mod+Z in the editor form, or anywhere in the editing pane that is
-// not a field of its own (its header, a label), or with nothing focused, is
-// the document's. Rich text and a canvas keep their own undo: a key one of
-// them took (defaultPrevented) or one pressed in a contenteditable is left
-// alone, and so is a key in a dialog. The browser's own undo of a field (the
-// Edit menu, `historyUndo`) is the document's too: the field would otherwise
-// save the browser's undo as a new edit, and the next Mod+Z put it back.
+// THE KEY. Mod+Z in a field the server keeps an undo for (the form's
+// `data-desk-undo-keys`: top-level free text), anywhere else in the editing
+// pane that is not an input (its header, a label, a button), or with nothing
+// focused, is the document's. Every other input (a slug, a url, a number, a
+// nested or list string) keeps the browser's own undo: taking the key there
+// would undo another field and leave this one's typing with no undo at all.
+// Rich text and a canvas keep their own undo: a key one of them took
+// (defaultPrevented) or one pressed in a contenteditable is left alone, and
+// so is a key in a dialog. The browser's own undo of a kept field (the Edit
+// menu, `historyUndo`) is the document's too: the field would otherwise save
+// the browser's undo as a new edit, and the next Mod+Z put it back.
 //
 // THE PUSH. Typing still in a field's delay is sent first
 // (`BarkparkFormLeave`, bp-array-focus.js); the socket keeps order, so the
@@ -37,6 +41,15 @@
     return f && desk && desk.contains(f) ? f : null;
   }
 
+  var FIELD = /^(INPUT|TEXTAREA|SELECT)$/;
+
+  // Whether `el` is a text field the server keeps an undo for.
+  function kept(f, el) {
+    var text = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type));
+    var keys = (f.getAttribute("data-desk-undo-keys") || "").split(/\s+/);
+    return text && !!el.name && keys.indexOf(el.name) !== -1;
+  }
+
   // Whether a key or a browser undo at `el` is the document's.
   function ours(el) {
     var f = form();
@@ -44,9 +57,10 @@
     if (!el || el === document.body || el === document.documentElement) return true;
     if (!el.closest || el.isContentEditable) return false;
     if (el.closest("[contenteditable], bp-paper-canvas, dialog")) return false;
+    if (FIELD.test(el.tagName)) return f.contains(el) && kept(f, el);
     if (f.contains(el)) return true;
     var pane = el.closest("[data-pane-editing]");
-    return !!pane && pane.contains(f) && !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+    return !!pane && pane.contains(f);
   }
 
   function run(redo) {

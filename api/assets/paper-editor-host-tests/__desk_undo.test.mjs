@@ -2,8 +2,10 @@
 // undo and redo keys. Mod+Z in the editor form (or with nothing focused, or
 // on the editing pane's header) pushes `desk-undo` named for the document,
 // after the typing still in a field's delay is sent; Shift+Mod+Z and Mod+Y
-// push a redo. Rich text, a dialog, another input and a key someone already
-// took are left alone. The browser's own undo of a field is the document's
+// push a redo. Only in a field the server keeps an undo for (the form's
+// `data-desk-undo-keys`): a slug, a url, a number or a nested string keeps
+// the browser's own undo. Rich text, a dialog, another input and a key
+// someone already took are left alone. The browser's own undo of a field is the document's
 // too. `desk:undone` sets the field that still shows the old value, puts the
 // caret at the end of what changed, and the focus in the field.
 //
@@ -25,9 +27,14 @@ doc.body.innerHTML =
   `<section id="list" data-pane-kind="list"><input id="search" type="search"></section>` +
   `<section id="pane" data-pane-editing><header><span class="kind" id="kind">Post</span>` +
   `<button id="menu" type="button">…</button><input id="pane-input" type="text"></header>` +
-  `<form id="editor-form" phx-value-_bp_doc='${MARK}'>` +
+  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt]" phx-value-_bp_doc='${MARK}'>` +
   `<input type="text" id="title" name="doc[title]" value="Fixture post 14">` +
   `<textarea id="excerpt" name="doc[excerpt]">Short.</textarea>` +
+  `<input type="text" id="slug" name="doc[slug]" value="fixture-post-14">` +
+  `<input type="url" id="site" name="doc[site]">` +
+  `<input type="number" id="count" name="doc[count]">` +
+  `<input type="text" id="alt" name="doc[image][alt]">` +
+  `<button type="button" id="add">Add</button>` +
   `<div contenteditable="true" id="rich">Body</div>` +
   `</form></section>` +
   `<dialog id="dialog" open><input id="dialog-input" type="text"></dialog></div>`;
@@ -108,6 +115,25 @@ check("rich text, a dialog, another input and a taken key are left alone", () =>
   key($("title"), { key: "x", metaKey: true });
   key($("title"), { key: "z" });
   assert.deepEqual(pushes, []);
+});
+
+check("a field with no undo kept (slug, url, number, nested) keeps the browser's own undo", () => {
+  for (const id of ["slug", "site", "count", "alt"]) {
+    const e = key($(id), { key: "z", metaKey: true });
+    assert.equal(e.defaultPrevented, false, `Mod+Z in #${id} is the browser's`);
+    const r = key($(id), { key: "z", metaKey: true, shiftKey: true });
+    assert.equal(r.defaultPrevented, false, `Shift+Mod+Z in #${id} is the browser's`);
+    const h = new window.InputEvent("beforeinput", { inputType: "historyUndo", bubbles: true, cancelable: true });
+    $(id).dispatchEvent(h);
+    assert.equal(h.defaultPrevented, false, `historyUndo in #${id} is the browser's`);
+  }
+  assert.deepEqual(pushes, []);
+});
+
+check("a button in the form is not a field: the key is the document's", () => {
+  const e = key($("add"), { key: "z", metaKey: true });
+  assert.equal(e.defaultPrevented, true);
+  assert.equal(pushes.length, 1);
 });
 
 check("no editor form on the desk: nothing is pushed", () => {

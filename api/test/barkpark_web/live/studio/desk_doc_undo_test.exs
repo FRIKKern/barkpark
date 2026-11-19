@@ -33,7 +33,15 @@ defmodule BarkparkWeb.Studio.DeskDocUndoTest do
           "visibility" => "public",
           "fields" => [
             %{"name" => "title", "title" => "Title", "type" => "string"},
-            %{"name" => "excerpt", "title" => "Excerpt", "type" => "text"}
+            %{"name" => "excerpt", "title" => "Excerpt", "type" => "text"},
+            %{"name" => "slug", "title" => "Slug", "type" => "slug"},
+            %{"name" => "site", "title" => "Site", "type" => "url"},
+            %{
+              "name" => "kind",
+              "title" => "Kind",
+              "type" => "string",
+              "options" => %{"list" => ["a", "b"]}
+            }
           ]
         },
         @dataset
@@ -225,6 +233,16 @@ defmodule BarkparkWeb.Studio.DeskDocUndoTest do
       render(a)
       undo(a, c)
       assert stored(c)["title"] == "Fixture post 14 B"
+    end
+  end
+
+  describe "which inputs the key is the document's in" do
+    test "the form names the top-level free-text fields only, not a slug, url or select", c do
+      view = open(c)
+      assert has_element?(view, ~s(#editor-form[data-desk-undo-keys="doc[title] doc[excerpt]"]))
+      # The fields it leaves to the browser are on the form.
+      assert has_element?(view, ~s(#editor-form [name^="doc[slug]"]))
+      assert has_element?(view, ~s(#editor-form [name="doc[site]"]))
     end
   end
 

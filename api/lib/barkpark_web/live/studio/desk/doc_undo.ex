@@ -47,6 +47,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.Panes
+  alias BarkparkWeb.Studio.Desk.PublishedView
   alias BarkparkWeb.Studio.Desk.RevisionView
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -60,6 +61,26 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   # first.
   @max_changes 100
   @max_bytes 1_000_000
+
+  @doc """
+  The form names of the fields an undo is kept for (`record/3`), space
+  separated, for the form's `data-desk-undo-keys`. `bp-desk-undo.js` takes
+  Mod+Z in these inputs only; in every other input (a slug, a url, a number,
+  a nested or list string) the browser keeps its own undo.
+  """
+  @spec names(map() | nil) :: String.t()
+  def names(schema) do
+    fields =
+      case schema do
+        %{fields: fields} when is_list(fields) -> fields
+        _ -> []
+      end
+
+    ["title" | for(%{"name" => key} <- fields, is_binary(key), do: key)]
+    |> Enum.uniq()
+    |> Enum.filter(&RemoteValues.free_text?(schema, &1))
+    |> Enum.map_join(" ", &"doc[#{&1}]")
+  end
 
   @doc """
   After the form's `autosave` post `params` (the result of handling it on
@@ -197,7 +218,9 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
 
   # An old revision or the published version is shown: nothing is written.
   defp read_only?(assigns),
-    do: RevisionView.shown?(assigns) or Panes.perspective(assigns[:desk_uri]) == :published
+    do:
+      RevisionView.shown?(assigns) or PublishedView.active?(assigns) or
+        Panes.perspective(assigns[:desk_uri]) == :published
 
   # ── State ───────────────────────────────────────────────────────────────
 
