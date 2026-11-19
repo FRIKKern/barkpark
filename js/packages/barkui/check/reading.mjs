@@ -10,18 +10,26 @@ export async function readView(page, part) {
   const frame = () => world(() => window.__barkCheck.frame())
   const shoot = async (clip) => (await page.barkCdp.send('Page.captureScreenshot', { format: 'png', clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h, scale }, captureBeyondViewport: true })).data
   const bounds = await world(([s, t]) => window.__barkCheck.boundaries(document.querySelector(s), t), [sel, part.json.textOnly ?? []])
-  const clip = await world((s) => {
-    const r = document.querySelector(s).getBoundingClientRect()
-    return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }
-  }, sel)
-  const { missing } = await world((s) => window.__barkCheck.things(document.querySelector(s)), sel)
-  if (missing.length) {
+  // The things of the view and, for any not yet drawn alone, their references. Laying out the alone sheet can
+  // move the page (the first capture beyond the viewport does), so the boxes are read again until no new
+  // reference is needed: every box below is from the layout the captures see.
+  for (let pass = 0; ; pass++) {
+    const { missing } = await world((s) => window.__barkCheck.things(document.querySelector(s)), sel)
+    if (!missing.length) break
+    if (pass === 3) throw new Error('the page kept moving while its labels were drawn alone')
     const at = await world((keys) => window.__barkCheck.alone(keys), missing)
     await frame()
     const png = await shoot(at)
     await world(([p, c, k]) => window.__barkCheck.measureAlone(p, c, k), [png, at, scale])
     await frame()
   }
+  // The stage's box, widened to whole device pixels so a capture's pixels are the page's own.
+  const clip = await world(([s, k]) => {
+    const r = document.querySelector(s).getBoundingClientRect()
+    const x = Math.floor((r.left + scrollX) * k) / k
+    const y = Math.floor((r.top + scrollY) * k) / k
+    return { x, y, w: Math.ceil((r.right + scrollX) * k) / k - x, h: Math.ceil((r.bottom + scrollY) * k) / k - y }
+  }, [sel, scale])
   const drawn = await shoot(clip)
   const without = {}
   try {

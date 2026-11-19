@@ -7,6 +7,7 @@ import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
 import { installBoundary } from './boundary.mjs'
 import { installDrawn } from './drawn.mjs'
+import { installMatch } from './match.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
 
@@ -35,6 +36,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.barkCheck = await isolate(page, 'barkui-check')
   await page.barkCheck(installHelpers)
   await page.barkCheck(installBoundary)
+  await page.barkCheck(installMatch)
   await page.barkCheck(installDrawn)
   page.barkCdp = await page.context().newCDPSession(page)
   page.barkScale = scale
