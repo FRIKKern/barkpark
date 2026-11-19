@@ -158,7 +158,9 @@ defmodule Barkpark.Content.StrengthenOnPublishTest do
         opts
       )
 
-    {:ok, _} = Content.create_document("sop_other", %{"doc_id" => "pat", "title" => "pat"}, @ds, opts)
+    {:ok, _} =
+      Content.create_document("sop_other", %{"doc_id" => "pat", "title" => "pat"}, @ds, opts)
+
     {:ok, _} = Content.publish_document("pat", "sop_other", @ds, opts)
 
     draft!("sop-wrong-type", %{"editor" => waiting("pat")}, opts)
@@ -170,7 +172,13 @@ defmodule Barkpark.Content.StrengthenOnPublishTest do
   test "a marker with weak: true goes on publish and the reference stays weak",
        %{opts: opts} do
     declared = fn id -> put_in(waiting(id), ["_strengthenOnPublish", "weak"], true) end
-    draft!("sop-declared-weak", %{"editor" => declared.("ann"), "seo" => %{"by" => declared.("cid")}}, opts)
+
+    draft!(
+      "sop-declared-weak",
+      %{"editor" => declared.("ann"), "seo" => %{"by" => declared.("cid")}},
+      opts
+    )
+
     {:ok, _} = Content.publish_document("sop-declared-weak", @post, @ds, opts)
     content = published_content("sop-declared-weak", opts)
 
