@@ -195,8 +195,9 @@ again. The selftest copies one part, so its time does not grow with the parts fo
 
 ## What the check proves about a label, and no more
 
-Every label in the showroom, as built, matches its reference at 1.00 on macOS and on Linux, on every
-surface and at 390px. A label must match at 0.975 or more. What that limit costs is measured by the
+Every label in the showroom, as built, matches its reference at 0.995 or more on macOS and on Linux, on
+every surface, at 1440px and at 390px (the check prints the lowest on every run; in the last runs it was
+1.000 on macOS and 0.995 on Linux, the "Sizes" heading at 390px). A label must match at 0.975 or more. What that limit costs is measured by the
 selftest's ladder, which cuts and covers one label step by step, and the selftest fails until this
 sentence moves with it: a ten-letter label 74 px wide (in CI, on Linux; 70 px on macOS) turns the
 lights off when its last 3 px are cut away, when a 5 px square of its ground covers its end, or when a
