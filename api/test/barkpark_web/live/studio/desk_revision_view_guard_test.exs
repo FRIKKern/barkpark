@@ -254,6 +254,10 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       for params <- [%{"field" => "title"}, %{"field" => "summary"}, %{"all" => "true"}],
           do: render_hook(view, "desk-field-revert", Map.merge(own_mark(d), params))
 
+      # The document's undo and redo (`DocUndo`).
+      for redo <- [false, true],
+          do: render_hook(view, "desk-undo", Map.put(own_mark(d), "redo", redo))
+
       for {event, params} <- [
             {"sidebar-label-add", %{"value" => "x"}},
             {"duplicate-doc", %{}},
