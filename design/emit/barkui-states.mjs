@@ -18,11 +18,12 @@
 //   - A state keeps its fill's colour: a soft fill's states keep its OKLCH hue
 //     within 1 degree and at least SOFT_FLOOR chroma; a primary fill's keep its
 //     hue within 1 degree; a grey muted fill's gain at most GREY_GAIN chroma.
-//   - A soft fill's hover and pressed are steps toward the tone itself. Where a
-//     state moves toward the lightness of the tone's solid fill, its chroma
-//     moves the same fraction of the way toward the solid's chroma (inside sRGB
-//     by lowering chroma, never by turning the hue). Every state keeps at least
-//     the rest fill's chroma.
+//   - A soft fill's hover and pressed are steps toward the tone itself. A state
+//     moving toward the lightness of the tone's solid fill follows the fraction
+//     rule: its chroma moves the same fraction of the way toward the solid's
+//     chroma (inside sRGB by lowering chroma, never by turning the hue). A state
+//     moving away from the solid keeps its hue within 1 degree and the rest
+//     fill's chroma.
 
 import { contrast, oklchToSrgb, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
 

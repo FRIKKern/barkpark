@@ -697,14 +697,7 @@ test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, w
 //     chroma; primary states keep its hue within 1 degree; muted states gain at
 //     most 0.002 chroma.
 //   - A fill that stands 3:1 off its ground at rest still does in both states.
-//   - A soft fill's hover and pressed are steps toward the tone itself: where a
-//     state moves toward the lightness of the tone's solid fill (--bark-<tone>
-//     on that surface), its chroma moves the same fraction of the way toward
-//     the solid's chroma (less only where sRGB ends at that hue), so each state
-//     is stronger than the one before. Every state keeps at least the rest
-//     fill's chroma. Chroma is read within SOFT_PRESS_TOL, the 8-bit rounding.
 const STATE = { step: 1.12, stepL: 0.03, ground: 1.1, hue: 1, softC: 0.016, greyGain: 0.002 };
-const SOFT_PRESS_TOL = 0.004;
 const STATE_FILLS = [["primary", "primary-foreground", "primary"], ["muted", "foreground", "muted"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`, "soft"])];
 const paint = (c) => parseColor(c).map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255) / 255);
 const hueOff = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
@@ -726,20 +719,6 @@ test("BarkUI sheet: every control fill has a visible hover and pressed state tha
         if (contrast(label, fills[k]) < 4.5) miss(`${lab} on ${n} is ${contrast(label, fills[k]).toFixed(2)}, under 4.5`);
         if (kind !== "muted" && hueOff(o[k].h, o[0].h) > STATE.hue) miss(`${n} is ${hueOff(o[k].h, o[0].h).toFixed(1)} degrees off the fill's hue`);
         if (kind === "soft" && o[k].C < STATE.softC) miss(`${n} has chroma ${o[k].C.toFixed(4)}, under ${STATE.softC}`);
-        if (kind === "soft") {
-          const solid = srgbToOklch(paint(get(f.replace(/-soft$/, ""))));
-          if (o[k].C < o[0].C) miss(`${n} has chroma ${o[k].C.toFixed(4)}, under the rest fill's ${o[0].C.toFixed(4)}`);
-          const toward = Math.sign(o[k].L - o[0].L) === Math.sign(solid.L - o[0].L);
-          if (toward) {
-            const frac = Math.min(1, (o[k].L - o[0].L) / (solid.L - o[0].L));
-            const want = Math.max(o[0].C, o[0].C + frac * (solid.C - o[0].C)), room = maxChroma(o[k].L, o[0].h);
-            const target = Math.min(want, room);
-            if (Math.abs(o[k].C - target) > SOFT_PRESS_TOL) miss(`${n} has chroma ${o[k].C.toFixed(4)}, not ${target.toFixed(4)} (${frac.toFixed(2)} of the way to the solid's ${solid.C.toFixed(3)})`);
-            // stronger than the state before wherever the rule asks for more than the rounding
-            const before = k === 1 ? o[0].C : Math.min(Math.max(o[0].C, o[0].C + Math.min(1, (o[1].L - o[0].L) / (solid.L - o[0].L)) * (solid.C - o[0].C)), maxChroma(o[1].L, o[0].h));
-            if (target - before > SOFT_PRESS_TOL && o[k].C <= o[k - 1].C) miss(`${n} is no stronger than the state before (chroma ${o[k].C.toFixed(4)} after ${o[k - 1].C.toFixed(4)})`);
-          }
-        }
         if (kind === "muted" && o[k].C > o[0].C + STATE.greyGain) miss(`${n} gains chroma ${(o[k].C - o[0].C).toFixed(4)}`);
       }
       if (contrast(label, rest) < 4.5) miss(`${lab} on rest is ${contrast(label, rest).toFixed(2)}, under 4.5`);
@@ -748,6 +727,46 @@ test("BarkUI sheet: every control fill has a visible hover and pressed state tha
         const end = contrast(rest, contrast(rest, [0, 0, 0]) >= contrast(bg, [0, 0, 0]) ? [1, 1, 1] : [0, 0, 0]);
         if (end >= STATE.step ** 2) miss(`moves toward its ground with ${end.toFixed(3)}:1 of room away from it`);
         if (g[2] < 3) miss(`moves toward its ground and ends ${g[2].toFixed(2)}:1 off it, under 3`);
+      }
+    }
+  });
+  assert.deepEqual(misses, []);
+});
+
+// A soft fill's hover and pressed are steps toward the tone itself, judged by
+// where the tone's solid fill (--bark-<tone> on that surface) sits:
+//   - a state moving toward the solid's lightness takes the rest chroma moved
+//     the same fraction of the way toward the solid's chroma (less only where
+//     sRGB ends at that hue), so it is stronger than the state before;
+//   - a state moving away from it keeps its hue within 1 degree and the rest
+//     chroma.
+// Chroma is read on the 8-bit colour; one 8-bit rounding moves it by at most
+// SOFT_ROUND. A single reading against the rule's value may be off by that
+// much (SOFT_TARGET_TOL adds a little); comparing two states reads two rounded
+// colours, so "stronger than the state before" allows two roundings.
+const SOFT_ROUND = 0.0021, SOFT_TARGET_TOL = 0.0025, SOFT_BEFORE_TOL = 0.004;
+test("BarkUI sheet: a soft state moving away from its solid keeps its hue within 1 degree and the rest chroma; one moving toward it follows the fraction rule", () => {
+  const misses = [];
+  eachSurface((at, mode, s, get) => {
+    for (const t of TONES) {
+      const o = ["", "-hover", "-pressed"].map((x) => srgbToOklch(paint(get(`${t}-soft${x}`))));
+      const solid = srgbToOklch(paint(get(t)));
+      const miss = (m) => misses.push(`${at}: ${t}-soft ${m}`);
+      const ruled = (l) => {
+        const frac = Math.min(1, (l - o[0].L) / (solid.L - o[0].L));
+        return [frac, Math.min(Math.max(o[0].C, o[0].C + frac * (solid.C - o[0].C)), maxChroma(l, o[0].h))];
+      };
+      for (const k of [1, 2]) {
+        const n = k === 1 ? "hover" : "pressed";
+        if (Math.sign(o[k].L - o[0].L) !== Math.sign(solid.L - o[0].L)) {
+          if (hueOff(o[k].h, o[0].h) > STATE.hue) miss(`${n} moves away from the solid and is ${hueOff(o[k].h, o[0].h).toFixed(2)} degrees off the rest hue`);
+          if (Math.abs(o[k].C - o[0].C) > SOFT_ROUND) miss(`${n} moves away from the solid with chroma ${o[k].C.toFixed(4)}, not the rest fill's ${o[0].C.toFixed(4)}`);
+          continue;
+        }
+        const [frac, target] = ruled(o[k].L);
+        if (Math.abs(o[k].C - target) > SOFT_TARGET_TOL) miss(`${n} has chroma ${o[k].C.toFixed(4)}, not ${target.toFixed(4)} (${frac.toFixed(2)} of the way to the solid's ${solid.C.toFixed(3)})`);
+        const before = k === 1 ? o[0].C : ruled(o[1].L)[1];
+        if (target - before > SOFT_BEFORE_TOL && o[k].C <= o[k - 1].C) miss(`${n} is no stronger than the state before (chroma ${o[k].C.toFixed(4)} after ${o[k - 1].C.toFixed(4)})`);
       }
     }
   });
