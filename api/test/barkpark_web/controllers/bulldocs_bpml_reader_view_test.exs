@@ -1,8 +1,7 @@
 defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   @moduledoc """
-  Every BPML answer about a Paper prints the reader's view of it
-  (`Papers.BpmlView`): the pull, its title, and the answers to a push that
-  updates or creates the Paper. And a push compares against that view, so a
+  The pull (its title included) and the answers to a push that updates or
+  creates a Paper print the reader's view of it (`Papers.BpmlView`). And a push compares against that view, so a
   block that spells as the pull showed it is not edited.
 
   The Paper's schema hides a block field (`text`) and the description, so the

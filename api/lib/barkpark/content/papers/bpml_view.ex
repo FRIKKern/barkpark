@@ -6,8 +6,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
   It is a function of the row alone: the anonymous reader's redaction under
   the Paper's own schema (`Content.Papers.reader_source_with_schema/3`), task
   blocks resolved for the given perspective, and the redacted label fields
-  (`Content.Papers.anonymous_content/2`). Every BPML answer about the row
-  prints it: the pull, and the answer to a push. A push compares against it,
+  (`Content.Papers.anonymous_content/2`). The pull, push and create answers
+  print it. A push compares against it,
   so a block that spells the same as its view block was not edited.
   """
 
@@ -42,7 +42,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
 
   @doc """
   `paper`'s view printed as `bp paper pull` gets it (flat route, published
-  task rows): the bytes every BPML answer about the row carries. Raises
+  task rows): the bytes the pull, push and create answers carry. Raises
   `Bpml.UnprintableError` when the view does not print.
   """
   @spec print(Document.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
