@@ -809,6 +809,13 @@ defmodule BarkparkWeb.StudioLocale do
       "Primary" => gettext("Primary"),
       "Pullquote" => gettext("Pullquote"),
       "Quote" => gettext("Quote"),
+      "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet." =>
+        gettext(
+          "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.",
+          part: "%{part}",
+          number: "%{number}",
+          type: "%{type}"
+        ),
       "Reference" => gettext("Reference"),
       "registry-backed enum" => gettext("registry-backed enum"),
       "Remove" => gettext("Remove"),
@@ -830,13 +837,6 @@ defmodule BarkparkWeb.StudioLocale do
       "single-line value" => gettext("single-line value"),
       "Slug" => gettext("Slug"),
       "source" => gettext("source"),
-      "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet." =>
-        gettext(
-          "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.",
-          part: "%{part}",
-          number: "%{number}",
-          type: "%{type}"
-        ),
       "stack" => gettext("stack"),
       "Stage" => gettext("Stage"),
       "Start typing, or press / for blocks…" => gettext("Start typing, or press / for blocks…"),

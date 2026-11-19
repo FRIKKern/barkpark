@@ -6317,7 +6317,7 @@ msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:834
 #, elixir-autogen, elixir-format
-msgid "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
+msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:674
@@ -15511,4 +15511,24 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/validation_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Username/password not allowed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Perspective"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Close menu"
 msgstr ""

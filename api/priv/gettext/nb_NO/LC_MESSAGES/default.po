@@ -6317,8 +6317,8 @@ msgstr "kilde"
 
 #: lib/barkpark_web/studio_locale.ex:834
 #, elixir-autogen, elixir-format
-msgid "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
-msgstr "Kildemodus holdes lukket: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}) ennå."
+msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
+msgstr "Bare lesing: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}) ennå."
 
 #: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
@@ -15514,3 +15514,23 @@ msgstr "Stemmer ikke overens med tillatte protokoller/skjemaer"
 #, elixir-autogen, elixir-format
 msgid "Username/password not allowed"
 msgstr "Brukernavn/passord er ikke tillatt"
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Perspective"
+msgstr "Perspektiv"
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts"
+msgstr "Utkast"
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Menu"
+msgstr "Meny"
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Close menu"
+msgstr "Lukk meny"
