@@ -36,9 +36,11 @@ export function foundationHash() {
   ])
 }
 
-/** Showroom only: `data-pin="hover"` (or active, focus-visible) holds that state for viewing. */
+/** Showroom only: `data-pin="hover"` (or active, focus-visible) holds that state for viewing. Selectors ignore
+    case, so this does too; the check reads every part's pinned rules back from the browser and refuses a state
+    the pin did not reach (check/cssom.mjs). */
 export function pinStates(css) {
-  return css.replace(/(?<!\(\s*(?:any-)?hover\s*):(hover|active|focus-visible)(?![-\w])/g, (_, s) => `:is(:${s}, [data-pin~="${s}"])`)
+  return css.replace(/(?<!\(\s*(?:any-)?hover\s*):(hover|active|focus-visible)(?![-\w])/gi, (_, s) => `:is(:${s.toLowerCase()}, [data-pin~="${s.toLowerCase()}"])`)
 }
 
 // `bare` leaves every demo out of the script: the check's baseline for what the
