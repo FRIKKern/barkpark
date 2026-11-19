@@ -55,6 +55,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.DocStyle
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
+  alias BarkparkWeb.Studio.Desk.Vision
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -103,6 +104,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
+      # The desk's own tool in place of the panes (`Vision`), from the URL.
+      |> assign(:desk_tool, nil)
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
       |> assign(:desk_scope, nil)
       |> Bulk.init()
@@ -133,6 +136,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
         if base = socket.assigns[:base],
           do: {:noreply, redirect(socket, to: base)},
           else: raise(NotFound)
+
+      # The desk's Vision: the desk's page with the query tool for its panes.
+      params["panes"] == ["_tools", "vision"] ->
+        {:noreply, socket} = follow(Map.delete(params, "panes"), uri, socket)
+        {:noreply, assign(socket, desk_tool: :vision, page_title: gettext("Vision"))}
 
       true ->
         follow(params, uri, socket)
@@ -199,6 +207,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         # `Shared.studio_path/4` prints the Studio's own navigation as desk URLs.
         desk_base: base,
         desk_uri: uri,
+        desk_tool: nil,
         titles: titles,
         page_title: titles[last.id] || kept_title(socket.assigns, last) || last.title
       )
@@ -493,6 +502,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <DocStyle.sheet />
     <BarkparkWeb.Studio.Desk.NavbarStyle.sheet />
     <BarkparkWeb.Studio.Desk.NavDrawerStyle.sheet />
+    <BarkparkWeb.Studio.Desk.VisionStyle.sheet :if={@desk_tool == :vision} />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <%!-- The search is a dialog, as the TanStack Studio's: the navbar's
           search button (`data-desk-search-open`), Cmd+K and "/" open it
@@ -536,12 +546,15 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-image={BarkparkWeb.StaticAssets.path("bp-desk-image.js")}
       data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       data-desk-undo={BarkparkWeb.StaticAssets.path("bp-desk-undo.js")}
+      data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >
+      <%!-- The desk's Vision (`Desk.Vision`) in place of the panes. --%>
+      <Vision.tool :if={@desk_tool == :vision} dataset={@dataset} scope_prefix={@scope_prefix} />
       <%!-- One loop, so the panes are in the page in chain order: the layout
             and the keys read that order. --%>
-      <%= for view <- @desk_panes do %>
+      <%= for view <- @desk_panes, @desk_tool != :vision do %>
       <%!-- The editor's section has an id of its own. On the pane's id the
             patch turned the pane into the editor in place, so the browser
             never let the pane's component go; a Back to that document then

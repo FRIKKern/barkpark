@@ -69,6 +69,10 @@ on:
       # change it exists to catch — the stylesheet could drift from the shipped
       # asset and every js PR after it would stay green on the stale copy.
       - "api/assets/paper-surface/**"
+      # The BarkUI skins. js/packages/barkui builds its showroom from this sheet
+      # and its browser check proves every part paints each skin's values, so a
+      # regenerated sheet must run that check here.
+      - "api/priv/barkui/**"
   pull_request:
     paths:
       - "js/**"
@@ -124,6 +128,10 @@ on:
       # change it exists to catch — the stylesheet could drift from the shipped
       # asset and every js PR after it would stay green on the stale copy.
       - "api/assets/paper-surface/**"
+      # The BarkUI skins. js/packages/barkui builds its showroom from this sheet
+      # and its browser check proves every part paints each skin's values, so a
+      # regenerated sheet must run that check here.
+      - "api/priv/barkui/**"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
@@ -135,6 +143,8 @@ jobs:
   test:
     name: Build + test + gates
     runs-on: ubuntu-latest
+    # A hung step must not hold every js PR for hours; each BarkUI step has its own, shorter limit.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: js
@@ -379,6 +389,103 @@ jobs:
         # coverage artifact ever existed. One blocking run, no coverage flag;
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
+
+      # Whether this change touches BarkUI: its showroom check and selftest run only
+      # then, on a change to js/packages/barkui/**, the tokens sheet
+      # (api/priv/barkui/**), this workflow, js/package.json (pnpm overrides), or
+      # js/pnpm-lock.yaml where the changed lines name one of BarkUI's own
+      # dependencies (a Playwright bump brings a new Chromium, which can move the
+      # pixel readings). PR: the diff from the merge base (fetch-depth 0).
+      # Push: the diff from the previous head, fetched here (the clone is
+      # shallow). --no-renames lists both sides of a move, so moving a BarkUI file
+      # out counts. Any failure to work out the diff RUNS both.
+      - name: "BarkUI: did this change touch it?"
+        id: barkui
+        run: |
+          set +e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(git -C .. diff --name-only --no-renames "origin/${{ github.base_ref }}...HEAD")
+            status=$?
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            git -C .. fetch --quiet --depth=1 origin "${{ github.event.before }}" &&
+              files=$(git -C .. diff --name-only --no-renames "${{ github.event.before }}" "${{ github.sha }}")
+            status=$?
+          else
+            status=1
+          fi
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the check and the selftest"; exit 0
+          fi
+          deps=$(node -e "const p = require('./packages/barkui/package.json'); console.log(Object.keys({ ...p.dependencies, ...p.devDependencies }).join('|'))")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then range="origin/${{ github.base_ref }}...HEAD"; else range="${{ github.event.before }} ${{ github.sha }}"; fi
+          lockstatus=0
+          if printf '%s\n' "$files" | grep -qx 'js/pnpm-lock.yaml'; then
+            lock=$(git -C .. diff --no-renames $range -- js/pnpm-lock.yaml) || lockstatus=$?
+          else
+            lock=""
+          fi
+          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|js/package\.json$|\.github/workflows/js-tests\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the check and the selftest"
+          elif [ "$lockstatus" -ne 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: lockfile diff unknown (status $lockstatus), running the check and the selftest"
+          elif printf '%s\n' "$lock" | grep -E '^[-+]' | grep -qE "($deps)"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: the lockfile moves one of its dependencies, running the check and the selftest"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the check and the selftest"
+          fi
+
+      # BarkUI's showroom check: builds js/packages/barkui's static page and
+      # presses every part with real keys in the Chromium installed above, then
+      # proves each skin, light and dark, on every surface, a 390px window and a
+      # script-free print, reading every label and graphic from pixels. Its limit
+      # below is STEP_MINUTES in check/capacity.mjs (a test holds them equal): the
+      # check refuses to run with more parts than that holds, and stops, failing,
+      # once a run passes its ceiling, under this limit.
+      # Reds on a part folder missing a file, a failed press step, a light that
+      # does not come on, any page error or network request, or a step or part
+      # past its time limit (check/proofs.mjs, check/check.mjs).
+      - name: "BarkUI showroom check (real keys in Chromium)"
+        if: steps.barkui.outputs.run != 'false'
+        timeout-minutes: 15
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/barkui run check 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          case "$out" in
+            *"No projects matched the filters"*)
+              echo "barkui check FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
+              exit 1
+              ;;
+          esac
+          exit "$status"
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds README.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit.
+      - name: "BarkUI showroom check selftest (each planted break turns its light off)"
+        if: steps.barkui.outputs.run != 'false'
+        timeout-minutes: 10
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          case "$out" in
+            *"No projects matched the filters"*)
+              echo "barkui selftest FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
+              exit 1
+              ;;
+          esac
+          exit "$status"
 
       # REGISTRATION for js/scripts/check-vitest-projects.mjs, added by the PR
       # that creates it. Execution floor for every project js/vitest.config.mts

@@ -404,6 +404,9 @@ type Worker struct {
 	// ShutdownDeadline bounds a graceful shutdown's grace window (dwb-15). Zero →
 	// DefaultShutdownDeadline. See Shutdown.
 	ShutdownDeadline time.Duration
+	// WarmPoolTarget is the configured WARM_POOL_SIZE (0 = pool off), reported to
+	// the control plane on every provision claim. See warmpool_target.go.
+	WarmPoolTarget int
 
 	// ── graceful-shutdown coordination (dwb-15) ──
 	// drainMu guards the in-flight-job handoff between the claim loop (RunOnce) and
@@ -898,6 +901,7 @@ func (w *Worker) claim(ctx context.Context) (JobSpec, bool, error) {
 		return JobSpec{}, false, err
 	}
 	w.authorize(req)
+	w.stampWarmPoolTarget(req)
 
 	resp, err := w.httpClient().Do(req)
 	if err != nil {

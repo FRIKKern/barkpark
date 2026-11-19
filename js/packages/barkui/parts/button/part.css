@@ -1,0 +1,110 @@
+/* Button: UI SDK's <ui-button> around a native <button data-slot="button">.
+   Variant by data-variant: none = secondary, "solid" = primary, "ghost" = quiet,
+   "destructive". Size by data-size: "sm", none, "lg" (28, 36, 44px on a 4px grid).
+   States come in pairs: a state that changes the ground names its text colour too.
+   The destructive look is the sheet's soft fill with its tone's text (--bark-danger-soft, --bark-danger-text);
+   its edge is that text too, the one tone token that marks the control at 3:1 or more against the ground.
+   Hover and pressed are the sheet's state fills for each look (--ui-muted-hover/-pressed for secondary and
+   quiet, --ui-primary-hover/-pressed, --bark-danger-soft-hover/-pressed); no tint is mixed here or in base.css.
+   The focus ring is base.css's, drawn once for every part. */
+[data-slot="button"] {
+  --bark-button-height: calc(var(--ui-spacing) * 9);
+  --bark-button-pad: calc(var(--ui-spacing) * 3.5);
+  --bark-button-text: 0.875rem;
+
+  --bark-button-bg: var(--ui-background);
+  --bark-button-fg: var(--ui-foreground);
+  --bark-button-edge: var(--ui-input);
+  --bark-button-hover-bg: var(--ui-muted-hover);
+  --bark-button-hover-fg: var(--ui-foreground);
+  --bark-button-hover-edge: var(--ui-input);
+  --bark-button-press-bg: var(--ui-muted-pressed);
+  --bark-button-press-fg: var(--ui-foreground);
+
+  height: var(--bark-button-height);
+  min-width: var(--bark-button-height);
+  padding-inline: var(--bark-button-pad);
+  gap: calc(var(--ui-spacing) * 2);
+  border: 1px solid var(--bark-button-edge);
+  border-radius: var(--ui-radius);
+  background: var(--bark-button-bg);
+  color: var(--bark-button-fg);
+  font-size: var(--bark-button-text);
+  font-weight: 500;
+  line-height: 1;
+  /* The shorthand on purpose: it also clears the 0.3s delay UI SDK's sheet sets for its pending fade. */
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+
+  &[data-size="sm"] {
+    --bark-button-height: calc(var(--ui-spacing) * 7);
+    --bark-button-pad: calc(var(--ui-spacing) * 2.5);
+    --bark-button-text: 0.8125rem;
+  }
+  &[data-size="lg"] {
+    --bark-button-height: calc(var(--ui-spacing) * 11);
+    --bark-button-pad: calc(var(--ui-spacing) * 5);
+    --bark-button-text: 0.9375rem;
+  }
+
+  &[data-variant="solid"] {
+    --bark-button-bg: var(--ui-primary);
+    --bark-button-fg: var(--ui-primary-foreground);
+    --bark-button-edge: var(--ui-primary);
+    --bark-button-hover-bg: var(--ui-primary-hover);
+    --bark-button-hover-fg: var(--ui-primary-foreground);
+    --bark-button-hover-edge: var(--ui-primary-hover);
+    --bark-button-press-bg: var(--ui-primary-pressed);
+    --bark-button-press-fg: var(--ui-primary-foreground);
+  }
+  &[data-variant="ghost"] {
+    --bark-button-bg: transparent;
+    --bark-button-edge: transparent;
+    --bark-button-hover-edge: transparent;
+  }
+  &[data-variant="destructive"] {
+    --bark-button-bg: var(--bark-danger-soft);
+    --bark-button-fg: var(--bark-danger-text);
+    --bark-button-edge: var(--bark-danger-text);
+    --bark-button-hover-bg: var(--bark-danger-soft-hover);
+    --bark-button-hover-fg: var(--bark-danger-text);
+    --bark-button-hover-edge: var(--bark-danger-text);
+    --bark-button-press-bg: var(--bark-danger-soft-pressed);
+    --bark-button-press-fg: var(--bark-danger-text);
+  }
+
+  &:hover:not([data-disabled]) {
+    border-color: var(--bark-button-hover-edge);
+    background: var(--bark-button-hover-bg);
+    color: var(--bark-button-hover-fg);
+  }
+  &:active:not([data-disabled], [data-pending]) {
+    background: var(--bark-button-press-bg);
+    color: var(--bark-button-press-fg);
+  }
+
+  &[data-disabled] {
+    border-color: transparent;
+    background: var(--ui-muted);
+    color: var(--ui-muted-foreground);
+    opacity: 1;
+    cursor: not-allowed;
+  }
+  &[data-variant="ghost"][data-disabled] { background: transparent; }
+
+  /* Pending: the label stays, a spinner takes the icon's place, presses are refused. */
+  &[data-pending] { filter: none; cursor: progress; }
+  &:not([data-pending]) [data-show="pending"],
+  &[data-pending] [data-show="idle"] { display: none; }
+
+  & > svg { width: 1rem; height: 1rem; }
+  & > [data-slot="spinner"] {
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: bark-spin 0.7s linear infinite;
+  }
+  &[aria-label]:has(> svg:only-child) { width: var(--bark-button-height); padding: 0; }
+}
+

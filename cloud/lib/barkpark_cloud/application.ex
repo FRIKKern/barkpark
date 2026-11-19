@@ -58,6 +58,10 @@ defmodule BarkparkCloud.Application do
         # worker's claim. In-memory by LAW (never-keeps custody): a restart
         # empties it and the pending job fails honestly at claim time.
         BarkparkCloud.Registry.AgentKeyStash,
+        # The warm-pool size the Go worker last reported on its job poll, so
+        # GET /v1/operator/warm-pool can say whether the worker will use the
+        # ready boxes. In memory: a restart reads "unknown" until the next poll.
+        BarkparkCloud.Registry.WarmPoolTarget,
         # azure-retail-pricing: an ETS-backed ~24h cache of Azure's global,
         # UNAUTHENTICATED Retail Prices sheet (no tenant, no credential), read to
         # stamp real monthly USD onto the neutral catalog's azure server types.
