@@ -53,9 +53,22 @@
 // Each tone also has a soft fill, -soft, for soft controls (a destructive
 // button, a soft badge) that draw the tone's -text on it: the tone's hue and
 // chroma at a lightness 1.1:1 off the ground, on the side away from the label
-// where the lightness range allows (else toward it). On every computed surface
-// a -text that does not read at 4.5:1 on its -soft is walked until it does;
-// base's own -text values read on base's -soft as they are.
+// where the lightness range allows (else toward it) and where its hover and
+// pressed fit. On every surface a -text that does not read at 4.5:1 on its
+// -soft, or on its hover and pressed, is walked until it does (labels give way
+// to their fill's states; design/emit/barkui-states.mjs).
+//
+// On a neutral ground (base, raised, sunken, inverse) a tone's text keeps its
+// tone: Studio's hue and most of its chroma. On a brand ground (BRAND_SURFACES)
+// status is carried by the fill: there a tone's text only has to read at 4.5:1
+// on its soft fill and on the ground, and walking it that far may take most of
+// its colour.
+//
+// On each ground the muted fill and the soft fills sit on one side (sideOf):
+// away from the label where every one of them fits there with both its steps,
+// else on the label's side. A dark ground has no room below for the muted fill,
+// so in dark mode muted sits above the page (not Studio's muted-surface, which
+// sits below it), with its muted-foreground walked on it.
 //
 // Depth is the BarkUI base's: each surface's ground moved in OKLCH lightness by
 // n x 0.02 up / 0.022 down (light) or n x 0.045 up / 0.02 down (dark), hue and
@@ -63,20 +76,27 @@
 // lighter, so positive depth there equals the ground and the elevation comes
 // from the depth shadow, as in the base.
 
-import { aaWalk, contrast, maxChroma, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
+import { aaWalk, contrast, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
+import { paint, stateNames, statesOf, stepsFor } from "./barkui-states.mjs";
 
 export const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 export const TONES = ["success", "warning", "danger", "info"];
 const TONE_ROLES = TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]);
+// Every fill a control can have, with its label and its kind: the primary fill,
+// the muted fill a secondary control takes, and each tone's soft fill (a
+// destructive control is the danger tone's soft fill). Each gets -hover and
+// -pressed (design/emit/barkui-states.mjs).
+const STATE_FILLS = [["primary", "primary-foreground", "primary"], ["muted", "foreground", "muted"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`, "soft"])];
 export const SURFACE_ROLES = [
   "background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
   ...TONE_ROLES, "destructive",
+  ...STATE_FILLS.flatMap(([fill]) => stateNames(fill)),
 ];
 export const DEPTHS = [-2, -1, 1, 2, 3];
 export const depthKey = (n) => (n < 0 ? `m${-n}` : String(n));
 // The name a part reads for a role: UI SDK's --ui-* or BarkUI's --bark-*.
-const BARK_ROLES = new Set(["accent", "selected", ...TONE_ROLES]);
+const BARK_ROLES = new Set(["accent", "selected", ...TONE_ROLES, ...TONES.flatMap((t) => stateNames(`${t}-soft`))]);
 export const pointedName = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 
 const SUNKEN_LIGHT = 0.028;
@@ -84,8 +104,8 @@ const DARK_SUNKEN_STEP = 1.05; // a dark sunken ground off base; its rim does th
 const RIM_STEP = 1.25; // a sunken well's inset rim off the base ground it is cut into
 const SOFT_STEP = 1.1; // a tone's soft fill off its ground: visibly tinted
 const SOFT_CHROMA = 0.06; // a soft fill's OKLCH chroma, where the gamut allows it
-const SOFT_CHROMA_SIDE = 0.025; // a side whose tint keeps this much chroma is taken
-const DARK_GROUND = 0.3; // under this OKLCH lightness a ground has no room below it for a visible tint
+// The surfaces whose ground is the brand colour, not a neutral one.
+export const BRAND_SURFACES = ["primary"];
 const MUTED_STEP = 1.2; // the primary surface's disabled fill off its ground
 const DEPTH_STEP = { light: { up: 0.02, down: 0.022 }, dark: { up: 0.045, down: 0.02 } };
 const DARK_FLOOR = 0.145;
@@ -166,35 +186,69 @@ function tonesOn(b, ground) {
   return out;
 }
 
-// A tone's soft fill on `ground`, for the label `text`: the tone's own OKLCH
-// hue at chroma SOFT_CHROMA (less where the gamut ends), at the lightness that
-// stands SOFT_STEP:1 off the ground. On a dark ground it goes lighter, the only
-// side with room for colour; elsewhere it takes the side away from the label if
-// the tint keeps at least SOFT_CHROMA_SIDE there, else the side where it does
-// (on a white ground only darker keeps any colour). The label is walked after.
-function softOn(fill, text, ground) {
+// The side of its ground the soft fills and the muted fill sit on, chosen per
+// ground so that every such button on one ground presses the same way: the side
+// away from the label if every one of them fits there (its rest fill and both
+// steps, hover and pressed); otherwise all of them sit on the label's side.
+// Sides are by the painted luminance, as contrast measures them; a candidate
+// that paints the same as its ground is on neither side. So on a dark ground,
+// where the muted fill has no room below, every one of them sits above.
+const lighter = (a, b) => contrast(a, "#000000") > contrast(b, "#000000");
+export const sideOfGround = (c, ground) => Math.sign(contrast(paint(c), "#000000") - contrast(paint(ground), "#000000"));
+// `fills` maps a role to [kind, candidates]; returns the role -> colour the ground's side picks.
+function sideOf(ground, label, fills) {
+  const labelSide = sideOfGround(label, ground);
+  const pick = (side) => Object.fromEntries(Object.entries(fills).map(([role, [, cs]]) => [role, cs.find((c) => c && sideOfGround(c, ground) === side)]));
+  const far = pick(-labelSide), near = pick(labelSide);
+  const fits = Object.entries(fills).every(([role, [kind]]) => far[role] && stepsFor(kind, far[role], ground));
+  const out = fits ? far : near;
+  for (const [role, c] of Object.entries(out)) if (!c) throw new Error(`barkui: ${role} has no fill on the label's side of its ground`);
+  return out;
+}
+
+// A tone's soft fill on `ground`, one candidate on each side: the tone's own
+// OKLCH hue at chroma SOFT_CHROMA (less where the gamut ends), at the lightness
+// that stands SOFT_STEP:1 off the ground. sideOf picks the side.
+export function softSides(fill, ground) {
   const { h } = srgbToOklch(fill);
   const at = (dir) => {
     for (let l = L(ground) + dir * 0.002; l >= 0 && l <= 1; l += dir * 0.002) {
       const rgb = oklchToSrgb(l, SOFT_CHROMA, h);
-      if (contrast(rgb, ground) >= SOFT_STEP + 0.005) return { rgb, c: Math.min(SOFT_CHROMA, maxChroma(l, h)) };
+      // the side is the side by luminance, as contrast measures it, not by OKLCH lightness
+      if (lighter(rgb, ground) === dir > 0 && contrast(rgb, ground) >= SOFT_STEP + 0.005) return css(rgb);
     }
     return null;
   };
-  const away = L(ground) < DARK_GROUND ? 1 : L(text) >= L(ground) ? -1 : 1;
-  const sides = [at(away), at(-away)].filter(Boolean);
-  const pick = sides.find((x) => x.c >= SOFT_CHROMA_SIDE) ?? sides.sort((x, y) => y.c - x.c)[0];
-  return css(pick.rgb);
+  return [at(-1), at(1)];
 }
 
-// Each tone's -soft on surface `s`; on a computed surface (`walk`), a -text
-// that does not read at 4.5:1 on its soft fill is walked until it does.
-function withSofts(s, walk) {
+// A surface with hover and pressed for every control fill. The step is fixed;
+// the label gives way: it is walked away from its fill until it reads 4.5:1 on
+// rest, hover and pressed, one label for all three.
+function withStates(s, at) {
   const out = { ...s };
-  for (const t of TONES) {
-    out[`${t}-soft`] = softOn(s[t], s[`${t}-text`], s.background);
-    if (walk) out[`${t}-text`] = walkTo(s[`${t}-text`], [s.background, out[`${t}-soft`]], 4.5, L(s[`${t}-text`]) >= L(s.background) ? 1 : -1);
+  for (const [fill, , kind] of STATE_FILLS)
+    [out[`${fill}-hover`], out[`${fill}-pressed`]] = statesOf(kind, s[fill], s.background, `${at}: ${fill}`);
+  for (const [fill, label] of STATE_FILLS) {
+    // a label that reads on the ground (a tone's text) keeps reading there too
+    const on = [fill, `${fill}-hover`, `${fill}-pressed`].map((n) => out[n]);
+    if (contrast(out[label], s.background) >= 4.5) on.push(s.background);
+    out[label] = walkTo(out[label], on, 4.5, L(out[label]) >= L(out[fill]) ? 1 : -1);
   }
+  return out;
+}
+// Surface `s` with its muted fill and each tone's -soft on the side sideOf
+// picks for its ground (the muted fill as given, or mirrored across the ground
+// by the same lightness). A muted fill that moves has its muted-foreground
+// walked on it; on a computed surface (`walk`) a -text that does not read at
+// 4.5:1 on its soft fill is walked until it does.
+function withSofts(s, walk) {
+  const fills = { muted: ["muted", [s.muted, atL(s.muted, 2 * L(s.background) - L(s.muted))]] };
+  for (const t of TONES) fills[`${t}-soft`] = ["soft", softSides(s[t], s.background)];
+  const out = { ...s, ...sideOf(s.background, s.foreground, fills) };
+  if (out.muted !== s.muted) out["muted-foreground"] = walkTo(s["muted-foreground"], out.muted, 4.5);
+  if (walk) for (const t of TONES)
+    out[`${t}-text`] = walkTo(s[`${t}-text`], [s.background, out[`${t}-soft`]], 4.5, L(s[`${t}-text`]) >= L(s.background) ? 1 : -1);
   return out;
 }
 
@@ -237,9 +291,14 @@ export function surfaceValues(base, raisedGround, primaryRing) {
       ...tonesOn(b, ground),
     };
     const rg = raisedGround[mode];
-    const raised = { ...b, background: rg, input: walkTo(b.input, rg, 3), ...tonesOn(b, rg) };
+    // Raised keeps base's muted offset from its own ground, as sunken does.
+    const rMuted = atL(b.muted, L(rg) + offset("muted"));
+    const raised = {
+      ...b, background: rg, muted: rMuted, "muted-foreground": walkTo(b["muted-foreground"], rMuted, 4.5),
+      input: walkTo(b.input, rg, 3), ...tonesOn(b, rg),
+    };
     const out = { base: withSofts(b, false), raised: withSofts(raised, true), sunken: withSofts(sunken, true), primary: withSofts(primary, true) };
-    for (const s of Object.keys(out)) out[s] = { ...out[s], depth: depths(out[s].background, mode) };
+    for (const s of Object.keys(out)) out[s] = { ...withStates(out[s], `${mode}/${s}`), depth: depths(out[s].background, mode) };
     return out;
   };
   const light = one("light"), dark = one("dark");

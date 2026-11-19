@@ -331,34 +331,7 @@ defmodule BarkparkWeb.SecretController do
   # `TenancyAuth.authorize(token, ws, :admin)`, the predicate the scoped
   # workspace audit (`AuditController.index/2`) already uses. The flat tier
   # carries no `workspace_slug` and is untouched. This controller is the only
-  # HTTP reader of the secret store.
-  plug(:require_scoped_admin_permission)
-
-  defp require_scoped_admin_permission(
-         %Plug.Conn{path_params: %{"workspace_slug" => _}} = conn,
-         _
-       ) do
-    with %{id: id} <- conn.assigns[:current_workspace],
-         ws_id when is_binary(ws_id) <- Barkpark.Repo.uuid_or_nil(id) do
-      case Barkpark.Tenancy.Auth.authorize(conn.assigns[:api_token], ws_id, :admin) do
-        :ok ->
-          conn
-
-        _ ->
-          env =
-            Barkpark.Content.Errors.to_envelope({:error, {:forbidden_capability, :admin}}, conn)
-
-          conn
-          |> put_status(env.status)
-          |> json(%{error: Map.delete(env, :status)})
-          |> halt()
-      end
-    else
-      # No usable workspace: `resolve_scope/1` answers the opaque 404 (D199),
-      # never `:global`, so passing through here still fails closed.
-      _ -> conn
-    end
-  end
-
-  defp require_scoped_admin_permission(conn, _opts), do: conn
+  # HTTP reader of the secret store. A missing or forged workspace passes
+  # through to `resolve_scope/1`'s opaque 404 (D199).
+  plug(BarkparkWeb.Plugs.RequireScopedAdminPermission)
 end
