@@ -11,8 +11,8 @@ defmodule BarkparkWeb.ScopedSecretsAdminPermissionTest do
   DELETE all need `TenancyAuth.authorize(token, ws, :admin)`, the predicate
   the scoped workspace audit already uses, refused with `missing_capability`.
 
-  In-process readers (`Barkpark.Secrets.get/2`: studio chat runtime, search
-  surface configs, Bulldocs ingest) have no HTTP gate and are untouched.
+  `SecretController` is the only HTTP reader of the secret store, so it is
+  the only place this rule lives.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -64,8 +64,13 @@ defmodule BarkparkWeb.ScopedSecretsAdminPermissionTest do
     assert error["code"] == "forbidden"
     assert error["reason"] == "missing_capability", "#{route}: #{inspect(error)}"
 
-    assert error["hint"] =~ "needs the `admin` capability",
+    assert error["hint"] =~
+             "This route needs the `admin` capability: an API token needs `admin` in its " <>
+               "permissions as well as an owner or admin seat. Call with a token that carries `admin`.",
            "#{route}: the hint must name the missing `admin` permission. Got: #{error["hint"]}"
+
+    refute error["hint"] =~ "user account",
+           "#{route}: only API tokens reach this check (RequireToken runs first). Got: #{error["hint"]}"
 
     refute error["hint"] =~ "needs `read`",
            "#{route}: the caller already holds read; the generic hint sends it the wrong way. " <>
@@ -110,10 +115,5 @@ defmodule BarkparkWeb.ScopedSecretsAdminPermissionTest do
 
     put_conn = put(req(ctx.admin_raw), "#{ctx.base}/#{@name}", Jason.encode!(%{"value" => "v2"}))
     assert put_conn.status == 200, put_conn.resp_body
-  end
-
-  test "CONTROL: the in-process reader Secrets.get/2 is untouched by the HTTP refusal", ctx do
-    assert get(req(ctx.read_raw), "#{ctx.base}/#{@name}").status == 403
-    assert @value == Secrets.get(@name, ctx.ws.id)
   end
 end

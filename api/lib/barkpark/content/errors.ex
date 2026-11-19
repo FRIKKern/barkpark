@@ -559,7 +559,7 @@ defmodule Barkpark.Content.Errors do
       status: 403,
       reason: "missing_capability",
       hint:
-        "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. This route needs the `admin` capability: an API token needs `admin` in its permissions as well as an owner or admin seat, and a user account needs an owner or admin role. Call with a token that carries `admin`, or raise the role."
+        "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. This route needs the `admin` capability: an API token needs `admin` in its permissions as well as an owner or admin seat. Call with a token that carries `admin`."
     }
 
   defp build({:error, :forbidden_capability}),

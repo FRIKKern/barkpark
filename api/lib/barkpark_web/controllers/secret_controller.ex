@@ -330,8 +330,8 @@ defmodule BarkparkWeb.SecretController do
   # action — list, reveal, audit, put, delete — now asks
   # `TenancyAuth.authorize(token, ws, :admin)`, the predicate the scoped
   # workspace audit (`AuditController.index/2`) already uses. The flat tier
-  # carries no `workspace_slug` and is untouched. In-process readers
-  # (`Barkpark.Secrets.get/2`) never pass through this controller.
+  # carries no `workspace_slug` and is untouched. This controller is the only
+  # HTTP reader of the secret store.
   plug(:require_scoped_admin_permission)
 
   defp require_scoped_admin_permission(
