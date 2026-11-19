@@ -128,25 +128,25 @@ defmodule BarkparkWeb.Studio.DeskJustSavedTest do
     assert mark(b) == nil
   end
 
-  test "both say Saved once the last write lands: another editor's save taken in is no problem",
+  test "both say Saved once the last write lands: another editor's save that kept B's words is no problem",
        c do
     a = open(c)
     b = open(c)
 
-    # B saves, then A (live-edit.spec.ts, before its reset).
+    # B saves, then A on top of B's words (live-edit.spec.ts, before its reset).
     type(b, "From B")
     assert eventually(fn -> status(b) == "Saved" end), status(b)
-    type(a, "From A")
+    type(a, "From B, then A")
     assert eventually(fn -> status(a) == "Saved" end), status(a)
 
-    # B takes A's save in (no typing of its own waits): still "Saved", not
-    # "Updated by another user".
+    # B takes A's save in (no typing of its own waits, B's words stay): still
+    # "Saved", not "Updated by another user".
     render(b)
 
     assert_push_event(
       b,
       "bp:form-remote-values",
-      %{values: %{"doc[title]" => %{value: "From A"}}},
+      %{values: %{"doc[title]" => %{value: "From B, then A"}}},
       2_000
     )
 

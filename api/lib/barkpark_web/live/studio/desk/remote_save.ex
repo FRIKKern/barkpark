@@ -12,9 +12,11 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   clash (`doc_conflict`), named too.
 
   - This tab's own change is kept per field as `{before, after}` in form
-    shape: the form before the write and the stored value after it, for the
-    fields both moved (`after_write/2`). The form takes every remote save,
-    so a field only another editor changed is not counted as this tab's.
+    shape (`after_write/3`). Free text: the text the post was typed from
+    and the text it posted, this tab's words alone. Any other field: the
+    form before the write and the stored value after it, when both moved.
+    The form takes every remote save, so a field only another editor
+    changed is not counted as this tab's.
   - A frame keeps a change intact when the field still holds this tab's
     value, or, for text, when this tab's words still come back out of it
     (`TextUndo.revert/3`). The change is then kept on the new text. A change
@@ -35,6 +37,7 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
 
   alias Barkpark.Content
   alias Barkpark.Content.TextUndo
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   @own :desk_own_values
   @overwritten :desk_overwritten
@@ -43,14 +46,19 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   # ── This tab's writes ───────────────────────────────────────────────────
 
   @doc """
-  The result of an event answered from `before` (the socket before it): a
-  write that landed keeps its change, and the document is no longer marked.
+  The result of an event answered from `before` (the socket before it), with
+  the event's `params`: a write that landed keeps its change, and the
+  document is no longer marked.
   """
-  def after_write({:noreply, socket}, before), do: {:noreply, own(socket, before)}
-  def after_write({:reply, reply, socket}, before), do: {:reply, reply, own(socket, before)}
-  def after_write(other, _before), do: other
+  def after_write({:noreply, socket}, before, params),
+    do: {:noreply, own(socket, before, params)}
 
-  defp own(socket, before) do
+  def after_write({:reply, reply, socket}, before, params),
+    do: {:reply, reply, own(socket, before, params)}
+
+  def after_write(other, _before, _params), do: other
+
+  defp own(socket, before, params) do
     doc = socket.assigns[:editor_doc]
 
     with "Saved" <- socket.assigns[:save_status],
@@ -58,20 +66,52 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
          %{doc_id: was, rev: was_rev} when was_rev != rev <- before.assigns[:editor_doc],
          pub = Content.published_id(id),
          true <- pub == Content.published_id(was) do
-      stored = Content.doc_to_form(doc, socket.assigns[:editor_schema])
+      schema = socket.assigns[:editor_schema]
+      stored = Content.doc_to_form(doc, schema)
       shown = before.assigns[:editor_form] || %{}
-      base = Content.doc_to_form(before.assigns[:editor_doc], socket.assigns[:editor_schema])
+      base = Content.doc_to_form(before.assigns[:editor_doc], schema)
 
+      # Any other field: the value the store kept, moved from what the form
+      # showed and from this tab's last copy (a field only another editor
+      # moved is in the form already).
       changes =
         for {key, value} <- stored,
+            not RemoteValues.free_text?(schema, key),
             Map.get(shown, key) != value and Map.get(base, key) != value,
             into: kept(socket.assigns, pub),
             do: {key, {Map.get(shown, key), value}}
 
-      assign(socket, [{@own, {pub, changes}}, {@overwritten, nil}])
+      assign(socket, [{@own, {pub, typed(changes, before, params, shown)}}, {@overwritten, nil}])
     else
       _ -> socket
     end
+  end
+
+  # Free text: the text the post was typed from (the base the save merged it
+  # from, as `DocUndo` reads it) and the text it posted. Not the stored
+  # text, which can hold another editor's words the save merged in.
+  defp typed(changes, before, %{"_target" => ["doc", key], "doc" => %{} = doc} = params, shown)
+       when is_binary(key) do
+    with posted when is_binary(posted) <- doc[key],
+         true <- RemoteValues.free_text?(before.assigns[:editor_schema], key),
+         from when is_binary(from) <- text_base(before, key, params, shown),
+         true <- from != posted do
+      Map.put(changes, key, {from, posted})
+    else
+      _ -> changes
+    end
+  end
+
+  defp typed(changes, _before, _params, _shown), do: changes
+
+  defp text_base(before, key, params, shown) do
+    given = params[:bases] || params["bases"] || %{}
+
+    seen =
+      RemoteValues.put_bases(before, [key], params["_bp_seen"]).assigns[:editor_field_bases] ||
+        %{}
+
+    Map.get(given, key) || Map.get(seen, key) || Map.get(shown, key)
   end
 
   defp kept(assigns, pub) do

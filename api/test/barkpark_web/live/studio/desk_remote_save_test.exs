@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveTest do
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @dataset "production"
   @status ~s([data-pane-editing] .dk-edit-footer [data-desk-footer-status] .save-state-text)
@@ -186,6 +187,17 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveTest do
       # The kept change follows the text: a later save of another field stays quiet.
       send_post(b, "excerpt", %{"excerpt" => "Second"})
       assert settled(a) == "Edited just now"
+
+      # B's save merged A's " A" in; it is not B's. A's undo takes it back out,
+      # B's "B " stays, and B is not told (live-edit.spec.ts:68 waits for
+      # "Saved" in B after A's undo).
+      render_hook(a, "desk-undo", %{
+        PostIdentity.key() => PostIdentity.value(@dataset, c.type, c.doc_id),
+        "redo" => false
+      })
+
+      assert stored(c)["title"] == "B Hello world"
+      refute settled(b) == "Updated by another user"
     end
   end
 
