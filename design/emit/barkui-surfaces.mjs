@@ -53,9 +53,22 @@
 // Each tone also has a soft fill, -soft, for soft controls (a destructive
 // button, a soft badge) that draw the tone's -text on it: the tone's hue and
 // chroma at a lightness 1.1:1 off the ground, on the side away from the label
-// where the lightness range allows (else toward it). On every computed surface
-// a -text that does not read at 4.5:1 on its -soft is walked until it does;
-// base's own -text values read on base's -soft as they are.
+// where the lightness range allows (else toward it) and where its hover and
+// pressed fit. On every surface a -text that does not read at 4.5:1 on its
+// -soft, or on its hover and pressed, is walked until it does (labels give way
+// to their fill's states; design/emit/barkui-states.mjs).
+//
+// On a neutral ground (base, raised, sunken, inverse) a tone's text keeps its
+// tone: Studio's hue and most of its chroma. On a brand ground (BRAND_SURFACES)
+// status is carried by the fill: there a tone's text only has to read at 4.5:1
+// on its soft fill and on the ground, and walking it that far may take most of
+// its colour.
+//
+// On a dark ground (OKLCH lightness under DARK_GROUND) a fill sits on the
+// lighter side of its ground, the only side with room for its hover and
+// pressed. The soft fills already do; the muted fill does too, on every surface,
+// so in dark mode muted sits above the page (not Studio's muted-surface, which
+// sits below it), with its muted-foreground walked on it.
 //
 // Depth is the BarkUI base's: each surface's ground moved in OKLCH lightness by
 // n x 0.02 up / 0.022 down (light) or n x 0.045 up / 0.02 down (dark), hue and
@@ -92,7 +105,10 @@ const RIM_STEP = 1.25; // a sunken well's inset rim off the base ground it is cu
 const SOFT_STEP = 1.1; // a tone's soft fill off its ground: visibly tinted
 const SOFT_CHROMA = 0.06; // a soft fill's OKLCH chroma, where the gamut allows it
 const SOFT_CHROMA_SIDE = 0.025; // a side whose tint keeps this much chroma is taken
-const DARK_GROUND = 0.3; // under this OKLCH lightness a ground has no room below it for a visible tint
+// Under this OKLCH lightness a ground has no room below it for a fill and its states.
+export const DARK_GROUND = 0.33;
+// The surfaces whose ground is the brand colour, not a neutral one.
+export const BRAND_SURFACES = ["primary"];
 const MUTED_STEP = 1.2; // the primary surface's disabled fill off its ground
 const DEPTH_STEP = { light: { up: 0.02, down: 0.022 }, dark: { up: 0.045, down: 0.02 } };
 const DARK_FLOOR = 0.145;
@@ -215,6 +231,14 @@ function withStates(s, at) {
   }
   return out;
 }
+// A surface whose muted fill sits on the lighter side of a dark ground: below
+// it, it is mirrored above by the same lightness, and its muted-foreground is
+// walked on it.
+function mutedOnDark(s) {
+  if (L(s.background) >= DARK_GROUND || contrast(s.muted, "#000000") >= contrast(s.background, "#000000")) return s;
+  const muted = atL(s.muted, 2 * L(s.background) - L(s.muted));
+  return { ...s, muted, "muted-foreground": walkTo(s["muted-foreground"], muted, 4.5) };
+}
 function withSofts(s, walk) {
   const out = { ...s };
   for (const t of TONES) {
@@ -263,9 +287,14 @@ export function surfaceValues(base, raisedGround, primaryRing) {
       ...tonesOn(b, ground),
     };
     const rg = raisedGround[mode];
-    const raised = { ...b, background: rg, input: walkTo(b.input, rg, 3), ...tonesOn(b, rg) };
+    // Raised keeps base's muted offset from its own ground, as sunken does.
+    const rMuted = atL(b.muted, L(rg) + offset("muted"));
+    const raised = {
+      ...b, background: rg, muted: rMuted, "muted-foreground": walkTo(b["muted-foreground"], rMuted, 4.5),
+      input: walkTo(b.input, rg, 3), ...tonesOn(b, rg),
+    };
     const out = { base: withSofts(b, false), raised: withSofts(raised, true), sunken: withSofts(sunken, true), primary: withSofts(primary, true) };
-    for (const s of Object.keys(out)) out[s] = { ...withStates(out[s], `${mode}/${s}`), depth: depths(out[s].background, mode) };
+    for (const s of Object.keys(out)) out[s] = { ...withStates(mutedOnDark(out[s]), `${mode}/${s}`), depth: depths(out[s].background, mode) };
     return out;
   };
   const light = one("light"), dark = one("dark");

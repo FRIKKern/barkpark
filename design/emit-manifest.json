@@ -12,7 +12,7 @@
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
     "api/lib/barkpark_web/plugs/studio_refusal_html.ex#studio refusal page (studio_refusal_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
-    "api/priv/barkui/tokens.css#BarkUI sheet": "493fb69414c151750e5221e692539339c469a183a5cadfbfb9ad33db75b0d3d5",
+    "api/priv/barkui/tokens.css#BarkUI sheet": "5f83603eed7956eac03ee018a9f93185fe7b83bbb8c3b94d5ec37c865862d421",
     "api/priv/static/assets/bp-graph.js#bp-graph palette (1/4)": "50af139633f57cbf0ec9670f0dc2d37ca7e681d46764974f1014a042ba168a22",
     "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts#mobile status vocabulary": "55b5be377acdae12c6ada4b2cc925c0cb261cb7992398803637cfd4b7c90f64a",
     "cloud/priv/static/app.css#cloud SPA": "d125c806bc483c5622acaac5fb85debc179df9d41d6cc987bfb0a7c46072a1b8",
