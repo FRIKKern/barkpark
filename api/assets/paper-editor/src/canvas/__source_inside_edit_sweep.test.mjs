@@ -50,7 +50,8 @@ const TYPED = "Ж";
 function papers() {
   const out = [];
   for (const [name, block] of sourceWallGoldens()) out.push([name, [block]]);
-  for (const dir of [".demo-content/papers", ".demo-content/repo-papers", "api/test/support/fixtures/bpml"]) {
+  for (const dir of [".demo-content/papers", ".demo-content/repo-papers", "api/test/support/fixtures/bpml",
+    "api/test/support/fixtures/portable-doc-validate/valid"]) {
     for (const name of readdirSync(join(REPO, dir)).sort()) {
       if (!name.endsWith(".json")) continue;
       const json = JSON.parse(readFileSync(join(REPO, dir, name), "utf8"));
@@ -73,7 +74,8 @@ function papers() {
 // The editor's own schema, from one mounted canvas: the wall projects with it.
 const { canvas } = await mount([]);
 const view = {
-  toDoc: (blocks) => canvas._editor.schema.nodeFromJSON(canvas._rt(blocks)).toJSON(),
+  // An empty run projects to a doc with no content key.
+  toDoc: (blocks) => ({ content: [], ...canvas._editor.schema.nodeFromJSON(canvas._rt(blocks)).toJSON() }),
   toOps: (...args) => canvas._ro(...args),
 };
 const lifted = { calloutBody: "lifted" };
@@ -169,7 +171,7 @@ const strings = (value) => typeof value === "string" ? [value]
 const sameBlock = (a, b) => JSON.stringify({ ...a, id: null }) === JSON.stringify({ ...b, id: null });
 
 function sweep(rule) {
-  const counts = { papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, lost: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
+  const counts = { rows: [], papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, lost: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), writableTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
   const opts = rule === "on" ? {} : lifted;
   for (const [name, stored] of papers()) {
     counts.papers += 1;
@@ -177,6 +179,7 @@ function sweep(rule) {
     const live = docToBlocks(normalizeCanvasDoc(view.toDoc(stored), stored));
     const wall = sourceWallLoss(stored, live, view, opts);
     if (wall) {
+      counts.rows.push([name, `read-only: ${wall.type} ${wall.path}`]);
       for (const block of stored) {
         const why = counts.readOnly.get(block.type) || new Set();
         why.add(`${wall.type} ${wall.path}`.replace(/\[\d+\]/g, ""));
@@ -185,6 +188,11 @@ function sweep(rule) {
       continue;
     }
     counts.writable += 1;
+    for (const block of stored) counts.writableTypes.add(block.type);
+    const before = { lines: counts.lines, words: counts.words, noWords: counts.noWords, refused: counts.refused, losers: counts.losers.length };
+    const row = () => counts.rows.push([name, `writable: ${counts.lines - before.lines} lines typed, ` +
+      `kept ${counts.words + counts.noWords - before.words - before.noWords}, refused ${counts.refused - before.refused}, ` +
+      `losers ${counts.losers.length - before.losers}`]);
     const md = blocksToMarkdown(live);
     assert.ok(!md.includes(TYPED), `${name}: the typed character is not already in the Paper`);
     assert.equal(live.length, stored.length, `${name}: the editor shows every stored block`);
@@ -209,6 +217,7 @@ function sweep(rule) {
       else if (outcome) counts[outcome] += 1;
       else counts.skipped += 1;
     });
+    row();
     function typeLine(text, line) {
       const index = spanOf(line);
       const span = index === -1 ? null : spans[index];
@@ -327,6 +336,7 @@ try {
   report("rule on", on);
   for (const loser of on.losers.slice(0, 20)) console.log(`  ${loser}`);
   const censusTypes = tally("on", on);
+  for (const [name, says] of on.rows.filter(([name]) => name.includes("portable-doc-validate"))) console.log(`  ${name}: ${says}`);
   assert.deepEqual(on.losers, [], "with the callout rule on, no key typed in a writable Paper loses anything");
   const typed = [...on.typedTypes].sort();
   const corpus = [...on.corpusTypes].sort();
@@ -336,7 +346,9 @@ try {
     console.log(`  not typed in: ${type}, every Paper holding it is read-only for ${[...on.readOnly.get(type)].sort().join("; ")}`);
   }
   assert.deepEqual(corpus, censusTypes, "the sweep saw the block types the census reads from the files");
-  assert.deepEqual(typed, censusTypes, "a key was typed in every block type the files hold, by name");
+  assert.deepEqual(typed, [...on.writableTypes].sort(), "a key was typed in every block type a writable Paper holds, by name");
+  assert.deepEqual(censusTypes.filter((type) => !on.typedTypes.has(type)), [...on.readOnly.keys()].filter((type) => !on.writableTypes.has(type)).sort(),
+    "every block type not typed in is held only by Papers that open read-only, and is named above");
 
   const off = sweep("lifted");
   report("rule lifted", off);
