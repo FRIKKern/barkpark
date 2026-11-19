@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { lintPartCss } from '../build/css-lint.mjs'
+import { PHONE } from '../build/vocabulary.mjs'
 import { discoverParts } from '../build/parts.mjs'
 
 const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
@@ -9,7 +10,7 @@ const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
 describe('every real part.css', () => {
   for (const p of parts) {
     it(`${p.name}/part.css has no colour literal and reads only --ui-* / --bark-*`, () => {
-      expect(lintPartCss(readFileSync(join(p.dir, 'part.css'), 'utf8'))).toEqual([])
+      expect(lintPartCss(readFileSync(join(p.dir, 'part.css'), 'utf8'), p.json.allow)).toEqual([])
     })
   }
 })
@@ -58,5 +59,40 @@ describe('lintPartCss', () => {
         height: var(--bark-button-height);
       }`
     expect(lintPartCss(css)).toEqual([])
+  })
+
+  // R4: part.css is written in a small vocabulary; anything else is named in part.json with a reason.
+  for (const [prop, css] of [
+    ['filter', 'a { filter: opacity(0.1); }'],
+    ['mix-blend-mode', 'a { mix-blend-mode: screen; }'],
+    ['clip-path', 'a { clip-path: inset(50%); }'],
+    ['mask-image', 'a { mask-image: linear-gradient(transparent, transparent); }'],
+    ['text-indent', 'a { text-indent: -999px; }'],
+    ['visibility', 'a { visibility: hidden; }'],
+    ['-webkit-text-fill-color', 'a { -webkit-text-fill-color: var(--ui-background); }'],
+    ['background-clip', 'a { background-clip: text; }'],
+    ['zoom', 'a { zoom: 0.1; }'],
+  ]) {
+    it(`refuses ${prop} unless part.json names it with a reason`, () => {
+      expect(lintPartCss(css).join('\n')).toMatch(new RegExp(`line 1: ${prop} is outside part\\.css's vocabulary.*part\\.json "allow"`))
+      expect(lintPartCss(css, { [prop]: 'the reason, in one line' })).toEqual([])
+    })
+  }
+
+  it('takes a font size only from a variable that holds a readable size', () => {
+    expect(lintPartCss('a { font-size: 0; }').join()).toMatch(/line 1: font-size .*var\(--bark-/)
+    expect(lintPartCss('a { font-size: 12px; }').join()).toMatch(/line 1: font-size/)
+    expect(lintPartCss('a { font: 0/0 a; }').join()).toMatch(/line 1: font is outside/)
+    expect(lintPartCss('a { --bark-a-text: 0; font-size: var(--bark-a-text); }').join()).toMatch(/line 1: --bark-a-text .*0\.75rem or more/)
+    expect(lintPartCss('a { --bark-a-text: 0.875rem; font-size: var(--bark-a-text); }')).toEqual([])
+  })
+
+  // R2: every view part.css can target is one the check renders.
+  it('allows @media only for reduced motion (motion properties inside) and the named phone breakpoint', () => {
+    expect(lintPartCss('@media (prefers-reduced-motion: reduce) { a { transition: none; animation: none; scroll-behavior: auto; } }')).toEqual([])
+    expect(lintPartCss(`@media ${PHONE} { a { gap: 0; } }`)).toEqual([])
+    expect(lintPartCss('@media (prefers-reduced-motion: no-preference) {\n a { color: var(--ui-background); } }').join()).toMatch(/line 2: color inside @media \(prefers-reduced-motion.*only transition, animation and scroll-behavior/)
+    for (const css of ['@media (max-width: 500px) { a { gap: 0; } }', '@media print { a { gap: 0; } }', '@container (width < 300px) { a { gap: 0; } }', '@supports (display: grid) { a { gap: 0; } }'])
+      expect(lintPartCss(css).join(), css).toMatch(/line 1: @(media|container|supports) .*not a view the check renders/)
   })
 })

@@ -70,4 +70,10 @@ describe('renderPage proof lights', () => {
     expect(html).toContain('control boundary 3.04:1 or more on every control on all 2 surfaces, needs 3:1')
     expect(html).toContain('text-only, no boundary, label held to text rules: Cancel, Rest')
   })
+
+  it('prints, beside the part, each property it uses beyond the vocabulary and why', () => {
+    const allowing = { ...part, json: { ...part.json, allow: { filter: 'the pending fade dims the label' } } }
+    const html = renderPage({ parts: [allowing], skins: ['a', 'b'], foundation: 'f1', uiSdkVersion: '0', proof: null })
+    expect(html).toContain('uses filter beyond the vocabulary: the pending fade dims the label')
+  })
 })

@@ -101,6 +101,9 @@ describe('discoverParts', () => {
     ['a <font> element', '<font color="red">X</font>'],
     ['a bgcolor= attribute', '<table bgcolor="#ff0000"><tr><td>X</td></tr></table>'],
     ['a declared shadow root', '<div><template shadowrootmode="open"><b>Ghost</b></template></div>'],
+    ['a <canvas> element', '<canvas width="40" height="10"></canvas>'],
+    ['an <iframe> element', '<iframe src="data:text/html,x"></iframe>'],
+    ['a <video> element', '<video></video>'],
   ]) {
     it(`refuses an example.html with ${what}, naming the file and line`, () => {
       const root = scratch()
@@ -148,5 +151,15 @@ describe('discoverParts', () => {
     const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
     writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, textOnly: '[data-variant="ghost"]' }))
     expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
+  })
+
+  it('refuses a part.json whose allow is not property -> one-line reason', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+    for (const allow of [['filter'], { filter: '' }, { filter: 'two\nlines' }, { 'not-a-property!': 'x' }]) {
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, allow }))
+      expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "allow" maps a property to a one-line reason/)
+    }
   })
 })

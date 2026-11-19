@@ -18,7 +18,14 @@ const mark = (d) => edit(join(d, 'example.html'), (s) => s.replace('id="button-a
 const wrap = (d) => edit(join(d, 'example.html'), (s) => s.replace('type="button">Duplicate</button>', 'type="button"><span>Duplicate</span></button>'))
 const skinsSay = (re) => (p) => re.test(p.parts.button.lights.skins.detail)
 const failedSay = (re) => (p) => re.test(p.parts.button.failed ?? '')
-const inCss = (rule) => (d) => appendFileSync(join(d, 'part.css'), `\n${rule}\n`)
+// A part.json entry naming a property outside part.css's vocabulary, with its reason (see build/vocabulary.mjs).
+const allow = (d, props) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), allow: { ...JSON.parse(s).allow, ...props } }, null, 2))
+const inCss = (rule, props) => (d) => {
+  appendFileSync(join(d, 'part.css'), `\n${rule}\n`)
+  if (props) allow(d, props)
+}
+const phoneSays = (re) => (p) => re.test(p.parts.button.lights.phone.detail)
+const why = 'planted by the selftest'
 const refused = (re) => (p, html, ok, logs) => !ok && p === null && re.test(logs.join('\n'))
 const CASES = [
   {
@@ -52,7 +59,7 @@ const CASES = [
     only: ['noscript'],
     plant: (d) => {
       mark(d)
-      appendFileSync(join(d, 'part.css'), '\nui-button:not(:defined) > [data-paint-free] { visibility: hidden; }\n')
+      inCss('ui-button:not(:defined) > [data-paint-free] { visibility: hidden; }', { visibility: why })(d)
     },
     expect: (p) => /button#button-after .* is hidden/.test(p.parts.button.lights.noscript.detail),
   },
@@ -94,7 +101,7 @@ const CASES = [
     only: ['skins', 'schemes'],
     plant: (d) => {
       wrap(d)
-      appendFileSync(join(d, 'part.css'), '\n#button-after > span { -webkit-text-fill-color: var(--ui-background); }\n')
+      inCss('#button-after > span { -webkit-text-fill-color: var(--ui-background); }', { '-webkit-text-fill-color': why })(d)
     },
     expect: skinsSay(/text [\d.]+:1 at span "Duplicate"/),
   },
@@ -208,19 +215,24 @@ const CASES = [
     ['a full-size ::after filled with the ground over a label',
       '[data-slot="button"][data-size="lg"] { position: relative; }\n[data-slot="button"][data-size="lg"]::after { content: ""; position: absolute; inset: 0; background-color: var(--ui-background); }',
       /text does not draw at button "Large"/],
-    ['filter: brightness(0.25) on hover', '[data-slot="button"]:not([data-variant]):hover { filter: brightness(0.25); }', /drawn text [\d.]+:1 at button "Hover"/],
-    ['mix-blend-mode on a button', '[data-slot="button"]:not([data-variant]) { mix-blend-mode: screen; }', /(text does not draw|drawn text [\d.]+:1) at button/],
-    ['font-size: 0 on a size', '[data-slot="button"][data-size="sm"] { font-size: 0; }', /text does not draw at button "Small"/],
+    ['filter: brightness(0.25) on hover', '[data-slot="button"]:not([data-variant]):hover { filter: brightness(0.25); }', /drawn text [\d.]+:1 at button "Hover"/, { filter: why }],
+    ['mix-blend-mode on a button', '[data-slot="button"]:not([data-variant]) { mix-blend-mode: screen; }', /(text does not draw|drawn text [\d.]+:1) at button/, { 'mix-blend-mode': why }],
     ['opacity on an ancestor', 'ui-button:has(> #button-secondary) { display: inline-flex; opacity: 0.15; }', /drawn text [\d.]+:1 at button#button-secondary/],
-    ['a clip-path that hides the label', '[data-slot="button"][data-size="lg"] { clip-path: inset(50%); }', /text does not draw at button "Large"/],
-    ['a mask that hides the label', '#button-quiet { mask-image: linear-gradient(transparent, transparent); }', /text does not draw at button#button-quiet/],
+    ['a clip-path that hides the label', '[data-slot="button"][data-size="lg"] { clip-path: inset(50%); }', /text does not draw at button "Large"/, { 'clip-path': why }],
+    ['a mask that hides the label', '#button-quiet { mask-image: linear-gradient(transparent, transparent); }', /text does not draw at button#button-quiet/, { 'mask-image': why }],
     ['a control with no edge and no fill', '#button-after { --bark-button-edge: transparent; --bark-button-bg: transparent; }', /control boundary 1(\.00)?:1 at button#button-after/],
-  ].map(([what, rule, re]) => ({
+  ].map(([what, rule, re, props]) => ({
     name: `${what} in part.css turns "every skin" off`,
     only: ['skins', 'schemes'],
-    plant: inCss(rule),
+    plant: inCss(rule, props),
     expect: skinsSay(re),
   })),
+  {
+    name: 'font-size: 0 on a size turns "every skin" off',
+    only: ['skins', 'schemes'],
+    css: '[data-slot="button"][data-size="sm"] { font-size: 0; }',
+    expect: skinsSay(/text does not draw at button "Small"/),
+  },
   {
     name: 'an edge in --ui-border, with the paint entry that pinned it removed, turns "every skin" off',
     only: ['skins', 'schemes'],
@@ -229,6 +241,64 @@ const CASES = [
       edit(join(d, 'part.json'), (s) => s.replace(', "border-top-color": "--ui-input"', ''))
     },
     expect: skinsSay(/control boundary [\d.]+:1 at button/),
+  },
+  // Round 6: everything in a stage draws in full, in every view part.css can target; text-only is a fact, not a switch.
+  ...[
+    ['a label pushed out of its own box', '[data-slot="button"][data-size="lg"] { overflow: hidden; justify-content: flex-start; text-indent: -2.6em; }', /label is cut: \d+% of it draws at button "Large"/, { 'text-indent': why }],
+    ['a label in a box of no height', '[data-slot="button"][data-size="lg"] { height: 0; min-height: 0; overflow: hidden; }', /label is cut: \d+% of it draws at button "Large"/],
+    ['a label truncated by the usual recipe', '#button-secondary { max-width: 3.4em; overflow: hidden; white-space: nowrap; justify-content: flex-start; }', /label is cut: \d+% of it draws at button#button-secondary/],
+    ['a label covered by its neighbour', '[data-slot="button"][data-size="lg"] { margin-inline-end: -40px; }\nui-button:has(> [data-size="lg"]) + ui-button > [data-slot="button"] { position: relative; }', /label is cut: \d+% of it draws at button "Large"/],
+    ['an icon faded out', '#button-more > svg { opacity: 0.1; }', /drawn graphic [\d.]+:1 at button#button-more/],
+    ['an icon in a weak colour', '#button-more { color: var(--ui-border); }', /drawn graphic [\d.]+:1 at button#button-more/],
+    ['an icon-only control filtered away', '#button-more { filter: opacity(0.08); }', /(drawn graphic [\d.]+:1|has nothing to show) at button#button-more/, { filter: why }],
+    ['an icon-only control hidden', 'ui-button:defined > #button-more { visibility: hidden; }', /(does not draw|has nothing to show) at button#button-more/, { visibility: why }],
+    ['an icon-only control clipped away', 'ui-button:defined > #button-more { clip-path: inset(50%); }', /(does not draw|is cut: \d+% of it draws|has nothing to show) at button#button-more/, { 'clip-path': why }],
+  ].map(([what, rule, re, props]) => ({
+    name: `${what} turns "every skin" off`,
+    only: ['skins', 'schemes'],
+    plant: inCss(rule, props),
+    expect: skinsSay(re),
+  })),
+  {
+    name: 'a label drawn as an <img> in a weak colour turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => edit(join(d, 'example.html'), (s) => s.replace('data-size="lg" type="button">Large</button>',
+      `data-size="lg" type="button"><img alt="Large" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='14'%3E%3Crect width='40' height='14' fill='%23eeeeee'/%3E%3C/svg%3E"></button>`)),
+    expect: skinsSay(/drawn graphic [\d.]+:1 at button "" img/),
+  },
+  {
+    name: 'a label blanked at phone width turns "phone" off',
+    only: ['phone'],
+    plant: inCss('@media (max-width: 600px) { [data-slot="button"][data-size="lg"] { --bark-button-fg: var(--ui-background); } }'),
+    expect: phoneSays(/(text does not draw|drawn text [\d.]+:1) at button "Large"/),
+  },
+  {
+    name: 'edges dropped at phone width turn "phone" off',
+    only: ['phone'],
+    plant: inCss('@media (max-width: 600px) { [data-slot="button"]:not([data-variant]) { --bark-button-edge: transparent; } }'),
+    expect: phoneSays(/control boundary [\d.]+:1 at button/),
+  },
+  {
+    name: 'a colour that only applies when motion is allowed is refused at discovery',
+    only: ['phone'],
+    plant: inCss('@media (prefers-reduced-motion: no-preference) { [data-slot="button"][data-size="lg"] { color: var(--ui-background); } }'),
+    expect: refused(/part\.css line \d+: .*prefers-reduced-motion.* only transition, animation and scroll-behavior/),
+  },
+  {
+    name: 'text-only on controls that draw a faint edge turns "every skin" off',
+    only: ['skins', 'schemes'],
+    plant: (d) => {
+      edit(join(d, 'part.css'), (s) => s.replace('--bark-button-edge: var(--ui-input);', '--bark-button-edge: var(--ui-border);'))
+      edit(join(d, 'part.json'), (s) => s.replace(', "border-top-color": "--ui-input"', '').replace('"textOnly": ["[data-variant=\\"ghost\\"]"]', '"textOnly": ["[data-variant=\\"ghost\\"]", "[data-slot=\\"button\\"]:not([data-variant])"]'))
+    },
+    expect: skinsSay(/text-only button.* draws its (edge|fill) at [\d.]+:1/),
+  },
+  {
+    name: 'an honest decorative dot keeps "every skin" on',
+    only: ['skins', 'schemes'],
+    green: true,
+    plant: inCss('#button-after::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ui-primary); }'),
+    expect: (p) => p.parts.button.lights.skins.pass && p.parts.button.lights.schemes.pass,
   },
   {
     name: 'a focus ring that cannot be seen against its ground turns the skins off',
@@ -242,7 +312,7 @@ const CASES = [
   ].map(([rule, why]) => ({
     name: `no-script content under ${rule} turns "printed with no script" off`,
     only: ['noscript'],
-    plant: (d) => appendFileSync(join(d, 'part.css'), `\nui-button:not(:defined) > [data-slot] { ${rule}; }\n`),
+    plant: inCss(`ui-button:not(:defined) > [data-slot] { ${rule}; }`, { visibility: why }),
     expect: (p) => why.test(p.parts.button.lights.noscript.detail),
   })),
   {
@@ -289,7 +359,7 @@ for (const c of run) {
     try {
       html = readFileSync(join(scratch, 'out', 'index.html'), 'utf8')
     } catch {}
-    const held = !ok && c.expect(proof, html, ok, logs) && secs < 60
+    const held = (c.green ? ok : !ok) && c.expect(proof, html, ok, logs) && secs < 60
     if (!held) failures++
     console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
     if (!held) console.log(logs.map((l) => `    ${l}`).join('\n'))
