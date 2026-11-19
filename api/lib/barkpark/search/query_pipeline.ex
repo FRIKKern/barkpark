@@ -476,6 +476,9 @@ defmodule Barkpark.Search.QueryPipeline do
   defp try_typo_widen_media(_parsed, _search_fn, _strategy, _config), do: nil
 
   defp highlight_hits("documents", docs, parsed, config, scope, opts) do
+    # A highlighted title is the one the caller is shown (`ShownTitle`).
+    docs = Barkpark.Content.ShownTitle.put(docs, scope, Keyword.get(opts, :caller_context))
+
     # Resolve each hit type's schema ONCE so the highlighter can drop only the
     # `content.*` highlight fields THIS caller may not see (field visibility),
     # instead of over-redacting every `content.*` field. Memoised per distinct

@@ -202,7 +202,7 @@ defmodule Barkpark.Content.Graph do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Document, DraftId, Edge, Envelope, Scope}
+  alias Barkpark.Content.{CallerContext, Document, DraftId, Edge, Envelope, Scope, ShownTitle}
 
   # The INVERTED plugin edge-extractor seam. The kernel (`content`) must hold no
   # compile-time reference to a feature concept, and `Barkpark.Plugins.Registry`
@@ -301,7 +301,11 @@ defmodule Barkpark.Content.Graph do
     # node, up to @node_budget of them) because hydration discarded the struct
     # and handed on only the rendered node map.
     hydrated_docs = hydrate_docs(node_ids, opts)
-    real_nodes = Enum.map(hydrated_docs, &node_map/1)
+
+    real_nodes =
+      hydrated_docs
+      |> ShownTitle.put(opts[:dataset], opts[:caller_context])
+      |> Enum.map(&node_map/1)
 
     # Owner/tenancy ACL on the EDGE list (MEDIUM-5, edge-half). The BFS crosses
     # ownership boundaries freely (no per-node ACL inside `bfs/7`), and node
@@ -1355,7 +1359,13 @@ defmodule Barkpark.Content.Graph do
         inbound = Content.list_inbound_edges(pk, edge_opts(opts))
 
         from_ids = Enum.map(inbound, & &1.from_id)
-        docs_by_id = docs_by_id(from_ids, opts)
+
+        docs_by_id =
+          docs_by_id(from_ids, opts)
+          |> Map.values()
+          |> ShownTitle.put(opts[:dataset], opts[:caller_context])
+          |> Map.new(&{&1.id, &1})
+
         card_fields = referencer_card_fields(opts)
 
         # Fail-closed hydration (MEDIUM-5): a source that did NOT hydrate under
@@ -1411,6 +1421,7 @@ defmodule Barkpark.Content.Graph do
 
       live =
         Content.Query.list_reference_holders(id, dataset, Keyword.put(opts, :schemas, schemas))
+        |> ShownTitle.put(dataset, ctx)
         |> Enum.map(fn src ->
           %{
             from_id: src.id,
@@ -1516,6 +1527,7 @@ defmodule Barkpark.Content.Graph do
         limit: ^(corpus_scan_limit() + 1)
       )
       |> Repo.all()
+      |> ShownTitle.put(opts[:dataset], opts[:caller_context])
       |> Enum.map(fn d ->
         %{id: d.id, doc_id: d.doc_id, type: d.type, title: d.title}
       end)

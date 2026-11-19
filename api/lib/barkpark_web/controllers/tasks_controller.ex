@@ -3004,7 +3004,7 @@ defmodule BarkparkWeb.TasksController do
     else
       page_opts = list_opts |> Keyword.put(:limit, take) |> Keyword.put(:offset, offset)
       {docs, has_more} = Content.list_documents_page(type, dataset, page_opts)
-      read = length(docs)
+      docs = Content.ShownTitle.put(docs, dataset, list_opts[:caller_context])
 
       {nodes_acc, seen_nodes} =
         Enum.reduce(docs, {nodes_acc, seen_nodes}, fn d, {acc_n, seen} ->
@@ -3034,11 +3034,11 @@ defmodule BarkparkWeb.TasksController do
       # `docs` is dead from here down.
       :erlang.garbage_collect()
 
-      next_offset = offset + read
+      next_offset = offset + length(docs)
       capped = capped or (has_more and next_offset >= per_type_limit)
       acc = {nodes_acc, edges_acc, seen_nodes, seen_edges, capped}
 
-      if has_more and read > 0 do
+      if has_more and docs != [] do
         fold_corpus_type(
           type,
           dataset,

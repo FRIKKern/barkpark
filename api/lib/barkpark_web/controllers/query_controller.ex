@@ -914,13 +914,11 @@ defmodule BarkparkWeb.QueryController do
       # See `read_region/3`. Same derivation as `tag_browse/2`; an empty
       # `documents` list here says "no document carries this tag".
       read_region(:tag_docs, "tag_docs/2 (dataset=#{inspect(dataset)} tag=#{inspect(tag)})", fn ->
+        opts = [order: :strength, published_only: true] ++ scope_opts(conn)
+
         docs =
-          Content.docs_with_tag(
-            tag,
-            parse_types(params["type"]),
-            dataset,
-            [order: :strength, published_only: true] ++ scope_opts(conn)
-          )
+          Content.docs_with_tag(tag, parse_types(params["type"]), dataset, opts)
+          |> Content.ShownTitle.put_by_doc_id(dataset, opts, CallerContext.from_conn(conn))
 
         json(conn, %{
           result: %{tag: tag, documents: docs, count: length(docs)},

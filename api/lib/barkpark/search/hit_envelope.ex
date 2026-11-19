@@ -234,7 +234,10 @@ defmodule Barkpark.Search.HitEnvelope do
     # the render pass and the snippet pass.
     resolver = memoised_resolver(docs, schema_resolver)
 
-    snippets = Highlighter.snippet_documents(docs, meta[:parsed] || %{}, %{}, ctx, resolver)
+    snippets =
+      docs
+      |> Barkpark.Content.ShownTitle.put(nil, ctx)
+      |> Highlighter.snippet_documents(meta[:parsed] || %{}, %{}, ctx, resolver)
 
     docs
     |> Envelope.render_many_by_type(resolver, ctx)

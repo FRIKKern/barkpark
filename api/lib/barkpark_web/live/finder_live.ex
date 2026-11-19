@@ -38,7 +38,7 @@ defmodule BarkparkWeb.FinderLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
-  alias Barkpark.Content.CallerContext
+  alias Barkpark.Content.{CallerContext, ShownTitle}
 
   @default_dataset "production"
   @hit_limit 12
@@ -315,7 +315,8 @@ defmodule BarkparkWeb.FinderLive do
             caller_context: caller_context
           )
 
-        assign(socket, q: query, hits: Enum.map(docs, &hit/1), hit_count: count)
+        hits = docs |> ShownTitle.put(socket.assigns.dataset, caller_context) |> Enum.map(&hit/1)
+        assign(socket, q: query, hits: hits, hit_count: count)
     end
   end
 
@@ -530,6 +531,7 @@ defmodule BarkparkWeb.FinderLive do
     real_nodes =
       doc_lists
       |> List.flatten()
+      |> ShownTitle.put(dataset, caller_context)
       |> Enum.map(fn d ->
         pid = Content.published_id(d.doc_id)
         %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
