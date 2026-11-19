@@ -11,16 +11,12 @@
 // Run: node src/__source_wall_fixtures.test.mjs
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { firstLoss, sourceLoss } from "./markdown/carries.js";
 import { sourceSaved } from "./canvas/source-save.js";
+import { sourceWallGoldens } from "./__source_wall_goldens.mjs";
 import { runToOps, runToTiptap } from "./canvas/run-convert.js";
 
 const view = { toDoc: runToTiptap, toOps: runToOps };
-
-const GOLDENS = fileURLToPath(new URL("../../../priv/portable_doc/goldens/", import.meta.url));
 
 const REFUSED = [
   "blocks/paragraph paragraph content.marks",
@@ -69,15 +65,11 @@ const REFUSED = [
 }
 
 const refused = [];
-let count = 0;
-for (const dir of ["blocks", "limits"]) {
-  for (const file of readdirSync(join(GOLDENS, dir)).filter((name) => name.endsWith(".golden.json")).sort()) {
-    count++;
-    const { input } = JSON.parse(readFileSync(join(GOLDENS, dir, file), "utf8"));
-    const block = { id: "fixture", ...input };
-    const loss = sourceLoss([block], (parsed) => sourceSaved([block], parsed, view));
-    if (loss) refused.push(`${dir}/${file.replace(/\.golden\.json$/, "")} ${loss.type} ${loss.path}`);
-  }
+const goldens = sourceWallGoldens();
+const count = goldens.length;
+for (const [name, block] of goldens) {
+  const loss = sourceLoss([block], (parsed) => sourceSaved([block], parsed, view));
+  if (loss) refused.push(`${name} ${loss.type} ${loss.path}`);
 }
 
 console.log(`source wall over ${count} shared fixtures: ${count - refused.length} open, ${refused.length} refused\n${refused.join("\n")}`);

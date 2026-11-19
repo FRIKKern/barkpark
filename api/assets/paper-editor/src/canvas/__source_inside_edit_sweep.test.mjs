@@ -20,21 +20,15 @@ import { mount } from "./source-flush-mounted-harness.mjs";
 import { normalizeCanvasDoc } from "./canvas-document.js";
 import { docToBlocks } from "./run-convert.js";
 import { sourceSaved } from "./source-save.js";
+import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
 import { blocksToMarkdown, firstLoss, markdownToBlockSpans, markdownToBlocks, sourceLoss } from "../markdown.js";
 
 const REPO = fileURLToPath(new URL("../../../../../", import.meta.url));
-const GOLDENS = join(REPO, "api/priv/portable_doc/goldens");
 const TYPED = "Ж";
 
 function papers() {
   const out = [];
-  for (const dir of ["blocks", "limits"]) {
-    for (const name of readdirSync(join(GOLDENS, dir)).sort()) {
-      if (!name.endsWith(".json")) continue;
-      const golden = JSON.parse(readFileSync(join(GOLDENS, dir, name), "utf8"));
-      out.push([`${dir}/${name}`, [{ id: "fixture", ...golden.input }]]);
-    }
-  }
+  for (const [name, block] of sourceWallGoldens()) out.push([name, [block]]);
   for (const dir of [".demo-content/papers", ".demo-content/repo-papers", "api/test/support/fixtures/bpml"]) {
     for (const name of readdirSync(join(REPO, dir)).sort()) {
       if (!name.endsWith(".json")) continue;
