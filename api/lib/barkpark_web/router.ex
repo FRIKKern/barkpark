@@ -4084,6 +4084,9 @@ defmodule BarkparkWeb.Router do
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
     get("/v1/structure/:dataset", StructureController, :show)
+    # Role names a seat here may hold, names only (task-4d3cd1a5e8265646).
+    # The workspace's, so no :dataset: one list for every dataset in it.
+    get("/v1/workspace/roles", RoleNamesController, :index)
   end
 
   # Personal members may inspect actions; API tokens retain the existing

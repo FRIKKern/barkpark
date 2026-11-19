@@ -18,7 +18,7 @@ Workspace ──< Project ──< Dataset
 | **Dataset** | under exactly one Project; promotes the legacy `dataset` *string* into a row | per-project | `datasets` |
 | **Membership** | binds a principal (`principal_type` ∈ `api_token · user`) to a Workspace with a role | one per `(workspace, principal_type, principal_id)` | `workspace_memberships` |
 
-Workspace + Project slugs match `^[a-z0-9][a-z0-9-]*$` and exclude reserved prefixes `admin api _plugins studio login media v1 w p`, enforced at the **changeset** layer (`validate_exclusion`), not the router.
+Workspace + Project slugs match `^[a-z0-9][a-z0-9-]*$` and exclude reserved prefixes `admin api _plugins studio login media v1 w p`, enforced by the **changeset** (`validate_exclusion`), not the router.
 
 ## The context — `Barkpark.Tenancy`
 
@@ -37,7 +37,7 @@ Use **`Barkpark.Tenancy.delete_workspace/1`**, the only safe path. Scope FKs `CA
 
 ## Roles & enforcement
 
-Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner · admin · member · contributor`, `membership.ex` `@roles`; `contributor` writes drafts, never publishes: `Auth.publish_refused?/2`). The membership role — not global permissions — decides workspace-admin authority (`Tenancy.Auth.workspace_admin?/2`, true for `owner`/`admin`), so a globally-privileged token added elsewhere lands as `member`, **not** admin there. `create_membership/4` defaults to `member`; only `create_workspace_with_owner/2` (`owner`) and token-mint (`Auth.create_token`) grant higher.
+Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner · admin · member · contributor`, `membership.ex` `@roles`; `contributor` writes drafts, never publishes: `Auth.publish_refused?/2`). The membership role — not global permissions — decides workspace-admin authority (`Tenancy.Auth.workspace_admin?/2`, true for `owner`/`admin`), so a globally-privileged token added elsewhere is a `member` there, **not** admin. `create_membership/4` defaults to `member`; only `create_workspace_with_owner/2` (`owner`) and token-mint (`Auth.create_token`) grant higher. Seated members read the role names a seat may hold: `GET …/v1/workspace/roles` (`Auth.valid_role_names/1`).
 
 **Role ceiling (ruling #5).** Via `Tenancy.Members` (`actor:`) only an `owner` grants, changes or removes `owner` (`403 owner_required`); a token seat holds an admin-authority role only if the token has `admin` (`403 role_exceeds_token`).
 
@@ -45,17 +45,17 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 **Two role axes (GR46).** The roles above are the *only* team-role vocabulary — every settings gate reads it. `platform_operator` is **not** a team role but the *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry, `/v1/operator/*` and `bp cloud rollout`. **Supporter** is a billing *plan*, never a role.
 
-Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises — ruling + widening: the `Tenancy.Auth` moduledoc.
+Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises (ruling + widening: `Tenancy.Auth` moduledoc).
 
 ## Data-layer scoping
 
 Canonical scope helpers in `api/lib/barkpark/content/scope.ex`:
 
-- **`scope_to_workspace/3`** — **fail-closed**: a `nil` workspace_id compiles to `where: false`, never a silent all-rows query. Binary id → `WHERE workspace_id = $1` (`AND project_id = $2` when given).
+- **`scope_to_workspace/3`** — **fail-closed**: a `nil` workspace_id compiles to `where: false`, never an all-rows query. Binary id → `WHERE workspace_id = $1` (`AND project_id = $2` when given).
 - **`scope_to_workspace_global/1`** — explicit, greppable cross-tenant opt-in; used by surfaces not yet path-scoped.
 - **`scope_to_workspace_or_global/3`** — back-compat bridge for flat routes: nil → global, binary → the fail-closed form.
 - **Shared schemas** — plugin schemas install with `workspace_id` NULL; `get_schema/3` falls back to one when the workspace owns none by that name.
-- **`maybe_scope_to_grants/2`** — the one owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grants (undecidable → `where: false`). It serves every grant-aware read (`Content.Query`, `DocumentsRetriever`, Indx hydration, `Content.Graph` backlinks).
+- **`maybe_scope_to_grants/2`** — the one owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grants (undecidable → `where: false`). Serves every grant-aware read (`Content.Query`, `DocumentsRetriever`, Indx hydration, `Content.Graph` backlinks).
 
 Multi-tenant installs project content edges with strict `scope_to_workspace/3`, never the `_or_global` bridge.
 
@@ -63,7 +63,7 @@ Multi-tenant installs project content edges with strict `scope_to_workspace/3`, 
 
 The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs `CASCADE`, but a NULL row escapes, so delete a Dataset only via `delete_dataset/2` (`Tenancy.DatasetDelete`; refuses `production`).
 
-`Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (in `api/lib/barkpark/content/write_scope.ex`; not delegated on the `Content` facade):
+`Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (`content/write_scope.ex`; not on the `Content` facade):
 
 ```
 resolve_read_dataset_id(dataset, opts) → id | nil
@@ -71,9 +71,9 @@ resolve_read_dataset_id(dataset, opts) → id | nil
   nil → WHERE dataset = $string
 ```
 
-So an un-backfilled `dataset_id IS NULL` row stays visible to dataset scoping (string path), but not under strict `scope_to_workspace/3` with a nil workspace_id.
+An un-backfilled NULL-`dataset_id` row stays visible to dataset scoping (string path), not to strict `scope_to_workspace/3` with a nil workspace_id.
 
-**Known asymmetry:** `resolve_read_dataset_id/2` returns `nil` when scoped by workspace **without** a project (string-path fallback), preventing cross-tenant bleed into the Default project; id-precise dataset scoping requires `project_id`.
+**Known asymmetry:** `resolve_read_dataset_id/2` returns `nil` when scoped by workspace **without** a project (string-path fallback, no cross-tenant bleed into the Default project); id-precise scoping needs `project_id`.
 
 ## Tables & constraints
 
@@ -86,4 +86,4 @@ So an un-backfilled `dataset_id IS NULL` row stays visible to dataset scoping (s
 | Auth enforcement: token↔workspace binding, plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`), 404/403 table, write gate | `docs/auth.md` |
 | HTTP API: scoped/flat URL shapes, hierarchy summary | `docs/api-v1.md` §1a |
 
-> Missing workspace/project delete **verb** (API/CLI exposure): tracked in `docs/decisions/deferred.md`.
+> No workspace/project delete **verb** (API/CLI) yet: `docs/decisions/deferred.md`.

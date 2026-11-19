@@ -255,6 +255,7 @@ var objectReadCommands = map[string]string{
 	"secret.scoped-get":            "one secret object, scoped twin (secret_controller.ex)",
 	"webhook.get":                  "single subscription object (webhook_controller.ex)",
 	"workspace.locale":             "single locale+known_locales object (workspace_locale_controller.ex)",
+	"workspace.roles":              "single roles object (role_names_controller.ex)",
 }
 
 var coreCmdOpen = regexp.MustCompile(`^\s*core_cmd\($`)

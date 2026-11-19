@@ -218,6 +218,7 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
             {"paper.detach-master", "scoped_write"},
             {"paper.apply-ops", "scoped_write"},
             {"workspace.locale", "scoped_read"},
+            {"workspace.roles", "scoped_read"},
             {"codelist.show", "scoped_read"},
             {"pref.get", "scoped_read"},
             {"pref.set", "scoped_write"},
