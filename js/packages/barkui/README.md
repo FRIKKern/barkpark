@@ -45,8 +45,8 @@ neither base.css nor a part mixes a tint of its own.
   for the right reason, naming the planted control. One plant per reading; plants on different controls
   share a run. Breaks in paint go in through a sheet only the selftest can add
   (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route. To keep within CI's
-  limit, a case reads the four other surfaces, and the reading with motion allowed, only when its plant
-  is there; the check itself always reads both.
+  limit, a case reads the four other surfaces, the reading with motion allowed, and real states against
+  their pins, only when its plant is there; the check itself always reads all three.
 - In CI (`js-tests.yml`) the showroom check and the selftest run only when a change touches
   `js/packages/barkui/**` (either side of a move), the sheet (`api/priv/barkui/**`), `js-tests.yml`
   itself or `js/package.json`, or changes lines of `js/pnpm-lock.yaml` that name one of BarkUI's own
@@ -57,8 +57,8 @@ neither base.css nor a part mixes a tint of its own.
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css lint.
 - `node check/shots.mjs <dir>` writes light and dark shots of the built page.
 
-In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`) holds that state for viewing,
-and `data-paint-free` marks an element that carries no paint of its own. It excuses that element (never
+In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`) holds that state for viewing (a
+pressed row pins `hover active`, as a real pointer press is both), and `data-paint-free` marks an element that carries no paint of its own. It excuses that element (never
 its children) from the "takes the skin's values" comparison only. It must truly carry none: transparent
 background, no border, shadow, outline or image, and its parent's text colour; otherwise the light
 fails and names it. Every such element is listed in `proof.json` and counted under the part. Every other
@@ -110,19 +110,32 @@ may condition on", goes unread, and nothing but `part.css` and the base styles c
   balance, and any at-rule but the three `@media` conditions below. Then the check parses part.css in
   its own Chromium, wrapped in the `bark-parts` layer exactly as the build places it, and walks the
   rules that come out (`check/cssom.mjs`). It allows one `bark-parts` layer block and nothing beside
-  it; inside it, style rules, their nested declarations, and `@media` whose condition, as the browser
+  it, and part.css must end where its rules end: a rule placed after it must come back as a rule of its
+  own, so no open bracket, parenthesis, string or comment runs on into the next part on the page. Inside it, style rules, their nested declarations, and `@media` whose condition, as the browser
   writes it, is `(max-width: 600px)` (the phone breakpoint: inside it only layout and type may change),
   `(prefers-reduced-motion: reduce)` or `(prefers-reduced-motion: no-preference)`. Inside a
   reduced-motion query only transition, animation and scroll-behavior properties may change. Every
   other rule type (`@keyframes`, `@layer`, `@container`, `@supports`, `@property`, `@font-face`, and
-  any the browser adds later) and every other condition refuses the run before a light is read.
+  any the browser adds later) and every other condition refuses the run before a light is read, and so
+  do `!important`, a `var()` with a fallback, and a custom property inside a reduced-motion query.
+  Selectors are read as the browser writes them back: a pinned state (`:hover`, `:active`,
+  `:focus-visible`, in any case) may stand only on the element the rule styles, never on a host,
+  ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
+  come from a short list of structure and attributes (`check/selectors.mjs`), and pseudo-elements are the
+  four the check reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
+  the page loads it, in the same browser, and each part's section must hold, rule by rule and with its
+  states pinned, what was read from that part alone; a difference refuses the run, naming the part.
 - Motion: a part defines no keyframes. It may name the shared ones in `css/base.css` (today one,
   `bark-spin`, which only turns its element; a test holds base.css to that), by name as the browser
   reads it. Transitions are free, because both ends are states the lights read anyway. Where motion is
   read: "What part.css may condition on".
 - part.css keeps to a small vocabulary, `build/vocabulary.mjs`: layout, type, paint and motion
   properties, held both as written and as the browser expands them (each longhand a shorthand sets
-  must belong to a property in the vocabulary, or be left at its initial value). A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
+  must belong to a property in the vocabulary, or be left at its initial value). A longhand the
+  vocabulary leaves out but a shorthand in it can set (`LEFT_OUT_INITIAL`: background-clip,
+  text-decoration-thickness, the border-image longhands, animation-timeline and its range) is read again
+  as computed on every element in the stage and its `::before` and `::after`, in every skin, scheme and
+  surface, so a value that arrives through a `var()` is held to its initial value too. A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
   no type tokens yet). A part cannot excuse itself: anything else (mix-blend-mode, clip-path, mask,
   text-indent, visibility, `-webkit-text-fill-color`, background-clip, text-shadow,
   text-decoration-thickness, zoom and the like) is refused. The one way past is `EXTRA` in that shared
@@ -174,12 +187,12 @@ refused on the sheet as the browser parses it (`check/cssom.mjs`) before any lig
 | Surface | base, raised, sunken, primary, inverse | those values, and `[data-surface]` selectors | every skin and scheme, at 1440px and at 390px |
 | Width | 1440px, 390px | `@media (max-width: 600px)`, inside which only layout and type may change: no paint, no decoration, no custom property | 390px with every skin, scheme and surface ("phone") |
 | Motion | reduced, allowed | `@media (prefers-reduced-motion: …)`, inside which only transition, animation and scroll-behavior may change; animation names from the shared keyframes, which only turn their element | every light reads with motion reduced; the drawn readings run again with motion allowed in one skin, light, on every surface at 1440px and on base at 390px, animations held finished and halfway |
-| State | as `example.html` shows it | selectors on the part's own markup (`:hover`, `:active`, `[data-disabled]` and the like) | every state `example.html` shows (`data-pin` holds hover, active and focus-visible) is read with every skin, scheme, surface and width; "pressed by real keys" steps the live states |
+| State | as `example.html` shows it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) is read with every skin, scheme, surface and width. Each real state (the pointer at a live control's centre, held down there, or Tab to it) is compared with its pin, on the live control of the same kind, in one skin, light, on base at 1440px: every computed property of the control and its `::before` and `::after` must change as the pin changes it, nothing up to the stage may change, and the stage is read as drawn ("every skin"); the pin carries it across skins, schemes, surfaces and widths. "Pressed by real keys" steps the live states |
 | Script | on, off | not at all (`@media (scripting)` is refused) | "printed with no script" reads the page as it opens with no script: base surface, 1440px |
 
 What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
 differ there, layout can. A moment partway through a transition is not read: both its ends are. A
-state `example.html` never shows is not read. The motion pass reads one skin in light on purpose:
+state `example.html` never shows is not read, and a real state is compared with its pin in that one view. The motion pass reads one skin in light on purpose:
 part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
 through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
 focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
