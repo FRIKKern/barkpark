@@ -118,7 +118,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
-      GET     /v1/operator/warm-pool operator  warm-pool status (console read)
+      GET     /v1/operator/warm-pool operator  warm-pool status: ready count + the target the worker last reported (console read; `bp cloud warm-pool`)
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
       POST    /v1/operator/sites/content-secrets/mint operator  mint the content-publish secret for content-bound sites that have none, and register the webhook
@@ -332,6 +332,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.MediaSha1Backfill
   alias BarkparkCloud.Registry.Adoption
   alias BarkparkCloud.Registry.AgentKeyStash
+  alias BarkparkCloud.Registry.WarmPoolTarget
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -6679,15 +6680,16 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/operator/warm-pool → 200 {ready: n} — the warm-pool depth
-  # (ready + refreshing, the reconciler's grow/shrink input).
+  # GET /v1/operator/warm-pool → 200 {ready: n, worker_target, worker_pool,
+  # worker_seen_at, worker_seen_ago_s} — the warm-pool depth (ready +
+  # refreshing) beside the target the worker last reported (WarmPoolTarget).
   get "/v1/operator/warm-pool" do
     conn = Auth.require_platform_operator(conn, [])
 
     if conn.halted do
       conn
     else
-      json(conn, 200, %{ready: Registry.count_ready_warm_servers()})
+      json(conn, 200, WarmPoolTarget.status(Registry.count_ready_warm_servers()))
     end
   end
 
@@ -9054,6 +9056,8 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
+      :ok = WarmPoolTarget.note(conn)
+
       case Registry.claim_next_job(generate_claim_token()) do
         nil ->
           send_resp(conn, 204, "")

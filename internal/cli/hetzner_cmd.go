@@ -144,6 +144,8 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudAutoupdate(out, g, args[1:])
 	case "rollout":
 		return runCloudRollout(out, g, args[1:])
+	case "warm-pool":
+		return runCloudWarmPool(out, g, args[1:])
 	case "rollback":
 		return runCloudRollback(out, g, args[1:])
 	// `update` is the self-update TRIGGER — the verb the console prints as a
