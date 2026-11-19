@@ -3,7 +3,9 @@
 // installMatch (it is serialised, so it may not reach anything outside its own
 // body) and adds its readers to the same helper object.
 //
-// The check captures the stage three times: as drawn, with every glyph
+// References are drawn in a tab of their own (the same browser context, so the
+// same pixel ratio and fonts): laying them out in the page under test can change
+// how the browser rasterises it. The check captures the stage three times: as drawn, with every glyph
 // unpainted (decorations stay), and with every graphic (svg, img, a
 // pseudo-element with a box) unpainted; each toggle is an !important sheet in
 // the earliest cascade layer, put there from the isolated world.
@@ -49,8 +51,8 @@ export function installDrawn() {
     return `rgb(${c.slice(0, 3).map((v, i) => Math.round(v * c[3] + ground[i] * (1 - c[3]))).join(', ')})`
   }
   const rgb = (ground) => `rgb(${ground.slice(0, 3).map(Math.round).join(', ')})`
-  /** Where a box starts within a device pixel, in CSS px, to the layout unit (1/64 px). */
-  const phase = (r) => [r.left, r.top].map((v) => Math.round(((((v * devicePixelRatio) % 1) + 1) % 1 / devicePixelRatio) * 64) / 64)
+  /** Where a box starts within a CSS pixel, to the layout unit (1/64 px): text is placed and snapped from it. */
+  const phase = (r) => [r.left, r.top].map((v) => Math.round((((v % 1) + 1) % 1) * 64) / 64)
   /** The text a pseudo-element's content says, or null when it comes from a counter or an attribute. */
   const said = (content) => {
     if (/counter|attr\(/.test(content)) return null
@@ -140,30 +142,35 @@ export function installDrawn() {
     copy.style.setProperty('color', solid(getComputedStyle(node).color, ground))
     return copy
   }
+  /** What the reference tab needs to draw some things alone: plain data, so it can cross to another page. */
+  const specs = (keys) =>
+    keys.map((key) => {
+      const t = items.find((x) => x.key === key)
+      const spec = { key, run: !!t.draw.run, ground: typeof t.draw.ground === 'string' ? t.draw.ground : rgb(t.draw.ground), ink: t.draw.ink ?? '#000', at: t.draw.at }
+      if (t.draw.str) Object.assign(spec, { font: t.draw.font, str: t.draw.str })
+      else if (t.draw.node) spec.html = copyOf(t.draw).outerHTML
+      else spec.html = t.draw.looks.map((look) => Object.assign(document.createElement('div'), { style: `all: initial; display: block; ${look}` }).outerHTML).join('')
+      return spec
+    })
   let sheet = null
-  /** Lay out every thing not yet measured, alone on its own ground, at the top of the document; returns its box. */
-  const alone = (keys) => {
+  /** In the reference tab: lay out each thing alone on its own ground, at the top of the document; returns the box. */
+  const alone = (list) => {
     sheet?.remove()
     sheet = document.createElement('div')
-    sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; z-index: 2147483647; display: block; background: #fff; color: #000;')
+    sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; display: block; background: #fff; color: #000;')
     document.documentElement.append(sheet)
     let top = 8
     let wide = 0
-    for (const key of keys) {
-      const t = items.find((x) => x.key === key)
+    for (const t of list) {
       const cell = document.createElement('div')
-      const ground = typeof t.draw.ground === 'string' ? t.draw.ground : rgb(t.draw.ground)
-      cell.dataset.key = key
-      cell.dataset.ground = ground
-      if (t.draw.run) cell.dataset.run = ''
+      cell.dataset.key = t.key
+      cell.dataset.ground = t.ground
+      if (t.run) cell.dataset.run = ''
       // Whole CSS pixels at both scales the check uses, plus the thing's own place within a device pixel.
-      const [dx, dy] = t.draw.at
-      cell.setAttribute('style', `all: initial; position: absolute; left: 8px; top: ${top}px; display: block; padding: ${4 + dy}px 4px 4px ${4 + dx}px; background: ${ground}; color: ${t.draw.ink ?? '#000'}; line-height: normal; white-space: pre;`)
-      if (t.draw.str) {
-        cell.setAttribute('style', `${cell.getAttribute('style')} ${t.draw.font};`)
-        cell.textContent = t.draw.str
-      } else if (t.draw.node) cell.append(copyOf(t.draw))
-      else for (const look of t.draw.looks) cell.append(Object.assign(document.createElement('div'), { style: `all: initial; display: block; ${look}` }))
+      const [dx, dy] = t.at
+      cell.setAttribute('style', `all: initial; position: absolute; left: 8px; top: ${top}px; display: block; padding: ${4 + dy}px 4px 4px ${4 + dx}px; background: ${t.ground}; color: ${t.ink}; line-height: normal; white-space: pre;${t.str ? ` ${t.font};` : ''}`)
+      if (t.str) cell.textContent = t.str
+      else cell.innerHTML = t.html
       sheet.append(cell)
       // A cell of whole pixels, so its ground ends on a pixel edge and only the thing differs from it.
       const r = cell.getBoundingClientRect()
@@ -215,10 +222,12 @@ export function installDrawn() {
     const core = strong.slice(0, Math.max(1, Math.ceil(strong.length / 10)))
     return { amount, count: strong.length, ratio: strong.length ? core[Math.floor(core.length / 2)] : 1 }
   }
-  /** Measure the things drawn alone: each against its own ground, which is all that is under it. */
+  /** In the reference tab: measure the things drawn alone, each against its own ground (all that is under it).
+      Returns plain data for the page's world: a footprint size, or a label's pixels as base64. */
   const measureAlone = async (png, clip, scale) => {
     const a = await pixels(png)
     const under = { w: a.w, h: a.h, data: new Uint8ClampedArray(a.data.length) }
+    const out = []
     for (const cell of sheet.children) {
       const [r, g, b] = h.rgba(cell.dataset.ground)
       const at = box(cell.getBoundingClientRect())
@@ -226,15 +235,23 @@ export function installDrawn() {
       const x1 = Math.min(a.w, Math.ceil((at.x + at.w - clip.x) * scale))
       for (let y = Math.max(0, Math.floor((at.y - clip.y) * scale)); y < Math.min(a.h, Math.ceil((at.y + at.h - clip.y) * scale)); y++)
         for (let x = x0; x < x1; x++) under.data.set([r, g, b, 255], (y * a.w + x) * 4)
-      if (cell.dataset.run === undefined) keyed.set(cell.dataset.key, ink(a, under, clip, scale, [at]).amount)
+      if (cell.dataset.run === undefined) out.push({ key: cell.dataset.key, amount: ink(a, under, clip, scale, [at]).amount })
       else {
         const range = document.createRange()
         range.selectNodeContents(cell.firstChild)
-        keyed.set(cell.dataset.key, h.reference(a, at, box(range.getBoundingClientRect()), clip, scale, [r, g, b]))
+        const ref = h.reference(a, at, box(range.getBoundingClientRect()), clip, scale, [r, g, b])
+        let bin = ''
+        for (let i = 0; i < ref.d.length; i += 0x8000) bin += String.fromCharCode(...ref.d.subarray(i, i + 0x8000))
+        out.push({ key: cell.dataset.key, ref: { ...ref, d: btoa(bin) } })
       }
     }
     sheet.remove()
     sheet = null
+    return out
+  }
+  /** In the page's world: keep what the reference tab measured. */
+  const keep = (list) => {
+    for (const x of list) keyed.set(x.key, x.ref ? { ...x.ref, d: Uint8Array.from(atob(x.ref.d), (c) => c.charCodeAt(0)) } : x.amount)
   }
 
   const TOGGLES = {
@@ -275,5 +292,5 @@ export function installDrawn() {
     }
   }
 
-  Object.assign(h, { things, alone, measureAlone, unpaint, judge })
+  Object.assign(h, { things, specs, alone, measureAlone, keep, unpaint, judge })
 }

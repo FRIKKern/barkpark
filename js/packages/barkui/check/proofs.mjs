@@ -40,6 +40,11 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   await page.barkCheck(installDrawn)
   page.barkCdp = await page.context().newCDPSession(page)
   page.barkScale = scale
+  // A blank tab in the same context, where things are drawn alone for reference (see drawn.mjs).
+  const ref = await page.context().newPage()
+  await ref.setContent('<!doctype html><html><head></head><body></body></html>')
+  page.barkRef = { page: ref, world: await isolate(ref, 'barkui-ref') }
+  for (const install of [installHelpers, installBoundary, installMatch, installDrawn]) await page.barkRef.world(install)
   page.barkPress = await isolate(page, 'barkui-press')
   await page.barkPress(installHelpers)
   return page

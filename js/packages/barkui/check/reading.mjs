@@ -8,28 +8,29 @@ export async function readView(page, part) {
   const world = page.barkCheck
   const scale = page.barkScale
   const frame = () => world(() => window.__barkCheck.frame())
-  const shoot = async (clip) => (await page.barkCdp.send('Page.captureScreenshot', { format: 'png', clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h, scale }, captureBeyondViewport: true })).data
+  // Captures go through Playwright, which keeps the page's pixel ratio: a capture from a CDP session of our
+  // own resets the emulated ratio to 1 for everything after it. The caret is left as it is (no style added).
+  const capture = async (p, c) => (await p.screenshot({ clip: { x: c.x, y: c.y, width: c.w, height: c.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
+  const shoot = (clip) => capture(page, clip)
   const bounds = await world(([s, t]) => window.__barkCheck.boundaries(document.querySelector(s), t), [sel, part.json.textOnly ?? []])
-  // The things of the view and, for any not yet drawn alone, their references. Laying out the alone sheet can
-  // move the page (the first capture beyond the viewport does), so the boxes are read again until no new
-  // reference is needed: every box below is from the layout the captures see.
-  for (let pass = 0; ; pass++) {
-    const { missing } = await world((s) => window.__barkCheck.things(document.querySelector(s)), sel)
-    if (!missing.length) break
-    if (pass === 3) throw new Error('the page kept moving while its labels were drawn alone')
-    const at = await world((keys) => window.__barkCheck.alone(keys), missing)
-    await frame()
-    const png = await shoot(at)
-    await world(([p, c, k]) => window.__barkCheck.measureAlone(p, c, k), [png, at, scale])
-    await frame()
+  // The things of the view and, for any not yet drawn alone, their references, drawn and measured in the
+  // reference tab (see drawn.mjs) so the page under test is never laid out differently.
+  const { missing } = await world((s) => window.__barkCheck.things(document.querySelector(s)), sel)
+  if (missing.length) {
+    const specs = await world((keys) => window.__barkCheck.specs(keys), missing)
+    const ref = page.barkRef
+    const at = await ref.world((list) => window.__barkCheck.alone(list), specs)
+    await ref.world(() => window.__barkCheck.frame())
+    const png = await capture(ref.page, at)
+    await world((list) => window.__barkCheck.keep(list), await ref.world(([p, c, k]) => window.__barkCheck.measureAlone(p, c, k), [png, at, scale]))
   }
-  // The stage's box, widened to whole device pixels so a capture's pixels are the page's own.
-  const clip = await world(([s, k]) => {
+  // The stage's box, widened to whole CSS pixels (so whole device pixels too): a capture's pixels are the page's own.
+  const clip = await world((s) => {
     const r = document.querySelector(s).getBoundingClientRect()
-    const x = Math.floor((r.left + scrollX) * k) / k
-    const y = Math.floor((r.top + scrollY) * k) / k
-    return { x, y, w: Math.ceil((r.right + scrollX) * k) / k - x, h: Math.ceil((r.bottom + scrollY) * k) / k - y }
-  }, [sel, scale])
+    const x = Math.floor(r.left + scrollX)
+    const y = Math.floor(r.top + scrollY)
+    return { x, y, w: Math.ceil(r.right + scrollX) - x, h: Math.ceil(r.bottom + scrollY) - y }
+  }, sel)
   const drawn = await shoot(clip)
   const without = {}
   try {

@@ -10,7 +10,8 @@
 // is extra ink). Its reference is the same string drawn alone, in the same font,
 // colours, ground and place within a device pixel. A pixel counts in each when
 // it moved at least half as far as the most any pixel there moved (the outline
-// at half cover). The score is the pixels in both over the pixels in either:
+// at half cover). The score is the pixels in both over the pixels in either (a
+// pixel is in both when the other has ink there or one device pixel to its side):
 // missing ink lowers it (cut, clipped, covered, shrunk, mirrored) and so does
 // extra ink.
 export function installMatch() {
@@ -73,32 +74,43 @@ export function installMatch() {
     const y1 = Math.ceil(top + (Math.max(line.h, ref.th) + PAD) * scale)
     const near = holes.filter((r) => r.x < clip.x + x1 / scale && r.x + r.w > clip.x + x0 / scale && r.y < clip.y + y1 / scale && r.y + r.h > clip.y + y0 / scale)
     const own = (x, y) => x >= line.x && x < line.x + line.w && y >= line.y && y < line.y + line.h
-    const page = []
-    const mine = []
+    const W = x1 - x0
+    const H = y1 - y0
+    const page = new Uint8Array(W * H)
+    const mine = new Uint8Array(W * H)
+    const out = new Uint8Array(W * H)
     let pageTop = 0
     for (let y = y0; y < y1; y++)
       for (let x = x0; x < x1; x++) {
+        const k = (y - y0) * W + (x - x0)
         const cx = clip.x + (x + 0.5) / scale
         const cy = clip.y + (y + 0.5) / scale
-        if (near.length && !own(cx, cy) && near.some((r) => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h)) continue
-        let p = 0
+        if (near.length && !own(cx, cy) && near.some((r) => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h)) {
+          out[k] = 1
+          continue
+        }
         if (x >= 0 && y >= 0 && x < a.w && y < a.h) {
           const i = (y * a.w + x) * 4
-          p = moved(a.data, i, [b.data[i], b.data[i + 1], b.data[i + 2]])
+          page[k] = moved(a.data, i, [b.data[i], b.data[i + 1], b.data[i + 2]])
         }
         const u = x + dx
         const v = y + dy
-        page.push(p)
-        mine.push(u >= 0 && v >= 0 && u < ref.w && v < ref.h ? ref.d[v * ref.w + u] : 0)
-        pageTop = Math.max(pageTop, p)
+        if (u >= 0 && v >= 0 && u < ref.w && v < ref.h) mine[k] = ref.d[v * ref.w + u]
+        pageTop = Math.max(pageTop, page[k])
       }
+    for (let k = 0; k < W * H; k++) {
+      page[k] = !out[k] && pageTop > 2 && page[k] >= pageTop / 2 ? 1 : 0
+      mine[k] = !out[k] && ref.top > 2 && mine[k] >= ref.top / 2 ? 1 : 0
+    }
+    // A pixel of either counts as in both when the other has ink there or one device pixel to its side: where
+    // a glyph lands within a pixel is rounded per glyph, so one column of a letter may fall either way.
+    const near1 = (img, k) => img[k] || (k % W > 0 && img[k - 1]) || (k % W < W - 1 && img[k + 1])
     let both = 0
     let either = 0
-    for (let i = 0; i < page.length; i++) {
-      const p = pageTop > 2 && page[i] >= pageTop / 2
-      const r = ref.top > 2 && mine[i] >= ref.top / 2
-      if (p && r) both++
-      if (p || r) either++
+    for (let k = 0; k < W * H; k++) {
+      if (!page[k] && !mine[k]) continue
+      either++
+      if (page[k] ? near1(mine, k) : near1(page, k)) both++
     }
     return either ? both / either : 0
   }
