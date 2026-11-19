@@ -77,7 +77,7 @@
 // from the depth shadow, as in the base.
 
 import { aaWalk, contrast, maxChroma, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
-import { stateNames, statesOf, stepsFor } from "./barkui-states.mjs";
+import { paint, stateNames, statesOf, stepsFor } from "./barkui-states.mjs";
 
 export const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 export const TONES = ["success", "warning", "danger", "info"];
@@ -189,29 +189,36 @@ function tonesOn(b, ground) {
   return out;
 }
 
-// A tone's soft fill on `ground`, for the label `text`: the tone's own OKLCH
-// hue at chroma SOFT_CHROMA (less where the gamut ends), at the lightness that
-// stands SOFT_STEP:1 off the ground. On a dark ground it goes lighter, the only
-// side with room for colour; elsewhere it takes the side away from the label if
-// the tint keeps at least SOFT_CHROMA_SIDE there, else the side where it does
-// (on a white ground only darker keeps any colour). Either way a side counts
-// only where the fill's hover and pressed fit. The label is walked after.
+// The side of its ground a fill sits on, one rule for the soft fills and the
+// muted fill: away from its label where its rest and its two steps (hover,
+// pressed) fit there; otherwise on the label's side. Sides are by the painted
+// luminance, as contrast measures them; a candidate that paints the same as the
+// ground is on neither side. So on a dark ground, where nothing fits below, a
+// fill sits above.
+const lighter = (a, b) => contrast(a, "#000000") > contrast(b, "#000000");
+const sideOfGround = (c, ground) => Math.sign(contrast(paint(c), "#000000") - contrast(paint(ground), "#000000"));
+function sideOf(kind, ground, label, candidates) {
+  const labelSide = sideOfGround(label, ground);
+  const away = candidates.find((c) => c && sideOfGround(c, ground) === -labelSide);
+  const near = candidates.find((c) => c && sideOfGround(c, ground) === labelSide);
+  return away && stepsFor(kind, away, ground) ? away : near;
+}
+
+// A tone's soft fill on `ground`: the tone's own OKLCH hue at chroma
+// SOFT_CHROMA (less where the gamut ends), at the lightness that stands
+// SOFT_STEP:1 off the ground, on the side sideOf picks. The label is walked after.
 function softOn(fill, text, ground) {
   const { h } = srgbToOklch(fill);
   const at = (dir) => {
     for (let l = L(ground) + dir * 0.002; l >= 0 && l <= 1; l += dir * 0.002) {
       const rgb = oklchToSrgb(l, SOFT_CHROMA, h);
       // the side is the side by luminance, as contrast measures it, not by OKLCH lightness
-      const lighter = contrast(rgb, "#000000") > contrast(ground, "#000000");
-      if (lighter === dir > 0 && contrast(rgb, ground) >= SOFT_STEP + 0.005) return { rgb, c: Math.min(SOFT_CHROMA, maxChroma(l, h)) };
+      if (lighter(rgb, ground) === dir > 0 && contrast(rgb, ground) >= SOFT_STEP + 0.005) return { rgb, c: Math.min(SOFT_CHROMA, maxChroma(l, h)) };
     }
     return null;
   };
-  const away = L(ground) < DARK_GROUND ? 1 : L(text) >= L(ground) ? -1 : 1;
-  // A side counts only where the fill's hover and pressed fit there.
-  const sides = [at(away), at(-away)].filter((x) => x && stepsFor("soft", css(x.rgb), ground));
-  const pick = sides.find((x) => x.c >= SOFT_CHROMA_SIDE) ?? sides.sort((x, y) => y.c - x.c)[0];
-  return css(pick.rgb);
+  const side = (dir) => { const x = at(dir); return x && css(x.rgb); };
+  return sideOf("soft", ground, text, [side(-1), side(1)]);
 }
 
 // Each tone's -soft on surface `s`; on a computed surface (`walk`), a -text
@@ -231,13 +238,13 @@ function withStates(s, at) {
   }
   return out;
 }
-// A surface whose muted fill sits on the lighter side of a dark ground: below
-// it, it is mirrored above by the same lightness, and its muted-foreground is
-// walked on it.
-function mutedOnDark(s) {
-  if (L(s.background) >= DARK_GROUND || contrast(s.muted, "#000000") >= contrast(s.background, "#000000")) return s;
-  const muted = atL(s.muted, 2 * L(s.background) - L(s.muted));
-  return { ...s, muted, "muted-foreground": walkTo(s["muted-foreground"], muted, 4.5) };
+// A surface whose muted fill sits on the side sideOf picks: the muted fill as
+// given, or mirrored across the ground by the same lightness; where it moves,
+// its muted-foreground is walked on it.
+function mutedSide(s) {
+  const mirror = atL(s.muted, 2 * L(s.background) - L(s.muted));
+  const muted = sideOf("muted", s.background, s.foreground, [s.muted, mirror]);
+  return muted === s.muted ? s : { ...s, muted, "muted-foreground": walkTo(s["muted-foreground"], muted, 4.5) };
 }
 function withSofts(s, walk) {
   const out = { ...s };
@@ -294,7 +301,7 @@ export function surfaceValues(base, raisedGround, primaryRing) {
       input: walkTo(b.input, rg, 3), ...tonesOn(b, rg),
     };
     const out = { base: withSofts(b, false), raised: withSofts(raised, true), sunken: withSofts(sunken, true), primary: withSofts(primary, true) };
-    for (const s of Object.keys(out)) out[s] = { ...withStates(mutedOnDark(out[s]), `${mode}/${s}`), depth: depths(out[s].background, mode) };
+    for (const s of Object.keys(out)) out[s] = { ...withStates(mutedSide(out[s]), `${mode}/${s}`), depth: depths(out[s].background, mode) };
     return out;
   };
   const light = one("light"), dark = one("dark");
