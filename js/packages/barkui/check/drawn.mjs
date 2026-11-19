@@ -10,8 +10,10 @@
 // when it is toggled off, weighed by how far each moved (so a colour or a fade
 // does not change the amount). That amount must be at least 90% of the same
 // thing drawn alone by the check, unclipped and uncovered (the same string in
-// the same font for text, a copy of the node for a graphic): anything less is
-// cut. Contrast is read from the core of the ink (the strongest tenth), the
+// the same font for text, a copy of the node for a graphic), in its own colours
+// on its own ground and at the same place within a device pixel, so that both
+// are rasterised alike: anything less is cut. Contrast is read from the core
+// of the ink (the strongest tenth), the
 // colour as drawn against what is drawn there without it: 4.5:1 for text, 3:1
 // for a graphic. Covers, filters, blend modes, opacity anywhere above, masks,
 // clips, transforms and font sizes all show up in the pixels.
@@ -41,6 +43,14 @@ export function installDrawn() {
   }
   const FONT = ['font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch', 'font-variant', 'font-feature-settings', 'font-variation-settings', 'font-kerning', 'font-optical-sizing', 'text-transform', '-webkit-font-smoothing']
   const fontOf = (s) => FONT.map((p) => `${p}: ${s.getPropertyValue(p)}`).join('; ')
+  /** A colour laid solid over a ground, as rgb(): how it is drawn there with no fade above it. */
+  const solid = (colour, ground) => {
+    const c = h.rgba(colour)
+    return `rgb(${c.slice(0, 3).map((v, i) => Math.round(v * c[3] + ground[i] * (1 - c[3]))).join(', ')})`
+  }
+  const rgb = (ground) => `rgb(${ground.slice(0, 3).map(Math.round).join(', ')})`
+  /** Where a box starts within a device pixel, in CSS px, in eighths of a device pixel. */
+  const phase = (r) => [r.left, r.top].map((v) => Math.round((((v * devicePixelRatio) % 1) + 1) % 1 * 8) / 8 / devicePixelRatio)
   /** The text a pseudo-element's content says, or null when it comes from a counter or an attribute. */
   const said = (content) => {
     if (/counter|attr\(/.test(content)) return null
@@ -48,14 +58,14 @@ export function installDrawn() {
   }
   const BOX = ['width', 'height', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style', 'border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius', 'background-image', 'background-size', 'background-position', 'background-repeat', 'mask-image', 'mask-size', 'mask-position', 'mask-repeat', '-webkit-mask-image', '-webkit-mask-size', '-webkit-mask-position', '-webkit-mask-repeat']
   const SIDES = ['top', 'right', 'bottom', 'left']
-  /** A pseudo-element that draws a box of its own: its look, in black, for drawing it alone. */
-  const boxOf = (ps) => {
+  /** A pseudo-element that draws a box of its own: its look, solid, for drawing it alone. */
+  const boxOf = (ps, ground) => {
     if (!(parseFloat(ps.width) > 0 && parseFloat(ps.height) > 0)) return null
     const edges = SIDES.filter((d) => parseFloat(ps.getPropertyValue(`border-${d}-width`)) > 0 && ps.getPropertyValue(`border-${d}-style`) !== 'none' && h.rgba(ps.getPropertyValue(`border-${d}-color`))[3] > 0)
     const fill = h.rgba(ps.backgroundColor)[3] > 0
     if (!fill && !edges.length && ps.backgroundImage === 'none') return null
     const look = BOX.map((p) => `${p}: ${ps.getPropertyValue(p)}`)
-    look.push(`background-color: ${fill ? '#000' : 'transparent'}`, ...SIDES.map((d) => `border-${d}-color: ${edges.includes(d) ? '#000' : 'transparent'}`))
+    look.push(`color: ${solid(ps.color, ground)}`, `background-color: ${fill ? solid(ps.backgroundColor, ground) : 'transparent'}`, ...SIDES.map((d) => `border-${d}-color: ${edges.includes(d) ? solid(ps.getPropertyValue(`border-${d}-color`), ground) : 'transparent'}`))
     return look.join('; ')
   }
 
@@ -69,47 +79,55 @@ export function installDrawn() {
     const painting = new Map()
     for (const el of h.shown(root)) {
       if (!el.checkVisibility()) continue
+      const ground = h.effectiveBg(el)
       for (const [p, ps, text] of h.pseudos(el)) {
-        const look = p === '::before' || p === '::after' ? boxOf(ps) : null
+        const look = p === '::before' || p === '::after' ? boxOf(ps, ground) : null
         if (look) painting.set(el, [...(painting.get(el) ?? []), look])
         if (text) {
           const str = p === '::placeholder' ? el.getAttribute('placeholder') : p === '::marker' ? null : said(ps.content)
           const holes = textNodes(el).flatMap((n) => textRects(n))
-          items.push({ kind: 'text', el, at: `${h.describe(el)}${p}`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes, key: str ? `text|${fontOf(ps)}|${str}` : null, draw: str ? { font: fontOf(ps), str } : null })
+          const draw = str ? { font: fontOf(ps), str, ink: solid(ps.webkitTextFillColor, ground), ground: rgb(ground), at: phase(el.getBoundingClientRect()) } : null
+          items.push({ kind: 'text', el, at: `${h.describe(el)}${p}`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes, key: draw ? `text|${JSON.stringify(draw)}` : null, draw })
         }
       }
     }
     for (const n of textNodes(root)) {
       const el = n.parentElement
       if (el instanceof SVGElement || !el.checkVisibility() || forReadersOnly(el, root)) continue
-      const str = n.textContent.replace(/\s+/g, ' ').trim()
-      const font = fontOf(getComputedStyle(el))
-      items.push({ kind: 'text', el, at: h.describe(el), quiet: quiet(el), rects: textRects(n, 1), key: `text|${font}|${str}`, draw: { font, str } })
+      const s = getComputedStyle(el)
+      const ground = h.effectiveBg(el)
+      const range = document.createRange()
+      range.selectNodeContents(n)
+      const draw = { font: fontOf(s), str: n.textContent.replace(/\s+/g, ' ').trim(), ink: solid(s.webkitTextFillColor, ground), ground: rgb(ground), at: phase(range.getBoundingClientRect()) }
+      items.push({ kind: 'text', el, at: h.describe(el), quiet: quiet(el), rects: textRects(n, 1), key: `text|${JSON.stringify(draw)}`, draw })
     }
     const owner = (g) => g.closest(h.CONTROLS) ?? g.parentElement
     for (const g of graphicEls) {
       const r = g.getBoundingClientRect()
       if (r.width < 1 || r.height < 1) continue
-      items.push({ kind: 'graphic', el: g, at: `${h.describe(owner(g))} ${g.tagName.toLowerCase()}`, quiet: quiet(g), rects: [box(r, 1)], key: `node|${items.length}|${r.width}x${r.height}|${g.outerHTML.length}`, draw: { node: g, w: r.width, h: r.height } })
+      const ground = h.effectiveBg(g.parentElement)
+      items.push({ kind: 'graphic', el: g, at: `${h.describe(owner(g))} ${g.tagName.toLowerCase()}`, quiet: quiet(g), rects: [box(r, 1)], key: `node|${items.length}|${r.width}x${r.height}|${phase(r)}|${getComputedStyle(g).color}|${rgb(ground)}|${g.outerHTML.length}`, draw: { node: g, w: r.width, h: r.height, ground, at: phase(r) } })
     }
     for (const [el, looks] of painting) {
       const inner = [...painting.keys()].filter((x) => x !== el && el.contains(x)).concat(graphicEls.filter((g) => el.contains(g)))
-      items.push({ kind: 'graphic', el, at: `${h.describe(el)}::before/::after`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes: inner.map((x) => box(x.getBoundingClientRect(), 1)), key: `box|${looks.join('|')}`, draw: { looks } })
+      const ground = rgb(h.effectiveBg(el))
+      const at = phase(el.getBoundingClientRect())
+      items.push({ kind: 'graphic', el, at: `${h.describe(el)}::before/::after`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes: inner.map((x) => box(x.getBoundingClientRect(), 1)), key: `box|${ground}|${at}|${looks.join('|')}`, draw: { looks, ground, at } })
     }
     return { count: items.length, missing: [...new Set(items.filter((t) => t.key && !keyed.has(t.key)).map((t) => t.key))] }
   }
 
   const PAINT = ['fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'stroke-dashoffset', 'fill-rule', 'clip-rule', 'display', 'object-fit', 'object-position']
-  /** A copy of a node, drawn alone: its own shapes in black at its drawn size, with nothing above it to fade or clip it. */
-  const copyOf = ({ node, w, h: ht }) => {
+  /** A copy of a node, drawn alone: its own shapes in its own colours at its drawn size, with nothing above it to fade or clip it. */
+  const copyOf = ({ node, w, h: ht, ground }) => {
     const copy = node.cloneNode(true)
     const pairs = [[node, copy], ...[...node.querySelectorAll('*')].map((x, i) => [x, copy.querySelectorAll('*')[i]])]
     for (const [from, to] of pairs) {
       if (!to?.style) continue
       const s = getComputedStyle(from)
       for (const p of PAINT) to.style.setProperty(p, s.getPropertyValue(p))
-      if (s.fill !== 'none') to.style.setProperty('fill', '#000')
-      if (s.stroke !== 'none') to.style.setProperty('stroke', '#000')
+      if (s.fill !== 'none' && !/url\(/.test(s.fill)) to.style.setProperty('fill', solid(s.fill, ground))
+      if (s.stroke !== 'none' && !/url\(/.test(s.stroke)) to.style.setProperty('stroke', solid(s.stroke, ground))
       to.style.setProperty('opacity', '1')
       to.style.setProperty('visibility', 'visible')
       to.style.setProperty('filter', 'none')
@@ -117,28 +135,43 @@ export function installDrawn() {
     copy.style.setProperty('display', 'block')
     copy.style.setProperty('width', `${w}px`)
     copy.style.setProperty('height', `${ht}px`)
-    copy.style.setProperty('color', '#000')
+    copy.style.setProperty('color', solid(getComputedStyle(node).color, ground))
     return copy
   }
   let sheet = null
-  /** Lay out every thing not yet measured, alone, black on white, at the top of the document; returns its box. */
+  /** Lay out every thing not yet measured, alone on its own ground, at the top of the document; returns its box. */
   const alone = (keys) => {
     sheet?.remove()
     sheet = document.createElement('div')
-    sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; z-index: 2147483647; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 8px; background: #fff; color: #000;')
+    sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; z-index: 2147483647; display: block; background: #fff; color: #000;')
+    document.documentElement.append(sheet)
+    let top = 8
+    let wide = 0
     for (const key of keys) {
       const t = items.find((x) => x.key === key)
       const cell = document.createElement('div')
+      const ground = typeof t.draw.ground === 'string' ? t.draw.ground : rgb(t.draw.ground)
       cell.dataset.key = key
-      cell.setAttribute('style', 'all: initial; display: block; padding: 4px; background: #fff; color: #000; line-height: normal; white-space: pre;')
+      cell.dataset.ground = ground
+      // Whole CSS pixels at both scales the check uses, plus the thing's own place within a device pixel.
+      const [dx, dy] = t.draw.at
+      cell.setAttribute('style', `all: initial; position: absolute; left: 8px; top: ${top}px; display: block; padding: ${4 + dy}px 4px 4px ${4 + dx}px; background: ${ground}; color: ${t.draw.ink ?? '#000'}; line-height: normal; white-space: pre;`)
       if (t.draw.str) {
         cell.setAttribute('style', `${cell.getAttribute('style')} ${t.draw.font};`)
         cell.textContent = t.draw.str
       } else if (t.draw.node) cell.append(copyOf(t.draw))
       else for (const look of t.draw.looks) cell.append(Object.assign(document.createElement('div'), { style: `all: initial; display: block; ${look}` }))
       sheet.append(cell)
+      // A cell of whole pixels, so its ground ends on a pixel edge and only the thing differs from it.
+      const r = cell.getBoundingClientRect()
+      cell.style.setProperty('box-sizing', 'border-box')
+      cell.style.setProperty('width', `${Math.ceil(r.width)}px`)
+      cell.style.setProperty('height', `${Math.ceil(r.height)}px`)
+      top = Math.ceil(top + r.height + 8)
+      wide = Math.max(wide, Math.ceil(r.width + 16))
     }
-    document.documentElement.append(sheet)
+    sheet.style.setProperty('width', `${wide}px`)
+    sheet.style.setProperty('height', `${top}px`)
     return box(sheet.getBoundingClientRect())
   }
 
@@ -177,11 +210,19 @@ export function installDrawn() {
     const core = strong.slice(0, Math.max(1, Math.ceil(strong.length / 10)))
     return { amount, count: strong.length, ratio: strong.length ? core[Math.floor(core.length / 2)] : 1 }
   }
-  /** Measure the things drawn alone (white is what is under them). */
+  /** Measure the things drawn alone: each against its own ground, which is all that is under it. */
   const measureAlone = async (png, clip, scale) => {
     const a = await pixels(png)
-    const white = { w: a.w, h: a.h, data: new Uint8ClampedArray(a.data.length).fill(255) }
-    for (const cell of sheet.children) keyed.set(cell.dataset.key, ink(a, white, clip, scale, [box(cell.getBoundingClientRect())]).amount)
+    const under = { w: a.w, h: a.h, data: new Uint8ClampedArray(a.data.length) }
+    for (const cell of sheet.children) {
+      const [r, g, b] = h.rgba(cell.dataset.ground)
+      const at = box(cell.getBoundingClientRect())
+      const x0 = Math.max(0, Math.floor((at.x - clip.x) * scale))
+      const x1 = Math.min(a.w, Math.ceil((at.x + at.w - clip.x) * scale))
+      for (let y = Math.max(0, Math.floor((at.y - clip.y) * scale)); y < Math.min(a.h, Math.ceil((at.y + at.h - clip.y) * scale)); y++)
+        for (let x = x0; x < x1; x++) under.data.set([r, g, b, 255], (y * a.w + x) * 4)
+      keyed.set(cell.dataset.key, ink(a, under, clip, scale, [at]).amount)
+    }
     sheet.remove()
     sheet = null
   }
