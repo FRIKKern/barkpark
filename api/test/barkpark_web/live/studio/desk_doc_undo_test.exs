@@ -101,7 +101,7 @@ defmodule BarkparkWeb.Studio.DeskDocUndoTest do
   # A pause longer than one undo step's (600 ms): the next typing is a step of its own.
   defp pause, do: Process.sleep(650)
 
-  # J05 then J06, as live-edit.spec.ts:17 types them: A's " A", B's " B" in
+  # J05 then J06, as live-edit.spec.ts's two-browser test types them: A's " A", B's " B" in
   # the excerpt, then A's " aaa" crossing B's "bbb " in the title.
   defp j05_j06(c, a, b) do
     send_post(a, "title", %{"title" => "Fixture post 14 A"})
