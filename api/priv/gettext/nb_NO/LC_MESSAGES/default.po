@@ -15539,3 +15539,127 @@ msgstr "Meny"
 #, elixir-autogen, elixir-format
 msgid "Close menu"
 msgstr "Lukk meny"
+
+#: lib/barkpark_web/live/studio/desk/navbar.ex
+#, elixir-autogen, elixir-format
+msgid "Vision"
+msgstr "Vision"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "No perspective (raw)"
+msgstr "Uten perspektiv (rå)"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query URL"
+msgstr "Spørrings-URL"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Copy to clipboard"
+msgstr "Kopier til utklippstavlen"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query"
+msgstr "Spørring"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Fetch"
+msgstr "Hent"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Execution: %{time}"
+msgstr "Kjøring: %{time}"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "n/a"
+msgstr "i.t."
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "End-to-end: %{time}"
+msgstr "Ende til ende: %{time}"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Save result as"
+msgstr "Lagre resultatet som"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "1 item"
+msgstr "1 element"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "%{count} items"
+msgstr "%{count} elementer"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "1 property"
+msgstr "1 egenskap"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "%{count} properties"
+msgstr "%{count} egenskaper"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Show %{count} more"
+msgstr "Vis %{count} til"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Write a GROQ query, like *[_type == \"post\"][0...10]"
+msgstr "Skriv en GROQ-spørring, som *[_type == \"post\"][0...10]"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The query is too long to send: its URL is over 32,753 bytes"
+msgstr "Spørringen er for lang til å sendes: URL-en er over 32 753 byte"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query failed: %{error}"
+msgstr "Spørringen mislyktes: %{error}"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query error: %{error}"
+msgstr "Feil i spørringen: %{error}"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "1 result in %{ms} ms"
+msgstr "1 resultat på %{ms} ms"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} results in %{ms} ms"
+msgstr "%{count} resultater på %{ms} ms"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query done in %{ms} ms"
+msgstr "Spørringen ble ferdig på %{ms} ms"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The URL is copied to the clipboard"
+msgstr "URL-en er kopiert til utklippstavlen"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The URL could not be copied"
+msgstr "URL-en kunne ikke kopieres"

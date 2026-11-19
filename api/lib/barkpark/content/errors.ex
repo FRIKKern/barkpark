@@ -148,6 +148,9 @@ defmodule Barkpark.Content.Errors do
                          # chat_host_controller.ex host_limit_reached/2: the
                          # workspace holds its cap of live chat hosts (409).
                          "host_limit_reached",
+                         # chat_host_controller.ex name_taken/4: a chat host
+                         # in this workspace already holds the name (409).
+                         "name_taken",
                          # Owner ruling #7 — member_controller.ex rotate_token:
                          # a user-owned token is rotated only by its owner (403).
                          "owner_only",

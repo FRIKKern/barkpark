@@ -118,7 +118,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
-      GET     /v1/operator/warm-pool operator  warm-pool status (console read)
+      GET     /v1/operator/warm-pool operator  warm-pool status: ready count + the target the worker last reported (console read; `bp cloud warm-pool`)
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
       POST    /v1/operator/sites/content-secrets/mint operator  mint the content-publish secret for content-bound sites that have none, and register the webhook
@@ -6679,15 +6679,15 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/operator/warm-pool → 200 {ready: n} — the warm-pool depth
-  # (ready + refreshing, the reconciler's grow/shrink input).
+  # GET /v1/operator/warm-pool → 200 {ready: n, worker_*} — the warm-pool depth
+  # (ready + refreshing) beside the worker's reported target (WarmPoolTarget).
   get "/v1/operator/warm-pool" do
     conn = Auth.require_platform_operator(conn, [])
 
     if conn.halted do
       conn
     else
-      json(conn, 200, %{ready: Registry.count_ready_warm_servers()})
+      json(conn, 200, Registry.WarmPoolTarget.status(Registry.count_ready_warm_servers()))
     end
   end
 
@@ -9049,7 +9049,7 @@ defmodule BarkparkCloud.Web.Router do
   # 204 (no body) when none is pending (the worker sleeps + retries). The
   # claim_token is generated here — one per claim, traceable on the job row.
   post "/v1/internal/provision-jobs/claim" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_worker(conn, []) |> Registry.WarmPoolTarget.note()
 
     if conn.halted do
       conn

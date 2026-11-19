@@ -2147,7 +2147,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 431 -> 437 (bp barkparks backfill-media-sha1): the new
   # internal/cloudclient/media_sha1_backfill.go decodes `MediaSha1Backfill`
   # and its reply. Six new NAMES ride with it. MEASURED by the PIN CO-EDIT arm.
-  @go_tag_pinned 437
+  # 437 -> 442 (task-48a556bfbe221dcf, bp cloud warm-pool): the new
+  # internal/cloudclient/warm_pool.go decodes `WarmPoolStatus`: FIVE new NAMES
+  # (`ready`, `worker_target`, `worker_pool`, `worker_seen_at`,
+  # `worker_seen_ago_s`). None rides an existing name, so the SITE register
+  # does not move. MEASURED by the PIN CO-EDIT arm ("437 -> 442").
+  @go_tag_pinned 442
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2686,7 +2691,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go)
+  # task-48a556bfbe221dcf: warm_pool.go added, the client half of
+  # `bp cloud warm-pool`. Its five tags are all new NAMES, so only
+  # `@go_tag_pinned` moves.
+  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go warm_pool.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

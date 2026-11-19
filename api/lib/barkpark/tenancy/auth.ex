@@ -1113,6 +1113,44 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   @doc """
+  Where `role` sits on `workspace_id`'s seat ladder (task-018e79d8734a1b08):
+
+    * `5` — `owner`
+    * `4` — admin authority: built-in `admin`, or a custom role of THIS
+      workspace holding the `admin` action (the `workspace_admin?/2` rule)
+    * `3` — writes and publishes (`member`, a custom role holding `write`)
+    * `2` — writes drafts only (`contributor`, see `publish_refused?/2`)
+    * `1` — reads only
+    * `0` — nothing: an unknown name, a role with no actions, malformed input
+
+  It COMPARES two roles of one workspace ("does this request ask for more than
+  the seat holds", `Tenancy.AccessRequests`). It admits nobody: no
+  authorization decision may read a rank as a grant; the doors stay
+  `authorize/3`, `workspace_admin?/2` and `seat_capabilities/3`. Total: any
+  non-binary argument is `0`, and a malformed workspace id resolves no custom
+  role (`Repo.uuid_or_nil/1` in the resolver).
+  """
+  @spec role_rank(String.t(), binary()) :: 0..5
+  def role_rank(role, workspace_id) when is_binary(role) and is_binary(workspace_id) do
+    cond do
+      role in @owner_roles -> 5
+      admin_role?(role, workspace_id) -> 4
+      true -> action_rank(role, granted_actions(role, workspace_id))
+    end
+  end
+
+  def role_rank(_role, _workspace_id), do: 0
+
+  defp action_rank(role, actions) do
+    cond do
+      "write" in actions and role not in @draft_only_roles -> 3
+      "write" in actions -> 2
+      "read" in actions -> 1
+      true -> 0
+    end
+  end
+
+  @doc """
   List the Workspaces a principal is a MEMBER of, ordered by slug.
 
   Accepts an `%ApiToken{}` struct, a `%User{}` struct, or a raw principal id

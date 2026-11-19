@@ -44,6 +44,18 @@ type Record struct {
 	TTL   int
 }
 
+// BoxRecordTTLSeconds is the TTL on every A record Barkpark points at a box IP:
+// the go-live chain (one-shot and warm assign), resurrect's repoint, a
+// platform-zone attach-domain, and the support box. Those records are created,
+// deleted and repointed with the box, and a deleted box releases its IP.
+//
+// A record written with no TTL takes the zone default. On 2026-11-19 a failed
+// hovinbyen launch was torn down and its record deleted, but resolvers kept
+// answering the released IP for up to an hour because they had cached it at
+// 3600 s. On 2026-07-26 a support chain's deleted record and a repointed slug
+// burned the same way. 60 s bounds what any resolver may cache about a box.
+const BoxRecordTTLSeconds = 60
+
 // DNSProvider is the per-instance DNS seam. A real impl talks to a DNS API; the
 // fake keeps a zone map in memory. The three methods are the whole API the
 // per-instance subdomain flow needs — upsert a record, delete it, resolve it.

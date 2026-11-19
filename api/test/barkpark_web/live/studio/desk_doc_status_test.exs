@@ -101,6 +101,62 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     refute chip(view, "Published") =~ "data-off"
   end
 
+  # The rig's J46 (navbar.spec.ts, a touch phone): every doc-pane button is a 44 px
+  # tap. The pills became buttons in #27369 and stayed 25 px; TanStack grows
+  # a pill's box with a clear 10 px border above and below on a touch screen.
+  test "on a touch screen the pill buttons are 44 px taps, drawn as before", c do
+    {:ok, _} = Content.publish_document(c.id, c.type, @dataset)
+    view = open(c)
+    html = render(view)
+
+    assert has_element?(view, ~s(#{@chips} button.dk-chip[aria-pressed]), "Published")
+    assert has_element?(view, ~s(#{@chips} button.dk-chip[aria-pressed]), "Draft")
+
+    coarse =
+      ~r/@media \(max-width: 768px\) and \(pointer: coarse\) \{\s*([^}]*\})/
+      |> Regex.scan(html, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.find("", &(&1 =~ "dk-chip"))
+
+    # The filled Draft's own `background` would reset the clip: it is named.
+    assert coarse =~
+             ".dk button.dk-chip, .dk button.dk-chip:hover, .dk button.dk-chip[data-active] {"
+
+    # 25 px (3 + 19 + 3) and 10 px above and below: 45.
+    assert coarse =~ "border-style: solid; border-color: transparent; border-width: 10px 0;"
+    assert coarse =~ "background-clip: padding-box;"
+    # A phone's pills, the greyed span too, are 44 px and give way only when
+    # the header has more in it: nothing is pushed past its edge.
+    assert html =~
+             ".dk .dk-chips .dk-chip { box-sizing: border-box; flex: 0 1 auto; width: 44px; min-width: 0;"
+
+    refute html =~ ".dk .dk-chips { flex-shrink: 0; }"
+
+    # Round ends of 12.5 px on the drawn 25 px band, not an ellipse.
+    assert coarse =~ "border-radius: 12.5px / 22.5px;"
+
+    # The focus ring traces the drawn pill, not the 45 px box.
+    assert html =~
+             ".dk button.dk-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }"
+
+    # The header makes the room as TanStack's does on a phone (J42).
+
+    assert has_element?(
+             view,
+             ~s([data-pane-editing] > .pane-header a.dk-split[data-desk-split-right])
+           )
+
+    css = rendered_to_string(BarkparkWeb.Studio.Desk.Style.sheet(%{}))
+
+    assert css =~
+             ".dk[data-narrow] .dk-doc > .pane-header :is([data-desk-split-right], [data-desk-close-split]) { display: none; }"
+
+    assert css =~
+             "@media (max-width: 480px) and (pointer: coarse) { .dk .dk-doc > .pane-header { padding-left: 6px; padding-right: 2px; } .dk[data-narrow] .dk-doc > .pane-header > .pane-header-title:has(> nav) { display: none; } }"
+
+    assert css =~ ".dk[data-narrow] .dk-doc > .pane-header .dk-close { margin-right: 0; }"
+  end
+
   test "a document never published greys out the Published pill", c do
     view = open(c)
 

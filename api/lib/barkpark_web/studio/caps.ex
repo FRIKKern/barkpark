@@ -226,7 +226,7 @@ defmodule BarkparkWeb.Studio.Caps do
     array_op select-media clear-image upload-image select-ref clear-ref
     restore-revision save-profile delete-doc confirm-delete
     discard-draft confirm-discard
-    duplicate-doc toggle-doc-checkbox desk-doc-paste
+    duplicate-doc toggle-doc-checkbox desk-doc-paste desk-undo
     paper-edit-block paper-block-autosave sidebar-slug-change
     paper-op paper-ops paper-history-step field-block-ops valueref-accept-baseline paper-add-block
     paper-materialize-slot paper-slash-insert paper-add-property
