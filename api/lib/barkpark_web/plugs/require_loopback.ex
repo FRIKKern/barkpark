@@ -38,9 +38,11 @@ defmodule BarkparkWeb.Plugs.RequireLoopback do
   @doc """
   Admits only when the TCP peer is loopback and every forwarded hop parses as
   loopback; no forwarded header from a loopback peer is the direct local
-  caller. A hop that is empty, is not valid UTF-8, carries a port or a zone
-  id, or does not parse as an address is refused, wherever it sits in the
-  chain. The header name is matched
+  caller. A hop is read with plain spaces and tabs trimmed, and must then be
+  an address the strict parser takes as it stands, or an IPv6 address in one
+  pair of brackets. Anything else is refused wherever it sits in the chain:
+  an empty hop, bytes that are not valid UTF-8, a port, a zone id, an IPv4
+  address in brackets, any other whitespace. The header name is matched
   without regard to case, and every copy of it is read.
   """
   @spec local_client?(Plug.Conn.t()) :: boolean()
@@ -55,25 +57,33 @@ defmodule BarkparkWeb.Plugs.RequireLoopback do
   # A value that is not valid UTF-8 is read as one hop that does not parse.
   defp hops(value) do
     if String.valid?(value),
-      do: value |> String.split(",") |> Enum.map(&String.trim/1),
+      do: value |> String.split(",") |> Enum.map(&trim_blank/1),
       else: [nil]
   end
 
-  # Bracketed IPv6 (`[::1]`) is read as the address; anything around it (a
-  # port) is not, so it does not parse. Nor does a zone id (`fe80::1%en0`):
-  # it names an interface on the sender's machine, not this one.
+  # Plain spaces and tabs only: any other whitespace stays, so the hop does not parse.
+  defp trim_blank(hop), do: String.replace(hop, ~r/\A[ \t]+|[ \t]+\z/, "")
+
+  # An IPv6 address in one pair of brackets (`[::1]`) is read as the address;
+  # anything around the brackets (a port) or inside them that is not IPv6 does
+  # not parse. Nor does a zone id (`fe80::1%en0`): it names an interface on the
+  # sender's machine, not this one.
   defp parse_hop(nil), do: nil
 
   defp parse_hop("[" <> rest) do
-    case String.split_at(rest, -1) do
-      {address, "]"} -> parse_hop(address)
+    with {inner, "]"} <- String.split_at(rest, -1),
+         address when tuple_size(address) == 8 <- parse_address(inner) do
+      address
+    else
       _ -> nil
     end
   end
 
+  defp parse_hop(hop), do: parse_address(hop)
+
   # Only the characters an address is written in reach the parser, so no hop
   # can make it raise.
-  defp parse_hop(hop) do
+  defp parse_address(hop) do
     with true <- hop =~ ~r/\A[0-9A-Fa-f:.]+\z/,
          {:ok, address} <- :inet.parse_strict_address(String.to_charlist(hop)) do
       address

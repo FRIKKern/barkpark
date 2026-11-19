@@ -31,6 +31,12 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
     {"an IPv6 loopback hop", @lo, [{@xff, "::1"}], :admitted, "127.0.0.1"},
     {"an IPv4-mapped loopback hop", @lo, [{@xff, "::ffff:127.0.0.1"}], :admitted, "127.0.0.1"},
     {"a bracketed loopback hop", @lo, [{@xff, "[::1]"}], :admitted, "127.0.0.1"},
+    {"a loopback hop between tabs", @lo, [{@xff, "\t127.0.0.1\t"}], :admitted, "127.0.0.1"},
+    {"an IPv4 loopback hop in brackets", @lo, [{@xff, "[127.0.0.1]"}], :refused, "127.0.0.1"},
+    {"an IPv6 loopback hop in two pairs of brackets", @lo, [{@xff, "[[::1]]"}], :refused,
+     "127.0.0.1"},
+    {"a loopback hop after a no-break space", @lo, [{@xff, "\u00A0127.0.0.1"}], :refused,
+     "127.0.0.1"},
     {"two headers, both loopback", @lo, [{@xff, "127.0.0.1"}, {@xff, "::1"}], :admitted,
      "127.0.0.1"},
     {"an unreadable hop", @lo, [{@xff, "garbage"}], :refused, "127.0.0.1"},
@@ -204,6 +210,11 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
         do: {verb, route.path}
   end
 
+  # The same set counted another way: off each route's own pipe_through.
+  defp api_local_route_count do
+    Enum.count(BarkparkWeb.Router.__routes__(), &(:api_local in Map.get(&1, :pipe_through, [])))
+  end
+
   defp route_verb(route), do: route.verb |> Atom.to_string() |> String.upcase()
 
   # The route's pipelines, read off the real matcher. A probe that lands on
@@ -230,7 +241,12 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
     assert modules_calling_gate() == [BarkparkWeb.Router]
     assert gated_pipelines() == [:api_local]
 
-    assert Enum.sort(gated_routes()) == [
+    routes = gated_routes()
+    count = api_local_route_count()
+    assert count > 0
+    assert length(routes) == count, "#{count} routes pipe through :api_local"
+
+    assert Enum.sort(routes) == [
              {"GET", "/v1/data/local/search/:dataset"},
              {"POST", "/v1/internal/retire-sse"}
            ]
@@ -253,7 +269,9 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
     ]
 
     routes = gated_routes()
-    assert routes != [], "no route reads as behind the gate, so nothing below would run"
+    count = api_local_route_count()
+    assert count > 0
+    assert length(routes) == count, "#{count} routes pipe through :api_local"
 
     for {verb, path} <- routes, {peer, headers} <- callers do
       conn = through_endpoint(verb, path, peer, headers)
