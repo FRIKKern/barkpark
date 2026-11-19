@@ -755,7 +755,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Map.merge(payload, %{
       bpml_unprintable: refusal,
       hint:
-        "the ops applied at `rev`, but the reader's view of the paper does not print as BPML, so there is no text to update your working copy with — pull format=json to see the blocks"
+        "the ops applied and `rev` is your new anchor, but the reader's view of the paper does not print as BPML — pull format=json to see it"
     })
   end
 

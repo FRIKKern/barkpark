@@ -54,8 +54,11 @@ defmodule Barkpark.Content.Papers.BpmlView do
            Content.Papers.bpml_paper_map(paper, blocks, fields)
          )}
 
-      _ ->
-        {:error, "the paper has no blocks a pull can print"}
+      {:html, _html} ->
+        {:error, "the paper has no blocks a pull can print (its source is HTML)"}
+
+      {:error, reason} ->
+        {:error, "the reader cannot show the paper (#{reason})"}
     end
   end
 
