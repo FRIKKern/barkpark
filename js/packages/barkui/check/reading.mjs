@@ -5,6 +5,8 @@ const fmt = (n) => n.toFixed(2)
 
 /** `waits`: this view's waits on the sheet (verdict); the reading marks each text drawn in one of their pairs. */
 export async function readView(page, part, waits = []) {
+  // A judged moment: first note which of the part's rules apply now (coverage.mjs).
+  if (page.barkCover) await page.barkCover()
   const sel = `[data-part="${part.name}"]`
   const world = page.barkCheck
   const scale = page.barkScale

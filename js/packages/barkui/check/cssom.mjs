@@ -21,7 +21,7 @@ import { inPartsLayer, SELECTOR_RULES } from '../build/css-lint.mjs'
 import { pinStates } from '../build/showroom.mjs'
 import { EXTRA, KEYFRAMES, LEFT_OUT_INITIAL, MEDIA, MOTION_ONLY, PHONE, PHONE_ONLY, VOCABULARY } from '../build/vocabulary.mjs'
 import { readFileSync } from 'node:fs'
-import { selectorFindings, statesOnSubject, unpinned } from './selectors.mjs'
+import { resolve, selectorFindings, statesOnSubject, strip, unpinned } from './selectors.mjs'
 
 const SENTINEL = '[data-barkui-sentinel] { gap: 0px; }'
 
@@ -114,13 +114,13 @@ export async function readPartCss(browser, css) {
         const walk = (rules, at, parent) => {
           for (const r of rules) {
             if (r instanceof CSSStyleRule) {
-              selectors.push({ text: r.selectorText, parent })
+              selectors.push({ text: r.selectorText, parent, media: at.media, decls: r.style.length })
               declarations(r.style, at, r.selectorText)
               walk(r.cssRules, at, selectors.length - 1)
             } else if (typeof CSSNestedDeclarations === 'function' && r instanceof CSSNestedDeclarations) declarations(r.style, at, 'nested declarations')
             else if (r instanceof CSSMediaRule) {
               if (!media.includes(r.conditionText)) found.push(`@media ${r.conditionText}: not a view the check renders`)
-              walk(r.cssRules, { inMotion: at.inMotion || /prefers-reduced-motion/.test(r.conditionText), inPhone: at.inPhone || r.conditionText === phone }, parent)
+              walk(r.cssRules, { inMotion: at.inMotion || /prefers-reduced-motion/.test(r.conditionText), inPhone: at.inPhone || r.conditionText === phone, media: [...at.media, r.conditionText] }, parent)
             } else found.push(`${r.constructor.name} "${r.cssText.replace(/\s+/g, ' ').slice(0, 60)}": not a rule part.css may hold`)
           }
         }
@@ -143,7 +143,7 @@ export async function readPartCss(browser, css) {
           return rules.slice(0, -1)
         }
         const asWritten = layer(texts.asWritten, true)
-        if (asWritten) walk(asWritten, { inMotion: false, inPhone: false }, -1)
+        if (asWritten) walk(asWritten, { inMotion: false, inPhone: false, media: [] }, -1)
         const pinned = asWritten && layer(texts.pinned, true)
         const pinnedSelectors = []
         if (pinned) {
@@ -168,10 +168,32 @@ export async function readPartCss(browser, css) {
     })
     // The pin must reach every state, whatever case or spacing the text gave it.
     for (const s of pinnedSelectors) for (const p of unpinned(s)) found.push(`${s}: ${p} is not pinned in the showroom; data-pin cannot show it`)
-    return { found, rules }
+    return { found, rules, entries: found.length ? [] : ruleEntries(selectors, pinnedSelectors) }
   } finally {
     await context.close()
   }
+}
+
+/** Each rule of the part that sets anything, for the coverage reading (check/coverage.mjs): `label`, its selector
+    made absolute; `now`, the selector the page holds (states pinned), less any pseudo-element, which an element
+    matches while the rule applies to it; `rest`, the same with its states taken out, which an element matches when
+    a state is all it needs; `states`, those states; `media`, the conditions it sits in. */
+function ruleEntries(selectors, pinned) {
+  const label = []
+  const now = []
+  const rest = []
+  const states = []
+  const entries = []
+  selectors.forEach((s, i) => {
+    const up = s.parent >= 0 ? s.parent : null
+    label[i] = resolve(s.text, up === null ? null : label[up])
+    now[i] = resolve(pinned[i], up === null ? null : now[up])
+    const own = strip(s.text)
+    rest[i] = strip(resolve(s.text, up === null ? null : rest[up])).selector
+    states[i] = [...new Set([...own.states, ...(up !== null && statesOnSubject(s.text, true) ? states[up] : [])])]
+    if (s.decls) entries.push({ label: label[i], now: strip(now[i]).selector, rest: rest[i], states: states[i], media: s.media })
+  })
+  return entries
 }
 
 /** The page's own barkui.css (`file`, the sheet index.html links), parsed whole in the same browser: each part's

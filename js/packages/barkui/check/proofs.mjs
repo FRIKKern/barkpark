@@ -11,6 +11,7 @@ import { installMatch } from './match.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
 import { realStates } from './states.mjs'
+import { installCover } from './coverage.mjs'
 import { LEFT_OUT_INITIAL } from '../build/vocabulary.mjs'
 
 export const STEP_MS = 5000
@@ -53,6 +54,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   page.barkRef = { page: ref, world: await isolate(ref, 'barkui-ref') }
   for (const install of [installHelpers, installBoundary, installMatch, installDrawn]) await page.barkRef.world(install)
+  installCover(page, ctx)
   page.barkPress = await isolate(page, 'barkui-press')
   await page.barkPress(installHelpers)
   return page
@@ -103,12 +105,17 @@ async function ax(page, selector) {
   }
 }
 
-export async function pressed(ctx, part) {
+// With `ctx.states`, each step ends with the stage read as drawn (in the first skin, light, on base), so a state
+// only the steps reach (pending, say) is read while it holds.
+export async function pressed(ctx, part, skins) {
   const { setup, steps } = await import(pathToFileURL(part.press).href)
   if (!Array.isArray(steps) || !steps.length) return { light: light(false, 'press.mjs exports no steps'), steps: [] }
-  const page = await open(ctx)
+  const drawn = ctx.states !== false
+  const page = await open(ctx, drawn ? { scale: 2, height: 1600 } : {})
+  const waits = waitsFor(skins[0], 'light', 'base')
   const results = []
   try {
+    if (drawn) await view(page, skins[0], 'light')
     if (setup) await inPage(page, setup, part.name, 'press.mjs setup')
     await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
     for (const step of steps) {
@@ -144,6 +151,8 @@ export async function pressed(ctx, part) {
             break
           }
         }
+        const fails = result === true && drawn ? verdict(await readView(page, part, waits), `drawn after this step, ${skins[0]} light on base: `, waits).fails : []
+        if (fails.length) result = fails.join('; ')
       } catch (e) {
         result = String(e.message).split('\n')[0]
       }
@@ -308,7 +317,7 @@ async function stateFails(ctx, part, skin) {
   const page = await open(ctx, { scale: 2, height: 1600 })
   try {
     await view(page, skin, 'light')
-    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title` })
+    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title`, entries: ctx.entries ?? [], pairs: ctx.pairs ?? [] })
     await stillStyled(ctx, page, 'states')
     return fails
   } finally {

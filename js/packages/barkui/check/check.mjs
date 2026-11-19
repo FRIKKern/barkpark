@@ -9,6 +9,7 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
 import { AT_ONCE, capacitySentence, PARTS_HELD } from './capacity.mjs'
+import { unread } from './coverage.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { limit } from './limit.mjs'
 import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } from './proofs.mjs'
@@ -51,8 +52,8 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   // part exactly as it was read alone (check/cssom.mjs).
   const judged = []
   for (const part of built.parts) {
-    const { found, rules } = await readPartCss(browser, part.css)
-    judged.push({ name: part.name, rules })
+    const { found, rules, entries } = await readPartCss(browser, part.css)
+    judged.push({ name: part.name, rules, entries })
     if (!found.length) continue
     await browser.close()
     for (const f of found) log(`check: parts/${part.name}/part.css, as the browser reads it: ${f}`)
@@ -77,7 +78,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   // when it ends, and proof.json keeps the parts in folder order.
   const checkPart = async (part) => {
     const lines = []
-    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion, states }
+    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion, states, entries: judged.find((j) => j.name === part.name).entries, judged: new Set(), pairs: [] }
     lines.push(part.name)
     const lights = {}
     let measures = {}
@@ -86,7 +87,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     let steps = []
     try {
       await limit((async () => {
-        if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part))
+        if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
         if (only.includes('skins') || only.includes('schemes')) {
           const looks = await skinsAndSchemes(ctx, part, skins)
           Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
@@ -102,7 +103,10 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     }
     for (const k of LIGHT_NAMES) if (!lights[k]) lights[k] = { pass: false, detail: only.includes(k) ? 'did not finish' : 'not run in this run' }
     const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
-    const failed = ctx.errors[0] ?? offs[0]
+    // Coverage, once every light has read: a rule or a driven pair no judged reading saw fails the part.
+    const missed = LIGHT_NAMES.every((k) => only.includes(k)) && states && !ctx.errors.length ? unread(ctx) : []
+    for (const m of missed) lines.push(`  ${m}`)
+    const failed = ctx.errors[0] ?? missed[0] ?? offs[0]
     for (const [k, l] of Object.entries(lights)) lines.push(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
     for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
     for (const [k, m] of Object.entries(measures))
@@ -112,7 +116,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
     for (const l of Object.values(lights)) l.surfaces = surfacesOf(ctx)
     for (const l of lines) log(l)
-    return { entry: { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(failed ? { failed } : {}) }, errors: ctx.errors }
+    return { entry: { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(missed.length ? { unread: missed } : {}), ...(failed ? { failed } : {}) }, errors: ctx.errors }
   }
   try {
     const done = new Array(built.parts.length)
