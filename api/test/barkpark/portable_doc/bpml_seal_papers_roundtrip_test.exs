@@ -35,7 +35,8 @@ defmodule Barkpark.PortableDoc.BpmlSealPapersRoundtripTest do
 
   So this suite states the criterion in the only form that is both TRUE and
   STRONG: `parse(print(blocks)) == canonicalize(blocks)`, where
-  `canonicalize/1` below implements EXACTLY those two rules and nothing else.
+  `canonicalize/1` is `Bpml.Canonical.normalize/1`, the one list of the
+  printer's rewrites that the print wall (`Bpml.RoundTrip`) compares by too.
   Any third difference — a dropped attribute, a lost body, a retyped block —
   reds. Two controls keep that honest: `canonicalize/1` must be a NO-OP on the
   parsed side (it is already canonical), and it must be a NO-OP on
@@ -74,16 +75,11 @@ defmodule Barkpark.PortableDoc.BpmlSealPapersRoundtripTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Bpml
+  alias Barkpark.PortableDoc.Bpml.Canonical
 
   @fixtures Path.expand("../../support/fixtures/bpml", __DIR__)
 
   @flagship_types ~w(figure asciicast columns)
-
-  # The inline node types that canonicalize onto a marked text node. `link` is
-  # NOT one of them — `<a href>` parses to a `link` node, which survives as a
-  # node — so a link appearing here would (correctly) fail rather than be
-  # normalized away.
-  @mark_node_types ~w(strong em code underline strike)
 
   describe "criterion 1 — heggemsnes-act" do
     test "round-trips parse(print(blocks)) == blocks, LITERALLY byte-equal" do
@@ -184,76 +180,12 @@ defmodule Barkpark.PortableDoc.BpmlSealPapersRoundtripTest do
     end
   end
 
-  # ── the two named canonicalizations, and nothing else ───────────────────────
+  # ── the printer's rewrites ──────────────────────────────────────────────────
   #
-  # The walk is MODE-AWARE, and it has to be: an inline code run and a code
-  # BLOCK are the same map — `%{"type" => "code", "value" => …}` — and only
-  # position tells them apart. Rule 1 may only fire in inline position, so the
-  # walker switches to block mode under the keys that hold blocks and stays in
-  # inline mode everywhere else. (Get this wrong and the normalizer rewrites
-  # every code block in the paper into marked prose; the two controls in the
-  # criterion-2 describe are what caught exactly that.)
-  @block_body_keys ~w(blocks children child columns slots steps)
-
-  defp canonicalize(blocks) when is_list(blocks), do: Enum.map(blocks, &canon_block/1)
-
-  # RULE 2 — `expandable` spells its body `blocks` (the parser's canonical key).
-  defp canon_block(%{"type" => "expandable", "children" => children} = block) do
-    block
-    |> Map.delete("children")
-    |> Map.put("blocks", children)
-    |> canon_block()
-  end
-
-  defp canon_block(%{} = block) do
-    Map.new(block, fn
-      {k, v} when k in @block_body_keys -> {k, canon_block_value(v)}
-      {k, v} -> {k, canon_inline(v)}
-    end)
-  end
-
-  defp canon_block(other), do: other
-
-  defp canon_block_value(v) when is_list(v), do: Enum.map(v, &canon_block_value/1)
-  defp canon_block_value(%{} = v), do: canon_block(v)
-  defp canon_block_value(v), do: v
-
-  # RULE 1 — a node-spelled inline mark becomes a text node carrying that mark.
-  defp canon_inline(%{"type" => t, "value" => v} = node)
-       when t in @mark_node_types and is_binary(v),
-       do: %{"type" => "text", "value" => v, "marks" => [t | Map.get(node, "marks", [])]}
-
-  # The mark distributes over every run the element covers (parser.ex), so one
-  # marked element with N children becomes N marked runs — hence the flatten in
-  # the list clause below.
-  defp canon_inline(%{"type" => t, "children" => children})
-       when t in @mark_node_types and is_list(children) do
-    Enum.map(children, fn child ->
-      case canon_inline(child) do
-        %{"marks" => marks} = c -> %{c | "marks" => [t | marks]}
-        %{} = c -> Map.put(c, "marks", [t])
-        other -> other
-      end
-    end)
-  end
-
-  defp canon_inline(%{} = m), do: Map.new(m, fn {k, v} -> {k, canon_inline(v)} end)
-
-  # Flattens EXACTLY the one level a distributed mark introduces. A blanket
-  # `List.flatten/1` here collapsed a table's rows-of-cells-of-nodes into one
-  # flat node list — structure destroyed, and the assertion would then have
-  # been comparing a shape the parser never emits.
-  defp canon_inline(l) when is_list(l) do
-    Enum.flat_map(l, fn
-      %{"type" => t, "children" => cs} = node when t in @mark_node_types and is_list(cs) ->
-        canon_inline(node)
-
-      item ->
-        [canon_inline(item)]
-    end)
-  end
-
-  defp canon_inline(other), do: other
+  # ONE source: the wall in `Bpml.RoundTrip` and this suite read the same
+  # `Canonical.normalize/1`. These two papers exercise rule 1 (`:mark_node`) and
+  # rule 2 (`:expandable_children`).
+  defp canonicalize(blocks), do: Canonical.normalize(blocks)
 
   # ── helpers ─────────────────────────────────────────────────────────────────
 
