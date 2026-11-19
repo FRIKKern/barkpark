@@ -200,7 +200,7 @@ function sideOf(ground, label, fills) {
   const labelSide = sideOfGround(label, ground);
   const pick = (side) => Object.fromEntries(Object.entries(fills).map(([role, [, cs]]) => [role, cs.find((c) => c && sideOfGround(c, ground) === side)]));
   const far = pick(-labelSide), near = pick(labelSide);
-  const fits = Object.entries(fills).every(([role, [kind]]) => far[role] && stepsFor(kind, far[role], ground));
+  const fits = Object.entries(fills).every(([role, [kind, , solid]]) => far[role] && stepsFor(kind, far[role], ground, solid));
   const out = fits ? far : near;
   for (const [role, c] of Object.entries(out)) if (!c) throw new Error(`barkui: ${role} has no fill on the label's side of its ground`);
   return out;
@@ -228,14 +228,27 @@ export function softSides(fill, ground) {
 function withStates(s, at) {
   const out = { ...s };
   for (const [fill, , kind] of STATE_FILLS)
-    [out[`${fill}-hover`], out[`${fill}-pressed`]] = statesOf(kind, s[fill], s.background, `${at}: ${fill}`);
+    [out[`${fill}-hover`], out[`${fill}-pressed`]] = statesOf(kind, s[fill], s.background, `${at}: ${fill}`, kind === "soft" ? s[fill.replace(/-soft$/, "")] : undefined);
   for (const [fill, label] of STATE_FILLS) {
     // a label that reads on the ground (a tone's text) keeps reading there too
     const on = [fill, `${fill}-hover`, `${fill}-pressed`].map((n) => out[n]);
     if (contrast(out[label], s.background) >= 4.5) on.push(s.background);
-    out[label] = walkTo(out[label], on, 4.5, L(out[label]) >= L(out[fill]) ? 1 : -1);
+    out[label] = walkLabel(out[label], on, L(out[label]) >= L(out[fill]) ? 1 : -1);
   }
   return out;
+}
+// A label walked to 4.5:1 on every colour in `on`. Where the walk's colour, as
+// painted, turns a tone's text more than half a degree off its hue, the label is
+// instead walked in painted steps that keep the hue.
+function walkLabel(label, on, dir) {
+  const walked = walkTo(label, on, 4.5, dir), { L: l, C, h } = srgbToOklch(label), o = srgbToOklch(paint(walked));
+  const off = (a) => { const d = Math.abs(a - h) % 360; return Math.min(d, 360 - d); };
+  if (walked === label || o.C < 0.02 || off(o.h) <= 0.5) return walked;
+  for (let x = l + dir * 0.001; x >= 0 && x <= 1; x += dir * 0.001) {
+    const c = paint(oklchToSrgb(x, C, h));
+    if (on.every((g) => contrast(c, paint(g)) >= 4.55) && off(srgbToOklch(c).h) <= 0.5) return css(c);
+  }
+  return walked;
 }
 // Surface `s` with its muted fill and each tone's -soft on the side sideOf
 // picks for its ground (the muted fill as given, or mirrored across the ground
@@ -244,7 +257,7 @@ function withStates(s, at) {
 // 4.5:1 on its soft fill is walked until it does.
 function withSofts(s, walk) {
   const fills = { muted: ["muted", [s.muted, atL(s.muted, 2 * L(s.background) - L(s.muted))]] };
-  for (const t of TONES) fills[`${t}-soft`] = ["soft", softSides(s[t], s.background)];
+  for (const t of TONES) fills[`${t}-soft`] = ["soft", softSides(s[t], s.background), s[t]];
   const out = { ...s, ...sideOf(s.background, s.foreground, fills) };
   if (out.muted !== s.muted) out["muted-foreground"] = walkTo(s["muted-foreground"], out.muted, 4.5);
   if (walk) for (const t of TONES)
