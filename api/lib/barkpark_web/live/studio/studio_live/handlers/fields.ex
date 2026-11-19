@@ -527,7 +527,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
             path ->
               acc
               |> seed_root(path, base_form)
-              |> StudioLive.put_value_at(path, coerce_leaf(socket, path, value))
+              |> write_leaf(socket, path, value)
           end
         end)
 
@@ -569,6 +569,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   defp seed_root(doc, _path, _base_form), do: doc
+
+  # ── An emptied language is removed (B06) ────────────────────────────────────
+  #
+  # A localizedText language the author emptied is unset, as the TanStack
+  # Studio unsets it: `{"nob" => "", "eng" => "…"}` is stored as
+  # `{"eng" => "…"}`, and a field left with no language is removed. Only a
+  # TOUCHED empty value reaches here (`foldable?/3`), so a language the author
+  # never typed in is kept as stored.
+  defp write_leaf(doc, socket, path, "") do
+    parent = Enum.drop(path, -1)
+
+    case Shared.find_field_by_path(socket, parent) do
+      %{"type" => "localizedText"} -> unset_language(doc, parent, List.last(path))
+      _ -> StudioLive.put_value_at(doc, path, coerce_leaf(socket, path, ""))
+    end
+  end
+
+  defp write_leaf(doc, socket, path, value),
+    do: StudioLive.put_value_at(doc, path, coerce_leaf(socket, path, value))
+
+  defp unset_language(doc, [root] = parent, lang) do
+    case value_at(doc, parent) do
+      %{} = map ->
+        left = Map.delete(map, lang)
+        Map.put(doc, root, if(left == %{}, do: "", else: left))
+
+      _ ->
+        doc
+    end
+  end
+
+  defp unset_language(doc, parent, lang) do
+    case value_at(doc, parent) do
+      %{} = map -> StudioLive.put_value_at(doc, parent, Map.delete(map, lang))
+      _ -> doc
+    end
+  end
+
+  defp value_at(value, []), do: value
+  defp value_at(%{} = map, [key | rest]), do: value_at(Map.get(map, key), rest)
+
+  defp value_at(list, [index | rest]) when is_list(list) and is_integer(index),
+    do: value_at(Enum.at(list, index), rest)
+
+  defp value_at(_value, _path), do: nil
 
   defp base_form(socket), do: socket.assigns[:editor_form] || %{}
 

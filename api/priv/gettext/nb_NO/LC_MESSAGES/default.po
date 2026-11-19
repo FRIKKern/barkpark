@@ -15509,3 +15509,18 @@ msgstr "Stemmer ikke overens med tillatte protokoller/skjemaer"
 #, elixir-autogen, elixir-format
 msgid "Username/password not allowed"
 msgstr "Brukernavn/passord er ikke tillatt"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has text"
+msgstr ", har tekst"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "%{lang} (primary)"
+msgstr "%{lang} (primær)"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "No %{primary} text: readers get the %{fallback} text instead."
+msgstr "Ingen %{primary}-tekst: leserne får %{fallback}-teksten i stedet."
