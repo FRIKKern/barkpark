@@ -48,8 +48,8 @@ defmodule Barkpark.Content.TextUndoTest do
 
   describe "TextRebase.merge3_both/3" do
     test "nil where the two changes overlap, where merge3/3 gives ours" do
-      assert TextRebase.merge3_both("Hello world", "Hello A world", "Hello B world") == nil
-      assert TextRebase.merge3("Hello world", "Hello A world", "Hello B world") == "Hello A world"
+      assert TextRebase.merge3_both("Hello world", "Hello there", "Hello wOrld") == nil
+      assert TextRebase.merge3("Hello world", "Hello there", "Hello wOrld") == "Hello there"
     end
 
     test "nil over the size bound" do

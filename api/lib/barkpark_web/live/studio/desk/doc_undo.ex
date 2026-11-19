@@ -40,8 +40,10 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [push_event: 3]
 
+  alias Barkpark.Content
   alias Barkpark.Content.TextRebase
   alias Barkpark.Content.TextUndo
+  alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.Panes
@@ -114,7 +116,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
 
     undo =
       case state.undo do
-        [%{field: ^key, at: at} = last | rest] when now - at < @group_ms ->
+        [%{field: ^key, at: at} = last | rest] when is_integer(at) and now - at < @group_ms ->
           [%{last | steps: last.steps ++ [step], at: now} | rest]
 
         changes ->
@@ -163,7 +165,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
         else: change.steps |> Enum.reverse() |> Enum.map(fn {a, b} -> {b, a} end)
 
     field = change.field
-    now = stored(socket, field)
+    now = current(socket, field)
     next = if is_binary(now), do: TextUndo.revert_steps(steps, now), else: now
     popped = if redo?, do: {state.undo, rest}, else: {rest, state.redo}
     socket = put_state(socket, mark, elem(popped, 0), elem(popped, 1))
@@ -177,7 +179,8 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
       {:noreply, saved} = EditorHost.write_built(params, socket)
 
       if landed?(saved, socket) do
-        change = %{change | at: 0}
+        # Undone or redone, it is a step of its own: typing next is not part of it.
+        change = %{change | at: nil}
 
         {undo, redo} =
           if redo?, do: {[change | onto], rest}, else: {rest, [change | onto]}
@@ -207,6 +210,26 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
 
   defp put_state(socket, mark, undo, redo),
     do: assign(socket, :desk_undo, %{doc: mark, undo: undo, redo: redo})
+
+  # The field as the store holds it now, read fresh: the editor's own copy
+  # can be a frame behind another editor's save, and an undo computed from
+  # it would take their words with ours. The editor's copy when the read
+  # finds nothing.
+  defp current(%{assigns: assigns} = socket, key) do
+    with %{doc_id: id} when is_binary(id) <- assigns[:editor_doc],
+         type when is_binary(type) <- assigns[:editor_type],
+         {%{} = doc, _, _} <-
+           Content.fetch_doc_with_draft(
+             type,
+             Content.published_id(id),
+             assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+      text(FieldActions.stored(doc, key))
+    else
+      _ -> stored(socket, key)
+    end
+  end
 
   defp stored(socket, key) do
     case socket.assigns[:editor_doc] do
