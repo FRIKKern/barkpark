@@ -37,10 +37,11 @@ defmodule BarkparkWeb.BulldocsEmailController do
 
       paper ->
         opts = %{style: :email, theme: email_theme(paper), locale: email_locale(paper)}
-        title = email_title(paper, slug)
+        source = Content.Papers.reader_source(paper, dataset, scope)
+        title = email_title(paper, slug, source)
         trusted_paper_uri = trusted_paper_uri(conn)
 
-        case Content.Papers.reader_source(paper, dataset, scope) do
+        case source do
           {:error, reason} ->
             conn
             |> put_status(:unprocessable_entity)
@@ -132,6 +133,14 @@ defmodule BarkparkWeb.BulldocsEmailController do
   end
 
   defp email_title(_paper, slug), do: slug
+
+  # The title the reader of these blocks is shown (`Papers.ReaderTitle`).
+  defp email_title(paper, slug, {:blocks, blocks}) do
+    stored = Barkpark.PortableDoc.Projection.read_blocks(paper.content || %{})
+    Content.Papers.ReaderTitle.of(email_title(paper, slug), stored, blocks, slug)
+  end
+
+  defp email_title(paper, slug, _source), do: email_title(paper, slug)
 
   # Resolve relative links against the canonical reader location while taking
   # the origin only from Endpoint configuration, never the request Host header.

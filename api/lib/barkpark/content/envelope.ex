@@ -83,6 +83,7 @@ defmodule Barkpark.Content.Envelope do
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, SchemaDefinition}
+  alias Barkpark.Content.Envelope.ShownBlocks
   alias Barkpark.Crypto.FieldCipher
   alias Barkpark.PortableDoc.Projection
 
@@ -770,6 +771,20 @@ defmodule Barkpark.Content.Envelope do
       end
     end)
     |> redact_preview_manifest(fields, ctx, owner_id)
+    |> ShownBlocks.apply(envelope, &redact_blocks(&1, fields, ctx, owner_id))
+  end
+
+  # A block list as the `blocks` field's rules show it to this caller; nil
+  # when the caller may not see the field at all.
+  defp redact_blocks(blocks, fields, ctx, owner_id) do
+    case find_raw_field(fields, "blocks") do
+      nil ->
+        blocks
+
+      field ->
+        if field_visible?(field, ctx, owner_id),
+          do: redact_nested(blocks, field, ctx, owner_id, 1)
+    end
   end
 
   # THE DERIVED COPY (task-84c95acb380f41e4). `content["preview"]` is stamped at
