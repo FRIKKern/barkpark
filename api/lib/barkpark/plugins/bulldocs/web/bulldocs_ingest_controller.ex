@@ -400,15 +400,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
         sync_create(conn, slug, parsed, dataset, scope)
 
       paper ->
-        # The paper-level integer rev — the same value the ops if_rev guard
-        # compares (content["rev"]), and the same one pull anchors in
-        # x-paper-rev. NEVER the row's _rev hash. Derived by the ONE owner,
-        # `Content.Papers.op_rev/1`, that the pull route reads too: deriving it
-        # here independently is how `to_string(nil)` turned a revless paper's
-        # ABSENT rev into `""` and then rendered it as a mismatch ("paper is at
-        # rev , your copy anchored on …") against the very anchor pull handed
-        # out. A revless paper anchors on 0 and pushes clean; an UNREADABLE rev
-        # is a distinct refusal below, never a comparand.
+        # The paper-level integer rev (content["rev"]) the ops if_rev guard
+        # compares and pull anchors in x-paper-rev, never the row's _rev hash,
+        # from the ONE owner the pull reads too (`Content.Papers.op_rev/1`):
+        # deriving it here once turned a revless paper's ABSENT rev into `""`.
+        # A revless paper anchors on 0; an UNREADABLE rev is its own refusal.
         rev_read = Content.Papers.op_rev(paper)
         current_rev = with {:ok, rev} <- rev_read, do: to_string(rev)
         current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
@@ -455,7 +451,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+            case Barkpark.PortableDoc.Bpml.WriteWall.derive(paper, parsed, dataset) do
+              {:error, %{} = r} ->
+                ErrorResponse.emit_fields(conn, :unprocessable_entity, r)
+
               {:error, :diff_verification_failed} ->
                 conn
                 |> ErrorResponse.emit_fields(:unprocessable_entity, %{

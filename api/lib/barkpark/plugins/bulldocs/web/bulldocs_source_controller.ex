@@ -43,27 +43,14 @@ defmodule BarkparkWeb.BulldocsSourceController do
         send_resp(conn, 404, "not found")
 
       paper ->
-        # The schema the blocks were redacted under also redacts the BPML
-        # label spine (description, tags) — no second lookup.
-        {reader_source, schema} = Content.Papers.reader_source_with_schema(paper, dataset, scope)
+        # One view of the row, shared with the BPML push (`Papers.BpmlView`).
+        view = Content.Papers.BpmlView.of(paper, dataset, scope, perspective)
 
         source =
-          case reader_source do
-            {:blocks, blocks} ->
-              resolved =
-                Content.Papers.resolve_tasks_in_blocks(
-                  blocks,
-                  task_scope(paper, perspective),
-                  dataset
-                )
-
-              %{"kind" => "blocks", "blocks" => resolved}
-
-            {:html, html} ->
-              %{"kind" => "html", "html" => html}
-
-            {:error, reason} ->
-              {:error, reason}
+          case view do
+            {:blocks, blocks, _fields} -> %{"kind" => "blocks", "blocks" => blocks}
+            {:html, html} -> %{"kind" => "html", "html" => html}
+            {:error, reason} -> {:error, reason}
           end
 
         case {source, format} do
@@ -75,7 +62,8 @@ defmodule BarkparkWeb.BulldocsSourceController do
           # BPML is a VIEW of blocks only — an html-source paper has no block
           # truth to print, so the isomorphic format honestly refuses.
           {%{"kind" => "blocks", "blocks" => blocks}, "bpml"} ->
-            send_bpml(conn, paper, blocks, Content.Papers.anonymous_content(paper, schema))
+            {:blocks, _blocks, fields} = view
+            send_bpml(conn, paper, blocks, fields)
 
           {%{"kind" => "html"}, "bpml"} ->
             conn
@@ -215,27 +203,5 @@ defmodule BarkparkWeb.BulldocsSourceController do
       %{id: id} -> [workspace_id: id]
       _ -> nil
     end
-  end
-
-  # The task-block scope carries the caller's OWN perspective, resolved once in
-  # `show/2` by `BarkparkWeb.AnonPerspective` — the single owner of "who may see
-  # drafts". A plain anonymous caller (no token, no preview JWT, not an `:edit`
-  # share) is pinned to `:published` there, so `published_only: true` and a
-  # draft-only task never reaches this surface (task-b10e10b944f6f55b); a
-  # preview/edit-share caller keeps `:drafts`/`:raw` and still sees them, which
-  # is the authoring contract this endpoint has always served.
-  defp task_scope(paper, perspective) do
-    ws_id =
-      paper.workspace_id ||
-        case Barkpark.Tenancy.get_default_workspace() do
-          %{id: id} -> id
-          _ -> nil
-        end
-
-    [
-      workspace_id: ws_id,
-      project_id: paper.project_id,
-      published_only: perspective == :published
-    ]
   end
 end

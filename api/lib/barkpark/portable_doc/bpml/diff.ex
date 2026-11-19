@@ -25,14 +25,18 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   (the caller persists ops and treats `minted_new_blocks` as the result truth) —
   or `{:error, :diff_verification_failed}` if the replay proof fails.
   `{:ok, new, []}` means the documents are already equal.
+
+  `shown` is what the pull printed for `old` (`Papers.BpmlView`, after
+  redaction and task resolution); a pushed block that spells the same as its
+  shown block was not edited. It defaults to `old` itself.
   """
-  @spec derive([map()], [map()]) ::
+  @spec derive([map()], [map()], [map()] | nil) ::
           {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
-  def derive(old, new) when is_list(old) and is_list(new) do
+  def derive(old, new, shown \\ nil) when is_list(old) and is_list(new) do
     new =
       new
       |> BlockIds.ensure_block_ids()
-      |> keep_unedited(old)
+      |> keep_unedited(old, shown || old)
 
     if old == new do
       {:ok, new, []}
@@ -51,17 +55,22 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   # equality, every such block derived a `replace-block` on a push nobody
   # edited — rewriting stored data (and, for a locked block, a refused batch).
   #
-  # A pushed block whose BPML spelling equals the stored block's spelling was
-  # not edited: the author can only change what BPML spells. So it is replaced
-  # by the stored block before the diff, and derives no op. A block the printer
-  # cannot spell is compared by map equality as before.
-  defp keep_unedited(new, old) do
+  # A pushed block whose BPML spelling equals the spelling of the block the
+  # pull SHOWED was not edited: the author can only change what the pull
+  # printed. So it is replaced by the stored block before the diff, and derives
+  # no op. Comparing against the stored block instead would call a block edited
+  # whenever the pull redacted part of it, and write the redacted print over it.
+  # A block the printer cannot spell is compared by map equality as before.
+  defp keep_unedited(new, old, shown) do
     old_by_id = Map.new(old, &{&1["id"], &1})
+    shown_by_id = Map.new(shown, &{&1["id"], &1})
 
     Enum.map(new, fn block ->
       case Map.fetch(old_by_id, block["id"]) do
         {:ok, stored} when stored != block ->
-          if same_spelling?(stored, block), do: stored, else: block
+          if same_spelling?(Map.get(shown_by_id, block["id"], stored), block),
+            do: stored,
+            else: block
 
         _ ->
           block
