@@ -83,7 +83,7 @@ func sshFailureHint(f chatHostEnrollFlags, name, remote string, sshErr error) st
 	}
 	return fmt.Sprintf("%s may not have enrolled (ssh: %v). Check bp chat-host list: if %s still reads waiting, it did not.\n"+
 		"Send it a new code over ssh's stdin (the old one stops working):\n"+
-		"  bp chat-host new-code %s -o json | jq -r .enrollment_token | ssh -T %s %s\n"+
+		"  bp chat-host new-code %s -o json | jq -er '.enrollment_token // empty' | ssh -T -- %s %s\n"+
 		"or revoke it and add it again:\n"+
 		"  bp chat-host revoke %s && %s",
 		f.ssh, sshErr, name,
