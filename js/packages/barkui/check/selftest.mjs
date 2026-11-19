@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { runCheck } from './check.mjs'
+import { readPartCss } from './cssom.mjs'
 
 const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
 // Runs `code` at the start of the part's demo, with `root` in scope.
@@ -132,6 +133,9 @@ const CASES = [
       'ui-button:has(> #button-primary) { display: inline-block; padding: 12px; background-color: var(--ui-primary); }',
       '#button-quiet { mix-blend-mode: overlay; }',
       '#button-destructive { filter: opacity(0.15); }',
+      // Beyond the lint and the browser-read walls (this sheet is the selftest's own): a rule only motion applies.
+      '@keyframes x { to { color: var(--ui-primary) } }',
+      '@media (prefers-reduced-motion: no-preference) { #button-primary { animation: x 1ms forwards; } }',
     ].join('\n'),
     expect: each({
       'a size with no font': drawnOff('button "Small"'),
@@ -143,6 +147,7 @@ const CASES = [
       'a focus ring lost on its ground': both(/focus on button#button-primary.*edge [\d.]+:1 against the ground/),
       'mix-blend-mode on one button': drawnOff('button#button-quiet "Cancel"'),
       'filter beyond its one value (vocabulary EXTRA)': drawnOff('button#button-destructive "Delete"'),
+      'a label hidden only when motion is allowed': skinsSay(new RegExp(`motion allowed, .* animations finished: .*${DRAWN} at button#button-primary`)),
     }),
   },
   // The paint trace: every colour an element shows is one skin variable in every skin and scheme.
@@ -329,6 +334,38 @@ const CASES = [
     plant: inCss('#button-after { filter: opacity(0.1); }'),
     expect: refused(/part\.css line \d+: filter: opacity\(0\.1\); part\.css may only set filter to none/),
   },
+  // The reviewer's own inputs: each refused before a browser opens, and each refused again by the browser's reading.
+  ...[
+    ['its own keyframes, run only when motion is allowed', '@keyframes x { to { color: var(--ui-primary) } }\n@media (prefers-reduced-motion: no-preference) { #button-primary { animation: x 1ms forwards; } }', /a part defines no keyframes/],
+    ['an escaped @media for a width the check never renders', String.raw`@\6d edia (min-width: 1600px) { [data-slot="button"] { color: var(--ui-background); } }`, /a backslash/],
+    ['an escaped filter', String.raw`#button-after { fil\000074er: blur(2px); }`, /a backslash/],
+    ['an escaped outline', String.raw`#button-after { outl\000069ne: none; }`, /a backslash/],
+    ['a brace that closes the bark-parts layer early', '} [data-slot="button"] { box-shadow: none; } @layer bark-parts {', /a \} with no \{ before it/],
+  ].map(([what, css, re]) => ({
+    name: `part.css with ${what} is refused at discovery`,
+    only: ['pressed'],
+    plant: inCss(css),
+    expect: refused(re),
+  })),
+  {
+    name: "the browser's reading of part.css refuses the same inputs with no help from the text lint",
+    direct: async () => {
+      const browser = await chromium.launch()
+      try {
+        const said = []
+        for (const [css, re] of [
+          ['@keyframes x { to { color: var(--ui-primary) } }\n@media (prefers-reduced-motion: no-preference) { #button-primary { animation: x 1ms forwards; } }', /CSSKeyframesRule/],
+          [String.raw`@\6d edia (min-width: 1600px) { a { gap: 1px; } }`, /@media \(min-width: 1600px\): not a view the check renders/],
+          [String.raw`a { fil\000074er: blur(2px); }`, /filter: blur\(2px\); it may only be none/],
+          [String.raw`a { outl\000069ne: none; }`, /outline-style is outside part\.css's vocabulary/],
+          ['} a { box-shadow: none; } @layer bark-parts {', /where part\.css's one bark-parts layer belongs/],
+        ]) said.push((await readPartCss(browser, css)).some((f) => re.test(f)))
+        return said.every(Boolean)
+      } finally {
+        await browser.close()
+      }
+    },
+  },
   {
     name: 'a part.json that names a property to allow is refused at discovery',
     only: ['pressed'],
@@ -356,6 +393,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const run = CASES.filter((c) => c.name.includes(pick))
   const start = Date.now()
   for (const c of run) {
+    if (c.direct) {
+      const t0 = Date.now()
+      const held = await c.direct()
+      if (!held) failures++
+      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+      continue
+    }
     const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
     try {
       const dir = join(scratch, 'parts')

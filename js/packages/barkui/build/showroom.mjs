@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, copyFi
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import * as esbuild from 'esbuild'
-import { lintPartCss } from './css-lint.mjs'
+import { lintPartCss, inPartsLayer } from './css-lint.mjs'
 import { discoverParts, hashFiles, partsDir } from './parts.mjs'
 import { renderPage } from './page.mjs'
 
@@ -57,7 +57,7 @@ export async function buildShowroom({ dir = partsDir, out = outDir, proof: proof
     '@layer ui-sdk, bark-base, bark-parts, bark-focus;',
     readFileSync(join(uiSdkDir, 'browser', 'web.css'), 'utf8'),
     readFileSync(join(root, 'css', 'base.css'), 'utf8'),
-    ...parts.map((p) => `/* parts/${p.name}/part.css */\n@layer bark-parts {\n${p.css}\n}`),
+    ...parts.map((p) => `/* parts/${p.name}/part.css */\n${inPartsLayer(p.css)}`),
   ].join('\n')
   writeFileSync(join(out, 'barkui.css'), pinStates(layered) + (plantCss ? `\n/* selftest plant */\n${plantCss}\n` : ''))
   writeFileSync(join(out, 'showroom.css'), readFileSync(join(root, 'build', 'showroom.css')))

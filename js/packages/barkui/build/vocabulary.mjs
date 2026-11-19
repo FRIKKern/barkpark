@@ -58,9 +58,31 @@ export const MOTION_ONLY = new Set(words(MOTION))
 //   so the label is drawn at full strength (selftest: "filter on hover").
 export const EXTRA = { filter: ['none'] }
 
+// Longhands outside the vocabulary that a shorthand in it can set: part.css may
+// leave them only at their initial value ('' is a value still waiting on a var()).
+export const LEFT_OUT_INITIAL = {
+  'background-clip': ['border-box'],
+  'text-decoration-thickness': ['auto'],
+  'border-image-source': ['none'],
+  'border-image-slice': ['100%'],
+  'border-image-width': ['1'],
+  'border-image-outset': ['0'],
+  'border-image-repeat': ['stretch'],
+  'animation-timeline': ['auto'],
+  'animation-range-start': ['normal'],
+  'animation-range-end': ['normal'],
+}
+
+// The keyframes a part may name, all in css/base.css. part.css defines none of
+// its own. Each only turns its element (a test holds base.css to that).
+export const KEYFRAMES = ['bark-spin']
+
+
 // The one phone breakpoint part.css may use. The phone light renders the part
 // at 390px, inside it, and reads it in full.
 export const PHONE = '(max-width: 600px)'
+// The @media conditions part.css may use, as the browser writes them.
+export const MEDIA = [PHONE, '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)']
 
 // The sheet carries no type tokens yet, so a font size is read from a --bark-*
 // or --ui-* variable, and every value part.css gives that variable must be a

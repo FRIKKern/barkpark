@@ -23,8 +23,9 @@ const NONE = { share: 1, label: { match: Infinity, at: '' } }
 export const surfacesOf = (ctx) => (ctx.surfaces === false ? ['base'] : SURFACES)
 
 // `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
-export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1 } = {}) {
-  const context = await ctx.browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: 'reduce', isMobile: mobile, hasTouch: mobile })
+// `motion`: the reduced-motion setting the page opens with; the lights are read under both (see motionFails).
+export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1, motion = 'reduce' } = {}) {
+  const context = await ctx.browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: motion, isMobile: mobile, hasTouch: mobile })
   const page = await context.newPage()
   const where = `${ctx.part}, ${width}px${js ? '' : ', no script'}`
   page.on('pageerror', (e) => ctx.errors.push(`${where}: ${String(e).slice(0, 200)}`))
@@ -261,6 +262,8 @@ export async function skinsAndSchemes(ctx, part, skins) {
   } finally {
     await page.context().close()
   }
+  // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
+  bad.light.push(...(await motionFails(ctx, part, skins[0])))
   const still = frozen(traces)
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }
@@ -293,6 +296,45 @@ export async function skinsAndSchemes(ctx, part, skins) {
       ? off('dark', `light and dark paint the same in ${sameAcross.join(', ')}`)
       : light(true, `dark paints its own values in every skin${where}; weakest drawn text ${fmt(drawnWeakest.dark)}:1; ${drawsAll(fullest.dark)}${boundNote}${focusNote}`)
   return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })), textOnly: [...bare].map(([selector, list]) => ({ selector, controls: list })) }
+}
+
+/** Holds every animation at one moment: 'finished' (an endless one halfway through its first round) or
+    'halfway' through. A transition is always finished: both its ends are states the lights read anyway. */
+const hold = (page, when) =>
+  page.barkCheck((w) => {
+    for (const a of document.getAnimations()) {
+      const t = a.effect.getComputedTiming()
+      const endless = t.activeDuration === Infinity
+      a.pause()
+      a.currentTime = a instanceof CSSTransition || (w === 'finished' && !endless) ? t.endTime : t.delay + (endless ? t.duration : t.activeDuration) / 2
+    }
+  }, when)
+
+/** The drawn readings with motion allowed. part.css cannot tell skins or schemes apart, so one skin in light shows
+    what any motion does: every surface at 1440px and base at 390px, with animations finished and halfway. */
+async function motionFails(ctx, part, skin) {
+  const fails = []
+  for (const [width, surfaces] of [[1440, surfacesOf(ctx)], [390, ['base']]]) {
+    const page = await open(ctx, { scale: 2, width, height: width < 600 ? 844 : 1600, mobile: width < 600, motion: 'no-preference' })
+    try {
+      await page.mouse.move(0, 0)
+      await view(page, skin, 'light')
+      for (const surface of surfaces) {
+        await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, surface])
+        await settle(page)
+        for (const when of ['finished', 'halfway']) {
+          await hold(page, when)
+          await limit(page.barkCheck(() => window.__barkCheck.frame()), STEP_MS, 'a frame')
+          const waits = waitsFor(skin, 'light', surface)
+          fails.push(...verdict(await readView(page, part, waits), `motion allowed, ${skin} light on ${surface} at ${width}px, animations ${when}: `, waits).fails)
+        }
+      }
+      await stillStyled(ctx, page, 'motion')
+    } finally {
+      await page.context().close()
+    }
+  }
+  return fails
 }
 
 export async function phone(ctx, part, skins) {

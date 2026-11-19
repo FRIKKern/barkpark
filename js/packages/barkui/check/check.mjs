@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
+import { readPartCss } from './cssom.mjs'
 import { limit } from './limit.mjs'
 import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } from './proofs.mjs'
 import { waitLine } from '../build/sheet-waits.mjs'
@@ -37,6 +38,14 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   // Grayscale text everywhere: with LCD text on, a layer the compositor makes non-opaque (a blend mode, say)
   // draws its glyphs another way than the reference does, and an honest label reads as cut.
   const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  // part.css as the browser parses it meets the same walls as its text (check/cssom.mjs).
+  for (const part of built.parts) {
+    const found = await readPartCss(browser, part.css)
+    if (!found.length) continue
+    await browser.close()
+    for (const f of found) log(`check: parts/${part.name}/part.css, as the browser reads it: ${f}`)
+    return { ok: false, proof: null }
+  }
   let styles
   try {
     styles = await styleBaseline(browser, pathToFileURL(bare.file).href)

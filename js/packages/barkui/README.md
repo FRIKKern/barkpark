@@ -10,7 +10,8 @@ parts/<name>/
                 optional textOnly (selectors of controls that draw no boundary, such as a ghost button)
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
-                build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only
+                build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
+                no escape, no keyframes of its own (see "part.css is judged as the browser parses it")
   example.html  the part in each state worth seeing, in UI SDK's printed markup (works with no script);
                 every id starts with "<name>-"
   press.mjs     setup(root, h) and steps: real keys or a click (the real pointer, pressed at the control's
@@ -96,12 +97,27 @@ and the base styles can style it.**
   its ground, and it has a drawn text label. One that draws an edge or a fill is held to 3:1 like any
   other ("text-only … draws its edge at 1.01:1; drop it or meet 3:1"); one with no text fails. The
   showroom prints the controls that pass ("text-only, no boundary, label held to text rules").
-- Every view part.css can target is rendered: `@media` only for reduced motion (and inside it only
-  transition, animation and scroll-behavior properties) and for the one phone breakpoint named in
-  `build/vocabulary.mjs`, which the phone light reads in full. `@container`, `@supports` and every
-  other condition are refused.
+- part.css is judged as the browser parses it, not only as text. The text lint refuses any backslash
+  (so no escape can spell a name one way for the lint and another for the browser), braces that do not
+  balance, and any at-rule but the three `@media` conditions below. Then the check parses part.css in
+  its own Chromium, wrapped in the `bark-parts` layer exactly as the build places it, and walks the
+  rules that come out (`check/cssom.mjs`). It allows one `bark-parts` layer block and nothing beside
+  it; inside it, style rules, their nested declarations, and `@media` whose condition, as the browser
+  writes it, is `(max-width: 600px)` (the phone breakpoint, which the phone light reads in full),
+  `(prefers-reduced-motion: reduce)` or `(prefers-reduced-motion: no-preference)`. Inside a
+  reduced-motion query only transition, animation and scroll-behavior properties may change. Every
+  other rule type (`@keyframes`, `@layer`, `@container`, `@supports`, `@property`, `@font-face`, and
+  any the browser adds later) and every other condition refuses the run before a light is read.
+- Motion: a part defines no keyframes. It may name the shared ones in `css/base.css` (today one,
+  `bark-spin`, which only turns its element; a test holds base.css to that), by name as the browser
+  reads it. Transitions are free, because both ends are states the lights read anyway. The lights are
+  read with reduced motion on, and the drawn readings again with motion allowed (one skin in light,
+  every surface at 1440px and the base surface at 390px; part.css cannot tell skins apart), with every
+  animation held finished and held halfway and every transition finished. What a person sees partway
+  through a transition is not read.
 - part.css keeps to a small vocabulary, `build/vocabulary.mjs`: layout, type, paint and motion
-  properties. A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
+  properties, held both as written and as the browser expands them (each longhand a shorthand sets
+  must belong to a property in the vocabulary, or be left at its initial value). A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
   no type tokens yet). A part cannot excuse itself: anything else (mix-blend-mode, clip-path, mask,
   text-indent, visibility, `-webkit-text-fill-color`, background-clip, text-shadow,
   text-decoration-thickness, zoom and the like) is refused. The one way past is `EXTRA` in that shared

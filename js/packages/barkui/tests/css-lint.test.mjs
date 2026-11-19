@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { lintPartCss } from '../build/css-lint.mjs'
-import { EXTRA, PHONE } from '../build/vocabulary.mjs'
+import { EXTRA, KEYFRAMES, PHONE } from '../build/vocabulary.mjs'
 import { discoverParts } from '../build/parts.mjs'
 
 const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
@@ -84,6 +84,22 @@ describe('lintPartCss', () => {
     expect(EXTRA).toEqual({ filter: ['none'] })
     expect(lintPartCss('a { filter: none; }')).toEqual([])
     expect(lintPartCss('a { filter: opacity(0.1); }').join()).toMatch(/line 1: filter: opacity\(0\.1\); part\.css may only set filter to none/)
+  })
+
+  it('refuses any escape, and keyframes of its own (a part names the shared ones in base.css)', () => {
+    expect(lintPartCss(String.raw`@\6d edia (min-width: 1600px) { a { gap: 1px; } }`).join()).toMatch(/line 1: a backslash/)
+    expect(lintPartCss(String.raw`a { fil\000074er: blur(2px); }`).join()).toMatch(/line 1: a backslash/)
+    expect(lintPartCss('/* a \\ in a comment */ a { gap: 1px; }')).toEqual([])
+    expect(lintPartCss('@keyframes x { to { color: var(--ui-primary); } }').join()).toMatch(/line 1: @keyframes x: a part defines no keyframes/)
+    expect(lintPartCss('} a { box-shadow: none; } @layer bark-parts {').join()).toMatch(/line 1: a \} with no \{ before it/)
+    expect(lintPartCss('a { gap: 1px;').join()).toMatch(/a \{ is never closed/)
+  })
+
+  it('shares keyframes from base.css that only turn their element', () => {
+    const base = readFileSync(join(import.meta.dirname, '..', 'css', 'base.css'), 'utf8')
+    const defined = [...base.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)]
+    expect(defined.map((m) => m[1]).sort()).toEqual([...KEYFRAMES].sort())
+    for (const m of defined) for (const d of m[2].matchAll(/([\w-]+)\s*:/g)) expect(['rotate', 'transform']).toContain(d[1])
   })
 
   it('takes content only as "" or none, and no thickness through the text-decoration shorthand', () => {

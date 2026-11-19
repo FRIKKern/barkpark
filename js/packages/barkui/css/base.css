@@ -57,3 +57,8 @@
       0 0 0 8px var(--ui-ring);
   }
 }
+
+/* The keyframes parts may name (part.css defines none of its own; see
+   build/vocabulary.mjs KEYFRAMES). Each only turns its element, so no shared
+   motion can change a colour, a size or whether a thing is seen. */
+@keyframes bark-spin { to { rotate: 1turn; } }

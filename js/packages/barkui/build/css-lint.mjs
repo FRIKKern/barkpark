@@ -2,7 +2,7 @@
 // variables, never from a literal. It keeps to the vocabulary in vocabulary.mjs
 // (and to the values EXTRA there gives a property beyond it), and to the views
 // the check renders. Returns one message per finding.
-import { EXTRA, MOTION_ONLY, PHONE, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
+import { EXTRA, KEYFRAMES, MOTION_ONLY, PHONE, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
 
 const NAMED = `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
 cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen
@@ -25,7 +25,7 @@ const HEX_RE = /#[0-9a-f]{3,8}\b/i
 // A part never branches on skin or scheme, and never draws its own focus ring
 // (base.css draws one ring for every part) or mixes its own state tints (the
 // sheet serves a hover and a pressed fill for every control fill).
-const SELECTOR_RULES = [
+export const SELECTOR_RULES = [
   [/\[\s*data-(skin|bp-theme|color-scheme|theme)\b/i, (m) => `a [data-${m[1]}] rule: parts never branch on skin or scheme`],
   [/prefers-color-scheme/i, () => 'a prefers-color-scheme query: parts never branch on scheme'],
   [/:focus(-visible|-within)?\b/i, (m) => `a :focus${m[1] ?? ''} rule: the focus ring is drawn once, in base.css`],
@@ -42,16 +42,35 @@ function block(text, from) {
   return [open, text.length]
 }
 
+/** part.css as the build places it in the page: inside the bark-parts layer. */
+export const inPartsLayer = (css) => `@layer bark-parts {\n${css}\n}`
+
 export function lintPartCss(css) {
   const found = []
   const text = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
   const lineOf = (i) => text.slice(0, i).split('\n').length
+  // An escape lets a name read one way here and another way in the browser, so part.css has none. (The check
+  // also reads part.css as the browser parses it, check/cssom.mjs.)
+  // Every brace closes where it opened, so nothing leaves the bark-parts layer the build wraps part.css in.
+  let depth = 0
+  for (const m of text.matchAll(/[{}]/g)) {
+    depth += m[0] === '{' ? 1 : -1
+    if (depth < 0) {
+      found.push(`line ${lineOf(m.index)}: a } with no { before it; part.css's braces stay balanced`)
+      depth = 0
+    }
+  }
+  if (depth > 0) found.push(`a { is never closed; part.css's braces stay balanced`)
+  for (const m of text.matchAll(/\\/g)) found.push(`line ${lineOf(m.index)}: a backslash; part.css writes every name and value plainly, with no escape`)
   // Views: a part may style the phone breakpoint and reduced motion, nothing the check does not render.
   const motion = []
   for (const m of text.matchAll(/@([\w-]+)\s*([^{;]*)/g)) {
     const name = m[1].toLowerCase()
     const prelude = m[2].trim().replace(/\s+/g, ' ')
-    if (/^(-webkit-)?keyframes$/.test(name)) continue
+    if (/^(-webkit-)?keyframes$/.test(name)) {
+      found.push(`line ${lineOf(m.index)}: @${name} ${prelude}: a part defines no keyframes; it may name the shared ones in css/base.css (${KEYFRAMES.join(', ')})`)
+      continue
+    }
     if (name === 'media' && /^\(prefers-reduced-motion: ?(reduce|no-preference)\)$/.test(prelude)) {
       motion.push(block(text, m.index))
       continue
