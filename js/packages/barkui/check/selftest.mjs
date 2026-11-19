@@ -401,6 +401,8 @@ const CASES = [
     expect: each({
       'a hover on a second control of its kind': skinsSay(/real hover on button#button-after "Duplicate": .*no pinned row shows this change/),
       'a hover through :nth-child on a later control': skinsSay(/real hover on button "Medium": .*no pinned row shows this change/),
+      'the hover, drawn on every control it applies to': skinsSay(/hover held on every live control it applies to, .*: text does not draw at button#button-after "Duplicate"/),
+      'the pin unlike the real state on the control itself': skinsSay(/real hover on button#button-destructive "Delete": .* where the control pinned /),
       'pending held at rest, in every view': drawnOff('button "Saving"'),
       'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
       'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),

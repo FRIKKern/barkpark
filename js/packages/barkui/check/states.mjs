@@ -2,11 +2,14 @@
 // that matches the rest of its selector (the state taken out, as element.matches says; outside the inert rows,
 // not a pinned row), the check produces that state on that control with the browser's own input: the pointer at
 // its centre for hover, held down there for active (a real press is both). While it holds:
-// - the stage is read as drawn (reading.mjs), and that reading records what applies (coverage.mjs);
-// - every computed property of the control and its ::before and ::after must change exactly as some pinned row
-//   with the same data-pin changes when its pin is taken off, so a pinned row, read in every skin, scheme,
-//   surface and width, shows this change too; the machine picks the row, by comparing;
-// - nothing from the control up to the stage may change (no pin shows a host or an ancestor).
+// - every computed property of the control, its ::before and ::after and everything inside it must be what the
+//   same control shows with that state pinned (data-pin), and nothing from the control up to the stage may change
+//   (no pin shows a host or an ancestor): so the control pinned is the control in that state;
+// - the control's change must be exactly the change of some pinned row with the same data-pin, so a pinned row,
+//   read in every skin, scheme, surface and width, shows this change too; the machine picks the row, by comparing.
+// Then, per state, every live control is pinned at once and the stage is read as drawn (reading.mjs); that reading
+// records what applies (coverage.mjs), so each pair is judged as drawn while its rule applies. One reading per
+// state instead of one per control: a reading costs about a second, a driven control a few frames.
 // One skin, light, base surface, 1440px.
 import { waitsFor } from '../build/sheet-waits.mjs'
 import { readView, verdict } from './reading.mjs'
@@ -32,30 +35,47 @@ function plan([n, entries]) {
   return { pins, pairs }
 }
 
-/** Runs in the check's world: computed styles of one stage element, its ::before and ::after, and its ancestors up
-    to the stage. `unpin`: read it with data-pin taken off (then put back). */
-function snap([n, i, unpin]) {
+/** Runs in the check's world: sets data-pin on stage elements (`pin` a value, or null to take it off), running
+    the transitions this starts to their end, as a reading after a real state waits for them. */
+function setPins([n, list, pin]) {
+  const root = document.querySelector(`[data-part="${n}"]`)
+  const els = [root, ...root.querySelectorAll('*')]
+  for (const i of list) {
+    if (pin === null) els[i].removeAttribute('data-pin')
+    else els[i].setAttribute('data-pin', pin)
+  }
+  for (const i of list) {
+    getComputedStyle(els[i]).color
+    for (const a of els[i].getAnimations({ subtree: true })) if (a instanceof CSSTransition) a.finish()
+  }
+}
+
+/** Runs in the check's world: computed styles of one stage element, its ::before and ::after, everything inside it
+    and its ancestors up to the stage. `pin`: read it with data-pin set to that (null: taken off), then put back. */
+function snap([n, i, pin]) {
   const root = document.querySelector(`[data-part="${n}"]`)
   const el = [root, ...root.querySelectorAll('*')][i]
   const read = (s) => Object.fromEntries([...s].map((p) => [p, s.getPropertyValue(p)]))
-  const pin = el.getAttribute('data-pin')
-  // Taking the pin off starts the control's transitions; run them to their end, as the reading after a real state
-  // waits for them, so the values read are where the state lands.
+  const was = el.getAttribute('data-pin')
   const land = () => {
     getComputedStyle(el).color
     for (const a of el.getAnimations({ subtree: true })) if (a instanceof CSSTransition) a.finish()
   }
-  if (unpin) {
-    el.removeAttribute('data-pin')
+  if (pin !== undefined) {
+    if (pin === null) el.removeAttribute('data-pin')
+    else el.setAttribute('data-pin', pin)
     land()
   }
   try {
+    const h = window.__barkCheck
     const up = []
-    for (let x = el.parentElement; x && root.contains(x); x = x.parentElement) up.push({ at: window.__barkCheck.describe(x), style: read(getComputedStyle(x)) })
-    return { self: read(getComputedStyle(el)), before: read(getComputedStyle(el, '::before')), after: read(getComputedStyle(el, '::after')), up }
+    for (let x = el.parentElement; x && root.contains(x); x = x.parentElement) up.push({ at: h.describe(x), style: read(getComputedStyle(x)) })
+    const down = [...el.querySelectorAll('*')].map((x) => ({ at: h.describe(x), style: read(getComputedStyle(x)) }))
+    return { self: read(getComputedStyle(el)), before: read(getComputedStyle(el, '::before')), after: read(getComputedStyle(el, '::after')), up, down }
   } finally {
-    if (unpin) {
-      el.setAttribute('data-pin', pin)
+    if (pin !== undefined) {
+      if (was === null) el.removeAttribute('data-pin')
+      else el.setAttribute('data-pin', was)
       land()
     }
   }
@@ -90,14 +110,15 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
   await rest()
   const { pins, pairs: todo } = await page.barkCheck(plan, [part.name, entries])
   pairs.push(...todo)
-  for (const p of pins) p.change = changes(await page.barkCheck(snap, [part.name, p.el, true]), await page.barkCheck(snap, [part.name, p.el, false]))
+  for (const p of pins) p.change = changes(await page.barkCheck(snap, [part.name, p.el, null]), await page.barkCheck(snap, [part.name, p.el]))
   // Each control once per mode its rules give it.
   const drives = new Map()
   for (const p of todo) for (const s of p.states) drives.set(`${p.el} ${MODES[s]}`, { el: p.el, at: p.at, mode: MODES[s] })
+  const held = new Map()
   for (const { el, at, mode } of drives.values()) {
     const said = `real ${mode.replace(' ', ' and ')} on ${at}`
     await rest()
-    const before = await page.barkCheck(snap, [part.name, el, false])
+    const before = await page.barkCheck(snap, [part.name, el])
     let down = false
     try {
       const to = await page.barkCheck(([n, k]) => {
@@ -119,7 +140,19 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
         down = true
       }
       await settle(page)
-      const now = await page.barkCheck(snap, [part.name, el, false])
+      const now = await page.barkCheck(snap, [part.name, el])
+      await page.mouse.move(0, 0)
+      if (down) await page.mouse.up()
+      down = false
+      await rest()
+      const pinned = await page.barkCheck(snap, [part.name, el, mode])
+      const unlike = differ(changes(before, now), changes(before, pinned)).map((d) => d.replace('where the pin', 'where the control pinned'))
+      now.down.forEach((d, k) => {
+        const prop = Object.keys(change(pinned.down[k].style, d.style))[0]
+        if (prop) unlike.push(`${d.at} inside it: ${prop} becomes ${d.style[prop]} where the control pinned shows ${pinned.down[k].style[prop]}`)
+      })
+      if (unlike.length) fails.push(`${said}: ${unlike[0]}; the pin does not show this state, so no view reads it`)
+      else held.set(mode, [...(held.get(mode) ?? []), el])
       const real = changes(before, now)
       const same = pins.filter((p) => p.states === mode.split(' ').sort().join(' '))
       if (!same.length) fails.push(`${said}: no pinned row shows data-pin="${mode}", so no other view reads this state`)
@@ -132,13 +165,23 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
         const prop = Object.keys(moved)[0]
         if (prop) fails.push(`${said}: ${u.at} ${prop} becomes ${moved[prop]}; a state may change nothing above the control, where no pin shows it`)
       })
-      // Text-only is a fact about a control at rest (README), read in every view with its pin let go; here the
-      // control is not at rest, so that one reading is left to the views.
-      const v = await readView(page, part, waits)
-      fails.push(...verdict({ ...v, bounds: { ...v.bounds, misnamed: [] } }, `${said}, ${skin} light on ${where}: `, waits).fails)
     } finally {
       await page.mouse.move(0, 0)
       if (down) await page.mouse.up()
+    }
+  }
+  // Each state once, with every control it was proven on pinned. Text-only is a fact about a control at rest
+  // (README), read in every view with its pin let go; here the controls are not at rest, so that one reading is
+  // left to the views.
+  for (const [mode, list] of held) {
+    await rest()
+    await page.barkCheck(setPins, [part.name, list, mode])
+    try {
+      await settle(page)
+      const v = await readView(page, part, waits)
+      fails.push(...verdict({ ...v, bounds: { ...v.bounds, misnamed: [] } }, `${mode.replace(' ', ' and ')} held on every live control it applies to, ${skin} light on ${where}: `, waits).fails)
+    } finally {
+      await page.barkCheck(setPins, [part.name, list, null])
     }
   }
   await rest()
