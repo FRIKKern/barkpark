@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: tenancy-model | budget: 2000tok -->
 # Tenancy — workspace · project · dataset · membership
 
-How Barkpark's **API layer** isolates data across tenants and scopes every read/write; cloud-side team/barkpark object authz is `docs/contracts/cloud-object-authz.md`. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
+How Barkpark's **API layer** isolates data across tenants and scopes every read/write; cloud-side team/barkpark object authz is `docs/contracts/cloud-object-authz.md`. Code: `api/lib/barkpark/tenancy/` (schemas, `Barkpark.Tenancy`, `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
 
 ## The hierarchy
 
@@ -22,7 +22,7 @@ Workspace + Project slugs match `^[a-z0-9][a-z0-9-]*$` and exclude reserved pref
 
 ## The context — `Barkpark.Tenancy`
 
-All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/delete these rows directly. Key entry points:
+All tenant mutation goes through `api/lib/barkpark/tenancy.ex`; never insert/delete these rows directly:
 
 - **`create_workspace_with_owner/2`** — one atomic transaction: workspace + owner Membership + Default project + production Dataset. The only correct way to stand up a tenant.
 - **`create_project_with_dataset/2`** — atomic project + production dataset.
@@ -43,7 +43,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 **Access requests** (`Tenancy.AccessRequests`). A seatless user (session or owned token) asks: `POST /v1/auth/access-requests {workspace, note?}` → `202`, alike whether the slug exists (a missing one stored with NULL `workspace_id`, unseen by admins); a member gets `409`. 5/h per user, one pending per slug. Admins approve (`…/v1/access-requests/:id/approve {role}`, via `Members.add_user_member/4`, ceiling holds) or deny; both are audited (`membership`).
 
-**Two role axes (GR46).** The roles above are the *only* team-role vocabulary — every settings gate reads it. `platform_operator` is **not** a team role but the *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry, `/v1/operator/*` and `bp cloud rollout`. **Supporter** is a billing *plan*, never a role.
+**Two role axes (GR46).** The roles above are the *only* team-role vocabulary; every settings gate reads it. `platform_operator` is **not** a team role but the *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry, `/v1/operator/*` and `bp cloud rollout`. **Supporter** is a billing *plan*, never a role.
 
 Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises — ruling + widening: the `Tenancy.Auth` moduledoc.
 
@@ -61,7 +61,7 @@ Multi-tenant installs project content edges with strict `scope_to_workspace/3`, 
 
 ### The dataset string↔id duality (in-progress migration)
 
-The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs `CASCADE`, but a NULL row escapes, so delete a Dataset only via `delete_dataset/2` (`Tenancy.DatasetDelete`; refuses `production`).
+The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside as the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs `CASCADE`, but a NULL row escapes, so delete a Dataset only via `delete_dataset/2` (`Tenancy.DatasetDelete`; refuses `production`).
 
 `Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (in `api/lib/barkpark/content/write_scope.ex`; not delegated on the `Content` facade):
 
@@ -77,7 +77,7 @@ So an un-backfilled `dataset_id IS NULL` row stays visible to dataset scoping (s
 
 ## Tables & constraints
 
-`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content/scope tables' nullable `workspace_id`/`project_id`/`dataset_id` FKs are also `CASCADE`; only `audit_events` + `audit_export_sinks` carry `workspace_id` with no FK. The literal column is `dataset` on content tables (`documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
+`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset) are `ON DELETE CASCADE`, and so are content/scope tables' nullable `workspace_id`/`project_id`/`dataset_id` FKs; only `audit_events` + `audit_export_sinks` carry `workspace_id` with no FK. The column is `dataset` on content tables (`documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables. Imports never carry `workspace_access_requests`; people ask again.
 
 ## Canonical homes (link, don't duplicate)
 

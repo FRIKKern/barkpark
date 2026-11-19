@@ -271,7 +271,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     InvalidBundleError
   }
 
-  alias Barkpark.Tenancy.WorkspaceBundle.{ImportConfinement, Janitor}
+  alias Barkpark.Tenancy.WorkspaceBundle.{ImportConfinement, Janitor, LocalOnly}
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
@@ -818,7 +818,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         stats =
           manifest["tables"]
           |> Enum.reduce({%{}, 0}, fn entry, {acc, total} ->
-            n = ImportConfinement.import!(confined, entry, dumps, mode, &import_member/3)
+            n = LocalOnly.import!(confined, entry, dumps, mode, &import_member/3)
             # ROW-COPY TIME, deliberately: see
             # assert_no_foreign_blob_path_collision!/3 for why a push-time
             # refusal reproduces the very state it is meant to prevent.
@@ -829,7 +829,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             # The manifest rides back out: provenance needs no second unpack.
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
-          |> ImportConfinement.settle!(confined)
+          |> LocalOnly.settle!(confined, manifest)
 
         with_ddl_lock_timeout(:restore_member_fks, fn ->
           alter_user_triggers!(live, "ENABLE")
