@@ -24,7 +24,8 @@ jobs read `.tool-versions`, `cloud.yml` reads `deploy/image.tool-versions` (the
 control-plane and published images' FROM tag). `scripts/toolchain-owners.tsv`
 maps each file to its consumers; `scripts/toolchain-drift-check.sh` reds on any
 other version on a line that names the tool. It does not see one on a line
-naming no tool (a bare `V=26.2`); task-1c24786728762c92 checks the runtime.
+naming no tool (a bare `V=26.2`): it is the early warning, and the wall that
+holds is task-1c24786728762c92, which asserts what runs.
 
 ## The postcheck rule
 

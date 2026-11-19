@@ -27,10 +27,12 @@
 # Every tracked .tool-versions / *.tool-versions must appear here. A version on
 # a line that names erlang, otp, elixir or node (or any tool an owner file
 # names), and any image tag, in a workflow, action, container or compose file,
-# deploy file, script, Makefile or mise config, fails without a row. A number
-# on a line that names no tool is not seen (task-1c24786728762c92). Moving a
-# consumer to another file is editing its row; folding a version file into
-# another is deleting its rows and re-pointing its consumers.
+# devcontainer, deploy file, script, Makefile or mise config, fails without a
+# row. A number on a line that names no tool is not seen: this table and its
+# check are the early warning, and task-1c24786728762c92 (assert what runs) is
+# the wall that holds. Moving a consumer to another file is editing its row;
+# folding a version file into another is deleting its rows and re-pointing its
+# consumers.
 
 # The content server's runtime: asdf on the box resolves the repo-root file.
 .tool-versions  .github/workflows/architecture.yml
@@ -84,6 +86,8 @@ pin  deploy/azure/bicepconfig.json  1.0.0  the Microsoft Graph Bicep extension
 pin  deploy/azure/main.bicep  0.2.28  an example Barkpark image tag in a parameter description
 pin  deploy/azure/main.bicep  3.22  the Alpine image of the Azure init container
 pin  deploy/testdata/capstone-turbopack-build-fail.txt  0.34.5  sharp's version in a captured npm log
+pin  .github/workflows/console-harness.yml  20  Node 20, named in refusal messages as the wrong runner Node
+pin  .github/workflows/console-harness.yml  22  Node 22, named in refusal messages as the Node the harness needs
 pin  scripts/check-vendor-blocks.mjs  20.9.0  a vendored package's engines.node range
 pin  scripts/check-vendor-blocks.mjs  20.19.0  a vendored package's engines.node range
 pin  scripts/check-vendor-blocks.mjs  22.12.0  a vendored package's engines.node range
@@ -103,4 +107,8 @@ line  scripts/pds-door-census.sh  bf80963a425a  pds-roster-callee-churn.exs :: C
 line  scripts/pds-door-census.sh  6112f7a1614b  pds-citation-expand.sh :: CPU-second price cells beside gate names, not versions
 line  scripts/pds-door-census.sh  9f5ed778749a  pds-secret-scan_test.sh :: CPU-second price cells beside gate names, not versions
 line  scripts/pds-door-census.sh  42abcc65236e  pds-elixir-receipt-census.exs :: CPU-second price cells beside gate names, not versions
+line  deploy/site-deploy-node.sh  88ebb1fb9d58  MUTANT: bytes built for node 20 :: a mutant label in the self-check names two Node majors
+line  deploy/site-spawner-node-live-proof.sh  9cc7bb572e78  E_CREATE_NOT_NODE=42 :: an exit code, not a version
+line  scripts/check-vendor-blocks.mjs  85675bd57cbb  declares NO engines.node :: a note naming a Node-20 install, not this repo's Node
+line  scripts/studio-journey-smoke.sh  b2e3a1e3700f  node 22+ required :: the smoke's Node floor for a global WebSocket, not a pin
 line  scripts/pds-blind-spot.sh  9d3a72e891b4  PDS_BLIND_SPOT= :: CPU-second figures in prose about :erlang.statistics, not versions

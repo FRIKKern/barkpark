@@ -20,22 +20,32 @@
 #           a. an erlef/setup-beam step (workflow or composite action) has
 #              `version-file: <owner>` and `version-type: strict`;
 #           b. in every tracked workflow, action, Dockerfile/Containerfile,
-#              compose file, deploy file, script, Makefile and mise config, a
-#              version-shaped token (N.N or longer) on a line that names an
-#              owned tool equals that tool's number in the file's owner. The
-#              tool words are the owner files' tool names plus aliases (otp,
-#              kerl, node, ...), case-insensitive, also inside names and keys
-#              (ERLANG_VERSION, otp-version, hexpm/elixir:). An image tag
-#              `name:N.N` is checked on any line. There is no list of ways to
-#              write a version: `?=`, `:=`, a space, a colon, a compose key and
-#              a mise table all reach the same comparison. A token that does
-#              not match passes only through a row: `data` (a test or fixture
-#              file, *.test.sh, *_test.*, test/, tests/, fixtures/, with a
-#              reason), `pin` (that file and token, and what it pins) or `line`
-#              (one line, by the hash of its text, with a reason).
-#   NOT SEEN: a version on a line that names no tool and is no image tag, such
-#           as a bare `V=26.2.5; asdf install erlang "$V"`. The runtime check
-#           after setup is task-1c24786728762c92.
+#              compose file, devcontainer.json, deploy file, script, Makefile
+#              and mise config, a version-shaped token (N.N or longer) on a
+#              line that names an owned tool equals that tool's number in the
+#              file's owner. The tool words are the owner files' tool names
+#              plus aliases (otp, kerl, node, ...), case-insensitive, also
+#              inside names and keys (ERLANG_VERSION, otp-version, erlangVersion,
+#              hexpm/elixir:). A `\` never ends a version (grep "1\.17\.3"). A
+#              number one non-alphanumeric character after a tool word counts
+#              too, a bare major included (erlang:26-alpine, erlang@26), and a
+#              bare major passes when it equals the owner's major. Every owned
+#              tool whose major alone names a release line (Erlang/OTP, Node)
+#              is at two digits; Elixir's release line is its minor, so a
+#              one-digit number after a tool word is a flag, not a version. An
+#              image tag `name:N.N` is checked on any line. There is no list of
+#              ways to write a version: `?=`, `:=`, a space, a colon, a compose
+#              key and a mise table all reach the same comparison. A token that
+#              does not match passes only through a row: `data` (a test or
+#              fixture file, *.test.sh, *_test.*, test/, tests/, fixtures/, with
+#              a reason), `pin` (that file and token, and what it pins) or
+#              `line` (one line, by the hash of its text, with a reason).
+#   NOT SEEN: a version on a line that names no tool and is no image tag (a
+#           bare `V=26.2.5` read by `asdf install erlang "$V"` on the next line,
+#           ERLVSN=, a neutral matrix key, a line continuation), and a tag with
+#           no number (`erlang:latest`, an @sha256 digest). This check is the
+#           early warning. The wall that holds is task-1c24786728762c92: CI and
+#           image builds assert the Erlang, Elixir and Node that actually run.
 #   Rows that no longer feed anything fail too, so the table cannot rot.
 #
 # EXIT CODES: 0 clean · 1 problems (each printed with path:line) · 2 refused
@@ -95,6 +105,7 @@ while IFS= read -r -d '' f; do
     .github/workflows/*.yml|.github/workflows/*.yaml|.github/actions/*.yml|.github/actions/*.yaml)
       BEAM_FILES="$BEAM_FILES$f
 " ;;
+    devcontainer.json|*/devcontainer.json|.devcontainer.json|*/.devcontainer.json) ;;
     deploy/*|*.sh|*.bash|Makefile|*/Makefile|*.mk|Dockerfile|*/Dockerfile|Dockerfile.*|*/Dockerfile.*|*.Dockerfile|*.dockerfile) ;;
     Containerfile|*/Containerfile|Containerfile.*|*/Containerfile.*|*.containerfile) ;;
     compose.y*ml|*/compose.y*ml|compose.*.y*ml|*/compose.*.y*ml|docker-compose*.y*ml|*/docker-compose*.y*ml) ;;
@@ -240,11 +251,28 @@ SCAN_OUT="$(cd "$ROOT" && LC_ALL=C awk -v rows="$ROWS_V" -v vers="$VERS" -v tool
   function ipv4(t,    c, i) { split(t, c, "."); for (i = 1; i <= 4; i++) if (c[i] + 0 > 255) return 0; return 1 }
   function base(v) { sub(/-otp-.*$/, "", v); return v }
   function where() { return file ":" n (job == "" ? "" : " (job " job ")") }
-  function line(l,    low, w, named, says, s, acc, t, prev, img, o, ok, tl, i, k) {
+  function check(t, named,    says, ok, tl, i, k, v) {
+    if (t in seen) return
+    seen[t] = 1
+    if (o == "data") { data[file] = 1; return }
+    if ((file "|" t) in pin) { pinned[file "|" t] = 1; return }
+    if (named == "") { printf "DRIFT|%s: image tag :%s is pinned by no row. Add `pin  %s  %s  <what it pins>`.\n", where(), t, file, t; return }
+    if (o == "") { printf "DRIFT|%s: %s on a line naming %s, and no row ties %s to a version file. Read the version from one, add the row, or pin it.\n", where(), t, named, file; return }
+    ok = 0; says = ""
+    k = split(named, tl, " ")
+    for (i = 1; i <= k; i++) { v = base(ver[o "|" tl[i]]); if (v == t || (t !~ /\./ && v ~ ("^" t "\\."))) ok = 1; says = says (says == "" ? "" : ", ") tl[i] " " (ver[o "|" tl[i]] == "" ? "(none)" : ver[o "|" tl[i]]) }
+    if (ok) tied[file] = 1
+    else printf "DRIFT|%s: %s on a line naming %s, but %s says %s.\n", where(), t, named, o, says
+  }
+  function line(l,    low, cs, w, named, s, acc, t, prev, img, k) {
     if (l ~ /^jobs:[ \t]*$/) injobs = 1; else if (l ~ /^[A-Za-z]/) injobs = 0
     if (injobs && l ~ /^  [A-Za-z0-9_-]+:[ \t]*(#.*)?$/) { job = l; sub(/^  /, "", job); sub(/:.*/, "", job) }
     if (l ~ /^[ \t]*(#|\/\/|$)/ || ((file "|" n) in skip)) return
-    low = tolower(l); named = ""
+    # `\` never ends a version (grep -E "1\.17\.3"), and a tool word also ends
+    # where lower case turns upper (erlangVersion).
+    gsub(/\\/, "", l); cs = l
+    while (match(cs, /[a-z][A-Z]/)) cs = substr(cs, 1, RSTART) " " substr(cs, RSTART + 1)
+    low = tolower(cs); named = ""; delete seen
     for (w in word) if (low ~ ("(^|[^a-z])" w "([^a-z]|$)") && index(" " named " ", " " word[w] " ") == 0) named = named (named == "" ? "" : " ") word[w]
     # A YAML key with no value (`otp:`) or a TOML table header (`[tools.erlang]`)
     # names its tool for the lines under it (a workflow job id does not).
@@ -263,15 +291,24 @@ SCAN_OUT="$(cd "$ROOT" && LC_ALL=C awk -v rows="$ROWS_V" -v vers="$VERS" -v tool
       # an IPv4 address is four parts of 0-255; only Erlang has four-part versions
       if (t ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && index(" " named " ", " erlang ") == 0 && ipv4(t)) continue
       if (named == "" && !(prev == ":" && substr(acc, 1, length(acc) - length(t)) ~ /[A-Za-z0-9][A-Za-z0-9._\/-]*:$/ && (img || substr(acc, 1, length(acc) - length(t)) ~ /\/[A-Za-z0-9._-]*:$/))) continue
-      if (o == "data") { data[file] = 1; continue }
-      if ((file "|" t) in pin) { pinned[file "|" t] = 1; continue }
-      if (named == "") { printf "DRIFT|%s: image tag :%s is pinned by no row. Add `pin  %s  %s  <what it pins>`.\n", where(), t, file, t; continue }
-      if (o == "") { printf "DRIFT|%s: %s on a line naming %s, and no row ties %s to a version file. Read the version from one, add the row, or pin it.\n", where(), t, named, file; continue }
-      ok = 0; says = ""
-      k = split(named, tl, " ")
-      for (i = 1; i <= k; i++) { if (base(ver[o "|" tl[i]]) == t) ok = 1; says = says (says == "" ? "" : ", ") tl[i] " " (ver[o "|" tl[i]] == "" ? "(none)" : ver[o "|" tl[i]]) }
-      if (ok) tied[file] = 1
-      else printf "DRIFT|%s: %s on a line naming %s, but %s says %s.\n", where(), t, named, o, says
+      check(t, named)
+    }
+    # A number one non-alphanumeric character after a tool word is a version of
+    # that tool, a bare major too (erlang:26-alpine, erlang@26), compared with
+    # the owner major. Not when the word is a suffix of a version (1.18.4-otp-27
+    # is one token) or the number opens a shell redirect (node 2>/dev/null).
+    # Every owned tool whose major alone names a release line (Erlang/OTP, Node)
+    # is at two digits; Elixir release line is its minor, so a one-digit number
+    # after a tool word is a flag, not a version.
+    for (w in word) {
+      s = low; acc = ""
+      while (match(s, "(^|[^a-z])" w "[^a-z0-9][0-9]+(\\.[0-9]+)*")) {
+        t = substr(s, RSTART, RLENGTH); prev = acc substr(s, 1, RSTART); acc = acc substr(s, 1, RSTART + RLENGTH - 1); s = substr(s, RSTART + RLENGTH)
+        if (s ~ /^[a-z0-9_<>]/ || prev ~ /[0-9]-$/) continue
+        sub(/^.*[^0-9.]/, "", t)
+        if (t ~ /^[0-9]$/) continue
+        check(t, named)
+      }
     }
   }
   NF { file = $0; n = 0; job = ""; injobs = 0; ctx = ""
