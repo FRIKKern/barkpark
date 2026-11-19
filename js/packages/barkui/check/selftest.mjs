@@ -25,6 +25,13 @@ const inCss = (rule, props) => (d) => {
   if (props) allow(d, props)
 }
 const phoneSays = (re) => (p) => re.test(p.parts.button.lights.phone.detail)
+// Both wide lights off, each for a drawn reading at the planted control: which reading (gone, cut, faint) is the
+// rasteriser's to decide, so a plant that fades or blends asserts only what holds on every machine.
+const DRAWN = String.raw`(does not draw|is cut: \d+% of it draws|drawn (text|graphic) [\d.]+:1|has nothing to show)`
+const drawnOff = (control) => (p) => ['skins', 'schemes'].every((l) => {
+  const it = p.parts.button.lights[l]
+  return !it.pass && new RegExp(`${DRAWN} at ${control}`).test(it.detail)
+})
 const why = 'planted by the selftest'
 const refused = (re) => (p, html, ok, logs) => !ok && p === null && re.test(logs.join('\n'))
 const CASES = [
@@ -215,9 +222,9 @@ const CASES = [
     ['a full-size ::after filled with the ground over a label',
       '[data-slot="button"][data-size="lg"] { position: relative; }\n[data-slot="button"][data-size="lg"]::after { content: ""; position: absolute; inset: 0; background-color: var(--ui-background); }',
       /text does not draw at button "Large"/],
-    ['filter: brightness(0.25) on hover', '[data-slot="button"]:not([data-variant]):hover { filter: brightness(0.25); }', /drawn text [\d.]+:1 at button "Hover"/, { filter: why }],
-    ['mix-blend-mode on a button', '[data-slot="button"]:not([data-variant]) { mix-blend-mode: screen; }', /(text does not draw|drawn text [\d.]+:1) at button/, { 'mix-blend-mode': why }],
-    ['opacity on an ancestor', 'ui-button:has(> #button-secondary) { display: inline-flex; opacity: 0.15; }', /drawn text [\d.]+:1 at button#button-secondary/],
+    ['filter: brightness(0.25) on hover', '[data-slot="button"]:not([data-variant]):hover { filter: brightness(0.25); }', 'button "Hover"', { filter: why }],
+    ['mix-blend-mode on a button', '[data-slot="button"]:not([data-variant]) { mix-blend-mode: screen; }', 'button', { 'mix-blend-mode': why }],
+    ['opacity on an ancestor', 'ui-button:has(> #button-secondary) { display: inline-flex; opacity: 0.15; }', 'button#button-secondary'],
     ['a clip-path that hides the label', '[data-slot="button"][data-size="lg"] { clip-path: inset(50%); }', /text does not draw at button "Large"/, { 'clip-path': why }],
     ['a mask that hides the label', '#button-quiet { mask-image: linear-gradient(transparent, transparent); }', /text does not draw at button#button-quiet/, { 'mask-image': why }],
     ['a control with no edge and no fill', '#button-after { --bark-button-edge: transparent; --bark-button-bg: transparent; }', /control boundary 1(\.00)?:1 at button#button-after/],
@@ -225,7 +232,7 @@ const CASES = [
     name: `${what} in part.css turns "every skin" off`,
     only: ['skins', 'schemes'],
     plant: inCss(rule, props),
-    expect: skinsSay(re),
+    expect: typeof re === 'string' ? drawnOff(re) : skinsSay(re),
   })),
   {
     name: 'font-size: 0 on a size turns "every skin" off',
@@ -248,29 +255,29 @@ const CASES = [
     ['a label in a box of no height', '[data-slot="button"][data-size="lg"] { height: 0; min-height: 0; overflow: hidden; }', /label is cut: \d+% of it draws at button "Large"/],
     ['a label truncated by the usual recipe', '#button-secondary { max-width: 3.4em; overflow: hidden; white-space: nowrap; justify-content: flex-start; }', /label is cut: \d+% of it draws at button#button-secondary/],
     ['a label covered by its neighbour', '[data-slot="button"][data-size="lg"] { margin-inline-end: -40px; }\nui-button:has(> [data-size="lg"]) + ui-button > [data-slot="button"] { position: relative; }', /label is cut: \d+% of it draws at button "Large"/],
-    ['an icon faded out', '#button-more > svg { opacity: 0.1; }', /drawn graphic [\d.]+:1 at button#button-more/],
-    ['an icon in a weak colour', '#button-more { color: var(--ui-border); }', /drawn graphic [\d.]+:1 at button#button-more/],
-    ['an icon-only control filtered away', '#button-more { filter: opacity(0.08); }', /(drawn graphic [\d.]+:1|has nothing to show) at button#button-more/, { filter: why }],
+    ['an icon faded out', '#button-more > svg { opacity: 0.1; }', 'button#button-more'],
+    ['an icon in a weak colour', '#button-more { color: var(--ui-border); }', 'button#button-more'],
+    ['an icon-only control filtered away', '#button-more { filter: opacity(0.08); }', 'button#button-more', { filter: why }],
     ['an icon-only control hidden', 'ui-button:defined > #button-more { visibility: hidden; }', /(does not draw|has nothing to show) at button#button-more/, { visibility: why }],
     ['an icon-only control clipped away', 'ui-button:defined > #button-more { clip-path: inset(50%); }', /(does not draw|is cut: \d+% of it draws|has nothing to show) at button#button-more/, { 'clip-path': why }],
   ].map(([what, rule, re, props]) => ({
     name: `${what} turns "every skin" off`,
     only: ['skins', 'schemes'],
     plant: inCss(rule, props),
-    expect: skinsSay(re),
+    expect: typeof re === 'string' ? drawnOff(re) : skinsSay(re),
   })),
   {
     name: 'a label drawn as an <img> in a weak colour turns "every skin" off',
     only: ['skins', 'schemes'],
     plant: (d) => edit(join(d, 'example.html'), (s) => s.replace('data-size="lg" type="button">Large</button>',
       `data-size="lg" type="button"><img alt="Large" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='14'%3E%3Crect width='40' height='14' fill='%23eeeeee'/%3E%3C/svg%3E"></button>`)),
-    expect: skinsSay(/drawn graphic [\d.]+:1 at button "" img/),
+    expect: drawnOff('button "" img'),
   },
   {
     name: 'a label blanked at phone width turns "phone" off',
     only: ['phone'],
     plant: inCss('@media (max-width: 600px) { [data-slot="button"][data-size="lg"] { --bark-button-fg: var(--ui-background); } }'),
-    expect: phoneSays(/(text does not draw|drawn text [\d.]+:1) at button "Large"/),
+    expect: phoneSays(new RegExp(`${DRAWN} at button "Large"`)),
   },
   {
     name: 'edges dropped at phone width turn "phone" off',

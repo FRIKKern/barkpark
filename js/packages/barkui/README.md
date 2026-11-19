@@ -67,7 +67,8 @@ and the base styles can style it.**
   text). The check captures the stage over CDP as drawn, with every glyph unpainted, and with every
   graphic unpainted (each a first-layer `!important` sheet put there from the isolated world), once per
   skin, scheme and surface, and at 390px. A thing's ink is the pixels that differ with it toggled off,
-  each weighed by how far it moved, so a colour or a fade does not change the amount. It must be at
+  and its footprint those that moved at least a fifth as far as the most any moved, so a colour, a
+  fade or a text gamma does not change it. It must be at
   least 90% of the same thing drawn alone by the check, unclipped and uncovered (the same string in the
   same font, or a copy of the node, in its own colours on its own ground and at its own place within
   a device pixel, so both rasterise alike); under that it fails as "label is cut: 41% of it draws". Contrast

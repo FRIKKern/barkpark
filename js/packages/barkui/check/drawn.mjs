@@ -7,8 +7,9 @@
 // unpainted, and with every graphic (svg, img, a pseudo-element with a box)
 // unpainted; each toggle is an !important sheet in the earliest cascade layer,
 // put there from the isolated world. A thing's ink is the pixels that differ
-// when it is toggled off, weighed by how far each moved (so a colour or a fade
-// does not change the amount). That amount must be at least 90% of the same
+// when it is toggled off; its footprint is those that moved at least a fifth as
+// far as the most any moved (so a colour, a fade or a text gamma does not change
+// it). That footprint must be at least 90% of the same
 // thing drawn alone by the check, unclipped and uncovered (the same string in
 // the same font for text, a copy of the node for a graphic), in its own colours
 // on its own ground and at the same place within a device pixel, so that both
@@ -183,9 +184,11 @@ export function installDrawn() {
     g.drawImage(bitmap, 0, 0)
     return { w: bitmap.width, h: bitmap.height, data: g.getImageData(0, 0, bitmap.width, bitmap.height).data }
   }
+  const FOOT = 0.2
   const inside = (x, y, rs) => rs.some((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
-  /** The ink between two captures inside some boxes: its amount (each pixel weighed by how far it moved,
-      against the most any moved), how many pixels clearly moved, and the contrast of its core. */
+  /** The ink between two captures inside some boxes: its footprint (the pixels that moved at least a fifth as far
+      as the most any moved, so a fade or a text gamma does not change it but a cut does), how many pixels clearly
+      moved, and the contrast of its core. */
   const ink = (a, b, clip, scale, rects, holes) => {
     const moved = []
     const strong = []
@@ -199,13 +202,13 @@ export function installDrawn() {
           if (holes?.length && inside(clip.x + x / scale, clip.y + y / scale, holes)) continue
           const i = (y * a.w + x) * 4
           const d = Math.max(Math.abs(a.data[i] - b.data[i]), Math.abs(a.data[i + 1] - b.data[i + 1]), Math.abs(a.data[i + 2] - b.data[i + 2]))
-          if (d <= 8) continue
+          if (d <= 2) continue
           moved.push(d)
           if (d > 16) strong.push(h.contrast([a.data[i], a.data[i + 1], a.data[i + 2]], [b.data[i], b.data[i + 1], b.data[i + 2]]))
         }
     }
     const top = moved.reduce((m, d) => Math.max(m, d), 0)
-    const amount = moved.reduce((s, d) => s + Math.min(1, d / top), 0)
+    const amount = moved.filter((d) => d >= FOOT * top).length
     strong.sort((p, q) => q - p)
     const core = strong.slice(0, Math.max(1, Math.ceil(strong.length / 10)))
     return { amount, count: strong.length, ratio: strong.length ? core[Math.floor(core.length / 2)] : 1 }

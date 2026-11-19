@@ -38,14 +38,15 @@ export async function readView(page, part) {
   return { ...seen, bounds }
 }
 
-/** What a reading fails on, text first, and the weakest text and graphic that draw. Disabled things must draw
-    in full but are not held to contrast. */
+/** What a reading fails on, text first, the weakest text and graphic that draw, and the least share of itself
+    that anything draws. Disabled things must draw in full but are not held to contrast. */
 export function verdict(view, where = '') {
   const fails = []
-  const weakest = { text: { ratio: Infinity, at: '' }, graphic: { ratio: Infinity, at: '' } }
+  const weakest = { text: { ratio: Infinity, at: '' }, graphic: { ratio: Infinity, at: '' }, share: 1 }
   for (const kind of ['text', 'graphic']) {
     const need = kind === 'text' ? 4.5 : 3
     for (const t of view.things.filter((x) => x.kind === kind)) {
+      if (t.draws && t.share !== null) weakest.share = Math.min(weakest.share, t.share)
       if (!t.draws) fails.push(`${where}${kind} does not draw at ${t.at}`)
       else if (t.share !== null && t.share < 0.9) fails.push(`${where}${kind === 'text' ? 'label' : 'graphic'} is cut: ${Math.round(t.share * 100)}% of it draws at ${t.at}`)
       else if (!t.quiet) {

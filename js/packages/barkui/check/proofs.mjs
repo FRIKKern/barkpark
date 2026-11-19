@@ -13,6 +13,8 @@ import { readView, verdict } from './reading.mjs'
 export const STEP_MS = 5000
 const light = (pass, detail, extra = {}) => ({ pass: !!pass, detail, ...extra })
 const fmt = (n) => n.toFixed(2)
+/** How much of itself the least drawn thing draws, against the same thing drawn alone (reading.mjs). */
+const drawsAll = (share) => `everything draws ${Math.floor(Math.min(1, share) * 100)}% or more of itself`
 
 // `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
 export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1 } = {}) {
@@ -154,6 +156,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
   const bad = { light: [], dark: [] }
   const text = { light: Infinity, dark: Infinity }
   const drawnWeakest = { light: Infinity, dark: Infinity }
+  const fullest = { light: 1, dark: 1 }
   const focus = { min: Infinity, max: 0 }
   const bounds = { min: Infinity, max: 0, at: '' }
   const bare = new Map()
@@ -194,6 +197,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
         const d = verdict(v, `${at}: `)
         bad[scheme].push(...d.fails)
         drawnWeakest[scheme] = Math.min(drawnWeakest[scheme], d.weakest.text.ratio)
+        fullest[scheme] = Math.min(fullest[scheme], d.weakest.share)
         const b = v.bounds
         keepBounds(bounds, b, at)
         for (const x of b.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
@@ -265,14 +269,14 @@ export async function skinsAndSchemes(ctx, part, skins) {
       ? light(false, bad.light[0])
       : distinct < skins.length
         ? light(false, `only ${distinct} of ${skins.length} skins paint differently`)
-        : light(true, `every element takes each of ${skins.length} skins' values; weakest drawn text ${fmt(drawnWeakest.light)}:1${boundNote}${focusNote}`)
+        : light(true, `every element takes each of ${skins.length} skins' values; weakest drawn text ${fmt(drawnWeakest.light)}:1; ${drawsAll(fullest.light)}${boundNote}${focusNote}`)
   const schemesLight = still.length
     ? light(false, still[0])
     : bad.dark.length
       ? light(false, bad.dark[0])
       : sameAcross.length
         ? light(false, `light and dark paint the same in ${sameAcross.join(', ')}`)
-        : light(true, `dark paints its own values in every skin; weakest drawn text ${fmt(drawnWeakest.dark)}:1${boundNote}${focusNote}`)
+        : light(true, `dark paints its own values in every skin; weakest drawn text ${fmt(drawnWeakest.dark)}:1; ${drawsAll(fullest.dark)}${boundNote}${focusNote}`)
   return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })), textOnly: [...bare].map(([selector, list]) => ({ selector, controls: list })) }
 }
 
@@ -290,6 +294,7 @@ export async function phone(ctx, part, skins) {
     // The phone view is read in full, as the wide one is: every skin and scheme, on base.
     let text = Infinity
     let edge = Infinity
+    let share = 1
     for (const scheme of ['light', 'dark']) {
       for (const skin of skins) {
         const at = `${skin} ${scheme}`
@@ -299,6 +304,7 @@ export async function phone(ctx, part, skins) {
         const d = verdict(v, `${at}: `)
         if (d.fails.length) return light(false, d.fails[0])
         text = Math.min(text, d.weakest.text.ratio)
+        share = Math.min(share, d.weakest.share)
         for (const c of v.bounds.read) {
           if (c.ratio < 3) return light(false, `${at}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
           edge = Math.min(edge, c.ratio)
@@ -306,7 +312,7 @@ export async function phone(ctx, part, skins) {
       }
     }
     await stillStyled(ctx, page, 'phone')
-    return light(true, `nothing scrolls sideways at 390px; weakest drawn text ${fmt(text)}:1; control boundary ${fmt(edge)}:1 or more`)
+    return light(true, `nothing scrolls sideways at 390px; weakest drawn text ${fmt(text)}:1; ${drawsAll(share)}; control boundary ${fmt(edge)}:1 or more`)
   } finally {
     await page.context().close()
   }
