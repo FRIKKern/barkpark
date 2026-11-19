@@ -1,0 +1,42 @@
+# Which version file owns which consumer. scripts/toolchain-drift-check.sh reads
+# this table and nothing else to decide where an Erlang/Elixir number may live.
+#
+# Columns: <version file> <consumer>, whitespace-separated, one consumer a row.
+#   .github/workflows/X.yml       every erlef/setup-beam step in X reads the file
+#                                 with `version-file:` + `version-type: strict`
+#   .github/workflows/X.yml#job   the same, for one job; beats the workflow row
+#   */Dockerfile                  the build stage's `FROM hexpm/elixir:` tag
+#                                 spells the file's numbers (Docker cannot read it)
+#   *.sh                          the script reads the file by path, or its
+#                                 ERLANG_VERSION/ELIXIR_VERSION defaults equal it
+#   *.tool-versions               that file's erlang line equals this file's
+#
+# Moving a consumer to another file is editing its row. Folding a version file
+# into another is deleting its rows and re-pointing its consumers.
+
+# The content server's runtime: asdf on the box resolves the repo-root file.
+.tool-versions  .github/workflows/architecture.yml
+.tool-versions  .github/workflows/barkdown-parity.yml
+.tool-versions  .github/workflows/codebase-intel.yml
+.tool-versions  .github/workflows/core-without-owned-tables.yml
+.tool-versions  .github/workflows/create-quickstart-smoke.yml
+.tool-versions  .github/workflows/elixir.yml
+.tool-versions  .github/workflows/elixir-nightly.yml
+.tool-versions  .github/workflows/engine-release.yml
+.tool-versions  .github/workflows/paper-rig.yml
+.tool-versions  .github/workflows/pds-scratch-round-trip.yml
+.tool-versions  .github/workflows/release-artifact.yml
+.tool-versions  .github/workflows/security.yml
+.tool-versions  deploy/azure-base-install.sh
+.tool-versions  tools/format.tool-versions
+
+# The release images: the control plane builds cloud/Dockerfile, and
+# api/Dockerfile is the published image.
+deploy/image.tool-versions  .github/workflows/cloud.yml
+deploy/image.tool-versions  api/Dockerfile
+deploy/image.tool-versions  cloud/Dockerfile
+deploy/image.tool-versions  scripts/cloud-format-check.sh
+
+# The formatter the format gate measures (reason in the file).
+tools/format.tool-versions  .github/workflows/elixir.yml#format
+tools/format.tool-versions  scripts/format-check.sh

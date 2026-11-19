@@ -435,12 +435,12 @@ format-check: ## Run mix format --check-formatted on api/ (read-only, mirrors CI
 	cd api && mix format --check-formatted
 
 # cloud/ IS NOT api/. The Cloud gate (.github/workflows/cloud.yml, compile job)
-# pins Elixir 1.18.1 while this fleet's Macs run 1.19.x, and the two formatters
-# DISAGREE — so `cd cloud && mix format --check-formatted` can exit 0 on bytes
-# the gate reds (task-417026dfc4826971, PR #17482). The target below reads the
-# pin out of cloud.yml, OBTAINS that Elixir, and runs the gate's own command
-# under it. Never restate the version here — one declaration, in the workflow.
-cloud-format-check: ## Run cloud/'s format gate under the Elixir cloud.yml pins (NOT your PATH's)
+# formats with the Elixir in deploy/image.tool-versions while this fleet's Macs
+# run 1.19.x, and the two formatters DISAGREE — so `cd cloud && mix format
+# --check-formatted` can exit 0 on bytes the gate reds (task-417026dfc4826971,
+# PR #17482). The target below reads that pin, OBTAINS that Elixir, and runs the
+# gate's own command under it. Never restate the version here.
+cloud-format-check: ## Run cloud/'s format gate under the Elixir the gate pins (NOT your PATH's)
 	bash scripts/cloud-format-check.sh
 
 # ── Setup ────────────────────────────────────────────────────────────────────

@@ -83,8 +83,8 @@ jobs:
         # Same action and the same pins elixir.yml / elixir-nightly.yml use.
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.0"
-          elixir-version: "1.18.4"
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Cache deps + _build
         uses: actions/cache@v6
@@ -95,9 +95,9 @@ jobs:
           # Its OWN key family, NOT elixir.yml's: that cache is MIX_ENV=test and
           # this job's cost is a MIX_ENV=prod compile. Sharing the key would let
           # one job's _build decide the other's regime.
-          key: ${{ runner.os }}-pds-scratch-mix-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-pds-scratch-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-pds-scratch-mix-27.0-1.18.4-
+            ${{ runner.os }}-pds-scratch-mix-${{ hashFiles('.tool-versions') }}-
 
       - name: Preflight — Postgres binaries, lsof, curl, shasum
         # bin/barkpark-pg runs its OWN initdb'd cluster inside $BARKPARK_HOME on a

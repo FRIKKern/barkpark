@@ -66,16 +66,13 @@
 #  it, so each local `mix format` re-reddened the gate and each gate-shaped
 #  repair was undone by the next local format. A treadmill, not a backlog.
 #  `.tool-versions` deliberately did NOT move with it: it is production's
-#  declaration (release-artifact.yml builds the prebuilt from it,
-#  deploy/azure-base-install.sh pins every box's asdf to it), and the elixir.yml
-#  mix-test / mix-prod-compile matrices are production's gates. So the PIN
-#  DISAGREES warning below is now EXPECTED, and says so — two numbers, each
-#  owned, rather than three unowned ones.
+#  declaration (the content server's asdf, the release artifact and the
+#  mix-test / mix-prod-compile jobs all read it). So the PIN DISAGREES warning
+#  below is EXPECTED, and says so — two numbers, each owned.
 #
 #  ONE SOURCE OF TRUTH FOR THE EXPECTED VERSION: it is READ OUT of
-#  .github/workflows/elixir.yml's format job matrix, never restated here. A
-#  second declaration is a second thing to drift, and drift between the pin and
-#  the gate is the defect this file exists to stop.
+#  tools/format.tool-versions, the file the format job's Setup BEAM step reads,
+#  never restated here. scripts/toolchain-owners.tsv records both consumers.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 #  USAGE
@@ -89,7 +86,7 @@
 #    1  GENUINELY UNFORMATTED — the only code that is a claim about the code
 #    3  WRONG ELIXIR — no claim made about formatting
 #    4  DEPS NOT FETCHED — no claim made about formatting
-#    5  the expected version could not be read out of the workflow
+#    5  the expected version could not be read out of tools/format.tool-versions
 #    6  THE FORMATTER DID NOT RUN — no `mix` on PATH, a wrapper REFUSED the
 #       invocation (the box's compile-slot shim does exactly this), or the
 #       formatter exited with a code that is neither 0 nor 1. The wrapper's own
@@ -101,34 +98,29 @@
 set -uo pipefail
 
 ROOT="${FORMAT_CHECK_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-WORKFLOW="${FORMAT_CHECK_WORKFLOW:-$ROOT/.github/workflows/elixir.yml}"
+PIN_FILE="${FORMAT_CHECK_PIN_FILE:-$ROOT/tools/format.tool-versions}"
 API_DIR="${FORMAT_CHECK_API_DIR:-$ROOT/api}"
 
 say() { printf '%s\n' "$*"; }
 
-# ── the expected version, read out of the gate that will judge you ───────────
-# Scoped to the `format:` job so a matrix elsewhere in the file cannot answer
-# for it. If the shape ever changes, this REFUSES (exit 5) rather than guessing
-# — a wrong expectation would be worse than none, because it would red people
-# who are on the correct toolchain.
+# ── the expected version, read out of the file the gate reads ───────────────
+# The `elixir <version>` line, without its `-otp-NN` suffix. If the line is
+# missing this REFUSES (exit 5) rather than guessing — a wrong expectation would
+# be worse than none, because it would red people on the correct toolchain.
 read_expected() {
-  awk '
-    /^  format:/            { in_job = 1; next }
-    in_job && /^  [a-z_-]+:/ { in_job = 0 }
-    in_job && /elixir: \[/  { if (match($0, /"[0-9][^"]*"/)) { print substr($0, RSTART+1, RLENGTH-2); exit } }
-  ' "$1" 2>/dev/null
+  sed -n 's/^[[:space:]]*elixir[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$1" 2>/dev/null | head -1
 }
 
 if [ "${1:-}" != "--selftest" ]; then
-  if [ ! -f "$WORKFLOW" ]; then
-    say "!! FORMAT CHECK REFUSED (exit 5): no workflow at $WORKFLOW, so the expected Elixir version cannot be read."
+  if [ ! -f "$PIN_FILE" ]; then
+    say "!! FORMAT CHECK REFUSED (exit 5): no pin file at $PIN_FILE, so the expected Elixir version cannot be read."
     say "   NO CLAIM is being made about formatting."
     exit 5
   fi
-  EXPECTED="$(read_expected "$WORKFLOW")"
+  EXPECTED="$(read_expected "$PIN_FILE")"
   if [ -z "$EXPECTED" ]; then
-    say "!! FORMAT CHECK REFUSED (exit 5): could not read the format job's pinned elixir version out of $WORKFLOW."
-    say "   The job's matrix shape changed. Fix this reader rather than guessing a version —"
+    say "!! FORMAT CHECK REFUSED (exit 5): no \`elixir <version>\` line in $PIN_FILE."
+    say "   Restore the line rather than guessing a version —"
     say "   a wrong expectation reds people who are on the CORRECT toolchain."
     say "   NO CLAIM is being made about formatting."
     exit 5
@@ -141,11 +133,11 @@ if [ "${1:-}" != "--selftest" ]; then
     exit 3
   fi
 
-  say ">> formatter   Elixir $RUNNING  (CI's format gate pins $EXPECTED, read from ${WORKFLOW#$ROOT/})"
+  say ">> formatter   Elixir $RUNNING  (CI's format gate pins $EXPECTED, read from ${PIN_FILE#$ROOT/})"
 
   # THE OTHER NUMBER, surfaced rather than silently tolerated. `.tool-versions`
   # is what a developer running asdf/mise will actually get, and it is a
-  # SEPARATE declaration from the gate's matrix — so it can disagree with the
+  # SEPARATE declaration from the gate's pin — so it can disagree with the
   # thing that will judge them, and on this repo it does (pin 1.18.4-otp-27 vs
   # format gate 1.19.5).
   #
@@ -153,7 +145,7 @@ if [ "${1:-}" != "--selftest" ]; then
   # rather than pretending it is a fresh defect: the two declarations answer
   # different questions. `.tool-versions` is PRODUCTION's toolchain (the release
   # artifact and every box's asdf read it, as do the mix-test / mix-prod-compile
-  # matrices at 1.18.1); this gate's matrix is THE FORMATTER, pinned to what the
+  # jobs); tools/format.tool-versions is THE FORMATTER, pinned to what the
   # fleet runs so that a local `mix format` and the gate reach the same verdict.
   # Still a WARNING and never a refusal: someone on the pin will be refused by
   # the version check below, with reasons, and that is the honest outcome.
@@ -162,9 +154,9 @@ if [ "${1:-}" != "--selftest" ]; then
     if [ -n "$PINNED" ] && [ "$PINNED" != "$EXPECTED" ]; then
       say "!! PIN DISAGREES (expected — two owned numbers, not one unowned one):"
       say "     .tool-versions          elixir $PINNED   <- PRODUCTION's toolchain"
-      say "     format gate matrix      elixir $EXPECTED   <- THE FORMATTER the fleet runs"
+      say "     tools/format.tool-versions elixir $EXPECTED   <- THE FORMATTER the fleet runs"
       say "   Deliberate since 2026-09-02: .tool-versions is read by release-artifact.yml,"
-      say "   deploy/azure-base-install.sh and the mix-test/mix-prod-compile matrices, so it"
+      say "   deploy/azure-base-install.sh and the mix-test/mix-prod-compile jobs, so it"
       say "   does NOT move with the format gate. Format under $EXPECTED. Neither pin is stale;"
       say "   moving either one to 'agree' would break the other's owner."
       say "   THIRD DECLARATION, OWNER-SIDE (outside this repo, not fixable from here):"
@@ -321,23 +313,21 @@ check() { # name expected_rc must_match must_not_match rc output
 SELF="${BASH_SOURCE[0]}"
 say "=== format-check selftest: every refusal must be able to fire, and name itself ==="
 
-# 1. UNREADABLE EXPECTATION — no workflow at all.
+# 1. UNREADABLE EXPECTATION — no pin file at all.
 mkdir -p "$tmp/no-wf/api/deps" && : > "$tmp/no-wf/api/deps/keep"
-out="$(FORMAT_CHECK_ROOT="$tmp/no-wf" FORMAT_CHECK_WORKFLOW="$tmp/no-wf/nope.yml" bash "$SELF" 2>&1)"; rc=$?
-check "a missing workflow REFUSES rather than guessing a version" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
+out="$(FORMAT_CHECK_ROOT="$tmp/no-wf" FORMAT_CHECK_PIN_FILE="$tmp/no-wf/nope" bash "$SELF" 2>&1)"; rc=$?
+check "a missing pin file REFUSES rather than guessing a version" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
 
-# 2. UNREADABLE EXPECTATION — a workflow whose format job has no matrix.
+# 2. UNREADABLE EXPECTATION — a pin file whose only elixir number is a comment.
 mkdir -p "$tmp/bad-wf/api/deps" && : > "$tmp/bad-wf/api/deps/keep"
-mkdir -p "$tmp/bad-wf/.github/workflows"
-printf 'jobs:\n  format:\n    name: Format\n  other:\n    elixir: ["9.9.9"]\n' > "$tmp/bad-wf/.github/workflows/elixir.yml"
-out="$(FORMAT_CHECK_ROOT="$tmp/bad-wf" FORMAT_CHECK_WORKFLOW="$tmp/bad-wf/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
-check "a matrix in a DIFFERENT job must not answer for the format job" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
+printf 'erlang 27.3.4\n# elixir 9.9.9 is prose, not a pin\n' > "$tmp/bad-wf/pin"
+out="$(FORMAT_CHECK_ROOT="$tmp/bad-wf" FORMAT_CHECK_PIN_FILE="$tmp/bad-wf/pin" bash "$SELF" 2>&1)"; rc=$?
+check "a commented-out elixir line must not answer for the pin" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
 
 # 3. WRONG ELIXIR — pin an expectation no toolchain satisfies.
 mkdir -p "$tmp/wrong/api/deps" && : > "$tmp/wrong/api/deps/keep"
-mkdir -p "$tmp/wrong/.github/workflows"
-printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["0.0.1"]\n' > "$tmp/wrong/.github/workflows/elixir.yml"
-out="$(FORMAT_CHECK_ROOT="$tmp/wrong" FORMAT_CHECK_WORKFLOW="$tmp/wrong/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+printf 'erlang 27.3.4\nelixir 0.0.1-otp-27\n' > "$tmp/wrong/pin"
+out="$(FORMAT_CHECK_ROOT="$tmp/wrong" FORMAT_CHECK_PIN_FILE="$tmp/wrong/pin" bash "$SELF" 2>&1)"; rc=$?
 check "a version mismatch REFUSES LOUDLY and is not reported as unformatted" 3 "WRONG ELIXIR" "UNFORMATTED" "$rc" "$out"
 check "and it says NO CLAIM is being made, so nothing downstream reads it as a verdict" 3 "NO CLAIM" "" "$rc" "$out"
 check "and it forbids the reflex 'fix' that would red a currently-green gate" 3 "Do NOT run" "" "$rc" "$out"
@@ -346,9 +336,9 @@ check "and it forbids the reflex 'fix' that would red a currently-green gate" 3 
 running_probe="$(elixir --version 2>/dev/null | sed -n 's/^Elixir \([0-9][0-9.]*\).*/\1/p' | head -1)"
 running="$running_probe"
 if [ -n "$running" ]; then
-  mkdir -p "$tmp/nodeps/api" "$tmp/nodeps/.github/workflows"
-  printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running" > "$tmp/nodeps/.github/workflows/elixir.yml"
-  out="$(FORMAT_CHECK_ROOT="$tmp/nodeps" FORMAT_CHECK_WORKFLOW="$tmp/nodeps/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+  mkdir -p "$tmp/nodeps/api"
+  printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running" > "$tmp/nodeps/pin"
+  out="$(FORMAT_CHECK_ROOT="$tmp/nodeps" FORMAT_CHECK_PIN_FILE="$tmp/nodeps/pin" bash "$SELF" 2>&1)"; rc=$?
   check "unfetched deps REFUSE as themselves, not as a format failure" 4 "DEPS NOT FETCHED" "UNFORMATTED" "$rc" "$out"
   check "and the import_deps trap is named so the next reader does not re-derive it" 4 "import_deps" "" "$rc" "$out"
 else
@@ -362,10 +352,10 @@ fi
 #    (exit 1) — a real verdict". It must now print CANNOT READ and exit 6, and
 #    must NOT contain the word UNFORMATTED anywhere.
 if [ -n "$running_probe" ]; then
-  mkdir -p "$tmp/refuse/api/deps" "$tmp/refuse/.github/workflows" "$tmp/refuse/bin"
+  mkdir -p "$tmp/refuse/api/deps" "$tmp/refuse/bin"
   : > "$tmp/refuse/api/deps/keep"
-  printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running_probe" \
-    > "$tmp/refuse/.github/workflows/elixir.yml"
+  printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running_probe" \
+    > "$tmp/refuse/pin"
   cat > "$tmp/refuse/bin/mix" <<'FAKE'
 #!/usr/bin/env bash
 echo "mix format is REFUSED on this box: local Elixir 1.19.5 != the 1.18.4 that CI and prod use." >&2
@@ -375,7 +365,7 @@ exit 2
 FAKE
   chmod +x "$tmp/refuse/bin/mix"
   out="$(PATH="$tmp/refuse/bin:$PATH" FORMAT_CHECK_ROOT="$tmp/refuse" \
-    FORMAT_CHECK_WORKFLOW="$tmp/refuse/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+    FORMAT_CHECK_PIN_FILE="$tmp/refuse/pin" bash "$SELF" 2>&1)"; rc=$?
   check "a wrapper REFUSAL refuses as itself and is NEVER reported as unformatted" 6 "CANNOT READ" "UNFORMATTED" "$rc" "$out"
   check "and it quotes the wrapper's own words so the reader can see WHO refused" 6 "REFUSED on this box" "" "$rc" "$out"
   check "and it says NO CLAIM, so nothing downstream reads exit 6 as a verdict" 6 "NO CLAIM" "" "$rc" "$out"
@@ -395,10 +385,10 @@ FAKE
   #     the pre-fix `printf | grep -q` idiom this arm reported UNFORMATTED exit 1;
   #     shorten the listing to 10 lines and the SAME idiom answers exit 6, so the
   #     hazard is the output SIZE, not the refusal.
-  mkdir -p "$tmp/refuse1/api/deps" "$tmp/refuse1/.github/workflows" "$tmp/refuse1/bin"
+  mkdir -p "$tmp/refuse1/api/deps" "$tmp/refuse1/bin"
   : > "$tmp/refuse1/api/deps/keep"
-  printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running_probe" \
-    > "$tmp/refuse1/.github/workflows/elixir.yml"
+  printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running_probe" \
+    > "$tmp/refuse1/pin"
   cat > "$tmp/refuse1/bin/mix" <<'FAKE1'
 #!/usr/bin/env bash
 echo "mix format is REFUSED on this box: the shim declined to run the formatter." >&2
@@ -407,7 +397,7 @@ exit 1
 FAKE1
   chmod +x "$tmp/refuse1/bin/mix"
   out="$(PATH="$tmp/refuse1/bin:$PATH" FORMAT_CHECK_ROOT="$tmp/refuse1" \
-    FORMAT_CHECK_WORKFLOW="$tmp/refuse1/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+    FORMAT_CHECK_PIN_FILE="$tmp/refuse1/pin" bash "$SELF" 2>&1)"; rc=$?
   # The producing fixture must actually be huge, or this arm is vacuous.
   if [ "${#out}" -lt 100000 ]; then
     say "  FAIL  the exit-1 refusal fixture never produced a large output (${#out} bytes)"; fails=$((fails + 1))
@@ -428,9 +418,9 @@ fi
 if [ -n "$running_probe" ] && command -v mix >/dev/null 2>&1; then
   for kind in ok bad; do
     d="$tmp/verdict-$kind"
-    mkdir -p "$d/api/deps" "$d/.github/workflows"; : > "$d/api/deps/keep"
-    printf 'jobs:\n  format:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running_probe" \
-      > "$d/.github/workflows/elixir.yml"
+    mkdir -p "$d/api/deps"; : > "$d/api/deps/keep"
+    printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running_probe" \
+      > "$d/pin"
     printf '[inputs: ["*.ex"]]\n' > "$d/api/.formatter.exs"
     if [ "$kind" = ok ]; then
       printf 'defmodule A do\n  def a, do: :ok\nend\n' > "$d/api/a.ex"
@@ -439,28 +429,28 @@ if [ -n "$running_probe" ] && command -v mix >/dev/null 2>&1; then
     fi
   done
   out="$(env -u BP_ALLOW_FORMAT FORMAT_CHECK_ROOT="$tmp/verdict-ok" \
-    FORMAT_CHECK_WORKFLOW="$tmp/verdict-ok/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+    FORMAT_CHECK_PIN_FILE="$tmp/verdict-ok/pin" bash "$SELF" 2>&1)"; rc=$?
   check "a FORMATTED tree still passes with the caller setting no BP_ALLOW_FORMAT" 0 "FORMAT OK" "CANNOT READ" "$rc" "$out"
   out="$(env -u BP_ALLOW_FORMAT FORMAT_CHECK_ROOT="$tmp/verdict-bad" \
-    FORMAT_CHECK_WORKFLOW="$tmp/verdict-bad/.github/workflows/elixir.yml" bash "$SELF" 2>&1)"; rc=$?
+    FORMAT_CHECK_PIN_FILE="$tmp/verdict-bad/pin" bash "$SELF" 2>&1)"; rc=$?
   check "an UNFORMATTED file still reds as exit 1, and not as a refusal" 1 "UNFORMATTED" "CANNOT READ" "$rc" "$out"
   check "and the red names the file the formatter objected to" 1 "b.ex" "" "$rc" "$out"
 else
   say "  skip  verdict cases — no elixir/mix on PATH to produce a real formatter verdict"
 fi
 
-# 7. THE READER ACTUALLY READS THE REAL WORKFLOW. If this ever returns empty on
+# 7. THE READER ACTUALLY READS THE REAL PIN FILE. If this ever returns empty on
 #    the committed file, every case above is testing a straw man.
-if [ -f "$WORKFLOW" ]; then
-  real="$(read_expected "$WORKFLOW")"
+if [ -f "$PIN_FILE" ]; then
+  real="$(read_expected "$PIN_FILE")"
   if [ -n "$real" ]; then
-    say "  ok    the reader resolves the REAL workflow's pin: Elixir $real"
+    say "  ok    the reader resolves the REAL pin: Elixir $real"
   else
-    say "  FAIL  the reader returns EMPTY on the committed $WORKFLOW — every case above is a straw man"
+    say "  FAIL  the reader returns EMPTY on the committed $PIN_FILE — every case above is a straw man"
     fails=$((fails + 1))
   fi
 else
-  say "  skip  real-workflow read — $WORKFLOW not present"
+  say "  skip  real pin read — $PIN_FILE not present"
 fi
 
 say ""
