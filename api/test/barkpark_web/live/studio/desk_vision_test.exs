@@ -125,7 +125,7 @@ defmodule BarkparkWeb.Studio.DeskVisionTest do
   test "Vision is the desk's: anyone but a workspace admin lands on the Studio", c do
     raw = "dvis-read-" <> Ecto.UUID.generate()
     {:ok, _} = Auth.create_token(raw, "dvis-read", @dataset, ["read"], c.workspace.id)
-    conn = Plug.Test.init_test_session(build_conn(), %{"api_token" => raw})
+    conn = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => raw})
 
     assert {:error, {:live_redirect, %{to: to}}} = live(conn, c.vision)
     refute to =~ "_desk"

@@ -56,8 +56,12 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
           <span class="dk-vision-label">{gettext("Perspective")}</span>
           <select class="dk-vision-input" data-vision-perspective>
             <option value="raw">{gettext("No perspective (raw)")}</option>
-            <option value="published">published</option>
-            <option value="drafts" selected>drafts</option>
+            <%!-- Sanity's names are the API's own codes, the `perspective=`
+                  the query URL sends, so they read as sent in every
+                  language, as TanStack's nb keeps them. --%>
+            <option :for={code <- ~w(published drafts)} value={code} selected={code == "drafts"}>
+              {code}
+            </option>
           </select>
         </label>
         <div class="dk-vision-url" data-vision-url hidden>
