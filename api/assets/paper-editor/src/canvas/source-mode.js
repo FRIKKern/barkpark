@@ -1,4 +1,4 @@
-import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
+import { blocksToMarkdown, markdownToBlocks, sourceLoss } from "../markdown.js";
 import { t } from "../i18n.js";
 import { docToBlocks } from "./run-convert.js";
 import {
@@ -51,14 +51,6 @@ export function sourceModeEnter() {
     // Otherwise an immediate source toggle serializes stale code/caption attrs.
     this.flushPendingChanges();
 
-    // Close any open popup — in source mode the textarea owns input, so a lingering
-    // [[ / # / slash / palette popup would float over a now-hidden editor.
-    this._closeWikilink();
-    this._closeTag();
-    this._closeEmoji();
-    this._closeSlash();
-    this._closePalette();
-
     // THE BASELINE — derived from the LIVE doc (L0), NOT this._blocks (C).
     //
     //   C  = this._blocks — the displayed run's save baseline. It advances after
@@ -72,8 +64,43 @@ export function sourceModeEnter() {
     // on an edited exit, a setContent built from C would DELETE those edits. So the
     // baseline + textarea MUST come from L0. We deep-clone L0 so a later parse +
     // realign never mutates it.
-    const liveDoc = this._normalizedDoc(this._editor.getJSON());
-    const L0 = docToBlocks(liveDoc);
+    const L0 = docToBlocks(this._normalizedDoc(this._editor.getJSON()));
+
+    // THE WALL. An edit in source mode saves markdownToBlocks(text) in place of the
+    // document, so source mode opens only where the Markdown reads back to the same
+    // content (sourceLoss, the one comparison), for both the blocks the canvas holds as
+    // stored (this._blocks: a callout's body and any other slot the rich view does not
+    // show) and the live doc (L0: marks typed but not yet saved). Each is its own round
+    // trip, so unsaved typing never reads as a loss, and each parse is settled the
+    // way sourceModeCommit saves it (ids given back, a locked template prefix put
+    // back), so the check judges what would be saved. Where either loses anything,
+    // nothing changes: no textarea, no op, the visual editor keeps its caret and its
+    // popups, and one plain line names the block.
+    const saved = (base) => (parsed) => {
+      const copy = deepCloneBlocks(base);
+      return clampLockedPrefix(copy, realignAcrossCommits(copy, copy, parsed));
+    };
+    const stored = this._blocks || [];
+    const loss = sourceLoss(stored, saved(stored)) || sourceLoss(L0, saved(L0));
+    if (loss) {
+      this._showFigureConstraint(
+        t("Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.", {
+          part: loss.part,
+          number: loss.index + 1,
+          type: loss.type,
+        }),
+      );
+      return;
+    }
+
+    // Close any open popup — in source mode the textarea owns input, so a lingering
+    // [[ / # / slash / palette popup would float over a now-hidden editor.
+    this._closeWikilink();
+    this._closeTag();
+    this._closeEmoji();
+    this._closeSlash();
+    this._closePalette();
+
     this._sourceBaselineBlocks = deepCloneBlocks(L0);
     this._sourceCommitBlocks = this._sourceBaselineBlocks;
     const md0 = blocksToMarkdown(this._sourceBaselineBlocks);

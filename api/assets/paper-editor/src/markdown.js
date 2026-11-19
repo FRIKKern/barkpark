@@ -3,3 +3,4 @@
 export { blocksToMarkdown } from "./markdown/serialize.js";
 export { blocksToExportMarkdown } from "./markdown/export.js";
 export { markdownToBlocks, markdownToBlockSpans } from "./markdown/parse.js";
+export { firstLoss, sourceLoss } from "./markdown/carries.js";
