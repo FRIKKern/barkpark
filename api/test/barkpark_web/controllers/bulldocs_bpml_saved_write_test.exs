@@ -120,6 +120,19 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     )
   end
 
+  # The workspace and project of the COMMITTED row, read straight off the
+  # table (every row of `slug`, so a second stray row fails the match).
+  defp committed_scope(slug) do
+    [scope] =
+      Repo.all(
+        from d in Barkpark.Content.Document,
+          where: d.doc_id == ^slug and d.type == "paper",
+          select: {d.workspace_id, d.project_id}
+      )
+
+    scope
+  end
+
   # What a write leaves behind for `slug`, besides its answer.
   defp trace(slug) do
     paper = Content.get_paper(slug, @ds, [])
@@ -220,7 +233,8 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
         assert answer["bpml"] == pulled
         assert answer["rev"] == rev
         assert pulled =~ @hidden
-        assert Content.get_paper(slug, @ds, []).workspace_id == default_scope()[:workspace_id]
+        home = default_scope()
+        assert committed_scope(slug) == {home[:workspace_id], home[:project_id]}
       end
     end
   end
@@ -246,8 +260,8 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
         assert Content.get_paper(slug, @ds, []) == nil
       else
         answer = json_response(resp, 200)
+        assert committed_scope(slug) == {other.ws.id, other.project.id}
         row = Content.get_paper(slug, @ds, other.scope)
-        assert {row.workspace_id, row.project_id} == {other.ws.id, other.project.id}
         assert {:ok, answer["bpml"]} == BpmlView.print(row, @ds)
         assert answer["bpml"] =~ @hidden
       end
@@ -277,6 +291,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
         assert trace(slug) == before
       else
         answer = json_response(resp, 200)
+        assert committed_scope(slug) == {other.ws.id, other.project.id}
         saved = Content.get_paper(slug, @ds, other.scope)
         assert {:ok, answer["bpml"]} == BpmlView.print(saved, @ds)
         assert answer["bpml"] =~ @hidden
@@ -316,9 +331,13 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
 
       resp = sync(c.slug, c.bpml, "0", c.raw, %{"project" => default_project.slug})
       assert json_response(resp, 200)["created"] == true
-      row = Content.get_paper(c.slug, @ds, [])
-      assert row.workspace_id == c.other.ws.id
-      refute row.project_id == default_project.id
+      # The gate approves the token's workspace and no project (the slug
+      # names none of its own); the committed row carries that workspace and
+      # either no project or one of that workspace's.
+      {ws_id, project_id} = committed_scope(c.slug)
+      assert ws_id == c.other.ws.id
+      refute project_id == default_project.id
+      assert is_nil(project_id) or Tenancy.get_project_by_id(project_id).workspace_id == ws_id
     end
   end
 
