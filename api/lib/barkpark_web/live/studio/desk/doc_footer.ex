@@ -26,7 +26,8 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     until that dialog is confirmed. It is greyed out, and says "Not
     published", when no published version exists. Over a draft it stays
     offered, as TanStack's: an unpublish keeps an existing draft as it is
-    (`Content.Lifecycle.unpublish_document`, draft wins).
+    (`Content.Lifecycle.unpublish_document`, draft wins). Its words are a
+    `role="status"`, not a button, and a singleton has no Unpublish.
 
   The words are drawn when the pane renders, so "5m ago" moves on with the
   next change, not with the clock.
@@ -66,10 +67,18 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     default: nil,
     doc: "the path that opens History on Review changes; nil leaves the words a disabled button"
 
+  attr :unpublish?, :boolean,
+    default: true,
+    doc: "false for a singleton, which is never unpublished: the footer has only its words"
+
   @doc "The left's words and the Publish button, or Unpublish in the published perspective."
   def bar(%{perspective: :published} = assigns) do
     ~H"""
-    <.words status={@status} review={@review} />
+    <%!-- TanStack's `PublishedFooter`: its words are a status, not a button
+          (`PublishedView.status/2`: "Last published …", "Unpublished …"). --%>
+    <div class="dk-footer-status doc-footer-status" data-desk-footer-status>
+      <span class="save-state" role="status"><span class="save-state-text">{@status}</span></span>
+    </div>
     <%!-- TanStack's `button.publish.danger`, named "Unpublish". The dialog it
           opens gives the focus back to it on Cancel (`ModalFocus`). --%>
     <style>
@@ -77,6 +86,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       .dk .dk-publish.danger:not(:disabled):hover { background: var(--dk-menu-danger); }
     </style>
     <button
+      :if={@unpublish?}
       type="button"
       id={"#{@id}-unpublish"}
       class="dk-publish publish danger"

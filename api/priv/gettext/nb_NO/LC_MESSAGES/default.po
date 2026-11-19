@@ -15470,6 +15470,11 @@ msgctxt "crop preview"
 msgid "Panorama"
 msgstr "Panorama"
 
+#: lib/barkpark_web/live/studio/desk/published_view.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublished %{ago}"
+msgstr "Avpublisert %{ago}"
+
 #: lib/barkpark_web/components/fields/tree_codelist_desk.ex
 #, elixir-autogen, elixir-format
 msgid "Not in the list"
