@@ -313,11 +313,11 @@ def selftest():
     rc, o = run(tree({"g.yml": GATE}, ["Gate"], ["Dispatch", "Leaf (27.0, 1.18.1)", "Mid"]))
     check("s5b ... but an UNmatrixed job is not accounted by a suffixed row", rc == 1, o)
     tpl = GATE.replace("{name: Leaf,", "{name: 'Leaf (OTP ${{ matrix.otp }})',")
-    rc, o = run(tree({"g.yml": tpl}, ["Gate"], ["Dispatch", "Leaf (OTP 27.0)", "Mid"]))
+    rc, o = run(tree({"g.yml": tpl}, ["Gate"], ["Dispatch", "Leaf (OTP any)", "Mid"]))
     check("s6 a partial template is accounted by a context it expands to", rc == 0, o)
     rc, o = run(tree({"g.yml": tpl}, ["Gate"], ["Dispatch", "Leaf (OTP ${{ matrix.otp }})", "Mid"]))
     check("s6b ... or by its own uninterpolated template (the skipped-leg name)", rc == 0, o)
-    rc, o = run(tree({"g.yml": tpl}, ["Gate"], ["Dispatch", "Other (OTP 27.0)", "Mid"]))
+    rc, o = run(tree({"g.yml": tpl}, ["Gate"], ["Dispatch", "Other (OTP any)", "Mid"]))
     check("s6c ... and not by an unrelated context", rc == 1, o)
     catch_wf = textwrap.dedent(GATE).replace(
         "  leaf: {name: Leaf, needs: changes, runs-on: x, steps: []}\n",
