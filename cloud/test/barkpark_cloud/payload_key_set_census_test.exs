@@ -1093,8 +1093,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   @reconciled [
     {"barkpark_json/6", :unread, "provision_steps",
      "BROWSER-ONLY. The /new page's refresh-durable provisioning narration (dwb-14); app.js reads provision_steps/provision_console at 17 call sites. `bp` narrates provisioning off its own poll, so decoding a live step list into a Go struct would be a SECOND renderer of the same bytes."},
-    {"barkpark_json/6", :unread, "provision_console",
-     "BROWSER-ONLY, same reader as provision_steps above (dwb-16)."},
+    # `provision_console` LEFT THIS LIST (task-9de1dbcf13951044): Go now decodes
+    # it (`cloudclient.Barkpark.ProvisionConsole`) and `bp cloud status` reads ONE
+    # line of it, the warm-or-cold line a Hetzner launch writes
+    # (internal/cli/cloud/launch_host_line.go). It is not a second console
+    # renderer; the browser still owns that.
     {"site_deployment_json/3", :unread, "console",
      "BROWSER-ONLY. gh-5's live build console; the CLI streams its own lines from the deploy stream rather than re-rendering this list."},
     {"barkpark_json/6", :phantom, "team",
@@ -2147,7 +2150,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 431 -> 437 (bp barkparks backfill-media-sha1): the new
   # internal/cloudclient/media_sha1_backfill.go decodes `MediaSha1Backfill`
   # and its reply. Six new NAMES ride with it. MEASURED by the PIN CO-EDIT arm.
-  @go_tag_pinned 437
+  # 437 -> 439 (task-9de1dbcf13951044, `bp cloud status` says warm or new
+  # server): `Barkpark.ProvisionConsole` and its `ProvisionConsoleLine` decode
+  # TWO new NAMES, `provision_console` and `line`. The entry's `at` is not
+  # decoded, so the SITE register does not move. The :unread row for
+  # `provision_console` left @reconciled in the same change. MEASURED by the
+  # PIN CO-EDIT arm ("437 -> 439").
+  @go_tag_pinned 439
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)

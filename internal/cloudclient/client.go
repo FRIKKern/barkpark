@@ -74,6 +74,12 @@ type Team struct {
 	Role string `json:"role"`
 }
 
+// ProvisionConsoleLine is one entry of `provision_console`. Only the line text
+// is decoded; the entry's `at` and truncation markers have no reader here.
+type ProvisionConsoleLine struct {
+	Line string `json:"line"`
+}
+
 // Barkpark is one registered server in the user's fleet, as returned by
 // GET /v1/barkparks (and embedded in launch / go-live responses). The JSON tags
 // match the control plane's serialization 1:1 — the two status axes
@@ -203,6 +209,13 @@ type Barkpark struct {
 	ProvisionError    string  `json:"provision_error"`
 	DeprovisionStatus string  `json:"deprovision_status"`
 	DeprovisionError  string  `json:"deprovision_error"`
+
+	// ProvisionConsole is the latest provision job's console, the lines the
+	// worker narrated (barkpark_json/6 `provision_console`, always present, []
+	// with no job). `bp cloud status` reads ONE line from it: the warm-or-cold
+	// line a Hetzner launch writes (internal/cli/cloud/launch_host_line.go). It
+	// does not render the console; the /new page does that.
+	ProvisionConsole []ProvisionConsoleLine `json:"provision_console"`
 
 	// Self-update TRUTH (isu-w5) — the full version + policy the control plane
 	// mirrors from each instance's own update verdict and the team's autoupdate
