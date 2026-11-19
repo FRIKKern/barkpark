@@ -141,14 +141,16 @@ jobs:
         #
         # THROUGH THE SAME INSTALLER EVERY BOX USES (task-16e58856f0182596):
         # install_caddy_pkg, cut from deploy.sh between its BEGIN/END
-        # markers. Official apt repo first; when that repo is unusable (since
+        # markers, with the bp_apt_get block it calls (task-aa4ef6ce7298ef70)
+        # cut beside it. Official apt repo first; when that repo is unusable (since
         # 2026-10-01 cloudsmith signs it with EXPIRED subkey 531A6B20FA058A70,
         # caddyserver/caddy issue 8095) the pinned, sha512-verified official release
         # .deb. So this job exercises the production install path, not a copy.
         run: |
           set -eu
-          sed -n '/^# install_caddy_pkg BEGIN/,/^# install_caddy_pkg END/p' deploy.sh > "$RUNNER_TEMP/caddy-fn.sh"
+          sed -n '/^# bp_apt_get BEGIN/,/^# bp_apt_get END/p;/^# install_caddy_pkg BEGIN/,/^# install_caddy_pkg END/p' deploy.sh > "$RUNNER_TEMP/caddy-fn.sh"
           grep -q '^install_caddy_pkg() {' "$RUNNER_TEMP/caddy-fn.sh"
+          grep -q '^bp_apt_get() {' "$RUNNER_TEMP/caddy-fn.sh"
           sudo bash -c ". '$RUNNER_TEMP/caddy-fn.sh'; install_caddy_pkg"
           command -v caddy
           caddy version
@@ -169,7 +171,7 @@ jobs:
         # package, its systemd unit present, at the >= 2.7 heredoc floor.
         run: |
           set -eu
-          sed -n '/^# install_caddy_pkg BEGIN/,/^# install_caddy_pkg END/p' deploy.sh > "$RUNNER_TEMP/caddy-fn.sh"
+          sed -n '/^# bp_apt_get BEGIN/,/^# bp_apt_get END/p;/^# install_caddy_pkg BEGIN/,/^# install_caddy_pkg END/p' deploy.sh > "$RUNNER_TEMP/caddy-fn.sh"
           for skip in 0 1; do
             echo "== arm BARKPARK_CADDY_SKIP_APT=$skip"
             docker run --rm -e BARKPARK_CADDY_SKIP_APT="$skip" \

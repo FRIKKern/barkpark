@@ -104,6 +104,7 @@
             "properties": {
               "code": {
                 "enum": [
+                  "already_enrolled",
                   "ambiguous_dataset",
                   "bad_request",
                   "batch_too_large",
@@ -173,6 +174,7 @@
                   "mfa_required",
                   "missing_slug",
                   "missing_source",
+                  "name_taken",
                   "no_mapped_group",
                   "no_user_identity",
                   "not_acceptable",

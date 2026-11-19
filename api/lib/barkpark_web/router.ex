@@ -2983,6 +2983,7 @@ defmodule BarkparkWeb.Router do
 
     get("/", ChatHostController, :index)
     post("/enrollments", ChatHostController, :create_enrollment)
+    post("/:id/enrollment", ChatHostController, :replace_enrollment)
     delete("/:id", ChatHostController, :revoke)
   end
 
