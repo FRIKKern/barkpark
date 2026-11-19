@@ -189,7 +189,7 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveTest do
       assert settled(a) == "Edited just now"
 
       # B's save merged A's " A" in; it is not B's. A's undo takes it back out,
-      # B's "B " stays, and B is not told (live-edit.spec.ts:68 waits for
+      # B's "B " stays, and B is not told (live-edit.spec.ts J05 J06 waits for
       # "Saved" in B after A's undo).
       render_hook(a, "desk-undo", %{
         PostIdentity.key() => PostIdentity.value(@dataset, c.type, c.doc_id),
