@@ -266,4 +266,101 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     assert kept == lede()
   end
+
+  # ── the view a copy was pulled from ─────────────────────────────────────────
+
+  defp pull_view(slug) do
+    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    [rev] = get_resp_header(resp, "x-paper-rev")
+    [view] = get_resp_header(resp, "x-bpml-view")
+    {response(resp, 200), rev, view}
+  end
+
+  defp sync_view(slug, bpml, rev, view) do
+    build_conn()
+    |> put_req_header("authorization", "Bearer #{@token}")
+    |> put_req_header("content-type", "application/json")
+    |> post("#{@ingest_path}/#{slug}/sync", %{
+      "bpml" => bpml,
+      "baseRev" => rev,
+      "bpmlView" => view
+    })
+  end
+
+  defp nested_private!(private?) do
+    paper_schema!([
+      %{"name" => "title", "type" => "string"},
+      %{
+        "name" => "blocks",
+        "type" => "array",
+        "of" => [
+          %{
+            "type" => "object",
+            "fields" => [%{"name" => "text", "type" => "string", "private" => private?}]
+          }
+        ]
+      }
+    ])
+  end
+
+  defp heading, do: %{"id" => "h", "type" => "heading", "level" => 2, "text" => "PRIVATE_HEADING"}
+
+  test "a push whose pull no longer matches the row's view answers 412 (a field made public at the same rev)" do
+    nested_private!(true)
+    slug = slug("view-changed")
+    paper!(slug, [heading(), plain()])
+    {bpml, rev, view} = pull_view(slug)
+
+    nested_private!(false)
+    resp = sync_view(slug, String.replace(bpml, "Plain.", "Plain, edited."), rev, view)
+
+    assert json_response(resp, 412)["error"]["code"] == "precondition_failed"
+    assert [heading(), plain()] == stored_blocks(slug)
+  end
+
+  test "a forged view fingerprint answers 412, never the fallback" do
+    slug = slug("forged")
+    paper!(slug, [plain()])
+    {bpml, rev, _view} = pull_view(slug)
+
+    resp = sync_view(slug, String.replace(bpml, "Plain.", "Plain, edited."), rev, "forged")
+    assert json_response(resp, 412)["error"]["code"] == "precondition_failed"
+  end
+
+  test "an applied push answers the new fingerprint, and the next push with it lands" do
+    slug = slug("next-push")
+    paper!(slug, [plain()])
+    {bpml, rev, view} = pull_view(slug)
+
+    first =
+      sync_view(slug, String.replace(bpml, "Plain.", "One."), rev, view) |> json_response(200)
+
+    assert is_binary(first["bpmlView"]) and first["bpmlView"] != view
+
+    second =
+      sync_view(
+        slug,
+        String.replace(first["bpml"], "One.", "Two."),
+        first["rev"],
+        first["bpmlView"]
+      )
+
+    assert json_response(second, 200)["ok"] == true
+    assert [%{"content" => [%{"value" => "Two."}]}] = stored_blocks(slug)
+  end
+
+  # KNOWN GAP, kept on purpose: a copy without the fingerprint (a bp from
+  # before it) gets the block rules alone. When the view changed at the same
+  # rev, the rules see the field as shown, and the push writes over it.
+  test "without a fingerprint, a field made public between pull and push is written over (known gap)" do
+    nested_private!(true)
+    slug = slug("no-fingerprint")
+    paper!(slug, [heading(), plain()])
+    {bpml, rev} = pull(slug)
+
+    nested_private!(false)
+    json_response(sync(slug, bpml, rev), 200)
+
+    assert [%{"id" => "h", "text" => ""}, _] = stored_blocks(slug)
+  end
 end

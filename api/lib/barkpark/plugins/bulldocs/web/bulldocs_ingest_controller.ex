@@ -351,6 +351,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
       `bpml_unprintable` marker;
     * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
       is silently lost);
+    * `bpmlView` is not the row's current view → 412; a push that changes what
+      its pull did not show → 422 `bpml_unshown` (`Bpml.WriteWall`);
     * no changes → 200 `{ok, unchanged: true}`;
     * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the CANONICAL
       print of the persisted blocks (post-normalization) — the client
@@ -389,6 +391,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           {:ok, parsed} ->
+            parsed = Map.put(parsed, "bpmlView", params["bpmlView"])
             sync_apply(conn, slug, parsed, base_rev, dataset, scope)
         end
     end
@@ -411,14 +414,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
         unprintable = unprintable_current(current_blocks)
 
         cond do
-          # ENTRY GUARD, before anything derives. If the paper's CURRENT blocks
-          # cannot be printed as BPML, the pushed document cannot describe them
-          # either — and `Diff.derive/2` would faithfully remove every block the
-          # (necessarily kernel-only) parse does not carry: a silent DESTRUCTION
-          # behind a 200. Nothing legitimate breaks, because pull already
-          # refuses such a paper (422) — no client can hold a working copy of
-          # one. Ordered before the rev check on purpose: an unprintable paper
-          # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
+          # ENTRY GUARD, before anything derives and before the rev check: a
+          # paper whose CURRENT blocks do not print has no honest BPML sync at
+          # any rev (its pull answers 422 too); a push would remove them all.
           unprintable != nil ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -453,7 +451,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
           true ->
             case Barkpark.PortableDoc.Bpml.WriteWall.derive(paper, parsed, dataset) do
               {:error, %{} = r} ->
-                ErrorResponse.emit_fields(conn, :unprocessable_entity, r)
+                ErrorResponse.emit_fields(conn, Barkpark.PortableDoc.Bpml.WriteWall.status(r), r)
 
               {:error, :diff_verification_failed} ->
                 conn
@@ -466,7 +464,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
               {:ok, _minted, []} ->
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
-                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+                |> json(%{
+                  ok: true,
+                  slug: slug,
+                  unchanged: true,
+                  rev: current_rev,
+                  op_count: 0,
+                  bpmlView: Content.Papers.BpmlView.hash_of(paper, dataset)
+                })
 
               {:ok, _minted, ops} ->
                 sync_persist(conn, slug, ops, base_rev, dataset, scope)
@@ -478,11 +483,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
       {:ok, result} ->
-        {canonical, echo_refusal} =
-          case Content.get_paper(slug, dataset, scope) do
-            nil -> {nil, nil}
-            paper -> canonical_echo(paper)
-          end
+        fresh = Content.get_paper(slug, dataset, scope)
+        {canonical, echo_refusal} = if fresh, do: canonical_echo(fresh), else: {nil, nil}
 
         payload = %{
           ok: true,
@@ -491,7 +493,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # rev spelling for the working copy to anchor on.
           rev: to_string(result.rev),
           op_count: result.op_count,
-          bpml: canonical
+          bpml: canonical,
+          bpmlView: fresh && Content.Papers.BpmlView.hash_of(fresh, dataset)
         }
 
         conn
@@ -550,14 +553,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # precheck is the FIRST thing that meets a degraded dedup scan, so whatever
   # it decides is the answer this door gives. See the seam in `sync_create/5`.
   #
-  # NOTE the deliberate absence of a locked title stamp: BPML cannot spell
-  # `role`/`locked`, and `Diff.derive/2` compares blocks by FULL map equality —
-  # a locked-title paper's every future push would derive a replace-block that
-  # strips `locked`, which `Patch.check_locked_placement/3` rejects. The one
-  # door must birth papers the same door can keep editing, so the created
-  # paper keeps its plain h1 (whose text still becomes the row title via
-  # `BlockOps.paper_title/2`), and `Template.validate/1` passes it under the
-  # additive no-locked-blocks rule — exactly as the validate dry-run does.
+  # NOTE no locked title stamp: BPML cannot spell `role`/`locked`, so a push
+  # could never edit a locked title (`Bpml.WriteWall`). The door births papers
+  # it can keep editing: a plain h1 (still the row title via
+  # `BlockOps.paper_title/2`), which `Template.validate/1` passes.
   defp sync_create(conn, slug, parsed, dataset, scope) do
     doc_slug = parsed["slug"]
 
@@ -666,7 +665,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
           created: true,
           rev: rev,
           op_count: length(get_in(paper.content || %{}, ["blocks"]) || []),
-          bpml: canonical
+          bpml: canonical,
+          bpmlView: Content.Papers.BpmlView.hash_of(paper, dataset)
         }
 
         conn

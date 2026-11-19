@@ -40,6 +40,32 @@ defmodule Barkpark.Content.Papers.BpmlView do
     end
   end
 
+  @doc """
+  The fingerprint of a pull's bytes (sha256, lowercase hex). The pull answers
+  it in `x-bpml-view`; a push that carries it back is refused (412) when the
+  row's view prints differently now, at any rev.
+  """
+  @spec hash(String.t()) :: String.t()
+  def hash(bytes) when is_binary(bytes),
+    do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  @doc "The fingerprint of `paper`'s view as `bp paper pull` prints it; nil when it does not print."
+  @spec hash_of(Document.t(), String.t()) :: String.t() | nil
+  def hash_of(%Document{} = paper, dataset) do
+    case of(paper, dataset, [], :published) do
+      {:blocks, blocks, fields} ->
+        Barkpark.PortableDoc.Bpml.print_paper(
+          Content.Papers.bpml_paper_map(paper, blocks, fields)
+        )
+        |> hash()
+
+      _ ->
+        nil
+    end
+  rescue
+    Barkpark.PortableDoc.Bpml.UnprintableError -> nil
+  end
+
   # The task-block scope carries the caller's OWN perspective, resolved by
   # `BarkparkWeb.AnonPerspective`, the single owner of "who may see drafts". A
   # plain anonymous caller (no token, no preview JWT, not an `:edit` share) is

@@ -55,45 +55,55 @@ type PaperSyncResult struct {
 	OpCount   int    `json:"op_count"`
 	Unchanged bool   `json:"unchanged"`
 	Bpml      string `json:"bpml"`
+	// View is the fingerprint of the paper's view after the push (see
+	// PaperPullBpml); the anchor keeps it for the next push.
+	View string `json:"bpmlView"`
 }
 
 const paperBodyCap = 32 << 20
 
-// PaperPullBpml fetches the paper's readable BPML view and the op-rev it
-// anchors on (the x-paper-rev header). The read is the public source route,
-// carried with the token so scoped instances resolve.
-func (c *Client) PaperPullBpml(slug string) (bpml string, rev string, apiErr *PaperAPIErr, err error) {
+// PaperPullBpml fetches the paper's readable BPML view, the op-rev it anchors
+// on (the x-paper-rev header) and the fingerprint of the bytes (x-bpml-view):
+// a push that sends it back is refused with 412 when the paper's view has
+// changed since, at any rev. The read is the public source route, carried with
+// the token so scoped instances resolve.
+func (c *Client) PaperPullBpml(slug string) (bpml string, rev string, view string, apiErr *PaperAPIErr, err error) {
 	u := c.flatURL("/papers/" + url.PathEscape(slug) + "/source?format=bpml")
 
 	resp, err := c.authGet(u)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", "", nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, paperBodyCap))
 	if err != nil {
-		return "", "", nil, fmt.Errorf("paper pull %s: %w", slug, err)
+		return "", "", "", nil, fmt.Errorf("paper pull %s: %w", slug, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", decodePaperErr(resp.StatusCode, body), nil
+		return "", "", "", decodePaperErr(resp.StatusCode, body), nil
 	}
 
 	rev = resp.Header.Get("x-paper-rev")
 	if rev == "" {
-		return "", "", nil, fmt.Errorf("paper pull %s: server sent no x-paper-rev anchor", slug)
+		return "", "", "", nil, fmt.Errorf("paper pull %s: server sent no x-paper-rev anchor", slug)
 	}
 
-	return string(body), rev, nil, nil
+	return string(body), rev, resp.Header.Get("x-bpml-view"), nil, nil
 }
 
 // PaperSync pushes an edited BPML document under the pulled anchor. A nil
 // *PaperAPIErr with a nil error means the sync landed (or was a no-op — check
 // Unchanged); a non-nil *PaperAPIErr is the server refusing with its reason
 // (stale anchor, teaching errors, missing paper), never a transport failure.
-func (c *Client) PaperSync(slug, bpml, baseRev string) (*PaperSyncResult, *PaperAPIErr, error) {
-	payload, err := json.Marshal(map[string]string{"bpml": bpml, "baseRev": baseRev})
+// view is the fingerprint the pull answered ("" when the copy has none).
+func (c *Client) PaperSync(slug, bpml, baseRev, view string) (*PaperSyncResult, *PaperAPIErr, error) {
+	fields := map[string]string{"bpml": bpml, "baseRev": baseRev}
+	if view != "" {
+		fields["bpmlView"] = view
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -57,14 +57,21 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   A push that sets a description or tags the view hid is refused rather than
   ignored, so bp never reports a hidden-field edit as landed.
 
-  ## Printer changes
+  ## A view that changed at the same rev
 
-  "Shown" is computed with the printer that answers the push. When a later
-  change teaches the printer to show more of a block, a copy pulled before it
-  could push over a part it never saw; the pull golden test fails on any
-  printer output change and says what to add (a printer-version mark on the
-  pull and the anchor, refusing older-version pushes on the blocks whose
-  shown parts changed).
+  The rev counts content writes only, so the view can change while it stays:
+  a schema makes a hidden field public, or a printer change shows more of a
+  block. A copy pulled before would push over a part it never saw. The pull
+  answers the fingerprint of its bytes (`x-bpml-view`); bp keeps it with the
+  anchor and sends it back as `bpmlView`; a push whose fingerprint is not the
+  row's current one is refused with 412, and an applied push answers the new
+  one. A push without a fingerprint (a bp from before it) gets the block rules
+  alone, which cannot see such a change: that gap is pinned by a test. A pull
+  through another perspective or tenant scope than `bp paper pull`'s prints
+  another view, so its push answers 412.
+
+  The pull golden test fails on any printer output change and names the same
+  rule.
   """
 
   alias Barkpark.Content.Document
@@ -100,11 +107,35 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
     pushed = parsed["blocks"] || []
 
-    with :ok <- unique_ids(pushed),
+    with :ok <- same_view(paper, dataset, parsed["bpmlView"]),
+         :ok <- unique_ids(pushed),
          :ok <- check_fields(content, fields, parsed),
          result = Diff.target(stored, pushed, shown),
          :ok <- check(stored, shown, result) do
       Diff.derive_target(stored, result)
+    end
+  end
+
+  @doc "The HTTP status a refusal answers."
+  @spec status(map()) :: atom()
+  def status(%{code: "precondition_failed"}), do: :precondition_failed
+  def status(_refusal), do: :unprocessable_entity
+
+  # The view the copy was pulled from must be the view the row prints now. A
+  # copy without the fingerprint (a bp from before it) falls back to the rules
+  # above alone, which cannot see a view that changed at the same rev.
+  defp same_view(_paper, _dataset, nil), do: :ok
+
+  defp same_view(paper, dataset, pulled) do
+    if pulled == BpmlView.hash_of(paper, dataset) do
+      :ok
+    else
+      {:error,
+       %{
+         code: "precondition_failed",
+         message: "the readable view of this paper changed since your pull",
+         hint: "bp paper pull to get the current text, re-apply your edit, push again"
+       }}
     end
   end
 

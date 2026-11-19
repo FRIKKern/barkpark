@@ -104,6 +104,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
         conn
         |> put_resp_content_type("text/bpml")
         |> put_resp_header("x-paper-rev", to_string(rev))
+        |> put_resp_header("x-bpml-view", Content.Papers.BpmlView.hash(bpml))
         |> send_resp(200, bpml)
     end
   rescue
