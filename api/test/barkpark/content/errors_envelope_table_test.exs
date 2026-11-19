@@ -81,6 +81,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"forbidden_capability", {:error, :forbidden_capability}, "forbidden", 403, [:reason]},
       {"forbidden_workspace_role", {:error, :forbidden_workspace_role}, "forbidden", 403,
        [:reason]},
+      {"forbidden_token_write", {:error, :forbidden_token_write}, "forbidden", 403, [:reason]},
       # A dataset-bound token on another dataset (task-4418b517649a58ce).
       {"forbidden_dataset", {:error, :forbidden_dataset}, "forbidden", 403, [:reason]},
       {"dataset_binding", {:error, :dataset_binding}, "forbidden", 403, [:reason]},

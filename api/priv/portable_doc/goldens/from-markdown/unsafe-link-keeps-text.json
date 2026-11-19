@@ -1,0 +1,24 @@
+{
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "click and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "ok"
+            }
+          ],
+          "href": "https://example.com",
+          "type": "link"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "markdown": "[click](javascript:alert(1)) and [ok](https://example.com)"
+}

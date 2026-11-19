@@ -411,7 +411,7 @@ defmodule BarkparkWeb.BulldocsRenderTest do
                      %{"code" => "value_not_allowed", "path" => "/blocks/0/depth"}
                    ]
 
-          name in ["nested columns", "nested section"] ->
+          name in ["nested columns", "nested section", "nested strong"] ->
             assert resp.status == 422
             assert [%{"code" => "too_deep"}] = error(resp)["violations"]
 

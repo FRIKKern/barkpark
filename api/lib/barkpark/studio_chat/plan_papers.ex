@@ -4,7 +4,8 @@ defmodule Barkpark.StudioChat.PlanPapers do
   (charter D49 — "the plan grows up").
 
   We ARE the API app, so there is no HTTP hop and no ingest token: the plan
-  markdown goes straight through `FromMarkdown.blocks/1` into
+  markdown goes straight through `FromMarkdown.blocks/1` (via
+  `FromMarkdown.KeptBack`, which judges a kept-back portabledoc fence) into
   `Content.upsert_paper/2` (with the audited `bypass_wall: true` — charter
   D23-b/D26: this fire-and-forget projection cannot retry a publish-wall
   rejection, and plan markdown has no label surface), SCOPE-LESS. A
@@ -25,7 +26,7 @@ defmodule Barkpark.StudioChat.PlanPapers do
   """
 
   alias Barkpark.Content
-  alias Barkpark.PortableDoc.FromMarkdown
+  alias Barkpark.PortableDoc.FromMarkdown.KeptBack
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
 
@@ -148,22 +149,37 @@ defmodule Barkpark.StudioChat.PlanPapers do
   def publish(session_id, request_id, plan_markdown)
       when is_binary(session_id) and is_binary(request_id) and is_binary(plan_markdown) do
     slug = slug_for(session_id, request_id)
+    {blocks, kept_back} = KeptBack.read(plan_markdown)
 
-    case Content.upsert_paper(
-           %{
-             "slug" => slug,
-             "blocks" => FromMarkdown.blocks(plan_markdown),
-             "style" => "article",
-             "dataset" => @dataset
-           },
-           # bypass_wall (charter D23-b/D26): this is a fire-and-forget internal
-           # projection of an ALREADY-approved plan — the approve must never fail
-           # or silently drop the paper on a wall 422, and plan markdown carries
-           # no label surface to retry with. Explicit, audited exemption.
-           bypass_wall: true
-         ) do
-      {:ok, _doc} -> {:ok, %{paper_id: slug, paper_url: paper_url(slug)}}
-      {:error, reason} -> {:error, reason}
+    # FromMarkdown keeps back a portabledoc fence whose blocks would not
+    # validate, so the upsert's own ratchet sees no error; the fence's errors
+    # are judged here instead (report-only or refused, as on every paper door).
+    with :ok <- KeptBack.check(stored_blocks(slug, kept_back), kept_back),
+         {:ok, _doc} <-
+           Content.upsert_paper(
+             %{
+               "slug" => slug,
+               "blocks" => blocks,
+               "style" => "article",
+               "dataset" => @dataset
+             },
+             # bypass_wall (charter D23-b/D26): this is a fire-and-forget internal
+             # projection of an ALREADY-approved plan — the approve must never fail
+             # or silently drop the paper on a wall 422, and plan markdown carries
+             # no label surface to retry with. Explicit, audited exemption.
+             bypass_wall: true
+           ) do
+      {:ok, %{paper_id: slug, paper_url: paper_url(slug)}}
+    end
+  end
+
+  # The blocks the plan paper already has, read only when a fence was kept back.
+  defp stored_blocks(_slug, []), do: []
+
+  defp stored_blocks(slug, _kept_back) do
+    case Content.get_paper(slug, @dataset) do
+      %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
+      _ -> []
     end
   end
 

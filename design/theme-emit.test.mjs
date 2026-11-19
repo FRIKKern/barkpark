@@ -313,15 +313,16 @@ const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 const TONES = ["success", "warning", "danger", "info"];
 const ROLES = ["background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
-  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`]), "destructive"];
+  ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]), "destructive"];
 const DEPTHS = [["-2", "m2"], ["-1", "m1"], ["1", "1"], ["2", "2"], ["3", "3"]];
-const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`])]);
+const BARK_ROLES = new Set(["accent", "selected", ...TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`])]);
 const pointed = (role) => (BARK_ROLES.has(role) ? `--bark-${role}` : `--ui-${role}`);
 // Where a table name lives in the skin rule: a pointed name as --bark-base-<role>.
 const skinVar = (name) => { const r = ROLES.find((x) => pointed(x) === name); return r ? `--bark-base-${r}` : name; };
 const SKIN_NAMES = [
   ...SURFACES.flatMap((s) => [...ROLES.map((r) => `--bark-${s}-${r}`), ...DEPTHS.map(([, k]) => `--bark-${s}-depth-${k}`)]),
   ...Object.keys({ ...BARKUI_SOURCES, ...BARKUI_CLOUD_SOURCES }).filter((n) => skinVar(n) === n),
+  "--bark-sunken-rim",
 ];
 
 // Every `selectors { body }` rule in a stylesheet, comments stripped, as
@@ -571,6 +572,101 @@ test("BarkUI sheet: tones and fills read on every surface, in every skin and mod
       }
     }
   }
+});
+
+// Every skin, mode and surface of the built sheet: calls f(at, mode, surface, get).
+function eachSurface(f) {
+  const sheet = ARTIFACTS.find((a) => a.path === BARKUI_PATH);
+  assert.ok(sheet, `${BARKUI_PATH} is not a registered design/emit.mjs artifact`);
+  const themes = loadThemes();
+  const rules = cssRules(sheet.build(themes));
+  let n = 0;
+  for (const { name } of themes) {
+    const v = ruleFor(rules, `[data-skin="${name}"]`).vars;
+    for (const mode of ["light", "dark"])
+      for (const s of SURFACES) {
+        f(`${name}/${mode}/${s}`, mode, s, (r, surface = s) => arms(v[`--bark-${surface}-${r}`])[mode]);
+        n++;
+      }
+  }
+  assert.equal(n, themes.length * 2 * SURFACES.length);
+}
+
+// A soft tone control (a destructive button, a soft badge) draws its tone's
+// -soft as its fill and the tone's -text as its label. The sheet writes -soft
+// per surface and tone. It must still be its tone: within SOFT_HUE degrees of
+// the tone fill's OKLCH hue on that surface, at OKLCH chroma SOFT_CHROMA or
+// more; it stands SOFT_STEP off the ground so the control is visibly tinted;
+// and the label reads on it at 4.5:1. SOFT_CHROMA is the most every case can
+// hold: a red tint 1.1:1 below a white ground ends at the sRGB gamut, 0.0167.
+// Chroma near black cannot be seen, so every soft fill also keeps OKLCH
+// lightness SOFT_LIGHTNESS or more.
+const SOFT_STEP = 1.1, SOFT_HUE = 1, SOFT_CHROMA = 0.016, SOFT_LIGHTNESS = 0.15;
+test("BarkUI sheet: every tone's soft fill keeps its tone, is visibly tinted, and its text reads on it", () => {
+  // Every miss is listed, so one failure names every skin, mode and surface it hits.
+  const misses = [];
+  eachSurface((at, mode, s, get) => {
+    const bg = get("background");
+    for (const t of TONES) {
+      const soft = get(`${t}-soft`), o = srgbToOklch(soft), tone = srgbToOklch(get(t));
+      const dh = Math.min(Math.abs(o.h - tone.h), 360 - Math.abs(o.h - tone.h));
+      const label = contrast(get(`${t}-text`), soft), step = contrast(soft, bg);
+      if (o.C < SOFT_CHROMA) misses.push(`${at}: ${t}-soft has chroma ${o.C.toFixed(3)}, under ${SOFT_CHROMA}`);
+      if (o.L < SOFT_LIGHTNESS) misses.push(`${at}: ${t}-soft has lightness ${o.L.toFixed(3)}, under ${SOFT_LIGHTNESS}`);
+      if (dh > SOFT_HUE) misses.push(`${at}: ${t}-soft is ${dh.toFixed(1)} degrees off the ${t} hue, over ${SOFT_HUE}`);
+      if (label < 4.5) misses.push(`${at}: ${t}-text on ${t}-soft is ${label.toFixed(2)}, under 4.5`);
+      if (step < SOFT_STEP) misses.push(`${at}: ${t}-soft is ${step.toFixed(3)}:1 off the ground, under ${SOFT_STEP}`);
+    }
+  });
+  assert.deepEqual(misses, []);
+});
+
+// Disabled controls draw on the muted fill with muted-foreground. They read as
+// inactive when that fill sits close to the ground, its text is readable but
+// clearly weaker than the foreground, and the fill can never be taken for the
+// primary fill. On the primary surface the muted fill is computed, so it is
+// held between 1.1 and 1.6:1 from the ground; the base muted fill is the colour
+// source's own and is not held to that band.
+test("BarkUI sheet: the muted fill reads as inactive on every surface", () => {
+  eachSurface((at, mode, s, get) => {
+    const bg = get("background"), muted = get("muted");
+    if (s === "primary") {
+      const step = contrast(muted, bg);
+      assert.ok(step >= 1.1 && step <= 1.6, `${at}: muted fill is ${step.toFixed(2)}:1 from the ground, outside 1.1 to 1.6`);
+    }
+    const quiet = contrast(get("muted-foreground"), muted), loud = contrast(get("foreground"), muted);
+    assert.ok(loud >= 1.2 * quiet, `${at}: muted-foreground ${quiet.toFixed(2)}:1 is not clearly weaker than the foreground ${loud.toFixed(2)}:1 on the muted fill`);
+    const vsPrimary = contrast(get("primary"), muted);
+    assert.ok(vsPrimary >= 3, `${at}: the muted fill is ${vsPrimary.toFixed(2)}:1 from --ui-primary, under 3`);
+  });
+});
+
+// A sunken well stands SUNKEN_STEP off base in both modes and is marked by an
+// inset 1px rim on every skin, the mirror of raised's shadow; the rim stands
+// RIM_STEP off the base ground it is cut into. Raised stands DARK_RAISED_STEP
+// off base in dark, where no shadow shows.
+// Raised in light is left out: its shadow marks it (the light raised panel is its own task).
+const DARK_RAISED_STEP = 1.1, SUNKEN_STEP = 1.05, RIM_STEP = 1.25;
+test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, with or without a depth", () => {
+  const css = ARTIFACTS.find((a) => a.path === BARKUI_PATH).build(loadThemes());
+  const rim = ':where([data-surface="sunken"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim);\n}';
+  const both = ':where([data-surface="sunken"][data-depth="1"], [data-surface="sunken"][data-depth="2"], [data-surface="sunken"][data-depth="3"]) {\n  box-shadow: inset 0 0 0 1px var(--bark-sunken-rim), var(--ui-shadow, 0 0 #0000);\n}';
+  const shadow = css.indexOf(':where([data-depth="1"], [data-depth="2"], [data-depth="3"]) {');
+  assert.ok(css.includes(rim), "no inset rim paint rule for the sunken surface");
+  assert.ok(css.includes(both), "no rule giving a sunken surface with depth 1 to 3 both its rim and the depth shadow");
+  assert.ok(shadow >= 0 && css.indexOf(rim) < shadow && shadow < css.indexOf(both),
+    "the paint rules are out of order: rim, then depth shadow, then the combined rule");
+  eachSurface((at, mode, s, get) => {
+    const base = get("background", "base");
+    if (s === "sunken") {
+      const r = contrast(get("rim"), base);
+      assert.ok(r >= RIM_STEP, `${at}: rim is ${r.toFixed(3)}:1 off the base ground, under ${RIM_STEP}`);
+    }
+    const floor = s === "sunken" ? SUNKEN_STEP : s === "raised" && mode === "dark" ? DARK_RAISED_STEP : 0;
+    if (!floor) return;
+    const step = contrast(get("background"), base);
+    assert.ok(step >= floor, `${at}: ground is ${step.toFixed(3)}:1 from base, under ${floor}`);
+  });
 });
 
 // The control edge (--ui-input): the edge of anything a person operates, an
