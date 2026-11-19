@@ -6,11 +6,17 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
   write back: the row, its rev and cache, its history and its change events
   are as they were, no broadcast reaches a subscriber and no job is left.
 
-  A create is checked the same way, on the row as stamped, so the schema that
-  decides is the one of the workspace the row lands in. Two workspaces whose
-  `paper` schemas hide different things, the default one and another, are
-  each tried both ways: a flat create with no workspace given, and a create
-  by a token pinned to the other workspace.
+  The check reads the saved row back by the row's own workspace and project,
+  so the schema that decides is the one of the workspace the row lives in,
+  whatever the request named. Two workspaces whose `paper` schemas hide
+  different things, the default one and another, are each tried both ways:
+  a flat create with no workspace given, a flat update of a Paper that lives
+  in the other workspace, and a create by a token pinned to the other one.
+
+  The right to write into a workspace or project is decided before the
+  action, by the route's scope gate, and these rows pin that it still is: a
+  pinned token that names another workspace, or a project outside its own,
+  leaves nothing.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -69,9 +75,26 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     %{ws: ws, project: project, scope: [workspace_id: ws.id, project_id: project.id]}
   end
 
-  defp paper!(slug, blocks) do
-    {:ok, paper} = Content.upsert_paper(LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+  defp paper!(slug, blocks, scope \\ []) do
+    attrs = %{
+      "slug" => slug,
+      "blocks" => blocks,
+      "workspace_id" => scope[:workspace_id],
+      "project_id" => scope[:project_id]
+    }
+
+    {:ok, paper} = Content.upsert_paper(LabelFixtures.paper_attrs(attrs))
     paper
+  end
+
+  # A block the write accepts and the BPML printer cannot spell.
+  defp image(id),
+    do: %{"id" => id, "type" => "image", "src" => "https://cdn.example.com/a.png", "alt" => "A"}
+
+  defp pinned_token!(ws) do
+    raw = "bpml-saved-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(raw, "bpml saved", @ds, ["admin"], ws.id)
+    raw
   end
 
   defp conn_for(token) do
@@ -210,8 +233,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
       other = other_workspace!()
       schema!(other.scope, unquote(other_hides?))
       schema!(default_scope(), not unquote(other_hides?))
-      raw = "bpml-saved-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw, "bpml saved", @ds, ["admin"], other.ws.id)
+      raw = pinned_token!(other.ws)
       slug = slug("pinned-create")
 
       resp =
@@ -229,6 +251,119 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
         assert {:ok, answer["bpml"]} == BpmlView.print(row, @ds)
         assert answer["bpml"] =~ @hidden
       end
+    end
+  end
+
+  # The flat route, no workspace given, updating a Paper that lives in the
+  # other workspace: the row's own workspace's schema decides, not the
+  # request's (which names none, so would fall back to the default).
+  for {name, other_hides?} <- [{"it hides", true}, {"only the default hides", false}] do
+    test "a flat update of another workspace's Paper when #{name}: its row's schema decides" do
+      other = other_workspace!()
+      schema!(other.scope, unquote(other_hides?))
+      schema!(default_scope(), not unquote(other_hides?))
+      slug = slug("flat-update")
+      paper = paper!(slug, [heading(), para(), heading("h2", @second)], other.scope)
+      assert {paper.workspace_id, paper.project_id} == {other.ws.id, other.project.id}
+      {:ok, bpml} = BpmlView.print(Content.get_paper(slug, @ds, other.scope), @ds)
+      emptied = String.replace(bpml, ~r/\s*<p id="p">Visible\.<\/p>/, "")
+      refute emptied == bpml
+      before = trace(slug)
+
+      resp = sync(slug, emptied, to_string(paper.content["rev"]))
+
+      if unquote(other_hides?) do
+        assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
+        assert trace(slug) == before
+      else
+        answer = json_response(resp, 200)
+        saved = Content.get_paper(slug, @ds, other.scope)
+        assert {:ok, answer["bpml"]} == BpmlView.print(saved, @ds)
+        assert answer["bpml"] =~ @hidden
+      end
+    end
+  end
+
+  describe "the right to write is decided before the action" do
+    setup do
+      {source, bpml} = creatable_bpml!([heading(), heading("h2", @second)])
+      other = other_workspace!()
+      slug = slug("pinned-scope")
+      bpml = String.replace(bpml, source, slug)
+      %{other: other, raw: pinned_token!(other.ws), slug: slug, bpml: bpml}
+    end
+
+    test "a pinned token naming another workspace is refused and leaves nothing", c do
+      jobs = Repo.aggregate(Oban.Job, :count)
+      named = %{"workspace" => Tenancy.get_default_workspace().slug}
+
+      resp = sync(c.slug, c.bpml, "0", c.raw, named)
+      assert json_response(resp, 422)["error"]["code"] == "workspace_scope_conflict"
+      assert trace(c.slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
+    end
+
+    test "a pinned token naming another workspace's project is refused, leaving nothing", c do
+      jobs = Repo.aggregate(Oban.Job, :count)
+      named = %{"workspace_id" => c.other.ws.id, "project_id" => default_scope()[:project_id]}
+
+      resp = sync(c.slug, c.bpml, "0", c.raw, named)
+      assert json_response(resp, 422)["error"]["code"] == "project_scope_conflict"
+      assert trace(c.slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
+    end
+
+    test "a pinned token naming a project slug outside its workspace writes in its own", c do
+      default_project = Tenancy.get_default_project()
+
+      resp = sync(c.slug, c.bpml, "0", c.raw, %{"project" => default_project.slug})
+      assert json_response(resp, 200)["created"] == true
+      row = Content.get_paper(c.slug, @ds, [])
+      assert row.workspace_id == c.other.ws.id
+      refute row.project_id == default_project.id
+    end
+  end
+
+  # What the removed 200 `bpml: nil` echo answered for: a write that lands a
+  # Paper whose view does not print. The check refuses it at the write, so
+  # an applied write always has the bytes it answers.
+  describe "the check at the write" do
+    test "a create whose saved view does not print is refused and leaves no row" do
+      schema!(default_scope(), false)
+      slug = slug("unprintable")
+      ref = make_ref()
+      blocks = [image("v"), para()]
+      attrs = LabelFixtures.paper_attrs(%{"slug" => slug, "blocks" => blocks})
+
+      assert {:error, {:view_refused, body}} =
+               Content.upsert_paper(attrs, before_commit: BpmlView.saved_check(ref))
+
+      assert body.code == "bpml_unprintable"
+      assert Content.get_paper(slug, @ds, []) == nil
+      assert BpmlView.checked(ref) == nil
+    end
+
+    test "a write whose saved view prints answers that view's bytes" do
+      schema!(default_scope(), false)
+      slug = slug("printable")
+      ref = make_ref()
+      attrs = LabelFixtures.paper_attrs(%{"slug" => slug, "blocks" => [heading(), para()]})
+
+      assert {:ok, _} = Content.upsert_paper(attrs, before_commit: BpmlView.saved_check(ref))
+      assert {:ok, BpmlView.checked(ref)} == BpmlView.print(Content.get_paper(slug), @ds)
+    end
+
+    test "a block-op batch whose saved view does not print is refused and the row is unchanged" do
+      schema!(default_scope(), false)
+      slug = slug("batch-unprintable")
+      paper!(slug, [heading(), para()])
+      before = trace(slug)
+      op = %{"op" => "insert-after", "afterId" => "p", "block" => image("v")}
+
+      opts = [before_commit: BpmlView.saved_check(make_ref())]
+
+      assert {:error, {:view_refused, %{code: "bpml_unprintable"}}} =
+               Content.apply_paper_block_ops(slug, [op], @ds, opts)
+
+      assert trace(slug) == before
     end
   end
 end

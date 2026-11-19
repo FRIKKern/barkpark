@@ -724,7 +724,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           with {:ok, %Document{} = doc} <-
                  write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title),
                _ = save_upsert_revision(doc, type, dataset, row, opts),
-               :ok <- SavedCheck.run(opts) do
+               :ok <- SavedCheck.run(opts, doc) do
             {:ok, doc}
           end
         end
@@ -1177,7 +1177,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          {:ok, receipt, effects} <-
-           SavedCheck.batch(opts, fn ->
+           SavedCheck.batch(opts, doc, fn ->
              persist_paper_block_ops(doc, slug, ops, dataset, opts)
            end) do
       run_paper_batch_effects(effects, dataset, opts)

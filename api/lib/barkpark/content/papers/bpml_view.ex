@@ -164,17 +164,25 @@ defmodule Barkpark.Content.Papers.BpmlView do
   end
 
   @doc """
-  The `before_commit` check a write runs inside its transaction: `read`
-  reads the saved row back and its view is printed. The bytes go to the
-  calling process as `{ref, bpml}` (the write's answer); a refusal is
-  `{:error, {:view_refused, body}}`, and the write rolls back.
+  The `before_commit` check a write runs inside its transaction, handed the
+  row the write saved. It reads that row back by the row's own slug, dataset,
+  workspace and project, and prints its view (`print/2`, whose schema is
+  resolved from the read row's own workspace and project). Nothing comes from
+  the request. The bytes go to the calling process as `{ref, bpml}` (the
+  write's answer); a refusal is `{:error, {:view_refused, body}}`, and the
+  write rolls back.
   """
-  @spec saved_check(reference(), (-> Document.t() | nil), String.t()) ::
-          (-> :ok | {:error, term()})
-  def saved_check(ref, read, dataset) when is_reference(ref) and is_function(read, 0) do
-    fn ->
-      case read.() do
-        %Document{} = saved -> answer(ref, print(saved, dataset))
+  @spec saved_check(reference()) :: (Document.t() -> :ok | {:error, term()})
+  def saved_check(ref) when is_reference(ref) do
+    fn %Document{} = row ->
+      scope =
+        Enum.reject(
+          [workspace_id: row.workspace_id, project_id: row.project_id],
+          &is_nil(elem(&1, 1))
+        )
+
+      case Content.get_paper(row.doc_id, row.dataset, scope) do
+        %Document{} = saved -> answer(ref, print(saved, saved.dataset))
         nil -> {:error, {:view_refused, refusal({:error, :not_found})}}
       end
     end

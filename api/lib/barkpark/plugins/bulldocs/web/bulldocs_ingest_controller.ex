@@ -346,7 +346,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
       BEFORE any op derives (a BPML document cannot describe them, so a sync
       would silently delete every non-kernel block behind a 200);
     * the Paper as saved has no reader's view that prints → 422 with the
-      view's refusal, and the write is rolled back (`BpmlView.saved_check/3`
+      view's refusal, and the write is rolled back (`BpmlView.saved_check/1`
       runs inside the write's transaction);
     * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
       is silently lost);
@@ -460,7 +460,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
-    check = saved_check(ref, slug, dataset, scope)
+    check = Content.Papers.BpmlView.saved_check(ref)
     opts = scope ++ [if_rev: base_rev, before_commit: check]
 
     case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
@@ -640,7 +640,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Warnings.reset()
     ref = make_ref()
 
-    case Content.upsert_paper(attrs, before_commit: saved_check(ref, slug, dataset, scope)) do
+    case Content.upsert_paper(attrs, before_commit: Content.Papers.BpmlView.saved_check(ref)) do
       {:ok, paper} ->
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 
@@ -705,16 +705,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp create_title(blocks, parsed, slug) do
     Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
-
-  # A sync write's check of the Paper as saved, inside its transaction: the
-  # row is read back the way the write found it, and its view printed.
-  defp saved_check(ref, slug, dataset, scope),
-    do:
-      Content.Papers.BpmlView.saved_check(
-        ref,
-        fn -> Content.get_paper(slug, dataset, scope) end,
-        dataset
-      )
 
   # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
   defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do

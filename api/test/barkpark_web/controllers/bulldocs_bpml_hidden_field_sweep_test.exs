@@ -15,7 +15,8 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
   section children, table cells), read off the answer itself. Each is made
   private through the `paper` schema's nested declaration of its path, and
   each row first shows that the reader's answer changed, so a field the
-  declaration missed fails rather than passes.
+  declaration missed fails rather than passes. A position the schema refuses
+  to declare fails too, unless it is listed in `@limits` with its reason.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -41,6 +42,11 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
       %{"type" => "code", "value" => "x = 1"}
     ]
   }
+
+  # Positions the `paper` schema cannot declare, each with its reason. Any
+  # other position the schema refuses fails the sweep, and so does a listed
+  # one that now declares.
+  @limits %{}
 
   # Printer kinds with no golden block.
   @written %{
@@ -297,8 +303,10 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
 
     assert failures == [], Enum.map_join(failures, "\n", &inspect(&1, limit: 40))
 
-    for essential <- [["blocks", "*", "id"], ["blocks", "*", "content", "*", "value"]],
-        do: refute(essential in undeclared, "#{inspect(essential)} could not be declared")
+    assert undeclared -- Map.keys(@limits) == [],
+           "positions the schema could not declare: #{inspect(undeclared -- Map.keys(@limits))}"
+
+    assert Map.keys(@limits) -- undeclared == [], "limits that now declare: remove them"
 
     {_, id_row} = List.keyfind(results, ["blocks", "*", "id"], 0)
     assert id_row != [], "the id row has no Paper"
