@@ -44,7 +44,8 @@ describe('discoverParts', () => {
     const before = discoverParts(root).map((p) => p.name)
     plantPart(root, 'zz-planted')
     const after = discoverParts(root).map((p) => p.name)
-    expect(after).toEqual([...before, 'zz-planted'])
+    // Whatever the real parts are called: the planted one is added, and nothing else changes.
+    expect([...after].sort()).toEqual([...before, 'zz-planted'].sort())
     const planted = discoverParts(root).find((p) => p.name === 'zz-planted')
     expect(planted.example).toContain('ui-button')
     expect(planted.json.summary).toBe('A planted part.')
