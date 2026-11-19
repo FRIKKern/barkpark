@@ -17,7 +17,7 @@ import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } fro
 import { computeMirror } from "./paper-editor-mirror.mjs";
 import { BRAND_SURFACES, softSides } from "./emit/barkui-surfaces.mjs";
 import { stepsFor } from "./emit/barkui-states.mjs";
-import { contrast, hexToRgb, hslToHex, oklchToSrgb, parseColor, rgbToHex, srgbToOklch, toHslTriplet } from "./derive.mjs";
+import { contrast, hexToRgb, hslToHex, maxChroma, oklchToSrgb, parseColor, rgbToHex, srgbToOklch, toHslTriplet } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -733,6 +733,46 @@ test("BarkUI sheet: every control fill has a visible hover and pressed state tha
   assert.deepEqual(misses, []);
 });
 
+// A soft fill's hover and pressed are steps toward the tone itself, judged by
+// where the tone's solid fill (--bark-<tone> on that surface) sits:
+//   - a state moving toward the solid's lightness takes the rest chroma moved
+//     the same fraction of the way toward the solid's chroma (less only where
+//     sRGB ends at that hue), so it is stronger than the state before;
+//   - a state moving away from it keeps its hue within 1 degree and the rest
+//     chroma.
+// Chroma is read on the 8-bit colour; one 8-bit rounding moves it by at most
+// SOFT_ROUND. A single reading against the rule's value may be off by that
+// much (SOFT_TARGET_TOL adds a little); comparing two states reads two rounded
+// colours, so "stronger than the state before" allows two roundings.
+const SOFT_ROUND = 0.0021, SOFT_TARGET_TOL = 0.0025, SOFT_BEFORE_TOL = 0.004;
+test("BarkUI sheet: a soft state moving away from its solid keeps its hue within 1 degree and the rest chroma; one moving toward it follows the fraction rule", () => {
+  const misses = [];
+  eachSurface((at, mode, s, get) => {
+    for (const t of TONES) {
+      const o = ["", "-hover", "-pressed"].map((x) => srgbToOklch(paint(get(`${t}-soft${x}`))));
+      const solid = srgbToOklch(paint(get(t)));
+      const miss = (m) => misses.push(`${at}: ${t}-soft ${m}`);
+      const ruled = (l) => {
+        const frac = Math.min(1, (l - o[0].L) / (solid.L - o[0].L));
+        return [frac, Math.min(Math.max(o[0].C, o[0].C + frac * (solid.C - o[0].C)), maxChroma(l, o[0].h))];
+      };
+      for (const k of [1, 2]) {
+        const n = k === 1 ? "hover" : "pressed";
+        if (Math.sign(o[k].L - o[0].L) !== Math.sign(solid.L - o[0].L)) {
+          if (hueOff(o[k].h, o[0].h) > STATE.hue) miss(`${n} moves away from the solid and is ${hueOff(o[k].h, o[0].h).toFixed(2)} degrees off the rest hue`);
+          if (Math.abs(o[k].C - o[0].C) > SOFT_ROUND) miss(`${n} moves away from the solid with chroma ${o[k].C.toFixed(4)}, not the rest fill's ${o[0].C.toFixed(4)}`);
+          continue;
+        }
+        const [frac, target] = ruled(o[k].L);
+        if (Math.abs(o[k].C - target) > SOFT_TARGET_TOL) miss(`${n} has chroma ${o[k].C.toFixed(4)}, not ${target.toFixed(4)} (${frac.toFixed(2)} of the way to the solid's ${solid.C.toFixed(3)})`);
+        const before = k === 1 ? o[0].C : ruled(o[1].L)[1];
+        if (target - before > SOFT_BEFORE_TOL && o[k].C <= o[k - 1].C) miss(`${n} is no stronger than the state before (chroma ${o[k].C.toFixed(4)} after ${o[k - 1].C.toFixed(4)})`);
+      }
+    }
+  });
+  assert.deepEqual(misses, []);
+});
+
 // On one ground the muted fill and every soft fill sit on one side, so every
 // such button there presses the same way: the side away from the label (the
 // foreground) if every one of them fits there with both its steps, else the
@@ -747,13 +787,13 @@ test("BarkUI sheet: on each ground the muted and soft fills sit on one side, awa
   eachSurface((at, mode, s, get) => {
     const ground = get("background"), labelSide = side(get("foreground"), ground);
     const mirror = (c) => { const o = srgbToOklch(c); return `hsl(${toHslTriplet(oklchToSrgb(2 * srgbToOklch(ground).L - o.L, o.C, o.h))})`; };
-    const fills = [["muted", "muted", get("muted"), (c) => mirror(c)], ...TONES.map((t) => [`${t}-soft`, "soft", get(`${t}-soft`), (c) => softSides(get(t), ground).find((x) => x && side(x, ground) === -side(c, ground))])];
+    const fills = [["muted", "muted", get("muted"), (c) => mirror(c)], ...TONES.map((t) => [`${t}-soft`, "soft", get(`${t}-soft`), (c) => softSides(get(t), ground).find((x) => x && side(x, ground) === -side(c, ground)), get(t)])];
     const sides = fills.map(([, , c]) => side(c, ground));
     if (new Set(sides).size !== 1 || sides[0] === 0) { misses.push(`${at}: the fills sit on sides ${sides.join(" ")}`); return; }
     if (sides[0] === labelSide) {
-      const far = fills.map(([, kind, c, other]) => [kind, other(c)]);
-      if (far.every(([kind, c]) => c && side(c, ground) === -labelSide && stepsFor(kind, c, ground))) misses.push(`${at}: every fill fits away from the label, but they sit on its side`);
-    } else for (const [role, kind, c] of fills) if (!stepsFor(kind, c, ground)) misses.push(`${at}: ${role} sits away from the label without room for its steps`);
+      const far = fills.map(([, kind, c, other, solid]) => [kind, other(c), solid]);
+      if (far.every(([kind, c, solid]) => c && side(c, ground) === -labelSide && stepsFor(kind, c, ground, solid))) misses.push(`${at}: every fill fits away from the label, but they sit on its side`);
+    } else for (const [role, kind, c, , solid] of fills) if (!stepsFor(kind, c, ground, solid)) misses.push(`${at}: ${role} sits away from the label without room for its steps`);
   });
   assert.deepEqual(misses, []);
 });
