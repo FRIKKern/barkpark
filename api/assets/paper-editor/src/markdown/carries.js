@@ -11,13 +11,20 @@
 // is no list of shapes here; the round trip itself is the check, as in the BPML print
 // wall (Barkpark.PortableDoc.Bpml.RoundTrip).
 //
-// Four spellings are the same content and are compared as one:
+// Five spellings are the same content and are compared as one:
 //   1. a top-level block's `id`: markdownToBlocks mints new ids and source mode gives
 //      each surviving block its id back (realignAcrossCommits);
 //   2. adjacent text runs carrying the same marks, which are one run;
 //   3. a text run with no characters and no mark, which carries nothing;
 //   4. a key holding false, "", null, an empty list or an empty map, which is the same
-//      as no key (`ordered: false`, `lang: ""`, `marks: []`).
+//      as no key (`ordered: false`, `lang: ""`, `marks: []`);
+//   5. a mark written as a node and the same mark on text (BPML's rule 1): a strong,
+//      em, strikethrough, highlight, underline, sub or sup node that is exactly
+//      {type, children}, a link that is exactly {type, href, children} and an inline
+//      code that is exactly {type, value} read as text runs carrying that mark. A mark
+//      on text is spelled one way (bold is strong, italic is em, s is strike, a link
+//      mark is {type, href}), and the marks on a run are a set. A node or a mark with
+//      any other key is not rewritten: that key is content.
 
 import { blocksToMarkdown } from "./serialize.js";
 import { markdownToBlocks } from "./parse.js";
@@ -53,11 +60,11 @@ function topBlock(block) {
   return normal(rest);
 }
 
-// The normal form: rules 2 and 3 above, applied wherever an array holds text runs.
+// The normal form: rules 2 to 5 above, applied wherever an array holds inline content.
 function normal(value) {
   if (Array.isArray(value)) {
     const out = [];
-    for (const item of value.map(normal)) {
+    for (const item of value.flatMap((node) => runsOf(node) ?? [normal(node)])) {
       if (isTextRun(item)) {
         if (item.value === "" && !item.marks) continue;
         const prev = out[out.length - 1];
@@ -80,6 +87,55 @@ function normal(value) {
     return out;
   }
   return value;
+}
+
+// Rule 5. The text runs an inline node reads as, or null when it is not one of the
+// exact mark shapes (it is then compared as it is).
+const WRAPPERS = { strong: "strong", em: "em", strikethrough: "strike", highlight: "highlight", underline: "underline", sub: "sub", sup: "sup" };
+const MARK_NAMES = {
+  strong: "strong", bold: "strong", em: "em", italic: "em", strike: "strike", s: "strike", strikethrough: "strike",
+  code: "code", highlight: "highlight", underline: "underline", sub: "sub", sup: "sup",
+};
+
+function runsOf(node) {
+  if (!isMap(node)) return null;
+  const keys = Object.keys(node).sort().join(",");
+  if (isTextRun(node)) {
+    const marks = markSet(node.marks);
+    return node.value === "" && !marks ? [] : [marks ? { type: "text", value: node.value, marks } : { type: "text", value: node.value }];
+  }
+  if (node.type === "code" && keys === "type,value" && typeof node.value === "string") {
+    return node.value === "" ? [] : [{ type: "text", value: node.value, marks: ["code"] }];
+  }
+  let mark = null;
+  if (WRAPPERS[node.type] && keys === "children,type") mark = WRAPPERS[node.type];
+  else if (node.type === "link" && keys === "children,href,type" && typeof node.href === "string") mark = { type: "link", href: node.href };
+  if (mark === null || !Array.isArray(node.children)) return null;
+  const runs = [];
+  for (const child of node.children) {
+    const inner = runsOf(child);
+    if (inner === null) return null;
+    for (const run of inner) runs.push({ ...run, marks: markSet([...(run.marks || []), mark]) });
+  }
+  return runs;
+}
+
+// A run's marks, each in its one spelling, as a sorted set; null when there are none.
+function markSet(marks) {
+  if (!Array.isArray(marks) || marks.length === 0) return null;
+  const named = marks.map((mark) => {
+    const name = typeof mark === "string" ? mark : isMap(mark) && Object.keys(mark).length === 1 ? mark.type : null;
+    if (typeof name === "string" && MARK_NAMES[name]) return MARK_NAMES[name];
+    if (isMap(mark) && mark.type === "link") {
+      const keys = Object.keys(mark).sort().join(",");
+      if (keys === "href,type" && typeof mark.href === "string") return { type: "link", href: mark.href };
+      if (keys === "attrs,type" && isMap(mark.attrs) && Object.keys(mark.attrs).join(",") === "href" &&
+        typeof mark.attrs.href === "string") return { type: "link", href: mark.attrs.href };
+    }
+    return normal(mark);
+  });
+  const unique = new Map(named.map((mark) => [canonical(mark), mark]));
+  return [...unique.keys()].sort().map((key) => unique.get(key));
 }
 
 function carriesNothing(value) {
@@ -107,7 +163,7 @@ function unmarked(value) {
         .filter(([key]) => !(key === "marks" && isTextRun(v)))
         .map(([key, item]) => [key, strip(item)]))
       : v;
-  return normal(strip(value));
+  return normal(strip(normal(value)));
 }
 
 function sameJson(x, y) {

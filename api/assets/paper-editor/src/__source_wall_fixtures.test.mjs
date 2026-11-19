@@ -17,15 +17,15 @@ const GOLDENS = fileURLToPath(new URL("../../../priv/portable_doc/goldens/", imp
 
 const REFUSED = [
   "blocks/paragraph paragraph content.marks",
-  "limits/em-at-the-depth-limit paragraph content[0].children[0].children",
-  "limits/em-one-level-above-the-depth-limit paragraph content[0].children[0].children",
+  "limits/em-at-the-depth-limit paragraph content[0].value",
+  "limits/em-one-level-above-the-depth-limit paragraph content[0].value",
   "limits/heatmap-number-past-what-a-float-holds heatmap cells[0][0]",
   "limits/list-at-the-depth-limit list items[0]",
   "limits/list-one-level-above-the-depth-limit list items[0]",
   "limits/marks-at-the-depth-limit paragraph content.marks",
   "limits/marks-one-level-above-the-depth-limit paragraph content.marks",
-  "limits/strong-at-the-depth-limit paragraph content[0].children[0].children",
-  "limits/strong-one-level-above-the-depth-limit paragraph content[0].children[0].children",
+  "limits/strong-at-the-depth-limit paragraph content[0].value",
+  "limits/strong-one-level-above-the-depth-limit paragraph content[0].value",
 ];
 
 // The comparison itself: what is the same content, and what is a loss.
@@ -55,6 +55,23 @@ const REFUSED = [
     "a key that carries nothing is the same as no key");
   assert.equal(firstLoss([{ type: "list", ordered: true, items: [[text("a")]] }], [{ type: "list", items: [[text("a")]] }]).path, "ordered",
     "a key that carries something is content");
+  const node = (type, children, extra = {}) => ({ type, children, ...extra });
+  assert.equal(
+    firstLoss(
+      [para("a", [text("a "), text("b", [{ type: "bold" }, "em"]), text(" "), text("c", [{ type: "link", href: "h" }]), text("d", ["code"])])],
+      [para("a", [text("a "), node("em", [node("strong", [text("b")])]), text(" "), node("link", [text("c")], { href: "h" }), { type: "code", value: "d" }])],
+    ),
+    null,
+    "a mark written as a node is the same content as the mark on text, in any spelling and order",
+  );
+  for (const extra of [{ _key: "k" }, { value: "x" }, { marks: ["em"] }, { href: "h" }]) {
+    const loss = firstLoss([para("a", [text("b", ["strong"])])], [para("a", [node("strong", [text("b")], extra)])]);
+    assert.ok(loss, `a strong node that also carries ${Object.keys(extra)[0]} is not the same content`);
+  }
+  assert.ok(firstLoss([para("a", [text("b", ["code"])])], [para("a", [{ type: "code", value: "b", lang: "js" }])]),
+    "an inline code node with another key is not the same content");
+  assert.ok(firstLoss([para("a", [text("b", [{ type: "link", href: "h", title: "t" }])])], [para("a", [node("link", [text("b")], { href: "h" })])]),
+    "a link mark with another key is not the same content");
 }
 
 const refused = [];
