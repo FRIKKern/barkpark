@@ -14,6 +14,25 @@ defmodule Barkpark.Tenancy.AccessRequests do
   `{:error, :already_member}`, and only a member gets it: a member already
   knows the workspace exists.
 
+  ## A member asks for a higher role (task-018e79d8734a1b08)
+
+  A member may name a `role` that ranks above the one they hold
+  (`Tenancy.Auth.role_rank/2`). The row records the role they held as
+  `from_role`, which marks it a role change. A same-or-lower role answers
+  `{:error, :role_not_higher}`, a name the workspace does not have
+  `{:error, :unknown_role}`, and no role at all `{:error, :already_member}`
+  as before. For a seatless asker `role` is a hint, checked for shape only:
+  validating it against the workspace's roles would tell a stranger which
+  custom roles exist.
+
+  Approving a role change goes through `Members.update_role/4`, the path an
+  admin uses to change any seat's role, with the approver as `actor:` (so its
+  ceiling and last-owner rail apply), never through a hand-written update.
+  It is refused, with nothing changed, when the seat is gone or its role is no
+  longer `from_role` (`:request_stale`), when the granted role does not rank
+  above the current one (`:role_not_higher`), and when the approver is the
+  asker or a token the asker owns (`:self_approval`).
+
   ## How a seat is made
 
   `approve/4` seats the user through `Members.add_user_member/4`, the path an
@@ -46,6 +65,9 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   @max_pending 20
 
+  # The role a seat request is approved with when the approver names none.
+  @default_seat_role "member"
+
   @doc "How many pending requests one user may hold at once."
   def max_pending, do: @max_pending
 
@@ -55,34 +77,75 @@ defmodule Barkpark.Tenancy.AccessRequests do
           workspace: String.t(),
           status: String.t(),
           note: String.t() | nil,
+          requested_role: String.t() | nil,
           inserted_at: DateTime.t(),
           decided_at: DateTime.t() | nil
         }
 
   @doc """
-  Ask for a seat in the workspace with slug `slug`.
+  Ask for a seat in the workspace with slug `slug`, or, as a member, for the
+  higher `role`.
 
-  `{:ok, own_row}` for a new request, a repeat of a pending one, and a slug
-  no workspace has. Refusals: `{:error, :email_unconfirmed}` (approving would
+  `{:ok, own_row}` for a new request, a repeat of a pending one (the pending
+  row is the answer; withdraw it to ask for something else), and a slug no
+  workspace has. Refusals: `{:error, :email_unconfirmed}` (approving would
   hand the seat to whoever holds the password, not to the email's owner),
-  `{:error, :already_member}`, `{:error, :too_many_pending}` and
-  `{:error, %Ecto.Changeset{}}` for a malformed slug or a long note.
+  `{:error, :already_member}` (a member naming no role),
+  `{:error, :role_not_higher}`, `{:error, :unknown_role}`,
+  `{:error, :too_many_pending}` and `{:error, %Ecto.Changeset{}}` for a
+  malformed slug or role or a long note.
   """
-  @spec request(User.t(), String.t(), String.t() | nil) :: {:ok, own_row()} | {:error, term()}
-  def request(%User{confirmed_at: nil}, _slug, _note), do: {:error, :email_unconfirmed}
+  @spec request(User.t(), String.t(), String.t() | nil, String.t() | nil) ::
+          {:ok, own_row()} | {:error, term()}
+  def request(user, slug, note, role \\ nil)
 
-  def request(%User{id: user_id}, slug, note) when is_binary(slug) do
+  def request(%User{confirmed_at: nil}, _slug, _note, _role), do: {:error, :email_unconfirmed}
+
+  def request(%User{id: user_id}, slug, note, role)
+      when is_binary(slug) and (is_nil(role) or is_binary(role)) do
     slug = String.trim(slug)
 
     changeset =
-      AccessRequest.create_changeset(%{user_id: user_id, workspace_slug: slug, note: note})
+      AccessRequest.create_changeset(%{
+        user_id: user_id,
+        workspace_slug: slug,
+        note: note,
+        requested_role: role
+      })
 
+    if changeset.valid? do
+      ws = Tenancy.get_workspace_by_slug(slug)
+
+      case ws && TenancyAuth.membership(user_id, ws.id, :user) do
+        %Membership{} = seat -> member_request(changeset, user_id, slug, ws, seat, role)
+        _ -> seat_request(changeset, user_id, slug, ws)
+      end
+    else
+      {:error, changeset}
+    end
+  end
+
+  def request(_user, _slug, _note, _role), do: {:error, :invalid_workspace}
+
+  defp seat_request(changeset, user_id, slug, ws) do
     cond do
-      not changeset.valid? ->
-        {:error, changeset}
+      existing = pending(user_id, slug) -> {:ok, own_row(existing)}
+      pending_count(user_id) >= @max_pending -> {:error, :too_many_pending}
+      true -> insert(changeset, user_id, slug, ws)
+    end
+  end
 
-      member?(user_id, slug) ->
+  # A member knows the workspace exists, so the role is checked for real here.
+  defp member_request(changeset, user_id, slug, ws, %Membership{role: current}, role) do
+    cond do
+      is_nil(role) ->
         {:error, :already_member}
+
+      role not in TenancyAuth.valid_role_names(ws.id) ->
+        {:error, :unknown_role}
+
+      not outranks?(role, current, ws.id) ->
+        {:error, :role_not_higher}
 
       existing = pending(user_id, slug) ->
         {:ok, own_row(existing)}
@@ -91,15 +154,18 @@ defmodule Barkpark.Tenancy.AccessRequests do
         {:error, :too_many_pending}
 
       true ->
-        insert(changeset, user_id, slug)
+        changeset
+        |> Ecto.Changeset.put_change(:from_role, current)
+        |> insert(user_id, slug, ws)
     end
   end
 
-  def request(_user, _slug, _note), do: {:error, :invalid_workspace}
+  defp outranks?(role, current, ws_id),
+    do: TenancyAuth.role_rank(role, ws_id) > TenancyAuth.role_rank(current, ws_id)
 
-  defp insert(changeset, user_id, slug) do
+  defp insert(changeset, user_id, slug, ws) do
     ws_id =
-      case Tenancy.get_workspace_by_slug(slug) do
+      case ws do
         %{id: id} -> id
         nil -> nil
       end
@@ -114,13 +180,6 @@ defmodule Barkpark.Tenancy.AccessRequests do
           %AccessRequest{} = row -> {:ok, own_row(row)}
           nil -> {:error, cs}
         end
-    end
-  end
-
-  defp member?(user_id, slug) do
-    case Tenancy.get_workspace_by_slug(slug) do
-      %{id: ws_id} -> match?(%Membership{}, TenancyAuth.membership(user_id, ws_id, :user))
-      nil -> false
     end
   end
 
@@ -180,7 +239,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   @doc """
   The workspace's pending requests, oldest first: who asked (email and display
-  name), their note and when. The admin's view.
+  name), their note, the role they asked for, the role they hold now (`nil`
+  for a seatless asker) and when. The admin's view.
   """
   @spec list_pending(binary()) :: [map()]
   def list_pending(workspace_id) when is_binary(workspace_id) do
@@ -193,42 +253,103 @@ defmodule Barkpark.Tenancy.AccessRequests do
           from(r in AccessRequest,
             join: u in User,
             on: u.id == r.user_id,
+            left_join: m in Membership,
+            on:
+              m.workspace_id == r.workspace_id and m.principal_type == "user" and
+                m.principal_id == r.user_id,
             where: r.workspace_id == ^ws and r.status == "pending",
             order_by: [asc: r.inserted_at, asc: r.id],
-            select: {r, u.email}
+            select: {r, u.email, m.role}
           )
           |> Repo.all()
 
-        names = rows |> Enum.map(fn {r, _} -> r.user_id end) |> Accounts.display_names()
+        names = rows |> Enum.map(fn {r, _, _} -> r.user_id end) |> Accounts.display_names()
 
-        Enum.map(rows, fn {r, email} -> admin_row(r, email, Map.get(names, r.user_id)) end)
+        Enum.map(rows, fn {r, email, current} ->
+          admin_row(r, email, Map.get(names, r.user_id), current)
+        end)
     end
   end
 
   @doc """
-  Approve a pending request of THIS workspace and seat the user with `role`.
+  Approve a pending request of THIS workspace.
+
+  A seat request seats the user with `role` (`nil` means `"member"`) through
+  `Members.add_user_member/4`. A member's role request changes their seat to
+  `role` (`nil` means the role they asked for) through `Members.update_role/4`.
+  Either way the approver is the `actor:`, so the roster's role ceiling holds.
 
   `{:ok, %{access_request: row, member: member_row}}`. A request of another
   workspace, a decided one or a missing id answers `{:error, :not_found}` and
-  writes nothing. Refusals from `Members.add_user_member/4` (`:owner_required`,
-  `:already_member`, a changeset for an unknown role) roll everything back.
+  writes nothing. Every other refusal rolls everything back: `:self_approval`,
+  `:request_stale`, `:role_not_higher`, `:unknown_role`, and the roster's own
+  (`:owner_required`, `:already_member`, a changeset for an unknown role).
   """
-  @spec approve(binary(), binary(), String.t(), ApiToken.t() | User.t()) ::
+  @spec approve(binary(), binary(), String.t() | nil, ApiToken.t() | User.t() | nil) ::
           {:ok, map()} | {:error, term()}
-  def approve(workspace_id, id, role, actor) when is_binary(role) do
+  def approve(workspace_id, id, role, actor) when is_nil(role) or is_binary(role) do
     Repo.transaction(fn ->
       with %AccessRequest{} = row <- lock_pending(workspace_id, id),
            %User{email: email} = user <- Repo.get(User, row.user_id),
-           {:ok, member} <- seat(workspace_id, email, role, actor),
+           :ok <- not_self(row, actor),
+           {:ok, member, granted, meta} <- grant(row, email, role, actor),
            {:ok, _} <- drop_invitation(row),
-           {:ok, row} <- decide(row, "approved", role, actor),
-           :ok <- audit("access_request_approved", row, user, actor, %{"role" => role}) do
-        %{access_request: admin_row(row, email, nil), member: member}
+           {:ok, row} <- decide(row, "approved", granted, actor),
+           :ok <- audit("access_request_approved", row, user, actor, meta) do
+        %{access_request: admin_row(row, email, nil, member.role), member: member}
       else
         {:error, reason} -> Repo.rollback(reason)
         _ -> Repo.rollback(:not_found)
       end
     end)
+    |> tap(fn
+      # The roster call announces before this transaction commits; say it
+      # again once the new role is visible to the re-check.
+      {:ok, _} -> Members.announce_seats_changed(workspace_id)
+      _ -> :ok
+    end)
+  end
+
+  # The asker never decides their own request: not as themselves and not
+  # through a token they own (whose seat may outrank their own).
+  defp not_self(%AccessRequest{user_id: uid}, %User{id: uid}), do: {:error, :self_approval}
+
+  defp not_self(%AccessRequest{user_id: uid}, %ApiToken{owner_user_id: uid}),
+    do: {:error, :self_approval}
+
+  defp not_self(_row, _actor), do: :ok
+
+  # A seat request: the normal seating path.
+  defp grant(%AccessRequest{from_role: nil} = row, email, role, actor) do
+    granted = role || @default_seat_role
+
+    with {:ok, member} <- seat(row.workspace_id, email, granted, actor),
+         do: {:ok, member, granted, %{"role" => granted}}
+  end
+
+  # A role change: judged against the seat as it is NOW, locked for the rest
+  # of the transaction, then changed through the roster's own path.
+  defp grant(%AccessRequest{} = row, _email, role, actor) do
+    granted = role || row.requested_role
+    ws = row.workspace_id
+
+    with %Membership{role: current} <- lock_seat(row) || {:error, :request_stale},
+         true <- current == row.from_role || {:error, :request_stale},
+         true <- is_binary(granted) || {:error, :unknown_role},
+         true <- granted in TenancyAuth.valid_role_names(ws) || {:error, :unknown_role},
+         true <- outranks?(granted, current, ws) || {:error, :role_not_higher},
+         {:ok, member} <-
+           Members.update_role(ws, %{type: :user, id: row.user_id}, granted, actor: actor) do
+      {:ok, member, granted, %{"role" => granted, "from_role" => current}}
+    end
+  end
+
+  defp lock_seat(%AccessRequest{workspace_id: ws, user_id: uid}) do
+    Repo.one(
+      from m in Membership,
+        where: m.workspace_id == ^ws and m.principal_type == "user" and m.principal_id == ^uid,
+        lock: "FOR UPDATE"
+    )
   end
 
   @doc """
@@ -242,7 +363,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
            %User{email: email} = user <- Repo.get(User, row.user_id),
            {:ok, row} <- decide(row, "denied", nil, actor),
            :ok <- audit("access_request_denied", row, user, actor, %{}) do
-        %{access_request: admin_row(row, email, nil)}
+        %{access_request: admin_row(row, email, nil, nil)}
       else
         {:error, reason} -> Repo.rollback(reason)
         _ -> Repo.rollback(:not_found)
@@ -325,12 +446,15 @@ defmodule Barkpark.Tenancy.AccessRequests do
       workspace: r.workspace_slug,
       status: r.status,
       note: r.note,
+      requested_role: r.requested_role,
       inserted_at: r.inserted_at,
       decided_at: r.decided_at
     }
   end
 
-  defp admin_row(%AccessRequest{} = r, email, display_name) do
+  # `kind` is "role" for a member's request to change their role, "seat" for
+  # a seatless user's request. `current_role` is the seat's role now.
+  defp admin_row(%AccessRequest{} = r, email, display_name, current_role) do
     %{
       id: r.id,
       user_id: r.user_id,
@@ -338,6 +462,9 @@ defmodule Barkpark.Tenancy.AccessRequests do
       display_name: display_name,
       note: r.note,
       status: r.status,
+      kind: if(is_nil(r.from_role), do: "seat", else: "role"),
+      requested_role: r.requested_role,
+      current_role: current_role,
       role: r.role,
       inserted_at: r.inserted_at,
       decided_at: r.decided_at

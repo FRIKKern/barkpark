@@ -41,7 +41,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 **Role ceiling (ruling #5).** Via `Tenancy.Members` (`actor:`) only an `owner` grants, changes or removes `owner` (`403 owner_required`); a token seat holds an admin-authority role only if the token has `admin` (`403 role_exceeds_token`).
 
-**Access requests** (`Tenancy.AccessRequests`). A seatless user (session or owned token) asks: `POST /v1/auth/access-requests {workspace, note?}` → `202`, alike whether the slug exists (a missing one stored with NULL `workspace_id`, unseen by admins); a member gets `409`. 5/h per user, one pending per slug. Admins approve (`…/v1/access-requests/:id/approve {role}`, via `Members.add_user_member/4`, ceiling holds) or deny; both are audited (`membership`).
+**Access requests** (`Tenancy.AccessRequests`). A user (session or owned token) asks: `POST /v1/auth/access-requests {workspace, note?, role?}` → `202`, alike if the slug exists (a missing one: NULL `workspace_id`, unseen by admins); a member gets `409` unless `role` outranks theirs. 5/h/user, one pending per slug. Admins approve (`…/:id/approve {role}`, via `Members.add_user_member/4`/`update_role/4`, ceiling holds) or deny; both audited (`membership`).
 
 **Two role axes (GR46).** The roles above are the *only* team-role vocabulary — every settings gate reads it. `platform_operator` is **not** a team role but the *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry, `/v1/operator/*` and `bp cloud rollout`. **Supporter** is a billing *plan*, never a role.
 

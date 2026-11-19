@@ -3045,7 +3045,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "workspace.access-request-ls",
         "workspace",
         "access-request-ls",
-        "Pending access requests: who asked for a seat here, their note and when.",
+        "Pending access requests: who asked for a seat or a higher role, their note and when.",
         "GET",
         "/v1/access-requests",
         "scoped_admin",
@@ -3057,14 +3057,16 @@ defmodule Barkpark.Plugins.Capabilities do
         "workspace.access-request-approve",
         "workspace",
         "access-request-approve",
-        "Approve an access request: the asker is seated with the role (only an owner grants owner).",
+        "Approve an access request: seat the asker, or give a member the higher role (only an owner grants owner).",
         "POST",
         "/v1/access-requests/:id/approve",
         "scoped_admin",
         args: [arg("id", true, "string", "Access request id.")],
         flags: [
-          flag("role", "string", "owner | admin | member | contributor (or a custom role).",
-            default: "member"
+          flag(
+            "role",
+            "string",
+            "owner | admin | member | contributor (or a custom role). Default: member for a seat, the asked-for role for a role request."
           )
         ],
         writes: true,
@@ -4401,7 +4403,10 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/auth/access-requests",
         "read",
         args: [arg("workspace", true, "string", "Workspace slug.")],
-        flags: [flag("note", "string", "A note for the admins (at most 500 characters).")],
+        flags: [
+          flag("note", "string", "A note for the admins (at most 500 characters)."),
+          flag("role", "string", "The role to ask for. A member must name one above their own.")
+        ],
         writes: true,
         default_output: "minimal"
       ),
