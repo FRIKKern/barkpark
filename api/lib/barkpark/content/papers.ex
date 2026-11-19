@@ -351,11 +351,11 @@ defmodule Barkpark.Content.Papers do
   # with `==` ONLY: a content hash has no total order, so "older/newer" is not a
   # question it can answer. Anything that is not that digest — an old digest,
   # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
-  defp cache_provenance(_paper, _blocks, html, _dataset)
+  def cache_provenance(_paper, _blocks, html, _dataset)
        when not is_binary(html) or html == "",
        do: {:coherent, nil}
 
-  defp cache_provenance(paper, blocks, html, dataset) do
+  def cache_provenance(paper, blocks, html, dataset) do
     content = paper.content || %{}
     style = get_in(content, ["style"])
     scope = provenance_scope(paper)

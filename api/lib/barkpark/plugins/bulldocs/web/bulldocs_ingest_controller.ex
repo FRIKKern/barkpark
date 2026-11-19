@@ -114,7 +114,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content.Papers.{BlockOps, MixedWriteGuard}
   alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Validate.NewErrors
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
   alias BarkparkWeb.{ErrorResponse, StudioLocale}
 
@@ -411,23 +410,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # is a distinct refusal below, never a comparand.
         rev_read = Content.Papers.op_rev(paper)
         current_rev = with {:ok, rev} <- rev_read, do: to_string(rev)
-        current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
-        unprintable = unprintable_current(current_blocks)
 
         cond do
-          # ENTRY GUARD, before anything derives and before the rev check: a
-          # paper whose CURRENT blocks do not print has no honest BPML sync at
-          # any rev (its pull answers 422 too); a push would remove them all.
-          unprintable != nil ->
-            conn
-            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-              code: "bpml_unprintable",
-              message:
-                "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
-              hint:
-                "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
-            })
-
           # A failed READ is NOT a mismatch. Ordered before the comparison so
           # the comparison is only ever reached with a rev we actually read.
           match?({:error, _}, rev_read) ->
@@ -450,16 +434,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            # A block is unedited when it spells as the pull showed it.
-            shown =
-              case Content.Papers.BpmlView.of(paper, dataset, [], :published) do
-                {:blocks, blocks, _fields} -> blocks
-                _no_view -> nil
-              end
+            # Diffed against the reader's view; refused, writing nothing, when there is none.
+            case Content.Papers.BpmlView.push(paper, parsed["blocks"] || [], dataset) do
+              {:refused, body} ->
+                ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
-            pushed = parsed["blocks"] || []
-
-            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, pushed, shown) do
               {:error, :diff_verification_failed} ->
                 conn
                 |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -468,12 +447,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
                   hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
                 })
 
-              {:ok, _minted, []} ->
+              {:ok, []} ->
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
                 |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
 
-              {:ok, _minted, ops} ->
+              {:ok, ops} ->
                 sync_persist(conn, slug, ops, base_rev, dataset, scope)
             end
         end
@@ -625,11 +604,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
     violations =
       Enum.map(wall_tuples, &wall_violation(conn, &1)) ++ paper_structure_violations(blocks)
 
-    case violations do
-      [] ->
+    view = Content.Papers.BpmlView.created(slug, parsed, scope)
+
+    case {violations, Content.Papers.BpmlView.write_refusal(view, dataset)} do
+      {[], nil} ->
         sync_create_persist(conn, slug, parsed, blocks, dataset, scope)
 
-      violations ->
+      {[], body} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
+
+      {violations, _} ->
         conn
         |> ErrorResponse.emit_fields(:unprocessable_entity, %{
           code: "create_wall",
@@ -723,29 +707,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
 
-  # The sync entry guard's probe: nil when every current block is printable,
-  # else the printer's typed refusal message (kind+type). A print is pure string
-  # work on blocks already in memory — cheap enough to run before deriving.
-  defp unprintable_current(blocks) do
-    _ = Barkpark.PortableDoc.Bpml.print_blocks(blocks)
-    nil
-  rescue
-    e in UnprintableError -> Exception.message(e)
-  end
-
   # The echo AFTER a successful write prints the reader's view of the row
-  # (`BpmlView.print/2`), as the pull does. The ops already committed, so an
-  # unprintable state degrades to `bpml: nil` plus a marker (a 500 strands the
-  # anchor, a 422 lies); only UnprintableError is rescued (charter D3). Public
-  # so the degrade contract stays testable.
+  # (`BpmlView.print/2`), the bytes a pull gives at the new rev. A write whose
+  # Paper would have no printable view is refused before it happens, so the
+  # `bpml: nil` marker is left only for a row that moved in between (a 500
+  # strands the anchor, a 422 lies). Public so the degrade contract stays testable.
   @doc false
   def canonical_echo(paper, dataset \\ "production") do
     case Content.Papers.BpmlView.print(paper, dataset) do
       {:ok, bpml} -> {bpml, nil}
-      {:error, why} -> {nil, why}
+      {:refused, body} -> {nil, body.message}
     end
-  rescue
-    e in UnprintableError -> {nil, Exception.message(e)}
   end
 
   @doc false
