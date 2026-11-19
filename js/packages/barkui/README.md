@@ -1,4 +1,111 @@
-# @barkpark/barkui
+<!-- doc-tier: human | canonical-for: barkui-home | budget: 5000tok -->
+# BarkUI
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showroom-dark.png">
+  <img alt="The BarkUI showroom: the button in every state, with its proof lights on" src="docs/images/showroom-light.png">
+</picture>
+
+**One look for every Barkpark app.** BarkUI draws the parts our apps are made of, from buttons to page trees, and every block of a PortableDoc document, in one set of skins. It lives in Barkpark for now as the private package `@barkpark/barkui`.
+
+## Vision
+
+Barkpark Studio, Barkdown, Barkever, BarkBot and the Barkpark desk each draw their own controls and name their own colours today. BarkUI gives them one set. An app picks a skin; a skin is three colours per mode, and a compiler works out the rest.
+
+UI SDK supplies the behaviour: focus, menus, trees, grids, drag. BarkUI supplies the look and follows UI SDK's own way of styling, testing and access ([0001](docs/decisions/0001-ui-sdk-names-are-the-contract.md)). PortableDoc keeps what a document is; BarkUI draws it on every format ([0002](docs/decisions/0002-barkui-draws-portable-doc-defines.md)). A table in a document and a table in an app become one part ([0003](docs/decisions/0003-a-block-is-a-part.md)).
+
+No app moves until the showroom shows BarkUI whole and ready ([0004](docs/decisions/0004-ready-before-any-switch.md)). Then apps move a screen at a time, and new designs become a change of skin.
+
+## What we get
+
+| Reward | Milestone |
+|---|---|
+| One colour source writes every skin under UI SDK's names | M2 |
+| One page shows every part in every skin, light and dark, and what is proven for it | Ready |
+| The editor's menus and Barkdown's page tree run on BarkUI parts | M3 |
+| A table in a document and a table in an app are one part | M4 |
+| Studio, Barkdown, Barkever, BarkBot and the Barkpark desk wear one look | M5 |
+| New app designs that separate kits could not carry | M6 |
+
+## News
+
+The daily news run fills this block from merged work once it covers BarkUI. Nothing here is written by hand.
+
+<!-- news:start -->
+<!-- news:end -->
+
+## Where things stand
+
+Counted from the files by `node build/status.mjs`; a fast test fails when this block is stale.
+
+<!-- status:start -->
+| What | Now |
+|---|---|
+| Parts in the showroom | 1: button |
+| Skins in the sheet | 5: evergreen, charple, ember, fjord, iris |
+| Surfaces a part can sit on | 5: base, raised, sunken, primary, inverse |
+| Colour names in the sheet | 15 `--ui-*` (UI SDK's), 262 `--bark-*` (BarkUI's own) |
+| UI SDK | `@ui-sdk/web` 0.1.0-beta.10, pinned |
+<!-- status:end -->
+
+What a check run proves for each part is on the showroom page, not here: it comes from a run, not from a file. No app reads BarkUI yet.
+
+| ember, dark | fjord, light |
+|---|---|
+| ![The showroom in the ember skin, dark](docs/images/showroom-ember-dark.png) | ![The showroom in the fjord skin, light](docs/images/showroom-fjord-light.png) |
+
+## Where things live (one fact, one home)
+
+| What | Where |
+|---|---|
+| Why, the plan, the order of work | Barkpark Paper `/papers/barkui-plan` |
+| Milestones | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
+| Decisions | [`docs/decisions/`](docs/decisions/), one page each |
+| What the lights mean; when a part counts as ready | [`QUALITY.md`](QUALITY.md) |
+| The colour source: three colours per mode for each skin | [`design/themes/`](../../../design/themes/), derived by [`design/derive.mjs`](../../../design/derive.mjs) |
+| The name table: today's colour slots to `--ui-*` and `--bark-*` | [`design/emit/barkui.mjs`](../../../design/emit/barkui.mjs), with its surfaces and states beside it |
+| The sheet (generated; never edited) | [`api/priv/barkui/tokens.css`](../../../api/priv/barkui/tokens.css) |
+| Parts | [`parts/`](parts/), one folder each |
+| Base styles and the one focus ring | [`css/base.css`](css/base.css) |
+| The showroom | [`build/`](build/), written to `dist/showroom/index.html` |
+| The checks | [`check/`](check/) in a browser, [`tests/`](tests/) without one; run in CI by `.github/workflows/js-tests.yml` |
+| The numbers on these pages | [`build/status.mjs`](build/status.mjs) |
+| Status, who does what | The BarkUI goal on Barkpark's task board. Never in docs |
+
+## Layout
+
+```
+build/       the showroom page, part discovery, the status numbers
+check/       the browser check, its selftest, the shot script
+css/         base styles: the page ground, type and the one focus ring
+parts/       one folder per part; adding a part is adding a folder
+tests/       the fast tests
+docs/        roadmap, decisions, pictures
+```
+
+Outside this folder: the colour source in `design/` and the sheet it writes, `api/priv/barkui/tokens.css`.
+
+## Run it
+
+Node 22 and pnpm, from the repo root.
+
+```sh
+cd js && pnpm install && cd packages/barkui
+pnpm run build             # dist/showroom/index.html; opens from disk, no server
+pnpm run check             # press every part in headless Chromium and light the page
+pnpm test                  # the fast tests, these pages' numbers included
+node build/status.mjs      # rewrite the numbers in README and ROADMAP
+node check/shots.mjs <dir> # light and dark pictures of the built page
+node ../../../design/emit.mjs --write   # rewrite the sheet after a skin changes
+```
+
+The showroom keeps its view in the address: `#skin=ember&scheme=dark` opens that skin in dark. The ember and fjord pictures here are that page.
+
+## When BarkUI leaves home
+
+BarkUI grows up inside Barkpark because its colour source also writes Barkpark's own Elixir, Go and web output, and Barkpark's hosted checks already run on every change. It moves to a repo of its own when that costs less than it saves: when apps in other repos install it, and its colour source can be split from what Barkpark itself needs. The package, the BarkUI emitters and the sheet would move; where the colour source lives is still open ([0007](docs/decisions/0007-incubated-in-barkpark.md)).
+
+## The part folder and the check
 
 BarkUI is one look for UI SDK's parts (`@ui-sdk/web`, pinned to `0.1.0-beta.10`). It reads only the
 `--ui-*` and `--bark-*` variables of `api/priv/barkui/tokens.css`, the one source of the skins.
