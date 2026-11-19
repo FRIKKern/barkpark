@@ -365,15 +365,18 @@ func warmSpecCompatible(req, base cloud.ServerSpec) bool {
 }
 
 // tryWarmAssign claims a warm box and assigns it into a live instance — the
-// ≤15s path. Returns (live, true) on success; (_, false) when the pool is empty,
-// the claim errored, or the assign failed (in which case the box was already torn
-// down + its row dropped) — the caller then falls through to one-shot SILENTLY, so
-// the go-live never dead-ends and the 90s p95 holds even on a cold/lagging pool.
+// ≤15s path. Returns (live, true) on success; (_, false) when the pin does not
+// match the pool, the pool is empty, the claim errored, or the assign failed (in
+// which case the box was already torn down + its row dropped) — the caller then
+// falls through to one-shot, so the go-live never dead-ends and the 90s p95 holds
+// even on a cold/lagging pool. Each outcome is handed to say (launch_host.go)
+// before the matching create starts: the warm line right after the claim, a cold
+// line before the caller's one-shot.
 //
 // A successful claim ALWAYS fires the async refill (never blocking the assign) so
 // the pool stays warm between reconciler passes; a refill failure is logged and
 // the next claim/reconcile re-tops the pool.
-func tryWarmAssign(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cloud.GoLiveSpec) (cloud.LiveServer, bool) {
+func tryWarmAssign(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cloud.GoLiveSpec, say func(hostDecision)) (cloud.LiveServer, bool) {
 	// Pin guard (azh-w3): the warm pool is UNIFORM — every box is baked at the
 	// env-derived warmBaseSpec region/server_type. A go-live that pins a region or
 	// server_type the pool wasn't baked for (e.g. fsn1/cx32 against an nbg1/cx23
@@ -383,18 +386,22 @@ func tryWarmAssign(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cl
 	// hetzner branch has already filled its empties with warmBaseSpec's own
 	// region/type — or a pin that EQUALS the pool base stays on the ≤15s warm path,
 	// byte-for-byte as before.
-	if !warmSpecCompatible(spec.Spec, warmBaseSpec(ctx)) {
+	if base := warmBaseSpec(ctx); !warmSpecCompatible(spec.Spec, base) {
+		say(pinMismatchDecision(spec.Spec, base))
 		return cloud.LiveServer{}, false
 	}
 
 	ws, ok, err := seams.WarmClient.Claim(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm claim failed, falling back to one-shot: %v\n", err)
+		say(hostDecision{hostClaimError, fmt.Sprintf("warm claim failed: %v", err)})
 		return cloud.LiveServer{}, false
 	}
 	if !ok {
-		return cloud.LiveServer{}, false // empty pool — silent one-shot
+		say(hostDecision{hostPoolEmpty, "no warm server ready"})
+		return cloud.LiveServer{}, false
 	}
+	say(hostDecision{hostWarm, ws.Name})
 
 	// The claim consumed a ready box: refill the pool asynchronously (must NOT
 	// block the assign the customer is waiting on).
@@ -415,6 +422,7 @@ func tryWarmAssign(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cl
 
 	if aerr != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm assign %s failed, falling back to one-shot: %v\n", ws.Name, aerr)
+		say(hostDecision{hostAssignFailed, fmt.Sprintf("warm server %s failed to assign: %v", ws.Name, aerr)})
 		return cloud.LiveServer{}, false
 	}
 	return live, true
