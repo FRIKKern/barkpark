@@ -239,7 +239,7 @@ change that sets them states what was measured. Past that number of parts the ch
 naming this sentence, before any light is read; change the ceilings in `check/capacity.mjs` and, if the
 step must grow, `STEP_MINUTES` and the step's limit in `js-tests.yml` together (a test holds them
 equal), or split the check, and measure again. The selftest copies one part, so its time does not grow
-with the parts folder. The selftest may take at most 540 s, 75% of its 12-minute step in CI, and stops, failing, once it passes that. `SELFTEST_STEP_MINUTES` and the step's limit move
+with the parts folder. The selftest may take at most 480 s, 80% of its 10-minute step in CI, and stops, failing, once it passes that. `SELFTEST_STEP_MINUTES` and the step's limit move
 together, as above.
 
 ## What the check proves about a label, and no more

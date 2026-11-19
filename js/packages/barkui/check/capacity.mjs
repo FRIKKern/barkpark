@@ -26,8 +26,9 @@ export const capacitySentence = () =>
 
 // The selftest's step. It copies one part, so its time does not grow with the parts folder, only with its own
 // cases.
-export const SELFTEST_STEP_MINUTES = 12
-export const SELFTEST_CEILING = 540
+// If the selftest outgrows its ceiling, it is split across jobs; the step does not grow.
+export const SELFTEST_STEP_MINUTES = 10
+export const SELFTEST_CEILING = 480
 
 export const selftestSentence = () =>
   `The selftest may take at most ${SELFTEST_CEILING} s, ${share(SELFTEST_CEILING, SELFTEST_STEP_MINUTES)}% of its ${SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`

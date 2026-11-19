@@ -467,12 +467,12 @@ jobs:
       # that holds README.md's claim, a faint or clipped icon, a frozen colour, a
       # bound wait on the sheet, the demo guards, refusals at discovery), and it
       # reds unless each turns the right light off, naming the planted control.
-      # Limit: 12 minutes, which check/capacity.mjs holds SELFTEST_STEP_MINUTES to (a
+      # Limit: 10 minutes, which check/capacity.mjs holds SELFTEST_STEP_MINUTES to (a
       # test reads this line); the selftest stops, failing with its sentence, once it
       # passes SELFTEST_CEILING, under this limit.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
         if: steps.barkui.outputs.run != 'false'
-        timeout-minutes: 12
+        timeout-minutes: 10
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"
