@@ -6317,7 +6317,7 @@ msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:834
 #, elixir-autogen, elixir-format
-msgid "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
+msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:674

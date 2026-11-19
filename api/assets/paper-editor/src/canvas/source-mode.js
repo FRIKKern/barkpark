@@ -74,24 +74,14 @@ export function sourceModeEnter() {
     // trip, so unsaved typing never reads as a loss, and each parse is settled the
     // way sourceModeCommit saves it (ids given back, a locked template prefix put
     // back), so the check judges what would be saved. Where either loses anything,
-    // nothing changes: no textarea, no op, the visual editor keeps its caret and its
-    // popups, and one plain line names the block.
+    // source mode opens READ-ONLY: it shows the Markdown, takes no typing, writes
+    // nothing back, and one plain line says why and names the block.
     const saved = (base) => (parsed) => {
       const copy = deepCloneBlocks(base);
       return clampLockedPrefix(copy, realignAcrossCommits(copy, copy, parsed));
     };
     const stored = this._blocks || [];
     const loss = sourceLoss(stored, saved(stored)) || sourceLoss(L0, saved(L0));
-    if (loss) {
-      this._showFigureConstraint(
-        t("Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.", {
-          part: loss.part,
-          number: loss.index + 1,
-          type: loss.type,
-        }),
-      );
-      return;
-    }
 
     // Close any open popup — in source mode the textarea owns input, so a lingering
     // [[ / # / slash / palette popup would float over a now-hidden editor.
@@ -117,6 +107,7 @@ export function sourceModeEnter() {
     ta.autocapitalize = "off";
     ta.autocomplete = "off";
     ta.setAttribute("autocorrect", "off");
+    ta.readOnly = this._sourceReadOnly = Boolean(loss);
     // The textarea owns its own toggle-back (Mod-Shift-m) + Escape, since the rich
     // editor's handleKeyDown does NOT fire while source mode is up.
     this._onSourceKeyDown = (e) => {
@@ -159,6 +150,15 @@ export function sourceModeEnter() {
     // hide path (update() hides when !view.hasFocus()) so no stale bubble lingers
     // over the now-hidden editor.
     if (this._bubble) this._bubble.update();
+    if (loss) {
+      this._showFigureConstraint(
+        t("Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.", {
+          part: loss.part,
+          number: loss.index + 1,
+          type: loss.type,
+        }),
+      );
+    }
   }
 
   // EXIT source mode → back to the rich editor.
@@ -171,7 +171,7 @@ export function sourceModeExit() {
     let emitted = false;
     if (this._mode === "source" && this._sourceEl) {
       const md = this._sourceEl.value;
-      const edited = md !== this._sourceOriginalMd;
+      const edited = !this._sourceReadOnly && md !== this._sourceOriginalMd;
 
       // Tear down the textarea + listener and reveal the rich editor FIRST so the
       // setContent (edited path) and the refocus land on the visible editor.
@@ -186,6 +186,8 @@ export function sourceModeExit() {
       this._sourceBaselineBlocks = null;
       this._sourceCommitBlocks = null;
       this._sourceOriginalMd = "";
+      if (this._sourceReadOnly) this._clearFigureConstraint();
+      this._sourceReadOnly = false;
       try {
         this._editor.commands.focus();
       } catch (_e) {
@@ -222,6 +224,7 @@ export function sourceModeExit() {
   // _sourceOriginalMd then holds this markdown, so an unchanged textarea is a no-op
   // for the next flush and for exit.
 export function sourceModeCommit(md) {
+    if (this._sourceReadOnly) return false;
     const L0 = this._sourceBaselineBlocks;
     const L1 = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
     this._editor
