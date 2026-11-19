@@ -38,7 +38,8 @@
   :where(::selection) { background: var(--bark-selected); color: var(--ui-foreground); }
 
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    /* One round only: an endless spinner at 0.01ms would flicker at a new angle every frame; it stands still. */
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   }
 }
 
