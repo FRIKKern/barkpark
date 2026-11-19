@@ -77,7 +77,7 @@ read_expected() {
   sed -n 's/^[[:space:]]*elixir[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$1" 2>/dev/null | head -1
 }
 
-elixir_version_of() { # bin-dir-or-empty -> "1.18.1"
+elixir_version_of() { # bin-dir-or-empty -> its Elixir version as "x.y.z"
   local prefix="$1"
   if [ -n "$prefix" ]; then
     PATH="$prefix:$PATH" "$prefix/elixir" --version 2>/dev/null \
@@ -324,9 +324,11 @@ check() { # name want yes no rc out
 }
 
 say "=== cloud-format-check selftest: every refusal must fire, and name only itself ==="
-# Fixture numbers sit in variables: scripts/toolchain-drift-check.sh reads a
-# literal Erlang/Elixir version in any script as a pin.
-fx_otp=27.3.4.13 fx_prose=9.9.9 fx_nowhere=0.0.1
+# Fixture numbers sit in variables. scripts/toolchain-drift-check.sh compares a
+# version on a line that names a tool with its owner file, so the made-up ones
+# sit on a line of their own.
+fx_otp=27.3.4.13
+fx_prose=9.9.9 fx_nowhere=0.0.1
 
 # 1. NO PIN FILE — refuse rather than guess a version.
 mkdir -p "$tmp/no-wf/cloud/deps"; : > "$tmp/no-wf/cloud/deps/keep"

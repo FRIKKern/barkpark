@@ -312,9 +312,11 @@ check() { # name expected_rc must_match must_not_match rc output
 
 SELF="${BASH_SOURCE[0]}"
 say "=== format-check selftest: every refusal must be able to fire, and name itself ==="
-# Fixture numbers sit in variables: scripts/toolchain-drift-check.sh reads a
-# literal Erlang/Elixir version in any script as a pin.
-fx_otp=27.3.4 fx_prose=9.9.9 fx_nowhere=0.0.1
+# Fixture numbers sit in variables. scripts/toolchain-drift-check.sh compares a
+# version on a line that names a tool with its owner file, so the made-up ones
+# sit on a line of their own.
+fx_otp=27.3.4
+fx_prose=9.9.9 fx_nowhere=0.0.1
 
 # 1. UNREADABLE EXPECTATION — no pin file at all.
 mkdir -p "$tmp/no-wf/api/deps" && : > "$tmp/no-wf/api/deps/keep"

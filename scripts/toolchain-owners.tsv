@@ -7,19 +7,24 @@
 #                                 with `version-file:` + `version-type: strict`
 #   .github/workflows/X.yml#job   the same, for one job; beats the workflow row
 #   .github/actions/X/action.yml  the same, for a composite action
-#   */Dockerfile, *.sh, ...       a literal version in it (an image tag, an
-#                                 install default) must equal the file's, or it
-#                                 reads the file by path
+#   */Dockerfile, *.sh, ...       a version on a line naming a tool equals that
+#                                 tool's number here, or the file reads this
+#                                 file by path
 #   *.tool-versions               that file's erlang line equals this file's
 #   data <file> <reason>          a test or fixture file (*.test.sh, *_test.*,
-#                                 test/, tests/, fixtures/) whose literals are test
-#                                 data or past check names, not a runtime; an
-#                                 install, image or *_VERSION form in it still fails
+#                                 test/, tests/, fixtures/) whose versions are
+#                                 test data or past check names, not a runtime
+#   pin <file> <token> <what>     one token that is not an owned tool's version
+#   line <file> <hash> <words> :: <reason>
+#                                 one line whose numbers are not versions
 #
-# Every tracked .tool-versions / *.tool-versions must appear here. A literal
-# version in a workflow, action, Dockerfile, deploy file or script with no row
-# fails. Moving a consumer to another file is editing its row; folding a
-# version file into another is deleting its rows and re-pointing its consumers.
+# Every tracked .tool-versions / *.tool-versions must appear here. A version on
+# a line that names erlang, otp, elixir or node (or any tool an owner file
+# names), and any image tag, in a workflow, action, container or compose file,
+# deploy file, script, Makefile or mise config, fails without a row. A number
+# on a line that names no tool is not seen (task-1c24786728762c92). Moving a
+# consumer to another file is editing its row; folding a version file into
+# another is deleting its rows and re-pointing its consumers.
 
 # The content server's runtime: asdf on the box resolves the repo-root file.
 .tool-versions  .github/workflows/architecture.yml
@@ -36,6 +41,7 @@
 .tool-versions  .github/workflows/security.yml
 .tool-versions  api/scripts/sobelow-baseline-reconcile.sh
 .tool-versions  deploy/azure-base-install.sh
+.tool-versions  deploy/instance-deploy_test.sh
 .tool-versions  tools/format.tool-versions
 
 # The release images: the control plane builds cloud/Dockerfile, and
@@ -54,3 +60,40 @@ data  scripts/elixir-main-red-attribution.test.sh  a stack-trace fixture names (
 data  scripts/fetch-prebuilt.test.sh  a fake box prints Elixir 1.18.3 so the guard sees a mismatch
 data  scripts/release-scan.test.sh  check-run fixtures carry past check names (Elixir 1.18.1 / OTP 27.0)
 data  scripts/required-checks.test.sh  a matrix fixture and the exclusion rows of past check names
+data  scripts/ci-test-watchdog.test.sh  `sleep 0.5` on an `elixir -e` line is a poll interval
+data  scripts/cloud-console-gate-shape.test.sh  a planted aggregator matrix (otp 27.0) the gate must refuse
+data  scripts/security-gate-shape.test.sh  a planted aggregator matrix (otp 27.0) the gate must refuse
+data  scripts/deploy-image.test.sh  Barkpark release image tags the deploy test pulls (0.2.30-0.2.32)
+data  scripts/deploy-admin-token-recovery.test.sh  a made-up Barkpark image tag (9.9.9)
+data  scripts/deploy-health-banner.test.sh  a made-up Barkpark image tag (9.9.9)
+data  api/test/scripts/test-plugin-node-matrix.sh  a package.json fixture's own version (0.1.0)
+
+# Other pins: `pin <file> <token> <what it pins>`. A version that is not an owned
+# tool's (a base image, a vendored package's engines field) or a number that is
+# not a version at all, on a line the check reads. The token must still be there.
+pin  .github/workflows/deploy-harnesses.yml  22.04  the Ubuntu image the git 2.34 fetch harness runs in
+pin  .github/workflows/portable-doc-editor-release.yml  22.22.0  Node for the npm pack and publish jobs of the editor package
+pin  deploy/azure/bicepconfig.json  1.0.0  the Microsoft Graph Bicep extension
+pin  deploy/azure/main.bicep  0.2.28  an example Barkpark image tag in a parameter description
+pin  deploy/azure/main.bicep  3.22  the Alpine image of the Azure init container
+pin  deploy/testdata/capstone-turbopack-build-fail.txt  0.34.5  sharp's version in a captured npm log
+pin  scripts/check-vendor-blocks.mjs  20.9.0  a vendored package's engines.node range
+pin  scripts/check-vendor-blocks.mjs  20.19.0  a vendored package's engines.node range
+pin  scripts/check-vendor-blocks.mjs  22.12.0  a vendored package's engines.node range
+pin  scripts/check-vendor-blocks.mjs  22.19.0  a vendored package's engines.node range
+pin  scripts/connectors/w19-claude-version-pin-proof.sh  2.1.211  the Claude Code version the shim pins
+pin  scripts/engine/build-postgres.mjs  15.18  the Postgres version in the usage line
+pin  scripts/idp-interop.sh  26.0  the Keycloak image of the identity-provider interop run
+
+# Lines that name a tool beside numbers that are not versions: `line <file>
+# <hash> <first words> :: <reason>`. The hash is the first 12 characters of
+# `printf '%s' "<the line>" | git hash-object --stdin`; the check skips only a
+# line that still hashes to it, so editing the line reds until it is re-read.
+line  scripts/pds-door-census.sh  01148b767e75  pds-ledger-census_test.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  64ec7b5f2626  pds-scratch-target_test.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  4262a7923cab  rerun-adjudicate.test.mjs :: arm numbers in a run log beside a node command, not versions
+line  scripts/pds-door-census.sh  bf80963a425a  pds-roster-callee-churn.exs :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  6112f7a1614b  pds-citation-expand.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  9f5ed778749a  pds-secret-scan_test.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  42abcc65236e  pds-elixir-receipt-census.exs :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-blind-spot.sh  9d3a72e891b4  PDS_BLIND_SPOT= :: CPU-second figures in prose about :erlang.statistics, not versions

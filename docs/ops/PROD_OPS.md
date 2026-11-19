@@ -23,7 +23,8 @@ touching anything else. CI tests the exact runtime each prod host runs: api
 jobs read `.tool-versions`, `cloud.yml` reads `deploy/image.tool-versions` (the
 control-plane and published images' FROM tag). `scripts/toolchain-owners.tsv`
 maps each file to its consumers; `scripts/toolchain-drift-check.sh` reds on any
-other version number.
+other version on a line that names the tool. It does not see one on a line
+naming no tool (a bare `V=26.2`); task-1c24786728762c92 checks the runtime.
 
 ## The postcheck rule
 

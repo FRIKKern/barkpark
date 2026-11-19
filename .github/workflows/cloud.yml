@@ -511,14 +511,15 @@ jobs:
         run: mix compile --warnings-as-errors
       - name: Format check
         # THE VERSION IS PART OF THE VERDICT. This job formats with the Elixir
-        # in deploy/image.tool-versions; dev checkouts run 1.19.x, and the two formatters
+        # in deploy/image.tool-versions; dev checkouts run the newer Elixir in
+        # tools/format.tool-versions, and the two formatters
         # disagree — so a green local `mix format --check-formatted` is NOT this
         # gate (task-417026dfc4826971, PR #17482). Say so AT THE POINT OF
         # FAILURE, or the next agent spends a cycle re-running the green one.
         run: |
           if mix format --check-formatted; then exit 0; fi
           v="$(elixir --version | sed -n 's/^Elixir \([0-9][0-9.]*\).*/\1/p')"
-          echo "::error title=Cloud format gate ran Elixir $v::This job formatted with Elixir $v (pinned in deploy/image.tool-versions). Dev checkouts run 1.19.x and the two formatters DISAGREE, so a green local 'cd cloud && mix format --check-formatted' does not measure this gate — and a local 'mix format' will rewrite gate-correct bytes into gate-red ones. Reproduce the gate locally with: make cloud-format-check"
+          echo "::error title=Cloud format gate ran Elixir $v::This job formatted with Elixir $v (pinned in deploy/image.tool-versions). Dev checkouts run the newer Elixir in tools/format.tool-versions and the two formatters DISAGREE, so a green local 'cd cloud && mix format --check-formatted' does not measure this gate — and a local 'mix format' will rewrite gate-correct bytes into gate-red ones. Reproduce the gate locally with: make cloud-format-check"
           exit 1
 
   test:
