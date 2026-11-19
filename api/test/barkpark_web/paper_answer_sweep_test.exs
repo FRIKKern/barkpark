@@ -130,6 +130,17 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
       for r <- results, r.unreached, do: "#{r.route}: the admin got #{inspect(r.admin_status)}"
 
     carries = Enum.count(results, & &1.carries)
+
+    no_debug_info =
+      for %{verb: verb, live: nil, plug: plug} = r <- Introspect.routes(),
+          verb != "GET",
+          Introspect.definitions(plug) == nil,
+          do: "#{r.verb} #{r.path}"
+
+    IO.puts(
+      "answer sweep: #{length(no_debug_info)} non-GET routes read-shaped for lack of debug info"
+    )
+
     if carries > @carries_floor, do: IO.puts("answer sweep: #{carries} routes carry the Paper")
 
     assert unreached == [], "not driven to an answer:\n" <> Enum.join(unreached, "\n")
