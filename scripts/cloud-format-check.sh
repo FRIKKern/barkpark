@@ -324,6 +324,9 @@ check() { # name want yes no rc out
 }
 
 say "=== cloud-format-check selftest: every refusal must fire, and name only itself ==="
+# Fixture numbers sit in variables: scripts/toolchain-drift-check.sh reads a
+# literal Erlang/Elixir version in any script as a pin.
+fx_otp=27.3.4.13 fx_prose=9.9.9 fx_nowhere=0.0.1
 
 # 1. NO PIN FILE — refuse rather than guess a version.
 mkdir -p "$tmp/no-wf/cloud/deps"; : > "$tmp/no-wf/cloud/deps/keep"
@@ -332,14 +335,14 @@ check "a missing pin file REFUSES rather than guessing a version" 5 "exit 5" "UN
 
 # 2. A COMMENTED-OUT ELIXIR LINE MUST NOT ANSWER FOR THE PIN.
 mkdir -p "$tmp/bad-wf/cloud/deps"; : > "$tmp/bad-wf/cloud/deps/keep"
-printf 'erlang 27.3.4.13\n# elixir 9.9.9 is prose, not a pin\n' > "$tmp/bad-wf/pin"
+printf 'erlang %s\n# elixir %s is prose, not a pin\n' "$fx_otp" "$fx_prose" > "$tmp/bad-wf/pin"
 out="$(CLOUD_FORMAT_ROOT="$tmp/bad-wf" CLOUD_FORMAT_PIN_FILE="$tmp/bad-wf/pin" bash "$SELF" 2>&1)"; rc=$?
 check "a commented-out elixir line must not answer for the pin" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
 
 # 3. AN UNOBTAINABLE PIN REFUSES AS ITSELF. No 0.0.1 exists anywhere, and the
 #    download loop 404s on every asset, so this exercises the real fallback.
 mkdir -p "$tmp/wrong/cloud/deps"; : > "$tmp/wrong/cloud/deps/keep"
-printf 'erlang 27.3.4.13\nelixir 0.0.1-otp-27\n' \
+printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$fx_nowhere" \
   > "$tmp/wrong/pin"
 out="$(BARKPARK_ELIXIR_CACHE="$tmp/cache" CLOUD_FORMAT_ROOT="$tmp/wrong" \
   CLOUD_FORMAT_PIN_FILE="$tmp/wrong/pin" bash "$SELF" 2>&1)"; rc=$?
@@ -351,7 +354,7 @@ check "and it forbids the reflex 'fix' that would red a currently-green gate" 3 
 running="$(elixir_version_of "")"
 if [ -n "$running" ]; then
   mkdir -p "$tmp/nodeps/cloud"
-  printf 'erlang 27.3.4.13\nelixir %s-otp-27\n' "$running" \
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running" \
     > "$tmp/nodeps/pin"
   out="$(CLOUD_FORMAT_ROOT="$tmp/nodeps" CLOUD_FORMAT_PIN_FILE="$tmp/nodeps/pin" bash "$SELF" 2>&1)"; rc=$?
   check "unfetched deps REFUSE as themselves, not as a format failure" 4 "DEPS NOT FETCHED" "UNFORMATTED" "$rc" "$out"
@@ -366,7 +369,7 @@ fi
 if [ -n "$running" ]; then
   mkdir -p "$tmp/refuse/cloud/deps" "$tmp/refuse/bin"
   : > "$tmp/refuse/cloud/deps/keep"
-  printf 'erlang 27.3.4.13\nelixir %s-otp-27\n' "$running" \
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running" \
     > "$tmp/refuse/pin"
   cat > "$tmp/refuse/bin/mix" <<'FAKE'
 #!/usr/bin/env bash

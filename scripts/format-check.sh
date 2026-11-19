@@ -312,6 +312,9 @@ check() { # name expected_rc must_match must_not_match rc output
 
 SELF="${BASH_SOURCE[0]}"
 say "=== format-check selftest: every refusal must be able to fire, and name itself ==="
+# Fixture numbers sit in variables: scripts/toolchain-drift-check.sh reads a
+# literal Erlang/Elixir version in any script as a pin.
+fx_otp=27.3.4 fx_prose=9.9.9 fx_nowhere=0.0.1
 
 # 1. UNREADABLE EXPECTATION — no pin file at all.
 mkdir -p "$tmp/no-wf/api/deps" && : > "$tmp/no-wf/api/deps/keep"
@@ -320,13 +323,13 @@ check "a missing pin file REFUSES rather than guessing a version" 5 "exit 5" "UN
 
 # 2. UNREADABLE EXPECTATION — a pin file whose only elixir number is a comment.
 mkdir -p "$tmp/bad-wf/api/deps" && : > "$tmp/bad-wf/api/deps/keep"
-printf 'erlang 27.3.4\n# elixir 9.9.9 is prose, not a pin\n' > "$tmp/bad-wf/pin"
+printf 'erlang %s\n# elixir %s is prose, not a pin\n' "$fx_otp" "$fx_prose" > "$tmp/bad-wf/pin"
 out="$(FORMAT_CHECK_ROOT="$tmp/bad-wf" FORMAT_CHECK_PIN_FILE="$tmp/bad-wf/pin" bash "$SELF" 2>&1)"; rc=$?
 check "a commented-out elixir line must not answer for the pin" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
 
 # 3. WRONG ELIXIR — pin an expectation no toolchain satisfies.
 mkdir -p "$tmp/wrong/api/deps" && : > "$tmp/wrong/api/deps/keep"
-printf 'erlang 27.3.4\nelixir 0.0.1-otp-27\n' > "$tmp/wrong/pin"
+printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$fx_nowhere" > "$tmp/wrong/pin"
 out="$(FORMAT_CHECK_ROOT="$tmp/wrong" FORMAT_CHECK_PIN_FILE="$tmp/wrong/pin" bash "$SELF" 2>&1)"; rc=$?
 check "a version mismatch REFUSES LOUDLY and is not reported as unformatted" 3 "WRONG ELIXIR" "UNFORMATTED" "$rc" "$out"
 check "and it says NO CLAIM is being made, so nothing downstream reads it as a verdict" 3 "NO CLAIM" "" "$rc" "$out"
@@ -337,7 +340,7 @@ running_probe="$(elixir --version 2>/dev/null | sed -n 's/^Elixir \([0-9][0-9.]*
 running="$running_probe"
 if [ -n "$running" ]; then
   mkdir -p "$tmp/nodeps/api"
-  printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running" > "$tmp/nodeps/pin"
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running" > "$tmp/nodeps/pin"
   out="$(FORMAT_CHECK_ROOT="$tmp/nodeps" FORMAT_CHECK_PIN_FILE="$tmp/nodeps/pin" bash "$SELF" 2>&1)"; rc=$?
   check "unfetched deps REFUSE as themselves, not as a format failure" 4 "DEPS NOT FETCHED" "UNFORMATTED" "$rc" "$out"
   check "and the import_deps trap is named so the next reader does not re-derive it" 4 "import_deps" "" "$rc" "$out"
@@ -354,11 +357,11 @@ fi
 if [ -n "$running_probe" ]; then
   mkdir -p "$tmp/refuse/api/deps" "$tmp/refuse/bin"
   : > "$tmp/refuse/api/deps/keep"
-  printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running_probe" \
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running_probe" \
     > "$tmp/refuse/pin"
   cat > "$tmp/refuse/bin/mix" <<'FAKE'
 #!/usr/bin/env bash
-echo "mix format is REFUSED on this box: local Elixir 1.19.5 != the 1.18.4 that CI and prod use." >&2
+echo "mix format is REFUSED on this box: local Elixir != the one CI and prod use." >&2
 echo "If you truly must: BP_ALLOW_FORMAT=1 mix format <file>" >&2
 echo "UNCHECKED: this refusal is exit 2 — a toolchain refusal, never a formatting verdict." >&2
 exit 2
@@ -387,7 +390,7 @@ FAKE
   #     hazard is the output SIZE, not the refusal.
   mkdir -p "$tmp/refuse1/api/deps" "$tmp/refuse1/bin"
   : > "$tmp/refuse1/api/deps/keep"
-  printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running_probe" \
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running_probe" \
     > "$tmp/refuse1/pin"
   cat > "$tmp/refuse1/bin/mix" <<'FAKE1'
 #!/usr/bin/env bash
@@ -419,7 +422,7 @@ if [ -n "$running_probe" ] && command -v mix >/dev/null 2>&1; then
   for kind in ok bad; do
     d="$tmp/verdict-$kind"
     mkdir -p "$d/api/deps"; : > "$d/api/deps/keep"
-    printf 'erlang 27.3.4\nelixir %s-otp-27\n' "$running_probe" \
+    printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running_probe" \
       > "$d/pin"
     printf '[inputs: ["*.ex"]]\n' > "$d/api/.formatter.exs"
     if [ "$kind" = ok ]; then

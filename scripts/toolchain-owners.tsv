@@ -1,18 +1,24 @@
 # Which version file owns which consumer. scripts/toolchain-drift-check.sh reads
-# this table and nothing else to decide where an Erlang/Elixir number may live.
+# this table and nothing else to decide where an Erlang/Elixir version may live.
 #
-# Columns: <version file> <consumer>, whitespace-separated, one consumer a row.
+# Columns: <owner> <consumer>, whitespace-separated, one consumer a row. The
+# owner is a *.tool-versions file, or `data`.
 #   .github/workflows/X.yml       every erlef/setup-beam step in X reads the file
 #                                 with `version-file:` + `version-type: strict`
 #   .github/workflows/X.yml#job   the same, for one job; beats the workflow row
-#   */Dockerfile                  the build stage's `FROM hexpm/elixir:` tag
-#                                 spells the file's numbers (Docker cannot read it)
-#   *.sh                          the script reads the file by path, or its
-#                                 ERLANG_VERSION/ELIXIR_VERSION defaults equal it
+#   .github/actions/X/action.yml  the same, for a composite action
+#   */Dockerfile, *.sh, ...       a literal version in it (an image tag, an
+#                                 install default) must equal the file's, or it
+#                                 reads the file by path
 #   *.tool-versions               that file's erlang line equals this file's
+#   data <file>                   its literals are test data or past check names,
+#                                 not a runtime; an install, image or *_VERSION
+#                                 form in it still fails
 #
-# Moving a consumer to another file is editing its row. Folding a version file
-# into another is deleting its rows and re-pointing its consumers.
+# Every tracked .tool-versions / *.tool-versions must appear here. A literal
+# version in a workflow, action, Dockerfile, deploy file or script with no row
+# fails. Moving a consumer to another file is editing its row; folding a
+# version file into another is deleting its rows and re-pointing its consumers.
 
 # The content server's runtime: asdf on the box resolves the repo-root file.
 .tool-versions  .github/workflows/architecture.yml
@@ -27,6 +33,7 @@
 .tool-versions  .github/workflows/pds-scratch-round-trip.yml
 .tool-versions  .github/workflows/release-artifact.yml
 .tool-versions  .github/workflows/security.yml
+.tool-versions  api/scripts/sobelow-baseline-reconcile.sh
 .tool-versions  deploy/azure-base-install.sh
 .tool-versions  tools/format.tool-versions
 
@@ -40,3 +47,12 @@ deploy/image.tool-versions  scripts/cloud-format-check.sh
 # The formatter the format gate measures (reason in the file).
 tools/format.tool-versions  .github/workflows/elixir.yml#format
 tools/format.tool-versions  scripts/format-check.sh
+
+# Test data: fake toolchains, and the names of past CI checks
+# ("Test (Elixir 1.18.1 / OTP 27.0)").
+data  scripts/blocking-name-census.py
+data  scripts/ci-measure.sh
+data  scripts/elixir-main-red-attribution.test.sh
+data  scripts/fetch-prebuilt.test.sh
+data  scripts/release-scan.test.sh
+data  scripts/required-checks.test.sh

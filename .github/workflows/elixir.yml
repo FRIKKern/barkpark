@@ -708,15 +708,15 @@ jobs:
 
       # ── the toolchain drift gate (task-97b251c1b5d6a1db) ─────────────────
       # CI runs the Erlang and Elixir production runs. The numbers live in the
-      # version files scripts/toolchain-owners.tsv names, and every setup-beam
-      # step, Dockerfile and script reads its owner's file. This step reds when
-      # anything names a version itself or reads the wrong file. HERE and not in
+      # version files scripts/toolchain-owners.tsv names. It reds on a version
+      # file the table lacks, a step reading the wrong file, or a literal
+      # version that differs from its owner or has none. HERE and not in
       # `mix-prod-compile`: this job has no `if:`, so a diff touching only a
       # version file or a workflow still runs it. A STEP and not a job, for the
       # two reasons written above the skip-disclosure ratchet.
       - name: The toolchain drift gate must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/run-instrument.sh toolchain-drift-selftest -- bash scripts/toolchain-drift-check.sh --selftest
+        run: bash scripts/run-instrument.sh toolchain-drift-selftest -- bash scripts/toolchain-drift-check.test.sh
 
       - name: Every Erlang and Elixir version comes from its version file
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
