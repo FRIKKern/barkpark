@@ -73,16 +73,21 @@ defmodule BarkparkWeb.Studio.DeskNavbarDrawerTest do
       assert text(view, @picker) == "Drafts"
       assert has_element?(view, @picker <> " .dot.draft-ring")
 
-      published = ~s(#{@menu} a[role="menuitemradio"][data-desk-perspective="published"])
-      drafts = ~s(#{@menu} a[role="menuitemradio"][data-desk-perspective="drafts"])
+      published = ~s(#{@menu} button[role="menuitemradio"][data-desk-perspective="published"])
+      drafts = ~s(#{@menu} button[role="menuitemradio"][data-desk-perspective="drafts"])
 
       assert has_element?(
                view,
-               published <> ~s([aria-checked="false"][href="#{base}?perspective=published"]),
+               published <>
+                 ~s([aria-checked="false"][phx-click*='"href":"#{base}?perspective=published"']),
                "Published"
              )
 
-      assert has_element?(view, drafts <> ~s([aria-checked="true"][href="#{base}"]), "Drafts")
+      assert has_element?(
+               view,
+               drafts <> ~s([aria-checked="true"][phx-click*='"href":"#{base}"']),
+               "Drafts"
+             )
     end
 
     test "picking Published patches the page to it, and Drafts back", %{conn: conn, base: base} do

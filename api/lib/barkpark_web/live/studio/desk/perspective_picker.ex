@@ -7,7 +7,8 @@ defmodule BarkparkWeb.Studio.Desk.PerspectivePicker do
   The perspective is the page's URL (`?perspective=published`), the one
   state the edit pane's Draft and Published pills already switch
   (`Panes.perspective/1`, `DocStatus`, `PublishedView`). Picking one is a
-  patch to the same page with the query changed, as TanStack's `pick`:
+  patch to the same page with the query changed (`JS.patch`, as the pane's
+  pills), as TanStack's `pick`:
   Published sets `perspective=published` and keeps the rest of the query;
   Drafts drops it (drafts is the default, so it leaves the URL). The pill
   and the pane's pills read the same URL, so they never disagree.
@@ -20,6 +21,7 @@ defmodule BarkparkWeb.Studio.Desk.PerspectivePicker do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Studio.Desk.Panes
+  alias Phoenix.LiveView.JS
 
   attr :uri, :string, default: nil, doc: "the page's URL (`desk_uri`)"
 
@@ -57,24 +59,30 @@ defmodule BarkparkWeb.Studio.Desk.PerspectivePicker do
         class="dk-menu perspective-menu"
         style="position-anchor: --dk-perspective; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0"
       >
-        <.link
+        <button
           :if={@published_href}
-          patch={@published_href}
+          type="button"
           role="menuitemradio"
           aria-checked={to_string(@published?)}
           tabindex="-1"
           class="dk-menu-item"
+          phx-click={JS.patch(@published_href)}
           data-desk-perspective="published"
-        ><span class="dot published" aria-hidden="true"></span>{gettext("Published")}</.link>
-        <.link
+        >
+          <span class="dot published" aria-hidden="true"></span>{gettext("Published")}
+        </button>
+        <button
           :if={@drafts_href}
-          patch={@drafts_href}
+          type="button"
           role="menuitemradio"
           aria-checked={to_string(!@published?)}
           tabindex="-1"
           class="dk-menu-item"
+          phx-click={JS.patch(@drafts_href)}
           data-desk-perspective="drafts"
-        ><span class="dot draft-ring" aria-hidden="true"></span>{gettext("Drafts")}</.link>
+        >
+          <span class="dot draft-ring" aria-hidden="true"></span>{gettext("Drafts")}
+        </button>
       </div>
     </div>
     """

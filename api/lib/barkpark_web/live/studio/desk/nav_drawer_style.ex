@@ -15,7 +15,8 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawerStyle do
     a narrow desktop window keeps 25 px.
   - In the published perspective the bar turns green, as Sanity's.
 
-  Colours are the desk's tokens (`--dk-*`, `Desk.Style`).
+  Colours are the desk's tokens (`--dk-*`, `Desk.Style`); the bar is outside
+  `.dk`, so its green is the design token `--success`.
   """
   use Phoenix.Component
 
@@ -37,7 +38,7 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawerStyle do
       .studio-shell:has(.dk) .navbar .perspective-menu .dk-menu-item[aria-checked="true"] { background: var(--dk-selected); color: var(--dk-on-selected); }
       .studio-shell:has(.dk) .navbar .perspective-menu .dk-menu-item[aria-checked="true"]::after { content: none; }
       .studio-shell:has(.dk) .navbar .perspective-menu .dk-menu-item:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-nav-focus); }
-      .studio-shell:has(.dk) .navbar:has(.perspective[data-perspective="published"]) { background: color-mix(in srgb, var(--dk-published) 10%, var(--dk-nav-bg)); }
+      .studio-shell:has(.dk) .navbar:has(.perspective[data-perspective="published"]) { background: color-mix(in srgb, var(--success) 10%, var(--dk-nav-bg)); }
       .studio-shell:has(.dk) .navbar:has(.perspective[data-perspective="published"]) .perspective-picker { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dk-published) 45%, var(--dk-nav-bg)); background: color-mix(in srgb, var(--dk-published) 10%, var(--dk-nav-bg)); }
       .studio-shell:has(.dk) .navbar .nav-drawer-wrap { display: none; }
       .studio-shell:has(.dk) .navbar .nav-drawer { box-sizing: border-box; position: fixed; inset: 0 auto 0 0; width: min(280px, calc(100vw - 48px)); height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; font-weight: 500; }
@@ -86,6 +87,9 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawerStyle do
         .studio-shell:has(.dk) .navbar #dk-help-menu { inset: 52px 4px auto auto !important; margin: 0 !important; }
         .studio-shell:has(.dk) .navbar .menu-wrap.perspective { flex: 0 1 auto; min-width: 0; }
         .studio-shell:has(.dk) .navbar .perspective-picker { max-width: 100%; min-width: 44px; }
+        .studio-shell:has(.dk) .navbar .perspective-picker { padding: 0 2px 0 10px; }
+        .studio-shell:has(.dk) .navbar .perspective-picker > .dot { margin-right: 8px; }
+        .studio-shell:has(.dk) .navbar .perspective-picker > svg { margin-left: 2px; }
         .studio-shell:has(.dk) .navbar .studio-bar-right > :not(.perspective) { flex: none; }
       }
       @media (max-width: 599px) and (pointer: fine) {
