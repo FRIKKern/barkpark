@@ -138,6 +138,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
 
   def put_bases(socket, _keys, _seen), do: assign(socket, :editor_field_bases, %{})
 
+  @doc """
+  Adds the bases of a change the server built (`Fields.autosave_built/2`)
+  to those `put_bases/3` stored: the value each field was computed from.
+  """
+  def add_bases(socket, bases) when is_map(bases) and map_size(bases) > 0,
+    do:
+      assign(
+        socket,
+        :editor_field_bases,
+        Map.merge(socket.assigns[:editor_field_bases] || %{}, bases)
+      )
+
+  def add_bases(socket, _bases), do: socket
+
   @doc false
   # The entry a post reporting number `n` was written from: the latest of the
   # values the page showed up to `n` and the page's own landed post. With no

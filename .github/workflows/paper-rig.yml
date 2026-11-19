@@ -141,8 +141,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.0"
-          elixir-version: "1.18.4"
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -155,9 +155,9 @@ jobs:
           path: |
             api/deps
             api/_build
-          key: ${{ runner.os }}-paper-rig-mix-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-paper-rig-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-paper-rig-mix-27.0-1.18.4-
+            ${{ runner.os }}-paper-rig-mix-${{ hashFiles('.tool-versions') }}-
 
       - name: Fetch deps
         working-directory: api

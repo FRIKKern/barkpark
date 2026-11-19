@@ -508,12 +508,6 @@ jobs:
     outputs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Track the prod server toolchain, same pin as elixir.yml.
-        otp: ["27.0"]
-        elixir: ["1.18.1"]
     defaults:
       run:
         working-directory: api
@@ -523,8 +517,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Cache deps + build
         uses: actions/cache@v6
@@ -532,9 +526,9 @@ jobs:
           path: |
             api/deps
             api/_build
-          key: ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-sobelow-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-sobelow-${{ hashFiles('.tool-versions') }}-
 
       - name: Fetch deps
         id: s1
@@ -641,7 +635,7 @@ jobs:
         if: always() && steps.s3.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
-          name: sobelow-baseline-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}
+          name: sobelow-baseline
           path: ${{ runner.temp }}/sobelow-baseline-reconcile
           # The reconcile script writes the baseline as a dotfile (.sobelow-skips);
           # upload-artifact@v4 excludes hidden files by default, which would ship
@@ -917,8 +911,8 @@ jobs:
         with:
           # Same pin as the sobelow job and elixir.yml. Nothing is compiled
           # here; this is only the runtime that provides :erlang.phash2.
-          otp-version: "27.0"
-          elixir-version: "1.18.1"
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Selftest (the fingerprint ratchet must be able to fail)
         id: s1
@@ -1006,7 +1000,7 @@ jobs:
     # decimal to ~> 3.0). The 8th, esaml GHSA-4g2h-vm7x-747c (XXE), has NO
     # upstream fix — every release ≤ 4.6.0 is affected — and is mitigated at
     # runtime by OTP 27+ (xmerl disables external entities by default), which
-    # this job (OTP 27.0) and prod both run. It is the single documented
+    # this job and prod both run (OTP 27, from .tool-versions). It is the single documented
     # suppression below; revisit if esaml ships a patched release.
     needs: changes
     # GATED ON ITS OWN INPUTS, not on `api` (2026-09-20, task-76e529e61d9e34d0).
@@ -1023,11 +1017,6 @@ jobs:
       # `security-gate` as V_AUDIT.
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ["27.0"]
-        elixir: ["1.18.1"]
     defaults:
       run:
         working-directory: api
@@ -1037,16 +1026,16 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Cache deps
         uses: actions/cache@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-audit-deps-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-audit-deps-${{ hashFiles('.tool-versions') }}-
 
       - name: Fetch deps
         id: s1
@@ -1162,8 +1151,8 @@ jobs:
     #
     #   * NO `strategy.matrix`. The published check-run name is then exactly the
     #     `name:` string below. A matrixed job's name either gains the full
-    #     matrix tuple (`… (27.0, 1.18.1)`, which is what BOTH heavy jobs here
-    #     publish) or, if it never STARTED, publishes the literal uninterpolated
+    #     matrix tuple (`… (27.0, 1.18.1)`, which BOTH heavy jobs here published
+    #     until they dropped their matrix) or, if it never STARTED, publishes the literal uninterpolated
     #     `${{ matrix.x }}` — both unusable as a required context (D20).
     #
     #   * `if: always()`. Without it this job would itself be `skipped` whenever

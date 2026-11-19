@@ -7,8 +7,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  PR #17482 sat at 3/4 with a RED "Cloud control-plane (compile + format)" job
 #  while `mix format --check-formatted` in the PR's own worktree exited 0 on the
-#  SAME head sha. Cause: .github/workflows/cloud.yml pins Elixir 1.18.1; the
-#  fleet's Macs run 1.19.5, and the two formatters disagree.
+#  SAME head sha. Cause: .github/workflows/cloud.yml then pinned Elixir 1.18.1;
+#  the fleet's Macs run 1.19.5, and the two formatters disagree.
 #
 #  MEASURED 2026-09-10, the exact byte that cost that cycle
 #  (cloud/test/barkpark_cloud/registry_name_claim_select_census_test.exs:351,
@@ -26,18 +26,17 @@
 #  silently: a local `mix format` REWRITES gate-correct bytes into gate-red
 #  ones, so the next dev's reflex "fix" re-reds a green gate.
 #
-#  THE PIN IS NOT THE ENFORCEMENT. .tool-versions says elixir 1.18.4-otp-27;
-#  cloud.yml says 1.18.1; this Mac's PATH says 1.19.5. Three numbers, and
-#  nothing on a dev box reconciles them, because there is no asdf/mise here.
+#  THE PIN IS NOT THE ENFORCEMENT. The gate's Elixir is the 1.18 line; this
+#  Mac's PATH says 1.19.5, and nothing on a dev box reconciles them, because
+#  there is no asdf/mise here.
 #  A declaration nothing checks is a comment. This script is the check: it
 #  OBTAINS the pinned Elixir and runs the gate's own command under it.
 #
 #  ONE SOURCE OF TRUTH FOR THE EXPECTED VERSION: it is READ OUT of
-#  .github/workflows/cloud.yml's `compile:` job matrix, never restated here.
-#  A second declaration is a second thing to drift, and drift between the pin
-#  and the gate is the defect this file exists to stop. If the shape ever
-#  changes this REFUSES (exit 5) rather than guessing — a wrong expectation is
-#  worse than none, because it reds people who are on the CORRECT toolchain.
+#  deploy/image.tool-versions, the file cloud.yml's Setup BEAM steps read,
+#  never restated here. If the elixir line is missing this REFUSES (exit 5)
+#  rather than guessing — a wrong expectation is worse than none, because it
+#  reds people who are on the CORRECT toolchain.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 #  USAGE
@@ -55,7 +54,8 @@
 #       the obtained build will not run on this OTP) — no claim made
 #    4  cloud/deps not fetched — .formatter.exs uses import_deps, so the
 #       formatter cannot even parse its own config — no claim made
-#    5  the pinned version could not be read out of cloud.yml — no claim made
+#    5  the pinned version could not be read out of deploy/image.tool-versions
+#       — no claim made
 #    6  the formatter DID NOT RUN (no mix, a wrapper refused it, or an exit code
 #       that is neither 0 nor 1) — no claim made
 #
@@ -65,24 +65,19 @@
 set -uo pipefail
 
 ROOT="${CLOUD_FORMAT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-WORKFLOW="${CLOUD_FORMAT_WORKFLOW:-$ROOT/.github/workflows/cloud.yml}"
+PIN_FILE="${CLOUD_FORMAT_PIN_FILE:-$ROOT/deploy/image.tool-versions}"
 CLOUD_DIR="${CLOUD_FORMAT_CLOUD_DIR:-$ROOT/cloud}"
 CACHE="${BARKPARK_ELIXIR_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/barkpark/elixir}"
 
 say() { printf '%s\n' "$*"; }
 
-# ── the expected version, read out of the gate that will judge you ───────────
-# Scoped to the `compile:` job (the one that runs the Format check step) so a
-# matrix elsewhere in the file — e.g. `test:` — cannot answer for it.
+# ── the expected version, read out of the file the gate reads ───────────────
+# The `elixir <version>` line, without its `-otp-NN` suffix.
 read_expected() {
-  awk '
-    /^  compile:/            { in_job = 1; next }
-    in_job && /^  [a-z_-]+:/ { in_job = 0 }
-    in_job && /elixir: \[/   { if (match($0, /"[0-9][^"]*"/)) { print substr($0, RSTART+1, RLENGTH-2); exit } }
-  ' "$1" 2>/dev/null
+  sed -n 's/^[[:space:]]*elixir[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$1" 2>/dev/null | head -1
 }
 
-elixir_version_of() { # bin-dir-or-empty -> "1.18.1"
+elixir_version_of() { # bin-dir-or-empty -> its Elixir version as "x.y.z"
   local prefix="$1"
   if [ -n "$prefix" ]; then
     PATH="$prefix:$PATH" "$prefix/elixir" --version 2>/dev/null \
@@ -145,25 +140,25 @@ obtain() {
 }
 
 run_check() {
-  if [ ! -f "$WORKFLOW" ]; then
-    say "!! CLOUD FORMAT CHECK REFUSED (exit 5): no workflow at $WORKFLOW,"
+  if [ ! -f "$PIN_FILE" ]; then
+    say "!! CLOUD FORMAT CHECK REFUSED (exit 5): no pin file at $PIN_FILE,"
     say "   so the Elixir version the Cloud gate pins cannot be read."
     say "   NO CLAIM is being made about formatting."
     return 5
   fi
   local EXPECTED RUNNING BIN GOT
-  EXPECTED="$(read_expected "$WORKFLOW")"
+  EXPECTED="$(read_expected "$PIN_FILE")"
   if [ -z "$EXPECTED" ]; then
-    say "!! CLOUD FORMAT CHECK REFUSED (exit 5): could not read the compile job's pinned"
-    say "   elixir version out of ${WORKFLOW#"$ROOT"/}. The job's matrix shape changed."
-    say "   Fix this reader rather than restating a version here — a second declaration is"
+    say "!! CLOUD FORMAT CHECK REFUSED (exit 5): no \`elixir <version>\` line in"
+    say "   ${PIN_FILE#"$ROOT"/}."
+    say "   Restore the line rather than restating a version here — a second declaration is"
     say "   a second thing to drift, and a wrong expectation reds people who are CORRECT."
     say "   NO CLAIM is being made about formatting."
     return 5
   fi
 
   RUNNING="$(elixir_version_of "")"
-  say ">> gate pins   Elixir $EXPECTED   (read from ${WORKFLOW#"$ROOT"/}, compile job matrix)"
+  say ">> gate pins   Elixir $EXPECTED   (read from ${PIN_FILE#"$ROOT"/})"
   say ">> on PATH     Elixir ${RUNNING:-<none>}"
 
   if [ -n "$RUNNING" ] && [ "$RUNNING" = "$EXPECTED" ]; then
@@ -182,7 +177,7 @@ run_check() {
     if [ -z "$BIN" ] || [ ! -x "$BIN/elixir" ]; then
       say ""
       say "!! CANNOT OBTAIN THE PINNED ELIXIR (exit 3) — a REFUSAL, not a verdict."
-      say "   the gate: Elixir $EXPECTED   (${WORKFLOW#"$ROOT"/}, compile job)"
+      say "   the gate: Elixir $EXPECTED   (${PIN_FILE#"$ROOT"/})"
       say "   this box: Elixir ${RUNNING:-<none>}"
       say "   Tried, in order: mise ($( command -v mise >/dev/null 2>&1 && echo present || echo absent))," \
           "asdf ($( command -v asdf >/dev/null 2>&1 && echo present || echo absent)),"
@@ -329,26 +324,30 @@ check() { # name want yes no rc out
 }
 
 say "=== cloud-format-check selftest: every refusal must fire, and name only itself ==="
+# Fixture numbers sit in variables. scripts/toolchain-drift-check.sh compares a
+# version on a line that names a tool with its owner file, so the made-up ones
+# sit on a line of their own.
+fx_otp=27.3.4.13
+fx_prose=9.9.9 fx_nowhere=0.0.1
 
-# 1. NO WORKFLOW — refuse rather than guess a version.
+# 1. NO PIN FILE — refuse rather than guess a version.
 mkdir -p "$tmp/no-wf/cloud/deps"; : > "$tmp/no-wf/cloud/deps/keep"
-out="$(CLOUD_FORMAT_ROOT="$tmp/no-wf" CLOUD_FORMAT_WORKFLOW="$tmp/no-wf/nope.yml" bash "$SELF" 2>&1)"; rc=$?
-check "a missing workflow REFUSES rather than guessing a version" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
+out="$(CLOUD_FORMAT_ROOT="$tmp/no-wf" CLOUD_FORMAT_PIN_FILE="$tmp/no-wf/nope" bash "$SELF" 2>&1)"; rc=$?
+check "a missing pin file REFUSES rather than guessing a version" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
 
-# 2. A MATRIX IN A DIFFERENT JOB MUST NOT ANSWER FOR compile:.
-mkdir -p "$tmp/bad-wf/cloud/deps" "$tmp/bad-wf/.github/workflows"; : > "$tmp/bad-wf/cloud/deps/keep"
-printf 'jobs:\n  compile:\n    name: Cloud\n  test:\n    strategy:\n      matrix:\n        elixir: ["9.9.9"]\n' \
-  > "$tmp/bad-wf/.github/workflows/cloud.yml"
-out="$(CLOUD_FORMAT_ROOT="$tmp/bad-wf" CLOUD_FORMAT_WORKFLOW="$tmp/bad-wf/.github/workflows/cloud.yml" bash "$SELF" 2>&1)"; rc=$?
-check "the test job's matrix must not answer for the compile job" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
+# 2. A COMMENTED-OUT ELIXIR LINE MUST NOT ANSWER FOR THE PIN.
+mkdir -p "$tmp/bad-wf/cloud/deps"; : > "$tmp/bad-wf/cloud/deps/keep"
+printf 'erlang %s\n# elixir %s is prose, not a pin\n' "$fx_otp" "$fx_prose" > "$tmp/bad-wf/pin"
+out="$(CLOUD_FORMAT_ROOT="$tmp/bad-wf" CLOUD_FORMAT_PIN_FILE="$tmp/bad-wf/pin" bash "$SELF" 2>&1)"; rc=$?
+check "a commented-out elixir line must not answer for the pin" 5 "exit 5" "UNFORMATTED" "$rc" "$out"
 
 # 3. AN UNOBTAINABLE PIN REFUSES AS ITSELF. No 0.0.1 exists anywhere, and the
 #    download loop 404s on every asset, so this exercises the real fallback.
-mkdir -p "$tmp/wrong/cloud/deps" "$tmp/wrong/.github/workflows"; : > "$tmp/wrong/cloud/deps/keep"
-printf 'jobs:\n  compile:\n    strategy:\n      matrix:\n        elixir: ["0.0.1"]\n' \
-  > "$tmp/wrong/.github/workflows/cloud.yml"
+mkdir -p "$tmp/wrong/cloud/deps"; : > "$tmp/wrong/cloud/deps/keep"
+printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$fx_nowhere" \
+  > "$tmp/wrong/pin"
 out="$(BARKPARK_ELIXIR_CACHE="$tmp/cache" CLOUD_FORMAT_ROOT="$tmp/wrong" \
-  CLOUD_FORMAT_WORKFLOW="$tmp/wrong/.github/workflows/cloud.yml" bash "$SELF" 2>&1)"; rc=$?
+  CLOUD_FORMAT_PIN_FILE="$tmp/wrong/pin" bash "$SELF" 2>&1)"; rc=$?
 check "an unobtainable pin REFUSES and is never reported as unformatted" 3 "CANNOT OBTAIN" "UNFORMATTED" "$rc" "$out"
 check "and it says NO CLAIM, so nothing downstream reads it as a verdict" 3 "NO CLAIM" "" "$rc" "$out"
 check "and it forbids the reflex 'fix' that would red a currently-green gate" 3 "Do NOT run" "" "$rc" "$out"
@@ -356,10 +355,10 @@ check "and it forbids the reflex 'fix' that would red a currently-green gate" 3 
 # 4. DEPS NOT FETCHED — pin matches PATH so the version branch is skipped.
 running="$(elixir_version_of "")"
 if [ -n "$running" ]; then
-  mkdir -p "$tmp/nodeps/cloud" "$tmp/nodeps/.github/workflows"
-  printf 'jobs:\n  compile:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running" \
-    > "$tmp/nodeps/.github/workflows/cloud.yml"
-  out="$(CLOUD_FORMAT_ROOT="$tmp/nodeps" CLOUD_FORMAT_WORKFLOW="$tmp/nodeps/.github/workflows/cloud.yml" bash "$SELF" 2>&1)"; rc=$?
+  mkdir -p "$tmp/nodeps/cloud"
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running" \
+    > "$tmp/nodeps/pin"
+  out="$(CLOUD_FORMAT_ROOT="$tmp/nodeps" CLOUD_FORMAT_PIN_FILE="$tmp/nodeps/pin" bash "$SELF" 2>&1)"; rc=$?
   check "unfetched deps REFUSE as themselves, not as a format failure" 4 "DEPS NOT FETCHED" "UNFORMATTED" "$rc" "$out"
   check "and the import_deps trap is named so the next reader does not re-derive it" 4 "import_deps" "" "$rc" "$out"
 else
@@ -370,10 +369,10 @@ fi
 #    refusal with everything else correct. It must print CANNOT READ, exit 6,
 #    and must NOT contain the word UNFORMATTED anywhere.
 if [ -n "$running" ]; then
-  mkdir -p "$tmp/refuse/cloud/deps" "$tmp/refuse/.github/workflows" "$tmp/refuse/bin"
+  mkdir -p "$tmp/refuse/cloud/deps" "$tmp/refuse/bin"
   : > "$tmp/refuse/cloud/deps/keep"
-  printf 'jobs:\n  compile:\n    strategy:\n      matrix:\n        elixir: ["%s"]\n' "$running" \
-    > "$tmp/refuse/.github/workflows/cloud.yml"
+  printf 'erlang %s\nelixir %s-otp-27\n' "$fx_otp" "$running" \
+    > "$tmp/refuse/pin"
   cat > "$tmp/refuse/bin/mix" <<'FAKE'
 #!/usr/bin/env bash
 echo "mix format is REFUSED on this box: local Elixir != the one CI and prod use." >&2
@@ -382,25 +381,25 @@ exit 2
 FAKE
   chmod +x "$tmp/refuse/bin/mix"
   out="$(PATH="$tmp/refuse/bin:$PATH" CLOUD_FORMAT_ROOT="$tmp/refuse" \
-    CLOUD_FORMAT_WORKFLOW="$tmp/refuse/.github/workflows/cloud.yml" bash "$SELF" 2>&1)"; rc=$?
+    CLOUD_FORMAT_PIN_FILE="$tmp/refuse/pin" bash "$SELF" 2>&1)"; rc=$?
   check "a wrapper REFUSAL refuses as itself and is NEVER reported as unformatted" 6 "CANNOT READ" "UNFORMATTED" "$rc" "$out"
   check "and it quotes the wrapper's own words so the reader can see WHO refused" 6 "REFUSED on this box" "" "$rc" "$out"
 else
   say "  skip  wrapper-refusal case — no elixir on PATH to pin an expectation to"
 fi
 
-# 6. THE READER ACTUALLY READS THE REAL WORKFLOW. If this returns empty on the
+# 6. THE READER ACTUALLY READS THE REAL PIN FILE. If this returns empty on the
 #    committed file, every case above is testing a straw man.
-if [ -f "$WORKFLOW" ]; then
-  real="$(read_expected "$WORKFLOW")"
+if [ -f "$PIN_FILE" ]; then
+  real="$(read_expected "$PIN_FILE")"
   if [ -n "$real" ]; then
-    say "  ok    the reader resolves the REAL cloud.yml compile-job pin: Elixir $real"
+    say "  ok    the reader resolves the REAL image pin: Elixir $real"
   else
-    say "  FAIL  the reader returns EMPTY on the committed ${WORKFLOW#"$ROOT"/} — every case above is a straw man"
+    say "  FAIL  the reader returns EMPTY on the committed ${PIN_FILE#"$ROOT"/} — every case above is a straw man"
     fails=$((fails + 1))
   fi
 else
-  say "  skip  real-workflow read — $WORKFLOW not present"
+  say "  skip  real pin read — $PIN_FILE not present"
 fi
 
 say ""

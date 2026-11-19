@@ -166,14 +166,15 @@ The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 **blocking** (no `continue-on-error`). The test-infra remediation was
 completed 2026-06-10 (`continue-on-error` dropped at that point); a failing
 test suite now prevents merge. Its job **id** is `mix-test`; the check that
-shows up on the PR is its display name, `Test (Elixir 1.18.1 / OTP 27.0)`,
-inside the workflow named `elixir`. There is no check called "Elixir Test" —
+shows up on the PR is its display name,
+`Test (Elixir and OTP from .tool-versions) (<partition>)`, inside the workflow
+named `elixir`. There is no check called "Elixir Test" —
 that name is folklore, and searching for it finds nothing. **The name a reader
 looking for "the Elixir gate" actually wants is `Elixir gate`**: the `elixir`
 workflow's `elixir-gate` aggregator, which is un-matrixed (so its check-run name
 is exactly that string), runs `if: always()`, and fails when any upstream job
 lands outside its allow-set. That is the one name branch protection is meant to
-require — `Test (Elixir 1.18.1 / OTP 27.0)` is a job underneath it.
+require — `Test (…)` is a job underneath it.
 
 **Gate ORDER inside `mix-test` is load-bearing** (task-openapi-drift-chronic).
 The two generated-artifact freshness gates — `OpenAPI drift check` and

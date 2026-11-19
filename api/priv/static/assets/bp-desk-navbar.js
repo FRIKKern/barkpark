@@ -1,6 +1,7 @@
-// The desk navbar's menus (Desk.UserMenu, Desk.HelpMenu, Desk.ScopeSwitch), as the TanStack
-// Studio's Navbar.tsx: the appearance radios, the help menu's two dialogs and
-// its "New version available". The menus open and close as popovers by
+// The desk navbar's menus (Desk.UserMenu, Desk.HelpMenu, Desk.ScopeSwitch,
+// Desk.PerspectivePicker, Desk.NavDrawer), as the TanStack Studio's Navbar.tsx:
+// the appearance radios, the help menu's two dialogs and its "New version
+// available", the perspective menu and the phone drawer. The menus open and close as popovers by
 // themselves; this script does what a popover cannot. It runs once a page,
 // from the help menu's script tag or from the desk hook's loader.
 (function () {
@@ -27,8 +28,10 @@
   };
   var checkAppearance = function (doc) {
     var now = appearance();
+    // The user menu's are radios (aria-checked), the drawer's pressed buttons.
     doc.querySelectorAll("[data-desk-appearance]").forEach(function (item) {
-      item.setAttribute("aria-checked", item.getAttribute("data-desk-appearance") === now ? "true" : "false");
+      var state = item.hasAttribute("aria-pressed") ? "aria-pressed" : "aria-checked";
+      item.setAttribute(state, item.getAttribute("data-desk-appearance") === now ? "true" : "false");
     });
   };
   var setAppearance = function (doc, value) {
@@ -94,13 +97,91 @@
     if (dialog && !dialog.open) dialog.showModal();
   };
 
+  // The drawer (Desk.NavDrawer): a modal dialog, so Escape shuts it and the
+  // browser gives the focus back to "Open menu". A modal dialog alone lets Tab
+  // stop on the dialog box and then leave the page, so Tab and Shift+Tab wrap
+  // between its first and last control, as TanStack's focus scope does.
+  var drawer = function (doc) {
+    return doc.getElementById("dk-drawer");
+  };
+  var drawerStops = function (d) {
+    return Array.prototype.filter.call(d.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), [tabindex]"), function (el) {
+      return el.tabIndex >= 0 && el.getClientRects().length > 0;
+    });
+  };
+  var trapDrawer = function (doc, e) {
+    var d = drawer(doc);
+    if (e.key !== "Tab" || !d || !d.open) return;
+    var list = drawerStops(d);
+    if (!list.length) return;
+    var first = list[0];
+    var last = list[list.length - 1];
+    var at = doc.activeElement;
+    if (!d.contains(at) || at === d) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && at === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && at === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  var closeDrawer = function (doc) {
+    var d = drawer(doc);
+    if (d && d.open) d.close();
+  };
+
+  var onDrawer = function (doc, target, e) {
+    if (target.closest("[data-desk-drawer-open]")) {
+      var d = drawer(doc);
+      if (d && !d.open) {
+        checkAppearance(doc);
+        d.showModal();
+        var opener = doc.getElementById("dk-drawer-open");
+        if (opener) opener.setAttribute("aria-expanded", "true");
+      }
+      return true;
+    }
+    if (target.closest("[data-desk-drawer-close]") || target.closest("[data-desk-drawer-pick]")) {
+      closeDrawer(doc);
+      return true;
+    }
+    // Help and resources: the navbar's own help menu, once the drawer is shut.
+    if (target.closest("[data-desk-drawer-help]")) {
+      closeDrawer(doc);
+      var menu = doc.getElementById("dk-help-menu");
+      if (menu && menu.showPopover && !menu.matches(":popover-open")) menu.showPopover();
+      return true;
+    }
+    // A press on the backdrop (the dialog itself, outside its box) shuts it.
+    if (target.id === "dk-drawer" && target.open) {
+      var box = target.getBoundingClientRect();
+      var inside = e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom;
+      if (!inside) target.close();
+      return true;
+    }
+    return false;
+  };
+
   var onClick = function (e) {
     var doc = e.currentTarget;
     var target = e.target;
     if (!target || !target.closest) return;
 
+    // A perspective picked (Desk.PerspectivePicker): its link patches the
+    // page; the menu closes at once.
+    var pick = target.closest("[data-desk-perspective]");
+    if (pick) {
+      var list = pick.closest("[popover]");
+      if (list && list.matches(":popover-open")) list.hidePopover();
+      return;
+    }
+
     var radio = target.closest("[data-desk-appearance]");
     if (radio) {
+      // The drawer's stay open, as TanStack's: the change shows at once.
       setAppearance(doc, radio.getAttribute("data-desk-appearance"));
       var menu = radio.closest("[popover]");
       if (menu && menu.matches(":popover-open")) menu.hidePopover();
@@ -138,6 +219,8 @@
       return;
     }
 
+    if (onDrawer(doc, target, e)) return;
+
     // Its own attribute: `data-desk-dialog` marks the desk's document dialogs.
     var opener = target.closest("[data-desk-nav-dialog]");
     if (opener) return openDialog(doc, opener, opener.getAttribute("data-desk-nav-dialog"));
@@ -162,8 +245,30 @@
     // The menu is drawn again by a live navigation: checked when it opens.
     doc.addEventListener("toggle", function (e) {
       if (e.target && e.target.id === "dk-user-menu" && e.newState === "open") checkAppearance(doc);
+      // The perspective menu opens on the one in use, as TanStack's (autoFocus).
+      if (e.target && e.target.id === "dk-perspective-menu" && e.newState === "open") {
+        var on = e.target.querySelector('[aria-checked="true"]');
+        if (on) on.focus();
+      }
     }, true);
+    doc.addEventListener("keydown", function (e) { trapDrawer(doc, e); }, true);
+    // In the perspective menu the arrows move between the two.
+    doc.addEventListener("keydown", function (e) {
+      var menu = e.target && e.target.closest ? e.target.closest("#dk-perspective-menu") : null;
+      if (!menu || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      var items = Array.prototype.slice.call(menu.querySelectorAll("[role=menuitemradio]"));
+      if (!items.length) return;
+      e.preventDefault();
+      var at = items.indexOf(doc.activeElement);
+      items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+    });
     doc.addEventListener("click", onClick);
+    // The drawer shut (Escape, Close menu, a tool, the backdrop): its button says so.
+    doc.addEventListener("close", function (e) {
+      if (!e.target || e.target.id !== "dk-drawer") return;
+      var opener = doc.getElementById("dk-drawer-open");
+      if (opener) opener.setAttribute("aria-expanded", "false");
+    }, true);
     ask(doc);
     setInterval(function () { ask(doc); }, EVERY_MS);
     var visible = function () {
