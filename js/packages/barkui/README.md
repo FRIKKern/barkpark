@@ -58,7 +58,8 @@ neither base.css nor a part mixes a tint of its own.
 - `node check/shots.mjs <dir>` writes light and dark shots of the built page.
 
 In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`) holds that state for viewing (a
-pressed row pins `hover active`, as a real pointer press is both), and `data-paint-free` marks an element that carries no paint of its own. It excuses that element (never
+pressed row pins `hover active`, as a real pointer press is both), and `data-paint-free` marks an
+element that carries no paint of its own. It excuses that element (never
 its children) from the "takes the skin's values" comparison only. It must truly carry none: transparent
 background, no border, shadow, outline or image, and its parent's text colour; otherwise the light
 fails and names it. Every such element is listed in `proof.json` and counted under the part. Every other
@@ -66,6 +67,26 @@ light applies to it.
 
 The rule: **nothing a person can see inside a part's stage, in the views listed under "What part.css
 may condition on", goes unread, and nothing but `part.css` and the base styles can style it.**
+Every rule in part.css, on every stage element it can match, is judged as drawn at a moment when it
+matches; a rule or a pair nobody judges fails the part by name.
+
+- Coverage is checked, not assumed (`check/coverage.mjs`). Every drawn reading, in every light, first
+  asks the browser which of the part's rules apply right then and to which stage elements
+  (`element.matches` with the selector the page holds, inside the media conditions that hold in that
+  page). After a full run, a rule that sets anything and applied at no judged moment fails the part as
+  "a rule nothing read", naming its selector, and so does a state pair (below) that no reading saw.
+- States, per pair (`check/states.mjs`). For every rule that holds `:hover` or `:active`, and every live
+  control (outside the inert rows, not a pinned row) that matches the rest of its selector, the check
+  produces that state on that control with the real pointer, at its centre or held down there (a real
+  press is both), and reads the stage as drawn while it holds, in the first skin, light, on base at
+  1440px. Every computed property of the control and its `::before` and `::after` must change exactly
+  as some pinned row with the same `data-pin` changes when its pin is taken off (the check finds the
+  row by comparing), so that row, read in every view, shows the same change; nothing from the control
+  up to the stage may change. A real state no pinned row shows fails ("no pinned row shows this
+  change"). Which controls are driven comes from `element.matches`, never from a name or an attribute.
+- States the steps reach. Each press step ends with the stage read as drawn, in the first skin, light,
+  on base at 1440px, so a state only an action reaches (pending, after Enter on a live button) is read
+  while it holds. `example.html` also shows pending at rest, in its own row, so every view reads it.
 
 - Read: the check walks every element in the stage (not only `[data-slot]`) and every `::before`,
   `::after`, `::marker` and `::placeholder` that draws. Each colour it shows must be one skin variable
@@ -121,8 +142,10 @@ may condition on", goes unread, and nothing but `part.css` and the base styles c
   Selectors are read as the browser writes them back: a pinned state (`:hover`, `:active`,
   `:focus-visible`, in any case) may stand only on the element the rule styles, never on a host,
   ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
-  come from a short list of structure and attributes (`check/selectors.mjs`), and pseudo-elements are the
-  four the check reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
+  come from a short list of structure (`check/selectors.mjs`): one a person changes by clicking or
+  typing (`:checked`, `:placeholder-shown`, `:enabled` and the like) is refused until a part needs it,
+  when it comes back as a state, driven and read like `:hover`. Pseudo-elements are the four the check
+  reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
   the page loads it, in the same browser, and each part's section must hold, rule by rule and with its
   states pinned, what was read from that part alone; a difference refuses the run, naming the part.
 - Motion: a part defines no keyframes. It may name the shared ones in `css/base.css` (today one,
@@ -187,12 +210,16 @@ refused on the sheet as the browser parses it (`check/cssom.mjs`) before any lig
 | Surface | base, raised, sunken, primary, inverse | those values, and `[data-surface]` selectors | every skin and scheme, at 1440px and at 390px |
 | Width | 1440px, 390px | `@media (max-width: 600px)`, inside which only layout and type may change: no paint, no decoration, no custom property | 390px with every skin, scheme and surface ("phone") |
 | Motion | reduced, allowed | `@media (prefers-reduced-motion: …)`, inside which only transition, animation and scroll-behavior may change; animation names from the shared keyframes, which only turn their element | every light reads with motion reduced; the drawn readings run again with motion allowed in one skin, light, on every surface at 1440px and on base at 390px, animations held finished and halfway |
-| State | as `example.html` shows it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) is read with every skin, scheme, surface and width. Each real state (the pointer at a live control's centre, held down there, or Tab to it) is compared with its pin, on the live control of the same kind, in one skin, light, on base at 1440px: every computed property of the control and its `::before` and `::after` must change as the pin changes it, nothing up to the stage may change, and the stage is read as drawn ("every skin"); the pin carries it across skins, schemes, surfaces and widths. "Pressed by real keys" steps the live states |
+| State | as `example.html` shows it, and as the real pointer and the press steps make it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) and each state shown at rest (the pending row) with every skin, scheme, surface and width. Each real state, on every live control a state rule matches, read as drawn in the first skin, light, on base at 1440px, and held to change exactly as a pinned row changes, which carries it to every other view ("every skin"). Each press step's result read as drawn in that same view ("pressed by real keys") |
 | Script | on, off | not at all (`@media (scripting)` is refused) | "printed with no script" reads the page as it opens with no script: base surface, 1440px |
 
 What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
 differ there, layout can. A moment partway through a transition is not read: both its ends are. A
-state `example.html` never shows is not read, and a real state is compared with its pin in that one view. The motion pass reads one skin in light on purpose:
+real state, or a state only the steps reach, is read as drawn in that one view; a real state reaches the
+other views through the pinned row that changes the same way. A state only the steps reach (the live
+button's pending) is read in that one view only: the pending row shows pending at rest in every view,
+but nothing holds the live button's pending to that row. The focus ring is base.css's and is measured on every
+Tab stop, below. The motion pass reads one skin in light on purpose:
 part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
 through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
 focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
