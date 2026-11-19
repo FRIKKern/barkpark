@@ -15495,6 +15495,21 @@ msgstr "De første 200 treffene. Skriv mer for å snevre dem inn."
 msgid "Not a code (kept as stored)"
 msgstr "Ikke en kode (beholdt slik den er lagret)"
 
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Not a valid URL"
+msgstr "Ikke en gyldig URL"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Does not match allowed protocols/schemes"
+msgstr "Stemmer ikke overens med tillatte protokoller/skjemaer"
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Username/password not allowed"
+msgstr "Brukernavn/passord er ikke tillatt"
+
 #: lib/barkpark_web/live/studio/desk/perspective_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Perspective"
