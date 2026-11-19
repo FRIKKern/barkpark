@@ -1,0 +1,9 @@
+{
+  "blocks": [
+    {
+      "type": "code",
+      "value": "[{\"type\":\"paragraph\",\"content\":[{\"type\":\"link\",\"href\":\"javascript:x\",\"children\":[{\"type\":\"text\",\"value\":\"y\"}]}]}]"
+    }
+  ],
+  "markdown": "```portabledoc\n[{\"type\":\"paragraph\",\"content\":[{\"type\":\"link\",\"href\":\"javascript:x\",\"children\":[{\"type\":\"text\",\"value\":\"y\"}]}]}]\n```"
+}

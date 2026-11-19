@@ -64,10 +64,12 @@ defmodule Barkpark.Content.Edges do
     # Which shape is canonical is an open owner ruling; until then every reader
     # of a reference sees both, so the guard and the disconnect miss neither.
     Enum.flat_map(ref_fields, fn {type_name, field_name} ->
-      [field_name, field_name <> "._ref"]
+      field_name
+      |> ref_paths(opts)
       |> Enum.flat_map(fn path ->
         ref_opts =
           opts
+          |> Keyword.delete(:bare_only)
           |> Keyword.put(:perspective, :raw)
           |> Keyword.put(:filter_map, %{path => pub_id})
           |> Keyword.put_new(:limit, 1000)
@@ -112,10 +114,12 @@ defmodule Barkpark.Content.Edges do
           do: {schema.name, field["name"]}
 
     Enum.reduce(ref_fields, %{}, fn {type_name, field_name}, acc ->
-      [field_name, field_name <> "._ref"]
+      field_name
+      |> ref_paths(opts)
       |> Enum.reduce(acc, fn path, acc2 ->
         ref_opts =
           opts
+          |> Keyword.delete(:bare_only)
           |> Keyword.put(:perspective, :raw)
           |> Keyword.put(:filter_map, %{path => %{"in" => pub_ids}})
           |> Keyword.put_new(:limit, 1000)
@@ -134,6 +138,16 @@ defmodule Barkpark.Content.Edges do
         end)
       end)
     end)
+  end
+
+  # The value shapes a referencer scan matches in one reference field: the bare
+  # id and the `{"_ref": id}` object. `bare_only: true` keeps the bare id only,
+  # for `ReferenceIntegrity`: its own scan reads every `_ref` object and skips
+  # `_weak: true` ones, which this `._ref` path cannot see.
+  defp ref_paths(field_name, opts) do
+    if Keyword.get(opts, :bare_only, false),
+      do: [field_name],
+      else: [field_name, field_name <> "._ref"]
   end
 
   # Re-reads the stored value AT `path` from the already-fetched `content` map

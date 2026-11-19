@@ -46,7 +46,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// parseTaskCreateArgs, the publish wall, the mutation body, the POST — sees
 	// the ordinary flag and can never drift from it. The same pass screens an
 	// implausible INLINE payload against the population-derived ceiling.
-	tail, perr := resolveProseTextFiles(tail, nil, out.errf)
+	tail, perr := resolveTaskCreateProse(tail, out.errf)
 	if perr != nil {
 		return useError(out, proseTextSourceCode, perr.Error(), exitValidation)
 	}
@@ -1194,9 +1194,8 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 
 	// After "--" every argument is positional, so a title may start with "--"
 	// (task-379127ebdf341017).
-	tail, afterFlags := cutAtEndOfFlags(tail)
-
-	for i := 0; i < len(tail); i++ {
+	i := 0
+	for ; i < len(tail) && tail[i] != "--"; i++ {
 		a := tail[i]
 		key, inline, hasInline := a, "", false
 		if eq := strings.IndexByte(a, '='); eq >= 0 && strings.HasPrefix(a, "--") {
@@ -1206,59 +1205,12 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 		switch {
 		case a == "--publish":
 			publish = true
-		case key == "--title":
-			v, ni, err := takeValue(i, "--title", inline, hasInline)
-			if err != nil {
-				return nil, false, err
-			}
-			body["title"] = v
-			i = ni
-		case key == "--description":
-			v, ni, err := takeValue(i, "--description", inline, hasInline)
-			if err != nil {
-				return nil, false, err
-			}
-			body["description"] = v
-			i = ni
-		case key == "--execution-policy":
-			v, ni, err := takeValue(i, "--execution-policy", inline, hasInline)
-			if err != nil {
-				return nil, false, err
-			}
-			policy, err := parseTaskExecutionPolicyJSON([]byte(v))
-			if err != nil {
-				return nil, false, fmt.Errorf("--execution-policy: %w", err)
-			}
-			body["execution_policy"] = policy
-			i = ni
-		case key == "--disposition" || key == "--reopen-trigger" || key == "--disposition-rerun":
-			// The adjudication triple as FIRST-CLASS flags. The three content
-			// keys are read from the shared vocabulary fixture, never spelled
-			// here — see tasks_adjudication.go. An unreadable fixture refuses
-			// the flag rather than writing a key it cannot name.
+		case taskCreateValueFlags[key]:
 			v, ni, err := takeValue(i, key, inline, hasInline)
 			if err != nil {
 				return nil, false, err
 			}
-			vocab, verr := loadTaskAdjudicationVocabulary()
-			if verr != nil {
-				return nil, false, fmt.Errorf("%s: %w", key, verr)
-			}
-			switch key {
-			case "--disposition":
-				body[vocab.DispositionKey] = v
-			case "--reopen-trigger":
-				body[vocab.ReopenTriggerKey] = v
-			default:
-				body[vocab.DispositionRerunKey] = v
-			}
-			i = ni
-		case key == "--set":
-			v, ni, err := takeValue(i, "--set", inline, hasInline)
-			if err != nil {
-				return nil, false, err
-			}
-			if err := applyTaskSet(body, v); err != nil {
+			if err := applyTaskCreateValue(body, key, v); err != nil {
 				return nil, false, err
 			}
 			i = ni
@@ -1271,7 +1223,7 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 		}
 	}
 
-	for _, a := range afterFlags {
+	for _, a := range afterEndOfFlags(tail, i) {
 		if err := title(a); err != nil {
 			return nil, false, err
 		}

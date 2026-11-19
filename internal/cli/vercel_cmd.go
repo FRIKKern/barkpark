@@ -592,8 +592,8 @@ func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site stri
 		ae := classifyError(status, respBody)
 		msg := ae.errorMessage()
 		// The instance's 403 hint names the role the :scoped_admin gate wanted
-		// ("Use a token with write/admin permission that is a member of this
-		// workspace."). This error is a flat string, so the runner's second
+		// (the owner or admin role in this workspace). This error is a flat
+		// string, so the runner's second
 		// hint line never prints it; carry the SERVER's sentence inline.
 		if ae.code == "forbidden" && ae.serverHint != "" {
 			msg += " — " + ae.serverHint

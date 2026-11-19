@@ -1,0 +1,13 @@
+{
+  "blocks": [
+    {
+      "id": "a",
+      "type": "divider"
+    },
+    {
+      "type": "code",
+      "value": "[{\"type\":\"divider\",\"id\":\"a\"}]"
+    }
+  ],
+  "markdown": "```portabledoc\n[{\"type\":\"divider\",\"id\":\"a\"}]\n```\n\n```portabledoc\n[{\"type\":\"divider\",\"id\":\"a\"}]\n```"
+}

@@ -1,0 +1,15 @@
+{
+  "blocks": [
+    {
+      "cite": "Mies",
+      "content": [
+        {
+          "type": "text",
+          "value": "Less is more."
+        }
+      ],
+      "type": "blockquote"
+    }
+  ],
+  "markdown": "> Less is more.\n>\n> — Mies"
+}

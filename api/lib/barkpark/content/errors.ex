@@ -549,6 +549,19 @@ defmodule Barkpark.Content.Errors do
   # `code` stays "forbidden" and the status stays 403 — byte-identical to the
   # membership arm for any client keying on those. `reason` is the only
   # discriminator, exactly as `:forbidden_membership` intends it to be.
+  # The same refusal when the route needs the `admin` capability
+  # (task-23ed7ba485104620: the scoped secrets tier). The generic hint above
+  # names `read`, which such a caller usually already holds.
+  defp build({:error, {:forbidden_capability, :admin}}),
+    do: %{
+      code: "forbidden",
+      message: "caller is a member of this workspace but lacks the required capability",
+      status: 403,
+      reason: "missing_capability",
+      hint:
+        "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. This route needs the `admin` capability: an API token needs `admin` in its permissions as well as an owner or admin seat. Call with a token that carries `admin`."
+    }
+
   defp build({:error, :forbidden_capability}),
     do: %{
       code: "forbidden",
@@ -557,6 +570,35 @@ defmodule Barkpark.Content.Errors do
       reason: "missing_capability",
       hint:
         "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
+    }
+
+  # The `scoped_admin` gate (`RequireWorkspaceRole`) refused: the caller's
+  # MEMBERSHIP ROLE in the URL's workspace is not owner or admin
+  # (task-18861daee04d1328). The generic `forbidden` hint ("use a token with
+  # write/admin permission that is a member of this workspace") is already
+  # true of a write member, so it sent that caller to re-mint a credential the
+  # route refuses again. The remedy is the role, never a token permission.
+  defp build({:error, :forbidden_workspace_role}),
+    do: %{
+      code: "forbidden",
+      message: "this route needs the owner or admin role in this workspace",
+      status: 403,
+      reason: "workspace_role_required",
+      hint:
+        "This route needs the owner or admin role in this workspace, a membership role, not a token permission: a token's write or admin permission does not grant it. Ask a workspace owner to raise this principal's role, or call with a credential belonging to an owner or admin of this workspace."
+    }
+
+  # The same gate admitted the ROLE but the request writes, and the token's own
+  # permissions do not permit `:write` (task-2617573f7e9fea79): a read-only
+  # token on an admin seat. The seat is not the problem, the token is.
+  defp build({:error, :forbidden_token_write}),
+    do: %{
+      code: "forbidden",
+      message: "this token's permissions do not allow writes",
+      status: 403,
+      reason: "token_write_permission_required",
+      hint:
+        "The principal holds the owner or admin role here, so do NOT change its seat. What is missing is the token's `write` permission: this token is read-only, and a read-only token can read admin routes but never write through them. Call with a token that carries `write` (or `admin`)."
     }
 
   # A draft-only seat (`contributor`, task-348a4fbe24feede6) asked to change
