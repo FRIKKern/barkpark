@@ -50,6 +50,11 @@ animation-direction animation-fill-mode animation-play-state scroll-behavior`
 const words = (s) => s.split(/\s+/).filter(Boolean)
 export const VOCABULARY = new Set([...words(LAYOUT), ...words(TYPE), ...words(PAINT), ...words(MOTION)])
 export const MOTION_ONLY = new Set(words(MOTION))
+// What may change inside the phone breakpoint: layout and type, never paint (no
+// decoration either, and no custom property, which any paint may read). So a part
+// paints alike at every width, and the phone light, reading every surface, skin and
+// scheme at 390px, sees what layout at that width does to every paint.
+export const PHONE_ONLY = new Set([...words(LAYOUT), ...words(TYPE)].filter((p) => !p.startsWith('text-decoration') && p !== 'text-underline-offset'))
 
 // Properties beyond the vocabulary, each with the only values part.css may give
 // it. Adding a row changes this shared file, and comes with a selftest plant that

@@ -6,8 +6,10 @@ Private; not published.
 
 ```
 parts/<name>/
-  part.json     name (= folder), family, element, imports, summary, paint (selector -> variable per property),
-                optional textOnly (selectors of controls that draw no boundary, such as a ghost button)
+  part.json     name (= folder), family, element, imports, summary; optional paint (selector -> variable
+                per property: a wrong entry turns "every skin" off, and with none the trace still holds every
+                colour to one skin variable); optional textOnly (selectors of controls that draw no
+                boundary, such as a ghost button)
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
@@ -33,7 +35,8 @@ neither base.css nor a part mixes a tint of its own.
   pressed by real keys, every skin (each element takes one skin variable in every skin and scheme, and
   everything in the stage is drawn in full, as itself, at contrast, on every surface; the focus ring's
   edge is at least 3:1 on every Tab stop), light and dark (the same, in dark), a 390px window read in
-  full in every skin and scheme, printed and seen with no script. The page shows a light only when the
+  full in every skin, scheme and surface, printed and seen with no script (see "What part.css may
+  condition on" for which light crosses what). The page shows a light only when the
   last run passed and proved it for the same part folder, tokens, base styles, UI SDK version and check
   code. It exits non-zero on an incomplete folder, a failed step, an unlit light, any page error or
   network request, or a step (5s) or part (120s) past its time limit.
@@ -42,8 +45,10 @@ neither base.css nor a part mixes a tint of its own.
   share a run. Breaks in paint go in through a sheet only the selftest can add
   (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route.
 - In CI (`js-tests.yml`) the showroom check and the selftest run only when a change touches
-  `js/packages/barkui/**` (either side of a move) or the sheet, `api/priv/barkui/**`, and whenever the
-  changed files cannot be worked out. The fast tests run with the rest of the js suite.
+  `js/packages/barkui/**` (either side of a move), the sheet (`api/priv/barkui/**`), `js-tests.yml`
+  itself or `js/package.json`, or changes lines of `js/pnpm-lock.yaml` that name one of BarkUI's own
+  dependencies (a Playwright bump brings a new Chromium), and whenever the changed files cannot be
+  worked out. The fast tests run with the rest of the js suite.
 - `build/sheet-waits.mjs` lists the contrast the tokens sheet does not deliver yet, each wait bound to one
   skin, scheme, surface and pair of tokens, with the ratio measured there (see "Surfaces" below).
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css lint.
@@ -56,8 +61,8 @@ background, no border, shadow, outline or image, and its parent's text colour; o
 fails and names it. Every such element is listed in `proof.json` and counted under the part. Every other
 light applies to it.
 
-The rule: **nothing a person can see inside a part's stage goes unread, and nothing but `part.css`
-and the base styles can style it.**
+The rule: **nothing a person can see inside a part's stage, in the views listed under "What part.css
+may condition on", goes unread, and nothing but `part.css` and the base styles can style it.**
 
 - Read: the check walks every element in the stage (not only `[data-slot]`) and every `::before`,
   `::after`, `::marker` and `::placeholder` that draws. Each colour it shows must be one skin variable
@@ -67,8 +72,8 @@ and the base styles can style it.**
 - Drawn in full, as itself. Every visible thing in the stage is read from pixels: each line of text,
   and each graphic (an `svg`, an `img`, a `::before` or `::after` with a box). The check captures the
   stage as drawn, with every glyph unpainted, and with every graphic unpainted (each a first-layer
-  `!important` sheet put there from the isolated world), once per skin, scheme and surface, and at
-  390px, at a pixel ratio of 2; the browser draws text in grayscale, never LCD. For reference it draws
+  `!important` sheet put there from the isolated world), once per skin, scheme and surface, at 1440px
+  and at 390px, at a pixel ratio of 2; the browser draws text in grayscale, never LCD. For reference it draws
   each thing alone, in a blank tab of its own: the same words in the same font, or a copy of the node,
   in its own colours, on its own ground, at its own place within a pixel.
   - A label (each line a text node is laid out in) is its picture against its reference. The picture is
@@ -103,18 +108,15 @@ and the base styles can style it.**
   its own Chromium, wrapped in the `bark-parts` layer exactly as the build places it, and walks the
   rules that come out (`check/cssom.mjs`). It allows one `bark-parts` layer block and nothing beside
   it; inside it, style rules, their nested declarations, and `@media` whose condition, as the browser
-  writes it, is `(max-width: 600px)` (the phone breakpoint, which the phone light reads in full),
+  writes it, is `(max-width: 600px)` (the phone breakpoint: inside it only layout and type may change),
   `(prefers-reduced-motion: reduce)` or `(prefers-reduced-motion: no-preference)`. Inside a
   reduced-motion query only transition, animation and scroll-behavior properties may change. Every
   other rule type (`@keyframes`, `@layer`, `@container`, `@supports`, `@property`, `@font-face`, and
   any the browser adds later) and every other condition refuses the run before a light is read.
 - Motion: a part defines no keyframes. It may name the shared ones in `css/base.css` (today one,
   `bark-spin`, which only turns its element; a test holds base.css to that), by name as the browser
-  reads it. Transitions are free, because both ends are states the lights read anyway. The lights are
-  read with reduced motion on, and the drawn readings again with motion allowed (one skin in light,
-  every surface at 1440px and the base surface at 390px; part.css cannot tell skins apart), with every
-  animation held finished and held halfway and every transition finished. What a person sees partway
-  through a transition is not read.
+  reads it. Transitions are free, because both ends are states the lights read anyway. Where motion is
+  read: "What part.css may condition on".
 - part.css keeps to a small vocabulary, `build/vocabulary.mjs`: layout, type, paint and motion
   properties, held both as written and as the browser expands them (each longhand a shorthand sets
   must belong to a property in the vocabulary, or be left at its initial value). A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
@@ -146,15 +148,38 @@ and the base styles can style it.**
 ## Surfaces
 
 The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage.
-The check reads every surface in every skin and scheme, and the lights are proved on all five; the
-page says so. A drawn text under 4.5:1 is let through only by a wait in `build/sheet-waits.mjs` that
+The check reads every surface in every skin and scheme, at 1440px and at 390px, and the lights are
+proved on all five; the page says so. A drawn text under 4.5:1 is let through only by a wait in `build/sheet-waits.mjs` that
 names its skin, scheme and surface, whose two tokens its fill and ground resolve to, and only while it
 measures no worse than the wait records. Any other text under 4.5:1, any control boundary under 3:1, and
-any label gone, cut or not drawn as itself, on any surface, turns "every skin" (light views) or "light
-and dark" (dark views) off. Each wait prints as "waiting on the sheet" with what the last run measured,
+any label gone, cut or not drawn as itself, on any surface, turns "every skin" (light views), "light
+and dark" (dark views) or "phone" (390px) off. Each wait prints as "waiting on the sheet" with what the last run measured,
 and the sheet's work that ends it. Today eight wait, all `--ui-muted-foreground` on `--ui-background` on
 primary (the demo labels), at 3.75 to 3.78:1. For each surface the check also records, as numbers only,
 a disabled control's fill against its ground and against the primary fill.
+
+## What part.css may condition on
+
+These are the only things a part's look can depend on in the showroom, and where each is read. A
+condition not listed here (another `@media`, `@container`, `@supports`, a skin or scheme selector) is
+refused on the sheet as the browser parses it (`check/cssom.mjs`) before any light is read.
+
+| Axis | Values read | How part.css reaches it | Read with |
+|---|---|---|---|
+| Skin | all 5 | only through `--ui-*` / `--bark-*` values; a skin selector is refused | every scheme, surface and width: "every skin" and "light and dark" at 1440px, "phone" at 390px |
+| Scheme | light, dark | only through those values; `prefers-color-scheme` and a scheme selector are refused | the same |
+| Surface | base, raised, sunken, primary, inverse | those values, and `[data-surface]` selectors | every skin and scheme, at 1440px and at 390px |
+| Width | 1440px, 390px | `@media (max-width: 600px)`, inside which only layout and type may change: no paint, no decoration, no custom property | 390px with every skin, scheme and surface ("phone") |
+| Motion | reduced, allowed | `@media (prefers-reduced-motion: …)`, inside which only transition, animation and scroll-behavior may change; animation names from the shared keyframes, which only turn their element | every light reads with motion reduced; the drawn readings run again with motion allowed in one skin, light, on every surface at 1440px and on base at 390px, animations held finished and halfway |
+| State | as `example.html` shows it | selectors on the part's own markup (`:hover`, `:active`, `[data-disabled]` and the like) | every state `example.html` shows (`data-pin` holds hover, active and focus-visible) is read with every skin, scheme, surface and width; "pressed by real keys" steps the live states |
+| Script | on, off | not at all (`@media (scripting)` is refused) | "printed with no script" reads the page as it opens with no script: base surface, 1440px |
+
+What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
+differ there, layout can. A moment partway through a transition is not read: both its ends are. A
+state `example.html` never shows is not read. The motion pass reads one skin in light on purpose:
+part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
+through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
+focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
 
 ## What the check proves about a label, and no more
 

@@ -216,17 +216,22 @@ const CASES = [
       'the waited pair worse than recorded': says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/),
     }),
   },
-  // Phone width: read in full in every skin and scheme.
+  // Phone width: read in full in every skin, scheme and surface. part.css may not change paint at phone width
+  // (refused below), so these rules come from the selftest's own sheet, beyond that wall.
   {
-    name: 'a label blanked and edges dropped at phone width turn "phone" off, each by name',
+    name: 'a label blanked, edges dropped, and a label and edge gone on raised only, at phone width, turn "phone" off, each by name',
     only: ['phone'],
-    plant: all(
-      inCss('@media (max-width: 600px) { [data-slot="button"][data-size="lg"] { --bark-button-fg: var(--ui-background); } }'),
-      inCss('@media (max-width: 600px) { [data-slot="button"]:not([data-variant]):not([data-size]) { --bark-button-edge: transparent; } }'),
-    ),
+    surfaces: true,
+    secs: 150,
+    css: [
+      '@media (max-width: 600px) { [data-slot="button"][data-size="lg"] { --bark-button-fg: var(--ui-background); } }',
+      '@media (max-width: 600px) { [data-slot="button"]:not([data-variant]):not([data-size]) { --bark-button-edge: transparent; } }',
+      '@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); --bark-button-edge: var(--bark-button-bg); } }',
+    ].join('\n'),
     expect: each({
       'a blanked label': phoneSays(new RegExp(`${DRAWN} at button "Large"`)),
       'dropped edges': phoneSays(/control boundary [\d.]+:1 at button/),
+      'a label gone on raised only': phoneSays(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)),
     }),
   },
   {
@@ -270,7 +275,13 @@ const CASES = [
     name: 'a clear cover over a control a step clicks turns "pressed" off',
     only: ['pressed'],
     css: 'ui-button:has(> #button-disabled) { position: relative; }\nui-button:has(> #button-disabled)::after { content: ""; position: absolute; inset: 0; }',
-    expect: (p) => /#button-disabled is not what a click at its centre reaches/.test(lights(p).pressed.detail),
+    expect: (p) => /is not what a click at its centre reaches: ui-button "Unavailable" is on top/.test(lights(p).pressed.detail),
+  },
+  {
+    name: 'pointer-events: none on an enabled control a step clicks turns "pressed" off',
+    only: ['pressed'],
+    plant: inCss('#button-secondary { pointer-events: none; }'),
+    expect: (p) => /#button-secondary is not what a click at its centre reaches/.test(lights(p).pressed.detail),
   },
   {
     name: 'an icon-only button with no name turns "pressed" off',
@@ -340,6 +351,7 @@ const CASES = [
     ['an escaped @media for a width the check never renders', String.raw`@\6d edia (min-width: 1600px) { [data-slot="button"] { color: var(--ui-background); } }`, /a backslash/],
     ['an escaped filter', String.raw`#button-after { fil\000074er: blur(2px); }`, /a backslash/],
     ['an escaped outline', String.raw`#button-after { outl\000069ne: none; }`, /a backslash/],
+    ['a paint change at phone width, on one surface', '@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); --bark-button-edge: var(--bark-button-bg); } }', /--bark-button-fg inside @media \(max-width: 600px\): only layout and type/],
     ['a brace that closes the bark-parts layer early', '} [data-slot="button"] { box-shadow: none; } @layer bark-parts {', /a \} with no \{ before it/],
   ].map(([what, css, re]) => ({
     name: `part.css with ${what} is refused at discovery`,
@@ -359,6 +371,7 @@ const CASES = [
           [String.raw`a { fil\000074er: blur(2px); }`, /filter: blur\(2px\); it may only be none/],
           [String.raw`a { outl\000069ne: none; }`, /outline-style is outside part\.css's vocabulary/],
           ['} a { box-shadow: none; } @layer bark-parts {', /where part\.css's one bark-parts layer belongs/],
+          ['@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); --bark-button-edge: var(--bark-button-bg); } }', /--bark-button-edge inside @media \(max-width: 600px\): only layout and type/],
         ]) said.push((await readPartCss(browser, css)).some((f) => re.test(f)))
         return said.every(Boolean)
       } finally {

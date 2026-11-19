@@ -391,8 +391,11 @@ jobs:
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
 
       # Whether this change touches BarkUI: its showroom check and selftest run only
-      # then, on a change to js/packages/barkui/** or the tokens sheet
-      # (api/priv/barkui/**). PR: the diff from the merge base (fetch-depth 0).
+      # then, on a change to js/packages/barkui/**, the tokens sheet
+      # (api/priv/barkui/**), this workflow, js/package.json (pnpm overrides), or
+      # js/pnpm-lock.yaml where the changed lines name one of BarkUI's own
+      # dependencies (a Playwright bump brings a new Chromium, which can move the
+      # pixel readings). PR: the diff from the merge base (fetch-depth 0).
       # Push: the diff from the previous head, fetched here (the clone is
       # shallow). --no-renames lists both sides of a move, so moving a BarkUI file
       # out counts. Any failure to work out the diff RUNS both.
@@ -414,8 +417,12 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the check and the selftest"; exit 0
           fi
-          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/)'; then
+          deps=$(node -e "const p = require('./packages/barkui/package.json'); console.log(Object.keys({ ...p.dependencies, ...p.devDependencies }).join('|'))")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then range="origin/${{ github.base_ref }}...HEAD"; else range="${{ github.event.before }} ${{ github.sha }}"; fi
+          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|js/package\.json$|\.github/workflows/js-tests\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the check and the selftest"
+          elif printf '%s\n' "$files" | grep -qx 'js/pnpm-lock.yaml' && git -C .. diff --no-renames $range -- js/pnpm-lock.yaml | grep -E '^[-+]' | grep -qE "($deps)"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: the lockfile moves one of its dependencies, running the check and the selftest"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the check and the selftest"
           fi

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { lintPartCss } from '../build/css-lint.mjs'
-import { EXTRA, KEYFRAMES, PHONE } from '../build/vocabulary.mjs'
+import { EXTRA, KEYFRAMES, PHONE, PHONE_ONLY } from '../build/vocabulary.mjs'
 import { discoverParts } from '../build/parts.mjs'
 
 const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
@@ -93,6 +93,14 @@ describe('lintPartCss', () => {
     expect(lintPartCss('@keyframes x { to { color: var(--ui-primary); } }').join()).toMatch(/line 1: @keyframes x: a part defines no keyframes/)
     expect(lintPartCss('} a { box-shadow: none; } @layer bark-parts {').join()).toMatch(/line 1: a \} with no \{ before it/)
     expect(lintPartCss('a { gap: 1px;').join()).toMatch(/a \{ is never closed/)
+  })
+
+  it('lets only layout and type change at phone width', () => {
+    const r = '@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); } }'
+    expect(lintPartCss(r).join()).toMatch(/--bark-button-fg inside @media \(max-width: 600px\): only layout and type/)
+    expect(lintPartCss('@media (max-width: 600px) { a { color: var(--ui-x); } }').join()).toMatch(/color inside @media/)
+    expect(lintPartCss('@media (max-width: 600px) { a { flex-direction: column; padding: 0.5rem; } }')).toEqual([])
+    for (const p of ['color', 'background', 'border-color', 'opacity', 'box-shadow', 'text-decoration-color']) expect(PHONE_ONLY.has(p)).toBe(false)
   })
 
   it('shares keyframes from base.css that only turn their element', () => {

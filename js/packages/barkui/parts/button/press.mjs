@@ -83,6 +83,11 @@ export const steps = [
     },
   },
   {
+    name: 'A real click on the secondary button fires it',
+    click: '#button-secondary',
+    expect: (root, h) => h.state.actions.at(-1) === 'button-secondary' || `actions: ${h.state.actions}`,
+  },
+  {
     name: 'A real click on the disabled button fires nothing',
     click: '#button-disabled',
     expect: (root, h) => !h.state.actions.includes('button-disabled') || `actions: ${h.state.actions}`,

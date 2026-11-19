@@ -340,15 +340,15 @@ async function motionFails(ctx, part, skin) {
 export async function phone(ctx, part, skins) {
   const page = await open(ctx, { width: 390, height: 844, mobile: true, scale: 2 })
   try {
-    const r = await inCheck(page, (root) => {
-      const doc = document.documentElement
-      if (doc.scrollWidth > doc.clientWidth) return `page is ${doc.scrollWidth}px wide in a ${doc.clientWidth}px window`
-      if (root.scrollWidth > root.clientWidth) return `the example is ${root.scrollWidth}px wide in ${root.clientWidth}px`
-      const out = [...root.querySelectorAll('*')].find((el) => el.getBoundingClientRect().right > doc.clientWidth)
-      return out ? `${out.textContent.trim()} ends past the window` : true
-    }, part.name, 'the phone check')
-    if (r !== true) return light(false, r)
-    // The phone view is read in full, as the wide one is: every skin and scheme, on base.
+    const sideways = () =>
+      inCheck(page, (root) => {
+        const doc = document.documentElement
+        if (doc.scrollWidth > doc.clientWidth) return `page is ${doc.scrollWidth}px wide in a ${doc.clientWidth}px window`
+        if (root.scrollWidth > root.clientWidth) return `the example is ${root.scrollWidth}px wide in ${root.clientWidth}px`
+        const out = [...root.querySelectorAll('*')].find((el) => el.getBoundingClientRect().right > doc.clientWidth)
+        return out ? `${out.textContent.trim()} ends past the window` : true
+      }, part.name, 'the phone check')
+    // The phone view is read in full, as the wide one is: every skin and scheme, on every surface.
     let text = Infinity
     let edge = Infinity
     let weakest = NONE
@@ -357,22 +357,29 @@ export async function phone(ctx, part, skins) {
       for (const skin of skins) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
-        await settle(page)
-        const waits = waitsFor(skin, scheme, 'base')
-        const v = await readView(page, part, waits)
-        const d = verdict(v, `${at}: `, waits)
-        fails.push(...d.fails)
-        text = Math.min(text, d.weakest.text.ratio)
-        weakest = least(weakest, d.weakest)
-        for (const c of v.bounds.read) {
-          if (c.ratio < 3) fails.push(`${at}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
-          edge = Math.min(edge, c.ratio)
+        for (const surface of surfacesOf(ctx)) {
+          await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, surface])
+          await settle(page)
+          const where = `${at} on ${surface}`
+          const r = await sideways()
+          if (r !== true) return light(false, `${where}: ${r}`)
+          const waits = waitsFor(skin, scheme, surface)
+          const v = await readView(page, part, waits)
+          const d = verdict(v, `${where}: `, waits)
+          fails.push(...d.fails)
+          text = Math.min(text, d.weakest.text.ratio)
+          weakest = least(weakest, d.weakest)
+          for (const c of v.bounds.read) {
+            if (c.ratio < 3) fails.push(`${where}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
+            edge = Math.min(edge, c.ratio)
+          }
         }
+        await page.barkCheck((n) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', 'base'), part.name)
       }
     }
     await stillStyled(ctx, page, 'phone')
     if (fails.length) return light(false, fails[0], { fails })
-    return light(true, `nothing scrolls sideways at 390px; weakest drawn text ${fmt(text)}:1; ${drawsAll(weakest)}; control boundary ${fmt(edge)}:1 or more`)
+    return light(true, `nothing scrolls sideways at 390px on ${surfacesOf(ctx).length < 2 ? 'base' : `all ${surfacesOf(ctx).length} surfaces`}; weakest drawn text ${fmt(text)}:1; ${drawsAll(weakest)}; control boundary ${fmt(edge)}:1 or more`)
   } finally {
     await page.context().close()
   }

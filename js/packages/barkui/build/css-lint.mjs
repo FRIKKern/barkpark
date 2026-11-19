@@ -2,7 +2,7 @@
 // variables, never from a literal. It keeps to the vocabulary in vocabulary.mjs
 // (and to the values EXTRA there gives a property beyond it), and to the views
 // the check renders. Returns one message per finding.
-import { EXTRA, KEYFRAMES, MOTION_ONLY, PHONE, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
+import { EXTRA, KEYFRAMES, MOTION_ONLY, PHONE, PHONE_ONLY, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
 
 const NAMED = `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
 cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen
@@ -64,6 +64,7 @@ export function lintPartCss(css) {
   for (const m of text.matchAll(/\\/g)) found.push(`line ${lineOf(m.index)}: a backslash; part.css writes every name and value plainly, with no escape`)
   // Views: a part may style the phone breakpoint and reduced motion, nothing the check does not render.
   const motion = []
+  const phone = []
   for (const m of text.matchAll(/@([\w-]+)\s*([^{;]*)/g)) {
     const name = m[1].toLowerCase()
     const prelude = m[2].trim().replace(/\s+/g, ' ')
@@ -75,7 +76,10 @@ export function lintPartCss(css) {
       motion.push(block(text, m.index))
       continue
     }
-    if (name === 'media' && prelude === PHONE) continue
+    if (name === 'media' && prelude === PHONE) {
+      phone.push(block(text, m.index))
+      continue
+    }
     found.push(`line ${lineOf(m.index)}: @${name} ${prelude} is not a view the check renders; part.css may use @media ${PHONE} and @media (prefers-reduced-motion) only`)
   }
   const sizes = new Set()
@@ -98,6 +102,8 @@ export function lintPartCss(css) {
     } else if (!VOCABULARY.has(prop)) found.push(`${at}: ${prop} is outside part.css's vocabulary (build/vocabulary.mjs)`)
     if (prop === 'content' && !/^(""|''|none)$/i.test(value)) found.push(`${at}: content: ${value}; part.css may only set content to "" or none (words belong in example.html)`)
     if (prop === 'text-decoration' && /\d|from-font/i.test(value)) found.push(`${at}: text-decoration: ${value} sets a thickness; text-decoration-thickness is outside part.css's vocabulary`)
+    if (phone.some(([a, b]) => where > a && where < b) && !PHONE_ONLY.has(prop))
+      found.push(`${at}: ${prop} inside @media ${PHONE}: only layout and type may change at phone width (no paint, no decoration, no custom property)`)
     if (motion.some(([a, b]) => where > a && where < b) && !MOTION_ONLY.has(prop))
       found.push(`${at}: ${prop} inside @media (prefers-reduced-motion): only transition, animation and scroll-behavior properties may change there`)
     if (prop === 'font-size') {

@@ -18,3 +18,14 @@ describe("README.md's claim about a label", () => {
     expect(readme).not.toMatch(/whole or partial/)
   })
 })
+
+describe("README.md's list of what part.css may condition on", () => {
+  it('names every @media condition the parsed-sheet check allows, and the shared keyframes', async () => {
+    const { KEYFRAMES, MEDIA } = await import('../build/vocabulary.mjs')
+    const table = readme.slice(readme.indexOf('## What part.css may condition on'), readme.indexOf('## What the check proves about a label'))
+    expect(table).toContain('@media (max-width: 600px)')
+    expect(table).toContain('@media (prefers-reduced-motion: …)')
+    expect(MEDIA).toEqual(['(max-width: 600px)', '(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: no-preference)'])
+    for (const k of KEYFRAMES) expect(readme).toContain(`\`${k}\``)
+  })
+})
