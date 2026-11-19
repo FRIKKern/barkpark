@@ -1509,6 +1509,9 @@ defmodule Barkpark.ChatHosts do
       name: host.name,
       enrolled: not is_nil(host.enrolled_at),
       revoked: not is_nil(host.revoked_at),
+      # When a waiting host's one-time code stops working (Studio and bp show
+      # the time left). Never the code: only its hash is stored.
+      enrollment_expires_at: host.enrollment_expires_at,
       approved_roots: host.approved_roots,
       protocol_version: host.protocol_version,
       capabilities: host.capabilities,

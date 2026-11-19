@@ -328,7 +328,10 @@ func run(args []string) int {
 		ControlURL: *controlURL,
 		Token:      tok,
 		Interval:   *interval,
-		Provision:  provisioner.DefaultProvision(seams),
+		// Reported on every provision claim so the control plane can tell an
+		// operator when ready warm boxes sit unused because the pool is off here.
+		WarmPoolTarget: poolSize,
+		Provision:      provisioner.DefaultProvision(seams),
 		// The resurrect drain: translate a claim's string bundle_ref (store creds +
 		// KEK from WORKER ENV) and restore the box through Provision. Runs in its own
 		// goroutine below, like deprovision/attach-domain.
