@@ -62,6 +62,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/deploy"
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 	"github.com/FRIKKern/barkpark/internal/fleetruntime"
 	"github.com/FRIKKern/barkpark/internal/textcut"
@@ -2081,12 +2082,12 @@ func supportAgentInstallStep(pkg, bin string) cloud.CaddyStep {
 	// that conflict with it, and print each installer's tail when it fails.
 	script := `set -e
 export DEBIAN_FRONTEND=noninteractive
-major=$(node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p')
+` + deploy.AptGetFunc() + `major=$(node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p')
 if [ -z "$major" ] || [ "$major" -lt 18 ]; then
   echo "node ${major:-absent} is older than 18; installing Node 20 from NodeSource"
-  apt-get purge -y nodejs npm libnode-dev libnode72 >/dev/null 2>&1 || true
+  bp_apt_get purge -y nodejs npm libnode-dev libnode72 >/dev/null 2>&1 || true
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/tmp/bp-nodesource.log 2>&1 || { tail -n 20 /tmp/bp-nodesource.log; exit 1; }
-  apt-get install -y nodejs >/tmp/bp-node-install.log 2>&1 || { tail -n 20 /tmp/bp-node-install.log; exit 1; }
+  bp_apt_get install -y nodejs >/tmp/bp-node-install.log 2>&1 || { tail -n 20 /tmp/bp-node-install.log; exit 1; }
 fi
 npm install -g '` + pkg + `' >/tmp/bp-agent-install.log 2>&1 || { tail -n 20 /tmp/bp-agent-install.log; exit 1; }
 command -v '` + bin + `'`
