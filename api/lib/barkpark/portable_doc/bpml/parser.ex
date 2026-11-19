@@ -177,7 +177,22 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp finish(result, []), do: {:ok, result}
+  # A document that parses is still refused when its blocks nest past the depth
+  # Validate allows (`Validate.max_depth/0`), at the path Validate names: BPML
+  # carries any depth a stored document may hold and flattens none.
+  defp finish(result, []) do
+    case Barkpark.PortableDoc.Validate.validate(result) do
+      {:error, errors} ->
+        case Enum.find(errors, &(&1.code == :too_deep)) do
+          nil -> {:ok, result}
+          %{path: path} -> {:error, [too_deep(path)]}
+        end
+
+      _ ->
+        {:ok, result}
+    end
+  end
+
   defp finish(_result, errors), do: {:error, Enum.reverse(errors)}
 
   # ── block sequence (inside <paper>, <section>, or at top level) ─────────────
@@ -323,15 +338,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp build_block("ul", attrs, sc, cur) do
     with {:ok, items, cur} <-
            child_seq("ul", "li", sc, cur, fn li_attrs, sc, cur ->
-             case tag_inline("li", sc, cur) do
-               {:ok, nodes, cur} ->
-                 case List.keyfind(li_attrs, "checked", 0) do
-                   {"checked", v} -> {:ok, %{"content" => nodes, "checked" => v == "true"}, cur}
-                   nil -> {:ok, nodes, cur}
-                 end
-
-               other ->
-                 other
+             with {:ok, nodes, children, cur} <- li_body(sc, cur) do
+               {:ok, list_item(nodes, children, List.keyfind(li_attrs, "checked", 0)), cur}
              end
            end) do
       {:ok,
@@ -962,35 +970,132 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
+  # ── list items ──────────────────────────────────────────────────────────────
+
+  # An item with child blocks is a map; one with no text before its children
+  # holds no `content` key, the shape portable-doc writes for it.
+  defp list_item(nodes, nil, nil), do: nodes
+  defp list_item(nodes, nil, {_, v}), do: %{"content" => nodes, "checked" => v == "true"}
+
+  defp list_item(nodes, children, checked) do
+    item = if nodes == [], do: %{}, else: %{"content" => nodes}
+    item = Map.put(item, "children", children)
+    if checked, do: Map.put(item, "checked", elem(checked, 1) == "true"), else: item
+  end
+
+  # A list item: its text, then at most one `<slot name="children">` holding its
+  # child blocks, then `</li>`. The text ends where the slot opens, so no
+  # whitespace is added to it; nothing may follow the slot.
+  defp li_body(true, cur), do: {:ok, [], nil, cur}
+
+  defp li_body(false, cur) do
+    case inline_seq(cur, [], []) do
+      {:ok, nodes, cur2} ->
+        if slot_next?(cur2) do
+          with {:ok, children, cur3} <- item_children_slot(cur2),
+               {:ok, [], cur4} <- tag_inline("li", false, cur3) do
+            {:ok, nodes, children, cur4}
+          else
+            {:ok, [_ | _], cur4} ->
+              {:skip,
+               [
+                 err(
+                   "slot-not-last",
+                   "<li> text continues after its <slot name=\"children\">",
+                   line(cur4),
+                   "put the item's text before the slot; the slot is the item's last part"
+                 )
+               ], cur4}
+
+            other ->
+              other
+          end
+        else
+          with {:ok, [], cur3} <- tag_inline("li", false, cur2), do: {:ok, nodes, nil, cur3}
+        end
+
+      {:error, errors, cur2} ->
+        {:skip, errors, consume_until_close("li", cur2)}
+    end
+  end
+
+  defp slot_next?({<<"<slot", c, _::binary>>, _}) when c in [?\s, ?>, ?/], do: true
+  defp slot_next?(_cur), do: false
+
+  defp item_children_slot(cur) do
+    {:ok, "slot", attrs, sc, cur2} = open_tag(cur)
+
+    cond do
+      List.keyfind(attrs, "name", 0) != {"name", "children"} ->
+        {:skip,
+         [
+           err(
+             "unknown-slot",
+             "a list item holds only <slot name=\"children\">",
+             line(cur),
+             "name the slot children"
+           )
+         ], consume_until_close("li", consume_element("slot", sc, cur2))}
+
+      sc ->
+        {:ok, [], cur2}
+
+      true ->
+        {blocks, errors, cur3} = block_seq(cur2, "slot")
+
+        case expect_close("slot", cur3, errors) do
+          {[], cur4} -> {:ok, blocks, cur4}
+          {errors, cur4} -> {:skip, errors, consume_until_close("li", cur4)}
+        end
+    end
+  end
+
   # Inline content: text + marks + links up to the closing tag.
   defp tag_inline(_tag, true, cur), do: {:ok, [], cur}
 
   defp tag_inline(tag, false, cur) do
     case inline_seq(cur, [], []) do
-      {:ok, nodes, cur2} ->
-        case close_tag(cur2) do
-          {:ok, ^tag, cur3} ->
-            {:ok, nodes, cur3}
-
-          {:ok, other, cur3} ->
-            {:skip,
-             [
-               err(
-                 "mismatched-close",
-                 "expected </#{tag}>, found </#{other}>",
-                 line(cur2),
-                 "inline tags nest strictly"
-               )
-             ], cur3}
-
-          :not_close ->
-            {:skip,
-             [err("unclosed-tag", "<#{tag}> is never closed", line(cur2), "add </#{tag}>")], cur2}
-        end
+      {:ok, _nodes, cur2} = stopped ->
+        if slot_next?(cur2), do: slot_in_text(tag, cur2), else: close_inline(tag, stopped)
 
       {:error, errors, cur2} ->
         {:skip, errors, consume_until_close(tag, cur2)}
     end
+  end
+
+  defp close_inline(tag, {:ok, nodes, cur2}) do
+    case close_tag(cur2) do
+      {:ok, ^tag, cur3} ->
+        {:ok, nodes, cur3}
+
+      {:ok, other, cur3} ->
+        {:skip,
+         [
+           err(
+             "mismatched-close",
+             "expected </#{tag}>, found </#{other}>",
+             line(cur2),
+             "inline tags nest strictly"
+           )
+         ], cur3}
+
+      :not_close ->
+        {:skip, [err("unclosed-tag", "<#{tag}> is never closed", line(cur2), "add </#{tag}>")],
+         cur2}
+    end
+  end
+
+  # A `<slot>` in inline text: only a list item takes one, once, after its text.
+  defp slot_in_text(tag, cur) do
+    {:skip,
+     [
+       err(
+         "slot-in-text",
+         "<#{tag}> text holds a <slot>",
+         line(cur),
+         "a <slot name=\"children\"> goes only at the end of a list item, once"
+       )
+     ], consume_until_close(tag, cur)}
   end
 
   # ── inline ──────────────────────────────────────────────────────────────────
@@ -1000,7 +1105,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     acc = if text == "", do: acc, else: [text_node(text, marks) | acc]
 
     cond do
-      peek(cur) == :close or peek(cur) == :eof ->
+      peek(cur) == :close or peek(cur) == :eof or (marks == [] and slot_next?(cur)) ->
         {:ok, Enum.reverse(acc), cur}
 
       true ->
@@ -1746,6 +1851,15 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   # Body rows arrive as lists of cells, a spanning cell as {:span, nodes, colspan, rowspan}.
   defp err(code, message, line, hint), do: %{code: code, message: message, line: line, hint: hint}
+
+  defp too_deep(path) do
+    err(
+      "too-deep",
+      "blocks nest deeper than #{Barkpark.PortableDoc.Validate.max_depth()} levels at #{path}",
+      nil,
+      "lift the deepest blocks up a level"
+    )
+  end
 
   defp table_split_spans(rows) do
     {rows, spans} =

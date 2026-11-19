@@ -558,12 +558,28 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
 
   # A checklist item is a map ({content|text, checked}); its `checked` rides as an
-  # attribute and its body prints like any inline array.
+  # attribute and its body prints like any inline array. An item's child blocks
+  # (`children`: a nested list, a paragraph, code…) follow its text in one
+  # `<slot name="children">`, printed whenever the key holds a list, even an
+  # empty one, so the parse gives the same item back.
   defp list_item_tag(item, d) do
-    pad(d + 1) <> "<li" <> li_attrs(item) <> ">" <> inline(list_item_inline(item)) <> "</li>"
+    pad(d + 1) <>
+      "<li" <>
+      li_attrs(item) <>
+      ">" <> inline(list_item_inline(item)) <> item_children(item, d + 1) <> "</li>"
   end
 
+  defp item_children(%{"children" => children}, d) when is_list(children) do
+    lines = Enum.map(children, &block(&1, d + 2))
+    "slot" |> wrap(~s( name="children"), lines, d + 1) |> String.trim_leading()
+  end
+
+  defp item_children(_item, _d), do: ""
+
+  # `checked="false"` prints only beside children: an unchecked item with no
+  # children is the plain item (normalize rule 3).
   defp li_attrs(%{"checked" => true}), do: ~s( checked="true")
+  defp li_attrs(%{"checked" => false, "children" => c}) when is_list(c), do: ~s( checked="false")
   defp li_attrs(_), do: ""
 
   defp list_item_inline(%{} = item) do
