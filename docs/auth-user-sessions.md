@@ -209,22 +209,20 @@ Encrypting an already-encrypted envelope is a no-op (idempotent).
 
 Visibility redaction has ONE chokepoint: `Barkpark.Content.Envelope.render/3`
 (and `render_many/3`) — `@canonical capability:visibility-redaction`. Every read
-surface (REST query, search, share-link, history, reference expansion) threads
-its caller through here, so a `private` / `owner_only` / allowlisted field is
-dropped before it can leave the system. Contract:
+surface threads its caller through here, so a `private` / `owner_only` /
+allowlisted field is dropped before it leaves the system. Contract:
 
-- `caller_context == nil` ⇒ no redaction (internal/writer paths carry the full
-  doc by design).
+- `nil` ⇒ the anonymous caller; only the writers' `:internal` skips redaction.
 - `caller_context.is_admin` ⇒ no redaction (admins see all; ciphertext is still
   NOT decrypted here).
 - any other caller ⇒ encrypted-ciphertext fields are dropped (encrypted ⇒
   **private by default**), and declared `private` / `readable_by` fields drop
   unless the caller is authorized.
+- every copy of a document's blocks, a Paper's title included, follows the
+  blocks the caller is shown. A view that hides a block field carries no HTML;
+  a Paper's reader page renders it.
 
-Redaction extends to the query itself: **filtering or ordering on a field the caller can't read returns `422 forbidden_field`** (`Errors.to_envelope/2`), not a silent empty page — otherwise filter/sort would be an oracle to binary-search or sort by a hidden field's value even though the body is redacted.
-
-With no encrypted values and no visibility metadata, output is byte-identical to
-the legacy `render/1`.
+Redaction extends to the query: **filtering or ordering on a field the caller can't read returns `422 forbidden_field`** (`Errors.to_envelope/2`), never an empty page, so filter and sort are no oracle for a hidden value.
 
 ## Ownership (row-level)
 
