@@ -857,7 +857,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # together and posted back as that string (task-ab428bfe4bb189f9). Only a
   # document path (`doc[meta].code`) qualifies: the save drops that untouched
   # empty dotted value, so the stored value stays. A paper block's composite
-  # (path `code`) writes whatever its controls post, so it is drawn as before.
+  # (path `code`) writes whatever its controls post, and a Portable Text
+  # block's dialog (`doc[__object]`, `ObjectBlocks`) keeps a posted value
+  # over a stored one, so both are drawn as before.
+  defp kept_code?("doc[__object]" <> _, _value), do: false
   defp kept_code?("doc[" <> _, value), do: not (is_nil(value) or is_binary(value))
   defp kept_code?(_path, _value), do: false
 

@@ -273,4 +273,103 @@ defmodule BarkparkWeb.Studio.NestedCodelistValueTest do
 
     assert_receive {:paper_op, %{"patch" => %{"value" => %{"code" => "7", "label" => "y"}}}}
   end
+
+  # Review of #27482, round 2: a Portable Text custom block's dialog names its
+  # fields `doc[__object].…`, and its save (`ObjectBlocks`) keeps a posted
+  # value over a stored one. Its codelist is drawn as on main, so a stored
+  # number survives an edit to another of the block's fields and Save.
+  for surface <- [:studio, :desk] do
+    test "#{surface}: a codelist in a Portable Text block's dialog keeps a stored number on another field's edit and Save",
+         c do
+      n = System.unique_integer([:positive])
+      long = "onixedit:nc-pt-#{n}"
+
+      for ns <- ["onixedit", "core"] do
+        {:ok, _} =
+          Codelists.register(ns, long, %{
+            issue: "1",
+            name: "Long",
+            values:
+              for(
+                i <- 1..120,
+                do: %{code: "L#{i}", translations: [%{language: "eng", label: "Long #{i}"}]}
+              )
+          })
+      end
+
+      block_type = "nc_blk_#{n}"
+      type = "nc_pt_#{n}"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => block_type,
+            "kind" => "object",
+            "title" => "Coded block",
+            "fields" => [
+              %{"name" => "label", "type" => "string"},
+              %{"name" => "code", "title" => "Code", "type" => "codelist", "codelistId" => long}
+            ]
+          },
+          @dataset
+        )
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "PT codes",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{"name" => "body", "type" => "richText"}
+            ]
+          },
+          @dataset
+        )
+
+      para = %{
+        "_key" => "p1",
+        "_type" => "block",
+        "style" => "normal",
+        "markDefs" => [],
+        "children" => [%{"_key" => "p1s", "_type" => "span", "text" => "Hello", "marks" => []}]
+      }
+
+      block = %{"_key" => "k1", "_type" => block_type, "label" => "x", "code" => 7}
+      id = "nc-pt-#{n}"
+
+      {:ok, _} =
+        Content.create_document(
+          type,
+          %{"doc_id" => id, "title" => "T", "content" => %{"body" => [para, block]}},
+          @dataset
+        )
+
+      path =
+        case unquote(surface) do
+          :studio -> "#{c.root}/#{type}/#{id}"
+          :desk -> "#{c.root}/_desk/#{type};#{id}"
+        end
+
+      {:ok, view, _} = live(c.conn, path)
+      if unquote(surface) == :desk, do: render_async(view, 5_000)
+
+      render_hook(view, "pt-block-open", %{"field" => "body", "key" => "k1"})
+      assert has_element?(view, "#bp-object-dialog-form-k1")
+
+      view
+      |> form("#bp-object-dialog-form-k1", %{"doc[__object].label" => "y"})
+      |> render_change(%{"_target" => ["doc[__object].label"]})
+
+      view
+      |> form("#bp-object-dialog-form-k1", %{"doc[__object].label" => "y"})
+      |> render_submit()
+
+      {doc, _, _} = Content.fetch_doc_with_draft(type, id, @dataset)
+      saved = Enum.find(doc.content["body"], &(&1["_key"] == "k1"))
+      assert saved["label"] == "y"
+      assert saved["code"] == 7
+    end
+  end
 end
