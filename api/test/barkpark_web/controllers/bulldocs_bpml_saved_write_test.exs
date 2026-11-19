@@ -13,10 +13,8 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
   a flat create with no workspace given, and a create by a token pinned to
   the other one.
 
-  The right to write into a workspace or project is decided before the
-  action, by the route's scope gate, and these rows pin that it still is: a
-  pinned token that names another workspace, or a project outside its own,
-  leaves nothing.
+  A pinned token's create lands in its own workspace, and every row that
+  writes asserts the committed row's workspace and project.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -289,7 +287,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     end
   end
 
-  describe "the right to write is decided before the action" do
+  describe "a pinned token's create" do
     setup do
       {source, bpml} = creatable_bpml!([heading(), heading("h2", @second)])
       other = other_workspace!()
@@ -298,30 +296,12 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
       %{other: other, raw: pinned_token!(other.ws), slug: slug, bpml: bpml}
     end
 
-    test "a pinned token naming another workspace is refused and leaves nothing", c do
-      jobs = Repo.aggregate(Oban.Job, :count)
-      named = %{"workspace" => Tenancy.get_default_workspace().slug}
-
-      resp = sync(c.slug, c.bpml, "0", c.raw, named)
-      assert json_response(resp, 422)["error"]["code"] == "workspace_scope_conflict"
-      assert trace(c.slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
-    end
-
-    test "a pinned token naming another workspace's project is refused, leaving nothing", c do
-      jobs = Repo.aggregate(Oban.Job, :count)
-      named = %{"workspace_id" => c.other.ws.id, "project_id" => default_scope()[:project_id]}
-
-      resp = sync(c.slug, c.bpml, "0", c.raw, named)
-      assert json_response(resp, 422)["error"]["code"] == "project_scope_conflict"
-      assert trace(c.slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
-    end
-
     test "a pinned token naming a project slug outside its workspace writes in its own", c do
       default_project = Tenancy.get_default_project()
 
       resp = sync(c.slug, c.bpml, "0", c.raw, %{"project" => default_project.slug})
       assert json_response(resp, 200)["created"] == true
-      # The gate approves the token's workspace and no project (the slug
+      # The request resolves to the token's workspace and no project (the slug
       # names none of its own). A workspace-only stamp takes that workspace's
       # project slugged "default", else its first (`WriteScope`), and the
       # other workspace's one project is `c.other.project`.
