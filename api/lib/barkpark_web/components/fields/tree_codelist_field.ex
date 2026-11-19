@@ -174,7 +174,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     end
   end
 
-  def handle_event("tree_search_input", %{"value" => query}, socket) do
+  def handle_event("tree_search_input", %{"value" => query}, socket) when is_binary(query) do
     apply_search(socket, query)
   end
 
@@ -188,6 +188,11 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       _ -> {:noreply, socket}
     end
   end
+
+  # Any other shape (a crafted `codelist_search` string or list, a `value`
+  # that is no string, no box at all) searches nothing and leaves the page
+  # running.
+  def handle_event("tree_search_input", _params, socket), do: {:noreply, socket}
 
   def handle_event("tree_search_clear", _params, socket) do
     {:noreply, assign(socket, search_query: "", matched: nil)}

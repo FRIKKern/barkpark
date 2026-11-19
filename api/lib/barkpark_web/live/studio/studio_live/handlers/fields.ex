@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
@@ -255,7 +256,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
-    case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
+    case params
+         |> fold_dot_paths(socket)
+         |> KeptRows.only_stored(base_form(socket))
+         |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} -> do_save(doc, socket)
       _ -> {:noreply, socket}
     end
@@ -427,7 +431,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
-    case params |> fold_dot_paths(socket) |> KeptRows.only_stored(base_form(socket)) do
+    case params
+         |> fold_dot_paths(socket)
+         |> KeptRows.only_stored(base_form(socket))
+         |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} ->
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
