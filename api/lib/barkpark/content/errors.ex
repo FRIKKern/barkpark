@@ -151,6 +151,9 @@ defmodule Barkpark.Content.Errors do
                          # chat_host_controller.ex name_taken/4: a chat host
                          # in this workspace already holds the name (409).
                          "name_taken",
+                         # chat_host_controller.ex replace_enrollment/2: the
+                         # host already enrolled, so it takes no new code (409).
+                         "already_enrolled",
                          # Owner ruling #7 — member_controller.ex rotate_token:
                          # a user-owned token is rotated only by its owner (403).
                          "owner_only",
