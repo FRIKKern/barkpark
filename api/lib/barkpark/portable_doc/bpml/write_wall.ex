@@ -36,12 +36,15 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   the document is refused when it holds unshown content. Blocks that hold
   none are written from the push as before.
 
-  The check runs on the result Diff derived and replay-proved. The write then
-  runs the chokepoint every block write runs (nested id minting, the canonical
-  list-item shape, field encryption), which is additive and idempotent. A row
-  any writer stored is already in that shape, so a block that must stay
-  byte-equal is persisted byte-equal; the corpus test asserts it on the stored
-  row after the write.
+  The check runs on the blocks the push would write (`Diff.target/3`), before
+  any op derives. The write then puts EVERY block of the Paper, touched or not,
+  through the chokepoint every block write runs: nested id minting, the
+  canonical shapes of `BlockOps.normalize_render_shapes/1` (list items, notes
+  and cards items, text-keyed leaves) and field encryption. Those rescue
+  shapes and keep content; a row a current writer stored is already in them.
+  So a block that must stay byte-equal is persisted as
+  `normalize_render_shapes([s])`, which is `s` itself for such a row; the
+  corpus test asserts exactly that on the row the write left.
 
   ## Paper fields
 
