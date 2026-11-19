@@ -76,7 +76,7 @@ defmodule BarkparkWeb.Studio.Desk.ChoiceStyle do
       .dk .dk-edit .radio-box .icon-btn, .dk .dk-edit .dp-head .icon-btn { width: 44px; height: 44px; }
       .dk .dk-edit .radio-box[data-direction=vertical] .radio-row .icon-btn { margin: 0 -1px 0 auto; }
       .dk .dk-edit .datetime-box .form-input { min-height: 44px; padding-right: 50px; }
-      .dk .dk-edit .datetime-box .icon-btn { width: 44px; }
+      .dk .dk-edit .datetime-box .icon-btn { width: 44px; top: 0; bottom: 0; }
       .dk .dk-edit .dp-month select, .dk .dk-edit .dp-year { min-height: 44px; }
       .dk .dk-edit .dp-grid { grid-auto-rows: 44px; }
       .dk .dk-edit .dp-grid button { height: 44px; }
