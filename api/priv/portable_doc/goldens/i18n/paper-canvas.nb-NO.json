@@ -155,6 +155,7 @@
   "No schedule to place these items on.": "Ingen tidsplan å plassere disse punktene på.",
   "No tasks yet.": "Ingen oppgaver ennå.",
   "No video yet — paste a video url below": "Ingen video ennå — lim inn en videoadresse under",
+  "Not saved: block %{number} is shown as JSON, and source mode does not edit it.": "Ikke lagret: blokk %{number} vises som JSON, og kildemodus redigerer den ikke.",
   "Note": "Notat",
   "Notes, one per line": "Notater, ett per linje",
   "Number": "Tall",
