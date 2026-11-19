@@ -1,0 +1,10 @@
+# The Erlang and Elixir that the release images run: cloud/Dockerfile (the
+# control plane) and api/Dockerfile (the published image). The repo-root
+# .tool-versions is the content server's runtime, through asdf on the box.
+#
+# Docker cannot read this file, so both FROM lines spell the same numbers;
+# scripts/toolchain-drift-check.sh reds when they part. asdf only reads files
+# named exactly `.tool-versions`, so no box ever resolves this one.
+# Owners and consumers: scripts/toolchain-owners.tsv.
+erlang 27.3.4.13
+elixir 1.18.4-otp-27
