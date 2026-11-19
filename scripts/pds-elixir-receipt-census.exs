@@ -1404,6 +1404,9 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send, :status_only_receipt},
     {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment, :status_only_receipt},
+    # A new one-time code for a waiting chat host (task-9a68069c4e55d95b): the
+    # same 201 {host, enrollment_token} receipt as create_enrollment above.
+    {:post, "/w/:workspace_slug/v1/chat-hosts/:id/enrollment", "BarkparkWeb.ChatHostController", :replace_enrollment, :status_only_receipt},
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob, :status_only_receipt},
     {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings, :status_only_receipt},
     {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings, :status_only_receipt},

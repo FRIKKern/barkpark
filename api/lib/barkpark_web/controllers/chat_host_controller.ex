@@ -38,11 +38,42 @@ defmodule BarkparkWeb.ChatHostController do
           end
       end
     else
-      conn
-      |> ErrorResponse.emit_fields(:forbidden, %{
-        code: "forbidden",
-        message: "workspace owner required"
-      })
+      owner_required(conn)
+    end
+  end
+
+  # POST /w/:ws/v1/chat-hosts/:id/enrollment: a new one-time code for a host
+  # still waiting to enroll; the old code stops working at once
+  # (`Enrollment.replace_code/2`). The same OWNER-ONLY seat as
+  # `create_enrollment/2`, asked at the same chokepoint, and the URL
+  # workspace binds the host.
+  def replace_enrollment(conn, %{"id" => id}) do
+    workspace_id = conn.assigns.current_workspace.id
+
+    if TenancyAuth.workspace_owner?(conn.assigns.api_token, workspace_id) do
+      case Enrollment.replace_code(workspace_id, id) do
+        {:ok, result} ->
+          conn |> put_status(:created) |> json(result)
+
+        {:error, :not_found} ->
+          not_found(conn)
+
+        {:error, :already_enrolled} ->
+          conn
+          |> ErrorResponse.emit_fields(:conflict, %{
+            code: "already_enrolled",
+            message:
+              "this machine is already enrolled, so it needs no code; revoke it and register it again to move it"
+          })
+
+        {:error, {:host_limit_reached, limit}} ->
+          host_limit_reached(conn, limit)
+
+        {:error, reason} ->
+          unprocessable(conn, reason)
+      end
+    else
+      owner_required(conn)
     end
   end
 
@@ -195,6 +226,14 @@ defmodule BarkparkWeb.ChatHostController do
     })
   end
 
+  defp owner_required(conn) do
+    conn
+    |> ErrorResponse.emit_fields(:forbidden, %{
+      code: "forbidden",
+      message: "workspace owner required"
+    })
+  end
+
   defp refused_enrollment(conn, :unknown), do: unauthorized_enrollment(conn)
 
   defp refused_enrollment(conn, reason) do
@@ -268,6 +307,6 @@ defmodule BarkparkWeb.ChatHostController do
   # line above moves.
   plug(
     BarkparkWeb.Plugs.DatasetBoundAdminWrites,
-    [surface: "tokens_write"] when action in [:create_enrollment, :revoke]
+    [surface: "tokens_write"] when action in [:create_enrollment, :replace_enrollment, :revoke]
   )
 end

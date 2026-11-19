@@ -362,6 +362,10 @@ var codeExit = map[string]int{
 	// code for the waiting host.
 	"name_taken": exitConflict,
 
+	// 409, chat_host_controller.ex replace_enrollment/2: the host already
+	// enrolled, so it takes no new code. Revoke it and register it again.
+	"already_enrolled": exitConflict,
+
 	// 422, ChatSendFailure: the turn names attachments and the session's
 	// registered host does not advertise their type. Permanent until the host
 	// binary is updated, so a validation exit, never a retry.
