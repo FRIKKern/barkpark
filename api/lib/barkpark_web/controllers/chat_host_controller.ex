@@ -4,6 +4,7 @@ defmodule BarkparkWeb.ChatHostController do
   require Logger
 
   alias Barkpark.ChatHosts
+  alias Barkpark.ChatHosts.Enrollment
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
 
@@ -24,9 +25,17 @@ defmodule BarkparkWeb.ChatHostController do
     # silently (`arpss-w10-bl-chat-hosts-owner-literal-seat-fork`).
     if TenancyAuth.workspace_owner?(conn.assigns.api_token, workspace_id) do
       case ChatHosts.issue_enrollment(workspace_id, params) do
-        {:ok, result} -> conn |> put_status(:created) |> json(result)
-        {:error, {:host_limit_reached, limit}} -> host_limit_reached(conn, limit)
-        {:error, changeset} -> unprocessable(conn, changeset)
+        {:ok, result} ->
+          conn |> put_status(:created) |> json(result)
+
+        {:error, {:host_limit_reached, limit}} ->
+          host_limit_reached(conn, limit)
+
+        {:error, changeset} ->
+          case name_conflict(workspace_id, params, changeset) do
+            {state, host_id} -> name_taken(conn, params["name"], state, host_id)
+            nil -> unprocessable(conn, changeset)
+          end
       end
     else
       conn
@@ -74,8 +83,12 @@ defmodule BarkparkWeb.ChatHostController do
       {:error, {:host_limit_reached, limit}} ->
         host_limit_reached(conn, limit)
 
+      # Still the one 401 and the one code, so a client that reads only the
+      # code is unchanged. `details.reason` and the message say why and what
+      # to do; `Enrollment.refusal/1` answers `:unknown` (the old message) to
+      # anyone who never held a real code.
       {:error, _reason} ->
-        unauthorized_enrollment(conn)
+        refused_enrollment(conn, Enrollment.refusal(token))
     end
   end
 
@@ -179,6 +192,31 @@ defmodule BarkparkWeb.ChatHostController do
     |> ErrorResponse.emit_fields(:unauthorized, %{
       code: "invalid_enrollment",
       message: "enrollment token is invalid or expired"
+    })
+  end
+
+  defp refused_enrollment(conn, :unknown), do: unauthorized_enrollment(conn)
+
+  defp refused_enrollment(conn, reason) do
+    conn
+    |> ErrorResponse.emit_fields(:unauthorized, %{
+      code: "invalid_enrollment",
+      message: Enrollment.refusal_message(reason),
+      details: %{reason: Atom.to_string(reason)}
+    })
+  end
+
+  defp name_conflict(workspace_id, params, changeset) do
+    if Enrollment.name_taken?(changeset),
+      do: Enrollment.name_conflict(workspace_id, params["name"])
+  end
+
+  defp name_taken(conn, name, state, host_id) do
+    conn
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "name_taken",
+      message: Enrollment.name_taken_message(name, state),
+      details: %{host_id: host_id, state: Atom.to_string(state)}
     })
   end
 

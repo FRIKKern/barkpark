@@ -72,6 +72,29 @@ defmodule BarkparkWeb.Studio.ChatHostsLiveTest do
     assert [%{name: "laptop"}] = ChatHosts.list_hosts(workspace.id)
   end
 
+  test "a second Create for a waiting machine's name says to make a new code for it", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    {:ok, _} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "vm", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, view, _html} = live(as(conn, raw), path)
+
+    html =
+      view
+      |> form("form[phx-submit=enroll]", %{
+        "host" => %{"name" => "vm", "approved_roots" => [System.tmp_dir!()]}
+      })
+      |> render_submit()
+
+    assert html =~ "A machine named vm is already waiting to enroll"
+    refute html =~ "Could not create enrollment"
+    assert [%{name: "vm"}] = ChatHosts.list_hosts(workspace.id)
+  end
+
   test "global admin without workspace-admin membership is REJECTED AT MOUNT (W26) — nothing enrolled, nothing revoked",
        %{
          conn: conn,
