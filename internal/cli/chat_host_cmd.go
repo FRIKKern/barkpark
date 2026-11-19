@@ -26,8 +26,13 @@ const chatHostUsage = `usage: bp chat-host <verb>
   enroll --name <n> --root <path>   make a one-time code and print the command to run on the machine
   new-code <name|id>                replace a waiting machine's code (the old code stops working)
   revoke <name|id> [--yes]          remove a machine; it can no longer run turns (asks first)
+  add --ssh <user@host> --name <n> --root <path>
+                                    register a machine you can ssh to, in one step: the code
+                                    goes to its enroll on ssh's stdin and is never shown
+                                    (--bin <path> if barkpark-chat-host is not on its PATH,
+                                    --state <file> for the credential file)
 
-enroll and new-code need the workspace owner's token. The code lasts 10 minutes.`
+enroll, new-code and add need the workspace owner's token. The code lasts 10 minutes.`
 
 // chatHost is one row of GET /w/:ws/v1/chat-hosts.
 type chatHost struct {
@@ -65,6 +70,8 @@ func runChatHost(out *writer, g globals, ctx manifest.Context, args []string) in
 		return runChatHostNewCode(out, ctx, rest)
 	case "revoke":
 		return runChatHostRevoke(out, g, ctx, rest)
+	case "add":
+		return runChatHostAdd(out, ctx, rest)
 	}
 	return usageErrf(out, func() { out.errf("%s", chatHostUsage) }, "unknown chat-host verb %q", verb)
 }
@@ -356,6 +363,14 @@ func mintChatHostCode(out *writer, ctx manifest.Context, what, suffix string, f 
 		out.userErr("chat-host %s: %v", what, err)
 		return chatHostCode{}, nil, exitGeneric
 	}
+	if status == 404 && suffix != "" {
+		// Only the new-code POST: the host was just listed as waiting, so a
+		// 404 here is a server without the new-code route, or a host revoked
+		// a moment ago. A 404 on the list GET is chatHostRefused's own case.
+		return chatHostCode{}, nil, useError(out, "not_found",
+			"bp chat-host new-code: the server made no new code. If bp chat-host list still shows the host waiting, this server is too old for new-code: remove it (bp chat-host revoke <name>) and enroll it again.",
+			exitGeneric)
+	}
 	if status != 201 {
 		return chatHostCode{}, nil, chatHostRefused(out, ctx, what, status, body)
 	}
@@ -436,13 +451,7 @@ func chatHostRefused(out *writer, ctx manifest.Context, what string, status int,
 	case status == 401:
 		return useError(out, "unauthorized",
 			"bp chat-host "+what+": the server did not accept your token. Sign in again (bp login) or pass --token.", exitAuth)
-	case status == 404 && what == "new-code":
-		// The host was just listed as waiting, so a 404 here is a server
-		// without the new-code route, or a host revoked a moment ago.
-		return useError(out, "not_found", fmt.Sprintf(
-			"bp chat-host new-code: the server made no new code. If bp chat-host list still shows the host waiting, this server is too old for new-code: remove it (bp chat-host revoke <name>) and enroll it again."),
-			exitGeneric)
-	case status == 403 && (what == "enroll" || what == "new-code"):
+	case status == 403 && (what == "enroll" || what == "new-code" || what == "add"):
 		return useError(out, "forbidden", fmt.Sprintf(
 			"bp chat-host %s: this needs the workspace owner's token. Only the owner of workspace %s can register a machine; run it with the owner's token (--token, or bp login as the owner).",
 			what, workspaceName(ctx)), exitAuth)

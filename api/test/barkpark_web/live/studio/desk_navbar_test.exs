@@ -83,18 +83,21 @@ defmodule BarkparkWeb.Studio.DeskNavbarTest do
   end
 
   # At 640 the bar wrapped to two rows (89 px). Under 900 px TanStack's bar
-  # moves its tools into its menu: the desk's More lists the three text tabs
+  # moves its tools into its menu: the desk's More lists the text tabs
   # first, and the stylesheet hides the bar's own there.
-  test "More lists Structure, Media and API first, for a narrow bar", %{conn: conn, base: base} do
+  test "More lists Structure, Vision, Media and API first, for a narrow bar", %{
+    conn: conn,
+    base: base
+  } do
     {:ok, _view, html} = live(conn, base)
 
     bar = tabs(html, ~s(#studio-bar .dk-nav > a.dk-nav-tab))
     narrow = tabs(html, ~s(#dk-nav-more[popover] > a.dk-nav-item.dk-nav-narrow))
     assert narrow == bar
-    assert Enum.map(narrow, &elem(&1, 1)) == ["Structure", "Media", "API"]
+    assert Enum.map(narrow, &elem(&1, 1)) == ["Structure", "Vision", "Media", "API"]
 
     first = tabs(html, "#dk-nav-more[popover] > :is(a, span)")
-    assert Enum.take(first, 3) == narrow, "the three come first in More"
+    assert Enum.take(first, 4) == narrow, "the four come first in More"
 
     # The copies are no tabs of their own: the page's tab set stays one of each.
     copies = html |> LazyHTML.from_document() |> LazyHTML.query(~s(.dk-nav-narrow[data-test-id]))

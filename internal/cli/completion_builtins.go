@@ -45,7 +45,7 @@ var builtinCompletionPaths = map[string][]string{
 		"hetzner", "instance", "instances", "member", "members", "open", "providers",
 		"rollback", "rollout", "site", "sites", "status", "support", "supports",
 		"token", "tokens", "update",
-		"usage", "verify", "webhook", "webhooks", "workspace", "workspaces",
+		"usage", "verify", "warm-pool", "webhook", "webhooks", "workspace", "workspaces",
 	},
 
 	// `bp cloud token <TAB>` — the PAT verbs. The aliases (create/list/rm) are

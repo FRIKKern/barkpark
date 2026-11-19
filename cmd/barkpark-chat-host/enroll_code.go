@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -34,7 +35,42 @@ func enrollCode(flagValue string) (string, error) {
 		}
 		return checkEnrollCode(string(line))
 	}
-	return readEnrollCode(os.Stdin)
+	return awaitEnrollCode(os.Stdin, os.Stderr, stdinHintAfter, stdinGiveUpAfter)
+}
+
+// A pipe that never sends a line (ssh host barkpark-chat-host enroll … with
+// no code piped and no -t) would otherwise wait in silence.
+const (
+	stdinHintAfter   = 3 * time.Second
+	stdinGiveUpAfter = 5 * time.Minute
+)
+
+// awaitEnrollCode reads the code from r, says on stderr what it is waiting
+// for when nothing arrives within hintAfter, and gives up after giveUpAfter.
+func awaitEnrollCode(r io.Reader, stderr io.Writer, hintAfter, giveUpAfter time.Duration) (string, error) {
+	type result struct {
+		code string
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, err := readEnrollCode(r)
+		done <- result{code, err}
+	}()
+	hint := time.NewTimer(hintAfter)
+	defer hint.Stop()
+	giveUp := time.NewTimer(giveUpAfter)
+	defer giveUp.Stop()
+	for {
+		select {
+		case res := <-done:
+			return res.code, res.err
+		case <-hint.C:
+			fmt.Fprintf(stderr, "Waiting for the one-time code on stdin. Pipe it in (printf '%%s\\n' CODE | barkpark-chat-host enroll …), run on a terminal to type it, or pass --token.\n")
+		case <-giveUp.C:
+			return "", fmt.Errorf("no enrollment code arrived on stdin in %s: pipe it in (printf '%%s\\n' CODE | barkpark-chat-host enroll --url … --root …) or pass --token", giveUpAfter)
+		}
+	}
 }
 
 // readEnrollCode reads the code from the first line of r.
