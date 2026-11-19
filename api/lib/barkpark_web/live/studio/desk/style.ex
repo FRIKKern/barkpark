@@ -77,6 +77,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk { --dk-avatar-blue: #4f66fb; --dk-avatar-green: #0db97a; --dk-avatar-yellow: #d28a12; --dk-avatar-orange: #fa6412; --dk-warn-fg: #6b5300; --dk-caution-card-bg: #fefae1; --dk-caution-card-fg: #3b2212; --dk-diff-bg: #fde6d8; --dk-diff-fg: #8a3a12; }
       html[data-theme="dark"] .dk { --dk-avatar-blue: #7898ff; --dk-avatar-green: #15f0a5; --dk-avatar-yellow: #f9be1e; --dk-avatar-orange: #ff9149; --dk-warn-fg: #f2d36b; --dk-caution-card-bg: #1e1a1b; --dk-caution-card-fg: #f9ea98; --dk-diff-bg: #4a2a17; --dk-diff-fg: #ffc9a8; }
       .dk fieldset.dk-revision-form { display: contents; margin: 0; padding: 0; border: 0; min-width: 0; }
+      .dk fieldset.dk-revision-form > .dk-form-box { display: contents; }
       /* TanStack's --critical-icon: a field's error mark (`SlugInUse`). */
       .dk { --dk-critical-icon: #ef3d2f; }
       html[data-theme="dark"] .dk { --dk-critical-icon: #f3503e; }

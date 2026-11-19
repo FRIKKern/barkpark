@@ -15469,3 +15469,8 @@ msgstr "Kvadrat"
 msgctxt "crop preview"
 msgid "Panorama"
 msgstr "Panorama"
+
+#: lib/barkpark_web/live/studio/desk/published_view.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublished %{ago}"
+msgstr "Avpublisert %{ago}"
