@@ -4,12 +4,13 @@
 //
 // It needs a signed-in `bp`, so it runs on a machine or in the daily news job,
 // never in a PR check. The goal's id is given on the command line and kept out
-// of the repo. The block ends with a stamp over its own lines; the fast tests
-// fail when the block was edited by hand or no longer has the shape below.
+// of the repo. The block ends with a stamp over its own lines (build/stamped.mjs);
+// the fast tests fail when the block was edited by hand or no longer has the
+// shape below, never because the board moved.
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readStamped, replaceBlock, stamp } from './stamped.mjs'
 
 export const START = '<!-- board:start -->'
 export const END = '<!-- board:end -->'
@@ -30,7 +31,6 @@ export const MILESTONES = [
 export const HEADER = ['| Id | Milestone | Done | In progress | Open |', '|---|---|---|---|---|']
 const ROW = /^\| (M\d+(?:\.\d+)?|Ready|Beside) \| [^|]+ \| \d+ \| \d+ \| \d+ \|$/
 const READ = /^Read from the board on \d{4}-\d{2}-\d{2}\.$/
-const STAMP = /^<!-- board-stamp: ([0-9a-f]{16}) -->$/
 
 const bpTask = (id) => JSON.parse(execFileSync('bp', ['task', 'get', id, '-o', 'json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
 
@@ -54,33 +54,23 @@ export function collect(goalId, read = bpTask) {
   })
 }
 
-const stampOf = (lines) => createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16)
-
 /** The block's lines: the table, the day it was read, and a stamp over both. */
 export function renderBoard(rows, day) {
-  const lines = [...HEADER, ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.done} | ${r.in_progress} | ${r.open} |`), '', `Read from the board on ${day}.`]
-  return [...lines, `<!-- board-stamp: ${stampOf(lines)} -->`].join('\n')
+  return stamp([...HEADER, ...renderRows(rows), '', `Read from the board on ${day}.`])
 }
 
-/** The block inside a page, or a reason it cannot be trusted. */
+export const renderRows = (rows) => rows.map((r) => `| ${r.id} | ${r.name} | ${r.done} | ${r.in_progress} | ${r.open} |`)
+
+/** The block's rows, or a reason it cannot be trusted. */
 export function readBlock(text) {
-  if (text.split(START).length !== 2 || text.split(END).length !== 2 || text.indexOf(START) > text.indexOf(END)) return { why: `needs exactly one ${START} ... ${END} pair` }
-  const lines = text.split(START)[1].split(END)[0].trim().split('\n')
-  const stamp = STAMP.exec(lines.at(-1) ?? '')
-  const body = lines.slice(0, -1)
-  if (!stamp) return { why: 'the block has no stamp' }
-  if (stampOf(body) !== stamp[1]) return { why: 'the block was edited by hand; run node build/board.mjs <goal-task-id>' }
+  const r = readStamped(text, START, END)
+  if (r.why) return { why: `${r.why}; run node build/board.mjs <goal-task-id>` }
+  const { body } = r
   if (body[0] !== HEADER[0] || body[1] !== HEADER[1]) return { why: 'the table header changed shape' }
   const rows = body.slice(2, -2)
-  if (!rows.length || !rows.every((r) => ROW.test(r))) return { why: 'a row changed shape' }
+  if (!rows.length || !rows.every((row) => ROW.test(row))) return { why: 'a row changed shape' }
   if (body.at(-2) !== '' || !READ.test(body.at(-1))) return { why: 'the "Read from the board" line changed shape' }
   return { rows }
-}
-
-export function applyBoard(text, block) {
-  if (readBlock(text).why?.startsWith('needs')) throw new Error(`ROADMAP.md ${readBlock(text).why}`)
-  const [head, rest] = text.split(START)
-  return `${head}${START}\n${block}\n${END}${rest.split(END)[1]}`
 }
 
 if (process.argv[1] === import.meta.filename) {
@@ -93,8 +83,8 @@ if (process.argv[1] === import.meta.filename) {
     const rows = collect(goal)
     const text = readFileSync(roadmapPath, 'utf8')
     // Same numbers as the block holds: leave it, date and all, so a daily run makes no change.
-    const same = JSON.stringify(readBlock(text).rows) === JSON.stringify(renderBoard(rows, '2000-01-01').split('\n').slice(2, -3))
-    const next = same ? text : applyBoard(text, renderBoard(rows, new Date().toISOString().slice(0, 10)))
+    const same = JSON.stringify(readBlock(text).rows) === JSON.stringify(renderRows(rows))
+    const next = same ? text : replaceBlock(text, START, END, renderBoard(rows, new Date().toISOString().slice(0, 10)))
     if (next !== text) writeFileSync(roadmapPath, next)
     console.log(`board: docs/ROADMAP.md ${next === text ? 'unchanged' : 'written'}`)
   } catch (e) {

@@ -14,9 +14,9 @@ The owner, on what matters before any app moves: "The most important for me to s
 
 ## Decision
 
-- No app reads BarkUI until the showroom shows it whole: every part with its lights on, in every skin, light and dark, at phone width and with no script ([QUALITY.md](../../QUALITY.md)).
-- The showroom is built first and is the scoreboard. The first six parts are built with care and set the look; the rest copy it.
-- Then apps move one screen at a time, each measured before it moves.
+- **The step.** The owner looks at the first six parts in the showroom and confirms their look, which the rest then copy; and no app reads BarkUI until every part in the showroom has every light on ([QUALITY.md](../../QUALITY.md)) and the owner says the whole is ready.
+- The showroom is built first and is the scoreboard.
+- After the step, apps move one screen at a time, each measured before it moves.
 
 ## What would change it
 

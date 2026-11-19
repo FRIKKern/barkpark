@@ -1,101 +1,84 @@
-// node build/status.mjs: writes the numbers in README.md and docs/ROADMAP.md
-// between <!-- status:start --> and <!-- status:end -->, read from the files
-// they count: the part folders, the tokens sheet and package.json's pin.
-// `--check` writes nothing and exits 1 when a block is stale; the fast tests
-// fail the same way. No number on those pages is typed by hand.
+// node build/status.mjs: writes what the sheet and the UI SDK pin hold into
+// README.md, between <!-- status:start --> and <!-- status:end -->, with the
+// day it was read and a stamp. The daily news run refreshes it with the board
+// block; a PR never has to. When the facts have not moved, the page is left as
+// it is.
 //
-// What a check run proves (the lights) is not counted here: it comes from a
-// run, not from a file, and the showroom page shows it.
+// Parts are not counted here: the showroom page is their one home, so adding a
+// part folder changes no other file. The fast tests fail when the block was
+// edited by hand or changed shape, never because the tree moved.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { discoverParts, partsDir } from './parts.mjs'
+import { readStamped, replaceBlock, stamp } from './stamped.mjs'
 
 export const root = join(import.meta.dirname, '..')
 export const START = '<!-- status:start -->'
 export const END = '<!-- status:end -->'
-export const PAGES = ['README.md', 'docs/ROADMAP.md']
+export const readmePath = join(root, 'README.md')
 const sheetPath = join(root, '..', '..', '..', 'api', 'priv', 'barkui', 'tokens.css')
+
+export const HEADER = ['| What | Read from the files |', '|---|---|']
+export const LABELS = ['Skins in the sheet', 'Surfaces a part can sit on', 'Colour names in the sheet', 'UI SDK']
+const READ = /^Read from the sheet and package\.json on \d{4}-\d{2}-\d{2}\.$/
 
 const unique = (text, re) => [...new Set([...text.matchAll(re)].map((m) => m[1]))]
 
 /** The facts, read from the files that hold them. */
-export function readFacts({ dir = partsDir, sheet = readFileSync(sheetPath, 'utf8'), pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) } = {}) {
-  const parts = discoverParts(dir).map((p) => ({ name: p.name, family: p.json.family }))
+export function readFacts({ sheet = readFileSync(sheetPath, 'utf8'), pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) } = {}) {
   return {
-    parts,
     skins: unique(sheet, /\[data-skin="([\w-]+)"\]/g),
     surfaces: unique(sheet, /\[data-surface="([\w-]+)"\]/g),
     ui: unique(sheet, /(--ui-[\w-]+)\s*:/g).length,
     bark: unique(sheet, /(--bark-[\w-]+)\s*:/g).length,
-    uiSdk: pkg.dependencies['@ui-sdk/web'],
+    core: pkg.dependencies['@ui-sdk/core'],
+    web: pkg.dependencies['@ui-sdk/web'],
   }
+}
+
+const exact = (v) => /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v ?? '')
+
+/** What the pin says, read from package.json: pinned only when both are one exact version. */
+export function pinText({ core, web }) {
+  if (core === web && exact(web)) return `\`@ui-sdk/core\` and \`@ui-sdk/web\` ${web}, pinned to that exact version`
+  return `\`@ui-sdk/core\` ${core}, \`@ui-sdk/web\` ${web}${exact(core) && exact(web) ? ', two different exact versions' : ', not pinned to one exact version'}`
 }
 
 const list = (names) => `${names.length}: ${names.join(', ')}`
 
-function byFamily(parts) {
-  const families = new Map()
-  for (const p of parts) families.set(p.family, [...(families.get(p.family) ?? []), p.name])
-  return [...families].sort(([a], [b]) => (a < b ? -1 : 1))
-}
-
-/** The block each page carries, by page. */
-export function renderBlocks(f) {
-  const readme = [
-    '| What | Now |',
-    '|---|---|',
-    `| Parts in the showroom | ${f.parts.length ? list(f.parts.map((p) => p.name)) : '0'} |`,
-    `| Skins in the sheet | ${list(f.skins)} |`,
-    `| Surfaces a part can sit on | ${list(f.surfaces)} |`,
-    `| Colour names in the sheet | ${f.ui} \`--ui-*\` (UI SDK's), ${f.bark} \`--bark-*\` (BarkUI's own) |`,
-    `| UI SDK | \`@ui-sdk/web\` ${f.uiSdk}, pinned |`,
+/** The table rows, without the date. */
+export function renderRows(f) {
+  return [
+    `| ${LABELS[0]} | ${list(f.skins)} |`,
+    `| ${LABELS[1]} | ${list(f.surfaces)} |`,
+    `| ${LABELS[2]} | ${f.ui} \`--ui-*\` (UI SDK's), ${f.bark} \`--bark-*\` (BarkUI's own) |`,
+    `| ${LABELS[3]} | ${pinText(f)} |`,
   ]
-  const families = byFamily(f.parts)
-  const roadmap = [
-    '| Family | Parts in the showroom |',
-    '|---|---|',
-    ...(families.length ? families.map(([family, names]) => `| ${family} | ${names.join(', ')} |`) : ['| none yet | |']),
-  ]
-  return { 'README.md': readme.join('\n'), 'docs/ROADMAP.md': roadmap.join('\n') }
 }
 
-/** The page with its block replaced; throws unless it holds exactly one marker pair. */
-export function applyBlock(text, block, name = 'page') {
-  const a = text.split(START).length - 1
-  const b = text.split(END).length - 1
-  if (a !== 1 || b !== 1 || text.indexOf(START) > text.indexOf(END)) throw new Error(`${name} needs exactly one ${START} ... ${END} pair`)
-  const [head, rest] = text.split(START)
-  return `${head}${START}\n${block}\n${END}${rest.split(END)[1]}`
+export function renderStatus(f, day) {
+  return stamp([...HEADER, ...renderRows(f), '', `Read from the sheet and package.json on ${day}.`])
 }
 
-/** Pages whose block differs from what the files say. */
-export function stalePages({ dir = root, facts = readFacts() } = {}) {
-  const blocks = renderBlocks(facts)
-  return PAGES.filter((page) => {
-    const text = readFileSync(join(dir, page), 'utf8')
-    return applyBlock(text, blocks[page], page) !== text
-  })
+/** The block's rows, or a reason it cannot be trusted. */
+export function readStatus(text) {
+  const r = readStamped(text, START, END)
+  if (r.why) return { why: `${r.why}; run node build/status.mjs` }
+  const { body } = r
+  if (body[0] !== HEADER[0] || body[1] !== HEADER[1]) return { why: 'the table header changed shape' }
+  const rows = body.slice(2, -2)
+  if (rows.length !== LABELS.length || !rows.every((row, i) => row.startsWith(`| ${LABELS[i]} | `) && row.endsWith(' |'))) return { why: 'a row changed shape' }
+  if (body.at(-2) !== '' || !READ.test(body.at(-1))) return { why: 'the "Read from" line changed shape' }
+  return { rows }
 }
 
 if (process.argv[1] === import.meta.filename) {
   try {
-    if (process.argv.includes('--check')) {
-      const stale = stalePages()
-      if (stale.length) {
-        console.error(`status: stale in ${stale.join(', ')}; run node build/status.mjs`)
-        process.exit(1)
-      }
-      console.log('status: every block matches')
-    } else {
-      const blocks = renderBlocks(readFacts())
-      for (const page of PAGES) {
-        const file = join(root, page)
-        const text = readFileSync(file, 'utf8')
-        const next = applyBlock(text, blocks[page], page)
-        if (next !== text) writeFileSync(file, next)
-        console.log(`status: ${page} ${next === text ? 'unchanged' : 'written'}`)
-      }
-    }
+    const facts = readFacts()
+    const text = readFileSync(readmePath, 'utf8')
+    const same = JSON.stringify(readStatus(text).rows) === JSON.stringify(renderRows(facts))
+    const next = same ? text : replaceBlock(text, START, END, renderStatus(facts, new Date().toISOString().slice(0, 10)))
+    if (next !== text) writeFileSync(readmePath, next)
+    console.log(`status: README.md ${next === text ? 'unchanged' : 'written'}`)
   } catch (e) {
     console.error(`status: ${e.message}`)
     process.exit(1)

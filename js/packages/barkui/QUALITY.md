@@ -24,17 +24,17 @@ Lights are proved on the base surface. On any other surface they show grey, "not
 - Its folder is whole: `part.json`, `part.css`, `example.html` and `press.mjs`. Adding it changed nothing outside the folder.
 - `part.css` reads only the sheet's colours, stays inside the property vocabulary, and draws no focus ring of its own.
 - Every light is on from a run of the check on that folder, as it is on main.
-- For the first six parts, the owner has also seen them and approved the look the rest will copy.
+- For the first six parts, also the step in [0004](docs/decisions/0004-ready-before-any-switch.md).
 
 A "waiting on the sheet" line is a gap in the sheet, not in the part. It is work for M2 ([ROADMAP](docs/ROADMAP.md)).
 
 ## The check guards itself
 
-`pnpm run check:selftest` plants one break per case in a scratch copy of a part, such as a colour from outside the sheet, a cut label or a demo that styles the page, and fails unless the check fails for the right reason. CI runs it whenever the package, the sheet or the workflow changes.
+`pnpm run check:selftest` plants one break per case in a scratch copy of a part, such as a colour from outside the sheet, a cut label or a demo that styles the page, and fails unless the check fails for the right reason. When CI runs it is in the README, under "The part folder and the check".
 
 ## Docs
 
 - Picture first: the README, the roadmap and the decisions open with a picture, a diagram or a table.
-- One fact, one home ([README](README.md#where-things-live-one-fact-one-home)). Status lives on the task board; `node build/board.mjs` copies it into the roadmap, stamped, and a fast test fails when that block is edited by hand. It needs `bp`, so it runs on a machine or in the daily news job, never in a PR check.
-- No number on these pages is typed by hand. Counts are written by `node build/status.mjs` between `<!-- status:start -->` and `<!-- status:end -->`, and a fast test fails when they are stale. A number nobody can count from a file is left out.
-- Pictures are real showroom shots, never mock-ups. They show the showroom as it stood when they were taken; `node check/shots.mjs <dir>` retakes them.
+- One fact, one home ([README](README.md#where-things-live-one-fact-one-home)). Which parts exist, and what is proven for each, lives on the showroom page only, so adding a part changes no other file.
+- No number on these pages is typed by hand. Two scripts write the blocks that hold numbers, each with the day it read them and a stamp: `node build/status.mjs` (skins, surfaces, colour names and the UI SDK pin, from the sheet and package.json) and `node build/board.mjs <goal-task-id>` (each milestone's progress, from the task board; it needs `bp`). The daily news run refreshes both; no PR check reads the board. A fast test fails when a block is edited by hand or changes shape, never because the files or the board moved.
+- Pictures are real showroom shots, never mock-ups. `node build/pictures.mjs` retakes every picture these pages show, after `pnpm run build` and `pnpm run check`.

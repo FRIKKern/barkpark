@@ -10,7 +10,7 @@ press.mjs step: keys ['Tab'] ─► headless Chromium's own input pipeline ─�
 
 ## Context
 
-A check can move focus or fire events from a script, or it can press keys the way a person does. When a trial grid was checked by moving focus from a script, the checks passed while the grid was broken under a real keyboard. A part that only passes scripted presses is not proven.
+A check can move focus or fire events from a script, or it can press keys the way a person does. A script skips the path a key press takes through the browser, so a part can pass scripted presses and still fail under a real keyboard.
 
 UI SDK has a testing kit of its own that checks keyboard handling, ARIA and the attributes a server prints.
 

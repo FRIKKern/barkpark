@@ -17,7 +17,7 @@ PortableDoc's renderers already draw every block on the web with and without scr
 
 ## Decision
 
-PortableDoc keeps what a document is: the format, the checker, the edit commands and the agent server. BarkUI owns how it looks: the colours, how each block is drawn on every format, the editor's menus and the app parts. The renderers stay where they are and read BarkUI's names through a bridge, with today's values as the fallback, so nothing draws differently on the day it switches.
+PortableDoc keeps what a document is: the format, the checker, the edit commands and the agent server. BarkUI owns how it looks: the colours, how each block is drawn on every format, the editor's menus and the app parts. The renderers stay where they are. The plan is that they read BarkUI's names through a bridge, with today's values as the fallback, so nothing draws differently on the day it switches; the bridge is not built yet.
 
 ## What would change it
 

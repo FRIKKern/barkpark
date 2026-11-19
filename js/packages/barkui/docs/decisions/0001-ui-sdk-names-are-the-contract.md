@@ -11,7 +11,7 @@ background: var(--ui-primary)                                     UI SDK's varia
 
 ## Context
 
-UI SDK ships behaviour with a plain default look. It already names every part (`data-slot`), its states (`data-disabled`, `data-pending` and the like) and every colour its default look reads (`--ui-*`). Barkpark's own pages name their colours under many prefixes today. A first contest set contracts of our own against UI SDK's; both judges ranked the one built on UI SDK's names first. A second contest built four hard parts on it: it held for the look, and behaviour needed a few additions (sizes a script can read, tone colours, the states a server must print, a value on every repeated part).
+UI SDK ships behaviour with a plain default look. It already names every part (`data-slot`), its states (`data-disabled`, `data-pending` and the like) and every colour its default look reads (`--ui-*`). Barkpark's own pages name their colours under many prefixes today. Two contests compared ways to build BarkUI; the plan Paper `/papers/barkui-plan` has them and their results. The contract built on UI SDK's own names was picked, and the plan lists what behaviour still needs added to it.
 
 ## Decision
 
@@ -22,8 +22,8 @@ UI SDK ships behaviour with a plain default look. It already names every part (`
 
 ## What would change it
 
-UI SDK renaming its slots, states or variables in a way the seam ([0005](0005-ui-sdk-behind-a-seam.md)) cannot absorb with generated aliases.
+UI SDK renaming its slots, states or variables in a way BarkUI cannot follow behind its pinned version ([0005](0005-ui-sdk-behind-a-seam.md)).
 
 ## Considered
 
-- **A contract of our own names.** Rejected: every part would need a translation layer to UI SDK's markup, and UI SDK's own test kit and docs would stop applying.
+- **A contract of our own names.** Rejected: every part would need a translation layer to UI SDK's markup, and UI SDK's own docs would stop applying.

@@ -38,7 +38,7 @@ describe('board block', () => {
         '| M2 | One skin everywhere | 1 | 2 | 3 |',
         '',
         'Read from the board on 2026-01-02.',
-        '<!-- board-stamp: c7dc67dcdc3b8bf4 -->',
+        '<!-- stamp: c7dc67dcdc3b8bf4 -->',
       ].join('\n'),
     )
   })
