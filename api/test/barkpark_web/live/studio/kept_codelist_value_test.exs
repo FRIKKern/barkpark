@@ -132,6 +132,18 @@ defmodule BarkparkWeb.Studio.KeptCodelistValueTest do
     end
   end
 
+  test "studio: the Save button's post, which names no field, keeps a stored object", c do
+    view = open(c, :studio, :object)
+
+    view
+    |> form("#editor-form", %{"doc" => %{"notes" => "saved"}})
+    |> render_submit()
+
+    assert stored(c, :object)["notes"] == "saved"
+    assert stored(c, :object)["flat"] == %{"code" => "A1"}
+    assert stored(c, :object)["long"] == %{"code" => "A1"}
+  end
+
   for surface <- [:studio, :desk] do
     test "#{surface}: the select says what is stored is not a code, and a pick or a clear still writes",
          c do
