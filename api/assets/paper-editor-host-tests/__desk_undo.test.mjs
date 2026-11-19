@@ -342,6 +342,33 @@ check("the pane folded to a strip while the undo was on its way is opened as a c
   }
 });
 
+check("a pane drawn a strip wide whose mark the patch dropped is marked again, then opened as a click does", () => {
+  const pane = $("pane");
+  const root = $("desk-panes");
+  const opened = [];
+  // bp-desk.js `_openStrip`: only a pane marked a strip opens.
+  const open = (e) => {
+    const strip = e.target.closest("[data-pane-collapsed]");
+    if (strip) {
+      opened.push(strip.id);
+      strip.removeAttribute("data-pane-collapsed");
+    }
+  };
+  root.addEventListener("click", open, true);
+  pane.getBoundingClientRect = () => ({ width: 52, height: 600, top: 0, left: 0, right: 52, bottom: 600 });
+  try {
+    $("excerpt").value = "Short. B";
+    doc.body.focus();
+    undone({ field: "doc[excerpt]", value: "Short.", was: "Short. B" });
+    assert.deepEqual(opened, ["pane"]);
+    assert.equal(pane.hasAttribute("data-pane-collapsed"), false);
+    assert.equal(doc.activeElement, $("excerpt"));
+  } finally {
+    root.removeEventListener("click", open, true);
+    delete pane.getBoundingClientRect;
+  }
+});
+
 check("an open fold is left as it is", () => {
   $("set-toggle").setAttribute("aria-expanded", "true");
   toggled.length = 0;

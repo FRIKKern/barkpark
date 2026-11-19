@@ -180,12 +180,15 @@
 
   // Opens the pane around `el` when it is folded to a strip (it may have
   // folded while the undo was on its way), as a click on the strip does
-  // (bp-desk.js `_openStrip`).
+  // (bp-desk.js `_openStrip`, which opens only a pane marked a strip). The
+  // patch that brings the answer drops that mark until the desk lays the
+  // panes out again, so a pane drawn a strip wide is marked again first.
   function unstrip(el) {
     var pane = el.closest("#desk-panes > [data-pane-index]");
     if (!pane) return;
-    var narrow = pane.getBoundingClientRect().width;
-    if (pane.hasAttribute("data-pane-collapsed") || (narrow > 0 && narrow <= STRIP_MAX)) pane.click();
+    var wide = pane.getBoundingClientRect().width;
+    if (wide > 0 && wide <= STRIP_MAX) pane.setAttribute("data-pane-collapsed", "");
+    if (pane.hasAttribute("data-pane-collapsed")) pane.click();
   }
 
   // Opens every fold around `el`, a fold by its own button, so LiveView's fold
