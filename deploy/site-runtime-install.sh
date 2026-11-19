@@ -52,11 +52,40 @@ fi
 
 set -euo pipefail
 
+# bp_apt_get BEGIN
+# apt-get that WAITS while another apt or dpkg run holds a lock, instead of
+# failing. A fresh Ubuntu box runs unattended-upgrades on first boot: on
+# 2026-11-19 the go-live of bp-hovinbyen-020ce1 died at step 7c with
+# "E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process
+# 14066 (unattended-upgr)", apt-get exit 100. DPkg::Lock::Timeout makes an
+# install or remove wait for the dpkg locks. `apt-get update` does NOT honour it
+# for /var/lib/apt/lists/lock (measured on apt 2.4.14, Ubuntu 22.04: exit 100 at
+# once while another process held that lock), so a lock refusal is retried every
+# 10 s until 600 s have passed. Any other failure returns at once. Every box
+# apt-get goes through this function; this block is byte-identical in each box
+# script, and deploy/apt_lock_wait_test.go reds on a drifted copy or a bare call.
+bp_apt_get() {
+  local deadline=$((SECONDS + 600)) err rc
+  while :; do
+    rc=0
+    { err="$(apt-get -o DPkg::Lock::Timeout=600 "$@" 2>&1 >&3 3>&-)" || rc=$?; } 3>&1
+    [ -z "$err" ] || printf '%s\n' "$err" >&2
+    case "$rc:$err" in
+      0:*) return 0 ;;
+      *"Could not get lock"*) [ "$SECONDS" -lt "$deadline" ] || return "$rc" ;;
+      *) return "$rc" ;;
+    esac
+    echo "!! apt-get $1: another apt or dpkg run holds a lock; retrying in 10 s" >&2
+    sleep 10
+  done
+}
+# bp_apt_get END
+
 echo "== probe: $(hostname) $(uname -m) =="
 
 if ! command -v docker >/dev/null; then
   echo "== install docker + git =="
-  apt-get update -qq && apt-get install -y -qq docker.io git
+  bp_apt_get update -qq && bp_apt_get install -y -qq docker.io git
   systemctl enable --now docker
 fi
 docker --version
@@ -66,7 +95,7 @@ docker --version
 # git ensure (start)
 if ! command -v git >/dev/null; then
   echo "== install git =="
-  apt-get update -qq && apt-get install -y -qq git
+  bp_apt_get update -qq && bp_apt_get install -y -qq git
 fi
 git --version
 # A git that decides it needs a username has NO tty here. Left alone it either
@@ -94,7 +123,7 @@ git_net_die() {
 # nixpacks builds need BuildKit's buildx component (docker.io ships without it).
 if ! docker buildx version >/dev/null 2>&1; then
   echo "== install docker-buildx =="
-  apt-get update -qq && apt-get install -y -qq docker-buildx
+  bp_apt_get update -qq && bp_apt_get install -y -qq docker-buildx
 fi
 docker buildx version
 

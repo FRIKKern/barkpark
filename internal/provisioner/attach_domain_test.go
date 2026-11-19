@@ -324,6 +324,11 @@ func TestRunOnceAttachDomainHappyPath(t *testing.T) {
 	if rec.Zone != "barkpark.cloud" || rec.Name != "gyldendal" || rec.Type != "A" || rec.Value != "203.0.113.9" {
 		t.Errorf("DNS upsert = %+v, want gyldendal.barkpark.cloud A → 203.0.113.9", rec)
 	}
+	// A short TTL, not the zone default (0): the box's IP is released at
+	// deprovision, and a cached record would keep answering it for an hour.
+	if rec.TTL <= 0 || rec.TTL > 300 {
+		t.Errorf("DNS upsert TTL = %d, want 1..300 (0 means the zone default)", rec.TTL)
+	}
 
 	// ── ordering: the DNS upsert strictly precedes every SSH step ──
 	events := log.all()

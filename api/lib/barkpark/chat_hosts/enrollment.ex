@@ -25,11 +25,12 @@ defmodule Barkpark.ChatHosts.Enrollment do
   @doc """
   Why the code was refused:
 
-    * `:used` - a machine already enrolled with it (whatever happened since);
+    * `:used` - a machine enrolled with it and is still registered;
     * `:expired` - never used, not revoked, past its 10 minutes;
-    * `:replaced` - never used, revoked, and a newer host row took its name
-      (the owner made a new code);
-    * `:revoked` - never used, revoked, with no newer row for its name;
+    * `:replaced` - revoked, and a newer host row took its name (the owner
+      made a new code, or registered the machine again);
+    * `:revoked` - revoked, with no newer row for its name, whether or not a
+      machine had enrolled with it first;
     * `:unknown` - no host row holds this code.
   """
   @spec refusal(String.t()) :: refusal()
@@ -38,7 +39,7 @@ defmodule Barkpark.ChatHosts.Enrollment do
 
     case Repo.one(from(h in RegisteredHost, where: h.enrollment_hash == ^hash)) do
       nil -> :unknown
-      %RegisteredHost{enrolled_at: %DateTime{}} -> :used
+      %RegisteredHost{revoked_at: nil, enrolled_at: %DateTime{}} -> :used
       %RegisteredHost{revoked_at: nil} -> :expired
       host -> if replaced?(host), do: :replaced, else: :revoked
     end
@@ -58,15 +59,17 @@ defmodule Barkpark.ChatHosts.Enrollment do
   def refusal_message(:expired),
     do:
       "This one-time code has expired; codes work for 10 minutes. " <>
-        "Ask the workspace owner for a new one (Studio > Chat hosts > Make a new code)."
+        "Ask the workspace owner for a new one " <>
+        "(bp chat-host new-code <name>, or Make a new code in Studio > Chat hosts)."
 
   def refusal_message(:replaced),
     do: "A newer code replaced this one. Run enroll again with the newest code for this machine."
 
   def refusal_message(:revoked),
     do:
-      "The workspace owner removed this machine before it enrolled. " <>
-        "Ask the owner to register it again."
+      "The workspace owner revoked this machine, so its code no longer works. " <>
+        "Ask the owner to register it again (Studio > Chat hosts, or bp chat-host enroll), " <>
+        "then run enroll with the new code."
 
   def refusal_message(:used),
     do:
