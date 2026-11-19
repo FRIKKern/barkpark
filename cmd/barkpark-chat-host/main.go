@@ -27,16 +27,21 @@ func main() {
 	case "enroll":
 		flags := flag.NewFlagSet("enroll", flag.ExitOnError)
 		server := flags.String("url", "", "Barkpark server URL")
-		token := flags.String("token", "", "one-time enrollment token")
-		root := flags.String("root", "", "absolute approved root")
+		token := flags.String("token", "", "one-time enrollment code (default: read it from stdin, which keeps it out of the process list)")
+		var roots rootList
+		flags.Var(&roots, "root", "absolute approved root (repeat for more than one)")
 		allowHTTP := flags.Bool("allow-http-loopback", false, "allow plaintext HTTP only for a loopback development server")
 		statePath := flags.String("state", stateDefault, "credential state path")
 		_ = flags.Parse(os.Args[2:])
-		if *server == "" || *token == "" || *root == "" {
-			fatal("enroll requires --url, --token, and --root")
+		if *server == "" || len(roots) == 0 {
+			fatal("enroll requires --url and --root; the code comes from stdin (printf '%s\\n' CODE | barkpark-chat-host enroll --url … --root …) or --token")
+		}
+		code, err := enrollCode(*token)
+		if err != nil {
+			fatal(err.Error())
 		}
 		client := &chathost.Client{BaseURL: *server, AllowInsecureLoopback: *allowHTTP}
-		result, err := client.Enroll(context.Background(), *token, []string{*root}, capabilities())
+		result, err := client.Enroll(context.Background(), code, roots, capabilities())
 		if err != nil {
 			fatal(err.Error())
 		}
@@ -44,6 +49,7 @@ func main() {
 			fatal(err.Error())
 		}
 		fmt.Printf("enrolled host %s (%s)\n", result.Host.Name, result.Host.ID)
+		fmt.Printf("start it and keep it running: barkpark-chat-host run --state %s\n", *statePath)
 
 	case "run":
 		flags := flag.NewFlagSet("run", flag.ExitOnError)
