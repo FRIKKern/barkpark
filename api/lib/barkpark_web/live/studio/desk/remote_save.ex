@@ -14,9 +14,16 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   - This tab's own change is kept per field as `{before, after}` in form
     shape (`after_write/3`). Free text: the text the post was typed from
     and the text it posted, this tab's words alone. Any other field: the
-    form before the write and the stored value after it, when both moved.
-    The form takes every remote save, so a field only another editor
-    changed is not counted as this tab's.
+    last stored value this tab knew (its own last write or the last frame
+    it took, `@seen`) and the stored value after the write, when that
+    moved. A field only another editor changed is in the last frame
+    already, so it is not counted as this tab's.
+  - Only the user's values: the title and the schema's fields. Never the
+    document's status (a first edit opens the draft, a Publish elsewhere
+    closes it: nothing of this tab's is lost) or any `_` key.
+  - Every desk write records it (`EditorHost`): the form's events, the
+    desk's own built writes (paste, undo, revert), and the writes the page
+    sends itself (a tree codelist's pick, a reference or image pick).
   - A frame keeps a change intact when the field still holds this tab's
     value, or, for text, when this tab's words still come back out of it
     (`TextUndo.revert/3`). The change is then kept on the new text. A change
@@ -30,7 +37,9 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   and a Publish elsewhere closes it ("Last published N ago").
 
   Both are keyed by the document's published id, so another document
-  opened in the pane does not inherit them.
+  opened in the pane does not inherit them, and both start again when the
+  editor loads a document (`reset/1`): opening it again, or the reload
+  after a discard elsewhere.
   """
 
   import Phoenix.Component, only: [assign: 2, assign: 3]
@@ -42,6 +51,11 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   @own :desk_own_values
   @overwritten :desk_overwritten
   @meta :desk_remote_meta
+  @seen :desk_remote_seen
+
+  @doc "Forget it all: the editor loaded a document afresh."
+  def reset(socket),
+    do: assign(socket, [{@own, nil}, {@overwritten, nil}, {@meta, nil}, {@seen, nil}])
 
   # ── This tab's writes ───────────────────────────────────────────────────
 
@@ -69,19 +83,26 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
       schema = socket.assigns[:editor_schema]
       stored = Content.doc_to_form(doc, schema)
       shown = before.assigns[:editor_form] || %{}
-      base = Content.doc_to_form(before.assigns[:editor_doc], schema)
+      seen = seen(before.assigns, pub, schema)
+      user = user_keys(schema)
 
-      # Any other field: the value the store kept, moved from what the form
-      # showed and from this tab's last copy (a field only another editor
-      # moved is in the form already).
+      # Any other field: the value the store kept, moved from the last
+      # stored value this tab knew (a field only another editor moved is in
+      # the last frame already). A pick the form showed before it was
+      # written (a reference, an image) counts too.
       changes =
         for {key, value} <- stored,
+            MapSet.member?(user, key),
             not RemoteValues.free_text?(schema, key),
-            Map.get(shown, key) != value and Map.get(base, key) != value,
+            Map.get(seen, key) != value,
             into: kept(socket.assigns, pub),
-            do: {key, {Map.get(shown, key), value}}
+            do: {key, {Map.get(seen, key), value}}
 
-      assign(socket, [{@own, {pub, typed(changes, before, params, shown)}}, {@overwritten, nil}])
+      assign(socket, [
+        {@own, {pub, typed(changes, before, params, shown)}},
+        {@overwritten, nil},
+        {@seen, {pub, stored}}
+      ])
     else
       _ -> socket
     end
@@ -114,6 +135,28 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
     Map.get(given, key) || Map.get(seen, key) || Map.get(shown, key)
   end
 
+  # The last stored values this tab knew: its last write or the last frame
+  # it took, else the document it holds.
+  defp seen(assigns, pub, schema) do
+    case assigns[@seen] do
+      {^pub, form} -> form
+      _ -> Content.doc_to_form(assigns[:editor_doc], schema)
+    end
+  end
+
+  # The user's values: the title and the schema's own fields, never the
+  # status or a system key.
+  defp user_keys(schema) do
+    names = for %{"name" => name} <- fields(schema), is_binary(name), do: name
+
+    ["title" | names]
+    |> Enum.reject(&(&1 == "status" or String.starts_with?(&1, "_")))
+    |> MapSet.new()
+  end
+
+  defp fields(%{fields: fields}) when is_list(fields), do: fields
+  defp fields(_schema), do: []
+
   defp kept(assigns, pub) do
     case assigns[@own] do
       {^pub, changes} -> changes
@@ -136,7 +179,12 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
          pub = Content.published_id(id),
          true <- pub == Content.published_id(frame_id),
          true <- newer?(frame, doc) do
-      socket |> judge(pub) |> draft_state(pub, msg, frame)
+      seen = Content.doc_to_form(frame, socket.assigns[:editor_schema])
+
+      socket
+      |> judge(pub)
+      |> draft_state(pub, msg, frame)
+      |> assign(@seen, {pub, seen})
     else
       _ -> socket
     end
@@ -220,15 +268,21 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
 
   @doc """
   The open document's last change, `{at, status}`: this tab's copy, or
-  another editor's frame when that is newer.
+  another editor's frame when that is newer and agrees with the draft state
+  the editor holds (a discard elsewhere reloads a published document over a
+  draft frame).
   """
   def latest(assigns) do
     doc = assigns[:editor_doc] || %{}
     own = {Map.get(doc, :updated_at), Map.get(doc, :status)}
+    draft? = assigns[:editor_is_draft] == true
+    agrees? = fn status -> if draft?, do: status == "draft", else: status != "draft" end
 
     case assigns[@meta] do
       %{id: id, at: %DateTime{} = at, status: status} ->
-        if id == open_id(assigns) and newer?(%{updated_at: at}, doc), do: {at, status}, else: own
+        if id == open_id(assigns) and newer?(%{updated_at: at}, doc) and agrees?.(status),
+          do: {at, status},
+          else: own
 
       _ ->
         own

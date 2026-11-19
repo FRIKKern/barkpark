@@ -173,11 +173,12 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       assigns[:editor_is_draft] == true ->
         gettext("Edited %{ago}", ago: ago(at, now))
 
-      state == "published" ->
-        gettext("Last published %{ago}", ago: ago(at, now))
+      state == "draft" ->
+        gettext("Edited %{ago}", ago: ago(at, now))
 
+      # Not a draft: what the document has is its published version.
       true ->
-        ""
+        gettext("Last published %{ago}", ago: ago(at, now))
     end
   end
 

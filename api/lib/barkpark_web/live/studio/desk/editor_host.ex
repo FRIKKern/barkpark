@@ -180,6 +180,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
       {:noreply,
        loaded
+       |> RemoteSave.reset()
        |> assign(
          active: length(panes) - 1,
          editing: target,
@@ -423,7 +424,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # which the Studio would put in the form (`Discarded`).
   def handle_info({:doc_updated, msg} = message, socket) do
     if Discarded.frame?(msg, socket.assigns),
-      do: ours({:noreply, Discarded.reload(socket)}),
+      do: ours({:noreply, socket |> Discarded.reload() |> RemoteSave.reset()}),
       else: message |> StudioLive.handle_info(socket) |> RemoteSave.frame(msg) |> ours()
   end
 
@@ -436,11 +437,30 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     cond do
       gone?(socket.assigns) or RevisionView.shown?(socket.assigns) -> {:noreply, socket}
       Discarded.drop?(socket.assigns) -> {:noreply, Discarded.drop(socket)}
-      true -> message |> StudioLive.handle_info(socket) |> ours()
+      true -> message |> StudioLive.handle_info(socket) |> ours() |> written_by_page(socket)
     end
   end
 
+  # A pick of a reference or an image (`select-ref`, `clear-ref`,
+  # `select-media`, `clear-image`, `upload-image`) shows in the form at once
+  # and is written here, from the form the page sent itself. So is a block
+  # op of the beta editor.
+  def handle_info({tag, _} = message, socket) when tag in [:autosave_form, :paper_op],
+    do: message |> StudioLive.handle_info(socket) |> ours() |> written_by_page(socket)
+
+  def handle_info({:paper_op, _op, _request_id} = message, socket),
+    do: message |> StudioLive.handle_info(socket) |> ours() |> written_by_page(socket)
+
   def handle_info(message, socket), do: message |> StudioLive.handle_info(socket) |> ours()
+
+  # A write the page sent itself is this tab's save, as an event's is: it
+  # says "Saved" (`JustSaved`), and another editor's save that replaces it is
+  # named (`RemoteSave`).
+  defp written_by_page(result, before),
+    do:
+      result
+      |> JustSaved.after_write(before.assigns[:editor_doc])
+      |> RemoteSave.after_write(before, %{})
 
   # The Studio's panes are not drawn here; its editor is.
   defp ours(result, how \\ :reload)

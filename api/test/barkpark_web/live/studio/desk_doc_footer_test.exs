@@ -134,7 +134,7 @@ defmodule BarkparkWeb.Studio.DeskDocFooterTest do
     assert DocFooter.status(%{editor_doc: doc}, now) == "Last published 2h ago"
     assert DocFooter.status(%{editor_doc: doc, editor_is_draft: true}, now) == "Edited 2h ago"
     assert DocFooter.status(%{editor_doc: doc, save_status: "Save failed"}, now) == "Save failed"
-    assert DocFooter.status(%{editor_doc: %{doc | status: "draft"}}, now) == ""
+    assert DocFooter.status(%{editor_doc: %{doc | status: "draft"}}, now) == "Edited 2h ago"
   end
 
   # Control: the old Studio has no such footer.
