@@ -16,52 +16,55 @@ defmodule Barkpark.PortableDoc.BpmlPrintRefusesLossTest do
 
   defp paper(blocks), do: %{"slug" => "s", "title" => "T", "blocks" => blocks}
 
-  @callout %{
-    "type" => "callout",
-    "tone" => "info",
-    "content" => [t("Heads up.")],
-    "slots" => %{
-      "body" => [
-        %{"type" => "paragraph", "content" => [t("First body paragraph.")]},
-        %{"type" => "list", "items" => [[t("a body item")]]}
+  defp callout,
+    do: %{
+      "type" => "callout",
+      "tone" => "info",
+      "content" => [t("Heads up.")],
+      "slots" => %{
+        "body" => [
+          %{"type" => "paragraph", "content" => [t("First body paragraph.")]},
+          %{"type" => "list", "items" => [[t("a body item")]]}
+        ]
+      }
+    }
+
+  defp nested_list,
+    do: %{
+      "type" => "list",
+      "items" => [
+        %{"content" => [t("a")], "children" => [%{"type" => "list", "items" => [[t("b")]]}]}
       ]
     }
-  }
 
-  @nested_list %{
-    "type" => "list",
-    "items" => [
-      %{"content" => [t("a")], "children" => [%{"type" => "list", "items" => [[t("b")]]}]}
-    ]
-  }
-
-  @paragraph_child %{
-    "type" => "list",
-    "items" => [
-      %{
-        "content" => [t("a")],
-        "children" => [%{"type" => "paragraph", "content" => [t("under a")]}]
-      }
-    ]
-  }
+  defp paragraph_child,
+    do: %{
+      "type" => "list",
+      "items" => [
+        %{
+          "content" => [t("a")],
+          "children" => [%{"type" => "paragraph", "content" => [t("under a")]}]
+        }
+      ]
+    }
 
   test "a callout with content and a two-block body is refused at its body" do
-    e = refusal([%{"type" => "paragraph", "content" => [t("before")]}, @callout])
+    e = refusal([%{"type" => "paragraph", "content" => [t("before")]}, callout()])
     assert e.kind == :round_trip
     assert e.type =~ ~r/^blocks\[1\]/
     assert Exception.message(e) =~ "BPML cannot carry blocks[1]"
-    assert_raise UnprintableError, fn -> Bpml.print_paper(paper([@callout])) end
+    assert_raise UnprintableError, fn -> Bpml.print_paper(paper([callout()])) end
   end
 
   test "a list item holding a nested list is refused at that item" do
-    e = refusal([@nested_list])
+    e = refusal([nested_list()])
     assert e.kind == :round_trip
     assert e.type =~ ~r/^blocks\[0\]\.items\[0\]/
-    assert_raise UnprintableError, fn -> Bpml.print_paper(paper([@nested_list])) end
+    assert_raise UnprintableError, fn -> Bpml.print_paper(paper([nested_list()])) end
   end
 
   test "a list item holding a paragraph is refused at that item" do
-    e = refusal([@paragraph_child])
+    e = refusal([paragraph_child()])
     assert e.kind == :round_trip
     assert e.type =~ ~r/^blocks\[0\]\.items\[0\]/
   end

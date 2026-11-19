@@ -3,20 +3,30 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   `normalize/1`: the spelling a document has after a BPML print and parse, when
   the text carries all of it. It is the one place the printer's rewrites live;
   `Bpml.RoundTrip` compares `parse(print(doc))` with `normalize(doc)`, and
-  `bpml_seal_papers_roundtrip_test.exs` uses it too. Five rewrites, no others:
+  `bpml_seal_papers_roundtrip_test.exs` uses it too. Six rewrites, no others:
 
     1. `:mark_node` — an inline mark written as a node (`code`, `strong`, `em`, `underline`, `strike`) becomes text carrying that mark.
     2. `:expandable_children` — an `expandable`'s body key `children` becomes `blocks`.
     3. `:unchecked_item` — a list item `%{"content" => c, "checked" => false}` and nothing else becomes the plain item `c`.
     4. `:heading_level` — a heading level written as a string (`"2"`) becomes the integer.
     5. `:text_merge` — adjacent text nodes with no marks merge into one.
+    6. `:alias_key` — a body the printer reads under an alias key moves whole to the key the parser writes (`Canonical.AliasKey`).
 
   It never drops a key that holds content (`children`, `slots`, `items`,
-  `blocks`) and never changes a word. A sixth rewrite is its own change, with
+  `blocks`) and never changes a word. A seventh rewrite is its own change, with
   its own careful review.
   """
 
-  @rules [:mark_node, :expandable_children, :unchecked_item, :heading_level, :text_merge]
+  alias Barkpark.PortableDoc.Bpml.Canonical.AliasKey
+
+  @rules [
+    :mark_node,
+    :expandable_children,
+    :unchecked_item,
+    :heading_level,
+    :text_merge,
+    :alias_key
+  ]
 
   # Keys whose value is blocks (or a list of block lists, or of step maps).
   # `slots` holds a map of named block lists; `items` holds list items; every
@@ -25,35 +35,40 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
 
   @mark_node_types ~w(strong em code underline strike)
 
-  @doc "The five rewrites, by name."
+  @doc "The six rewrites, by name."
   @spec rules() :: [atom()]
   def rules, do: @rules
 
   @doc """
   The stored blocks as a BPML print and parse spells them. `rules` limits the
-  rewrites (all five by default); the sweep test counts each one with it.
+  rewrites (all six by default); the sweep test counts each one with it.
   """
   @spec normalize(term(), [atom()]) :: term()
   def normalize(blocks, rules \\ @rules)
   def normalize(blocks, rules) when is_list(blocks), do: Enum.map(blocks, &block(&1, rules))
   def normalize(other, _rules), do: other
 
-  defp block(%{"type" => "expandable", "children" => children} = b, r)
+  defp block(%{} = b, r) do
+    if :alias_key in r, do: b |> AliasKey.rekey() |> shape(r), else: shape(b, r)
+  end
+
+  defp block(other, _r), do: other
+
+  defp shape(%{"type" => "expandable", "children" => children} = b, r)
        when not is_map_key(b, "blocks") do
     if :expandable_children in r,
       do: b |> Map.delete("children") |> Map.put("blocks", children) |> walk_block(r),
       else: walk_block(b, r)
   end
 
-  defp block(%{"type" => "heading", "level" => level} = b, r) when is_binary(level) do
+  defp shape(%{"type" => "heading", "level" => level} = b, r) when is_binary(level) do
     case :heading_level in r and Integer.parse(level) do
       {n, ""} when n in 1..6 -> walk_block(%{b | "level" => n}, r)
       _ -> walk_block(b, r)
     end
   end
 
-  defp block(%{} = b, r), do: walk_block(b, r)
-  defp block(other, _r), do: other
+  defp shape(b, r), do: walk_block(b, r)
 
   defp walk_block(b, r) do
     Map.new(b, fn

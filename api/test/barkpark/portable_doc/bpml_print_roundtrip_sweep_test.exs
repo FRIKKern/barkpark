@@ -25,7 +25,15 @@ defmodule Barkpark.PortableDoc.BpmlPrintRoundtripSweepTest do
     for {pattern, kind} <- @sources,
         file <- @root |> Path.join(pattern) |> Path.wildcard() |> Enum.sort() do
       json = file |> File.read!() |> Jason.decode!()
-      blocks = if kind == :golden, do: [json["input"]], else: json["blocks"] || []
+
+      blocks =
+        case {kind, json} do
+          {:golden, %{"input" => input}} -> [input]
+          {:blocks, list} when is_list(list) -> list
+          {:blocks, %{"blocks" => blocks}} when is_list(blocks) -> blocks
+          _ -> []
+        end
+
       {Path.relative_to(file, @root), blocks}
     end
   end
