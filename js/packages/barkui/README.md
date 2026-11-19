@@ -6,7 +6,7 @@
   <img alt="The BarkUI showroom: the button in every state, with its proof lights on" src="docs/images/showroom-light.png">
 </picture>
 
-**One look for every Barkpark app.** BarkUI is meant to draw the parts our apps are made of, from buttons to page trees, and every block of a PortableDoc document, in one set of skins. What stands today: the sheet of skins, the first part (the button) and the showroom check that proves it. It lives in Barkpark for now as the private package `@barkpark/barkui`.
+**One look for every Barkpark app.** BarkUI is meant to draw the parts our apps are made of, from buttons to page trees, and every block of a PortableDoc document, in one set of skins. What stands today: the sheet of skins, the parts the showroom lists, and the showroom check that proves each one. What is not built yet reads as planned, with no dates. It lives in Barkpark for now as the private package `@barkpark/barkui`.
 
 ## Vision
 
@@ -36,7 +36,7 @@ The daily news run fills this block from merged work once it covers BarkUI. Noth
 
 ## Where things stand
 
-The showroom is the one home for which parts exist and what is proven for each: `pnpm run build`, then open `dist/showroom/index.html`. How far each milestone has come is on the [roadmap](docs/ROADMAP.md#where-things-stand). The block below is written by `node build/status.mjs`, run by hand until the daily news run calls it; a fast test fails when it is edited without the script.
+The showroom is the one home for which parts exist and what is proven for each: `pnpm run build`, then open `dist/showroom/index.html`. How far each milestone has come is on the [roadmap](docs/ROADMAP.md#where-things-stand). The block below is written by `node build/status.mjs`; [QUALITY.md](QUALITY.md#docs) says when it runs and what guards it.
 
 <!-- status:start -->
 | What | Read from the files |

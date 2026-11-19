@@ -15,7 +15,7 @@ M0 Contest ─► M0.5 Proof round ─► M1 Map ─► M2 One skin everywhere �
 Beside them all: Groundwork, every shared piece has one source
 ```
 
-Today the sheet, the first part (the button) and the showroom check stand in this repo; everything else here is planned, with no dates. Order and rewards live on this page; the reasons, the contests and the trials live in the plan Paper `/papers/barkui-plan`. How far each milestone has come is copied from the task board into [Where things stand](#where-things-stand), by a script only.
+What stands today is told once, in the [README](../README.md#barkui). Order and rewards live on this page; the reasons, the contests and the trials live in the plan Paper `/papers/barkui-plan`. How far each milestone has come is copied from the task board into [Where things stand](#where-things-stand), by a script only.
 
 | Id | Milestone | What it gives | Ready when |
 |---|---|---|---|
@@ -56,7 +56,7 @@ Hard parts run beside the batches, two at a time. One folder per part and nothin
 
 ## Where things stand
 
-Done, in progress and open under each milestone, copied from the task board. `node build/board.mjs <goal-task-id>` writes this block from the task board, on a machine signed in to `bp`. It is run by hand until the daily news run calls it; a PR check never reads the board. A milestone with no tasks under it counts as one item itself; a blocked task counts as open, and a cancelled one is left out.
+Done, in progress and open under each milestone, copied from the task board by `node build/board.mjs <goal-task-id>`; [QUALITY.md](../QUALITY.md#docs) says when it runs and what guards it. A milestone with no tasks under it counts as one item itself; a blocked task counts as open, and a cancelled one is left out.
 
 <!-- board:start -->
 | Id | Milestone | Done | In progress | Open |

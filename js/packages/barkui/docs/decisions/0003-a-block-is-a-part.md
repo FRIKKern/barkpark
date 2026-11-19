@@ -15,7 +15,7 @@ The same thing is often built twice: a table in a document and a grid in an app,
 
 ## Decision
 
-A document block and the app part it resembles are one part, built once. The table block and the grid go first. Other blocks become parts only when an app needs them as one; until then they are drawn by PortableDoc's renderers through the bridge ([0002](0002-barkui-draws-portable-doc-defines.md)).
+A document block and the app part it resembles are one part, built once. The table block and the grid go first. Other blocks become parts only when an app needs them as one; until then they are drawn by PortableDoc's renderers, through the bridge once it is built ([0002](0002-barkui-draws-portable-doc-defines.md)).
 
 ## What would change it
 
