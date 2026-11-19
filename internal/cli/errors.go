@@ -417,6 +417,7 @@ var codeExit = map[string]int{
 	"bpml":                       exitValidation, // 422, bulldocs_ingest_controller.ex:237
 	"bpml_unavailable":           exitValidation, // 422, bulldocs_source_controller.ex:77
 	"bpml_unprintable":           exitValidation, // 422, bulldocs_ingest_controller.ex:273
+	"bpml_unshown":               exitValidation, // 422, bpml/write_wall.ex (sync)
 	"constraint":                 exitValidation, // 422, bulldocs_ingest_controller.ex:354
 	"create_wall":                exitValidation, // 422, bulldocs_ingest_controller.ex:432
 	"invalid_conversation":       exitValidation, // 422, bulldocs_ingest_controller.ex:1151

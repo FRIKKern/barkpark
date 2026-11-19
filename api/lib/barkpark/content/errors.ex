@@ -193,6 +193,9 @@ defmodule Barkpark.Content.Errors do
                          "bpml",
                          "bpml_unavailable",
                          "bpml_unprintable",
+                         # A push that would change what its pull did not show
+                         # (Bpml.WriteWall).
+                         "bpml_unshown",
                          "unknown_format",
                          "hollow_paper",
                          "structure",
