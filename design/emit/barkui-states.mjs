@@ -21,6 +21,9 @@
 
 import { contrast, oklchToSrgb, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
 
+// A step a person sees. On dark greys 1.12:1 already takes more than 0.03 of
+// lightness; a larger lightness step (0.04) would walk the danger and info texts
+// on charple's dark raised panel to under 0.9 of their chroma.
 export const STEP = 1.12;
 export const STEP_L = 0.03;
 export const STATE_GROUND = 1.1;
