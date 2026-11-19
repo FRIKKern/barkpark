@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pinStates } from '../build/showroom.mjs'
-import { selectorFindings, statesOnSubject, unpinned } from '../check/selectors.mjs'
+import { resolve, selectorFindings, statesOnSubject, strip, unpinned } from '../check/selectors.mjs'
 
 // Inputs as the browser hands them back (selectorText): lowercase, `& ` before a nested descendant.
 describe('a pinned state may stand only on the element a rule styles', () => {
@@ -19,6 +19,14 @@ describe('a pinned state may stand only on the element a rule styles', () => {
     expect(selectorFindings('a:target')[0]).toMatch(/:target is not a pseudo-class/)
     expect(selectorFindings('a::selection')[0]).toMatch(/::selection is not a pseudo-element/)
     expect(selectorFindings('a[title=":target"]::before')).toEqual([])
+    // What a person changes by clicking or typing waits until a part reads it as a state.
+    for (const p of ['checked', 'placeholder-shown', 'enabled', 'disabled', 'indeterminate']) expect(selectorFindings(`a:${p}`).length, p).toBe(1)
+  })
+
+  it('makes a nested selector absolute and takes its states and pseudo-element out, for element.matches', () => {
+    expect(resolve('&:hover > svg', '[data-slot="button"]')).toBe(':is([data-slot="button"]):hover > svg')
+    expect(strip(':is(a):hover:not([t=":hover"])::before')).toEqual({ selector: ':is(a):not([t=":hover"])', states: ['hover'] })
+    expect(strip(':active, b > ::after')).toEqual({ selector: '*, b > *', states: ['active'] })
   })
 
   it('pins a state whatever its case, and names one the pin did not reach', () => {

@@ -379,18 +379,33 @@ const CASES = [
       'background-clip: text through a variable': skinsSay(/button#button-after "Duplicate" computes background-clip: text/),
     }),
   },
+  // Every rule on every control it can match, read at a moment it applies (states.mjs, coverage.mjs): all lights.
   {
-    name: 'a real hover that draws unlike its pin turns "every skin" off at the live control',
-    only: ['skins', 'schemes'],
+    name: 'a state on any control of its kind, pending held or reached by the steps, and a rule nothing reads each fail by name',
+    only: ['pressed', 'skins', 'schemes', 'phone', 'noscript'],
     states: true,
+    secs: 150,
+    plant: all(
+      // The review's: a second control of the secondary kind, and pending.
+      inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
+      inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }'),
+      // A later control reached by structure alone, and a rule that applies to nothing.
+      inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
+      inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
+    ),
     css: [
-      // Beyond the walls (this sheet is the selftest's own, and never pinned): the reviewer's two hover rules.
+      // Beyond the walls (this sheet is the selftest's own, and never pinned): the round-8 review's two hover rules.
       '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled]) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
     ].join('\n'),
     expect: each({
-      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": color becomes .* where its pin \(button "Hover"\)/),
-      'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": color becomes/),
+      'a hover on a second control of its kind': skinsSay(/real hover on button#button-after "Duplicate": .*no pinned row shows this change/),
+      'a hover through :nth-child on a later control': skinsSay(/real hover on button "Medium": .*no pinned row shows this change/),
+      'pending held at rest, in every view': drawnOff('button "Saving"'),
+      'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
+      'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
+      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
+      'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     }),
   },
   {
