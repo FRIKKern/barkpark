@@ -69,7 +69,8 @@ and the base styles can style it.**
   skin, scheme and surface, and at 390px. A thing's ink is the pixels that differ with it toggled off,
   each weighed by how far it moved, so a colour or a fade does not change the amount. It must be at
   least 90% of the same thing drawn alone by the check, unclipped and uncovered (the same string in the
-  same font, or a copy of the node); under that it fails as "label is cut: 41% of it draws". Contrast
+  same font, or a copy of the node, in its own colours on its own ground and at its own place within
+  a device pixel, so both rasterise alike); under that it fails as "label is cut: 41% of it draws". Contrast
   is the core of the ink (the strongest tenth, not the anti-aliased rim) against what is drawn there
   without it: 4.5:1 for text, 3:1 for a graphic. A run with text and no ink fails as "text does not
   draw", and a control whose text and graphics add up to nothing fails as "control has nothing to
