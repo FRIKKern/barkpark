@@ -75,6 +75,16 @@ const reconcileEveryCycles = 50
 // than reconcile because staying current is the whole point.
 const refreshEveryCycles = 6
 
+// warmPoolBootLine is the boot line that says whether the warm pool is on. It
+// says so when it is OFF too: on 2026-11-19 a worker ran with the pool off while
+// two warm servers sat ready, and nothing at boot said so.
+func warmPoolBootLine(size int) string {
+	if size > 0 {
+		return fmt.Sprintf("barkpark-provisioner: warm pool ENABLED (target size %d)", size)
+	}
+	return "barkpark-provisioner: warm pool DISABLED (WARM_POOL_SIZE=0 or unset) — every launch creates a new server"
+}
+
 // warmPoolSize reads WARM_POOL_SIZE (default 0 = the warm pool DISABLED, so
 // provisioning stays on the proven one-shot path). A non-numeric or negative
 // value is treated as 0 with a warning — a typo must never silently enable paid
@@ -284,8 +294,8 @@ func run(args []string) int {
 			Token:      tok,
 			HTTPClient: &http.Client{Timeout: 30 * time.Second},
 		}
-		fmt.Fprintf(os.Stderr, "barkpark-provisioner: warm pool ENABLED (target size %d)\n", poolSize)
 	}
+	fmt.Fprintln(os.Stderr, warmPoolBootLine(poolSize))
 
 	// Resurrect drain (charter S14f): the portable-archive RESTORE queue. The bundle
 	// store creds + KEK come from WORKER ENV (never the claim JSON, D43); a missing

@@ -229,6 +229,26 @@
       "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. The uninterpolated skipped-shape name of elixir.yml's `mix-prod-compile`; see the `mix-test` twin above."
     },
     {
+      "context": "Test (Elixir and OTP from .tool-versions)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-test`, a `needs:` of `Elixir gate` (required), SKIPPED-SHAPE name. Since task-97b251c1b5d6a1db the job reads its toolchain from .tool-versions instead of an otp/elixir matrix axis, so its `name:` interpolates no matrix value: a skipped job publishes this bare name and a running cell appends its partition (the three rows below). Added by hand with the workflow change, so no head has rendered it yet; acknowledged with `--expect-unrendered` in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
+      "context": "Test (Elixir and OTP from .tool-versions) (1)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-test`, partition 1, RUN-SHAPE name: GitHub appends the remaining matrix value (the partition) to a `name:` that interpolates none. See the bare-name row above; acknowledged the same way."
+    },
+    {
+      "context": "Test (Elixir and OTP from .tool-versions) (2)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-test`, partition 2, RUN-SHAPE name: GitHub appends the remaining matrix value (the partition) to a `name:` that interpolates none. See the bare-name row above; acknowledged the same way."
+    },
+    {
+      "context": "Test (Elixir and OTP from .tool-versions) (3)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-test`, partition 3, RUN-SHAPE name: GitHub appends the remaining matrix value (the partition) to a `name:` that interpolates none. See the bare-name row above; acknowledged the same way."
+    },
+    {
+      "context": "Prod compile gate (Elixir and OTP from .tool-versions)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. elixir.yml job `mix-prod-compile`, a `needs:` of `Elixir gate` (required). Unmatrixed since task-97b251c1b5d6a1db (toolchain from .tool-versions), so the run and skip shapes render this one name. Added by hand with the workflow change; acknowledged with `--expect-unrendered` in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
       "context": "Billing tier floor (rendered)",
       "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. console-harness.yml job `tier-floor-render`, listed in `Console gate`'s `needs:`. Substantive and load-bearing — this row says it is ALREADY enforced through the aggregator, never that it does not matter."
     },

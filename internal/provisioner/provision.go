@@ -418,10 +418,16 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 
 	// Acquire a configured, live host. When the warm pool is enabled (dwb-10), try
 	// to ASSIGN a pre-baked box (≤15s); on an empty pool or a failed assign fall
-	// through to one-shot create SILENTLY, so a cold/lagging pool still meets the
-	// 90s p95 and a go-live never dead-ends. Disabled (WarmPoolSize 0 / no
-	// WarmClient) → the one-shot path, byte-for-byte the prior behavior.
-	live, err := acquireHost(ctx, seams, wp, spec)
+	// through to one-shot create, so a cold/lagging pool still meets the 90s p95
+	// and a go-live never dead-ends. Disabled (WarmPoolSize 0 / no WarmClient) →
+	// the one-shot path. A Hetzner launch says which way it went, and why, as a
+	// create/progress line (launch_host.go); a non-Hetzner launch has its pool
+	// forced off above and stays silent about it.
+	var say func(hostDecision)
+	if kind == cloud.ProviderHetzner {
+		say = hostNarrator(wp)
+	}
+	live, err := acquireHost(ctx, seams, wp, spec, say)
 	if err != nil {
 		// The acquisition path already tore down any half-built box on the way out
 		// (one-shot cleans up its own; a failed warm assign tears its box down, then
@@ -584,16 +590,26 @@ var _ cloud.CaddyStepper = managedBoxCaddy{}
 
 // acquireHost returns a configured, live host for the job. When the warm pool is
 // enabled (WarmPoolSize > 0 AND a WarmClient is injected) it tries to ASSIGN a
-// pre-baked box (the ≤15s path); on an empty pool, a claim error, or a failed
-// assign it falls through to one-shot create SILENTLY — so the go-live never
+// pre-baked box (the ≤15s path); on an empty pool, a pin mismatch, a claim error,
+// or a failed assign it falls through to one-shot create, so the go-live never
 // dead-ends and the 90s p95 holds even when the pool is cold or lagging. With the
 // pool disabled it is exactly wp.ProvisionOneShot (the prior behavior).
-func acquireHost(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cloud.GoLiveSpec) (cloud.LiveServer, error) {
+//
+// say, when non-nil, hears which way the launch went and why, before the create
+// starts (launch_host.go). nil keeps the launch silent about it (a non-Hetzner
+// job, whose pool is off on purpose).
+func acquireHost(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cloud.GoLiveSpec, say func(hostDecision)) (cloud.LiveServer, error) {
+	if say == nil {
+		say = func(hostDecision) {}
+	}
 	if seams.WarmPoolSize > 0 && seams.WarmClient != nil {
-		if live, ok := tryWarmAssign(ctx, seams, wp, spec); ok {
+		if live, ok := tryWarmAssign(ctx, seams, wp, spec, say); ok {
 			return live, nil
 		}
-		// empty pool / claim error / assign failure → fall through to one-shot.
+		// empty pool / pin mismatch / claim error / assign failure → one-shot;
+		// tryWarmAssign has already said which.
+	} else {
+		say(poolOffDecision(seams))
 	}
 	return wp.ProvisionOneShot(ctx, spec)
 }
