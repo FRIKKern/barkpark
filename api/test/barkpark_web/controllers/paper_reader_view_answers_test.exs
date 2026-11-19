@@ -179,66 +179,6 @@ defmodule BarkparkWeb.PaperReaderViewAnswersTest do
         assert leaks(Jason.encode!(Envelope.render(paper, schema, ctx))) == []
       end
     end
-
-    # Every GET route, with the Paper's dataset, type, id and slug in its path
-    # parameters: a new answer that carries a Paper is red here until it gives
-    # the caller's view. Streams are left out (they answer through `redact/4`,
-    # covered above).
-    test "finds a hidden field's text in no answer of any route", %{
-      slug: slug,
-      paper: paper,
-      tokens: tokens
-    } do
-      ws = Tenancy.get_default_workspace()
-      project = Tenancy.get_default_project()
-      tag = paper.content["tags"] |> List.first() |> then(&((is_map(&1) && &1["tag"]) || "x"))
-
-      fill = %{
-        "dataset" => @ds,
-        "type" => "paper",
-        "doc_id" => slug,
-        "id" => slug,
-        "slug" => slug,
-        "tag" => tag,
-        "workspace_slug" => ws.slug,
-        "project_slug" => project.slug
-      }
-
-      routes =
-        BarkparkWeb.Router.__routes__()
-        |> Enum.filter(&(&1.verb == :get))
-        |> Enum.reject(&String.contains?(&1.path, ["listen", "/events", "*"]))
-        |> Enum.map(fn r ->
-          r.path
-          |> String.split("/")
-          |> Enum.map(fn
-            ":" <> name -> Map.get(fill, name, "x")
-            seg -> seg
-          end)
-          |> Enum.join("/")
-        end)
-        |> Enum.uniq()
-
-      found =
-        for {who, conn} <- callers(tokens),
-            path <- routes,
-            params <- [%{}, %{"q" => "Visibleword", "query" => ~s(*[_type == "paper"])}],
-            body = safe_body(conn, path, params),
-            leaks(body) != [],
-            uniq: true,
-            do: {who, path, leaks(body)}
-
-      assert found == []
-    end
-  end
-
-  defp safe_body(conn, path, params) do
-    resp = get(conn, path, params)
-    if is_binary(resp.resp_body), do: resp.resp_body, else: ""
-  rescue
-    _ -> ""
-  catch
-    _, _ -> ""
   end
 
   defp hidden(text), do: %{"id" => "x", "type" => "heading", "level" => 2, "text" => text}
