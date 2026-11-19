@@ -178,6 +178,16 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		// Not gated: the manifest verb cannot send -w or --permissions in the
+		// body (task-e044d53aceb0e5c8), so every call takes this path.
+		Noun:    "app_token",
+		Verb:    "create",
+		Summary: "Mint an app token in the -w workspace, permissions sent as a list; replaces the manifest verb, which minted into Default.",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runAppTokenCreate(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "doc",
 		Verb:    "diff",
 		Summary: "What publishing would change: the draft compared to the published version (exits 1 when they differ).",
