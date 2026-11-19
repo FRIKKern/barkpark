@@ -4072,20 +4072,17 @@ defmodule BarkparkWeb.Router do
   end
 
   # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
-  # membership at :read). An editing Studio needs the schema with its API token
-  # or account-session bearer (task-b21d1b647d448142), without a shared service
-  # credential. The desk tree is read the same way: it names the same types and
-  # counts their documents, which a member token can already query
-  # (task-472c206eeff80777). PublicRead still refuses a public-read token here.
-  # The schema write gate below is unchanged.
+  # membership at :read), by API token or account-session bearer, with no shared
+  # service credential (task-b21d1b647d448142). The desk tree names the same
+  # types (task-472c206eeff80777); the role names are the workspace's, one list
+  # for every dataset, names only. PublicRead still refuses a public-read token
+  # here. The schema write gate below is unchanged.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token_or_member_login_session])
 
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
     get("/v1/structure/:dataset", StructureController, :show)
-    # Role names a seat here may hold, names only (task-4d3cd1a5e8265646).
-    # The workspace's, so no :dataset: one list for every dataset in it.
     get("/v1/workspace/roles", RoleNamesController, :index)
   end
 
