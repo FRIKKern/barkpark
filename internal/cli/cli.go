@@ -247,6 +247,12 @@ func Execute(args []string) int {
 		if verb != "approve" {
 			return runChat(out, g, ctx, rest[1:])
 		}
+	case "chat-host":
+		// `bp chat-host list|enroll|new-code|revoke` — register the machines
+		// that run this workspace's chat turns (chat_host_cmd.go). Builtin:
+		// the workspace-scoped /w/:ws/v1/chat-hosts routes are not manifest
+		// verbs, and enroll prints a command built from the minted code.
+		return runChatHost(out, g, ctx, rest[1:])
 	case "task":
 		// Task-noun verb aliases (charter decision 12; census: 2,428 `task show`
 		// + 329 `task list` typed errors — 1.19 MB of pure context waste). The
