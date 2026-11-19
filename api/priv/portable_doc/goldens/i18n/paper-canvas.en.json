@@ -156,6 +156,8 @@
   "No tasks yet.": "No tasks yet.",
   "No video yet — paste a video url below": "No video yet — paste a video url below",
   "Not saved: block %{number} is shown as JSON, and source mode does not edit it.": "Not saved: block %{number} is shown as JSON, and source mode does not edit it.",
+  "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.": "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.",
+  "Not saved: source mode could not read this change. Your text is kept.": "Not saved: source mode could not read this change. Your text is kept.",
   "Note": "Note",
   "Notes, one per line": "Notes, one per line",
   "Number": "Number",

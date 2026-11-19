@@ -156,6 +156,8 @@
   "No tasks yet.": "Ingen oppgaver ennå.",
   "No video yet — paste a video url below": "Ingen video ennå — lim inn en videoadresse under",
   "Not saved: block %{number} is shown as JSON, and source mode does not edit it.": "Ikke lagret: blokk %{number} vises som JSON, og kildemodus redigerer den ikke.",
+  "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.": "Ikke lagret: blokk %{number} vises som JSON. Slett den og lagre først, og gjør så de andre endringene.",
+  "Not saved: source mode could not read this change. Your text is kept.": "Ikke lagret: kildemodus kunne ikke lese denne endringen. Teksten din er beholdt.",
   "Note": "Notat",
   "Notes, one per line": "Notater, ett per linje",
   "Number": "Tall",
