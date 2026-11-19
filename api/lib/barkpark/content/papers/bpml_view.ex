@@ -173,8 +173,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
   def refusal({:error, reason}),
     do:
       body(
-        to_string(reason),
-        @reasons[reason] || "the reader's view of this Paper cannot be built"
+        @reasons[reason] || "the reader's view of this Paper cannot be built",
+        to_string(reason)
       )
 
   defp body(message, code) do

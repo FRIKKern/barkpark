@@ -131,8 +131,9 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
       assert answer["ok"] == true
       answer_is_the_pull!(slug, answer)
 
-      assert [heading(), %{"content" => [%{"value" => "Edited."}]}, heading("h2", @second)] ==
-               row(slug)["blocks"]
+      head = heading()
+      second = heading("h2", @second)
+      assert [^head, %{"content" => [%{"value" => "Edited."}]}, ^second] = row(slug)["blocks"]
     end
 
     test "an unedited push writes nothing and keeps every field the pull hid" do
@@ -213,7 +214,8 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   end
 
   test "a create that would leave the reader nothing to see is refused before it writes" do
-    {source, bpml} = creatable_bpml!([heading(), para("p", "")])
+    # Its only text past the title heading is a heading the schema hides.
+    {source, bpml} = creatable_bpml!([heading(), heading("h2", @second)])
     schema!(text: true)
 
     slug = slug("create-empty")
