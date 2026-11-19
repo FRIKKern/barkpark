@@ -479,6 +479,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <Style.sheet />
     <DocStyle.sheet />
     <BarkparkWeb.Studio.Desk.NavbarStyle.sheet />
+    <BarkparkWeb.Studio.Desk.NavDrawerStyle.sheet />
     <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
     <%!-- The search is a dialog, as the TanStack Studio's: the navbar's
           search button (`data-desk-search-open`), Cmd+K and "/" open it
