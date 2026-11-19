@@ -220,7 +220,9 @@ defmodule BarkparkWeb.Studio.DeskNavbarDrawerTest do
     end
 
     test "under 900 px the drawer's button shows and the tools and the user menu give way" do
-      assert @css =~ ".studio-shell:has(.dk) .navbar .nav-drawer-wrap { display: none; }"
+      assert @css =~
+               ".studio-shell:has(.dk) .navbar .nav-drawer-wrap { display: none; background: none; }"
+
       narrow = block("(max-width: 899px)")
       assert narrow =~ ".navbar .nav-drawer-wrap { display: flex; }"
 

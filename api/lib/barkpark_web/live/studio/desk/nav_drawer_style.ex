@@ -40,7 +40,7 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawerStyle do
       .studio-shell:has(.dk) .navbar .perspective-menu .dk-menu-item:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-nav-focus); }
       .studio-shell:has(.dk) .navbar:has(.perspective[data-perspective="published"]) { background: color-mix(in srgb, var(--success) 10%, var(--dk-nav-bg)); }
       .studio-shell:has(.dk) .navbar:has(.perspective[data-perspective="published"]) .perspective-picker { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dk-published) 45%, var(--dk-nav-bg)); background: color-mix(in srgb, var(--dk-published) 10%, var(--dk-nav-bg)); }
-      .studio-shell:has(.dk) .navbar .nav-drawer-wrap { display: none; }
+      .studio-shell:has(.dk) .navbar .nav-drawer-wrap { display: none; background: none; }
       .studio-shell:has(.dk) .navbar .nav-drawer { box-sizing: border-box; position: fixed; inset: 0 auto 0 0; width: min(280px, calc(100vw - 48px)); height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; font-weight: 500; }
       .studio-shell:has(.dk) .navbar .nav-drawer[open] { display: flex; flex-direction: column; }
       .studio-shell:has(.dk) .navbar .nav-drawer::backdrop { background: var(--dk-backdrop); }
