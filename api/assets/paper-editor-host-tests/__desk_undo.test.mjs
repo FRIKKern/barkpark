@@ -26,7 +26,7 @@ const MARK = '["production","post","post-14"]';
 doc.body.innerHTML =
   `<div id="desk-panes">` +
   `<section id="list" data-pane-kind="list"><input id="search" type="search"></section>` +
-  `<section id="pane" data-pane-editing><header><span class="kind" id="kind">Post</span>` +
+  `<section id="pane" data-pane-index="1" data-pane-editing><header><span class="kind" id="kind">Post</span>` +
   `<button id="menu" type="button">…</button><input id="pane-input" type="text"></header>` +
   `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt]" phx-value-_bp_doc='${MARK}'>` +
   `<input type="text" id="title" name="doc[title]" value="Fixture post 14">` +
@@ -197,6 +197,28 @@ check("the editor form hidden (focus mode, the narrow layout: display none): Mod
   assert.equal(pushes.length, 1, "drawn again, the key is the document's");
 });
 
+check("a modal open anywhere in the page (Delete, Unpublish): Mod+Z is the browser's", () => {
+  const m = doc.createElement("div");
+  m.setAttribute("role", "dialog");
+  m.setAttribute("aria-modal", "true");
+  doc.body.appendChild(m);
+  try {
+    for (const target of [doc.body, $("title"), $("kind")]) {
+      const e = key(target, { key: "z", metaKey: true });
+      assert.equal(e.defaultPrevented, false, `Mod+Z on ${target.id || target.tagName} under a modal`);
+    }
+    const h = new window.InputEvent("beforeinput", { inputType: "historyUndo", bubbles: true, cancelable: true });
+    $("title").dispatchEvent(h);
+    assert.equal(h.defaultPrevented, false);
+    assert.deepEqual(pushes, []);
+    m.hidden = true;
+    key(doc.body, { key: "z", metaKey: true });
+    assert.equal(pushes.length, 1, "a hidden modal is not open");
+  } finally {
+    m.remove();
+  }
+});
+
 check("no editor form on the desk: nothing is pushed", () => {
   const form = $("editor-form");
   const parent = form.parentNode;
@@ -297,27 +319,26 @@ check("nested folds (a fieldset in a folded object, a closed details) all open, 
   assert.equal(doc.activeElement, $("deep"));
 });
 
-check("a fold that will not open: the change is put back at once (the opposite step), once", () => {
-  const toggle = $("set-toggle");
-  toggle.setAttribute("aria-expanded", "false");
-  const eat = (e) => e.stopPropagation();
-  toggle.addEventListener("click", eat);
+check("the pane folded to a strip while the undo was on its way is opened as a click on it does, then focused", () => {
+  const pane = $("pane");
+  const root = $("desk-panes");
+  // bp-desk.js `_openStrip`: a click on a strip opens its pane.
+  const open = (e) => {
+    const strip = e.target.closest("[data-pane-collapsed]");
+    if (strip) strip.removeAttribute("data-pane-collapsed");
+  };
+  root.addEventListener("click", open, true);
+  pane.setAttribute("data-pane-collapsed", "");
   try {
-    $("folded").value = "Folded. X";
-    $("add").focus();
-    undone({ field: "doc[folded]", value: "Folded.", was: "Folded. X", redo: false });
-    assert.equal(toggle.getAttribute("aria-expanded"), "false");
-    assert.notEqual(doc.activeElement, $("folded"), "no focus into a field out of sight");
-    assert.deepEqual(
-      pushes.map((p) => [p.event, p.payload.redo]),
-      [["desk-undo", true]],
-    );
-    // The put-back's answer cannot be shown either: left, no loop.
-    undone({ field: "doc[folded]", value: "Folded. X", was: "Folded.", redo: true });
-    assert.equal(pushes.length, 1);
+    $("excerpt").value = "Short. B";
+    doc.body.focus();
+    undone({ field: "doc[excerpt]", value: "Short.", was: "Short. B" });
+    assert.equal(pane.hasAttribute("data-pane-collapsed"), false);
+    assert.equal($("excerpt").value, "Short.");
+    assert.equal(doc.activeElement, $("excerpt"));
   } finally {
-    toggle.removeEventListener("click", eat);
-    toggle.setAttribute("aria-expanded", "true");
+    root.removeEventListener("click", open, true);
+    pane.removeAttribute("data-pane-collapsed");
   }
 });
 

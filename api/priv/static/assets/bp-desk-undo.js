@@ -16,7 +16,8 @@
 // menu, `historyUndo`) is the document's too: the field would otherwise save
 // the browser's undo as a new edit, and the next Mod+Z put it back. None of
 // it while the editor form is not drawn (its pane folded to a strip, or
-// hidden by focus mode or the narrow layout): the key stays the browser's.
+// hidden by focus mode or the narrow layout), or while a modal is open: the
+// key stays the browser's.
 // With nothing focused the key is the document's, as the TanStack Studio's
 // Edit-menu undo is: the browser's own undo has nothing to give there once a
 // script has set a field's value.
@@ -33,8 +34,8 @@
 // field on a group tab that was not shown arrives drawn, on its tab, with the
 // new value (the server switched the tab first). A field in a folded fieldset
 // or object (folded by the schema, or by the user) has its folds opened first.
-// A field still out of sight after that has its change put back at once (the
-// opposite step), so nothing stays changed where the user cannot see it.
+// A field whose pane was folded to a strip while the undo was on its way has
+// the strip opened first, as a click on it does.
 //
 // A document-level listener, no phx-hook: bp-desk.js loads it when the desk
 // mounts (the address is on the desk's root, `data-desk-undo`).
@@ -71,12 +72,35 @@
     return typeof el.checkVisibility !== "function" || el.checkVisibility();
   }
 
+  // Whether a modal is open anywhere in the page (Delete, Unpublish: a
+  // `role=dialog aria-modal=true`, or a <dialog> opened with showModal): the
+  // page under it is not the user's to change, so the key stays the browser's.
+  function modal() {
+    var all = document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]');
+    for (var i = 0; i < all.length; i++) {
+      var m = all[i];
+      if (m.closest("[hidden]")) continue;
+      if (m.tagName === "DIALOG" && m.getAttribute("aria-modal") !== "true" && !isModal(m)) continue;
+      if (typeof m.checkVisibility === "function" && !m.checkVisibility()) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function isModal(dialog) {
+    try {
+      return dialog.matches(":modal");
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Whether a key or a browser undo at `el` is the document's. Never while the
   // editor form is not drawn (its pane a strip, or hidden): the change would
   // land out of sight, and the browser keeps the key, as with no desk undo.
   function ours(el) {
     var f = form();
-    if (!f || !drawn(f)) return false;
+    if (!f || !drawn(f) || modal()) return false;
     if (!el || el === document.body || el === document.documentElement) return true;
     if (!el.closest || el.isContentEditable) return false;
     if (el.closest("[contenteditable], bp-paper-canvas, dialog")) return false;
@@ -85,9 +109,6 @@
     var pane = el.closest("[data-pane-editing]");
     return !!pane && pane.contains(f);
   }
-
-  // Set while a change that could not be shown is being put back.
-  var restoring = false;
 
   function run(redo) {
     var desk = document.getElementById("desk-panes");
@@ -153,6 +174,20 @@
     return shut;
   }
 
+  // A strip is 52 px drawn (bp-desk.js `STRIP_DRAWN`); a pane this narrow or
+  // narrower is one, whatever its attributes say yet.
+  var STRIP_MAX = 60;
+
+  // Opens the pane around `el` when it is folded to a strip (it may have
+  // folded while the undo was on its way), as a click on the strip does
+  // (bp-desk.js `_openStrip`).
+  function unstrip(el) {
+    var pane = el.closest("#desk-panes > [data-pane-index]");
+    if (!pane) return;
+    var narrow = pane.getBoundingClientRect().width;
+    if (pane.hasAttribute("data-pane-collapsed") || (narrow > 0 && narrow <= STRIP_MAX)) pane.click();
+  }
+
   // Opens every fold around `el`, a fold by its own button, so LiveView's fold
   // command runs as on a click.
   function unfold(el) {
@@ -170,18 +205,8 @@
     var text = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type));
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
+    unstrip(el);
     unfold(el);
-    // Still out of sight (a fold that would not open): the change is put back
-    // at once, the opposite step, so nothing stays changed where the user
-    // cannot see it. Once: a put-back that cannot be shown either is left.
-    if (!drawn(el)) {
-      if (!restoring && typeof d.redo === "boolean") {
-        restoring = true;
-        run(!d.redo);
-      } else restoring = false;
-      return;
-    }
-    restoring = false;
     if (document.activeElement !== el) el.focus();
     // Drawn with the new value already (the undo switched to its tab): the
     // caret still goes to the change.
@@ -198,5 +223,5 @@
   document.addEventListener("keydown", onKey);
   document.addEventListener("beforeinput", onBeforeInput, true);
   window.addEventListener("phx:desk:undone", onUndone);
-  window.BarkparkDeskUndo = { onKey: onKey, onUndone: onUndone, ours: ours, unfold: unfold, drawn: drawn };
+  window.BarkparkDeskUndo = { onKey: onKey, onUndone: onUndone, ours: ours, unfold: unfold, drawn: drawn, unstrip: unstrip };
 })();
