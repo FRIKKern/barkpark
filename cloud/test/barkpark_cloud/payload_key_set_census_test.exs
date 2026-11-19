@@ -2695,7 +2695,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go)
+  # task-9de1dbcf13951044: provision_console.go added (ProvisionConsoleLine, one `line` tag); MEASURED: neither register moves.
+  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go provision_console.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

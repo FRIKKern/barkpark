@@ -74,12 +74,6 @@ type Team struct {
 	Role string `json:"role"`
 }
 
-// ProvisionConsoleLine is one entry of `provision_console`. Only the line text
-// is decoded; the entry's `at` and truncation markers have no reader here.
-type ProvisionConsoleLine struct {
-	Line string `json:"line"`
-}
-
 // Barkpark is one registered server in the user's fleet, as returned by
 // GET /v1/barkparks (and embedded in launch / go-live responses). The JSON tags
 // match the control plane's serialization 1:1 — the two status axes
@@ -89,10 +83,9 @@ type ProvisionConsoleLine struct {
 // attention-triage twin (`bp cloud status`, charter decision 15) needs: the
 // list route's barkpark_json (cloud/lib/barkpark_cloud/web/router.ex) already
 // merges these in — the billing-suspension axis (suspended/suspended_reason),
-// the self-update verdict (update_state), and the provision/deprovision job
-// statuses merged per-row. They are purely additive: a control plane that omits
-// any of them decodes to the field's zero value, and no existing field is
-// renamed, so `bp barkparks` and every current consumer are untouched.
+// the self-update verdict (update_state), the provision/deprovision job statuses
+// and the provision console (provision_console.go). All additive: an omitted
+// key decodes to its zero value and no existing field is renamed.
 // UpdateFailure is one failed self-update run as the control plane mirrors it
 // (`update_last_failure`). ExitCode is a pointer: the plane stores null when the
 // box sent no integer, which is not exit 0.
@@ -203,19 +196,13 @@ type Barkpark struct {
 	// a billing date, a beat time, or a zero-value date for a nil. `bp cloud
 	// status` renders a nil as an explicit em dash (`suspendedSinceMark`) and
 	// `-o json` emits NO KEY at all.
-	SuspendedAt       *string `json:"suspended_at"`
-	UpdateState       string  `json:"update_state"`
-	ProvisionStatus   string  `json:"provision_status"`
-	ProvisionError    string  `json:"provision_error"`
-	DeprovisionStatus string  `json:"deprovision_status"`
-	DeprovisionError  string  `json:"deprovision_error"`
-
-	// ProvisionConsole is the latest provision job's console, the lines the
-	// worker narrated (barkpark_json/6 `provision_console`, always present, []
-	// with no job). `bp cloud status` reads ONE line from it: the warm-or-cold
-	// line a Hetzner launch writes (internal/cli/cloud/launch_host_line.go). It
-	// does not render the console; the /new page does that.
-	ProvisionConsole []ProvisionConsoleLine `json:"provision_console"`
+	SuspendedAt       *string                `json:"suspended_at"`
+	UpdateState       string                 `json:"update_state"`
+	ProvisionStatus   string                 `json:"provision_status"`
+	ProvisionError    string                 `json:"provision_error"`
+	DeprovisionStatus string                 `json:"deprovision_status"`
+	DeprovisionError  string                 `json:"deprovision_error"`
+	ProvisionConsole  []ProvisionConsoleLine `json:"provision_console"`
 
 	// Self-update TRUTH (isu-w5) — the full version + policy the control plane
 	// mirrors from each instance's own update verdict and the team's autoupdate
