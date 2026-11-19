@@ -20,8 +20,11 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   box while the background and the ring keep their drawn size
   (`background-clip: padding-box`; an inset shadow is drawn inside the
   border), so the header looks the same. On a phone the header squeezes the
-  pills to their dot; they stay at least 44 px wide. A mouse keeps the 25 px
-  pill.
+  pills to their dot; they stay at least 44 px wide. The filled Draft
+  (`data-active`) is named in the rule too: its `background` shorthand
+  would set the clip back and fill the clear border. The focus ring is an
+  inset ring of the same token, so it traces the pill, not the 45 px box
+  (an outline follows the box). A mouse keeps the 25 px pill.
 
   The pills' state is in colour, so each also says it in words for screen
   readers ("Not published", "Draft: unpublished changes", …); the visible
@@ -60,7 +63,8 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
       .dk button.dk-chip { font: inherit; font-size: 13px; font-weight: 500; border: 0; background: var(--dk-bg); cursor: pointer; }
       .dk button.dk-chip:hover { box-shadow: inset 0 0 0 1px var(--dk-line-strong); }
       @media (max-width: 768px) and (pointer: coarse) {
-        .dk button.dk-chip, .dk button.dk-chip:hover { border-style: solid; border-color: transparent; border-width: 10px 0; background-clip: padding-box; min-width: 44px; }
+        .dk button.dk-chip, .dk button.dk-chip:hover, .dk button.dk-chip[data-active] { border-style: solid; border-color: transparent; border-width: 10px 0; background-clip: padding-box; min-width: 44px; }
+        .dk button.dk-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
       }
     </style>
     <span class="dk-chips" data-desk-status>

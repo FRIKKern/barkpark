@@ -118,12 +118,19 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
       |> List.flatten()
       |> Enum.find("", &(&1 =~ "dk-chip"))
 
-    assert coarse =~ ".dk button.dk-chip, .dk button.dk-chip:hover {"
+    # The filled Draft's own `background` would reset the clip: it is named.
+    assert coarse =~
+             ".dk button.dk-chip, .dk button.dk-chip:hover, .dk button.dk-chip[data-active] {"
+
     # 25 px (3 + 19 + 3) and 10 px above and below: 45.
     assert coarse =~ "border-style: solid; border-color: transparent; border-width: 10px 0;"
     assert coarse =~ "background-clip: padding-box;"
     # A 390 px phone squeezes the pills to their dot; they keep a 44 px floor.
     assert coarse =~ "min-width: 44px;"
+
+    # The focus ring traces the drawn pill, not the 45 px box.
+    assert html =~
+             ".dk button.dk-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }"
   end
 
   test "a document never published greys out the Published pill", c do
