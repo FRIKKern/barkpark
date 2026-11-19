@@ -39,10 +39,21 @@ if [[ -z $ARTIFACT_DIR ]]; then
   exit 2
 fi
 
+# The pinned toolchain is the one the repo-root .tool-versions names (the
+# Sobelow job's setup-beam reads the same file; scripts/toolchain-owners.tsv
+# holds this script to it). `elixir 1.18.4-otp-27` -> Elixir 1.18.4, OTP 27.
+TOOL_VERSIONS="$API_DIR/../.tool-versions"
+want_elixir=$(awk '$1 == "elixir" { sub(/-.*/, "", $2); print $2; exit }' "$TOOL_VERSIONS" 2>/dev/null || true)
+want_otp=$(awk '$1 == "erlang" { sub(/\..*/, "", $2); print $2; exit }' "$TOOL_VERSIONS" 2>/dev/null || true)
+if [[ -z $want_elixir || -z $want_otp ]]; then
+  echo "error: cannot read the elixir and erlang lines of $TOOL_VERSIONS" >&2
+  exit 2
+fi
 versions=$(elixir --version)
-if ! grep -Eq '^Erlang/OTP 27([.[:space:]]|$)' <<<"$versions" ||
-   ! grep -Eq '^Elixir 1\.18\.1([[:space:]]|$)' <<<"$versions"; then
-  printf 'error: expected Elixir 1.18.1 / OTP 27, got:\n%s\n' "$versions" >&2
+if ! grep -Eq "^Erlang/OTP ${want_otp}([.[:space:]]|\$)" <<<"$versions" ||
+   ! grep -Eq "^Elixir ${want_elixir//./\\.}([[:space:]]|\$)" <<<"$versions"; then
+  printf 'error: expected Elixir %s / OTP %s (from .tool-versions), got:\n%s\n' \
+    "$want_elixir" "$want_otp" "$versions" >&2
   exit 2
 fi
 if [[ ! -s $BASELINE ]]; then

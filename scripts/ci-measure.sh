@@ -1190,8 +1190,8 @@ FIX
   # shipped jl_analyze and not a copy of its rule.
   cat > "$tmp/jl.jsonl" <<'FIX'
 {"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":3,"listed":3}
-{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
-{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900002,"conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z","steps":[{"name":"Set up job","conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z"}]}
+{"__jljob__":true,"name":"Test (Elixir and OTP from .tool-versions) (1)","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
+{"__jljob__":true,"name":"Test (Elixir and OTP from .tool-versions) (1)","run_id":900002,"conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z","steps":[{"name":"Set up job","conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z"}]}
 {"__jljob__":true,"name":"Compile closure","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:20:00Z","steps":[{"name":"compile","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:20:00Z"}]}
 FIX
   local jl
@@ -1252,7 +1252,7 @@ FIX
   # of its own `total_count` must surface in chunks_short_of_total_count.
   cat > "$tmp/jl-capped.jsonl" <<'FIX'
 {"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":1400,"listed":1000}
-{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900003,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"}]}
+{"__jljob__":true,"name":"Test (Elixir and OTP from .tool-versions) (1)","run_id":900003,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"}]}
 FIX
   local jl_cap jl_capn
   jl_cap=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
@@ -1271,7 +1271,7 @@ FIX
   # every test selection in that run silently fell back to ALL.
   cat > "$tmp/jl-dead.jsonl" <<'FIX'
 {"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":1,"listed":1}
-{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900004,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"failure","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
+{"__jljob__":true,"name":"Test (Elixir and OTP from .tool-versions) (1)","run_id":900004,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"failure","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
 FIX
   local jl_dead jl_deadids
   jl_dead=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \

@@ -815,14 +815,15 @@ PY
   # to run it twice — and the two `if::` lines above are what keeps the suite out
   # of the deal.
   assert_fact "if::census" "needs.changes.outputs.census == 'true' && needs.changes.outputs.cloud != 'true'"
-  assert_fact "matrix::census" True
   # …and the file it runs is the file the tier derives its roots FROM.
   assert_fact census_mix_test "mix test ${CENSRC#cloud/}"
-  # …and the reason the aggregator had to be a NEW job rather than a rename of a
-  # leaf: both gated jobs ARE matrixed, so their published names carry the matrix
-  # tuple (or the uninterpolated template when they never start).
-  assert_fact "matrix::compile" True
-  assert_fact "matrix::test" True
+  # The three leaves are NOT matrixed: each reads deploy/image.tool-versions
+  # through setup-beam, so one runtime, one published name. The aggregator
+  # stays the required context because a leaf that never starts publishes
+  # "skipped", and a skipped required check is a pass.
+  assert_fact "matrix::census" False
+  assert_fact "matrix::compile" False
+  assert_fact "matrix::test" False
 
   # ── D36 mutation proof: the fifth fact must FIRE, and must go quiet ────────
   # `needs_without_decide = ""` above proves nothing unless the same emitter, on

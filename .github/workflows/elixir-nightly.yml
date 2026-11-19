@@ -121,11 +121,6 @@ jobs:
       SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ["27.0"]
-        elixir: ["1.18.4"]
     defaults:
       run:
         working-directory: api
@@ -149,8 +144,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
       - name: Setup Node (requires_node tests shell tsc / node)
         uses: actions/setup-node@v7
         with:
@@ -163,9 +158,9 @@ jobs:
             api/_build
           # Same key family as elixir.yml's mix-test job so the nightly reads
           # the cache the PR path already warmed; a miss falls back to the prefix.
-          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-${{ hashFiles('.tool-versions') }}-
       - name: Fetch deps
         run: mix deps.get
       - name: Install libxml2-utils for ONIX XSD validation
@@ -310,8 +305,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.0"
-          elixir-version: "1.18.4"
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -328,15 +323,15 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-deps-v2-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-
+            ${{ runner.os }}-mix-test-deps-v2-${{ hashFiles('.tool-versions') }}-
 
       - name: Restore compiled dependency artifacts (test)
         uses: actions/cache/restore@v6
         with:
           path: api/_build/test/lib
-          key: ${{ runner.os }}-mix-test-depbuild-v1-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
         run: mix deps.get

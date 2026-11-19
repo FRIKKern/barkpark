@@ -134,7 +134,7 @@ registry() {
 .go-format-drift-ceiling none the go-format ratchet baseline
 .mcp.json none MCP server registration for agents
 .omx none omx tooling config
-.tool-versions none the asdf production toolchain pin; toolchain-skew-check reads it
+.tool-versions none the asdf production toolchain pin; toolchain-drift-check reads it
 AGENTS.md none agent-facing router
 CHANGELOG.md none release notes
 CLAUDE.md elixir the repo router doc; the Elixir suite reads it
@@ -170,6 +170,7 @@ scripts cloud the gate and ops scripts; cloud-path-escape-check.sh declares scri
 sdk none generated SDK artefacts
 templates cloud,go project templates both suites read
 tooling none standalone tooling trees
+tools none version files that are not production's (the format gate's Elixir); toolchain-drift-check reads them
 vercel.json none vercel project config
 web none the Next.js web demo
 REGISTRY
