@@ -88,6 +88,13 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # unresolved workspace id already has a ruled answer — "refuse when ANY seat
   # is draft-only" — pinned in `publish_refused_test.exs`. It casts every id
   # through `Repo.uuid_or_nil/1` and its catch-all takes any non-context caller.
+  #
+  # `role_rank/2` (task-018e79d8734a1b08) ranks a role NAME on a workspace's
+  # seat ladder so access requests can tell "higher" from "same or lower". It
+  # admits nobody, so it has no denial value for this matrix; its built-in
+  # rungs are workspace-id-INDEPENDENT like `role_permits?/3`'s. Its totality
+  # (non-binary -> 0, malformed workspace id -> no custom rung) is pinned in
+  # `role_rank_test.exs` in this directory.
   @public_surface [
     authorize: 3,
     authorize_with_reason: 3,
@@ -105,6 +112,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     publish_refused?: 2,
     role_for_permissions: 1,
     role_permits?: 3,
+    role_rank: 2,
     seat_capabilities: 3,
     tier_of: 1,
     valid_role_names: 1,
@@ -189,7 +197,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 22 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 23 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

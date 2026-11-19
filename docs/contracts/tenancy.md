@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: tenancy-model | budget: 2000tok -->
 # Tenancy — workspace · project · dataset · membership
 
-How Barkpark's **API layer** isolates data across tenants and scopes every read/write; cloud-side team/barkpark object authz is `docs/contracts/cloud-object-authz.md`. Code: `api/lib/barkpark/tenancy/` (schemas, `Barkpark.Tenancy`, `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
+How Barkpark's **API layer** isolates tenants and scopes every read/write; cloud-side team/barkpark object authz is `docs/contracts/cloud-object-authz.md`. Code: `api/lib/barkpark/tenancy/` (schemas, `Barkpark.Tenancy`, `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
 
 ## The hierarchy
 
@@ -24,16 +24,16 @@ Workspace + Project slugs match `^[a-z0-9][a-z0-9-]*$` and exclude reserved pref
 
 All tenant mutation goes through `api/lib/barkpark/tenancy.ex`; never insert/delete these rows directly:
 
-- **`create_workspace_with_owner/2`** — one atomic transaction: workspace + owner Membership + Default project + production Dataset. The only correct way to stand up a tenant.
+- **`create_workspace_with_owner/2`** — one transaction: workspace + owner Membership + Default project + production Dataset. The only correct way to stand up a tenant.
 - **`create_project_with_dataset/2`** — atomic project + production dataset.
 - **`get_or_create_dataset/2`** — idempotent (`on_conflict: :nothing` on `(project_id, slug)`); reloads for the persisted id.
 - **`list_workspaces_for/1`** — INNER JOIN on memberships: only the principal's workspaces; unknown → `[]`.
-- **`multi_tenant?/0`** — true when >1 workspace exists; **fail-closed** (rescues to `true`), which flips stricter scoping on.
-- **`resolve_scope_slugs/2`** — `{workspace_id, project_id}` → `{ws_slug, project_slug}`, falling back to `"default"` on a nil or stale id.
+- **`multi_tenant?/0`** — true when >1 workspace exists; **fail-closed** (rescues to `true`), flipping stricter scoping on.
+- **`resolve_scope_slugs/2`** — `{workspace_id, project_id}` → `{ws_slug, project_slug}`, falling back to `"default"` for a nil/stale id.
 
 ### Safe delete — NEVER `Repo.delete/1` on a Workspace
 
-Use **`Barkpark.Tenancy.delete_workspace/1`**, the only safe path. Scope FKs `CASCADE`, so a raw `Repo.delete(workspace)` skips the blob/CDN purge + lifecycle hooks. In order: (1) `media_files` → `Media.delete_file/2` (blob, CDN, renditions, hooks); (2) `documents` → `Content.delete_document/4` (delete hooks); (3) `Repo.delete(workspace)`, CASCADE prunes the rest; (4) its chats (`chat_sessions.owner_workspace_id`, no FK) + messages; NULL-owned chats stay. No `delete_project/1` yet.
+Use only **`Tenancy.delete_workspace/1`**. Scope FKs `CASCADE`, so `Repo.delete(workspace)` skips the blob/CDN purge + lifecycle hooks. In order: (1) `media_files` → `Media.delete_file/2` (blob, CDN, renditions, hooks); (2) `documents` → `Content.delete_document/4` (delete hooks); (3) `Repo.delete(workspace)`, CASCADE prunes the rest; (4) its chats (`chat_sessions.owner_workspace_id`, no FK) + messages; NULL-owned chats stay. No `delete_project/1` yet.
 
 ## Roles & enforcement
 
@@ -41,7 +41,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 **Role ceiling (ruling #5).** Via `Tenancy.Members` (`actor:`) only an `owner` grants, changes or removes `owner` (`403 owner_required`); a token seat holds an admin-authority role only if the token has `admin` (`403 role_exceeds_token`).
 
-**Access requests** (`Tenancy.AccessRequests`). A seatless user (session or owned token) asks: `POST /v1/auth/access-requests {workspace, note?}` → `202`, alike whether the slug exists (a missing one stored with NULL `workspace_id`, unseen by admins); a member gets `409`. 5/h per user, one pending per slug. Admins approve (`…/v1/access-requests/:id/approve {role}`, via `Members.add_user_member/4`, ceiling holds) or deny; both are audited (`membership`).
+**Access requests** (`Tenancy.AccessRequests`). A user (session/owned token) asks: `POST /v1/auth/access-requests {workspace, note?, role?}` → `202`, alike if the slug exists (missing: NULL `workspace_id`, unseen by admins); a member: `409` unless `role` outranks theirs. 5/h/user, 1 pending/slug. Admins approve (`…/:id/approve {role}`, via `Members.add_user_member/4`/`update_role/4`, ceiling holds; a seat written since (DB-set `seat_change`) is `409 request_stale`) or deny; both audited (`membership`).
 
 **Two role axes (GR46).** The roles above are the *only* team-role vocabulary; every settings gate reads it. `platform_operator` is **not** a team role but the *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry, `/v1/operator/*` and `bp cloud rollout`. **Supporter** is a billing *plan*, never a role.
 
