@@ -36,7 +36,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   A request records the seat its asker held (`from_role`, nil for none). Once
   the seat is no longer that, by any door (removed, re-roled, seated another
-  way), the request is stale: `stale?/2` decides it, in this module only.
+  way), the request is stale: `Tenancy.AccessRequestStaleness.stale?/2`
+  decides it, and nothing else does.
   Approve refuses it, the admin list marks it `stale: true`, and asking again
   replaces it instead of answering the old row.
 
@@ -59,6 +60,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   import Ecto.Query, warn: false
   import Barkpark.Tenancy.AccessRequestRows, only: [own_row: 1]
+  import Barkpark.Tenancy.AccessRequestStaleness, only: [stale?: 2]
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.User
@@ -318,7 +320,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
            %User{email: email} = user <- Repo.get(User, row.user_id),
            :ok <- not_self(row, actor),
            seat <- lock_seat(row),
-           false <- stale?(row, seat_role(seat)) || {:error, :request_stale},
+           false <- stale?(row, seat && seat.role) || {:error, :request_stale},
            {:ok, member, granted, meta} <- grant(row, seat, email, role, actor),
            {:ok, _} <- drop_invitation(row),
            {:ok, row} <- decide(row, "approved", granted, actor),
@@ -368,18 +370,6 @@ defmodule Barkpark.Tenancy.AccessRequests do
       {:ok, member, granted, %{"role" => granted, "from_role" => current}}
     end
   end
-
-  # THE staleness rule (task-018e79d8734a1b08), the one place it is decided:
-  # a request records the seat its asker held when asking (`from_role`, nil
-  # for none). Once the seat is no longer that (removed, re-roled, or seated
-  # by another path) the request describes a situation that is gone. Approve
-  # refuses it, the admin list marks it, and asking again replaces it. A row
-  # for a missing workspace has no seat to compare and is never stale.
-  defp stale?(%AccessRequest{workspace_id: nil}, _current_role), do: false
-  defp stale?(%AccessRequest{from_role: from}, current_role), do: current_role != from
-
-  defp seat_role(%Membership{role: role}), do: role
-  defp seat_role(nil), do: nil
 
   defp lock_seat(%AccessRequest{workspace_id: nil}), do: nil
 
@@ -479,7 +469,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   defp actor_ref(%User{id: id}), do: "user:" <> id
   defp actor_ref(_), do: nil
 
-  # The stale flag is decided here, by `stale?/2`; the row module only shapes.
+  # The stale flag comes from `AccessRequestStaleness`; the row module only shapes.
   defp admin_row(%AccessRequest{} = r, email, display_name, current_role),
     do:
       AccessRequestRows.admin_row(

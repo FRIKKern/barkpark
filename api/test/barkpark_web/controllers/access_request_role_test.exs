@@ -253,6 +253,22 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     assert json_response(approve(ctx.admin, ctx.base, new), 200)["member"]["role"] == "member"
   end
 
+  test "a seat request whose asker was seated meanwhile is stale: 409 request_stale", ctx do
+    asker = user!(ctx.ws, nil)
+    id = json_response(ask(asker, ctx.ws.slug, nil), 202)["access_request"]["id"]
+    {:ok, _} = TenancyAuth.create_membership(ctx.ws.id, asker.user.id, "contributor", "user")
+
+    assert [%{"kind" => "seat", "stale" => true}] = listed(ctx.admin, ctx.base)
+
+    # It answered 409 already_member before the staleness rule.
+    assert json_response(approve(ctx.admin, ctx.base, id, %{role: "admin"}), 409)["error"][
+             "code"
+           ] == "request_stale"
+
+    assert role_in(ctx.ws, asker) == "contributor"
+    assert Repo.get!(AccessRequest, id).status == "pending"
+  end
+
   test "approve with a role that would lower or keep the seat is refused", ctx do
     asker = user!(ctx.ws, "contributor")
     id = json_response(ask(asker, ctx.ws.slug, "admin"), 202)["access_request"]["id"]

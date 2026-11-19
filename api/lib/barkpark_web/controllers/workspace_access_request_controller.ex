@@ -16,10 +16,14 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
   A member's request for a higher role (`kind: "role"` in the list, with
   `requested_role`, `current_role` and `stale`) is approved through
   `Members.update_role/4`, the same path as `PATCH /v1/members/:ref`, so the
-  same ceiling holds. It is refused with nothing changed when the seat moved
-  since the ask (`409 request_stale`, listed as `stale: true`), when the role granted does not
-  rank above the current one (`409 role_not_higher`) and when the approver is
-  the asker or a token the asker owns (`403 self_approval`).
+  same ceiling holds; a role that does not rank above the current one is
+  `409 role_not_higher`.
+
+  Any request is refused with nothing changed when the seat moved since the
+  ask (`409 request_stale`, listed as `stale: true`). That includes a seat
+  request whose asker was seated meanwhile, which answered `409
+  already_member` before. The asker, or a token the asker owns, never
+  decides their own request (`403 self_approval`).
   """
   use BarkparkWeb, :controller
 
@@ -117,7 +121,8 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
         conn,
         :conflict,
         "request_stale",
-        "that person's seat changed since they asked; deny the request and let them ask again"
+        "that person's seat changed since they asked (removed, re-roled, or seated another " <>
+          "way); deny the request, or let them ask again"
       )
 
   defp deny(conn, :role_not_higher),
