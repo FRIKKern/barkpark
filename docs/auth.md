@@ -20,7 +20,7 @@ The path carries both
 
 Mutate and any `:scoped_admin` write need `write` (or 403). A token bound to a
 `dataset` (`dataset_bound`; old `bp` mints: re-mint) gets `403 dataset_not_bound`
-elsewhere: workspace/project create, playground, import. Admin reads/writes (audit,
+elsewhere, on workspace/project create, playground, import. Admin reads/writes (audit,
 export, seats, grants, shares, tokens, chat hosts, secrets, workspace
 delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 `:dataset_bound_admin_reads` `:enforce`.
@@ -58,7 +58,7 @@ on membership, act instance-wide). A flat admin route pins the
 GLOBAL tier (`SecretController.resolve_scope/1` → `:global`, never the assign);
 acting per-workspace needs a slug-resolving route proving `workspace_admin?/2`.
 
-`admin` must never enter the hardcoded `chat` literal: `RequireChatAccess`
+`admin` must never enter the `chat` literal: `RequireChatAccess`
 resolves it to `:global`, stamping `owner_workspace_id = NULL`
 (`ChatTokenController`).
 
@@ -94,13 +94,13 @@ on `[:api, :require_admin]` (instance-global only).
 
 Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
 *replaces* `:api`: `[:api, :require_admin]` hits the bug class above.
-`DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
-`AssignDefaultScope` does nothing; `FlatAdminTenancyTest` reds on a swap.
+`DeriveWorkspaceFromToken` is no-op-if-set: *after*
+`AssignDefaultScope` it does nothing; `FlatAdminTenancyTest` reds on a swap.
 
 ## Dev token
 
-`barkpark-dev-token` (seeded by profile `demo`; `clean` mints none) carries
+`barkpark-dev-token` (seeded by `demo`; `clean` mints none outside dev) carries
 `["read","write","admin"]` AND a `Default` `workspace_memberships` row;
-passes every gate.
+passes every gate but Tier 0.
 **MUST rotate before prod**: starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.
