@@ -10,12 +10,12 @@ LiveViews read `session["api_token_session"]`
 
 ## Tenancy — token ↔ workspace
 
-The principal is the API token, bound to one **workspace** (`docs/api-v1.md` §1a) by two agreeing facts: `api_tokens.workspace_id`
+The principal is the API token, bound to one workspace (`docs/api-v1.md` §1a) by two agreeing facts: `api_tokens.workspace_id`
 and its `workspace_memberships` row.
 
 The path carries both
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is checked
-**before** permissions: slug unresolved → `404 not_found`; no seat → `403 forbidden`
+before permissions: slug unresolved → `404 not_found`; no seat → `403 forbidden`
 `not_a_member` naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`) resolve to `"Default"`.
 
 Mutate and any `:scoped_admin` write need `write` (or 403). A token bound to a
@@ -37,7 +37,7 @@ delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 | `admin` | The above + plugin-settings reveal/audit, secrets + webhooks (both tiers), flat schema CRUD (scoped: `write` + admin seat) | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/secrets/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
-> a token, **not** `write`: `:media_mutate`/`:scoped_media_mutate` omit `RequireWritePermission`.
+> a token, not `write`: `:media_mutate`/`:scoped_media_mutate` omit `RequireWritePermission`.
 
 ### Hierarchy — permission ⟂ membership
 
@@ -69,7 +69,8 @@ env allowlist once set (flat `/v1/secrets` too); [instance-operator-tier.md](con
 
 `POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`), the only HTTP `admin` mint (offline: `admin-token` recovery and the seeds):
 caller has flat `admin` AND an admin seat, gets at most its own set; seated,
-audited `token_minted`. `bp token create --permissions read,write,admin`.
+audited `token_minted`.
+`bp -w acme token create ci --permissions read,write --dataset staging`.
 `bp token rotate` needs `--force` on Cloud's credential
 (label `barkpark cloud admin`).
 Self-mint caps a PAT at `read` (member) or `read`+`write`
@@ -92,8 +93,8 @@ all halt: flash + redirect to `/studio`.
 → RequireAdmin; `:require_platform_operator` → RequirePlatformOperator, THIRD
 on `[:api, :require_admin]` (instance-global only).
 
-Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
-*replaces* `:api`: `[:api, :require_admin]` hits the bug class above.
+Mount every flat (`/v1/…`) admin route on `:flat_admin_api`, which
+replaces `:api`: `[:api, :require_admin]` hits the bug class above.
 `DeriveWorkspaceFromToken` is no-op-if-set: *after*
 `AssignDefaultScope` it does nothing; `FlatAdminTenancyTest` reds on a swap.
 
@@ -103,4 +104,4 @@ Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
 `["read","write","admin"]` AND a `Default` `workspace_memberships` row;
 passes every gate.
 **MUST rotate before prod**: starter templates bake it into `BARKPARK_TOKEN`
-and `BARKPARK_SERVER_TOKEN`; replace **both**.
+and `BARKPARK_SERVER_TOKEN`; replace both.
