@@ -34,7 +34,21 @@ defmodule BarkparkWeb.Studio.DeskDocUndoGroupsTest do
           "fields" => [
             %{"name" => "title", "title" => "Title", "type" => "string", "group" => "main"},
             %{"name" => "excerpt", "title" => "Excerpt", "type" => "text", "group" => "main"},
-            %{"name" => "note", "title" => "Note", "type" => "text", "group" => "meta"}
+            %{"name" => "note", "title" => "Note", "type" => "text", "group" => "meta"},
+            %{
+              "name" => "folded",
+              "title" => "Folded",
+              "type" => "text",
+              "group" => "meta",
+              "fieldset" => "more"
+            }
+          ],
+          "fieldsets" => [
+            %{
+              "name" => "more",
+              "title" => "More",
+              "options" => %{"collapsible" => true, "collapsed" => true}
+            }
           ]
         },
         @dataset
@@ -46,7 +60,7 @@ defmodule BarkparkWeb.Studio.DeskDocUndoGroupsTest do
         %{
           "doc_id" => doc_id,
           "title" => "T",
-          "content" => %{"excerpt" => "Short.", "note" => "N"}
+          "content" => %{"excerpt" => "Short.", "note" => "N", "folded" => "F"}
         },
         @dataset
       )
@@ -124,6 +138,35 @@ defmodule BarkparkWeb.Studio.DeskDocUndoGroupsTest do
     assert stored(c)["note"] == "N"
     assert drawn?(view, "note")
     assert has_element?(view, ~s(#bp-group-tab-meta[aria-selected="true"]))
+  end
+
+  # Review round 3, path 1: the tab switched to draws the field's fieldset
+  # folded (`options.collapsed`). The fold's state lives in the page, on its
+  # title button (`Desk.Fieldsets`), so the server draws it folded; the page
+  # opens it when told the field (`desk:undone`, bp-desk-undo.js, host test
+  # __desk_undo "a field drawn in a fieldset that starts folded ...").
+  test "a field in a fieldset that starts folded, undone from another tab: its tab, and the page told",
+       c do
+    {:ok, view, _} = live(c.conn, c.desk)
+    render(view)
+    tab(view, "meta")
+    type_in(view, "folded", "F X")
+    assert stored(c)["folded"] == "F X"
+
+    tab(view, "main")
+    refute drawn?(view, "folded")
+
+    undo(view, c)
+    assert stored(c)["folded"] == "F"
+    assert has_element?(view, ~s(#bp-group-tab-meta[aria-selected="true"]))
+
+    assert has_element?(
+             view,
+             ~s(fieldset[data-collapsible] > legend > .object-toggle[aria-expanded="false"])
+           )
+
+    assert has_element?(view, ~s(fieldset[data-collapsible] [name="doc[folded]"]))
+    assert_push_event(view, "desk:undone", %{field: "doc[folded]", value: "F"})
   end
 
   test "a field on the tab shown leaves the tab where it is", c do

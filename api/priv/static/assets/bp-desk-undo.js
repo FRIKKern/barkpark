@@ -26,7 +26,8 @@
 // (a LiveView patch leaves the focused input alone), the caret goes to the
 // end of what changed, and the focus goes into the field, as TanStack's. A
 // field on a group tab that was not shown arrives drawn, on its tab, with the
-// new value (the server switched the tab first).
+// new value (the server switched the tab first). A field in a folded fieldset
+// or object (folded by the schema, or by the user) has its folds opened first.
 //
 // A document-level listener, no phx-hook: bp-desk.js loads it when the desk
 // mounts (the address is on the desk's root, `data-desk-undo`).
@@ -105,6 +106,37 @@
     return now.length - s;
   }
 
+  // The title button of a fold (a fieldset, or an object, folded by it).
+  function toggleOf(fold) {
+    for (var c = fold.firstElementChild; c; c = c.nextElementSibling) {
+      if (c.tagName !== "LEGEND") continue;
+      for (var b = c.firstElementChild; b; b = b.nextElementSibling) {
+        if (b.classList && b.classList.contains("object-toggle")) return b;
+      }
+    }
+    return null;
+  }
+
+  // Opens every fold around `el`, outermost first: a fieldset or an object
+  // folded by its title button (`Desk.Fieldsets`: the state is the button's
+  // `aria-expanded`, kept in the page), and a closed <details>. A fold is
+  // opened by its own button, so LiveView's fold command runs as on a click.
+  // A field the undo changed is never left out of sight.
+  function unfold(el) {
+    var shut = [];
+    for (var n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      if (n.tagName === "DETAILS" && !n.open) shut.unshift(n);
+      if (n.tagName === "FIELDSET" && n.hasAttribute("data-collapsible")) {
+        var t = toggleOf(n);
+        if (t && t.getAttribute("aria-expanded") === "false") shut.unshift(t);
+      }
+    }
+    shut.forEach(function (f) {
+      if (f.tagName === "DETAILS") f.open = true;
+      else f.click();
+    });
+  }
+
   function onUndone(e) {
     var d = (e && e.detail) || {};
     var f = form();
@@ -113,6 +145,7 @@
     var text = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type));
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
+    unfold(el);
     if (document.activeElement !== el) el.focus();
     // Drawn with the new value already (the undo switched to its tab): the
     // caret still goes to the change.
@@ -129,5 +162,5 @@
   document.addEventListener("keydown", onKey);
   document.addEventListener("beforeinput", onBeforeInput, true);
   window.addEventListener("phx:desk:undone", onUndone);
-  window.BarkparkDeskUndo = { onKey: onKey, onUndone: onUndone, ours: ours };
+  window.BarkparkDeskUndo = { onKey: onKey, onUndone: onUndone, ours: ours, unfold: unfold };
 })();

@@ -6,8 +6,9 @@
 // `data-desk-undo-keys`): a slug, a url, a number or a nested string keeps
 // the browser's own undo. Rich text, a dialog, another input and a key
 // someone already took are left alone. The browser's own undo of a field is the document's
-// too. `desk:undone` sets the field that still shows the old value, puts the
-// caret at the end of what changed, and the focus in the field.
+// too. `desk:undone` sets the field that still shows the old value, opens
+// the folds around it, puts the caret at the end of what changed, and the
+// focus in the field.
 //
 // Runs the TRACKED static asset api/priv/static/assets/bp-desk-undo.js under jsdom.
 //
@@ -35,9 +36,24 @@ doc.body.innerHTML =
   `<input type="number" id="count" name="doc[count]">` +
   `<input type="text" id="alt" name="doc[image][alt]">` +
   `<button type="button" id="add">Add</button>` +
+  `<fieldset id="set" data-collapsible><legend><button type="button" class="object-toggle" id="set-toggle" aria-expanded="false">More</button></legend>` +
+  `<textarea id="folded" name="doc[folded]">Folded.</textarea></fieldset>` +
+  `<fieldset id="obj" data-collapsible><legend><button type="button" class="object-toggle" id="obj-toggle" aria-expanded="false">Obj</button></legend>` +
+  `<div><fieldset id="inner" data-collapsible><legend><button type="button" class="object-toggle" id="inner-toggle" aria-expanded="false">Inner</button></legend>` +
+  `<details id="det"><summary>More</summary><textarea id="deep" name="doc[deep]">Deep.</textarea></details></fieldset></div></fieldset>` +
   `<div contenteditable="true" id="rich">Body</div>` +
   `</form></section>` +
   `<dialog id="dialog" open><input id="dialog-input" type="text"></dialog></div>`;
+
+// LiveView runs a fold button's own command on its click
+// (`JS.toggle_attribute({"aria-expanded", "true", "false"})`, Desk.Fieldsets).
+const toggled = [];
+doc.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest(".object-toggle");
+  if (!b) return;
+  toggled.push(b.id);
+  b.setAttribute("aria-expanded", b.getAttribute("aria-expanded") === "true" ? "false" : "true");
+});
 
 const pushes = [];
 const order = [];
@@ -213,6 +229,47 @@ check("a field drawn with the new value already (its tab was switched to) takes 
   assert.equal(excerpt.value, "Short.");
   assert.equal(doc.activeElement, excerpt);
   assert.equal(excerpt.selectionStart, "Short.".length);
+});
+
+check("a field in a fieldset folded since (by the user) is opened by its own button, then focused", () => {
+  const folded = $("folded");
+  folded.value = "Folded. X2";
+  $("set-toggle").setAttribute("aria-expanded", "false");
+  $("set-toggle").focus();
+  toggled.length = 0;
+  undone({ field: "doc[folded]", value: "Folded.", was: "Folded. X2" });
+  assert.equal(folded.value, "Folded.");
+  assert.equal($("set-toggle").getAttribute("aria-expanded"), "true");
+  assert.deepEqual(toggled, ["set-toggle"]);
+  assert.equal(doc.activeElement, folded);
+});
+
+check("a field drawn in a fieldset that starts folded (its tab was switched to) is opened too", () => {
+  $("set-toggle").setAttribute("aria-expanded", "false");
+  $("folded").value = "Folded.";
+  $("add").focus();
+  undone({ field: "doc[folded]", value: "Folded.", was: "Folded. X1" });
+  assert.equal($("set-toggle").getAttribute("aria-expanded"), "true");
+  assert.equal(doc.activeElement, $("folded"));
+});
+
+check("nested folds (a fieldset in a folded object, a closed details) all open, outermost first", () => {
+  toggled.length = 0;
+  $("deep").value = "Deep. X";
+  undone({ field: "doc[deep]", value: "Deep.", was: "Deep. X" });
+  assert.deepEqual(toggled, ["obj-toggle", "inner-toggle"]);
+  assert.equal($("obj-toggle").getAttribute("aria-expanded"), "true");
+  assert.equal($("inner-toggle").getAttribute("aria-expanded"), "true");
+  assert.equal($("det").open, true);
+  assert.equal(doc.activeElement, $("deep"));
+});
+
+check("an open fold is left as it is", () => {
+  $("set-toggle").setAttribute("aria-expanded", "true");
+  toggled.length = 0;
+  undone({ field: "doc[folded]", value: "Folded.", was: "Folded." });
+  assert.deepEqual(toggled, []);
+  assert.equal($("set-toggle").getAttribute("aria-expanded"), "true");
 });
 
 check("a field the form does not have is ignored", () => {
