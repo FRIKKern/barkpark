@@ -97,10 +97,36 @@
     if (dialog && !dialog.open) dialog.showModal();
   };
 
-  // The drawer (Desk.NavDrawer): a modal dialog, so Tab stays inside and
-  // Escape shuts it; the browser gives the focus back to "Open menu".
+  // The drawer (Desk.NavDrawer): a modal dialog, so Escape shuts it and the
+  // browser gives the focus back to "Open menu". A modal dialog alone lets Tab
+  // stop on the dialog box and then leave the page, so Tab and Shift+Tab wrap
+  // between its first and last control, as TanStack's focus scope does.
   var drawer = function (doc) {
     return doc.getElementById("dk-drawer");
+  };
+  var drawerStops = function (d) {
+    return Array.prototype.filter.call(d.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), [tabindex]"), function (el) {
+      return el.tabIndex >= 0 && el.getClientRects().length > 0;
+    });
+  };
+  var trapDrawer = function (doc, e) {
+    var d = drawer(doc);
+    if (e.key !== "Tab" || !d || !d.open) return;
+    var list = drawerStops(d);
+    if (!list.length) return;
+    var first = list[0];
+    var last = list[list.length - 1];
+    var at = doc.activeElement;
+    if (!d.contains(at) || at === d) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && at === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && at === last) {
+      e.preventDefault();
+      first.focus();
+    }
   };
   var closeDrawer = function (doc) {
     var d = drawer(doc);
@@ -225,6 +251,7 @@
         if (on) on.focus();
       }
     }, true);
+    doc.addEventListener("keydown", function (e) { trapDrawer(doc, e); }, true);
     // In the perspective menu the arrows move between the two.
     doc.addEventListener("keydown", function (e) {
       var menu = e.target && e.target.closest ? e.target.closest("#dk-perspective-menu") : null;

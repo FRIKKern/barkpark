@@ -23,7 +23,7 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawerStyle do
   def sheet(assigns) do
     ~H"""
     <style>
-      .studio-shell:has(.dk) .navbar .perspective-picker { box-sizing: border-box; display: inline-flex; align-items: center; height: 33px; padding: 0 5px 0 13px; border: 0; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--dk-line-strong); background: var(--dk-nav-bg); font: inherit; font-size: 13px; font-weight: 500; color: var(--dk-nav-fg); white-space: nowrap; cursor: pointer; }
+      .studio-shell:has(.dk) .navbar .perspective-picker { box-sizing: border-box; display: inline-flex; align-items: center; height: 33px; padding: 0 5px 0 13px; border: 0; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--dk-nav-border); background: var(--dk-nav-bg); font: inherit; font-size: 13px; font-weight: 500; color: var(--dk-nav-fg); white-space: nowrap; cursor: pointer; }
       .studio-shell:has(.dk) .navbar .perspective-picker:hover { background: var(--dk-nav-hover); }
       .studio-shell:has(.dk) .navbar .perspective-picker:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-nav-focus); }
       .studio-shell:has(.dk) .navbar .perspective-picker > .dot { margin-right: 20px; }

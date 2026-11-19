@@ -239,6 +239,20 @@ defmodule BarkparkWeb.Studio.DeskNavbarDrawerTest do
       assert phone =~ ".navbar #dk-help > #help-menu { display: none; }"
     end
 
+    # The pill's ring, as TanStack's: a token the bar itself defines. The
+    # document pane's `--dk-line-strong` is not set up here, so it drew none.
+    test "the picker's ring is the bar's border token, set in both themes" do
+      [picker] = Regex.run(~r/\.navbar \.perspective-picker \{[^}]*\}/, @css)
+      assert picker =~ "box-shadow: inset 0 0 0 1px var(--dk-nav-border);"
+      refute @css =~ "--dk-line-strong"
+
+      bar = rendered_to_string(BarkparkWeb.Studio.Desk.Style.sheet(%{}))
+      assert bar =~ ~r/\.studio-shell:has\(\.dk\) \.studio-bar \{[^}]*--dk-nav-border:/
+
+      assert bar =~
+               ~r/html\[data-theme="dark"\] \.studio-shell:has\(\.dk\) \.studio-bar \{[^}]*--dk-nav-border:/
+    end
+
     test "on a touch screen the picker and the drawer's items are 44 px" do
       assert block("(max-width: 768px) and (pointer: coarse)") =~
                ".navbar .perspective-picker { min-height: 44px; }"
