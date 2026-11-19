@@ -37,6 +37,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.Bulk
   alias BarkparkWeb.Studio.Desk.DocClip
+  alias BarkparkWeb.Studio.Desk.DocUndo
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
@@ -334,6 +335,14 @@ defmodule BarkparkWeb.Studio.DeskLive do
     end
   end
 
+  # A typed edit of the form: the editor's, and a step of the document's
+  # undo when it landed (`DocUndo`).
+  def handle_event("autosave" = event, params, socket),
+    do: event |> EditorHost.handle_event(params, socket) |> DocUndo.record(params, socket)
+
+  # The document's undo and redo, Mod+Z and Shift+Mod+Z (`DocUndo`).
+  def handle_event("desk-undo", params, socket), do: DocUndo.handle_event(params, socket)
+
   # A field's "Field actions" menu (`FieldActions`).
   def handle_event("desk-field-" <> _ = event, params, socket),
     do: FieldActions.handle_event(event, params, socket)
@@ -520,6 +529,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}
       data-desk-image={BarkparkWeb.StaticAssets.path("bp-desk-image.js")}
       data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
+      data-desk-undo={BarkparkWeb.StaticAssets.path("bp-desk-undo.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

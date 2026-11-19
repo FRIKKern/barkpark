@@ -406,10 +406,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   A change the server built itself for the document the socket holds (the
   desk's Paste field): not a browser post, so it carries no name and none is
   asked (`PostIdentity`). Never call it with params that came from the page.
-  """
-  def autosave_built(params, socket) when is_map(params), do: autosave_open(params, socket)
 
-  defp autosave_open(params, socket) do
+  The params may carry, under the atom key `:bases`, the value each free-text
+  field was computed from (the desk's undo, `Desk.DocUndo`): the save merges
+  it onto what the store holds by then, as it does a typed post from the base
+  the page reports. A page's params never carry an atom key.
+  """
+  def autosave_built(params, socket) when is_map(params) do
+    {bases, params} = Map.pop(params, :bases, %{})
+    autosave_open(params, socket, bases)
+  end
+
+  defp autosave_open(params, socket, built_bases \\ %{}) do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
@@ -422,6 +430,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         saved =
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"])
+          |> RemoteValues.add_bases(built_bases)
           |> RefusedSave.target(keys)
           |> Shared.do_autosave(doc, :change)
           |> RemoteValues.settle(socket, keys, doc)
