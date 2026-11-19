@@ -67,9 +67,9 @@ end
 defmodule Barkpark.Tenancy.WorkspaceBundle do
   @moduledoc """
   Export ANY workspace into one complete, self-describing bp-export-v1 bundle
-  and re-import it into a clean database with ZERO silent loss — the keystone
-  the five Cloud consumers (backup, eject, rebalance, graduation, migration)
-  inherit.
+  and re-import it into a clean database. The import leaves out one table,
+  `workspace_access_requests` (`LocalOnly`: people ask again). The keystone the
+  five Cloud consumers (backup, eject, rebalance, graduation, migration) inherit.
 
   Completeness is PROVEN, never asserted by grep: an `information_schema` +
   `pg_constraint` partition diff plus per-table count-parity and
@@ -232,7 +232,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   Two modes:
 
-    * `:clean` (default) — byte-identical restore into a CLEAN target. E1/E2/
+    * `:clean` (default) — restore into a CLEAN target, minus `LocalOnly`. E1/E2/
       root members re-import via `COPY … FROM STDIN`; the string-keyed E3 +
       allowlist members re-import via `INSERT … ON CONFLICT DO NOTHING`,
       because their key is NOT workspace-unique (the same
@@ -380,16 +380,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   @doc """
   Re-import a bundle binary. Returns `{:ok, stats}` where `stats.manifest` is
   the bundle's own manifest (so the caller can stamp pull provenance without
-  re-inflating the tar) and `stats.tables` maps
-  each table to the rows imported into it (rows already present via the
-  ON-CONFLICT path are not double-counted at the SQL level but ARE included in
-  the member's row_count — the return counts rows the bundle CARRIED, in BOTH
-  modes: a merge that updated-in-place rather than inserted still reports the
-  carried row count, never a per-row insert/update split).
+  re-inflating the tar) and `stats.tables` maps each table to the rows the bundle
+  CARRIED for it, in both modes: rows already present via the ON-CONFLICT path
+  count too, and a merge that updated in place still reports the carried count,
+  never an insert/update split. `workspace_access_requests` maps to 0, since the
+  import leaves it out (`LocalOnly`); `stats.access_requests_left_out` holds the
+  bundle's count of it.
 
   ## Options
 
-    * `:mode` — `:clean` (default; byte-identical restore into a clean target)
+    * `:mode` — `:clean` (default; restore into a clean target, minus `LocalOnly`)
       or `:merge` (PDS-D8; convergent upsert over a possibly-populated target).
     * `:grant_admin_to` — the principal bringing this workspace onto this
       instance, as `{principal_id, principal_type}`. It is granted an `admin`
@@ -412,8 +412,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       project; the other codes are listed on the exception). Only `:clean` mode;
       `:grant_admin_to` does not apply, because the target workspace already
       exists. See `Barkpark.Tenancy.WorkspaceBundle.DatasetRemap` for the table
-      of what is rewritten and what is not. Defaults to `nil` (the byte-for-byte
-      restore above, unchanged).
+      of what is rewritten and what is not. Defaults to `nil` (the restore above,
+      unchanged).
 
   In `:merge` mode a same-slug/different-id root collision returns
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
