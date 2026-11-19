@@ -1,0 +1,27 @@
+{
+  "name": "@barkpark/barkui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BarkUI: one look for UI SDK's parts, read from the --ui-* and --bark-* variables of api/priv/barkui/tokens.css. One folder per part under parts/; the showroom and the check find them by reading the directory. Not published.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "node build/showroom.mjs",
+    "test": "vitest run",
+    "check": "node check/run.mjs",
+    "shots": "node check/shots.mjs",
+    "check:selftest": "node check/selftest.mjs"
+  },
+  "dependencies": {
+    "@ui-sdk/core": "0.1.0-beta.10",
+    "@ui-sdk/web": "0.1.0-beta.10"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "playwright": "^1.63.0",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
