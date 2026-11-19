@@ -28,6 +28,11 @@
  * (`data-value`: the saved edit, or another editor's) or another document
  * (`data-doc`). A wrapper that does not name its document holds nothing.
  *
+ * In the desk the picker is a text box ("2026-09-06 11:00") with a calendar
+ * button (`Fields.DeskDatetime`, the TanStack Studio's DateTimeInput); the
+ * hook's text mode commits a typed date on Enter or blur and opens the
+ * calendar (bp-desk-datepicker.js). The hidden input is the same.
+ *
  * Loaded with `defer` at the bottom of <body> (never <head>, Golden Rule 4);
  * the inline Hooks map delegates to `window.BarkparkDatetimeFieldHook` once it
  * exists. Pure functions are exported for the node test in
@@ -75,10 +80,36 @@
     return d.toISOString().replace(/\.\d{3}Z$/, "Z");
   }
 
+  // The desk's text box (`Fields.DeskDatetime`), the TanStack Studio's
+  // DateTimeInput: the stored value as local "YYYY-MM-DD HH:mm"; typed text
+  // back to a Date, or null when it does not read as one.
+  var TYPED = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})$/;
+
+  function toText(stored) {
+    return toLocalInput(stored).replace("T", " ");
+  }
+
+  function fromText(text) {
+    var m = String(text).trim().match(TYPED);
+    if (!m) return null;
+    var d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    if (isNaN(d.getTime()) || d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[3] || +m[4] > 23) return null;
+    return d;
+  }
+
+  function stringsOf(el) {
+    try {
+      return JSON.parse(el.getAttribute("data-strings") || "{}");
+    } catch (_e) {
+      return {};
+    }
+  }
+
   var Hook = {
     mounted: function () {
       var self = this;
       this._sync();
+      if (this._text()) return this._mountText();
 
       // Stop the picker's own events at the wrapper: it is nameless, and the
       // form must only ever see the hidden input's value.
@@ -108,6 +139,120 @@
     destroyed: function () {
       this.el.removeEventListener("input", this._onPicker);
       this.el.removeEventListener("change", this._onPicker);
+      if (this._offText) this._offText();
+    },
+
+    _text: function () {
+      return this.el.querySelector("input[data-datetime-text]");
+    },
+
+    // The desk's box: typing stays in the box (the form posts nothing); Enter
+    // or leaving the box commits it when it reads as a date (empty clears),
+    // else the box is marked and says the format. The calendar button opens
+    // the picker (bp-desk-datepicker.js); a picked day commits at once. The
+    // instant is stored as the TanStack Studio stores it (toISOString).
+    _mountText: function () {
+      var self = this;
+      var text = this._text();
+      var button = this.el.querySelector("button[data-datetime-open]");
+      var error = this.el.querySelector("[data-datetime-error]");
+      var strings = stringsOf(this.el);
+      var now = new Date();
+      text.placeholder = (strings.example || "e.g. %{example}").replace(
+        "%{example}",
+        toText(now.toISOString())
+      );
+
+      var mark = function (bad) {
+        if (bad) {
+          self.el.setAttribute("data-invalid", "");
+          text.setAttribute("aria-invalid", "true");
+        } else {
+          self.el.removeAttribute("data-invalid");
+          text.removeAttribute("aria-invalid");
+        }
+        if (error) {
+          error.hidden = !bad;
+          error.textContent = bad ? (strings.invalid || "Not a valid date. Use the format %{format}.").replace("%{format}", "2026-09-06 11:00") : "";
+        }
+      };
+      // Only what was typed is written: a box that was only focused shows
+      // what the server holds (`_sync`), so leaving it never writes back a
+      // value another editor has changed since.
+      var commit = function () {
+        var hidden = self._hidden();
+        if (!hidden || text.readOnly || !self._typed) return;
+        if (text.value === toText(hidden.value)) return (self._typed = false), mark(false);
+        if (text.value.trim() === "") return (self._typed = false), mark(false), self._set("");
+        var d = fromText(text.value);
+        if (!d) return mark(true);
+        self._typed = false;
+        mark(false);
+        self._set(d.toISOString());
+      };
+      // Only the hidden input's own event reaches the form: the box's and
+      // the calendar's controls (month, year, time) are nameless.
+      var onInput = function (e) {
+        if (e.target === self._hidden()) return;
+        e.stopPropagation();
+        if (e.target === text) {
+          self._typed = true;
+          mark(false);
+        }
+      };
+      var onKey = function (e) {
+        if (e.target === text && e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+      };
+      var onOut = function (e) {
+        if (e.target === text) commit();
+      };
+      var onClick = function () {
+        var picker = root.BarkparkDatePicker;
+        var hidden = self._hidden();
+        if (!picker || !hidden) return;
+        var stored = hidden.value ? new Date(hidden.value) : null;
+        picker.toggle({
+          box: text.parentNode,
+          host: text.parentNode.parentNode,
+          button: button,
+          value: stored && !isNaN(stored.getTime()) ? stored : null,
+          locale: self.el.getAttribute("data-locale") || "en",
+          strings: strings,
+          onPick: function (d) {
+            self._typed = false;
+            mark(false);
+            self._set(d.toISOString());
+          }
+        });
+      };
+      this.el.addEventListener("input", onInput);
+      this.el.addEventListener("change", onInput);
+      this.el.addEventListener("keydown", onKey);
+      this.el.addEventListener("focusout", onOut);
+      if (button) button.addEventListener("click", onClick);
+      this._offText = function () {
+        self.el.removeEventListener("input", onInput);
+        self.el.removeEventListener("change", onInput);
+        self.el.removeEventListener("keydown", onKey);
+        self.el.removeEventListener("focusout", onOut);
+        if (button) button.removeEventListener("click", onClick);
+        if (root.BarkparkDatePicker && root.BarkparkDatePicker.isOpen()) root.BarkparkDatePicker.close(false);
+      };
+    },
+
+    // Write a value: the hidden input posts it, the box shows it.
+    _set: function (value) {
+      var hidden = this._hidden();
+      var text = this._text();
+      if (!hidden) return;
+      if (text) text.value = toText(value);
+      if (hidden.value === value) return;
+      hidden.value = value;
+      this._hold(value);
+      hidden.dispatchEvent(new Event("input", { bubbles: true }));
     },
 
     _hidden: function () {
@@ -142,10 +287,18 @@
       if (hidden.value !== held.value) hidden.value = held.value;
     },
 
-    // Show the stored value in local time, unless the editor is typing.
+    // Show the stored value in local time, unless the editor is typing. A
+    // box that has the focus but no typing shows a new value from the server
+    // too (another editor's), as the TanStack Studio's does.
     _sync: function () {
-      var picker = this._picker();
+      var text = this._text && this._text();
       var hidden = this._hidden();
+      if (text && hidden) {
+        if (typeof document === "undefined" || document.activeElement !== text || !this._typed)
+          text.value = toText(hidden.value);
+        return;
+      }
+      var picker = this._picker();
       if (!picker || !hidden) return;
       if (typeof document !== "undefined" && document.activeElement === picker) return;
       picker.value = toLocalInput(hidden.value);
@@ -160,14 +313,20 @@
   function fillStatic(doc) {
     var wrappers = doc.querySelectorAll(".bp-datetime-field");
     for (var i = 0; i < wrappers.length; i++) {
-      var picker = wrappers[i].querySelector('input[type="datetime-local"]');
+      var picker = wrappers[i].querySelector('input[type="datetime-local"], input[data-datetime-text]');
       var hidden = wrappers[i].querySelector("input[data-datetime-value]");
       if (!picker || !hidden || picker.value !== "" || doc.activeElement === picker) continue;
-      picker.value = toLocalInput(hidden.value);
+      picker.value = picker.type === "text" ? toText(hidden.value) : toLocalInput(hidden.value);
     }
   }
 
-  root.BarkparkDatetime = { toLocalInput: toLocalInput, toInstant: toInstant, fillStatic: fillStatic };
+  root.BarkparkDatetime = {
+    toLocalInput: toLocalInput,
+    toInstant: toInstant,
+    toText: toText,
+    fromText: fromText,
+    fillStatic: fillStatic
+  };
   root.BarkparkDatetimeFieldHook = Hook;
 
   if (typeof document !== "undefined" && document.querySelectorAll) {

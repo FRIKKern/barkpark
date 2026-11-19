@@ -15653,3 +15653,53 @@ msgstr "URL-en er kopiert til utklippstavlen"
 #, elixir-autogen, elixir-format
 msgid "The URL could not be copied"
 msgstr "URL-en kunne ikke kopieres"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Open calendar"
+msgstr "Åpne kalender"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Select date"
+msgstr "Velg dato"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Month"
+msgstr "Måned"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Year"
+msgstr "År"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Go to previous year"
+msgstr "Gå til forrige år"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Go to next year"
+msgstr "Gå til neste år"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Select time"
+msgstr "Velg tid"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Set to current time"
+msgstr "Sett til nå"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. %{example}"
+msgstr "f.eks. %{example}"
+
+#: lib/barkpark_web/components/fields/desk_datetime.ex
+#, elixir-autogen, elixir-format
+msgid "Not a valid date. Use the format %{format}."
+msgstr "Ikke en gyldig dato. Bruk formatet %{format}."

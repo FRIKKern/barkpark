@@ -46,9 +46,51 @@ defmodule Barkpark.Content.SelectOptions do
   @spec values(term()) :: [String.t()]
   def values(opts), do: opts |> normalize() |> Enum.map(& &1.value)
 
+  @doc """
+  The option list a field declares: `options` itself when it is a list, or
+  Sanity's `options.list` (`"options": {"list": [...], "direction": ...}`).
+  `nil` when there is none.
+  """
+  @spec list(term()) :: list() | nil
+  def list(opts) when is_list(opts), do: opts
+  def list(%{"list" => opts}) when is_list(opts), do: opts
+  def list(%{list: opts}) when is_list(opts), do: opts
+  def list(_), do: nil
+
+  @doc """
+  The options as the TanStack Studio titles them (`optionsOf`, Sanity's):
+  a bare value's title is the value with its first letter capitalised
+  (`"idea"` is shown "Idea", `"idea"` stored); a `{value, title}` pair keeps
+  its title.
+  """
+  @spec titled(term()) :: [option()]
+  def titled(opts) do
+    opts
+    |> list()
+    |> List.wrap()
+    |> Enum.map(fn
+      v when is_binary(v) or is_atom(v) or is_number(v) ->
+        %{"value" => v, "title" => upcase_first(to_string(v))}
+
+      o ->
+        o
+    end)
+    |> normalize()
+  end
+
+  @doc "True when a radio list asks to lie in a row (`options.direction`)."
+  @spec horizontal?(map()) :: boolean()
+  def horizontal?(%{"options" => %{"direction" => "horizontal"}}), do: true
+  def horizontal?(%{"direction" => "horizontal"}), do: true
+  def horizontal?(_), do: false
+
+  defp upcase_first(<<first::utf8, rest::binary>>), do: String.upcase(<<first::utf8>>) <> rest
+  defp upcase_first(other), do: other
+
   @doc "True when the field asks for Sanity's `layout: \"radio\"`."
   @spec radio?(map()) :: boolean()
   def radio?(%{"layout" => "radio"}), do: true
+  def radio?(%{"options" => %{"layout" => "radio"}}), do: true
   def radio?(%{layout: "radio"}), do: true
   def radio?(%{raw: %{} = raw}), do: radio?(raw)
   def radio?(_), do: false

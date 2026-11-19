@@ -22,6 +22,10 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptCodes do
       the whole field (`_target` names the field and no row: Review
       changes' Revert, Paste) is its own change, written as posted.
 
+  A top-level `datetime` stored as something other than a string (a number
+  of epoch ms) is kept the same way as a codelist: the desk's date box shows
+  it empty and posts "".
+
   So an edit elsewhere, or the Save button's post (which names no field),
   leaves the stored value as it is, and a pick or a clear in the field or the
   row itself is written as before. A value or row that is a string, or none,
@@ -43,7 +47,11 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptCodes do
 
   def only_touched(params, _form, _schema), do: params
 
-  defp keep(%{"type" => "codelist", "name" => name}, doc, form, changed) when is_binary(name) do
+  # A datetime holds a string. One stored as something else (a number of
+  # epoch ms, from an import or the API) is drawn as an empty box
+  # (`DeskDatetime`), which posts "", so it is kept the same way.
+  defp keep(%{"type" => type, "name" => name}, doc, form, changed)
+       when type in ["codelist", "datetime"] and is_binary(name) do
     if Map.has_key?(doc, name) and not match?([^name | _], changed) and
          kept?(Map.get(form, name)),
        do: Map.delete(doc, name),
