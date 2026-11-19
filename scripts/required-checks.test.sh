@@ -2458,6 +2458,14 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # single-quoted: the name carries a literal `${{ … }}` — in double quotes
         # bash reads it as a parameter expansion and dies with `bad substitution`.
         --expect-unrendered 'Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})'
+        # task-97b251c1b5d6a1db: mix-test and mix-prod-compile read their
+        # toolchain from .tool-versions, not a matrix axis, so they render new
+        # names that no frozen head carries. The rows above stay for open PRs.
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions)"
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions) (1)"
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions) (2)"
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions) (3)"
+        --expect-unrendered "Prod compile gate (Elixir and OTP from .tool-versions)"
         --expect-unrendered "Billing tier floor (rendered)"
         --expect-unrendered "Overflow guard (rendered)"
         --expect-unrendered "Modal CSSOM oracle (rendered)"

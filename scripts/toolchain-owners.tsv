@@ -1,0 +1,114 @@
+# Which version file owns which consumer. scripts/toolchain-drift-check.sh reads
+# this table and nothing else to decide where an Erlang/Elixir version may live.
+#
+# Columns: <owner> <consumer>, whitespace-separated, one consumer a row. The
+# owner is a *.tool-versions file, or `data`.
+#   .github/workflows/X.yml       every erlef/setup-beam step in X reads the file
+#                                 with `version-file:` + `version-type: strict`
+#   .github/workflows/X.yml#job   the same, for one job; beats the workflow row
+#   .github/actions/X/action.yml  the same, for a composite action
+#   */Dockerfile, *.sh, ...       a version on a line naming a tool equals that
+#                                 tool's number here, or the file reads this
+#                                 file by path
+#   *.tool-versions               that file's erlang and elixir lines equal this
+#                                 file's, unless a pin row names the number
+#   data <file> <reason>          a test or fixture file whose versions are test
+#                                 data or past check names, not a runtime. A data
+#                                 row covers EVERY number in its file, an install
+#                                 line too, so the check allows one only on the
+#                                 paths its own test-path rule names: *.test.sh,
+#                                 *_test.*, test/, tests/, fixtures/. A test file
+#                                 that sets up a tool for anything but its own
+#                                 test takes line rows instead
+#   pin <file> <token> <what>     one token that is not an owned tool's version
+#   line <file> <hash> <words> :: <reason>
+#                                 one line whose numbers are not versions
+#
+# Every tracked .tool-versions / *.tool-versions must appear here. A version on
+# a line that names erlang, otp, elixir or node (or any tool an owner file
+# names), and any image tag, in a workflow, action, container or compose file,
+# devcontainer, deploy file, script, Makefile or mise config, fails without a
+# row. A number on a line that names no tool is not seen: this table and its
+# check are the early warning, and task-1c24786728762c92 (assert what runs) is
+# the wall that holds. Moving a consumer to another file is editing its row;
+# folding a version file into another is deleting its rows and re-pointing its
+# consumers.
+
+# The content server's runtime: asdf on the box resolves the repo-root file.
+.tool-versions  .github/workflows/architecture.yml
+.tool-versions  .github/workflows/barkdown-parity.yml
+.tool-versions  .github/workflows/codebase-intel.yml
+.tool-versions  .github/workflows/core-without-owned-tables.yml
+.tool-versions  .github/workflows/create-quickstart-smoke.yml
+.tool-versions  .github/workflows/elixir.yml
+.tool-versions  .github/workflows/elixir-nightly.yml
+.tool-versions  .github/workflows/engine-release.yml
+.tool-versions  .github/workflows/paper-rig.yml
+.tool-versions  .github/workflows/pds-scratch-round-trip.yml
+.tool-versions  .github/workflows/release-artifact.yml
+.tool-versions  .github/workflows/security.yml
+.tool-versions  api/scripts/sobelow-baseline-reconcile.sh
+.tool-versions  deploy/azure-base-install.sh
+.tool-versions  deploy/instance-deploy_test.sh
+.tool-versions  tools/format.tool-versions
+
+# The release images: the control plane builds cloud/Dockerfile, and
+# api/Dockerfile is the published image.
+deploy/image.tool-versions  .github/workflows/cloud.yml
+deploy/image.tool-versions  api/Dockerfile
+deploy/image.tool-versions  cloud/Dockerfile
+deploy/image.tool-versions  scripts/cloud-format-check.sh
+
+# The formatter the format gate measures (reason in the file).
+tools/format.tool-versions  .github/workflows/elixir.yml#format
+tools/format.tool-versions  scripts/format-check.sh
+
+# Test data. Only a test or fixture path may be data, and each row says why.
+data  scripts/elixir-main-red-attribution.test.sh  a stack-trace fixture names (elixir 1.18.4)
+data  scripts/fetch-prebuilt.test.sh  a fake box prints Elixir 1.18.3 so the guard sees a mismatch
+data  scripts/release-scan.test.sh  check-run fixtures carry past check names (Elixir 1.18.1 / OTP 27.0)
+data  scripts/required-checks.test.sh  a matrix fixture and the exclusion rows of past check names
+data  scripts/ci-test-watchdog.test.sh  `sleep 0.5` on an `elixir -e` line is a poll interval
+data  scripts/cloud-console-gate-shape.test.sh  a planted aggregator matrix (otp 27.0) the gate must refuse
+data  scripts/security-gate-shape.test.sh  a planted aggregator matrix (otp 27.0) the gate must refuse
+data  scripts/deploy-image.test.sh  Barkpark image tags (0.2.30-0.2.32) fed to a fake docker
+data  scripts/deploy-admin-token-recovery.test.sh  a made-up Barkpark image tag (9.9.9) fed to a fake docker
+data  scripts/deploy-health-banner.test.sh  a made-up Barkpark image tag (9.9.9)
+data  api/test/scripts/test-plugin-node-matrix.sh  a package.json fixture's own version (0.1.0)
+
+# Other pins: `pin <file> <token> <what it pins>`. A version that is not an owned
+# tool's (a base image, a vendored package's engines field) or a number that is
+# not a version at all, on a line the check reads. The token must still be there.
+pin  tools/format.tool-versions  1.19.5  the formatter's Elixir, which the format gate measures (reason in the file); production's is 1.18.4
+pin  .github/workflows/deploy-harnesses.yml  22.04  the Ubuntu image the git 2.34 fetch harness runs in
+pin  .github/workflows/portable-doc-editor-release.yml  22.22.0  Node for the editor package's npm pack and publish jobs; it DIFFERS from the owner (.tool-versions nodejs 26.5.0), and task-ba826294ea551271 decides: move to the owner Node, or write why not
+pin  deploy/azure/bicepconfig.json  1.0.0  the Microsoft Graph Bicep extension
+pin  deploy/azure/main.bicep  0.2.28  an example Barkpark image tag in a parameter description
+pin  deploy/azure/main.bicep  3.22  the Alpine image of the Azure init container
+pin  deploy/testdata/capstone-turbopack-build-fail.txt  0.34.5  sharp's version in a captured npm log
+pin  .github/workflows/console-harness.yml  20  Node 20, named in refusal messages as the wrong runner Node
+pin  .github/workflows/console-harness.yml  22  Node 22, named in refusal messages as the Node the harness needs
+pin  scripts/check-vendor-blocks.mjs  20.9.0  a vendored package's engines.node range
+pin  scripts/check-vendor-blocks.mjs  20.19.0  a vendored package's engines.node range
+pin  scripts/check-vendor-blocks.mjs  22.12.0  a vendored package's engines.node range
+pin  scripts/check-vendor-blocks.mjs  22.19.0  a vendored package's engines.node range
+pin  scripts/connectors/w19-claude-version-pin-proof.sh  2.1.211  the Claude Code version the shim pins
+pin  scripts/engine/build-postgres.mjs  15.18  the Postgres version in the usage line
+pin  scripts/idp-interop.sh  26.0  the Keycloak image of the identity-provider interop run
+
+# Lines that name a tool beside numbers that are not versions: `line <file>
+# <hash> <first words> :: <reason>`. The hash is the first 12 characters of
+# `printf '%s' "<the line>" | git hash-object --stdin`; the check skips only a
+# line that still hashes to it, so editing the line reds until it is re-read.
+line  scripts/pds-door-census.sh  01148b767e75  pds-ledger-census_test.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  64ec7b5f2626  pds-scratch-target_test.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  4262a7923cab  rerun-adjudicate.test.mjs :: arm numbers in a run log beside a node command, not versions
+line  scripts/pds-door-census.sh  bf80963a425a  pds-roster-callee-churn.exs :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  6112f7a1614b  pds-citation-expand.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  9f5ed778749a  pds-secret-scan_test.sh :: CPU-second price cells beside gate names, not versions
+line  scripts/pds-door-census.sh  42abcc65236e  pds-elixir-receipt-census.exs :: CPU-second price cells beside gate names, not versions
+line  deploy/site-deploy-node.sh  88ebb1fb9d58  MUTANT: bytes built for node 20 :: a mutant label in the self-check names two Node majors
+line  deploy/site-spawner-node-live-proof.sh  9cc7bb572e78  E_CREATE_NOT_NODE=42 :: an exit code, not a version
+line  scripts/check-vendor-blocks.mjs  85675bd57cbb  declares NO engines.node :: a note naming a Node-20 install, not this repo's Node
+line  scripts/studio-journey-smoke.sh  b2e3a1e3700f  node 22+ required :: the smoke's Node floor for a global WebSocket, not a pin
+line  scripts/pds-blind-spot.sh  9d3a72e891b4  PDS_BLIND_SPOT= :: CPU-second figures in prose about :erlang.statistics, not versions

@@ -2132,7 +2132,7 @@
         },
         {
           "type": "text",
-          "value": "Test (Elixir 1.18.1 / OTP 27.0)",
+          "value": "Test (Elixir and OTP from .tool-versions) (<partition>)",
           "marks": [
             "code"
           ]
@@ -2206,7 +2206,7 @@
         },
         {
           "type": "text",
-          "value": "Test (Elixir 1.18.1 / OTP 27.0)",
+          "value": "Test (…)",
           "marks": [
             "code"
           ]
