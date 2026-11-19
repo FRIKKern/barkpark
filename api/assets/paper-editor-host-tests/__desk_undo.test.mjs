@@ -164,6 +164,39 @@ check("a button in the form is not a field: the key is the document's", () => {
   assert.equal(pushes.length, 1);
 });
 
+check("the editing pane folded to a strip: Mod+Z is the browser's, on BODY, the pane and a field", () => {
+  const pane = $("pane");
+  pane.setAttribute("data-pane-collapsed", "");
+  try {
+    for (const target of [doc.body, pane, $("kind"), $("title")]) {
+      const e = key(target, { key: "z", metaKey: true });
+      assert.equal(e.defaultPrevented, false, `Mod+Z on ${target.id || target.tagName} is the browser's`);
+    }
+    const h = new window.InputEvent("beforeinput", { inputType: "historyUndo", bubbles: true, cancelable: true });
+    $("title").dispatchEvent(h);
+    assert.equal(h.defaultPrevented, false);
+    assert.deepEqual(pushes, []);
+  } finally {
+    pane.removeAttribute("data-pane-collapsed");
+  }
+});
+
+check("the editor form hidden (focus mode, the narrow layout: display none): Mod+Z on BODY is the browser's", () => {
+  const proto = window.HTMLElement.prototype;
+  proto.checkVisibility = function () {
+    return !$("pane").contains(this);
+  };
+  try {
+    const e = key(doc.body, { key: "z", metaKey: true });
+    assert.equal(e.defaultPrevented, false);
+    assert.deepEqual(pushes, []);
+  } finally {
+    delete proto.checkVisibility;
+  }
+  key(doc.body, { key: "z", metaKey: true });
+  assert.equal(pushes.length, 1, "drawn again, the key is the document's");
+});
+
 check("no editor form on the desk: nothing is pushed", () => {
   const form = $("editor-form");
   const parent = form.parentNode;
@@ -262,6 +295,30 @@ check("nested folds (a fieldset in a folded object, a closed details) all open, 
   assert.equal($("inner-toggle").getAttribute("aria-expanded"), "true");
   assert.equal($("det").open, true);
   assert.equal(doc.activeElement, $("deep"));
+});
+
+check("a fold that will not open: the change is put back at once (the opposite step), once", () => {
+  const toggle = $("set-toggle");
+  toggle.setAttribute("aria-expanded", "false");
+  const eat = (e) => e.stopPropagation();
+  toggle.addEventListener("click", eat);
+  try {
+    $("folded").value = "Folded. X";
+    $("add").focus();
+    undone({ field: "doc[folded]", value: "Folded.", was: "Folded. X", redo: false });
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.notEqual(doc.activeElement, $("folded"), "no focus into a field out of sight");
+    assert.deepEqual(
+      pushes.map((p) => [p.event, p.payload.redo]),
+      [["desk-undo", true]],
+    );
+    // The put-back's answer cannot be shown either: left, no loop.
+    undone({ field: "doc[folded]", value: "Folded. X", was: "Folded.", redo: true });
+    assert.equal(pushes.length, 1);
+  } finally {
+    toggle.removeEventListener("click", eat);
+    toggle.setAttribute("aria-expanded", "true");
+  }
 });
 
 check("an open fold is left as it is", () => {

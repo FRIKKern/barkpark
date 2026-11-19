@@ -139,7 +139,8 @@ defmodule BarkparkWeb.Studio.DeskDocUndoTest do
       assert_push_event(a, "desk:undone", %{
         field: "doc[title]",
         value: "bbb Fixture post 14 A",
-        was: "bbb Fixture post 14 A aaa"
+        was: "bbb Fixture post 14 A aaa",
+        redo: false
       })
 
       undo(a, c)
@@ -180,6 +181,9 @@ defmodule BarkparkWeb.Studio.DeskDocUndoTest do
 
       undo(a, c, true)
       assert stored(c)["title"] == "bbb Fixture post 14 A"
+      # The page is told which way it went: a change it cannot show is put back
+      # with the opposite step (bp-desk-undo.js).
+      assert_push_event(a, "desk:undone", %{field: "doc[title]", redo: true})
       undo(a, c, "true")
       assert stored(c)["title"] == "bbb Fixture post 14 A aaa"
       assert stored(c)["excerpt"] == "Short. B"

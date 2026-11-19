@@ -215,7 +215,12 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
          saved
          |> put_state(mark, undo, redo)
          |> show_field(field)
-         |> push_event(@event, %{field: "doc[#{field}]", value: stored(saved, field), was: now})}
+         |> push_event(@event, %{
+           field: "doc[#{field}]",
+           value: stored(saved, field),
+           was: now,
+           redo: redo?
+         })}
       else
         {:noreply, put_state(saved, mark, state.undo, state.redo)}
       end
