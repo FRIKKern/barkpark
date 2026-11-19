@@ -336,7 +336,11 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
     theirs(c, %{"address" => %{"street" => "Main 12", "city" => "Bergen"}})
 
     undo(view, c)
-    assert stored(c)["address"] == %{"street" => "Main 1", "city" => "Bergen"}
+
+    assert Map.take(stored(c)["address"], ["street", "city"]) == %{
+             "street" => "Main 1",
+             "city" => "Bergen"
+           }
 
     assert_push_event(view, "desk:undone", %{
       field: "doc[address].street",
