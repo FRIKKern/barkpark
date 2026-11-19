@@ -15,8 +15,10 @@
 //
 // A field inside an array item is looked for in its row: by the path as its
 // id, else by the field's name at the end of an input's id. With no such
-// input the focus goes to the row's summary, and with no such row to the
-// array's add button. Nothing hidden is ever asked to take the focus.
+// input the focus goes to the row's summary (or its preview), and with no
+// such row to the array's add button. Nothing hidden is ever asked to take
+// the focus. A field in an item's dialog opens the dialog first, as the
+// item's preview does.
 //
 // UNDER 600 PX the panel covers the form, so the jump closes the panel first
 // (its own close button) and then focuses the field.
@@ -66,18 +68,29 @@
     return null;
   }
 
-  // Every folded fieldset or object, and every closed array row, around `el`.
+  // Every folded fieldset or object, every closed array row, and every shut
+  // item dialog around `el`.
   function open(el) {
     var around = [];
     for (var node = el; node; node = node.parentElement) around.unshift(node);
     around.forEach(function (node) {
       if (!node.matches) return;
       if (node.matches("details") && node !== el.closest("details[data-add-member-menu]")) node.open = true;
+      if (node.matches("dialog[data-desk-item-dialog]") && !node.open) openDialog(node);
       if (node.matches("fieldset[data-collapsible]")) {
         var toggle = node.querySelector(":scope > legend > .object-toggle");
         if (toggle && toggle.getAttribute("aria-expanded") === "false") toggle.click();
       }
     });
+  }
+
+  // An array item's dialog opens as its preview opens it (bp-desk-array-menu.js:
+  // modal, the focus kept inside), so the jump lands in it the same way.
+  function openDialog(dialog) {
+    var row = dialog.closest("li[data-row-index]");
+    var preview = row && row.querySelector(":scope > [data-desk-item-open]");
+    if (preview) preview.click();
+    if (!dialog.open && dialog.showModal) dialog.showModal();
   }
 
   // What the jump aims at, in order of preference, or null while nothing of
@@ -90,7 +103,7 @@
     var list = byId(path.slice(0, cut));
     if (!list) return null;
     var name = path.slice(path.lastIndexOf(".") + 1);
-    var rows = list.querySelectorAll("details.bp-array-item");
+    var rows = list.querySelectorAll("details.bp-array-item, li[data-row-index]");
     var row = null;
     for (var i = 0; i < rows.length; i++) {
       if (rows[i].getAttribute("data-row-index") === String(item)) {
@@ -109,7 +122,7 @@
       }
     }
     var add = (list.closest(".field") || list.parentElement || list).querySelector(".bp-array-btn-add, [data-add-member-menu] > summary, button[phx-value-op='add']");
-    return [field, row && row.querySelector(":scope > summary"), add, list].filter(Boolean);
+    return [field, row && row.querySelector(":scope > summary, :scope > [data-desk-item-open]"), add, list].filter(Boolean);
   }
 
   function focusOn(list) {
