@@ -169,7 +169,7 @@ const strings = (value) => typeof value === "string" ? [value]
 const sameBlock = (a, b) => JSON.stringify({ ...a, id: null }) === JSON.stringify({ ...b, id: null });
 
 function sweep(rule) {
-  const counts = { papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
+  const counts = { papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, lost: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
   const opts = rule === "on" ? {} : lifted;
   for (const [name, stored] of papers()) {
     counts.papers += 1;
@@ -201,6 +201,15 @@ function sweep(rule) {
     const sentinelIds = new Set(live.filter((b, i) => lines[spans[i] ? spans[i][0] : -1]?.startsWith(SENTINEL_OPEN)).map((b) => b.id));
     const spanOf = (line) => spans.findIndex(([from, to]) => line >= from && line < to);
     lines.forEach((text, line) => {
+      // Each line ends in one outcome: kept (with words or without), refused, refused for
+      // a fence it opened, lost (a loser), or skipped when it reached none of them.
+      const losers = counts.losers.length;
+      const outcome = typeLine(text, line);
+      if (counts.losers.length > losers) counts.lost += 1;
+      else if (outcome) counts[outcome] += 1;
+      else counts.skipped += 1;
+    });
+    function typeLine(text, line) {
       const index = spanOf(line);
       const span = index === -1 ? null : spans[index];
       const [at, words] = placement(text, line, span, live[index]);
@@ -213,7 +222,6 @@ function sweep(rule) {
       if (index !== -1) counts.typedTypes.add(type);
       if (text.startsWith(SENTINEL_OPEN)) {
         // A block shown as JSON is not edited: source mode must refuse the save.
-        counts.refused += 1;
         if (changedSentinel(typedMd, md) === -1) lose(where, "a key typed in a sentinel was not refused");
         const block = live[index];
         const payload = text.trim().slice(SENTINEL_OPEN.length, -SENTINEL_CLOSE.length);
@@ -236,7 +244,7 @@ function sweep(rule) {
           if (same) counts.guardKept += 1;
           else counts.guardDeleted += 1;
         }
-        return;
+        return "refused";
       }
       if (changedSentinel(typedMd, md) !== -1) return lose(where, "a key typed outside any sentinel was refused");
       const laidTyped = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(typedMd)));
@@ -245,7 +253,7 @@ function sweep(rule) {
         // Refused rightly only when the key opened a fence that takes a sentinel line
         // into its body: that save would store the JSON as the fence's words.
         const whole = (text) => markdownToBlocks(text).filter((b) => b.id && sentinelIds.has(b.id)).length;
-        if (whole(typedMd) < whole(md)) { counts.fenceRefused += 1; return; }
+        if (whole(typedMd) < whole(md)) return "fenceRefused";
         return lose(where, "the stored-result guard refused a key typed outside any sentinel");
       }
       const after = sourceSaved(stored, markdownToBlocks(typedMd), view, { ...lifted, realignTo: live });
@@ -253,14 +261,12 @@ function sweep(rule) {
       const clean = withoutTyped(after);
       const byId = new Map(clean.map((block) => [block.id, block]));
       if (words) {
-        counts.words += 1;
         const loss = firstLoss(kept, clean);
         if (loss) return lose(where, `${loss.type} ${loss.path}`);
         const unread = kept.findIndex((block) => readerDiffers(block, byId.get(block.id)));
         if (unread !== -1) lose(where, `the reader shows other words for block ${unread + 1}`);
-        return;
+        return "words";
       }
-      counts.noWords += 1;
       const now = markdownToBlocks(typedMd);
       let head = 0;
       while (head < parsed.length && head < now.length && sameBlock(parsed[head], now[head])) head++;
@@ -275,26 +281,52 @@ function sweep(rule) {
         const loss = now ? firstLoss([block], [{ ...now, id: block.id }]) : { type: block.type, path: "(gone)" };
         if (loss || readerDiffers(block, now)) lose(where, `block ${i + 1}, untouched, lost ${loss ? `${loss.type} ${loss.path}` : "its words"}`);
       });
-    });
+      return "noWords";
+    }
   }
   return counts;
+}
+
+// The same count made apart from the sweep: the lines of every Paper's Markdown that
+// opens writable, and the block types in all of them, read from the files again.
+function census(rule) {
+  const opts = rule === "on" ? {} : lifted;
+  let lines = 0;
+  const types = new Set();
+  for (const [, stored] of papers()) {
+    for (const block of stored) types.add(block.type);
+    const live = docToBlocks(normalizeCanvasDoc(view.toDoc(stored), stored));
+    if (!sourceWallLoss(stored, live, view, opts)) lines += blocksToMarkdown(live).split("\n").length;
+  }
+  return { lines, types: [...types].sort() };
+}
+
+// Every line the census counts reached exactly one outcome, none was skipped.
+function tally(rule, c) {
+  const { lines, types } = census(rule);
+  const outcomes = c.words + c.noWords + c.refused + c.fenceRefused + c.lost + c.skipped;
+  assert.equal(c.lines, lines, `${rule}: the sweep typed on every line the census counts`);
+  assert.equal(outcomes, lines, `${rule}: kept + refused + fence-refused + lost + skipped is the census's line count`);
+  assert.equal(c.skipped, 0, `${rule}: no line is skipped`);
+  return types;
 }
 
 function report(label, c) {
   console.log(`inside-edit sweep, ${label}: ${c.papers} Papers, ${c.writable} writable, ${c.blocks} blocks, ` +
     `${c.shown} prose blocks showing the reader's words; ${c.lines} lines typed: ` +
     `kept ${c.words + c.noWords} (${c.words} with words, ${c.noWords} without), refused ${c.refused}, ` +
-    `skipped ${c.skipped}; ${c.losers.length} losers`);
+    `refused for opening a fence over a sentinel ${c.fenceRefused}, lost ${c.lost}, skipped ${c.skipped}; ` +
+    `${c.losers.length} losers`);
   console.log(`  sentinel lines, ${c.edits} edits judged by the stored-result guard alone: ` +
-    `kept unchanged ${c.guardKept}, deleted whole ${c.guardDeleted}, refused ${c.guardRefused}; ` +
-    `${c.fenceRefused} keys outside a sentinel refused because they opened a fence over one`);
+    `kept unchanged ${c.guardKept}, deleted whole ${c.guardDeleted}, refused ${c.guardRefused}`);
+  assert.equal(c.guardKept + c.guardDeleted + c.guardRefused, c.edits, "each sentinel edit ends in one of the three");
 }
 
 try {
   const on = sweep("on");
   report("rule on", on);
   for (const loser of on.losers.slice(0, 20)) console.log(`  ${loser}`);
-  assert.equal(on.skipped, 0, "no line is skipped");
+  const censusTypes = tally("on", on);
   assert.deepEqual(on.losers, [], "with the callout rule on, no key typed in a writable Paper loses anything");
   const typed = [...on.typedTypes].sort();
   const corpus = [...on.corpusTypes].sort();
@@ -303,9 +335,12 @@ try {
   for (const type of corpus.filter((type) => !on.typedTypes.has(type))) {
     console.log(`  not typed in: ${type}, every Paper holding it is read-only for ${[...on.readOnly.get(type)].sort().join("; ")}`);
   }
+  assert.deepEqual(corpus, censusTypes, "the sweep saw the block types the census reads from the files");
+  assert.deepEqual(typed, censusTypes, "a key was typed in every block type the files hold, by name");
 
   const off = sweep("lifted");
   report("rule lifted", off);
+  tally("lifted", off);
   const kinds = [...new Set(off.losers.map((loser) => loser.replace(/^.* \((\w+)\) line \d+: (\w+) (\S+).*$/, "$1 $3").replace(/\[\d+\]/g, "")))];
   for (const loser of off.losers.slice(0, 20)) console.log(`  ${loser}`);
   assert.deepEqual(kinds, ["callout content.value"], "lifted, the sweep finds the callout body and nothing else");

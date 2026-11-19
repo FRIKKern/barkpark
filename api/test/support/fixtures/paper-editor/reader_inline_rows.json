@@ -307,6 +307,20 @@
       ]
     },
     {
+      "row": "heading: a number as text, shown as its digits",
+      "block": {
+        "type": "heading",
+        "level": 2,
+        "text": 7
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "7"
+        }
+      ]
+    },
+    {
       "row": "callout: body slot only",
       "block": {
         "type": "callout",
