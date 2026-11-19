@@ -77,7 +77,7 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
           "title" => "Undo probe",
           "content" => %{
             "choice" => "b",
-            "handle" => "my-slug",
+            "handle" => %{"_type" => "slug", "current" => "my-slug"},
             "cards" => [card("c1", "One"), card("c2", "Two")],
             "address" => %{"street" => "Main 1", "city" => "Oslo"}
           }
@@ -109,6 +109,13 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
     view
     |> element("#editor-form")
     |> render_change(Map.merge(mark(c), %{"_target" => ["doc" | target], "doc" => doc}))
+  end
+
+  # A nested input's post: its dotted name is the params key and the target.
+  defp post_nested(view, c, name, value) do
+    view
+    |> element("#editor-form")
+    |> render_change(Map.merge(mark(c), %{"_target" => [name], name => value}))
   end
 
   defp remove(view, c, list, index) do
@@ -184,13 +191,29 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
     refute_push_event(view, "desk:undone", %{field: "doc[choice]"})
   end
 
-  test "a slug: this editor's typing comes back out, another editor's words stay", c do
+  test "a slug: this editor's typing comes back out byte for byte; another editor's words stay",
+       c do
     view = open(c)
+    before = Jason.encode!(stored(c)["handle"])
     post(view, c, ["handle"], %{"handle" => "my-slug-x"})
-    assert stored(c)["handle"] == "my-slug-x"
+    assert stored(c)["handle"]["current"] == "my-slug-x"
 
     undo(view, c)
-    assert stored(c)["handle"] == "my-slug"
+    assert Jason.encode!(stored(c)["handle"]) == before
+
+    assert_push_event(view, "desk:undone", %{
+      field: "doc[handle]",
+      value: "my-slug",
+      was: "my-slug-x"
+    })
+
+    pause()
+
+    post(view, c, ["handle"], %{"handle" => "my-slug-y"})
+    theirs(c, %{"handle" => %{"_type" => "slug", "current" => "their-my-slug-y"}})
+
+    undo(view, c)
+    assert stored(c)["handle"] == %{"_type" => "slug", "current" => "their-my-slug"}
   end
 
   test "a list: a removed item comes back where it was, another editor's item stays", c do
@@ -218,9 +241,7 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
        c do
     view = open(c)
 
-    post(view, c, ["address", "street"], %{
-      "address" => %{"street" => "Main 12", "city" => "Oslo"}
-    })
+    post_nested(view, c, "doc[address].street", "Main 12")
 
     assert stored(c)["address"]["street"] == "Main 12"
     theirs(c, %{"address" => %{"street" => "Main 12", "city" => "Bergen"}})
@@ -229,9 +250,25 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
     assert stored(c)["address"] == %{"street" => "Main 1", "city" => "Bergen"}
 
     assert_push_event(view, "desk:undone", %{
-      field: "doc[address][street]",
+      field: "doc[address].street",
       value: "Main 1",
       was: "Main 12"
+    })
+  end
+
+  test "a list item's text: this editor's typing comes back out, the page is told the item", c do
+    view = open(c)
+    before = Jason.encode!(stored(c)["cards"])
+    post_nested(view, c, "doc[cards][1].label", "Two!")
+    assert Enum.at(stored(c)["cards"], 1)["label"] == "Two!"
+
+    undo(view, c)
+    assert Jason.encode!(stored(c)["cards"]) == before
+
+    assert_push_event(view, "desk:undone", %{
+      field: "doc[cards][1].label",
+      value: "Two",
+      was: "Two!"
     })
   end
 

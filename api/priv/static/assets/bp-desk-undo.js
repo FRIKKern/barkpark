@@ -214,7 +214,11 @@
   function named(f, field) {
     var el = f.elements.namedItem(field);
     if (el && el.tagName) return el;
-    return f.querySelector('[name^="' + field.replace(/"/g, '\\"') + '["]');
+    for (var i = 0; i < f.elements.length; i++) {
+      var x = f.elements[i];
+      if (x.name && x.name.indexOf(field + "[") === 0) return x;
+    }
+    return null;
   }
 
   function onUndone(e) {

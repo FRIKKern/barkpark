@@ -28,13 +28,17 @@ doc.body.innerHTML =
   `<section id="list" data-pane-kind="list"><input id="search" type="search"></section>` +
   `<section id="pane" data-pane-index="1" data-pane-editing><header><span class="kind" id="kind">Post</span>` +
   `<button id="menu" type="button">…</button><input id="pane-input" type="text"></header>` +
-  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt]" phx-value-_bp_doc='${MARK}'>` +
+  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt] doc[choice] doc[cards] doc[address]" phx-value-_bp_doc='${MARK}'>` +
   `<input type="text" id="title" name="doc[title]" value="Fixture post 14">` +
   `<textarea id="excerpt" name="doc[excerpt]">Short.</textarea>` +
   `<input type="text" id="slug" name="doc[slug]" value="fixture-post-14">` +
   `<input type="url" id="site" name="doc[site]">` +
   `<input type="number" id="count" name="doc[count]">` +
   `<input type="text" id="alt" name="doc[image][alt]">` +
+  `<select id="choice" name="doc[choice]"><option value="a">Alpha</option><option value="b">Beta</option><option value="c" selected>Gamma</option></select>` +
+  `<div id="cards"><input type="text" id="card-label" name="doc[cards][0][label]" value="Two"></div>` +
+  `<input type="text" id="street" name="doc[address][street]" value="Main 12">` +
+  `<input type="number" id="floor" name="doc[address][floor]">` +
   `<button type="button" id="add">Add</button>` +
   `<fieldset id="set" data-collapsible><legend><button type="button" class="object-toggle" id="set-toggle" aria-expanded="false">More</button></legend>` +
   `<textarea id="folded" name="doc[folded]">Folded.</textarea></fieldset>` +
@@ -131,6 +135,17 @@ check("rich text, a dialog, another input and a taken key are left alone", () =>
   key($("title"), { key: "x", metaKey: true });
   key($("title"), { key: "z" });
   assert.deepEqual(pushes, []);
+});
+
+check("a select, a list item's text and an object's nested text of a kept field are the document's", () => {
+  for (const id of ["choice", "card-label", "street"]) {
+    const e = key($(id), { key: "z", metaKey: true });
+    assert.equal(e.defaultPrevented, true, `Mod+Z in #${id} is the document's`);
+  }
+  assert.equal(pushes.length, 3);
+  // A number nested in a kept object is still the browser's.
+  assert.equal(key($("floor"), { key: "z", metaKey: true }).defaultPrevented, false);
+  assert.equal(pushes.length, 3);
 });
 
 check("a field with no undo kept (slug, url, number, nested) keeps the browser's own undo", () => {
@@ -375,6 +390,22 @@ check("an open fold is left as it is", () => {
   undone({ field: "doc[folded]", value: "Folded.", was: "Folded." });
   assert.deepEqual(toggled, []);
   assert.equal($("set-toggle").getAttribute("aria-expanded"), "true");
+});
+
+check("an undone select is set when it still shows the old option, and focused", () => {
+  $("choice").value = "c";
+  doc.body.focus();
+  undone({ field: "doc[choice]", value: "b", was: "c" });
+  assert.equal($("choice").value, "b");
+  assert.equal(doc.activeElement, $("choice"));
+  $("choice").value = "c";
+});
+
+check("an undone list (no input of its own) brings its first input into sight and focus", () => {
+  doc.body.focus();
+  undone({ field: "doc[cards]", value: null, was: null });
+  assert.equal(doc.activeElement, $("card-label"));
+  assert.equal($("card-label").value, "Two", "the server's render draws the list");
 });
 
 check("a field the form does not have is ignored", () => {

@@ -41,11 +41,20 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   typed in (nil for a list's button): nil when it is not kept here.
   """
   @spec target(String.t(), map(), map()) :: {String.t(), String.t() | nil} | nil
-  def target("autosave", %{"_target" => ["doc", first | rest]}, assigns) when is_binary(first) do
-    key = first |> String.split(".") |> hd()
-
+  def target("autosave", %{"_target" => ["doc", key | rest]}, assigns) when is_binary(key) do
     if recorded?(assigns[:editor_schema], key),
-      do: {key, "doc[" <> Enum.join([first | rest], "][") <> "]"}
+      do: {key, "doc[" <> Enum.join([key | rest], "][") <> "]"}
+  end
+
+  # A nested input's name is dotted (`doc[address].street`,
+  # `doc[cards][0].label`) and arrives whole (`Fields.track_touched/2`).
+  def target("autosave", %{"_target" => ["doc[" <> _ = name]}, assigns) do
+    with [key | _] when is_binary(key) <- StudioLive.parse_path(name),
+         true <- recorded?(assigns[:editor_schema], key) do
+      {key, name}
+    else
+      _ -> nil
+    end
   end
 
   # A list's button names its list by `path`, or by `field` with no path
@@ -95,8 +104,8 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   @doc """
   What the page is told an undo of `input` set: the input's new text and
   the text it showed, when the value at the input is text (a select, a
-  slug, a nested or a list item's string); nils otherwise, and the server's
-  render draws it.
+  slug's `current`, a nested or a list item's string); nils otherwise, and
+  the server's render draws it.
   """
   @spec told(String.t() | nil, String.t(), term(), term()) :: {term(), term()}
   def told(nil, _key, _next, _now), do: {nil, nil}
@@ -104,7 +113,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   def told(input, key, next, now) do
     path = input_path(input, key)
 
-    case {at(next, path), at(now, path)} do
+    case {text(at(next, path)), text(at(now, path))} do
       {a, b} when is_binary(a) and is_binary(b) -> {a, b}
       {a, nil} when is_binary(a) -> {a, ""}
       {nil, b} when is_binary(b) -> {"", b}
@@ -112,27 +121,23 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
     end
   end
 
-  # The path inside the field's value an input names: `doc[cards][0][label]`
+  # The text an input shows for a value: a slug's is its `current`.
+  defp text(%{"current" => current}) when is_binary(current), do: current
+  defp text(value), do: value
+
+  # The path inside the field's value an input names: `doc[cards][0].label`
   # is `[0, "label"]` in `cards`.
   defp input_path(input, key) do
-    input
-    |> String.trim_leading("doc[")
-    |> String.trim_trailing("]")
-    |> String.split("][")
-    |> case do
+    case StudioLive.parse_path(input) do
       [^key | rest] -> rest
-      [dotted | rest] -> tl(String.split(dotted, ".")) ++ rest
+      _ -> [:none]
     end
   end
 
   defp at(value, []), do: value
 
-  defp at(value, [seg | rest]) when is_list(value) do
-    case Integer.parse(seg) do
-      {i, ""} -> value |> Enum.at(i) |> at(rest)
-      _ -> nil
-    end
-  end
+  defp at(value, [i | rest]) when is_list(value) and is_integer(i),
+    do: value |> Enum.at(i) |> at(rest)
 
   defp at(value, [seg | rest]) when is_map(value), do: value |> Map.get(seg) |> at(rest)
   defp at(_value, _path), do: nil
