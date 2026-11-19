@@ -199,6 +199,28 @@ defmodule Barkpark.Content.Envelope do
   defp blank_title?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank_title?(_value), do: true
 
+  @doc """
+  The title `caller_context` is shown for a stored row: a document or a
+  revision, anything with `type`, `doc_id`, `title` and `content`. It is the
+  stored `title`, unless the caller's view of the row's blocks takes the
+  title from a heading it may not read (`ShownBlocks`), or the `title` field
+  is hidden from the caller (nil). A caller shown every block gets
+  `row.title` unchanged. For an answer that carries a row's title but not
+  the row's `render/3`.
+  """
+  @spec title(map(), term(), term()) :: String.t() | nil
+  def title(%{type: type, title: title} = row, schema, caller_context) do
+    envelope = %{"_type" => type, "_id" => Map.get(row, :doc_id) || "", "title" => title}
+
+    envelope =
+      case Projection.read_blocks(Map.get(row, :content) || %{}) do
+        blocks when is_list(blocks) -> Map.put(envelope, "blocks", blocks)
+        _ -> envelope
+      end
+
+    Map.get(redact(envelope, schema, caller_context), "title")
+  end
+
   def render_many(docs, schema \\ nil, caller_context \\ nil),
     do: Enum.map(docs, &render(&1, schema, caller_context))
 
@@ -215,28 +237,49 @@ defmodule Barkpark.Content.Envelope do
   catches encrypted ciphertext. Resolving each doc's own schema closes the leak
   exactly as single-type search already does.
   """
-  def render_many_by_type(docs, schema_fun, caller_context) when is_function(schema_fun, 1) do
+  def render_many_by_type(docs, schema_fun, caller_context)
+      when is_function(schema_fun, 1) or is_function(schema_fun, 2) do
     {rendered, _cache} =
       Enum.map_reduce(docs, %{}, fn doc, cache ->
-        {schema, cache} = resolve_schema_cached(cache, doc.type, schema_fun)
+        {schema, cache} = resolve_schema_cached(cache, doc, schema_fun)
         {render(doc, schema, caller_context), cache}
       end)
 
     rendered
   end
 
-  defp resolve_schema_cached(cache, type, schema_fun) do
-    case Map.fetch(cache, type) do
+  @doc """
+  `schema_fun`'s schema for `doc`. A resolver of arity 1 is handed the
+  document's type; one of arity 2 the type and the document, for a read whose
+  rows may come from more than one tenant (each redacted by its own tenant's
+  schema).
+  """
+  def schema_for(schema_fun, doc) when is_function(schema_fun, 2),
+    do: schema_fun.(Map.get(doc, :type), doc)
+
+  def schema_for(schema_fun, doc) when is_function(schema_fun, 1),
+    do: schema_fun.(Map.get(doc, :type))
+
+  # Indexed once per type (per type and tenant for an arity-2 resolver), not
+  # once per document (`field_index/1`).
+  defp resolve_schema_cached(cache, doc, schema_fun) do
+    key = schema_key(schema_fun, doc)
+
+    case Map.fetch(cache, key) do
       {:ok, schema} ->
         {schema, cache}
 
       :error ->
-        # Indexed once per type, not once per document (`field_index/1`).
-        fields = schema_fun.(type) |> raw_fields()
+        fields = schema_for(schema_fun, doc) |> raw_fields()
         schema = {:indexed, field_index(fields), only_ciphertext_hidden?(fields)}
-        {schema, Map.put(cache, type, schema)}
+        {schema, Map.put(cache, key, schema)}
     end
   end
+
+  defp schema_key(schema_fun, doc) when is_function(schema_fun, 2),
+    do: {doc.type, Map.get(doc, :workspace_id), Map.get(doc, :project_id)}
+
+  defp schema_key(_schema_fun, doc), do: doc.type
 
   @doc """
   Content source map (task-f18edb4599e06308, candidate 1) — a `{result path
@@ -766,6 +809,9 @@ defmodule Barkpark.Content.Envelope do
         drop_field?(key, value, fields, ctx, owner_id) ->
           acc
 
+        key == "blocks" ->
+          Map.put(acc, key, redact_block_tree(value, find_raw_field(fields, key), ctx, owner_id))
+
         true ->
           Map.put(acc, key, redact_nested(value, find_raw_field(fields, key), ctx, owner_id, 1))
       end
@@ -783,7 +829,7 @@ defmodule Barkpark.Content.Envelope do
 
       field ->
         if field_visible?(field, ctx, owner_id),
-          do: redact_nested(blocks, field, ctx, owner_id, 1)
+          do: redact_block_tree(blocks, field, ctx, owner_id)
     end
   end
 
@@ -873,6 +919,38 @@ defmodule Barkpark.Content.Envelope do
   end
 
   defp redact_nested(value, _field, _ctx, _owner_id, _depth), do: value
+
+  # A block list, by the item shape the `blocks` field declares, at EVERY
+  # depth (task-a9b706c495feaa01). Each block is redacted as `redact_nested/5`
+  # redacts an item; then every value left in it -- a section's `children`, a
+  # container's `blocks`, `steps` and `tabs` rows, `columns` lists, a
+  # figure's `child`, list items, an alias body, inline nodes -- is walked,
+  # and every map in it is held to the same item shape. So a field the schema
+  # hides on a block is hidden wherever it appears below one, in any
+  # container. Past `@max_nested_depth` maps the rest is dropped, never passed
+  # through. A field that declares no item kids leaves the list as stored.
+  defp redact_block_tree(blocks, field, ctx, owner_id) do
+    case item_field(field) do
+      nil ->
+        blocks
+
+      item ->
+        if nested_kids(item) == [], do: blocks, else: block_tree(blocks, item, ctx, owner_id, 1)
+    end
+  end
+
+  defp block_tree(_value, _item, _ctx, _owner_id, depth) when depth > @max_nested_depth, do: nil
+
+  defp block_tree(value, item, ctx, owner_id, depth) when is_list(value),
+    do: Enum.map(value, &block_tree(&1, item, ctx, owner_id, depth))
+
+  defp block_tree(value, item, ctx, owner_id, depth) when is_map(value) do
+    value
+    |> redact_nested(item, ctx, owner_id, 1)
+    |> Map.new(fn {key, v} -> {key, block_tree(v, item, ctx, owner_id, depth + 1)} end)
+  end
+
+  defp block_tree(value, _item, _ctx, _owner_id, _depth), do: value
 
   # Does this declaration carry ANY visibility restriction? Used to put the
   # restrictive twin first when two array member shapes declare the same kid.

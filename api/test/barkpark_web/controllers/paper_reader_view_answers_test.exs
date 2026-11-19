@@ -63,7 +63,30 @@ defmodule BarkparkWeb.PaperReaderViewAnswersTest do
         "type" => "paragraph",
         "content" => [t("Visibleword paragraph for every reader.")]
       },
-      %{"id" => "h2", "type" => "heading", "level" => 2, "text" => "#{@block_word} again"}
+      %{"id" => "h2", "type" => "heading", "level" => 2, "text" => "#{@block_word} again"},
+      # The hidden field inside a nested child block, two sections deep.
+      %{
+        "id" => "s",
+        "type" => "section",
+        "title" => "Section",
+        "children" => [
+          %{"id" => "sp", "type" => "paragraph", "content" => [t("Inner visible text.")]},
+          %{
+            "id" => "s2",
+            "type" => "section",
+            "title" => "Inner section",
+            "children" => [
+              %{
+                "id" => "nh",
+                "type" => "heading",
+                "level" => 3,
+                "text" => "#{@block_word} nested"
+              },
+              %{"id" => "np", "type" => "paragraph", "content" => [t("Deeper visible text.")]}
+            ]
+          }
+        ]
+      }
     ]
 
     description =
@@ -134,7 +157,7 @@ defmodule BarkparkWeb.PaperReaderViewAnswersTest do
         refute Map.has_key?(doc, "body_html"), who
         refute Map.has_key?(doc["body"] || %{}, "html"), who
         assert doc["title"] == slug, who
-        assert Enum.map(doc["blocks"], & &1["id"]) == ["h", "p", "h2"], who
+        assert Enum.map(doc["blocks"], & &1["id"]) == ["h", "p", "h2", "s"], who
         assert leaks(Jason.encode!(doc)) == [], who
       end
     end
@@ -218,6 +241,51 @@ defmodule BarkparkWeb.PaperReaderViewAnswersTest do
     _, _ -> ""
   end
 
+  defp hidden(text), do: %{"id" => "x", "type" => "heading", "level" => 2, "text" => text}
+
+  defp redacted(paper, blocks) do
+    schema = Content.Papers.reader_schema(paper, "paper", @ds)
+    envelope = %{"_type" => "paper", "_id" => "x", "title" => "x", "blocks" => blocks}
+    Jason.encode!(Envelope.redact(envelope, schema, CallerContext.anonymous()))
+  end
+
+  describe "a block field hidden at any depth" do
+    test "is hidden in every container kind", %{paper: paper} do
+      h = hidden(@block_word)
+
+      containers = [
+        %{"type" => "section", "children" => [h]},
+        %{"type" => "callout", "blocks" => [h]},
+        %{
+          "type" => "steps",
+          "steps" => [%{"title" => "One", "children" => [h], "blocks" => [h]}]
+        },
+        %{"type" => "tabs", "tabs" => [%{"label" => "One", "blocks" => [h]}]},
+        %{"type" => "columns", "columns" => [[h], [%{"type" => "section", "children" => [h]}]]},
+        %{"type" => "figure", "child" => h},
+        %{"type" => "list", "items" => [%{"text" => @block_word, "children" => [h]}]}
+      ]
+
+      for container <- containers do
+        assert leaks(redacted(paper, [container])) == [], inspect(container["type"])
+      end
+    end
+
+    test "past 32 levels the rest is dropped, never passed through", %{paper: paper} do
+      deep = fn depth, word ->
+        leaf = %{"id" => "leaf", "type" => "paragraph", "content" => [t(word)]}
+
+        Enum.reduce(1..depth, leaf, fn i, acc ->
+          %{"id" => "s#{i}", "type" => "section", "children" => [acc]}
+        end)
+      end
+
+      shallow = redacted(paper, [deep.(5, "SHALLOWVISIBLE"), deep.(40, "DEEPVISIBLE")])
+      assert shallow =~ "SHALLOWVISIBLE"
+      refute shallow =~ "DEEPVISIBLE"
+    end
+  end
+
   describe "the full answer" do
     test "reaches a caller with the right, unchanged", %{slug: slug, paper: paper, tokens: tokens} do
       doc =
@@ -240,6 +308,7 @@ defmodule BarkparkWeb.PaperReaderViewAnswersTest do
 
       for ctx <- [CallerContext.anonymous(), nil] do
         assert Envelope.render(paper, schema, ctx) == Envelope.render(paper, schema, :internal)
+        assert Envelope.title(paper, schema, ctx) == paper.title
       end
     end
   end

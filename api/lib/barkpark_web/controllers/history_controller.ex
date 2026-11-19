@@ -45,12 +45,20 @@ defmodule BarkparkWeb.HistoryController do
       )
 
     has_more = length(fetched) > limit
+    caller_context = CallerContext.from_conn(conn)
+
+    schema =
+      case Content.Schema.get_schema_for_redaction(type, dataset, scope_opts(conn)) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
     # An erased user's stamped email is never served (Accounts.Privacy).
     revisions =
       fetched
       |> Enum.take(limit)
       |> Barkpark.Accounts.Privacy.redact_actor_labels()
-      |> Enum.map(&render_revision/1)
+      |> Enum.map(&render_revision(&1, schema, caller_context))
 
     json(conn, %{
       revisions: revisions,
@@ -162,7 +170,7 @@ defmodule BarkparkWeb.HistoryController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
-  defp render_revision(rev) do
+  defp render_revision(rev, schema, caller_context) do
     %{
       id: rev.id,
       action: rev.action,
@@ -178,7 +186,7 @@ defmodule BarkparkWeb.HistoryController do
       actor_kind: rev.actor_kind,
       actor_id: rev.actor_id,
       actor_label: rev.actor_label,
-      title: rev.title,
+      title: Envelope.title(rev, schema, caller_context),
       status: rev.status,
       timestamp: rev.inserted_at
     }
@@ -196,7 +204,7 @@ defmodule BarkparkWeb.HistoryController do
       actor_kind: rev.actor_kind,
       actor_id: rev.actor_id,
       actor_label: rev.actor_label,
-      title: rev.title,
+      title: Envelope.title(rev, schema, caller_context),
       status: rev.status,
       # `owner_id` is unknown for a stored snapshot (revisions carry none), so an
       # `owner_only` field conservatively drops for non-admins — fail closed.

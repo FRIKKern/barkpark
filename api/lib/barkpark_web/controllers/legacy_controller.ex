@@ -344,7 +344,7 @@ defmodule BarkparkWeb.LegacyController do
   defp render_legacy_doc(doc, schema, caller_context) do
     base = %{
       id: doc.doc_id,
-      title: doc.title,
+      title: Envelope.title(doc, schema, caller_context),
       status: doc.status,
       updatedAt: doc.updated_at
     }
