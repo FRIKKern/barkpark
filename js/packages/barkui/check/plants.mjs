@@ -90,7 +90,7 @@ export const ladderHolds = async (p, html, ok, logs, out) => {
 }
 
 // A ceiling passed fails the run at that moment, wherever it is (ceiling.mjs): a ceiling of 1 s, lowered for
-// the test, against a check run and a selftest case that each take longer.
+// the test, against a check run and a selftest case that each take far longer on any runner.
 export const CEILING_CASES = [
   {
     name: 'a check run that passes its ceiling stops there, failing, with the sentence',
@@ -102,8 +102,9 @@ export const CEILING_CASES = [
   {
     name: 'a selftest whose last case passes its ceiling stops there, failing, with the sentence',
     direct: async () => {
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a page whose barkui.css differs from a part'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '1' }, encoding: 'utf8', timeout: 60000 })
-      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 1 s while "a page whose barkui.css differs') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
+      // The last (and only) case is the full-run state case, about 45 s anywhere, so it is mid-case at 1 s.
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a state on any control of its kind'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '1' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 1 s while "a state on any control of its kind') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
     },
   },
 ]
