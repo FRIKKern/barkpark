@@ -419,9 +419,17 @@ jobs:
           fi
           deps=$(node -e "const p = require('./packages/barkui/package.json'); console.log(Object.keys({ ...p.dependencies, ...p.devDependencies }).join('|'))")
           if [ "${{ github.event_name }}" = "pull_request" ]; then range="origin/${{ github.base_ref }}...HEAD"; else range="${{ github.event.before }} ${{ github.sha }}"; fi
+          lockstatus=0
+          if printf '%s\n' "$files" | grep -qx 'js/pnpm-lock.yaml'; then
+            lock=$(git -C .. diff --no-renames $range -- js/pnpm-lock.yaml) || lockstatus=$?
+          else
+            lock=""
+          fi
           if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|js/package\.json$|\.github/workflows/js-tests\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the check and the selftest"
-          elif printf '%s\n' "$files" | grep -qx 'js/pnpm-lock.yaml' && git -C .. diff --no-renames $range -- js/pnpm-lock.yaml | grep -E '^[-+]' | grep -qE "($deps)"; then
+          elif [ "$lockstatus" -ne 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: lockfile diff unknown (status $lockstatus), running the check and the selftest"
+          elif printf '%s\n' "$lock" | grep -E '^[-+]' | grep -qE "($deps)"; then
             echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: the lockfile moves one of its dependencies, running the check and the selftest"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the check and the selftest"

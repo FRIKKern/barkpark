@@ -10,6 +10,8 @@ import { installDrawn } from './drawn.mjs'
 import { installMatch } from './match.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
+import { realStates } from './states.mjs'
+import { LEFT_OUT_INITIAL } from '../build/vocabulary.mjs'
 
 export const STEP_MS = 5000
 const light = (pass, detail, extra = {}) => ({ pass: !!pass, detail, ...extra })
@@ -239,6 +241,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
           for (const x of v.bounds.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
           controls = Math.max(controls, v.bounds.count)
           keepDisabled(surface, await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name))
+          for (const f of await leftOut(page, part.name)) bad[scheme].push(`${at} on ${surface}: ${f}`)
         }
         await surfaceTo('base')
         // Focus: Tab through the part with real keys and measure the ring on each stop.
@@ -264,6 +267,8 @@ export async function skinsAndSchemes(ctx, part, skins) {
   }
   // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
   if (ctx.motion !== false) bad.light.push(...(await motionFails(ctx, part, skins[0])))
+  // Real states against their pins (states.mjs).
+  if (ctx.states !== false) bad.light.push(...(await stateFails(ctx, part, skins[0])))
   const still = frozen(traces)
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }
@@ -297,6 +302,36 @@ export async function skinsAndSchemes(ctx, part, skins) {
       : light(true, `dark paints its own values in every skin${where}; weakest drawn text ${fmt(drawnWeakest.dark)}:1; ${drawsAll(fullest.dark)}${boundNote}${focusNote}`)
   return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })), textOnly: [...bare].map(([selector, list]) => ({ selector, controls: list })) }
 }
+
+/** Pinned equals real, in one skin, light, on base at 1440px (states.mjs). */
+async function stateFails(ctx, part, skin) {
+  const page = await open(ctx, { scale: 2, height: 1600 })
+  try {
+    await view(page, skin, 'light')
+    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title` })
+    await stillStyled(ctx, page, 'states')
+    return fails
+  } finally {
+    await page.context().close()
+  }
+}
+
+/** Longhands a shorthand in the vocabulary sets but the vocabulary leaves out, as computed on every element in the
+    stage and its ::before and ::after: each must sit at its initial value (a var() is read here, once resolved). */
+const leftOut = (page, name) =>
+  page.barkCheck(([n, list]) => {
+    const h = window.__barkCheck
+    const out = []
+    for (const el of [...document.querySelector(`[data-part="${n}"]`).querySelectorAll('*')])
+      for (const pe of [null, '::before', '::after']) {
+        const s = getComputedStyle(el, pe)
+        for (const [p, ok] of Object.entries(list)) {
+          const v = s.getPropertyValue(p)
+          if (v && !v.split(/,\s*/).every((x) => ok.includes(x))) out.push(`${h.describe(el)}${pe ?? ''} computes ${p}: ${v}; part.css may leave ${p} only at ${ok[0]}`)
+        }
+      }
+    return out
+  }, [name, LEFT_OUT_INITIAL])
 
 /** Holds every animation at one moment: 'finished' (an endless one halfway through its first round) or
     'halfway' through. A transition is always finished: both its ends are states the lights read anyway. */

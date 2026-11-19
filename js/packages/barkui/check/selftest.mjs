@@ -17,7 +17,8 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { capacitySentence, PARTS_HELD } from './capacity.mjs'
 import { runCheck } from './check.mjs'
-import { readPartCss } from './cssom.mjs'
+import { readPartCss, sameAsShipped } from './cssom.mjs'
+import { buildShowroom } from '../build/showroom.mjs'
 
 const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
 // Runs `code` at the start of the part's demo, with `root` in scope.
@@ -27,6 +28,14 @@ const mark = (d, id) => edit(join(d, 'example.html'), (s) => s.replace(`id="${id
 const wrap = (d) => edit(join(d, 'example.html'), (s) => s.replace('type="button">Duplicate</button>', 'type="button"><span>Duplicate</span></button>'))
 const inCss = (rule) => (d) => appendFileSync(join(d, 'part.css'), `\n${rule}\n`)
 const all = (...plants) => (d) => plants.forEach((p) => p(d))
+// A copy of the part beside it, under another name, its ids renamed to match.
+const copyAs = (d, name) => {
+  const to = join(d, '..', name)
+  cpSync(d, to, { recursive: true })
+  for (const f of ['part.json', 'example.html', 'press.mjs', 'demo.mjs'])
+    edit(join(to, f), (t) => t.replace(/(["'#,])button-/g, `$1${name}-`).replace('"name": "button"', `"name": "${name}"`))
+  return to
+}
 const lights = (p) => p?.parts?.button?.lights ?? {}
 const reasons = (p, l) => lights(p)[l]?.fails ?? [lights(p)[l]?.detail ?? '']
 const says = (l, re) => (p) => !lights(p)[l]?.pass && reasons(p, l).some((f) => re.test(f))
@@ -374,23 +383,101 @@ const CASES = [
           [String.raw`a { outl\000069ne: none; }`, /outline-style is outside part\.css's vocabulary/],
           ['} a { box-shadow: none; } @layer bark-parts {', /where part\.css's one bark-parts layer belongs/],
           ['@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); --bark-button-edge: var(--bark-button-bg); } }', /--bark-button-edge inside @media \(max-width: 600px\): only layout and type/],
-        ]) said.push((await readPartCss(browser, css)).some((f) => re.test(f)))
+          // A state on the host, where no pin reaches; and states and pseudo-elements outside the allow-list.
+          ['ui-button:hover > [data-slot="button"] { --bark-button-hover-fg: var(--bark-button-hover-bg); }', /ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/],
+          ['a { &:hover { & svg { gap: 0; } } }', /& svg: the rule it is nested in pins a state/],
+          ['a:target { gap: 0; }', /:target is not a pseudo-class part\.css may use/],
+          ['a::first-line { gap: 0; }', /::first-line is not a pseudo-element the check reads/],
+          // What the text lint also refuses, refused by the parse itself.
+          ['a { gap: 1px !important; }', /row-gap is !important/],
+          ['@media (prefers-reduced-motion: reduce) { a { --bark-button-fg: var(--ui-primary); } }', /--bark-button-fg inside @media \(prefers-reduced-motion\)/],
+          ['a { color: var(--ui-primary, var(--ui-background)); }', /var\(--ui-primary,… gives a variable a fallback/],
+          // An open parenthesis at the end runs on into the next part on the page.
+          ['a { gap: 0; }\nb:not([data-size] { gap: 0; }', /part\.css does not end where its rules end/],
+        ]) said.push((await readPartCss(browser, css)).found.some((f) => re.test(f)))
+        if (!said.every(Boolean)) console.log(`    not caught: input ${said.indexOf(false) + 1}`)
         return said.every(Boolean)
       } finally {
         await browser.close()
       }
     },
   },
+  // What ships is what was judged: the page loads every part in one barkui.css.
+  {
+    name: 'a part whose open parenthesis would run into the next part on the page is refused by name, and the next part is not blamed',
+    only: ['pressed'],
+    plant: (d) => {
+      const to = copyAs(d, 'aa-button')
+      edit(join(to, 'part.css'), (t) => `${t.replace(/^\[data-slot="button"\] \{/m, '[data-part="aa-button"] [data-slot="button"] {')}\n[data-part="aa-button"] [data-slot="button"]:not([data-size] { gap: calc(var(--ui-spacing) * 2); }\n`)
+    },
+    expect: (p, html, ok, logs) => refused(/parts\/aa-button\/part\.css, as the browser reads it: part\.css does not end where its rules end/)(p, html, ok, logs) && !logs.some((l) => l.includes('parts/button/')),
+  },
+  {
+    name: "a page whose barkui.css differs from a part as it was judged alone fails, naming that part and no other",
+    direct: async () => {
+      const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
+      const browser = await chromium.launch()
+      try {
+        const dir = join(scratch, 'parts')
+        cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
+        copyAs(join(dir, 'button'), 'aa-button')
+        const out = join(scratch, 'out')
+        const built = await buildShowroom({ dir, out, proof: join(scratch, 'proof.json'), quiet: true })
+        const judged = []
+        for (const part of built.parts) judged.push({ name: part.name, rules: (await readPartCss(browser, part.css)).rules })
+        const sheet = join(out, 'barkui.css')
+        const honest = await sameAsShipped(browser, sheet, judged)
+        // Drop one declaration from the first part's section only, as a page that ships other rules would.
+        const text = readFileSync(sheet, 'utf8')
+        const at = text.indexOf('/* parts/aa-button/part.css */')
+        writeFileSync(sheet, text.slice(0, at) + text.slice(at).replace('min-width: var(--bark-button-height);', ''))
+        const found = await sameAsShipped(browser, sheet, judged)
+        const held = !honest.length && found.length === 1 && found[0].startsWith('parts/aa-button/part.css: ')
+        if (!held) console.log(`    honest: ${honest.join('; ')}\n    planted: ${found.join('; ')}`)
+        return held
+      } finally {
+        await browser.close()
+        rmSync(scratch, { recursive: true, force: true })
+      }
+    },
+  },
+  // States: one allowed form, and the real state held to its pin.
+  {
+    name: 'a state on the host in part.css is refused at the browser read, where no pin reaches it',
+    only: ['pressed'],
+    plant: inCss('ui-button:hover > [data-slot="button"] { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
+    expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
+  },
+  {
+    name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
+    only: ['skins', 'schemes'],
+    plant: all(
+      inCss('[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled]) { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
+      inCss('#button-after { --bark-bgx: var(--bark-button-bg) text; background: var(--bark-bgx); }'),
+    ),
+    expect: each({
+      'the pinned Hover row draws what the uppercase rule does': drawnOff('button "Hover"'),
+      'background-clip: text through a variable': skinsSay(/button#button-after "Duplicate" computes background-clip: text/),
+    }),
+  },
+  {
+    name: 'a real hover that draws unlike its pin turns "every skin" off at the live control',
+    only: ['skins', 'schemes'],
+    states: true,
+    css: [
+      // Beyond the walls (this sheet is the selftest's own, and never pinned): the reviewer's two hover rules.
+      '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled]) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
+      'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
+    ].join('\n'),
+    expect: each({
+      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": color becomes .* where its pin \(button "Hover"\) shows/),
+      'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": color becomes/),
+    }),
+  },
   {
     name: 'one part more than the CI check step holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
-      for (let i = 0; i < PARTS_HELD; i++) {
-        const name = `held${String.fromCharCode(97 + i)}-button`
-        const to = join(d, '..', name)
-        cpSync(d, to, { recursive: true })
-        for (const f of ['part.json', 'example.html', 'press.mjs', 'demo.mjs'])
-          edit(join(to, f), (t) => t.replace(/(["'#,])button-/g, `$1${name}-`).replace('"name": "button"', `"name": "${name}"`))
-      }
+      for (let i = 0; i < PARTS_HELD; i++) copyAs(d, `held${String.fromCharCode(97 + i)}-button`)
     },
     expect: (p, html, ok, logs) => !ok && p === null && logs.some((l) => l.includes(`${PARTS_HELD + 1} parts, more than CI's check step holds. ${capacitySentence()}`)),
   },
@@ -436,7 +523,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, 'button'))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: !!c.surfaces, motion: !!c.motion, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: !!c.surfaces, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {

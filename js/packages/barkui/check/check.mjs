@@ -25,10 +25,11 @@ function variableNames() {
   return [...new Set([...text.matchAll(/(--(?:ui|bark)-[\w-]+)\s*:/g)].map((m) => m[1]))]
 }
 
-// `surfaces: false` skips measuring the four unproved surfaces, and `motion: false` the reading with motion
-// allowed (the selftest does both, except in the cases that plant there);
+// `surfaces: false` skips measuring the four unproved surfaces, `motion: false` the reading with motion
+// allowed, and `states: false` the real states held to their pins (the selftest skips each, except in the cases
+// that plant there);
 // `plantCss` is the selftest's planted sheet (see buildShowroom).
-export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, plantCss = '' } = {}) {
+export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '' } = {}) {
   let built
   let bare
   try {
@@ -76,7 +77,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   // when it ends, and proof.json keeps the parts in folder order.
   const checkPart = async (part) => {
     const lines = []
-    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion }
+    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion, states }
     lines.push(part.name)
     const lights = {}
     let measures = {}

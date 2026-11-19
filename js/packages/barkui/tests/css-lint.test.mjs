@@ -40,6 +40,8 @@ describe('lintPartCss', () => {
     'own outline': 'a { outline: 2px solid var(--ui-ring); }',
     'url image': 'a { background-image: url("photo.png"); }',
     'data svg with its own colour': "a { background-image: url(\"data:image/svg+xml,%3Csvg fill='black'/%3E\"); }",
+    'bitmap whose url holds a semicolon': 'a { background-image: url(data:image/png;base64,iVBORw0KGgo); }',
+    'quoted svg whose url holds a semicolon and its own colour': "a { background-image: url(\"data:image/svg+xml;utf8,<svg fill='black'/>\"); }",
   }
   for (const [what, css] of Object.entries(bad)) {
     it(`refuses a ${what}`, () => {

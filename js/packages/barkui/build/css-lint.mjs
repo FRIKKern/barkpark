@@ -87,8 +87,9 @@ export function lintPartCss(css) {
   for (const [re, say] of SELECTOR_RULES) {
     for (const m of text.matchAll(new RegExp(re.source, 'gi'))) found.push(`line ${lineOf(m.index)}: ${say(m)}`)
   }
-  // Declarations: `prop: value` ending at ; or }. Property names are case-insensitive.
-  const decl = /(^|[{;\s])(--?[\w-]+|[a-z-]+)\s*:\s*([^;{}]+)(?=[;}])/gi
+  // Declarations: `prop: value` ending at ; or }, where a url(...) or a quoted string is one piece of the value
+  // (a ; inside one, as in url(data:image/png;base64,...), does not end it). Property names are case-insensitive.
+  const decl = /(^|[{;\s])(--?[\w-]+|[a-z-]+)\s*:\s*((?:url\([^)]*\)|"[^"]*"|'[^']*'|[^;{}"'])+)(?=[;}])/gi
   for (let m; (m = decl.exec(text)); ) {
     const [, , rawProp, raw] = m
     const prop = rawProp.startsWith('--') ? rawProp : rawProp.toLowerCase()
