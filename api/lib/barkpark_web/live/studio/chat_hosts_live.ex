@@ -189,9 +189,14 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
 
   defp revoked_message(%{name: name}), do: "Removed #{name}. Its code no longer works."
 
+  # The owner learns why no code was made and what frees a slot.
+  defp limit_message(1),
+    do:
+      "This workspace already has 1 enrolled machine, the most it can hold. Revoke it to register another."
+
   defp limit_message(limit),
     do:
-      "This workspace already has #{limit} enrolled machines, the most it can hold. Revoke one to add another."
+      "This workspace already has #{limit} enrolled machines, the most it can hold. Revoke one to register another."
 
   # The owner is told what to change: a taken name says whether that machine
   # is waiting or enrolled, and a refused field names the field.
