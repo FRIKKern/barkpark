@@ -76,7 +76,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2846 api/lib/barkpark_web/live/studio/studio_live/shared.ex
 2828 internal/chat/render.go
 2816 scripts/check-deployyml-filters.sh
-2809 api/lib/barkpark_web/controllers/query_controller.ex
+2807 api/lib/barkpark_web/controllers/query_controller.ex
 2761 api/lib/barkpark/groq/document_source.ex
 2726 api/lib/barkpark/tenancy/workspace_bundle.ex
 2723 api/priv/static/assets/bp-paper-editor-shell.css
