@@ -16,6 +16,9 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTabs do
       command: the browser selects it, nothing goes to the server, and the
       choice stays when the server redraws the field.
     * With the primary empty, a status line says which language readers get.
+    * A language's validation findings show in its panel (`data-error-for`,
+      as the rows draw them), and its tab carries a mark named ", has an
+      error", so a finding on a hidden language is seen.
 
   The old Studio keeps its rows (`LocalizedTextField`): this is drawn only
   where the field has an `:id_base`, the desk.
@@ -63,7 +66,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTabs do
             tabindex={if lang == @primary, do: "0", else: "-1"}
             title={lang_label(lang, @primary)}
             phx-click={select(@base, lang)}
-          ><%= lang %><span :if={filled?(@map, lang)} class="filled" aria-label={gettext(", has text")}></span></button>
+          ><%= lang %><span :if={filled?(@map, lang)} class="filled" aria-label={gettext(", has text")}></span><span :if={errors(@errors, lang) != []} class="has-error" aria-label={gettext(", has an error")}></span></button>
         </div>
         <div id={@base <> "-panels"}>
           <div
@@ -86,6 +89,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTabs do
               title={@title}
               aria_label={lang_label(lang, @primary)}
             />
+            <span :for={err <- errors(@errors, lang)} class="error" data-error-for={lang}><%= err %></span>
           </div>
         </div>
         <p :if={@fallback} class="localized-warning" role="status">
@@ -131,6 +135,16 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTabs do
   end
 
   defp filled?(map, lang), do: text(map, lang) != ""
+
+  # A language's findings (`%{lang => [message]}`), as the rows draw them.
+  defp errors(%{} = errors, lang) do
+    case Map.get(errors, lang) do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp errors(_errors, _lang), do: []
 
   defp text(map, lang) do
     case Map.get(map, lang) do

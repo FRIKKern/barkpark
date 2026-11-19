@@ -29,6 +29,9 @@ defmodule BarkparkWeb.Studio.Desk.LocalizedStyle do
     .dk .dk-edit .lang-tabs [role=tab]:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--dk-bg), 0 0 0 3px var(--dk-focus-ring); }
     .dk .dk-edit .lang-tabs .filled { display: inline-block; width: 5px; height: 5px; margin-left: 5px; vertical-align: middle; border-radius: 50%; background: var(--dk-published); }
     .dk .dk-edit .localized-warning { margin: 0; font-size: 12px; color: var(--dk-warn-fg); }
+    .dk .dk-edit .lang-tabs .has-error { display: inline-block; width: 5px; height: 5px; margin-left: 5px; vertical-align: middle; border-radius: 50%; background: var(--dk-critical-icon); }
+    .dk .dk-edit .localized [role=tabpanel] > .error { display: block; margin-top: 4px; font-size: 12px; color: var(--dk-danger-text); }
+    @media (pointer: coarse) { .dk .dk-edit .lang-tabs [role=tab] { min-width: 44px; min-height: 44px; } }
     """
   end
 end

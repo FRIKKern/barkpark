@@ -15542,3 +15542,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "No %{primary} text: readers get the %{fallback} text instead."
 msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has an error"
+msgstr ""

@@ -39,6 +39,14 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
               "format" => "plain",
               "fallbackChain" => ["nob", "eng"]
             },
+            %{
+              "name" => "code",
+              "title" => "Code",
+              "type" => "localizedText",
+              "languages" => ["nob", "eng"],
+              "fallbackChain" => ["nob", "eng"],
+              "validation" => %{"max" => 5}
+            },
             %{"name" => "notes", "type" => "string"}
           ]
         },
@@ -187,6 +195,63 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
 
     assert Content.get_document(id, c.type, @dataset) == published
     refute stored(c, id)["blurb"]["eng"] == "Typed"
+  end
+
+  test "a language's finding shows in its panel, and its tab is marked", c do
+    id = doc!(c, @blurb)
+    view = desk(c, id)
+
+    change(view, "doc[code].eng", "toolongtext")
+    assert stored(c, id)["code"] == %{"eng" => "toolongtext"}
+
+    assert has_element?(
+             view,
+             ~s(#code-panel-eng[hidden] .error[data-error-for="eng"]),
+             "Must be at most 5 characters"
+           )
+
+    assert has_element?(view, ~s(#code-tab-eng .has-error[aria-label=", has an error"]))
+    refute has_element?(view, ~s(#code-tab-nob .has-error))
+    refute has_element?(view, ~s(#code-panel-nob .error))
+
+    change(view, "doc[code].eng", "ok")
+    refute has_element?(view, ~s(#code-tab-eng .has-error))
+    refute has_element?(view, ~s(#code-panel-eng .error))
+  end
+
+  # The old Studio's stored shape is main's: an emptied language is kept as "",
+  # and an edit elsewhere keeps the field byte-identical.
+  test "the old Studio stores an emptied language as it did, and keeps the field on other edits",
+       c do
+    id = doc!(c, @blurb)
+    {:ok, view, _html} = live(c.conn, "#{c.root}/#{c.type}/#{id}")
+
+    view
+    |> form("#editor-form", %{"doc" => %{"notes" => "typed"}})
+    |> render_change(%{"_target" => ["doc", "notes"]})
+
+    assert stored(c, id)["notes"] == "typed"
+    assert stored(c, id)["blurb"] == @blurb
+
+    view
+    |> form("#editor-form", %{"doc[blurb].nob" => ""})
+    |> render_change(%{"_target" => ["doc[blurb].nob"]})
+
+    assert stored(c, id)["blurb"] == %{"nob" => "", "eng" => "A book about fields."}
+  end
+
+  test "the desk keeps the field byte-identical on an edit elsewhere and on Save", c do
+    id = doc!(c, @blurb)
+    view = desk(c, id)
+
+    view
+    |> form(@form, %{"doc" => %{"notes" => "typed"}})
+    |> render_change(%{"_target" => ["doc", "notes"]})
+
+    assert stored(c, id)["blurb"] == @blurb
+    view |> element(@form) |> render_submit()
+    assert stored(c, id)["blurb"] == @blurb
+    assert stored(c, id)["notes"] == "typed"
   end
 
   test "the old Studio keeps a row per language", c do

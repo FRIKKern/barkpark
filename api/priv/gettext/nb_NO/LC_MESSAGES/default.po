@@ -15544,3 +15544,8 @@ msgstr "%{lang} (primær)"
 #, elixir-autogen, elixir-format
 msgid "No %{primary} text: readers get the %{fallback} text instead."
 msgstr "Ingen %{primary}-tekst: leserne får %{fallback}-teksten i stedet."
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has an error"
+msgstr ", har en feil"

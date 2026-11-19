@@ -587,8 +587,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # Studio unsets it: `{"nob" => "", "eng" => "…"}` is stored as
   # `{"eng" => "…"}`, and a field left with no language is removed. Only a
   # TOUCHED empty value reaches here (`foldable?/3`), so a language the author
-  # never typed in is kept as stored.
-  defp write_leaf(doc, socket, path, "") do
+  # never typed in is kept as stored. Only in the desk (the one host with a
+  # `:desk_base`): the old Studio stores the emptied language as "", as it
+  # always has.
+  defp write_leaf(doc, %{assigns: %{desk_base: base}} = socket, path, "") when is_binary(base) do
     parent = Enum.drop(path, -1)
 
     case Shared.find_field_by_path(socket, parent) do
