@@ -201,6 +201,7 @@
   "Shift": "Shift",
   "Slug": "Slug",
   "Source": "Source",
+  "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.": "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.",
   "Sources": "Sources",
   "Stage": "Stage",
   "Start typing, or press / for blocks…": "Start typing, or press / for blocks…",

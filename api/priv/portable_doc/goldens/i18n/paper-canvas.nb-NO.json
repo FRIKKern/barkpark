@@ -201,6 +201,7 @@
   "Shift": "Skift",
   "Slug": "Slug",
   "Source": "Kilde",
+  "Source mode stays closed: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.": "Kildemodus holdes lukket: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}) ennå.",
   "Sources": "Kilder",
   "Stage": "Scene",
   "Start typing, or press / for blocks…": "Begynn å skrive, eller trykk / for blokker …",
