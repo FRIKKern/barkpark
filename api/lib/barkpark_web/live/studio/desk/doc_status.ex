@@ -5,14 +5,15 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   Published and a Draft pill.
 
   - Published is green when a published version exists, and greyed out
-    (`data-off`) when none does.
-  - Draft is the version the desk edits, so it is always the chosen one
-    (`data-selected`). It is filled (`data-active`) while there are edits
-    not yet published.
+    (`data-off`, `aria-disabled`, a span) when none does.
+  - Draft is filled (`data-active`) while there are edits not yet
+    published, in the draft perspective.
 
-  In the TanStack Studio the pills are buttons that switch between the
-  published and the draft view. The desk has no published view, so here
-  they only say the state.
+  As TanStack's (`TipChip`), each pill that can be chosen is a button that
+  switches the page's perspective (`aria-pressed`): Published opens the
+  published version read-only (`?perspective=published`, `PublishedView`),
+  Draft the draft again. The chosen one carries `data-selected`. Both keep
+  the pane's own params; a patch, so the button keeps the focus.
 
   The pills' state is in colour, so each also says it in words for screen
   readers ("Not published", "Draft: unpublished changes", …); the visible
@@ -36,10 +37,21 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   attr :draft?, :boolean, required: true
   attr :published?, :boolean, required: true
   attr :presences, :list, default: []
+  attr :perspective, :atom, default: :drafts, values: [:drafts, :published]
+
+  attr :published_href, :string,
+    default: nil,
+    doc: "the pane in the published perspective; nil draws the pills as words only"
+
+  attr :drafts_href, :string, default: nil, doc: "the pane in the draft perspective"
 
   @doc "The avatar stack and the two pills."
   def chips(assigns) do
     ~H"""
+    <style>
+      .dk button.dk-chip { font: inherit; font-size: 13px; font-weight: 500; border: 0; background: var(--dk-bg); cursor: pointer; }
+      .dk button.dk-chip:hover { box-shadow: inset 0 0 0 1px var(--dk-line-strong); }
+    </style>
     <span class="dk-chips" data-desk-status>
       <span
         :if={@presences != []}
@@ -58,20 +70,31 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
           {initials(p.name)}
         </span>
       </span>
-      <span
-        class="dk-chip chip"
-        data-tone={@published? && "positive"}
-        data-off={!@published?}
-        title={!@published? && gettext("Unpublished")}
+      <.pill
+        :if={@published?}
+        href={@published_href}
+        pressed={@perspective == :published}
+        data-tone="positive"
       >
         <span class="dk-chip-dot dk-chip-dot-published" aria-hidden="true"></span>
         <span class="dk-chip-label" aria-hidden="true">{gettext("Published")}</span>
-        <span class="sr-only">{if @published?, do: gettext("Published"), else: gettext("Not published")}</span>
-      </span>
+        <span class="sr-only">{gettext("Published")}</span>
+      </.pill>
       <span
+        :if={!@published?}
         class="dk-chip chip"
-        data-selected
-        data-active={@draft?}
+        data-off
+        aria-disabled={@published_href && "true"}
+        title={gettext("Unpublished")}
+      >
+        <span class="dk-chip-dot dk-chip-dot-published" aria-hidden="true"></span>
+        <span class="dk-chip-label" aria-hidden="true">{gettext("Published")}</span>
+        <span class="sr-only">{gettext("Not published")}</span>
+      </span>
+      <.pill
+        href={@drafts_href}
+        pressed={@perspective != :published}
+        data-active={@draft? and @perspective != :published}
         title={@draft? && gettext("Edited")}
       >
         <span class="dk-chip-dot dk-chip-dot-draft" aria-hidden="true"></span>
@@ -79,8 +102,36 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         <span class="sr-only">
           {if @draft?, do: gettext("Draft: unpublished changes"), else: gettext("Draft: no changes")}
         </span>
-      </span>
+      </.pill>
     </span>
+    """
+  end
+
+  attr :href, :string, default: nil
+  attr :pressed, :boolean, required: true
+  attr :rest, :global, include: ~w(data-tone data-active)
+  slot :inner_block, required: true
+
+  # A pill that switches the perspective, or, with no path to switch to, the
+  # words only (the chosen one still `data-selected`).
+  defp pill(%{href: nil} = assigns) do
+    ~H"""
+    <span class="dk-chip chip" data-selected={@pressed} {@rest}>{render_slot(@inner_block)}</span>
+    """
+  end
+
+  defp pill(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class="dk-chip chip"
+      data-selected={@pressed}
+      aria-pressed={to_string(@pressed)}
+      phx-click={Phoenix.LiveView.JS.patch(@href)}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </button>
     """
   end
 

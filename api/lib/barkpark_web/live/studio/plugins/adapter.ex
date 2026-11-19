@@ -129,6 +129,9 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
         FieldComponents.codelist(%{
           field: parsed,
           value: ensure_string(value),
+          # A stored value that is no code (a number, an object) is drawn as
+          # no code; the tree then posts nothing for it, so it is kept.
+          kept: not (is_nil(value) or is_binary(value)),
           errors: errors_for(assigns, name),
           on_change: "autosave",
           plugin_name: plugin,
