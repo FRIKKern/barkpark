@@ -143,7 +143,7 @@ jobs:
   test:
     name: Build + test + gates
     runs-on: ubuntu-latest
-    # Runs take 2 to 7 minutes; a hung step must not hold every js PR for hours.
+    # A hung step must not hold every js PR for hours; each BarkUI step has its own, shorter limit.
     timeout-minutes: 40
     defaults:
       run:
@@ -438,10 +438,10 @@ jobs:
       # BarkUI's showroom check: builds js/packages/barkui's static page and
       # presses every part with real keys in the Chromium installed above, then
       # proves each skin, light and dark, on every surface, a 390px window and a
-      # script-free print, reading every label and graphic from pixels. Limit:
-      # 15 minutes, which check/capacity.mjs holds STEP_MINUTES to (a test reads
-      # this line): the check refuses to run with more parts than that holds, and
-      # stops, failing, once a run passes its ceiling, under this limit.
+      # script-free print, reading every label and graphic from pixels. Its limit
+      # below is STEP_MINUTES in check/capacity.mjs (a test holds them equal): the
+      # check refuses to run with more parts than that holds, and stops, failing,
+      # once a run passes its ceiling, under this limit.
       # Reds on a part folder missing a file, a failed press step, a light that
       # does not come on, any page error or network request, or a step or part
       # past its time limit (check/proofs.mjs, check/check.mjs).
@@ -467,9 +467,9 @@ jobs:
       # that holds README.md's claim, a faint or clipped icon, a frozen colour, a
       # bound wait on the sheet, the demo guards, refusals at discovery), and it
       # reds unless each turns the right light off, naming the planted control.
-      # Limit: 10 minutes, which check/capacity.mjs holds SELFTEST_STEP_MINUTES to (a
-      # test reads this line); the selftest stops, failing with its sentence, once it
-      # passes SELFTEST_CEILING, under this limit.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
         if: steps.barkui.outputs.run != 'false'
         timeout-minutes: 10
