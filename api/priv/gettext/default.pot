@@ -4626,12 +4626,12 @@ msgstr ""
 msgid "Not saved: block %{number} is shown as JSON, and source mode does not edit it."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:781
+#: lib/barkpark_web/studio_locale.ex:786
 #, elixir-autogen, elixir-format
 msgid "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:781
+#: lib/barkpark_web/studio_locale.ex:791
 #, elixir-autogen, elixir-format
 msgid "Not saved: source mode could not read this change. Your text is kept."
 msgstr ""
