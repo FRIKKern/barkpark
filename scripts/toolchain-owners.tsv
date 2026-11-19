@@ -11,9 +11,10 @@
 #                                 install default) must equal the file's, or it
 #                                 reads the file by path
 #   *.tool-versions               that file's erlang line equals this file's
-#   data <file>                   its literals are test data or past check names,
-#                                 not a runtime; an install, image or *_VERSION
-#                                 form in it still fails
+#   data <file> <reason>          a test or fixture file (*.test.sh, *_test.*,
+#                                 test/, tests/, fixtures/) whose literals are test
+#                                 data or past check names, not a runtime; an
+#                                 install, image or *_VERSION form in it still fails
 #
 # Every tracked .tool-versions / *.tool-versions must appear here. A literal
 # version in a workflow, action, Dockerfile, deploy file or script with no row
@@ -48,11 +49,8 @@ deploy/image.tool-versions  scripts/cloud-format-check.sh
 tools/format.tool-versions  .github/workflows/elixir.yml#format
 tools/format.tool-versions  scripts/format-check.sh
 
-# Test data: fake toolchains, and the names of past CI checks
-# ("Test (Elixir 1.18.1 / OTP 27.0)").
-data  scripts/blocking-name-census.py
-data  scripts/ci-measure.sh
-data  scripts/elixir-main-red-attribution.test.sh
-data  scripts/fetch-prebuilt.test.sh
-data  scripts/release-scan.test.sh
-data  scripts/required-checks.test.sh
+# Test data. Only a test or fixture path may be data, and each row says why.
+data  scripts/elixir-main-red-attribution.test.sh  a stack-trace fixture names (elixir 1.18.4)
+data  scripts/fetch-prebuilt.test.sh  a fake box prints Elixir 1.18.3 so the guard sees a mismatch
+data  scripts/release-scan.test.sh  check-run fixtures carry past check names (Elixir 1.18.1 / OTP 27.0)
+data  scripts/required-checks.test.sh  a matrix fixture and the exclusion rows of past check names

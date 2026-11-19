@@ -30,7 +30,7 @@ plant() { # plant <dir>: a clean git tree that must pass
 deploy/image.tool-versions  img/Dockerfile
 tools/format.tool-versions  .github/workflows/ci.yml#format
 tools/format.tool-versions  scripts/fmt.sh
-data  scripts/names.test.sh
+data  scripts/names.test.sh  past check names
 TSV
   cat > "$d/.github/workflows/ci.yml" <<'YML'
 name: ci
@@ -136,6 +136,16 @@ plant p;   printf 'jobs:\n  x:\n    steps:\n      - uses: actions/cache@v4\n    
 expect "a cache key spells the versions" p 1 'k.yml:6 (job x): a literal erlang version (27.0)'
 plant q;   printf 'asdf install erlang 26.2.5\n' >> "$T/q/scripts/names.test.sh"; stage q
 expect "an install in a data file" q 1 'scripts/names.test.sh:3: installs or selects erlang 26.2.5'
+plant da;  printf 'jobs:\n  x:\n    name: Test (Elixir 1.18.1 / OTP 27.0)\n' > "$T/da/.github/workflows/names.yml"
+printf 'data  .github/workflows/names.yml  past check names\n' >> "$T/da/$TABLE_REL"; stage da
+expect "a data row on a workflow file" da 1 'data row `.github/workflows/names.yml`: only a test or fixture path'
+plant db;  printf '#!/bin/sh\necho "Test (Elixir 1.18.1 / OTP 27.0)"\n' > "$T/db/scripts/names.sh"
+printf 'data  scripts/names.sh  past check names\n' >> "$T/db/$TABLE_REL"; stage db
+expect "a data row on a non-test script" db 1 'data row `scripts/names.sh`: only a test or fixture path'
+plant dc;  edit dc/$TABLE_REL 's/^data  scripts\/names.test.sh .*/data  scripts\/names.test.sh/'; stage dc
+expect "a data row with no reason" dc 1 'data row `scripts/names.test.sh` gives no reason'
+plant dd;  printf '#!/bin/sh\necho "no versions here"\n' > "$T/dd/scripts/names.test.sh"; stage dd
+expect "a data row whose file holds no version text" dd 1 'data row `scripts/names.test.sh` carries no version literal'
 plant s;   awk 'BEGIN { for (i = 1; i <= 4000; i++) print "asdf install erlang 26.2." i }' > "$T/s/scripts/big.sh"; stage s
 expect "4000 findings (output far past a pipe buffer) still fail" s 1 'scripts/big.sh:4000:'
 plant n;   rm -f "$T/n/deploy/image.tool-versions"; stage n

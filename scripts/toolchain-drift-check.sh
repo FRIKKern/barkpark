@@ -26,8 +26,10 @@
 #              literal that cannot be avoided (an image tag, an install
 #              default) is compared with its file's owner row and fails on any
 #              difference; a literal with no owner row fails. A `data` row
-#              marks a file whose literals are test data or past check names:
-#              those pass, but an install, image or *_VERSION form there fails.
+#              marks a test or fixture file (*.test.sh, *_test.*, test/, tests/,
+#              fixtures/) whose literals are test data or past check names, with
+#              a one-line reason: those pass, but an install, image or
+#              *_VERSION form there fails.
 #   Rows that no longer feed anything fail too, so the table cannot rot.
 #
 # EXIT CODES: 0 clean · 1 problems (each printed with path:line) · 2 refused
@@ -237,11 +239,19 @@ while IFS='|' read -r kind rest; do
 done <<<"$SCAN_OUT"
 
 # ── rows that feed nothing ──────────────────────────────────────────────────
+while IFS= read -r consumer; do
+  [ -z "$consumer" ] || drift "$TABLE_REL: data row \`$consumer\` gives no reason. Add a one-line reason after the path."
+done <<<"$(awk '!/^[[:space:]]*#/ && $1 == "data" && NF < 3 { print $2 }' "$ROOT/$TABLE_REL")"
 while IFS="$(printf '\t')" read -r owner consumer; do
   path="${consumer%%#*}"
   if [ ! -f "$ROOT/$path" ]; then drift "$TABLE_REL: row \`$owner $consumer\`: $path does not exist. Delete the row."; continue; fi
   case "$owner|$path" in
-    data\|*) has_line "$path" "$DATA" || drift "$TABLE_REL: data row \`$consumer\` carries no version literal any more. Delete the row." ;;
+    data\|*)
+      case "$path" in
+        *.test.sh|*_test.*|test/*|*/test/*|tests/*|*/tests/*|fixtures/*|*/fixtures/*)
+          has_line "$path" "$DATA" || drift "$TABLE_REL: data row \`$consumer\` carries no version literal any more. Delete the row." ;;
+        *) drift "$TABLE_REL: data row \`$consumer\`: only a test or fixture path (*.test.sh, *_test.*, test/, tests/, fixtures/) may be data. Read the version from its owner instead." ;;
+      esac ;;
     *\|.github/workflows/*|*\|.github/actions/*)
       has_line "$consumer" "$FED" || drift "$TABLE_REL: row \`$owner $consumer\` feeds no setup-beam step. Delete the row." ;;
     *\|*.tool-versions) : ;;
