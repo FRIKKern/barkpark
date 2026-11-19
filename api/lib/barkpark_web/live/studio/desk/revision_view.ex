@@ -130,14 +130,17 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
     |> HistoryPanel.waiting()
   end
 
-  # Every field as `FieldLock` draws one its condition locks: a text field
-  # keeps its input (`readonly`), any other is display-only.
   @text_types ~w(string text url email slug number)
 
-  defp locked(%{fields: fields} = schema) when is_list(fields),
+  @doc """
+  The schema with every field as `FieldLock` draws one its condition locks:
+  a text field keeps its input (`readonly`), any other is display-only. The
+  published view draws its form the same way (`PublishedView`).
+  """
+  def locked(%{fields: fields} = schema) when is_list(fields),
     do: %{schema | fields: Enum.map(fields, &lock/1)}
 
-  defp locked(schema), do: schema
+  def locked(schema), do: schema
 
   defp lock(%{"type" => type} = field),
     do: Map.merge(field, %{"lockedByRule" => true, "readOnly" => type not in @text_types})
@@ -158,6 +161,9 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
 
   @doc "Whether `event` is refused because a revision is shown in the form's place."
   def refuses?(event, assigns), do: shown?(assigns) and event not in @reads
+
+  @doc "The page's events that write nothing of the open document, and the revision's Restore."
+  def reads, do: @reads
 
   # The header menu's items that send an event and write nothing: Copy
   # document copies the revision shown (`DocClip`).
