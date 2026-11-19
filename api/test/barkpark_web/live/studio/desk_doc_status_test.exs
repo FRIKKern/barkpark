@@ -101,6 +101,29 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     refute chip(view, "Published") =~ "data-off"
   end
 
+  # The rig's J46 (navbar.spec.ts, a touch phone): every doc-pane button is a 44 px
+  # tap. The pills became buttons in #27369 and stayed 25 px; TanStack grows
+  # a pill's box with a clear 10 px border above and below on a touch screen.
+  test "on a touch screen the pill buttons are 44 px taps, drawn as before", c do
+    {:ok, _} = Content.publish_document(c.id, c.type, @dataset)
+    view = open(c)
+    html = render(view)
+
+    assert has_element?(view, ~s(#{@chips} button.dk-chip[aria-pressed]), "Published")
+    assert has_element?(view, ~s(#{@chips} button.dk-chip[aria-pressed]), "Draft")
+
+    coarse =
+      ~r/@media \(max-width: 768px\) and \(pointer: coarse\) \{\s*([^}]*\})/
+      |> Regex.scan(html, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.find("", &(&1 =~ "dk-chip"))
+
+    assert coarse =~ ".dk button.dk-chip, .dk button.dk-chip:hover {"
+    # 25 px (3 + 19 + 3) and 10 px above and below: 45.
+    assert coarse =~ "border-style: solid; border-color: transparent; border-width: 10px 0;"
+    assert coarse =~ "background-clip: padding-box;"
+  end
+
   test "a document never published greys out the Published pill", c do
     view = open(c)
 
