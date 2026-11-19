@@ -1,7 +1,8 @@
 defmodule Barkpark.Tenancy.AccessRequestStalenessTest do
   @moduledoc """
   `AccessRequestStaleness.stale?/2` on built structs: no DB, so each case is
-  the rule itself (task-018e79d8734a1b08).
+  the rule itself (task-018e79d8734a1b08). The seat stamp decides, not the
+  role and not the clock. Each case fails on the earlier role + timestamp rule.
   """
   use ExUnit.Case, async: true
 
@@ -10,38 +11,31 @@ defmodule Barkpark.Tenancy.AccessRequestStalenessTest do
   @asked ~U[2026-11-19 10:00:00.000000Z]
   @earlier ~U[2026-11-19 09:00:00.000000Z]
   @later ~U[2026-11-19 11:00:00.000000Z]
+  @stamp "6f2b1f4e-6a59-4c2e-9a39-0a7d1c7f1a01"
+  @other_stamp "6f2b1f4e-6a59-4c2e-9a39-0a7d1c7f1a02"
 
-  defp request(from_role) do
-    %AccessRequest{workspace_id: Ecto.UUID.generate(), from_role: from_role, inserted_at: @asked}
+  defp role_request(stamp) do
+    %AccessRequest{
+      workspace_id: Ecto.UUID.generate(),
+      from_role: "viewer",
+      seat_change: stamp,
+      inserted_at: @asked
+    }
   end
 
-  defp seat(role, inserted_at, updated_at),
-    do: %Membership{role: role, inserted_at: inserted_at, updated_at: updated_at}
+  defp seat(stamp, at),
+    do: %Membership{role: "viewer", seat_change: stamp, inserted_at: at, updated_at: at}
 
-  test "an untouched seat holding the recorded role is fresh" do
-    refute AccessRequestStaleness.stale?(request("viewer"), seat("viewer", @earlier, @earlier))
+  test "a seat written since the ask is stale, even with the same role and older timestamps" do
+    assert AccessRequestStaleness.stale?(role_request(@stamp), seat(@other_stamp, @earlier))
   end
 
-  test "a seat re-made with the same role after the ask is stale" do
-    assert AccessRequestStaleness.stale?(request("viewer"), seat("viewer", @later, @later))
+  test "the seat with the stamp the request recorded is fresh, whatever its timestamps" do
+    refute AccessRequestStaleness.stale?(role_request(@stamp), seat(@stamp, @later))
   end
 
-  test "a role moved A -> B -> A after the ask is stale" do
-    assert AccessRequestStaleness.stale?(request("viewer"), seat("viewer", @earlier, @later))
-  end
-
-  test "another role, or no seat, is stale for a role request" do
-    assert AccessRequestStaleness.stale?(request("viewer"), seat("member", @earlier, @earlier))
-    assert AccessRequestStaleness.stale?(request("viewer"), nil)
-  end
-
-  test "a seat request is fresh without a seat and stale with one" do
-    refute AccessRequestStaleness.stale?(request(nil), nil)
-    assert AccessRequestStaleness.stale?(request(nil), seat("member", @earlier, @earlier))
-  end
-
-  test "a request for a missing workspace is never stale" do
-    ghost = %AccessRequest{workspace_id: nil, from_role: nil, inserted_at: @asked}
-    refute AccessRequestStaleness.stale?(ghost, seat("member", @later, @later))
+  test "a row for a missing workspace is stale once its asker holds a seat" do
+    ghost = %AccessRequest{workspace_id: nil, inserted_at: @asked}
+    assert AccessRequestStaleness.stale?(ghost, seat(@stamp, @earlier))
   end
 end

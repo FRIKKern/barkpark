@@ -13,9 +13,10 @@ defmodule Barkpark.Tenancy.AccessRequest do
   the same whether the workspace exists or not, and no admin can see it.
 
   `requested_role` is the role the asker named, if any (task-018e79d8734a1b08).
-  `from_role` is set only when a MEMBER asks for a higher role: the role they
-  held when asking. A non-nil `from_role` marks the request as a role change,
-  and approve refuses it once the seat's role is no longer `from_role`.
+  `from_role` and `seat_change` are set only when a MEMBER asks for a higher
+  role: the role they held and their seat's change stamp at ask time (both or
+  neither, a CHECK constraint). A non-nil `from_role` marks the request as a
+  role change. Fresh or stale: `Tenancy.AccessRequestStaleness`.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -37,6 +38,7 @@ defmodule Barkpark.Tenancy.AccessRequest do
     field :role, :string
     field :requested_role, :string
     field :from_role, :string
+    field :seat_change, Ecto.UUID
     field :decided_by, :string
     field :decided_at, :utc_datetime_usec
 

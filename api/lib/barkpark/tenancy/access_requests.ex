@@ -18,7 +18,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   A member may name a `role` that ranks above the one they hold
   (`Tenancy.Auth.role_rank/2`). The row records the role they held as
-  `from_role`, which marks it a role change. A same-or-lower role answers
+  `from_role`, which marks it a role change, and their seat's change stamp
+  as `seat_change`. A same-or-lower role answers
   `{:error, :role_not_higher}`, a name the workspace does not have
   `{:error, :unknown_role}`, and no role at all `{:error, :already_member}`
   as before. For a seatless asker `role` is a hint, checked for shape only:
@@ -34,12 +35,14 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   ## Stale requests
 
-  A request records the seat its asker held (`from_role`, nil for none). Once
-  the seat is no longer that, by any door (removed, re-roled, seated another
-  way), the request is stale: `Tenancy.AccessRequestStaleness.stale?/2`
-  decides it, and nothing else does.
-  Approve refuses it, the admin list marks it `stale: true`, and asking again
-  replaces it instead of answering the old row.
+  A request records the seat its asker held (`seat_change`, nil for none).
+  Every write to a seat gives it a new stamp, so once the seat is no longer
+  that one, by any door (removed, re-roled, seated another way, written by an
+  import), the request is stale: `Tenancy.AccessRequestStaleness.stale?/2`
+  decides it, and nothing else does. An import does not carry access
+  requests; people ask again.
+  Approve refuses a stale request, the admin list marks it `stale: true`, and
+  asking again replaces it instead of answering the old row.
 
   ## How a seat is made
 
@@ -161,6 +164,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
       true ->
         changeset
         |> Ecto.Changeset.put_change(:from_role, current)
+        |> Ecto.Changeset.put_change(:seat_change, seat.seat_change)
         |> insert(user_id, slug, ws, stale)
     end
   end
@@ -357,8 +361,8 @@ defmodule Barkpark.Tenancy.AccessRequests do
          do: {:ok, member, granted, %{"role" => granted}}
   end
 
-  # A role change (not stale, so the seat still holds `from_role`, locked for
-  # the rest of the transaction): changed through the roster's own path.
+  # A role change (not stale, so the seat is unchanged since the ask, locked
+  # for the rest of the transaction): changed through the roster's own path.
   defp grant(%AccessRequest{} = row, %Membership{role: current}, _email, role, actor) do
     granted = role || row.requested_role
     ws = row.workspace_id

@@ -254,6 +254,46 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     assert role_in(ctx.ws, reseated) == "viewer" and role_in(ctx.ws, bounced) == "viewer"
   end
 
+  test "a seat row written back with its old stamp and older timestamps is still stale", ctx do
+    asker = user!(ctx.ws, "viewer")
+    id = json_response(ask(asker, ctx.ws.slug, "member"), 202)["access_request"]["id"]
+    %AccessRequest{seat_change: stamp} = Repo.get!(AccessRequest, id)
+
+    # Same role, the stamp the request recorded, dated before the ask.
+    Repo.query!(
+      "UPDATE workspace_memberships SET role = 'viewer', seat_change = $1, " <>
+        "inserted_at = now() - interval '1 day', updated_at = now() - interval '1 day' " <>
+        "WHERE workspace_id = $2 AND principal_id = $3",
+      [Ecto.UUID.dump!(stamp), Ecto.UUID.dump!(ctx.ws.id), Ecto.UUID.dump!(asker.user.id)]
+    )
+
+    assert [%{"stale" => true}] = listed(ctx.admin, ctx.base)
+
+    assert json_response(approve(ctx.admin, ctx.base, id), 409)["error"]["code"] ==
+             "request_stale"
+
+    assert role_in(ctx.ws, asker) == "viewer"
+  end
+
+  test "a member's ask replaces their pending row from before the workspace existed", ctx do
+    slug = "arr-later-#{System.unique_integer([:positive])}"
+    asker = user!(ctx.ws, nil)
+    old = json_response(ask(asker, slug, nil), 202)["access_request"]["id"]
+    assert %AccessRequest{workspace_id: nil} = Repo.get!(AccessRequest, old)
+
+    later = create_workspace!(slug)
+    project = create_project!(later)
+    {:ok, _} = TenancyAuth.create_membership(later.id, asker.user.id, "member", "user")
+
+    new = json_response(ask(asker, slug, "admin"), 202)["access_request"]
+    assert new["id"] != old and new["requested_role"] == "admin"
+    assert Repo.get(AccessRequest, old) == nil
+
+    base = "/w/#{slug}/p/#{project.slug}/v1"
+    assert [%{"id" => id, "stale" => false}] = listed(seated_token!(later, "admin"), base)
+    assert id == new["id"]
+  end
+
   test "demoted after asking: asking again replaces the stale request", ctx do
     asker = user!(ctx.ws, "viewer")
     old = json_response(ask(asker, ctx.ws.slug, "admin"), 202)["access_request"]["id"]
