@@ -18,7 +18,9 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptCodes do
     * A codelist: its posted value is dropped unless this post is a change
       of that field (`_target` names it).
     * An array: each posted row whose stored row is not a code is posted as
-      the stored row, unless this post is a change of that row.
+      the stored row, unless this post is a change of that row. A write of
+      the whole field (`_target` names the field and no row: Review
+      changes' Revert, Paste) is its own change, written as posted.
 
   So an edit elsewhere, or the Save button's post (which names no field),
   leaves the stored value as it is, and a pick or a clear in the field or the
@@ -59,6 +61,12 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptCodes do
     row = with [^name, index | _] <- changed, do: index, else: (_ -> nil)
 
     case Map.get(doc, name) do
+      # The whole field written at once (Review changes' Revert, Paste,
+      # Paste document): that write is the field's own change. No browser
+      # post names an array without a row.
+      _ when changed == [name] ->
+        doc
+
       posted when is_list(stored) and (is_map(posted) or is_list(posted)) ->
         Map.put(doc, name, rows(posted, stored, row))
 

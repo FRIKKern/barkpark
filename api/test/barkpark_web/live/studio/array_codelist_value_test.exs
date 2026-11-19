@@ -134,4 +134,69 @@ defmodule BarkparkWeb.Studio.ArrayCodelistValueTest do
 
     assert codes(c) == @codes
   end
+
+  # Review of #27497: Review changes' Revert writes the whole field
+  # (`_target` ["doc", "codes"], no row). That write is the field's own
+  # change: the published rows are written, a stored row that is no code
+  # included, as on main.
+  describe "a whole-field write in the desk" do
+    defp versions!(c, published, draft) do
+      id = "ac-rev-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.create_document(
+          c.type,
+          %{
+            "doc_id" => id,
+            "title" => "Book",
+            "content" => %{"codes" => published, "notes" => "p"}
+          },
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document(id, c.type, @dataset)
+
+      {:ok, _} =
+        Content.upsert_document(
+          c.type,
+          %{
+            "doc_id" => Content.draft_id(id),
+            "title" => "Book",
+            "content" => %{"codes" => draft, "notes" => "d"}
+          },
+          @dataset
+        )
+
+      %{c | id: id, desk: String.replace(c.desk, c.id, id)}
+    end
+
+    @review ",changesInspectorTab=review,inspect=sanity%2Fstructure%2Fhistory"
+
+    for {name, published, draft} <- [
+          {"rows that hold no code", ["A1", "B2", "A1"], [7, %{"o" => 1}, "A1"]},
+          {"a shorter list", ["B2"], [7, "A1"]},
+          {"rows of codes, back to rows that hold none", [7, %{"o" => 1}], ["A1", "B2"]}
+        ] do
+      test "Revert of an array of codes writes the published rows: #{name}", c do
+        c = versions!(c, unquote(Macro.escape(published)), unquote(Macro.escape(draft)))
+        {:ok, view, _} = live(c.conn, c.desk <> @review)
+        render_async(view, 5_000)
+
+        assert has_element?(
+                 view,
+                 ~s([data-pane-editing] [role="tabpanel"] li[data-field="codes"])
+               )
+
+        render_hook(
+          view,
+          "desk-field-revert",
+          Map.merge(BarkparkWeb.EditorPost.mark(view), %{"field" => "codes"})
+        )
+
+        assert codes(c) == unquote(Macro.escape(published))
+        {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+        assert doc.content["notes"] == "d"
+      end
+    end
+  end
 end
