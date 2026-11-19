@@ -206,7 +206,7 @@ function softOn(fill, text, ground) {
 function withStates(s, at) {
   const out = { ...s };
   for (const [fill, , kind] of STATE_FILLS)
-    [out[`${fill}-hover`], out[`${fill}-pressed`]] = process.env.PROBE_MUTED && kind === "muted" && !stepsFor(kind, s[fill], s.background) ? [s[fill], s[fill]] : statesOf(kind, s[fill], s.background, `${at}: ${fill}`);
+    [out[`${fill}-hover`], out[`${fill}-pressed`]] = statesOf(kind, s[fill], s.background, `${at}: ${fill}`);
   for (const [fill, label] of STATE_FILLS) {
     // a label that reads on the ground (a tone's text) keeps reading there too
     const on = [fill, `${fill}-hover`, `${fill}-pressed`].map((n) => out[n]);
