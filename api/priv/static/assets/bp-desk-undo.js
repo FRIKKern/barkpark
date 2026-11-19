@@ -76,7 +76,7 @@
   // `role=dialog aria-modal=true`, or a <dialog> opened with showModal): the
   // page under it is not the user's to change, so the key stays the browser's.
   function modal() {
-    var all = document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]');
+    var all = document.querySelectorAll('[role=dialog][aria-modal=true], dialog[open]');
     for (var i = 0; i < all.length; i++) {
       var m = all[i];
       if (m.closest("[hidden]")) continue;
