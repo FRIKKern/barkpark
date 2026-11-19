@@ -1,0 +1,35 @@
+<!-- doc-tier: human | canonical-for: barkui-decision-real-presses | budget: 800tok -->
+# 0008 Press checks press real keys in a real browser
+
+Date: 2026-11-19 · Status: accepted
+
+```
+press.mjs step: keys ['Tab'] ─► headless Chromium's own input pipeline ─► expect(root) true or a reason
+                                                                       └► what a screen reader gets (role, name, states)
+```
+
+## Context
+
+A check can move focus or fire events from a script, or it can press keys the way a person does. When a trial grid was checked by moving focus from a script, the checks passed while the grid was broken under a real keyboard. A part that only passes scripted presses is not proven.
+
+UI SDK has a testing kit of its own that checks keyboard handling, ARIA and the attributes a server prints.
+
+## Decision
+
+- Each part's `press.mjs` lists steps: keys to press or an element to click, then what must be true. The check runs them in headless Chromium through the browser's own input, the same path a keyboard takes.
+- Each step's expectation and setup run in an isolated world: they share the page's elements but none of its script, so a demo cannot make a step pass.
+- Where a step names them, the role, name and states are read from the browser's accessibility tree, which is what a screen reader gets.
+- The "Pressed by real keys" light is on only when every step passed in the last run ([QUALITY.md](../../QUALITY.md)).
+
+UI SDK's testing kit is not used today.
+
+## What would change it
+
+We would add UI SDK's testing kit beside the real presses, not in place of them, when either holds:
+
+- Parts get a React face (planned). The kit may then check part of that behaviour in the fast tests.
+- UI SDK's kit checks something the browser run does not, such as the attributes a server prints for a state.
+
+## Considered
+
+- **UI SDK's testing kit alone.** Not chosen for now: the browser run already presses real keys and reads what a screen reader gets, and one route keeps the light's meaning plain. Whether the kit drives the browser's own input was not checked.
