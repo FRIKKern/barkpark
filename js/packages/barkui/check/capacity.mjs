@@ -1,33 +1,33 @@
-// How many parts one CI check step holds, from measured times. The check runs
-// AT_ONCE parts at a time in one browser, so its time grows with each batch of
-// AT_ONCE parts. When the parts folder holds more than PARTS_HELD, the check
-// refuses to run and says this sentence, so the wall is seen before CI's time
-// limit is hit. A test holds STEP_MINUTES to the check step's limit in
-// js-tests.yml, and the README to the sentence.
+// How many parts one CI check step holds, from ceilings: the most a run may take, which the check enforces.
+// The check runs AT_ONCE parts at a time in one browser, so its time grows with each batch of AT_ONCE parts.
+// A run of the check stops, failing with capacitySentence, once it passes the ceiling for its parts
+// (check/run.mjs); the selftest stops, failing with selftestSentence, once it passes its own. Each ceiling sits
+// under its step's limit in js-tests.yml, so the check's own words come before CI cuts it off. When the parts
+// folder holds more than PARTS_HELD, the check refuses to run at all. A test holds each step's minutes to its
+// limit in js-tests.yml, and the README to both sentences. The times the ceilings were set over are stated
+// with the change that sets them, not here: a ceiling is what is enforced.
 
 // How many parts run at once: small and fixed, so this machine and the hosted runner both hold.
 export const AT_ONCE = 3
 // The check step's limit in .github/workflows/js-tests.yml.
 export const STEP_MINUTES = 15
-// Measured on Linux in a 4-CPU, 6 GB container with copies of the button (1, 3 and 6 parts: 78 s, 97 s and
-// 240 s; again with real states held to their pins, 83 s, 95 s and 197 s), the most of each rounded up: the
-// whole run with one batch of AT_ONCE parts, and what each further batch adds.
-export const MEASURED = { firstBatch: 100, eachBatch: 145 }
-// The share of the step limit the parts may plan on; the rest is room for a slower runner.
-export const PLANNED_SHARE = 0.6
+// Seconds: the most the first batch of AT_ONCE parts may take (with the build and the browser's start), and
+// the most each further batch may add.
+export const CEILING = { firstBatch: 240, eachBatch: 300 }
 
-export const PARTS_HELD = AT_ONCE * (1 + Math.floor((STEP_MINUTES * 60 * PLANNED_SHARE - MEASURED.firstBatch) / MEASURED.eachBatch))
+/** The most a run over `n` parts may take, in seconds. */
+export const ceilingFor = (n) => CEILING.firstBatch + CEILING.eachBatch * Math.max(0, Math.ceil(n / AT_ONCE) - 1)
+/** The most parts whose ceiling fits in the step. */
+export const PARTS_HELD = AT_ONCE * (1 + Math.floor((STEP_MINUTES * 60 - CEILING.firstBatch) / CEILING.eachBatch))
+const share = (secs, minutes) => Math.round((secs / (minutes * 60)) * 100)
 
 export const capacitySentence = () =>
-  `The check runs ${AT_ONCE} parts at a time; on Linux with 4 CPUs the first ${AT_ONCE} take about ${MEASURED.firstBatch} s and each further ${AT_ONCE} about ${MEASURED.eachBatch} s more, so the ${STEP_MINUTES}-minute check step in CI holds ${PARTS_HELD} parts with at least ${Math.round((1 - PLANNED_SHARE) * 100)}% of its time to spare.`
+  `The check runs ${AT_ONCE} parts at a time; a run may take at most ${CEILING.firstBatch} s for the first ${AT_ONCE} and ${CEILING.eachBatch} s more for each further ${AT_ONCE}, and stops, failing, once it passes that, so the ${STEP_MINUTES}-minute check step in CI holds ${PARTS_HELD} parts, whose ceiling of ${ceilingFor(PARTS_HELD)} s is ${share(ceilingFor(PARTS_HELD), STEP_MINUTES)}% of it.`
 
 // The selftest's step. It copies one part, so its time does not grow with the parts folder, only with its own
-// cases. Measured as a whole run on Linux in the same 4-CPU container (SELFTEST_MEASURED, seconds, rounded
-// up). It plans on the same share of its step's limit as the check, and stops itself, failing with this
-// sentence, once its run passes that share, so the wall is seen in its own words before CI cuts it off.
-export const SELFTEST_STEP_MINUTES = 10
-export const SELFTEST_MEASURED = 230
-export const SELFTEST_PLANNED = Math.round(SELFTEST_STEP_MINUTES * 60 * PLANNED_SHARE)
+// cases.
+export const SELFTEST_STEP_MINUTES = 12
+export const SELFTEST_CEILING = 540
 
 export const selftestSentence = () =>
-  `The selftest takes about ${SELFTEST_MEASURED} s on Linux with 4 CPUs; its ${SELFTEST_STEP_MINUTES}-minute step in CI plans on ${SELFTEST_PLANNED} s, ${Math.round(PLANNED_SHARE * 100)}% of it, and the selftest stops, failing, once it passes that.`
+  `The selftest may take at most ${SELFTEST_CEILING} s, ${share(SELFTEST_CEILING, SELFTEST_STEP_MINUTES)}% of its ${SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`

@@ -440,7 +440,8 @@ jobs:
       # proves each skin, light and dark, on every surface, a 390px window and a
       # script-free print, reading every label and graphic from pixels. Limit:
       # 15 minutes, which check/capacity.mjs holds STEP_MINUTES to (a test reads
-      # this line): the check refuses to run with more parts than that holds.
+      # this line): the check refuses to run with more parts than that holds, and
+      # stops, failing, once a run passes its ceiling, under this limit.
       # Reds on a part folder missing a file, a failed press step, a light that
       # does not come on, any page error or network request, or a step or part
       # past its time limit (check/proofs.mjs, check/check.mjs).
@@ -466,12 +467,12 @@ jobs:
       # that holds README.md's claim, a faint or clipped icon, a frozen colour, a
       # bound wait on the sheet, the demo guards, refusals at discovery), and it
       # reds unless each turns the right light off, naming the planted control.
-      # Limit: 10 minutes, which check/capacity.mjs holds SELFTEST_STEP_MINUTES to (a
-      # test reads this line), with the selftest's measured time; the selftest stops,
-      # failing with that sentence, once it passes 60% of it.
+      # Limit: 12 minutes, which check/capacity.mjs holds SELFTEST_STEP_MINUTES to (a
+      # test reads this line); the selftest stops, failing with its sentence, once it
+      # passes SELFTEST_CEILING, under this limit.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
         if: steps.barkui.outputs.run != 'false'
-        timeout-minutes: 10
+        timeout-minutes: 12
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"

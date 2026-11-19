@@ -78,15 +78,22 @@ matches; a rule or a pair nobody judges fails the part by name.
 - States, per pair (`check/states.mjs`). For every rule that holds `:hover` or `:active`, and every live
   control (outside the inert rows, not a pinned row) that matches the rest of its selector, the check
   produces that state on that control with the real pointer, at its centre or held down there (a real
-  press is both), and reads the stage as drawn while it holds, in the first skin, light, on base at
-  1440px. Every computed property of the control and its `::before` and `::after` must change exactly
-  as some pinned row with the same `data-pin` changes when its pin is taken off (the check finds the
-  row by comparing), so that row, read in every view, shows the same change; nothing from the control
-  up to the stage may change. A real state no pinned row shows fails ("no pinned row shows this
-  change"). Which controls are driven comes from `element.matches`, never from a name or an attribute.
+  press is both), in the first skin, light, on base at 1440px. Every computed property of the control,
+  its `::before` and `::after` and everything inside it must then be what the same control shows with
+  that state pinned, and nothing from the control up to the stage may change: so the control pinned is
+  the control in that state. Its change must also be exactly the change of some pinned row with the same
+  `data-pin` (the check finds the row by comparing), so that row, read in every view, shows the same
+  change. Then, per state, every live control it was proven on is pinned at once and the stage is read
+  as drawn, so each pair is judged as drawn while its rule applies. A real state unlike its pin, or one no
+  pinned row shows, fails by name. Which controls are driven comes from `element.matches`, never from a
+  name or an attribute.
 - States the steps reach. Each press step ends with the stage read as drawn, in the first skin, light,
   on base at 1440px, so a state only an action reaches (pending, after Enter on a live button) is read
-  while it holds. `example.html` also shows pending at rest, in its own row, so every view reads it.
+  while it holds. A reading takes real time, so on the pressed page the page's own timers run on a clock
+  that stands still while the check reads: a step's wait moves it that far, and a pending that lasts
+  2.5 s lasts 2.5 s of the page's time whatever the readings cost. `example.html` also shows pending at
+  rest, in its own row, so every view reads it; under reduced motion (`css/base.css`) an animation runs
+  one round, so its spinner stands still.
 
 - Read: the check walks every element in the stage (not only `[data-slot]`) and every `::before`,
   `::after`, `::marker` and `::placeholder` that draws. Each colour it shows must be one skin variable
@@ -210,7 +217,7 @@ refused on the sheet as the browser parses it (`check/cssom.mjs`) before any lig
 | Surface | base, raised, sunken, primary, inverse | those values, and `[data-surface]` selectors | every skin and scheme, at 1440px and at 390px |
 | Width | 1440px, 390px | `@media (max-width: 600px)`, inside which only layout and type may change: no paint, no decoration, no custom property | 390px with every skin, scheme and surface ("phone") |
 | Motion | reduced, allowed | `@media (prefers-reduced-motion: …)`, inside which only transition, animation and scroll-behavior may change; animation names from the shared keyframes, which only turn their element | every light reads with motion reduced; the drawn readings run again with motion allowed in one skin, light, on every surface at 1440px and on base at 390px, animations held finished and halfway |
-| State | as `example.html` shows it, and as the real pointer and the press steps make it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) and each state shown at rest (the pending row) with every skin, scheme, surface and width. Each real state, on every live control a state rule matches, read as drawn in the first skin, light, on base at 1440px, and held to change exactly as a pinned row changes, which carries it to every other view ("every skin"). Each press step's result read as drawn in that same view ("pressed by real keys") |
+| State | as `example.html` shows it, and as the real pointer and the press steps make it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) and each state shown at rest (the pending row) with every skin, scheme, surface and width. Each real state, on every live control a state rule matches, held to equal that control pinned and read as drawn so in the first skin, light, on base at 1440px, and held to change exactly as a pinned row changes, which carries it to every other view ("every skin"). Each press step's result read as drawn in that same view ("pressed by real keys") |
 | Script | on, off | not at all (`@media (scripting)` is refused) | "printed with no script" reads the page as it opens with no script: base surface, 1440px |
 
 What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
@@ -226,14 +233,13 @@ focus ring's edge is measured on every Tab stop on the base surface at 1440px, i
 
 ## How many parts the check holds
 
-The check runs 3 parts at a time; on Linux with 4 CPUs the first 3 take about 100 s and each further 3
-about 145 s more, so the 15-minute check step in CI holds 12 parts with at least 40% of its time to
-spare. That is about 48 s for each part past the first three. Past that number the check refuses to run,
-naming this sentence, before any light is read; raise `STEP_MINUTES` in `check/capacity.mjs` and the
-step's limit in `js-tests.yml` together (a test holds them equal), or split the check, and measure
-again. The selftest copies one part, so its time does not grow with the parts folder. The selftest
-takes about 230 s on Linux with 4 CPUs; its 10-minute step in CI plans on 360 s, 60% of it, and the
-selftest stops, failing, once it passes that. `SELFTEST_STEP_MINUTES` and the step's limit move
+The check runs 3 parts at a time; a run may take at most 240 s for the first 3 and 300 s more for each further 3, and stops, failing, once it passes that, so the 15-minute check step in CI holds 9 parts, whose ceiling of 840 s is 93% of it. The numbers are ceilings the check enforces
+(`check/capacity.mjs`, `check/run.mjs`), set with room over what a run took on Linux with 4 CPUs; the
+change that sets them states what was measured. Past that number of parts the check refuses to run,
+naming this sentence, before any light is read; change the ceilings in `check/capacity.mjs` and, if the
+step must grow, `STEP_MINUTES` and the step's limit in `js-tests.yml` together (a test holds them
+equal), or split the check, and measure again. The selftest copies one part, so its time does not grow
+with the parts folder. The selftest may take at most 540 s, 75% of its 12-minute step in CI, and stops, failing, once it passes that. `SELFTEST_STEP_MINUTES` and the step's limit move
 together, as above.
 
 ## What the check proves about a label, and no more

@@ -32,21 +32,24 @@ describe("README.md's list of what part.css may condition on", () => {
 
 describe('how many parts the check holds', () => {
   it("keeps check/capacity.mjs to the check step's limit in js-tests.yml, and the README to its sentence", async () => {
-    const { STEP_MINUTES, PARTS_HELD, capacitySentence } = await import('../check/capacity.mjs')
+    const { STEP_MINUTES, PARTS_HELD, capacitySentence, ceilingFor } = await import('../check/capacity.mjs')
     const workflow = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
     const step = workflow.slice(workflow.indexOf('name: "BarkUI showroom check (real keys in Chromium)"'))
     expect(step.match(/timeout-minutes: (\d+)/)[1]).toBe(String(STEP_MINUTES))
     expect(Number.isInteger(PARTS_HELD) && PARTS_HELD >= 1).toBe(true)
+    // The ceiling of the most parts held stays under the step's limit; one batch more would not.
+    expect(ceilingFor(PARTS_HELD)).toBeLessThan(STEP_MINUTES * 60)
+    expect(ceilingFor(PARTS_HELD + 1)).toBeGreaterThan(STEP_MINUTES * 60)
     expect(readme).toContain(capacitySentence())
   })
 
-  it("keeps the selftest's measured time and step to its limit in js-tests.yml, and the README to its sentence", async () => {
-    const { SELFTEST_STEP_MINUTES, SELFTEST_MEASURED, SELFTEST_PLANNED, selftestSentence } = await import('../check/capacity.mjs')
+  it("keeps the selftest's ceiling under its step's limit in js-tests.yml, and the README to its sentence", async () => {
+    const { SELFTEST_STEP_MINUTES, SELFTEST_CEILING, selftestSentence } = await import('../check/capacity.mjs')
     const workflow = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
     const step = workflow.slice(workflow.indexOf('name: "BarkUI showroom check selftest'))
     expect(step.match(/timeout-minutes: (\d+)/)[1]).toBe(String(SELFTEST_STEP_MINUTES))
-    expect(SELFTEST_MEASURED).toBeGreaterThan(0)
-    expect(SELFTEST_MEASURED).toBeLessThan(SELFTEST_PLANNED)
+    expect(SELFTEST_CEILING).toBeGreaterThan(0)
+    expect(SELFTEST_CEILING).toBeLessThan(SELFTEST_STEP_MINUTES * 60)
     expect(readme).toContain(selftestSentence())
   })
 })

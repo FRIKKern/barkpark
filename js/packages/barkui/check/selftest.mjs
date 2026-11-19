@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PARTS_HELD, SELFTEST_PLANNED, selftestSentence } from './capacity.mjs'
+import { capacitySentence, PARTS_HELD, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
@@ -444,8 +444,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const run = CASES.filter((c) => c.name.includes(pick))
   const start = Date.now()
   for (const c of run) {
-    if (Date.now() - start > SELFTEST_PLANNED * 1000) {
-      console.log(`FAIL the selftest passed ${SELFTEST_PLANNED} s with ${run.length - run.indexOf(c)} case(s) left. ${selftestSentence()} Measure again, then raise SELFTEST_STEP_MINUTES in check/capacity.mjs and the step's limit in js-tests.yml together, or trim cases.`)
+    if (Date.now() - start > SELFTEST_CEILING * 1000) {
+      console.log(`FAIL the selftest passed ${SELFTEST_CEILING} s with ${run.length - run.indexOf(c)} case(s) left. ${selftestSentence()} Measure again, then change SELFTEST_CEILING and, if the step must grow, SELFTEST_STEP_MINUTES in check/capacity.mjs and the step's limit in js-tests.yml together, or trim cases.`)
       failures++
       break
     }
