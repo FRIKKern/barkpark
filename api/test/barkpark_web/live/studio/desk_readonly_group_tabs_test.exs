@@ -132,6 +132,10 @@ defmodule BarkparkWeb.Studio.DeskReadonlyGroupTabsTest do
 
     EditorPost.change(view, %{"doc[stage]" => "typed"})
 
+    # The shell's own header sits outside the read-only fields now. The desk
+    # hides it; a press sent anyway is refused.
+    view |> element("#{@pane} #doc-action-publish") |> render_click()
+
     assert published(c) == before_published
     assert draft(c).content == before_draft.content
   end
@@ -141,14 +145,17 @@ defmodule BarkparkWeb.Studio.DeskReadonlyGroupTabsTest do
   test "an old revision: the group tabs switch, the fields stay read-only, a write is refused",
        c do
     before_draft = draft(c)
+    before_published = published(c)
     view = open(c, ",rev=#{c.rev}")
 
     assert has_element?(view, "#{@pane} fieldset[data-desk-revision-form]")
     tabs_switch(view, "review", "fieldset[data-desk-revision-form]")
 
     EditorPost.change(view, %{"doc[stage]" => "typed"})
+    view |> element("#{@pane} #doc-action-publish") |> render_click()
 
     assert draft(c).content == before_draft.content
+    assert published(c) == before_published
   end
 
   # With the History inspector open the tabs wait and every group's fields
