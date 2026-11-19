@@ -5,7 +5,9 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
   `PublishedFooter` (barkpark-studio `e2e/journeys/unpublish-guard.spec.ts:20`,
   `lifecycle.spec.ts:130`). It opens the desk's unpublish dialog, which
   always asks; only the dialog's confirm unpublishes. Without that
-  perspective, on a singleton, and in the old Studio the footer is as it was.
+  perspective and in the old Studio the footer is as it was. A singleton is
+  never unpublished: its published footer has only its words. The published
+  view itself (the read-only form) is `DeskPublishedViewTest`.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -91,8 +93,8 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
 
     refute has_element?(view, ~s(#{@unpublish}[disabled]))
     refute has_element?(view, @publish)
-    # The "…" stays beside it.
-    assert has_element?(view, ~s(#{@footer} button[aria-label="Open document actions"]))
+    # No "…" beside it: TanStack's `PublishedFooter` has none.
+    refute has_element?(view, ~s(#{@footer} button[aria-label="Open document actions"]))
 
     BarkparkWeb.EditorPost.press_on(view, element(view, @unpublish))
 
@@ -137,20 +139,25 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     refute published?(c.type, c.id)
     assert eventually(fn -> has_element?(view, ~s(#{@unpublish}[disabled])) end)
     refute has_element?(view, @publish)
-    # The menu still publishes the draft that is left.
-    assert has_element?(view, ~s(#{@footer} [data-desk-doc-action="publish"]))
+
+    # The draft perspective publishes the draft that is left.
+    view = open(c, "#{c.type};#{c.id}")
+    refute has_element?(view, ~s(#{@publish}[disabled]))
   end
 
   test "a draft over the published version: Unpublish unpublishes and keeps the draft as it is",
        c do
-    view = open(c, "#{c.type};#{c.id}?perspective=published")
-
-    view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
-    render_async(view, 5_000)
+    # The published form is read-only, so the draft is typed elsewhere.
+    {:ok, _} =
+      Content.upsert_document(
+        c.type,
+        %{"doc_id" => "drafts." <> c.id, "title" => "Typed"},
+        @dataset
+      )
 
     draft = fn -> Content.get_document("drafts." <> c.id, c.type, @dataset) end
-    assert eventually(fn -> match?({:ok, %{title: "Typed"}}, draft.()) end)
     {:ok, before} = draft.()
+    view = open(c, "#{c.type};#{c.id}?perspective=published")
 
     # Still offered, as the TanStack Studio's: only "nothing published" greys it out.
     refute has_element?(view, ~s(#{@unpublish}[disabled]))
@@ -235,11 +242,12 @@ defmodule BarkparkWeb.Studio.DeskFooterUnpublishTest do
     refute has_element?(view, ~s(#{@footer} [data-desk-unpublish]))
   end
 
-  test "a singleton is never unpublished: its footer stays Publish, and the event does nothing",
+  test "a singleton is never unpublished: its footer has only its words, and the event does nothing",
        c do
     view = open(c, "#{c.single}?perspective=published")
 
-    assert has_element?(view, ~s(#{@publish}[disabled]))
+    assert has_element?(view, ~s(#{@footer} [role="status"]), "Last published")
+    refute has_element?(view, @publish)
     refute has_element?(view, ~s(#{@footer} [data-desk-unpublish]))
 
     BarkparkWeb.EditorPost.press(view, "unpublish", %{})
