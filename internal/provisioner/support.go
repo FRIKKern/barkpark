@@ -63,6 +63,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/deploy"
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/fleetruntime"
@@ -1171,7 +1172,7 @@ func supportFleetFilesStep(sha string) cloud.CaddyStep {
 // failure as a WARNING (fail-open): presence never depends on the vendor CLI.
 func supportAgentInstallStep(pkg, bin string) cloud.CaddyStep {
 	script := `set -e
-command -v node >/dev/null 2>&1 || { apt-get update -y >/dev/null 2>&1 && apt-get install -y nodejs npm >/dev/null 2>&1; }
+` + deploy.AptGetFunc() + `command -v node >/dev/null 2>&1 || { bp_apt_get update -y >/dev/null 2>&1 && bp_apt_get install -y nodejs npm >/dev/null 2>&1; }
 npm install -g '` + pkg + `' >/dev/null 2>&1
 command -v '` + bin + `' >/dev/null 2>&1`
 	return cloud.CaddyStep{

@@ -14,7 +14,10 @@
 // .github/workflows/shell-harnesses.yml) that tests these exact bytes.
 package deploy
 
-import _ "embed"
+import (
+	_ "embed"
+	"strings"
+)
 
 // SiteRuntimeInstallScript is deploy/site-runtime-install.sh verbatim: the
 // idempotent installer for a box's SITE-HOSTING PLANE — docker + buildx,
@@ -29,3 +32,21 @@ import _ "embed"
 //
 //go:embed site-runtime-install.sh
 var SiteRuntimeInstallScript string
+
+// AptGetFunc is the bp_apt_get shell function, cut out of
+// SiteRuntimeInstallScript between its BEGIN/END markers. A Go-built command
+// that runs apt-get on a box prepends it and calls bp_apt_get, so it waits for
+// unattended-upgrades' dpkg and lists locks the same way the box scripts do.
+// apt_lock_wait_test.go reds if the markers vanish or a copy drifts.
+func AptGetFunc() string {
+	const begin, end = "# bp_apt_get BEGIN\n", "# bp_apt_get END\n"
+	i := strings.Index(SiteRuntimeInstallScript, begin)
+	if i < 0 {
+		return ""
+	}
+	j := strings.Index(SiteRuntimeInstallScript[i:], end)
+	if j < 0 {
+		return ""
+	}
+	return SiteRuntimeInstallScript[i : i+j+len(end)]
+}
