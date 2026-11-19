@@ -408,6 +408,68 @@ check("an undone list (no input of its own) brings its first input into sight an
   assert.equal($("card-label").value, "Two", "the server's render draws the list");
 });
 
+// A piece of form drawn for one check, taken away after it.
+const drawIn = (html) => {
+  const box = doc.createElement("div");
+  box.innerHTML = html;
+  $("editor-form").appendChild(box);
+  return box;
+};
+
+// bp-desk-array-menu.js opens an item's dialog on a click on its preview.
+doc.addEventListener("click", (e) => {
+  const p = e.target.closest && e.target.closest("[data-desk-item-open]");
+  if (p) doc.getElementById(p.getAttribute("data-desk-item-open")).setAttribute("open", "");
+});
+
+check("a list the undo emptied in a folded fieldset: its wrapper is found by path, unfolded and focused", () => {
+  const box = drawIn(
+    `<fieldset id="more" data-collapsible><legend><button type="button" class="object-toggle" id="more-toggle" aria-expanded="false">More</button></legend>` +
+      `<fieldset class="bp-field" data-field-name="bits"><legend>Bits</legend><button type="button" id="bits-add">Add item</button></fieldset></fieldset>`
+  );
+  try {
+    doc.body.focus();
+    undone({ field: "doc[bits]", value: null, was: null, path: "bits" });
+    assert.deepEqual(toggled, ["more-toggle"], "the fold is opened by its own button");
+    assert.equal(doc.activeElement, $("bits-add"));
+  } finally {
+    box.remove();
+  }
+});
+
+check("a field in a list item's closed dialog: the dialog opens as a click on the item does, then the field is set and focused", () => {
+  const box = drawIn(
+    `<ul><li><button type="button" id="prev1" data-desk-item-open="item-1-dialog">One</button>` +
+      `<dialog id="item-1-dialog" data-desk-item-dialog><input type="text" id="note" name="doc[cards][0].note" value="N1 X1"></dialog></li></ul>`
+  );
+  try {
+    $("prev1").focus();
+    undone({ field: "doc[cards][0].note", value: "N1", was: "N1 X1", path: "cards" });
+    assert.equal($("item-1-dialog").open, true, "the item's dialog is open");
+    assert.equal($("note").value, "N1");
+    assert.equal(doc.activeElement, $("note"));
+    assert.deepEqual(pushes, []);
+  } finally {
+    box.remove();
+  }
+});
+
+check("a field in an item dialog that cannot be opened is not changed out of sight: the change is put back", () => {
+  const box = drawIn(
+    `<dialog id="lost-dialog" data-desk-item-dialog><input type="text" id="lost" name="doc[cards][1].note" value="N2 X2"></dialog>`
+  );
+  try {
+    $("lost-dialog").showModal = undefined;
+    $("title").focus();
+    undone({ field: "doc[cards][1].note", value: "N2", was: "N2 X2", path: "cards" });
+    assert.equal($("lost").value, "N2 X2", "the field is not set");
+    assert.equal(doc.activeElement, $("title"), "the focus stays");
+    assert.deepEqual(pushes, [{ event: "desk-undo", payload: { redo: true, _bp_doc: MARK } }]);
+  } finally {
+    box.remove();
+  }
+});
+
 check("a field the form does not have is ignored", () => {
   undone({ field: "doc[nope]", value: "x", was: "y" });
   undone({});

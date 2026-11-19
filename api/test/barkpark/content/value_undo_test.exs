@@ -32,8 +32,93 @@ defmodule Barkpark.Content.ValueUndoTest do
   end
 
   describe "text" do
-    test "unapplies where this editor's words still are, theirs kept" do
-      assert ValueUndo.revert("my-slug-x", "my-slug", "their-my-slug-x") == "their-my-slug"
+    test "free text unapplies where this editor's words still are, theirs kept" do
+      for field <- [%{"type" => "text"}, %{"type" => "string"}] do
+        assert ValueUndo.revert("Main 12", "Main 1", "Their Main 12", field) == "Their Main 1"
+      end
+    end
+
+    # task-0b9061cb95e89484 review B1: text-merged, two picks made a value neither
+    # editor chose ("small" from "x-large" over "x-small").
+    test "any other string is one value: changed since, it stays theirs" do
+      select = %{
+        "type" => "select",
+        "options" => [%{"value" => "small"}, %{"value" => "x-small"}]
+      }
+
+      assert ValueUndo.revert("x-large", "large", "x-small", select) == "x-small"
+      assert ValueUndo.revert_steps([{"x-large", "large"}], "x-small", select) == "x-small"
+
+      options = %{"type" => "string", "options" => %{"list" => ["draft", "draft_2", "in_review"]}}
+      assert ValueUndo.revert("in_review", "draft", "in_review_2", options) == "in_review_2"
+
+      listed = %{"type" => "string", "options" => [%{"value" => "a"}, %{"value" => "ab"}]}
+      assert ValueUndo.revert("ab", "a", "abb", listed) == "abb"
+
+      for type <- ~w(slug date datetime codelist) do
+        assert ValueUndo.revert("2026-11-21", "2026-11-20", "2026-12-21", %{"type" => type}) ==
+                 "2026-12-21"
+      end
+
+      # A field the schema does not name is not free text either.
+      assert ValueUndo.revert("my-slug-x", "my-slug", "their-my-slug-x") == "their-my-slug-x"
+    end
+
+    test "nested: an object's date or datetime and a slug's current stay theirs, its free text merges" do
+      event = %{
+        "type" => "composite",
+        "fields" => [
+          %{"name" => "place", "type" => "string"},
+          %{"name" => "on", "type" => "date"},
+          %{"name" => "at", "type" => "datetime"}
+        ]
+      }
+
+      mine = %{"place" => "Oslo", "on" => "2026-11-21", "at" => "2026-11-20T10:30"}
+      was = %{"place" => "Oslo", "on" => "2026-11-20", "at" => "2026-11-20T10:00"}
+      theirs = %{"place" => "Oslo", "on" => "2026-12-21", "at" => "2026-11-21T11:30"}
+      assert ValueUndo.revert(mine, was, theirs, event) == theirs
+
+      assert ValueUndo.revert(
+               %{"place" => "Oslo S"},
+               %{"place" => "Oslo"},
+               %{"place" => "Gamle Oslo S"},
+               event
+             ) == %{"place" => "Gamle Oslo"}
+
+      slug = %{"type" => "slug"}
+
+      assert ValueUndo.revert(
+               %{"_type" => "slug", "current" => "a-x"},
+               %{"_type" => "slug", "current" => "a"},
+               %{"_type" => "slug", "current" => "b-a-x"},
+               slug
+             ) == %{"_type" => "slug", "current" => "b-a-x"}
+    end
+
+    test "a list item's codelist code stays theirs; its free text merges" do
+      cards = %{
+        "type" => "arrayOf",
+        "of" => %{
+          "type" => "composite",
+          "name" => "card",
+          "fields" => [
+            %{"name" => "label", "type" => "string"},
+            %{"name" => "code", "type" => "codelist"}
+          ]
+        }
+      }
+
+      mine = [%{"_key" => "k", "label" => "One!", "code" => "AB"}]
+      was = [%{"_key" => "k", "label" => "One", "code" => "A"}]
+
+      assert ValueUndo.revert(
+               mine,
+               was,
+               [%{"_key" => "k", "label" => "One!", "code" => "ABC"}],
+               cards
+             ) ==
+               [%{"_key" => "k", "label" => "One", "code" => "ABC"}]
     end
   end
 
@@ -85,8 +170,8 @@ defmodule Barkpark.Content.ValueUndoTest do
     end
   end
 
-  describe "a list of plain values" do
-    test "what this editor added goes, what it removed comes back, theirs stays" do
+  describe "a list with no keys" do
+    test "what this editor added goes, what it removed comes back, theirs added at the end stays" do
       assert ValueUndo.revert(["red", "blue"], ["red"], ["red", "blue", "green"]) == [
                "red",
                "green"
@@ -96,6 +181,24 @@ defmodule Barkpark.Content.ValueUndoTest do
                "red",
                "blue",
                "green"
+             ]
+    end
+
+    # task-0b9061cb95e89484 review B4: put back by index, "two" landed before "one".
+    test "another editor's item before mine moves positions: the step does nothing" do
+      before = ["one", "two", "three"]
+      theirs = ["zero", "one", "three"]
+      assert ValueUndo.revert(["one", "three"], before, theirs) == theirs
+      assert ValueUndo.revert_steps([{["one", "three"], before}], theirs) == theirs
+
+      retyped = ["one", "two!", "three"]
+      assert ValueUndo.revert(retyped, before, ["zero" | retyped]) == ["zero" | retyped]
+
+      # Objects with no `_key`, the same.
+      a = [%{"label" => "A"}, %{"label" => "B"}]
+
+      assert ValueUndo.revert(a, [%{"label" => "A"}], [%{"label" => "R"} | a]) == [
+               %{"label" => "R"} | a
              ]
     end
   end

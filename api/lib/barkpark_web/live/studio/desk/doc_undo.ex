@@ -272,7 +272,8 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   # The value the store holds now, and that value with the steps taken back.
   defp reverted(socket, %{kind: :value} = change, steps) do
     now = DocUndoValues.stored_now(socket, change.field)
-    {now, ValueUndo.revert_steps(steps, now)}
+    field = DocUndoValues.field(socket.assigns[:editor_schema], change.field)
+    {now, ValueUndo.revert_steps(steps, now, field)}
   end
 
   defp reverted(socket, change, steps) do
@@ -296,7 +297,9 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
     {value, was} =
       DocUndoValues.told(change.input, field, DocUndoValues.stored(saved, field), now)
 
-    %{field: input, value: value, was: was}
+    # `path` names the field itself: a list the undo left empty has no input
+    # to find it by.
+    %{field: input, value: value, was: was, path: field}
   end
 
   defp told(_change, saved, field, now),

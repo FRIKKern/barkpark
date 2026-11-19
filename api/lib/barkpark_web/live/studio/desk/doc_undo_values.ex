@@ -14,8 +14,9 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
     change alone, and its undo cannot take another editor's change with it.
   - The writes recorded are the form's own: a typed or picked change
     (`autosave`) and a list's buttons and item menu (`array_op`).
-  - Taken back with `ValueUndo`: another editor's items, keys and values
-    since stay theirs.
+  - Taken back with `ValueUndo`, by the field's schema: another editor's
+    items, keys and values since stay theirs, and only free text is
+    merged.
   - A rich-text body, a reference, an image or a file is not kept here: the
     body has its canvas's own undo, the others are widgets of their own.
   """
@@ -142,8 +143,9 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   defp at(value, [seg | rest]) when is_map(value), do: value |> Map.get(seg) |> at(rest)
   defp at(_value, _path), do: nil
 
-  defp field(%{fields: fields}, key) when is_list(fields),
+  @doc "The schema's top-level field `key`, nil when it has none."
+  def field(%{fields: fields}, key) when is_list(fields),
     do: Enum.find(fields, &(is_map(&1) and &1["name"] == key))
 
-  defp field(_schema, _key), do: nil
+  def field(_schema, _key), do: nil
 end
