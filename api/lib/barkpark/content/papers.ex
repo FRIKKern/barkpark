@@ -626,8 +626,8 @@ defmodule Barkpark.Content.Papers do
   The paper map `Bpml.print_paper/1` is handed — the ONE builder for it.
 
   Two call sites print a paper as BPML: the source route (`bp paper pull`) and
-  the ingest route's post-write canonical echo (`bp paper push`). They MUST
-  agree — `bp paper push` compares the echo against the next pull, so any drift
+  the ingest route's answer to a write (`bp paper push`). They MUST agree —
+  `bp paper push` compares that answer against the next pull, so any drift
   between them shows up as a working copy that changes under an author who
   edited nothing.
 
