@@ -10,10 +10,10 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical.AliasKey do
   the print shows only the first, so the round trip sees the other one missing
   and refuses.
 
-  `@reads` is a copy of the printer's alias reads. The test
-  `bpml_canonical_alias_key_test.exs` diffs it against every `alias_get(` and
-  `plain_alias(` call in `printer.ex` and fails when the printer reads an alias
-  this list lacks. Lifting the list into the printer itself is
+  `@reads` is a copy of the printer's alias reads. `bpml_canonical_test.exs`
+  diffs it against every `alias_get(`, `plain_alias(` and `plain_body(` call in
+  `printer.ex`, both ways: it fails when the printer reads an alias this list
+  lacks, or this list holds one the printer does not read. Lifting the list into the printer itself is
   task-7b80797938b17417.
   """
 

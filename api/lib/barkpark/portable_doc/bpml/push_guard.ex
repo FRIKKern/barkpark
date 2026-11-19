@@ -11,7 +11,11 @@ defmodule Barkpark.PortableDoc.Bpml.PushGuard do
   A copy without the mark (pulled before, or written from scratch for a slug
   that exists) may not have shown everything. Its push is compared with what is
   stored, and refused, naming the block paths, when it would remove a block, a
-  list item's children or a callout's body.
+  list item's children or a callout's body. A `bp` from before the mark never
+  sends one, so its pushes may not remove those parts either.
+
+  When the print learns to carry a part it could not carry before, the mark
+  goes up: a copy pulled before then counts as unmarked.
   """
 
   @print_mark "1"
@@ -60,7 +64,7 @@ defmodule Barkpark.PortableDoc.Bpml.PushGuard do
            message:
              "this push would remove #{Enum.join(paths, ", ")}, which your copy may never have shown: " <>
                "it has no print mark (it was pulled before the print checked itself, or written from scratch for a Paper that exists). " <>
-               "Pull again (bp paper pull) and make your change in the fresh copy.",
+               "Pull again with a current bp (bp paper pull) and make your change in the fresh copy.",
            paths: paths
          }}
     end

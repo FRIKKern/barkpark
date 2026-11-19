@@ -34,7 +34,7 @@ defmodule Barkpark.PortableDoc.BpmlPushGuardTest do
              PushGuard.check(stored, [para("p1", "One")], nil)
 
     assert msg =~ "blocks[1]"
-    assert msg =~ "Pull again (bp paper pull) and make your change in the fresh copy."
+    assert msg =~ "Pull again with a current bp (bp paper pull) and make your change in the fresh copy."
     assert msg =~ "written from scratch"
   end
 
