@@ -80,6 +80,16 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallCorpusTest do
           [rev] = get_resp_header(resp, "x-paper-rev")
           bpml = resp.resp_body
 
+          # The route serves the printer's bytes for the row's view, at its rev.
+          {:blocks, view, fields} = BpmlView.of(paper, @ds, [], :published)
+
+          assert bpml ==
+                   Barkpark.PortableDoc.Bpml.print_paper(
+                     Content.Papers.bpml_paper_map(paper, view, fields)
+                   )
+
+          assert {:ok, String.to_integer(rev)} == Content.Papers.op_rev(paper)
+
           unedited = sync(slug, bpml, rev)
 
           if unedited.status == 200 do
