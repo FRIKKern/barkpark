@@ -14,7 +14,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LocalOnly do
   * **Columns: `seat_change`** on `workspace_memberships` and on
     `workspace_access_requests`. The seat change stamp is set by this
     database alone (task-018e79d8734a1b08). The export leaves these
-    columns out; an import refuses a bundle that names one (`invalid_bundle`).
+    columns out. An import refuses a `workspace_memberships` member that
+    names `seat_change` (`invalid_bundle`); a `workspace_access_requests`
+    member is left out whole, whatever columns it names, so nothing it
+    carries lands.
   * **A trigger: `workspace_memberships_seat_change`**, the one setter of a
     seat's stamp, `ENABLE ALWAYS` so it fires under
     `session_replication_role = replica` too. The import turns user triggers

@@ -8,7 +8,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleSeatChangeTest do
     a new stamp from this database, so a role request the target made before
     the import is stale after it: promoted, demoted or removed in the target,
     the import putting the old seat row back does not make it approvable.
-  * A bundle that names `seat_change` is refused before anything commits.
+  * A bundle whose `workspace_memberships` member names `seat_change` is
+    refused before anything commits.
   """
   use Barkpark.DataCase, async: false
 
@@ -185,7 +186,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleSeatChangeTest do
   for mode <- [:merge, :clean] do
     @mode mode
 
-    test "#{mode}: a bundle that names seat_change is refused and writes nothing" do
+    test "#{mode}: a bundle whose memberships name seat_change is refused and writes nothing" do
       f = fixture()
       {manifest, dumps} = Archive.unpack(f.bundle)
       forged = "00000000-0000-0000-0000-0000000000aa"
