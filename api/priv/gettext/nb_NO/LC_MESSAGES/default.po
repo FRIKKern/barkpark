@@ -15474,3 +15474,18 @@ msgstr "Panorama"
 #, elixir-autogen, elixir-format
 msgid "Unpublished %{ago}"
 msgstr "Avpublisert %{ago}"
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Not in the list"
+msgstr "Ikke i listen"
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Remove code"
+msgstr "Fjern kode"
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "The first 200 matches. Type more to narrow them."
+msgstr "De første 200 treffene. Skriv mer for å snevre dem inn."

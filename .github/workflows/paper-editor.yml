@@ -180,6 +180,7 @@ jobs:
           node ../paper-editor-host-tests/__card_media_bridge.test.mjs
           node ../paper-editor-host-tests/__card_title_contextual_inline.test.mjs
           node ../paper-editor-host-tests/__collection_focus.test.mjs
+          node ../paper-editor-host-tests/__desk_codelist_keys.test.mjs
           node ../paper-editor-host-tests/__desk_field_actions.test.mjs
           node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
           node ../paper-editor-host-tests/__desk_focus_mode.test.mjs
