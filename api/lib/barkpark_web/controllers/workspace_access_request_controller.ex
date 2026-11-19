@@ -12,13 +12,23 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
   Approve seats the user through `Members.add_user_member/4`
   (`Tenancy.AccessRequests.approve/4`), so the invite path's role ceiling
   holds: only an owner grants `owner` (`403 owner_required`).
+
+  A member's request for a higher role (`kind: "role"` in the list, with
+  `requested_role`, `current_role` and `stale`) is approved through
+  `Members.update_role/4`, the same path as `PATCH /v1/members/:ref`, so the
+  same ceiling holds; a role that does not rank above the current one is
+  `409 role_not_higher`.
+
+  Any request is refused with nothing changed when the seat moved since the
+  ask (`409 request_stale`, listed as `stale: true`). That includes a seat
+  request whose asker was seated meanwhile, which answered `409
+  already_member` before. The asker, or a token the asker owns, never
+  decides their own request (`403 self_approval`).
   """
   use BarkparkWeb, :controller
 
   alias Barkpark.Tenancy.AccessRequests
   alias BarkparkWeb.ErrorResponse
-
-  @default_role "member"
 
   @doc "`GET /w/:ws/p/:proj/v1/access-requests` — pending requests, oldest first."
   def index(conn, _params) do
@@ -29,8 +39,10 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
   end
 
   @doc """
-  `POST /w/:ws/p/:proj/v1/access-requests/:id/approve` — seat the asker.
-  Body: `{"role": "member|admin|owner|contributor|<custom>"}`, default `member`.
+  `POST /w/:ws/p/:proj/v1/access-requests/:id/approve` — seat the asker, or
+  change a member's role. Body: `{"role": "member|admin|owner|contributor|<custom>"}`.
+  With no role a seat request seats `member` and a role request grants the
+  role asked for.
   """
   def approve(conn, %{"id" => id} = params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
@@ -58,7 +70,10 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
   end
 
   defp fetch_role(params) do
-    case Map.get(params, "role", @default_role) do
+    case Map.get(params, "role") do
+      nil ->
+        {:ok, nil}
+
       role when is_binary(role) ->
         case String.trim(role) do
           "" -> {:error, :invalid_role}
@@ -90,6 +105,36 @@ defmodule BarkparkWeb.WorkspaceAccessRequestController do
         "already_member",
         "that person already holds a seat here; deny the request to clear it"
       )
+
+  defp deny(conn, :self_approval),
+    do:
+      fields(
+        conn,
+        :forbidden,
+        "self_approval",
+        "the asker cannot decide their own request; another admin must"
+      )
+
+  defp deny(conn, :request_stale),
+    do:
+      fields(
+        conn,
+        :conflict,
+        "request_stale",
+        "that person's seat changed since they asked (removed, re-roled, or seated another " <>
+          "way); deny the request, or let them ask again"
+      )
+
+  defp deny(conn, :role_not_higher),
+    do:
+      fields(
+        conn,
+        :conflict,
+        "role_not_higher",
+        "that role does not rank above the role the person holds now"
+      )
+
+  defp deny(conn, :unknown_role), do: unprocessable(conn, "role is not a role of this workspace")
 
   defp deny(conn, %Ecto.Changeset{} = cs) do
     if Keyword.has_key?(cs.errors, :role),

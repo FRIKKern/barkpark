@@ -805,6 +805,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           :if={!@edit_failed and !gone?(assigns) and !document_node?(@view.pane)}
           patch={Panes.split_right(@chain, @view.index, @base)}
           class="dk-split icon-btn"
+          data-desk-split-right
           aria-label={gettext("Split pane right")}
           data-tip={gettext("Split pane right")}
         >
