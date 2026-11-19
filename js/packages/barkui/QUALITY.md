@@ -35,6 +35,6 @@ A "waiting on the sheet" line is a gap in the sheet, not in the part. It is work
 ## Docs
 
 - Picture first: the README, the roadmap and the decisions open with a picture, a diagram or a table.
-- One fact, one home ([README](README.md#where-things-live-one-fact-one-home)). Status lives on the task board, never in docs.
+- One fact, one home ([README](README.md#where-things-live-one-fact-one-home)). Status lives on the task board; `node build/board.mjs` copies it into the roadmap, stamped, and a fast test fails when that block is edited by hand. It needs `bp`, so it runs on a machine or in the daily news job, never in a PR check.
 - No number on these pages is typed by hand. Counts are written by `node build/status.mjs` between `<!-- status:start -->` and `<!-- status:end -->`, and a fast test fails when they are stale. A number nobody can count from a file is left out.
 - Pictures are real showroom shots, never mock-ups. They show the showroom as it stood when they were taken; `node check/shots.mjs <dir>` retakes them.

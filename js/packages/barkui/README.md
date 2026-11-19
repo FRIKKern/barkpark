@@ -69,8 +69,8 @@ What a check run proves for each part is on the showroom page, not here: it come
 | Base styles and the one focus ring | [`css/base.css`](css/base.css) |
 | The showroom | [`build/`](build/), written to `dist/showroom/index.html` |
 | The checks | [`check/`](check/) in a browser, [`tests/`](tests/) without one; run in CI by `.github/workflows/js-tests.yml` |
-| The numbers on these pages | [`build/status.mjs`](build/status.mjs) |
-| Status, who does what | The BarkUI goal on Barkpark's task board. Never in docs |
+| The numbers on these pages | [`build/status.mjs`](build/status.mjs) from the files; [`build/board.mjs`](build/board.mjs) from the board |
+| Status, who does what | The BarkUI goal on Barkpark's task board; copied into the roadmap only by [`build/board.mjs`](build/board.mjs) |
 
 ## Layout
 
@@ -95,6 +95,7 @@ pnpm run build             # dist/showroom/index.html; opens from disk, no serve
 pnpm run check             # press every part in headless Chromium and light the page
 pnpm test                  # the fast tests, these pages' numbers included
 node build/status.mjs      # rewrite the numbers in README and ROADMAP
+node build/board.mjs <goal-task-id>   # copy each milestone's progress from the board (needs bp)
 node check/shots.mjs <dir> # light and dark pictures of the built page
 node ../../../design/emit.mjs --write   # rewrite the sheet after a skin changes
 ```
