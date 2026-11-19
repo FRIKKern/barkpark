@@ -13,8 +13,10 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     not yet published,
     "Last published 2h ago" when there are none, and the save's own words
     when a save went wrong ("Save failed", "Updated by another user" while
-    another editor's save clashes with typing here; one taken in cleanly is
-    no problem). A
+    another editor's save clashes with typing here or replaced a value this
+    tab saved; one that kept them is no problem, `RemoteSave`). Another
+    editor's save of the draft is the draft's state here too: "Edited N
+    ago", Publish offered. A
     refused save names its field or its reason (`RefusedSave.status/1`).
   - Publish sends the Studio's own `publish` event. It is greyed out when
     there is nothing to publish (the Studio offers no Publish then), as
@@ -40,6 +42,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Studio.Desk.JustSaved
+  alias BarkparkWeb.Studio.Desk.RemoteSave
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias Phoenix.LiveView.JS
 
@@ -153,8 +156,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   @doc "The footer's words for the open document."
   @spec status(map(), DateTime.t()) :: String.t()
   def status(assigns, now \\ DateTime.utc_now()) do
-    doc = assigns[:editor_doc] || %{}
-    at = Map.get(doc, :updated_at)
+    {at, state} = RemoteSave.latest(assigns)
 
     problem = RefusedSave.token(assigns)
 
@@ -171,7 +173,7 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
       assigns[:editor_is_draft] == true ->
         gettext("Edited %{ago}", ago: ago(at, now))
 
-      Map.get(doc, :status) == "published" ->
+      state == "published" ->
         gettext("Last published %{ago}", ago: ago(at, now))
 
       true ->
@@ -179,11 +181,14 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     end
   end
 
-  # Another editor's save the form took in cleanly (no clash with typing
-  # here, `doc_conflict` unset): the Studio still names it "Updated by another
+  # Another editor's save that kept every value this tab saved (no clash with
+  # typing here, `doc_conflict` unset, and nothing this tab saved replaced or
+  # dropped, `RemoteSave`): the Studio still names it "Updated by another
   # user", but nothing went wrong, so the footer says what it says otherwise,
   # as TanStack's (which names no remote save).
-  defp merged?("Updated by another user", assigns), do: assigns[:doc_conflict] != true
+  defp merged?("Updated by another user", assigns),
+    do: assigns[:doc_conflict] != true and not RemoteSave.overwritten?(assigns)
+
   defp merged?(_problem, _assigns), do: false
 
   @doc "How long ago `at` was, in the words the footer and the list rows use (\"5m ago\")."

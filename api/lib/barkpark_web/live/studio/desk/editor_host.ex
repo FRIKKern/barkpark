@@ -40,6 +40,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
   alias BarkparkWeb.Studio.Desk.JustSaved
+  alias BarkparkWeb.Studio.Desk.RemoteSave
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -366,6 +367,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           |> ours()
           |> after_restore(event, before)
           |> JustSaved.after_write(before)
+          |> RemoteSave.after_write(socket)
         else
           {:halt, socket} -> {:noreply, socket}
         end
@@ -394,6 +396,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             |> Scope.settle_group()
             |> ours()
             |> JustSaved.after_write(socket.assigns[:editor_doc])
+            |> RemoteSave.after_write(socket)
 
           {:halt, socket} ->
             {:noreply, socket}
@@ -421,7 +424,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   def handle_info({:doc_updated, msg} = message, socket) do
     if Discarded.frame?(msg, socket.assigns),
       do: ours({:noreply, Discarded.reload(socket)}),
-      else: message |> StudioLive.handle_info(socket) |> ours()
+      else: message |> StudioLive.handle_info(socket) |> RemoteSave.frame(msg) |> ours()
   end
 
   # A tree codelist's pick: the press went to its component

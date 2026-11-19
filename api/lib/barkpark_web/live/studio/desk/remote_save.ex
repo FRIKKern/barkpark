@@ -1,0 +1,204 @@
+defmodule BarkparkWeb.Studio.Desk.RemoteSave do
+  @moduledoc """
+  Another editor's save, as the desk footer reads it (`DocFooter.status/2`).
+
+  WHETHER IT IS NAMED. The Studio names every save from another editor
+  "Updated by another user". The footer hides that only when the save kept
+  every value this tab saved intact: another field, or J06's two ends of
+  one title. When it replaced or dropped one, the footer keeps the warning:
+  two splices that overlap, a post with no base text, a date both picked, a
+  text over the merge's size cap (`TextRebase.merge3/3` falls back to the
+  last post in each). Typing this tab still holds is the Studio's own
+  clash (`doc_conflict`), named too.
+
+  - This tab's own change is kept per field as `{before, after}` in form
+    shape: the form before the write and the stored value after it, for the
+    fields both moved (`after_write/2`). The form takes every remote save,
+    so a field only another editor changed is not counted as this tab's.
+  - A frame keeps a change intact when the field still holds this tab's
+    value, or, for text, when this tab's words still come back out of it
+    (`TextUndo.revert/3`). The change is then kept on the new text. A change
+    not intact is dropped, and the document is marked until this tab's
+    next save lands.
+
+  THE DRAFT. A remote frame does not change `editor_doc`: it stays this
+  tab's base for the merge. What the footer and the Publish button read of
+  it is refreshed here: a remote save of the draft opens it in this tab too
+  (`editor_is_draft`, Publish offered, "Edited N ago" from the frame's time),
+  and a Publish elsewhere closes it ("Last published N ago").
+
+  Both are keyed by the document's published id, so another document
+  opened in the pane does not inherit them.
+  """
+
+  import Phoenix.Component, only: [assign: 2, assign: 3]
+
+  alias Barkpark.Content
+  alias Barkpark.Content.TextUndo
+
+  @own :desk_own_values
+  @overwritten :desk_overwritten
+  @meta :desk_remote_meta
+
+  # ── This tab's writes ───────────────────────────────────────────────────
+
+  @doc """
+  The result of an event answered from `before` (the socket before it): a
+  write that landed keeps its change, and the document is no longer marked.
+  """
+  def after_write({:noreply, socket}, before), do: {:noreply, own(socket, before)}
+  def after_write({:reply, reply, socket}, before), do: {:reply, reply, own(socket, before)}
+  def after_write(other, _before), do: other
+
+  defp own(socket, before) do
+    doc = socket.assigns[:editor_doc]
+
+    with "Saved" <- socket.assigns[:save_status],
+         %{doc_id: id, rev: rev} <- doc,
+         %{doc_id: was, rev: was_rev} when was_rev != rev <- before.assigns[:editor_doc],
+         pub = Content.published_id(id),
+         true <- pub == Content.published_id(was) do
+      stored = Content.doc_to_form(doc, socket.assigns[:editor_schema])
+      shown = before.assigns[:editor_form] || %{}
+      base = Content.doc_to_form(before.assigns[:editor_doc], socket.assigns[:editor_schema])
+
+      changes =
+        for {key, value} <- stored,
+            Map.get(shown, key) != value and Map.get(base, key) != value,
+            into: kept(socket.assigns, pub),
+            do: {key, {Map.get(shown, key), value}}
+
+      assign(socket, [{@own, {pub, changes}}, {@overwritten, nil}])
+    else
+      _ -> socket
+    end
+  end
+
+  defp kept(assigns, pub) do
+    case assigns[@own] do
+      {^pub, changes} -> changes
+      _ -> %{}
+    end
+  end
+
+  # ── Another editor's frame ──────────────────────────────────────────────
+
+  @doc """
+  After the Studio took another editor's frame `msg` into `result`: whether
+  it kept this tab's values, and the draft state it carries.
+  """
+  def frame({:noreply, socket}, msg), do: {:noreply, frame_into(socket, msg)}
+  def frame(other, _msg), do: other
+
+  defp frame_into(socket, %{doc: %{doc_id: frame_id} = frame} = msg) do
+    with true <- msg[:sender] != self(),
+         %{doc_id: id} = doc <- socket.assigns[:editor_doc],
+         pub = Content.published_id(id),
+         true <- pub == Content.published_id(frame_id),
+         true <- newer?(frame, doc) do
+      socket |> judge(pub) |> draft_state(pub, msg, frame)
+    else
+      _ -> socket
+    end
+  end
+
+  defp frame_into(socket, _msg), do: socket
+
+  # The form now holds the frame (the Studio's clean path); a clash with
+  # typing here is the Studio's own warning.
+  defp judge(socket, pub) do
+    if socket.assigns[:doc_conflict] == true do
+      socket
+    else
+      now = socket.assigns[:editor_form] || %{}
+
+      {intact, lost} =
+        socket.assigns
+        |> kept(pub)
+        |> Enum.reduce({%{}, []}, fn {key, step}, {intact, lost} ->
+          case intact(step, Map.get(now, key)) do
+            {:ok, step} -> {Map.put(intact, key, step), lost}
+            :lost -> {intact, [key | lost]}
+          end
+        end)
+
+      socket = assign(socket, @own, {pub, intact})
+      if lost == [], do: socket, else: assign(socket, @overwritten, pub)
+    end
+  end
+
+  # The field still holds this tab's value, or this tab's words still come
+  # back out of the text: kept on the text it holds now.
+  defp intact({_before, value} = step, value), do: {:ok, step}
+
+  defp intact({before, value}, now)
+       when is_binary(before) and is_binary(value) and is_binary(now) do
+    case TextUndo.revert(value, before, now) do
+      ^now -> :lost
+      without -> {:ok, {without, now}}
+    end
+  end
+
+  defp intact(_step, _now), do: :lost
+
+  defp draft_state(socket, pub, msg, frame) do
+    meta = %{id: pub, at: frame[:updated_at]}
+
+    case {msg[:mutation], Content.draft?(frame.doc_id)} do
+      {"publish", _} ->
+        assign(socket,
+          editor_is_draft: false,
+          editor_has_published: true,
+          desk_remote_meta: Map.put(meta, :status, "published")
+        )
+
+      {"unpublish", true} ->
+        assign(socket,
+          editor_is_draft: true,
+          editor_has_published: false,
+          desk_remote_meta: Map.put(meta, :status, "draft")
+        )
+
+      {mutation, true} when mutation not in ["discardDraft", "delete"] ->
+        assign(socket, editor_is_draft: true, desk_remote_meta: Map.put(meta, :status, "draft"))
+
+      _ ->
+        socket
+    end
+  end
+
+  defp newer?(%{updated_at: %DateTime{} = sent}, %{updated_at: %DateTime{} = own}),
+    do: DateTime.compare(sent, own) != :lt
+
+  defp newer?(_frame, _doc), do: true
+
+  # ── What the footer reads ───────────────────────────────────────────────
+
+  @doc "Whether another editor's save replaced or dropped a value this tab saved."
+  def overwritten?(assigns),
+    do: open_id(assigns) != nil and assigns[@overwritten] == open_id(assigns)
+
+  @doc """
+  The open document's last change, `{at, status}`: this tab's copy, or
+  another editor's frame when that is newer.
+  """
+  def latest(assigns) do
+    doc = assigns[:editor_doc] || %{}
+    own = {Map.get(doc, :updated_at), Map.get(doc, :status)}
+
+    case assigns[@meta] do
+      %{id: id, at: %DateTime{} = at, status: status} ->
+        if id == open_id(assigns) and newer?(%{updated_at: at}, doc), do: {at, status}, else: own
+
+      _ ->
+        own
+    end
+  end
+
+  defp open_id(assigns) do
+    case assigns[:editor_doc] do
+      %{doc_id: id} when is_binary(id) -> Content.published_id(id)
+      _ -> nil
+    end
+  end
+end
