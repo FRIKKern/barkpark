@@ -4,7 +4,9 @@
    States come in pairs: a state that changes the ground names its text colour too.
    The destructive look is the sheet's soft fill with its tone's text (--bark-danger-soft, --bark-danger-text);
    its edge is that text too, the one tone token that marks the control at 3:1 or more against the ground.
-   State tints come from base.css; the focus ring is base.css's, drawn once for every part. */
+   Hover and pressed are the sheet's state fills for each look (--ui-muted-hover/-pressed for secondary and
+   quiet, --ui-primary-hover/-pressed, --bark-danger-soft-hover/-pressed); no tint is mixed here or in base.css.
+   The focus ring is base.css's, drawn once for every part. */
 [data-slot="button"] {
   --bark-button-height: calc(var(--ui-spacing) * 9);
   --bark-button-pad: calc(var(--ui-spacing) * 3.5);
@@ -13,10 +15,10 @@
   --bark-button-bg: var(--ui-background);
   --bark-button-fg: var(--ui-foreground);
   --bark-button-edge: var(--ui-input);
-  --bark-button-hover-bg: var(--bark-hover);
+  --bark-button-hover-bg: var(--ui-muted-hover);
   --bark-button-hover-fg: var(--ui-foreground);
   --bark-button-hover-edge: var(--ui-input);
-  --bark-button-press-bg: var(--bark-press);
+  --bark-button-press-bg: var(--ui-muted-pressed);
   --bark-button-press-fg: var(--ui-foreground);
 
   height: var(--bark-button-height);
@@ -48,10 +50,10 @@
     --bark-button-bg: var(--ui-primary);
     --bark-button-fg: var(--ui-primary-foreground);
     --bark-button-edge: var(--ui-primary);
-    --bark-button-hover-bg: var(--bark-hover-primary);
+    --bark-button-hover-bg: var(--ui-primary-hover);
     --bark-button-hover-fg: var(--ui-primary-foreground);
-    --bark-button-hover-edge: var(--bark-hover-primary);
-    --bark-button-press-bg: var(--bark-press-primary);
+    --bark-button-hover-edge: var(--ui-primary-hover);
+    --bark-button-press-bg: var(--ui-primary-pressed);
     --bark-button-press-fg: var(--ui-primary-foreground);
   }
   &[data-variant="ghost"] {
@@ -63,10 +65,10 @@
     --bark-button-bg: var(--bark-danger-soft);
     --bark-button-fg: var(--bark-danger-text);
     --bark-button-edge: var(--bark-danger-text);
-    --bark-button-hover-bg: var(--bark-hover-destructive);
+    --bark-button-hover-bg: var(--bark-danger-soft-hover);
     --bark-button-hover-fg: var(--bark-danger-text);
     --bark-button-hover-edge: var(--bark-danger-text);
-    --bark-button-press-bg: var(--bark-press-destructive);
+    --bark-button-press-bg: var(--bark-danger-soft-pressed);
     --bark-button-press-fg: var(--bark-danger-text);
   }
 

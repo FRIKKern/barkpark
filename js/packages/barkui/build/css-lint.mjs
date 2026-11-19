@@ -23,8 +23,8 @@ const FUNC_RE = /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|light-dark)\s*\(/i
 const HEX_RE = /#[0-9a-f]{3,8}\b/i
 
 // A part never branches on skin or scheme, and never draws its own focus ring
-// (base.css draws one ring for every part) or mixes its own state tints (base.css
-// computes them once from the skin).
+// (base.css draws one ring for every part) or mixes its own state tints (the
+// sheet serves a hover and a pressed fill for every control fill).
 const SELECTOR_RULES = [
   [/\[\s*data-(skin|bp-theme|color-scheme|theme)\b/i, (m) => `a [data-${m[1]}] rule: parts never branch on skin or scheme`],
   [/prefers-color-scheme/i, () => 'a prefers-color-scheme query: parts never branch on scheme'],
@@ -91,7 +91,7 @@ export function lintPartCss(css, allow = {}) {
       if (!/^data:image\/svg\+xml/i.test(src)) found.push(`${at}: ${prop} loads an image; only a data: SVG drawn in currentColor is allowed`)
       else if (own || !/currentColor/i.test(src)) found.push(`${at}: ${prop} has an SVG with its own colour; draw it in currentColor`)
     }
-    if (/color-mix\s*\(/i.test(value)) found.push(`${at}: ${prop} mixes a tint; state tints are computed once in base.css`)
+    if (/color-mix\s*\(/i.test(value)) found.push(`${at}: ${prop} mixes a tint; state fills are the sheet's (--ui-primary-hover, --ui-muted-pressed and so on)`)
     if (/^outline/.test(prop)) found.push(`${at}: ${prop}: the focus ring is drawn once, in base.css`)
     const named = value.match(NAMED_RE)
     if (named) found.push(`${at}: ${prop} uses the named colour "${named[2]}"`)

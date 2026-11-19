@@ -20,9 +20,10 @@ parts/<name>/
 Adding a part is adding a folder. The build, the check and the tests find parts by reading `parts/`;
 no other file changes.
 
-`css/base.css` holds what every part shares: the state tints (`--bark-hover`, `--bark-hover-primary`,
-`--bark-press-destructive` and so on, computed once from the skin until the sheet owns them) and the one
-focus ring (a 2px gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `--ui-ring` halo).
+`css/base.css` holds what every part shares: the page ground and type, and the one focus ring (a 2px
+gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `--ui-ring` halo). Hover and pressed fills
+are the sheet's (`--ui-primary-hover`, `--ui-muted-pressed`, `--bark-danger-soft-hover` and so on);
+neither base.css nor a part mixes a tint of its own.
 
 - `pnpm run build` writes `dist/showroom/index.html`, which opens from disk with no server and no network.
 - `pnpm run check` builds, presses every part in headless Chromium, and writes `dist/proof.json`:

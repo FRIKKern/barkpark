@@ -9,23 +9,6 @@
     --ui-radius: 0.375rem;
   }
 
-  /* State grounds, computed once here from the skin until the sheet owns them.
-     Parts read these names and never mix a tint of their own. Declared wherever
-     the sheet repoints --ui-* (a skin, a surface, a depth), so each computes its own.
-     Named state-first, clear of the sheet's per-surface --bark-<surface>-* names. */
-  :root,
-  [data-skin],
-  [data-bp-theme],
-  [data-surface],
-  [data-depth] {
-    --bark-hover: var(--ui-muted);
-    --bark-press: var(--bark-selected);
-    --bark-hover-primary: color-mix(in oklab, var(--ui-primary) 88%, var(--ui-foreground));
-    --bark-press-primary: color-mix(in oklab, var(--ui-primary) 78%, var(--ui-foreground));
-    --bark-hover-destructive: color-mix(in oklab, var(--ui-destructive) 10%, var(--ui-background));
-    --bark-press-destructive: color-mix(in oklab, var(--ui-destructive) 14%, var(--ui-background));
-  }
-
   *, *::before, *::after { box-sizing: border-box; }
 
   :where(html) { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
