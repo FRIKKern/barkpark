@@ -7,7 +7,7 @@ import {
   deepCloneBlocks,
   mergeSourceText,
 } from "./source-realign.js";
-import { sentinelHarm, sourceStored, sourceWallLoss } from "./source-save.js";
+import { sentinelRefusal, sourceStored, sourceWallLoss } from "./source-save.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 
   // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──
@@ -242,21 +242,23 @@ export function sourceModeCommit(md) {
   // source mode does not edit. Such Markdown is refused, with one line naming the
   // block, until the line is put back; moving or deleting the line is saved as usual.
   // Two checks, the second the wall: changedSentinel (a sentinel line that is not one
-  // the textarea already held, whole), then sentinelHarm on the blocks the save would
-  // store (no block gains the marker or a shown sentinel's JSON in its words, and a
-  // block shown as a sentinel is stored unchanged or not at all).
+  // the textarea already held, whole), then sentinelRefusal on the blocks the save would
+  // store (no block gains the marker or a shown sentinel's JSON in its words; a block
+  // shown as a sentinel is stored unchanged, or deleted by a save that only deletes,
+  // which has a notice of its own; a batch the fold refuses is refused).
 function refuseSentinelEdit(md) {
-    let index = changedSentinel(md, this._sourceOriginalMd);
-    if (index === -1) index = storedSentinelHarm.call(this, md);
-    if (index === -1) {
+    const edited = changedSentinel(md, this._sourceOriginalMd);
+    const refusal = edited !== -1 ? { index: edited, removal: false } : storedSentinelHarm.call(this, md);
+    if (!refusal) {
       if (this._sourceRefusing) this._clearFigureConstraint();
       this._sourceRefusing = false;
       return false;
     }
     this._sourceRefusing = true;
-    this._showFigureConstraint(
-      t("Not saved: block %{number} is shown as JSON, and source mode does not edit it.", { number: index + 1 }),
-    );
+    const number = refusal.index + 1;
+    this._showFigureConstraint(refusal.removal
+      ? t("Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.", { number })
+      : t("Not saved: block %{number} is shown as JSON, and source mode does not edit it.", { number }));
     return true;
   }
 
@@ -268,14 +270,14 @@ function sourceView() {
     };
 }
 
-// sentinelHarm over what sourceModeCommit(md) would store: the parse laid out as the
+// sentinelRefusal over what sourceModeCommit(md) would store: the parse laid out as the
 // commit lays it, saved over the run its ops are diffed from.
 function storedSentinelHarm(md) {
     const L0 = this._sourceBaselineBlocks || [];
     const laid = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
     const base = this._inflightOps ? this._inflightOps.afterBlocks : (this._debounceBaselineBlocks || this._blocks || []);
     const { saved } = sourceStored(base, laid, sourceView.call(this));
-    return saved ? sentinelHarm(base, L0, this._sourceOriginalMd, saved) : -1;
+    return sentinelRefusal(base, L0, this._sourceOriginalMd, saved);
 }
 
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the

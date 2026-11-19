@@ -13,10 +13,11 @@
 //             string that is not an id or a type: source mode does not edit such a
 //             block, so the save must be refused (changedSentinel)
 //             Each sentinel line also gets every edit below, judged by the guard on
-//             what the save would store alone (sentinelHarm, not changedSentinel):
-//             each must store the block unchanged, store it deleted whole, or be
-//             refused, never a block holding JSON in its words, never two blocks
-//             with one id
+//             what the save would store alone (sentinelRefusal, not changedSentinel):
+//             each must store the block unchanged, store it deleted by a save that
+//             only deletes, or be refused, never a block holding JSON in its words,
+//             never two blocks with one id. The saves refused for deleting the block
+//             and doing more are counted, and counted again apart (onlyDeletes)
 //   no words  a divider, a closing fence, a blank line, a diagram fence with no
 //             caption, a sentinel with no string to type in: the key changes what
 //             the line is, and the textarea shows that
@@ -36,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { mount } from "./source-flush-mounted-harness.mjs";
 import { normalizeCanvasDoc } from "./canvas-document.js";
 import { docToBlocks } from "./run-convert.js";
-import { sentinelHarm, sourceSaved, sourceStored, sourceWallLoss } from "./source-save.js";
+import { sentinelRefusal, sourceSaved, sourceStored, sourceWallLoss } from "./source-save.js";
 import { canonicalJSON } from "./projection-json.js";
 import { clampLockedPrefix, realignAcrossCommits } from "./source-realign.js";
 import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
@@ -171,7 +172,7 @@ const strings = (value) => typeof value === "string" ? [value]
 const sameBlock = (a, b) => JSON.stringify({ ...a, id: null }) === JSON.stringify({ ...b, id: null });
 
 function sweep(rule) {
-  const counts = { rows: [], papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, lost: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), writableTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
+  const counts = { rows: [], papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, lost: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, removalRefused: 0, removalCensus: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), writableTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
   const opts = rule === "on" ? {} : lifted;
   for (const [name, stored] of papers()) {
     counts.papers += 1;
@@ -239,7 +240,13 @@ function sweep(rule) {
           counts.edits += 1;
           const laid = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(editedMd)));
           const { saved } = sourceStored(stored, laid, view);
-          if (!saved || sentinelHarm(stored, live, md, saved) !== -1) { counts.guardRefused += 1; continue; }
+          if (saved && !saved.some((b) => b.id === block.id) && !onlyDeletes(stored, saved)) counts.removalCensus += 1;
+          const refusal = sentinelRefusal(stored, live, md, saved);
+          if (refusal) {
+            counts.guardRefused += 1;
+            if (refusal.removal) counts.removalRefused += 1;
+            continue;
+          }
           const ids = saved.map((b) => b.id);
           if (new Set(ids).size !== ids.length) lose(where, `${edit}: two blocks share an id`);
           const same = saved.find((b) => b.id === block.id);
@@ -258,7 +265,7 @@ function sweep(rule) {
       if (changedSentinel(typedMd, md) !== -1) return lose(where, "a key typed outside any sentinel was refused");
       const laidTyped = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(typedMd)));
       const storedTyped = sourceStored(stored, laidTyped, view).saved;
-      if (storedTyped && sentinelHarm(stored, live, md, storedTyped) !== -1) {
+      if (sentinelRefusal(stored, live, md, storedTyped)) {
         // Refused rightly only when the key opened a fence that takes a sentinel line
         // into its body: that save would store the JSON as the fence's words.
         const whole = (text) => markdownToBlocks(text).filter((b) => b.id && sentinelIds.has(b.id)).length;
@@ -296,6 +303,19 @@ function sweep(rule) {
   return counts;
 }
 
+// Whether `saved` is `stored` with some blocks taken out, every one left byte-equal and
+// in its order: written apart from the guard, to count its deletion refusals again.
+function onlyDeletes(stored, saved) {
+  let from = 0;
+  for (const block of saved) {
+    const json = canonicalJSON(block);
+    while (from < stored.length && canonicalJSON(stored[from]) !== json) from++;
+    if (from === stored.length) return false;
+    from++;
+  }
+  return true;
+}
+
 // The same count made apart from the sweep: the lines of every Paper's Markdown that
 // opens writable, and the block types in all of them, read from the files again.
 function census(rule) {
@@ -327,8 +347,10 @@ function report(label, c) {
     `refused for opening a fence over a sentinel ${c.fenceRefused}, lost ${c.lost}, skipped ${c.skipped}; ` +
     `${c.losers.length} losers`);
   console.log(`  sentinel lines, ${c.edits} edits judged by the stored-result guard alone: ` +
-    `kept unchanged ${c.guardKept}, deleted whole ${c.guardDeleted}, refused ${c.guardRefused}`);
+    `kept unchanged ${c.guardKept}, deleted whole ${c.guardDeleted}, refused ${c.guardRefused} ` +
+    `(${c.removalRefused} for deleting the block and doing more)`);
   assert.equal(c.guardKept + c.guardDeleted + c.guardRefused, c.edits, "each sentinel edit ends in one of the three");
+  assert.equal(c.removalRefused, c.removalCensus, "the deletion refusals are the saves onlyDeletes finds doing more than deleting");
 }
 
 try {

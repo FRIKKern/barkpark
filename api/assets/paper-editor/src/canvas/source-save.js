@@ -68,7 +68,7 @@ export function sourceStored(base, laid, view) {
   }
 }
 
-export { sentinelHarm } from "./source-sentinel-guard.js";
+export { sentinelHarm, sentinelRefusal } from "./source-sentinel-guard.js";
 
 // The wall: the first loss opening source mode could make, or null. `stored` is what
 // the Paper holds, with the ops still in flight (`inflight`) folded on. Its own

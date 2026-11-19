@@ -8,7 +8,7 @@
 // as empty, so it opens read-only. And a Paper whose unedited save gives back other
 // blocks than stored opens read-only.
 // Run: node src/canvas/__source_wall_carriers_mounted.test.mjs (CASE=<shape name> or
-// CASE=refused, edges, duplicate or readme runs one case).
+// CASE=refused, edges, outcome, duplicate or readme runs one case).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -160,9 +160,11 @@ try {
         canvas.toggleSourceMode();
         const still = canvas.querySelector(".bp-canvas-source");
         const refused = flushed === false && still !== null && still.value === next && batches.length === 0 &&
-          JSON.stringify(server) === JSON.stringify(blocks) &&
-          notice(canvas) === "Not saved: block 2 is shown as JSON, and source mode does not edit it.";
-        if (!refused) failed.push(`${carrier} ${edit}`);
+          JSON.stringify(server) === JSON.stringify(blocks) && [
+            "Not saved: block 2 is shown as JSON, and source mode does not edit it.",
+            "Not saved: block 2 is shown as JSON. Delete it and save first, then make your other changes.",
+          ].includes(notice(canvas));
+        if (!refused) failed.push(`${carrier} ${edit}: flushed ${flushed}, ${batches.length} batches, open ${still !== null}, ${JSON.stringify(notice(canvas))}`);
       }
     }
     assert.deepEqual(failed, [], "every edge is refused: nothing sent, source mode open, the text kept, block 2 named");
@@ -170,6 +172,90 @@ try {
 
   // A duplicated sentinel line saves a copy under a new id; the block stays as it was
   // and no two blocks share an id.
+  // Outcome rows: a block shown as JSON is stored unchanged, or deleted by a save that
+  // only deletes; anything else is refused (a line that is no longer there, whatever
+  // took its place, gets the notice that asks for the deletion on its own). Each row is
+  // judged alone, failures listed.
+  if (runs("outcome")) {
+    const EDIT = "Not saved: block %N is shown as JSON, and source mode does not edit it.";
+    const REMOVE = "Not saved: block %N is shown as JSON. Delete it and save first, then make your other changes.";
+    const image = (id) => ({ id, type: "image", src: "https://example.test/a.png", alt: "A", caption: "cap", width: 300 });
+    const carried = (id) => ({ id, type: "paragraph", text: "carried" });
+    const p = (id, value) => paragraph(id, value);
+    // The JSON of a sentinel line with its words edited (alt "A" or text "carried").
+    const json = (line, id = null) => {
+      let out = line.slice("<!--bp:block ".length, -"-->".length).replace('"alt":"A"', '"alt":"B"').replace('"carried"', '"carried!"');
+      return id ? out.replace(/"id":"[^"]*"/, `"id":"${id}"`) : out;
+    };
+    const lineOf = (md, id) => md.split("\n").find((line) => line.startsWith(`<!--bp:block {"id":"${id}"`));
+    const drop = (md, id) => md.split("\n\n").filter((chunk) => !chunk.startsWith(`<!--bp:block {"id":"${id}"`)).join("\n\n");
+    const rows = [];
+    for (const [kind, make] of [["image", image], ["paragraph", carried]]) {
+      const mid = [p("p0", "Before"), make("x"), p("p2", "After")];
+      rows.push(
+        [`${kind}: marker dropped`, mid, (md) => md.replace(lineOf(md, "x"), json(lineOf(md, "x"))), "refused"],
+        [`${kind}: marker broken with a space`, mid, (md) => md.replace(lineOf(md, "x"), "<!--bp :block " + json(lineOf(md, "x")) + "-->"), "refused"],
+        [`${kind}: marker dropped, --> kept`, mid, (md) => md.replace(lineOf(md, "x"), json(lineOf(md, "x")) + "-->"), "refused"],
+        [`${kind}: marker dropped, id edited`, mid, (md) => md.replace(lineOf(md, "x"), json(lineOf(md, "x"), "y")), "refused"],
+        [`${kind}: first block, marker dropped`, [make("x"), p("p2", "After")], (md) => md.replace(lineOf(md, "x"), json(lineOf(md, "x"))), "refused"],
+        [`${kind}: last block, marker dropped`, [p("p0", "Before"), make("x")], (md) => md.replace(lineOf(md, "x"), json(lineOf(md, "x"))), "refused"],
+        [`${kind}: two side by side, one edited`, [p("p0", "Before"), make("x"), make("z"), p("p2", "After")], (md) => md.replace(lineOf(md, "z"), json(lineOf(md, "z"))), "refused"],
+        [`${kind}: deleted, its JSON put at the start`, mid, (md) => json(lineOf(md, "x")) + "\n\n" + drop(md, "x"), "refused"],
+        [`${kind}: deleted, its JSON put at the end`, mid, (md) => drop(md, "x") + "\n\n" + json(lineOf(md, "x")), "refused"],
+        [`${kind}: deleted, its JSON put in a neighbour's words`, mid, (md) => drop(md, "x").replace("After", "After " + json(lineOf(md, "x"))), "refused"],
+        [`${kind}: deleted, its JSON put as a list item`, mid, (md) => drop(md, "x") + "\n\n- " + json(lineOf(md, "x")), "refused"],
+        [`${kind}: deleted, its JSON put as a heading`, mid, (md) => drop(md, "x") + "\n\n# " + json(lineOf(md, "x")), "refused"],
+        [`${kind}: deleted, its JSON put in a fence`, mid, (md) => drop(md, "x") + "\n\n```json\n" + json(lineOf(md, "x")) + "\n```", "refused"],
+        // A paragraph's id passes to the paragraph typed in after it (realign), so the
+        // block reads as edited and gets that notice; an image's id has no taker.
+        [`${kind}: deleted, and a letter typed far away`, mid, (md) => drop(md, "x").replace("After", "Afterz"),
+          (kind === "image" ? REMOVE : EDIT).replace("%N", "2")],
+        [`${kind}: deleted alone`, mid, (md) => drop(md, "x"), ["p0", "p2"]],
+        [`${kind}: two deleted alone`, [p("p0", "Before"), make("x"), make("z"), p("p2", "After")], (md) => drop(drop(md, "x"), "z"), ["p0", "p2"]],
+        [`${kind}: deleted with a plain paragraph`, mid, (md) => drop(md, "x").replace("After", "").replace(/\n+$/, ""), ["p0"]],
+      );
+    }
+    const failed = [];
+    for (const [name, blocks, change, want] of rows) {
+      const { canvas, batches, server } = await mount(clone(blocks));
+      all.push(canvas);
+      canvas.toggleSourceMode();
+      const textarea = canvas.querySelector(".bp-canvas-source");
+      const next = change(textarea.value);
+      watchValueWrites(textarea).type(next);
+      const flushed = canvas.flushPendingChanges();
+      canvas.toggleSourceMode();
+      const still = canvas.querySelector(".bp-canvas-source");
+      const said = notice(canvas);
+      if (Array.isArray(want)) {
+        if (still !== null || JSON.stringify(server.map((block) => block.id)) !== JSON.stringify(want)) {
+          failed.push(`${name}: saved ${JSON.stringify(server.map((block) => block.id))}, open ${still !== null}`);
+        }
+        continue;
+      }
+      const refused = flushed === false && still !== null && still.value === next && batches.length === 0 &&
+        JSON.stringify(server) === JSON.stringify(blocks);
+      const named = want === "refused" ? [EDIT, REMOVE].some((text) => text.replace("%N", "") === (said || "").replace(/\d+/, "")) : said === want;
+      if (!refused || !named) failed.push(`${name}: refused ${refused}, notice ${JSON.stringify(said)}`);
+    }
+
+    // A batch the fold refuses is refused whatever the Paper holds.
+    {
+      const blocks = [p("p0", "Before"), p("p2", "After")];
+      const { canvas, batches } = await mount(clone(blocks));
+      all.push(canvas);
+      canvas.toggleSourceMode();
+      canvas._ro = () => [{ op: "patch-block", id: "not-there", patch: {} }];
+      const textarea = canvas.querySelector(".bp-canvas-source");
+      watchValueWrites(textarea).type(textarea.value.replace("Before", "Before!"));
+      const flushed = canvas.flushPendingChanges();
+      if (flushed !== false || batches.length !== 0 || notice(canvas) === null) {
+        failed.push(`a batch the fold refuses: flushed ${flushed}, ${batches.length} batches, notice ${JSON.stringify(notice(canvas))}`);
+      }
+    }
+    assert.deepEqual(failed, [], "every outcome row ends as it must");
+  }
+
   if (runs("duplicate")) {
     const carried = { id: "x", type: "paragraph", text: "carried" };
     const { canvas, server } = await mount(clone([paragraph("p0", "Before"), carried]));
@@ -201,7 +287,7 @@ try {
     assert.deepEqual(batches, [], "nothing is sent");
   }
 
-  console.log(`source wall carriers mounted: ${Object.keys(shapes).length} shapes, refused/put back/move/delete, edges, duplicate, readme.json: passed`);
+  console.log(`source wall carriers mounted: ${Object.keys(shapes).length} shapes, refused/put back/move/delete, edges, outcome, duplicate, readme.json: passed`);
 } finally {
   for (const canvas of all) canvas.remove();
 }
