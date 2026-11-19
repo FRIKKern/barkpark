@@ -24,18 +24,26 @@ defmodule Barkpark.Search.HitPreview do
   @doc """
   `documents` with `_preview` on every hit whose type declares a list preview.
   `schema_fun` resolves a type to its schema (`nil` when unknown).
+  `opts[:image_ref]` gives an image in the reference shape its URL
+  (`PreviewText.media_item/4`).
   """
-  @spec attach([map()], String.t(), keyword(), (String.t() -> map() | nil), term()) :: [map()]
-  def attach(documents, dataset, scope_opts, schema_fun, caller_context)
+  @spec attach([map()], String.t(), keyword(), (String.t() -> map() | nil), term(), keyword()) ::
+          [map()]
+  def attach(documents, dataset, scope_opts, schema_fun, caller_context, opts \\ [])
 
-  def attach(documents, _dataset, _scope_opts, _schema_fun, nil), do: documents
+  def attach(documents, _dataset, _scope_opts, _schema_fun, nil, _opts), do: documents
 
-  def attach(documents, _dataset, _scope_opts, _schema_fun, %CallerContext{
-        principal_type: :anonymous
-      }),
+  def attach(
+        documents,
+        _dataset,
+        _scope_opts,
+        _schema_fun,
+        %CallerContext{principal_type: :anonymous},
+        _opts
+      ),
       do: documents
 
-  def attach(documents, dataset, scope_opts, schema_fun, caller_context)
+  def attach(documents, dataset, scope_opts, schema_fun, caller_context, opts)
       when is_list(documents) do
     specs =
       documents |> Enum.map(&type_of/1) |> Enum.uniq() |> Map.new(&{&1, specs(schema_fun.(&1))})
@@ -49,16 +57,17 @@ defmodule Barkpark.Search.HitPreview do
     deref = &Map.get(targets, &1)
     # `|type` shows a type name by its schema title.
     fmt = [type_title: &type_title(schema_fun.(&1))]
+    image = [image_ref: Keyword.get(opts, :image_ref)]
 
     Enum.map(documents, fn doc ->
       case Map.get(specs, type_of(doc), %{}) do
         spec when map_size(spec) == 0 -> doc
-        spec -> put_preview(doc, preview(spec, doc, deref, fmt))
+        spec -> put_preview(doc, preview(spec, doc, deref, {fmt, image}))
       end
     end)
   end
 
-  def attach(documents, _dataset, _scope_opts, _schema_fun, _ctx), do: documents
+  def attach(documents, _dataset, _scope_opts, _schema_fun, _ctx, _opts), do: documents
 
   defp put_preview(doc, preview) when map_size(preview) == 0, do: doc
   defp put_preview(doc, preview), do: Map.put(doc, "_preview", preview)
@@ -71,15 +80,16 @@ defmodule Barkpark.Search.HitPreview do
         do: {out, value}
   end
 
-  defp text("media", spec, doc, deref, _fmt) do
-    case PreviewText.media_item(spec, doc, deref) do
+  defp text("media", spec, doc, deref, {_fmt, image}) do
+    case PreviewText.media_item(spec, doc, deref, image) do
       {:icon, name} -> {"icon", name}
       {:url, url} -> {"media", url}
       nil -> {"media", nil}
     end
   end
 
-  defp text(key, spec, doc, deref, fmt), do: {key, PreviewText.format(spec, doc, deref, fmt)}
+  defp text(key, spec, doc, deref, {fmt, _image}),
+    do: {key, PreviewText.format(spec, doc, deref, fmt)}
 
   defp type_title(%{title: title}) when is_binary(title), do: title
   defp type_title(%{"title" => title}) when is_binary(title), do: title

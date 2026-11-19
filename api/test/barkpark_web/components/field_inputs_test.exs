@@ -517,8 +517,14 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
     end
 
     test "hotspot + alt opt-ins reach the picker as attributes; absent → no attribute at all (Gyldendal E1)" do
+      # The picker's words (`data-strings`) name the hotspot ("Edit hotspot
+      # and crop"); the attributes are what is asserted, so they go first.
+      render_input = fn assigns ->
+        assigns |> render_input() |> String.replace(~r/data-strings="[^"]*"/, "")
+      end
+
       html =
-        render_input(%{
+        render_input.(%{
           field: %{"type" => "image", "name" => "cover", "hotspot" => true, "alt" => true},
           editor_form: %{"cover" => ""}
         })
@@ -527,7 +533,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       assert html =~ ~r{<bp-media-picker[^>]*\salt[^>]*>}
 
       nested =
-        render_input(%{
+        render_input.(%{
           field: %{"type" => "image", "name" => "cover", "options" => %{"hotspot" => true}},
           editor_form: %{"cover" => ""}
         })
@@ -535,7 +541,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       assert nested =~ ~r{<bp-media-picker[^>]*\shotspot[^>]*>}
 
       plain =
-        render_input(%{
+        render_input.(%{
           field: %{"type" => "image", "name" => "cover"},
           editor_form: %{"cover" => ""}
         })

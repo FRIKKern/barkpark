@@ -738,6 +738,8 @@
       deskScript("data-desk-bulk", window.BarkparkDeskBulk);
       // An array item's handle, "…" menu and dialog (bp-desk-array-menu.js).
       deskScript("data-desk-array-menu", window.BarkparkDeskArrayMenu);
+      // An image's hotspot and crop dialog and its fields (bp-desk-image.js).
+      deskScript("data-desk-image", window.BarkparkDeskImage);
       // The navbar's menus (bp-desk-navbar.js), when a live navigation came here.
       deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
       hook._onFieldAction = function (e) {

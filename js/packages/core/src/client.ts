@@ -541,10 +541,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
       // and prepend the workspace/project scope prefix so scoped clients emit the
       // scoped rendition route (the flat /media/renditions/:id/:preset route is pinned
       // to the Default workspace). scopePrefix() is '' for flat clients — no-op there.
+      // A reference-shape image ({asset: {_ref}}) is served from this client's own
+      // dataset — never a caller's `dataset` — and its route exists only under a
+      // /w/:ws/p/:proj scope, so a flat client ('' prefix → '' dataset) gives it no URL.
+      const p = scopePrefix(frozen)
       return buildImageUrl(asset, {
         baseUrl: frozen.projectUrl,
-        pathPrefix: scopePrefix(frozen),
+        pathPrefix: p,
         ...opts,
+        dataset: p && frozen.dataset,
       })
     },
     schemas(opts) {

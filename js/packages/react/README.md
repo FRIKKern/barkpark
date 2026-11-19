@@ -68,6 +68,8 @@ export function generateMetadata({ post }) {
 
 Renders an image asset as an `<img>`, or any component via `as` (e.g. `next/image`). Pulls `width`/`height` from asset metadata and forwards `lqip` as `blurDataURL` to custom components. The `preset` prop requests a server rendition (`thumb`/`preview`/`hero`/`og`); with `baseUrl` it builds an absolute URL, without one a relative `/media/renditions/<id>/<preset>` path (valid same-origin). Omit it for the original.
 
+An image in the reference shape, `{asset: {_ref: "image-<sha1>-<w>x<h>-<ext>"}}`, needs the `dataset` prop (and the scope in `pathPrefix` or `baseUrl`): it renders `<baseUrl><pathPrefix>/images/barkpark/<dataset>/<sha1>-<w>x<h>.<ext>`, with a `preset`'s bounds as `w`/`h`/`fit`. Without `dataset` it renders nothing, unless `asset` is expanded with a `url`.
+
 ```tsx
 import { BarkparkImage, imageUrl } from '@barkpark/react' // imageUrl re-exported from core
 import NextImage from 'next/image'

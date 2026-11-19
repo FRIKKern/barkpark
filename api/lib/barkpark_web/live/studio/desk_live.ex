@@ -519,6 +519,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
       data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}
+      data-desk-image={BarkparkWeb.StaticAssets.path("bp-desk-image.js")}
       data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"

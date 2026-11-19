@@ -36,9 +36,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   numbers start from the clock at the first one, so a page that rejoins a new
   socket and still reports the old socket's numbers matches nothing either.
 
-  A field the page reports nothing for is not merged: the post stands, as
-  before this module. So is any field that is not free text: a date or a
-  select is a choice, not text two people type into.
+  A post that names no number for a field (task-f18af43e26e46ff4) left the
+  page before the first push it would have numbered: two people's posts
+  cross, and the second to land was sent before the first's push arrived.
+  It was typed from what the page showed before any push it has not taken:
+  its own landed post, or the value the first push says it showed
+  (`:origin`), which is what the page reports for it once that push
+  arrives. Once the kept history has dropped that entry, nothing tells, and
+  the post stands. That reading needs a page that numbers every value it
+  shows, an undrawn field included: bp-array-focus.js says so with `v` in
+  `_bp_seen` (`@seen_version`), written by the page, never drawn by the
+  server. A tab still running an older copy of that file (loaded before a
+  deploy) sends no `v`: its posts with no number stand, and the numbers the
+  server drew into its form (`seen_value/1`) are not read, as before. Only
+  the numbers that copy wrote itself count. A change the server built
+  itself (no `_bp_seen` at all) is never merged. Nor is any field that is
+  not free text: a date or a select is a choice, not text two people type
+  into.
   """
 
   import Phoenix.Component, only: [assign: 3]
@@ -47,6 +61,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   alias Barkpark.Content
 
   @event "bp:form-remote-values"
+
+  # The `v` bp-array-focus.js writes into `_bp_seen` (its SEEN_VERSION).
+  @seen_version 2
+
+  # The `_bp_seen` key the server draws its numbers under (`seen_value/1`).
+  @drawn_key "drawn"
 
   # Entries kept per field. A page that reports a number older than these is
   # not merged.
@@ -92,16 +112,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   value). `Forms.upsert_draft/6` merges the post onto the stored value from
   it (`Barkpark.Content.TextRebase.rebase/3`).
   """
-  def put_bases(socket, keys, seen) do
+  def put_bases(socket, keys, seen) when is_binary(seen) do
     seen = decode_seen(seen)
     history = history(socket)
     schema = socket.assigns[:editor_schema]
+    crossing? = Map.get(seen, "v") == @seen_version
+    # The numbers the server drew into the form (`seen_value/1`) count only
+    # for a page that keeps them current: an older copy of the JS posts them
+    # back unchanged after it skipped a push for an undrawn field.
+    drawn = if crossing?, do: drawn_numbers(seen), else: %{}
 
     bases =
       for key <- keys,
           free_text?(schema, key),
-          n = Map.get(seen, "doc[#{key}]"),
-          is_integer(n),
+          name <- ["doc[#{key}]"],
+          # A generator, not `n = ...`: a nil filter would drop the field.
+          n <- [Map.get(seen, name) || Map.get(drawn, name)],
+          is_integer(n) or (is_nil(n) and crossing?),
           {_seq, value, _kind} <- List.wrap(base_entry(Map.get(history, key, []), n)),
           into: %{},
           do: {key, value}
@@ -109,9 +136,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     assign(socket, :editor_field_bases, bases)
   end
 
+  def put_bases(socket, _keys, _seen), do: assign(socket, :editor_field_bases, %{})
+
   @doc false
   # The entry a post reporting number `n` was written from: the latest of the
-  # values the page showed up to `n` and the page's own landed post.
+  # values the page showed up to `n` and the page's own landed post. With no
+  # number, the page took no push yet: its own post or the first push's `was`.
+  def base_entry(entries, nil) do
+    entries
+    |> Enum.filter(fn {_seq, _value, kind} -> kind in [:own, :origin] end)
+    |> latest()
+  end
+
   def base_entry(entries, n) do
     entries
     |> Enum.filter(fn {seq, _value, kind} -> kind == :own or seq <= n end)
@@ -163,6 +199,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   @doc """
+  The `_bp_seen` a form starts from when it is drawn (task-f18af43e26e46ff4):
+  per free-text field, the number of the latest value the server holds for
+  it, which is what a form drawn now shows. A form that was not on the page
+  when a push came (a document view was open in its place) started from
+  "{}", and its next post was merged from an older value than the one the
+  person saw. The input is `phx-update="ignore"`: a form already on the page
+  keeps the numbers bp-array-focus.js wrote.
+
+  The numbers sit under their own key (`"drawn"`), read only beside `v`: an
+  older copy of the JS keeps the key but never updates it, so after it skips
+  a push for a field it does not draw, the drawn number is stale (#26988
+  review, round 3). A number the page wrote under the field's own name wins.
+  """
+  def seen_value(assigns) do
+    assigns
+    |> history()
+    |> Enum.flat_map(fn {key, entries} ->
+      case latest(entries) do
+        {seq, _value, _kind} -> [{"doc[#{key}]", seq}]
+        nil -> []
+      end
+    end)
+    |> Map.new()
+    |> case do
+      drawn when drawn == %{} -> "{}"
+      drawn -> Jason.encode!(%{@drawn_key => drawn})
+    end
+  end
+
+  @doc """
   Keeps `before`'s history on `socket`, which `Shared.rebuild_panes/1` built
   from it: for a rebuild that tells the page what changed with `push/3`.
   """
@@ -200,6 +266,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
         {seq, ^old, _kind} ->
           {socket, entries, seq}
 
+        # The first value the server says this page showed.
+        nil ->
+          {socket, seq} = next_seq(socket)
+          {socket, [{seq, old, :origin}], seq}
+
         _ ->
           {socket, seq} = next_seq(socket)
           {socket, entries ++ [{seq, old, :push}], seq}
@@ -223,9 +294,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   # The history belongs to one document; another document's is empty.
-  defp history(socket) do
-    case socket.assigns[:editor_remote_history] do
-      {key, history} -> if key == doc_key(socket), do: history, else: %{}
+  defp history(%{assigns: assigns}), do: history(assigns)
+
+  defp history(assigns) do
+    case assigns[:editor_remote_history] do
+      {key, history} -> if key == doc_key(assigns), do: history, else: %{}
       _ -> %{}
     end
   end
@@ -235,9 +308,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     assign(socket, :editor_remote_history, {doc_key(socket), history})
   end
 
-  defp doc_key(socket) do
-    case socket.assigns[:editor_doc] do
-      %{doc_id: id} when is_binary(id) -> {socket.assigns[:editor_type], Content.published_id(id)}
+  defp doc_key(%{assigns: assigns}), do: doc_key(assigns)
+
+  defp doc_key(assigns) do
+    case assigns[:editor_doc] do
+      %{doc_id: id} when is_binary(id) -> {assigns[:editor_type], Content.published_id(id)}
       _ -> nil
     end
   end
@@ -250,4 +325,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   defp decode_seen(_seen), do: %{}
+
+  defp drawn_numbers(seen) do
+    case Map.get(seen, @drawn_key) do
+      drawn when is_map(drawn) -> drawn
+      _ -> %{}
+    end
+  end
 end

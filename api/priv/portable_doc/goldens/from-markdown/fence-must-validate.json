@@ -1,0 +1,9 @@
+{
+  "blocks": [
+    {
+      "type": "code",
+      "value": "[{\"type\":\"table\",\"rows\":\"nope\"}]"
+    }
+  ],
+  "markdown": "```portabledoc\n[{\"type\":\"table\",\"rows\":\"nope\"}]\n```"
+}

@@ -134,7 +134,8 @@ defmodule Barkpark.Api.OpenApi do
   # Each manifest command yields one OpenAPI operation at its flat path, plus a
   # second operation at the scoped `/w/{workspace_slug}/p/{project_slug}/...`
   # mirror when the command declares a `scoped_prefix` (so the doc documents
-  # both the flat and tenant-scoped forms the router actually serves).
+  # both the flat and tenant-scoped forms the router actually serves). A
+  # scoped-tier command yields the scoped operation only.
   defp paths(commands) do
     commands
     |> Enum.flat_map(&path_entries/1)
@@ -143,6 +144,12 @@ defmodule Barkpark.Api.OpenApi do
       {path, Map.new(entries, fn {_path, method, op} -> {method, op} end)}
     end)
   end
+
+  # A scoped tier's route is mounted ONLY under its `scoped_prefix`, so the
+  # spec documents that spelling alone: a flat one would be a door no route
+  # serves. bp's BuildURL composes the prefix for the same tiers
+  # (internal/manifest/url.go `isScopedTier`).
+  @scoped_tiers ~w(scoped_admin scoped_read scoped_write)
 
   defp path_entries(cmd) do
     method = cmd |> get_in(["http", "method"]) |> to_string() |> String.downcase()
@@ -153,7 +160,8 @@ defmodule Barkpark.Api.OpenApi do
     case Map.get(cmd, "scoped_prefix") do
       prefix when is_binary(prefix) and prefix != "" ->
         scoped_template = prefix <> template
-        [flat, {openapi_path(scoped_template), method, operation(cmd, scoped_template)}]
+        scoped = {openapi_path(scoped_template), method, operation(cmd, scoped_template)}
+        if Map.get(cmd, "auth_tier") in @scoped_tiers, do: [scoped], else: [flat, scoped]
 
       _ ->
         [flat]
@@ -250,8 +258,8 @@ defmodule Barkpark.Api.OpenApi do
   ]
 
   # Templates whose mount binds the request (query and body) into the key
-  # (`bind_request: true`), so the spec also states the 422. Every mount binds
-  # today; a mount without `bind_request` lists its templates apart.
+  # (`bind_request: true`), so the spec also states the 422. Every mount binds:
+  # the plug's `init/1` refuses an unbound one.
   @request_bound_templates @idempotent_templates
 
   @doc """
@@ -624,7 +632,7 @@ defmodule Barkpark.Api.OpenApi do
   # ── Security ───────────────────────────────────────────────────────────────
 
   # `none` → public (empty security); every higher tier requires the bearer
-  # token. `scoped_admin`/`ingest` also require a token — they are never anon.
+  # token. The scoped tiers and `ingest` also require a token — never anon.
   defp security_for("none"), do: []
   defp security_for(_tier), do: [%{"bearerAuth" => []}]
 

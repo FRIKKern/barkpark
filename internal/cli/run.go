@@ -1840,7 +1840,7 @@ func defaultPageLimit(cmd manifest.Command) int {
 
 // authHeaders returns the tier-appropriate auth headers for cmd. Only `none`
 // (public, existence-hiding floor) sends no credential. Every authenticated
-// tier — read, write, admin, scoped_admin — carries the resolved api bearer
+// tier — read, write, admin and the scoped tiers — carries the resolved api bearer
 // token whenever one is present, regardless of scoped_prefix: flat
 // auth-required reads (e.g. GET /api/workspaces, GET /v1/tasks/:dataset) need
 // the bearer just as much as scoped ones, and an OptionalToken public read
@@ -1866,7 +1866,7 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 		if ctx.Token != "" {
 			h["Authorization"] = "Bearer " + ctx.Token
 		}
-	case "read", "write", "admin", "scoped_admin":
+	case "read", "write", "admin", "scoped_admin", "scoped_read", "scoped_write":
 		if ctx.Token != "" {
 			h["Authorization"] = "Bearer " + ctx.Token
 		}
@@ -1998,7 +1998,7 @@ func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []st
 	}
 
 	i := 0
-	for i < len(tail) {
+	for i < len(tail) && tail[i] != "--" {
 		a := tail[i]
 
 		// Long flag: --name or --name=value.
@@ -2081,7 +2081,7 @@ func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []st
 		pos = append(pos, a)
 		i++
 	}
-	return pos, flags, nil
+	return append(pos, afterEndOfFlags(tail, i)...), flags, nil
 }
 
 // setBodyFlagName is the CLI's key=value body-merge flag. It is repeatable BY

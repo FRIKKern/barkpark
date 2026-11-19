@@ -202,15 +202,21 @@ func (u *instanceUp) entraSecret(tenant, appObjectID, clientID string) (string, 
 	expires := secretExpiry(made.EndDateTime)
 	u.sub(start, "Microsoft Graph made the client secret %s, expires %s, in %s", name, expires, file)
 
-	// Entra refuses a new secret (AADSTS7000215) for some seconds. Ask the
-	// token endpoint until it accepts the secret three times in a row, for at
-	// most 5 minutes. The 2026-10-27 drill saw refusals now and then for 9
-	// minutes more, which a first secret can live with: no sign-in uses it yet.
-	start = time.Now()
+	u.waitSecretAccepted(tenant, clientID, made.SecretText)
+	return expires, nil
+}
+
+// waitSecretAccepted waits until Entra takes a new secret. Entra refuses a
+// new secret (AADSTS7000215) for some seconds. Ask the token endpoint until
+// it accepts the secret three times in a row, for at most 5 minutes. The
+// 2026-10-27 drill saw refusals now and then for 9 minutes more, which a
+// first secret can live with: no sign-in uses it yet.
+func (u *instanceUp) waitSecretAccepted(tenant, clientID, secret string) {
+	start := time.Now()
 	ok, tries := 0, 0
-	for ok < 3 && time.Since(start) < 5*time.Minute {
+	for ok < 3 && tries < 100 && time.Since(start) < 5*time.Minute {
 		tries++
-		if instanceUpSecretAccepted(u.ctx, tenant, clientID, made.SecretText) {
+		if instanceUpSecretAccepted(u.ctx, tenant, clientID, secret) {
 			ok++
 		} else {
 			ok = 0
@@ -221,8 +227,75 @@ func (u *instanceUp) entraSecret(tenant, appObjectID, clientID string) (string, 
 	}
 	if ok < 3 {
 		u.sub(start, "Entra did not accept the new secret within 5 minutes. A sign-in that fails with AADSTS7000215 works when you try again later")
-		return expires, nil
+		return
 	}
 	u.sub(start, "Entra accepts the new secret, %d token requests", tries)
-	return expires, nil
+}
+
+// instanceUpNow is the clock for secret end dates. Tests replace it.
+var instanceUpNow = time.Now
+
+// entraExistingApp uses the app registration --entra-app-id names, which IT
+// may own with the operator as an owner. It checks that the app has the
+// sign-in redirect URI, then adds a client secret with az ad app credential
+// reset --append, which keeps the app's other secrets. The secret goes from
+// az's stdout into this process and from there over ssh stdin into
+// /etc/barkpark/entra-client-secret on the VM, root only. It never reaches a
+// file on this machine or any argv. A rerun keeps a secret the VM has.
+func (u *instanceUp) entraExistingApp() error {
+	st := u.st
+	start := time.Now()
+	var app struct {
+		AppID     string   `json:"appId"`
+		Redirects []string `json:"redirects"`
+	}
+	if err := u.az(&app, "ad", "app", "show", "--id", st.EntraAppID, "--query", "{appId:appId,redirects:web.redirectUris}"); err != nil {
+		if notFound(err) {
+			return fmt.Errorf("the app registration %s was not found in tenant %s, or you may not read it. Check the id with its owner.\n%v", st.EntraAppID, st.Tenant, err)
+		}
+		return err
+	}
+	redirect := "https://" + st.host() + "/v1/auth/oidc/" + st.Org + "/callback"
+	found := false
+	for _, r := range app.Redirects {
+		found = found || r == redirect
+	}
+	if !found {
+		return fmt.Errorf("the app %s has no Web redirect URI %s. Ask its owner to add it on the Web platform, then run again", st.EntraAppID, redirect)
+	}
+	u.sub(start, "the app %s has the redirect URI %s", st.EntraAppID, redirect)
+
+	have, err := u.ssh("sudo test -s "+instanceUpVMSecret+" && echo present || echo missing", nil, false)
+	if err != nil {
+		return err
+	}
+	st.Out.AppID = app.AppID
+	if strings.TrimSpace(have) == "present" {
+		if st.Out.SecretExpires == "" {
+			st.Out.SecretExpires = "unknown"
+		}
+		u.out.errf("        keeping the client secret in %s on the VM", instanceUpVMSecret)
+		return nil
+	}
+
+	start = time.Now()
+	end := instanceUpNow().UTC().AddDate(1, 0, 0).Format("2006-01-02T15:04:05Z")
+	name := "barkpark-" + st.Org + "-" + instanceUpNow().UTC().Format("20060102")
+	var secret string
+	if err := u.az(&secret, "ad", "app", "credential", "reset", "--id", st.EntraAppID, "--append",
+		"--display-name", name, "--end-date", end, "--query", "password"); err != nil {
+		return err
+	}
+	if secret == "" {
+		return fmt.Errorf("az ad app credential reset gave no secret. Remove the client secret %s from the app %s in the portal, then run again", name, st.EntraAppID)
+	}
+	write := "sudo mkdir -p /etc/barkpark && sudo sh -c 'umask 077 && cat > " + instanceUpVMSecret + ".new && mv -f " +
+		instanceUpVMSecret + ".new " + instanceUpVMSecret + "'"
+	if _, err := u.ssh(write, []byte(secret+"\n"), false); err != nil {
+		return fmt.Errorf("the VM did not take the new client secret, which is now lost. Remove the client secret %s from the app %s in the portal, then run again.\n%v", name, st.EntraAppID, err)
+	}
+	st.Out.SecretExpires = end
+	u.sub(start, "added the client secret %s, expires %s, in %s on the VM", name, end, instanceUpVMSecret)
+	u.waitSecretAccepted(st.Tenant, app.AppID, secret)
+	return nil
 }

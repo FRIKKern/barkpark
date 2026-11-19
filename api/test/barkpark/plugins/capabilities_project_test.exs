@@ -190,6 +190,48 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
       assert Capabilities.visible?("scoped_admin", "admin")
     end
 
+    # task-967f2dbbc1e9131f: the scoped rungs say WHERE the route is mounted,
+    # not who may call it, so they rank exactly like read / write.
+    test "scoped_read / scoped_write rank like read / write" do
+      for caller <- ~w(none read write admin) do
+        assert Capabilities.visible?("scoped_read", caller) ==
+                 Capabilities.visible?("read", caller)
+
+        assert Capabilities.visible?("scoped_write", caller) ==
+                 Capabilities.visible?("write", caller)
+      end
+
+      refute Capabilities.visible?("scoped_write", "read")
+      assert Capabilities.visible?("scoped_write", "write")
+    end
+
+    test "the scoped-only read and write commands ship on the scoped tiers" do
+      by_id =
+        Map.new(Capabilities.manifest("admin", project: false)["commands"], &{&1["id"], &1})
+
+      for {id, tier} <- [
+            {"paper.masters", "scoped_read"},
+            {"paper.fleet-blocks", "scoped_read"},
+            {"paper.save-master", "scoped_write"},
+            {"paper.insert-master", "scoped_write"},
+            {"paper.pin-master", "scoped_write"},
+            {"paper.detach-master", "scoped_write"},
+            {"paper.apply-ops", "scoped_write"},
+            {"workspace.locale", "scoped_read"},
+            {"codelist.show", "scoped_read"},
+            {"pref.get", "scoped_read"},
+            {"pref.set", "scoped_write"},
+            {"pref.patch", "scoped_write"},
+            {"pref.rm", "scoped_write"},
+            {"doc.actions", "scoped_admin"},
+            {"doc.run-action", "scoped_admin"}
+          ] do
+        assert by_id[id]["auth_tier"] == tier,
+               "#{id} is served only under /w/:ws/p/:proj; on tier " <>
+                 "#{inspect(by_id[id]["auth_tier"])} bp sends the flat path and 404s"
+      end
+    end
+
     test "ingest: visible only to admin/ingest, never to anon/read/write" do
       refute Capabilities.visible?("ingest", "none")
       refute Capabilities.visible?("ingest", "read")

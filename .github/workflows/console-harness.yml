@@ -164,6 +164,7 @@ on:
       - "templates/astro-search-starter/public/bp-graph.js"
       - "templates/search-starter/app/globals.css"
       - "templates/astro-search-starter/src/styles/globals.css"
+      - "api/priv/barkui/tokens.css"
       - ".github/required-checks.json"
       - ".github/workflows/cloud.yml"
       - "scripts/console-*"

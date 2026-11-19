@@ -60,6 +60,11 @@ func stepUpPreflight(u *instanceUp) error {
 	if _, done := st.Done["preflight"]; done {
 		return nil
 	}
+	if st.SubnetID != "" {
+		if err := u.checkSubnet(acct.ID); err != nil {
+			return err
+		}
+	}
 	if err := u.registerProviders(instanceUpProviders(st)); err != nil {
 		return err
 	}
@@ -69,6 +74,54 @@ func stepUpPreflight(u *instanceUp) error {
 		}
 	}
 	return u.purgeLeftovers()
+}
+
+// checkSubnet reads the subnet that --subnet-id names and its VNet. The VM
+// goes to the VNet's region. The subnet must have a network security group,
+// because a Standard public IP lets no traffic in without one, and up adds no
+// rule to a group it does not own.
+func (u *instanceUp) checkSubnet(subscription string) error {
+	st := u.st
+	parts := strings.Split(st.SubnetID, "/")
+	if !strings.EqualFold(parts[2], subscription) {
+		return fmt.Errorf("the subnet is in subscription %s, but az uses %s. A VM's NIC must be in the subscription of its VNet. Run az account set --subscription %s", parts[2], subscription, parts[2])
+	}
+	var sn struct {
+		NSG *struct {
+			ID string `json:"id"`
+		} `json:"networkSecurityGroup"`
+	}
+	if err := u.az(&sn, "network", "vnet", "subnet", "show", "--ids", st.SubnetID); err != nil {
+		if notFound(err) {
+			return fmt.Errorf("the subnet %s was not found, or you may not read it. Ask its owner for read access on the VNet and for the subnet id.\n%v", parts[len(parts)-1], err)
+		}
+		return err
+	}
+	vnetID := strings.Join(parts[:len(parts)-2], "/")
+	var vn struct {
+		Location string `json:"location"`
+	}
+	if err := u.az(&vn, "network", "vnet", "show", "--ids", vnetID, "--query", "{location:location}"); err != nil {
+		return err
+	}
+	if vn.Location == "" {
+		return fmt.Errorf("az network vnet show gave no region for %s", vnetID)
+	}
+	if st.Region == "" {
+		st.Region = vn.Location
+	} else if !strings.EqualFold(st.Region, vn.Location) {
+		return fmt.Errorf("--region is %s, but the subnet's VNet is in %s. A VM must be in its VNet's region. Run again with --region %s and a new --state file", st.Region, vn.Location, vn.Location)
+	}
+	if sn.NSG == nil || sn.NSG.ID == "" {
+		return fmt.Errorf("the subnet %s has no network security group, and a Standard public IP lets no traffic in without one. Ask the subnet's owner for a group that allows 443 and 80 from the Internet and 22 from your address", parts[len(parts)-1])
+	}
+	nsg := st.SubnetID
+	if i := strings.LastIndex(sn.NSG.ID, "/"); i >= 0 {
+		nsg = sn.NSG.ID[i+1:]
+	}
+	u.out.errf("        subnet %s in %s. Its network security group %s decides the open ports; up adds no rule.", parts[len(parts)-1], vn.Location, nsg)
+	u.out.errf("        It must allow 443 and 80 from the Internet, for sign-in and the TLS certificate, and 22 from this machine for up's ssh.")
+	return nil
 }
 
 // registerProviders registers the providers that are not registered and
@@ -126,6 +179,9 @@ func (u *instanceUp) registerProviders(want []string) error {
 func (u *instanceUp) checkVMQuota() error {
 	st := u.st
 	hint := fmt.Sprintf("Try --region %s --size %s, which small subscriptions can use, or ask for more quota in the portal under Quotas.", instanceUpVMRegion, instanceUpDefaultVM)
+	if st.SubnetID != "" {
+		hint = "The subnet fixes the region. Try another --size, or ask for more quota in the portal under Quotas."
+	}
 	// The Resource SKUs API filters by region on the server, in about 3
 	// seconds. az vm list-skus filters the size on the client and takes a
 	// minute.
@@ -319,32 +375,78 @@ type instanceUpVMInfo struct {
 	FQDNs     string `json:"fqdns"`
 }
 
-// stepUpVM creates the VM unless it exists, and opens 80 and 443.
+// stepUpVM creates the VM unless it exists. Without --subnet-id az makes a
+// VNet and a NIC network security group, and up opens 80 and 443 in it. With
+// --subnet-id the NIC joins that subnet with no NIC group, and up opens no
+// port. --entra-ssh adds the extension for Entra ID ssh sign-in, which needs
+// the system-assigned identity.
 func stepUpVM(u *instanceUp) error {
 	st := u.st
+	name := st.vmName()
 	var vm instanceUpVMInfo
-	err := u.az(&vm, "vm", "show", "-d", "-g", st.ResourceGroup, "-n", instanceUpVMName)
+	err := u.az(&vm, "vm", "show", "-d", "-g", st.ResourceGroup, "-n", name)
 	if err != nil && !notFound(err) {
 		return err
 	}
-	if err != nil {
-		args := []string{"vm", "create", "-g", st.ResourceGroup, "-n", instanceUpVMName, "--image", "Ubuntu2204",
+	identity := st.AssignID || st.EntraSSH
+	existed := err == nil
+	if !existed {
+		args := []string{"vm", "create", "-g", st.ResourceGroup, "-n", name, "--image", instanceUpVMImage,
 			"--size", st.Size, "--location", st.Region, "--admin-username", instanceUpVMUser,
 			"--ssh-key-values", st.SSHKey + ".pub", "--public-ip-sku", "Standard"}
+		if st.SubnetID != "" {
+			args = append(args, "--subnet", st.SubnetID, "--nsg", "")
+		}
+		dnsName := st.dnsLabel()
+		if st.PublicIP != "" {
+			args = append(args, "--public-ip-address", st.PublicIP)
+			var pip struct {
+				FQDN string `json:"fqdn"`
+			}
+			perr := u.az(&pip, "network", "public-ip", "show", "-g", st.ResourceGroup, "-n", st.PublicIP, "--query", "{fqdn:dnsSettings.fqdn}")
+			switch {
+			case perr == nil:
+				// The address exists; az uses it as it is.
+				if dnsName != "" && !strings.EqualFold(pip.FQDN, st.host()) {
+					return fmt.Errorf("the public IP %s has the host name %q, not %s. Give --host the DNS label it has, or a --public-ip without one", st.PublicIP, pip.FQDN, st.host())
+				}
+				dnsName = ""
+			case !notFound(perr):
+				return perr
+			}
+		}
+		if dnsName != "" {
+			args = append(args, "--public-ip-address-dns-name", dnsName)
+		}
 		if st.DiskSku != "" {
 			args = append(args, "--storage-sku", st.DiskSku)
 		}
 		if st.DiskGB != "" {
 			args = append(args, "--os-disk-size-gb", st.DiskGB)
 		}
-		if l := st.dnsLabel(); l != "" {
-			args = append(args, "--public-ip-address-dns-name", l)
+		if identity {
+			args = append(args, "--assign-identity", "[system]")
 		}
 		var created struct {
 			PublicIPAddress string `json:"publicIpAddress"`
 			FQDNs           string `json:"fqdns"`
 		}
-		if err := u.az(&created, args...); err != nil {
+		err := u.retryAuth("az vm create", func() error {
+			err := u.azOnce(&created, args...)
+			if err == nil || !authFailed(err) {
+				return err
+			}
+			// az reads the NIC and the IP after the deployment. A refused
+			// read leaves a VM that exists, which a retry would create again.
+			var got instanceUpVMInfo
+			if serr := u.azOnce(&got, "vm", "show", "-d", "-g", st.ResourceGroup, "-n", name); serr == nil && got.PublicIPs != "" {
+				u.out.errf("        az vm create answered AuthorizationFailed, but the VM %s exists; going on with it", name)
+				created.PublicIPAddress, created.FQDNs = got.PublicIPs, got.FQDNs
+				return nil
+			}
+			return err
+		})
+		if err != nil {
 			if strings.Contains(cmdOutput(err), "DnsRecordInUse") || strings.Contains(cmdOutput(err), "DnsLabel") {
 				return fmt.Errorf("the DNS label %s is taken in %s. Choose another --host with a new --state file.\n%v", st.dnsLabel(), st.Region, err)
 			}
@@ -353,14 +455,28 @@ func stepUpVM(u *instanceUp) error {
 		vm = instanceUpVMInfo{PublicIPs: created.PublicIPAddress, FQDNs: created.FQDNs}
 	}
 	if vm.PublicIPs == "" {
-		return fmt.Errorf("the VM %s has no public IP address", instanceUpVMName)
+		return fmt.Errorf("the VM %s has no public IP address", name)
 	}
 	st.Out.IP = vm.PublicIPs
 	st.Out.Host = st.host()
-	if err := u.az(nil, "vm", "open-port", "-g", st.ResourceGroup, "-n", instanceUpVMName, "--port", "80,443", "--priority", "900", "--query", "provisioningState"); err != nil {
-		return err
+	if st.SubnetID == "" {
+		if err := u.az(nil, "vm", "open-port", "-g", st.ResourceGroup, "-n", name, "--port", "80,443", "--priority", "900", "--query", "provisioningState"); err != nil {
+			return err
+		}
 	}
-	u.out.errf("        VM %s at %s, host %s", instanceUpVMName, st.Out.IP, st.Out.Host)
+	if identity && existed {
+		if err := u.az(nil, "vm", "identity", "assign", "-g", st.ResourceGroup, "-n", name, "--query", "systemAssignedIdentity"); err != nil {
+			return err
+		}
+	}
+	if st.EntraSSH {
+		if err := u.az(nil, "vm", "extension", "set", "-g", st.ResourceGroup, "--vm-name", name,
+			"--publisher", "Microsoft.Azure.ActiveDirectory", "--name", "AADSSHLoginForLinux", "--query", "provisioningState"); err != nil {
+			return err
+		}
+		u.out.errf("        AADSSHLoginForLinux is on. Sign in with az ssh vm -g %s -n %s once you have a Virtual Machine Administrator Login or User Login role.", st.ResourceGroup, name)
+	}
+	u.out.errf("        VM %s at %s, host %s", name, st.Out.IP, st.Out.Host)
 	if st.dnsLabel() == "" {
 		u.out.errf("        point a DNS A record for %s at %s now. Caddy needs it for the certificate.", st.Out.Host, st.Out.IP)
 	}
@@ -717,6 +833,9 @@ func stepUpEntra(u *instanceUp) error {
 		u.out.errf("        main.bicep made the app %s; the server connects %s at its first boot", st.Out.AppID, st.Org)
 		return nil
 	}
+	if st.EntraAppID != "" {
+		return u.entraExistingApp()
+	}
 	app, group := st.entraNames()
 	script := []string{"--host", st.host(), "--org", st.Org, "--secret-file", st.secretFile(), "--add-owner", st.Owner,
 		"--org-name", st.OrgName, "--owners-group", group}
@@ -847,31 +966,57 @@ func stepUpConnect(u *instanceUp) error {
 	if _, err := u.bp(token, nil, "org", "attach-workspace", st.Org, "default", "--yes"); err != nil {
 		return err
 	}
-	secret, err := os.ReadFile(st.secretFile())
+	secret, err := u.clientSecret()
 	if err != nil {
 		return err
 	}
-	mapping := fmt.Sprintf(`group_role_mappings:={"%s":"owner"}`, st.Out.OwnersGroupID)
+	// An app from IT has no owners group of ours. The owner is then seated
+	// by BARKPARK_BOOTSTRAP_OWNER_EMAIL at the first sign-in.
+	var mapping []string
+	if st.Out.OwnersGroupID != "" {
+		mapping = []string{"--set", fmt.Sprintf(`group_role_mappings:={"%s":"owner"}`, st.Out.OwnersGroupID)}
+	}
 	scopes := "openid profile email"
 	create := []string{"org", "oidc-create", st.Org, "https://login.microsoftonline.com/" + st.Tenant + "/v2.0", st.Out.AppID, "-",
-		"--tenant_id", st.Tenant, "--scopes", scopes, "--strict_validation", "--set", mapping, "--yes"}
+		"--tenant_id", st.Tenant, "--scopes", scopes, "--strict_validation"}
+	create = append(append(create, mapping...), "--yes")
 	if st.Out.SecretExpires != "" && st.Out.SecretExpires != "unknown" {
 		create = append(create, "--client_secret_expires_at", st.Out.SecretExpires)
 	}
-	if _, err := u.bp(token, []byte(strings.TrimSpace(string(secret))), create...); err != nil {
+	if _, err := u.bp(token, []byte(secret), create...); err != nil {
 		if !alreadyExists(err) {
 			return err
 		}
 		u.out.errf("        the OIDC connection exists; setting its scopes and mapping")
-		if _, err := u.bp(token, nil, "org", "oidc-update", st.Org, "--set", "client_id="+st.Out.AppID, "--scopes", scopes, "--set", mapping, "--yes"); err != nil {
+		update := append(append([]string{"org", "oidc-update", st.Org, "--set", "client_id=" + st.Out.AppID, "--scopes", scopes}, mapping...), "--yes")
+		if _, err := u.bp(token, nil, update...); err != nil {
 			return err
 		}
 	}
 	if _, err := u.bp(token, nil, "org", "oidc-update", st.Org, "--trust_idp_mfa", "--yes"); err != nil {
 		return err
 	}
+	if st.Out.OwnersGroupID == "" {
+		u.out.errf("        organization %s connected to Entra with the app %s; %s becomes owner at the first sign-in", st.Org, st.Out.AppID, st.Owner)
+		return nil
+	}
 	u.out.errf("        organization %s connected to Entra; group %s maps to owner", st.Org, st.Out.OwnersGroupID)
 	return nil
+}
+
+// clientSecret reads the Entra client secret: from the VM when up used an
+// existing app, else from the secret file. It is never printed.
+func (u *instanceUp) clientSecret() (string, error) {
+	if u.st.EntraAppID != "" {
+		s, err := u.ssh("sudo cat "+instanceUpVMSecret, nil, false)
+		s = strings.TrimSpace(s)
+		if err == nil && s == "" {
+			err = fmt.Errorf("%s on the VM is empty", instanceUpVMSecret)
+		}
+		return s, err
+	}
+	b, err := os.ReadFile(u.st.secretFile())
+	return strings.TrimSpace(string(b)), err
 }
 
 // checkBootstrapped checks that the server connected the organization at

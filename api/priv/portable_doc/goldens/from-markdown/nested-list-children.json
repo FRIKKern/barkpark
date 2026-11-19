@@ -1,0 +1,45 @@
+{
+  "blocks": [
+    {
+      "items": [
+        {
+          "children": [
+            {
+              "items": [
+                [
+                  {
+                    "type": "text",
+                    "value": "b"
+                  }
+                ],
+                [
+                  {
+                    "type": "text",
+                    "value": "c"
+                  }
+                ]
+              ],
+              "ordered": true,
+              "type": "list"
+            }
+          ],
+          "content": [
+            {
+              "type": "text",
+              "value": "a"
+            }
+          ]
+        },
+        [
+          {
+            "type": "text",
+            "value": "d"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    }
+  ],
+  "markdown": "- a\n  1. b\n  2. c\n- d"
+}

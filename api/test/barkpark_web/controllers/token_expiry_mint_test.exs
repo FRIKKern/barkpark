@@ -59,9 +59,14 @@ defmodule BarkparkWeb.TokenExpiryMintTest do
     {:ok, _} = TenancyAuth.create_membership(ws.id, admin_tok.id, "admin")
 
     # Workspace ADMIN (passes the scoped-admin route gate) WITHOUT the flat
-    # "admin" permission — the principal the opt-out must refuse.
+    # "admin" permission — the principal the opt-out must refuse. It carries
+    # `write`: the scoped-admin gate refuses a read-only token on any POST
+    # (task-2617573f7e9fea79), and this principal must reach the controller.
     ws_admin_raw = uniq("exp-wsadmin")
-    {:ok, ws_admin_tok} = Auth.create_token(ws_admin_raw, "exp-wsadmin", @dataset, ["read"])
+
+    {:ok, ws_admin_tok} =
+      Auth.create_token(ws_admin_raw, "exp-wsadmin", @dataset, ["read", "write"])
+
     {:ok, _} = TenancyAuth.create_membership(ws.id, ws_admin_tok.id, "admin")
 
     # Default-workspace instance admin (fleet support / share / app / playground).

@@ -421,6 +421,8 @@ defmodule BarkparkWeb.Studio.DeskReviewChangesTest do
       view = open(c, @review)
       edit = fn title -> EditorPost.change(view, %{"doc" => %{"title" => title}}) end
 
+      quiet(view)
+
       {_, many} =
         Barkpark.QueryCounter.census(fn ->
           Barkpark.QueryCounter.own(view.pid) && edit.("Edit one")
@@ -431,6 +433,8 @@ defmodule BarkparkWeb.Studio.DeskReviewChangesTest do
 
       assert [_] = :sys.get_state(view.pid).socket.assigns.desk_review.changes
 
+      quiet(view)
+
       {_, one} =
         Barkpark.QueryCounter.census(fn ->
           Barkpark.QueryCounter.own(view.pid) && edit.("Edit two")
@@ -438,6 +442,20 @@ defmodule BarkparkWeb.Studio.DeskReviewChangesTest do
 
       assert many == one, "with 12 changes: #{inspect(many)}; with 1: #{inspect(one)}"
     end
+  end
+
+  # Every save is followed, a moment later, by the desk's refresh tick: the
+  # list pane reads again in a task the view started, which the census owns.
+  # After the reverts that tick is still pending, so it landed inside the
+  # second census on some runs (16 more reads). Wait until no tick is pending
+  # and no read is out, so a census counts the edit alone.
+  defp quiet(view) do
+    assert Enum.any?(1..500, fn _ ->
+             (is_nil(:sys.get_state(view.pid).socket.assigns.refresh_timer) and
+                Phoenix.LiveView.Channel.async_pids(view.pid) == {:ok, []}) or
+               (Process.sleep(10) && false)
+           end),
+           "the desk still had a refresh or a read out after 5 s"
   end
 
   describe "the word diff" do

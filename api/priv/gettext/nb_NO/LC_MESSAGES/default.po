@@ -15408,6 +15408,68 @@ msgstr "Kopier dokument"
 msgid "Paste document"
 msgstr "Lim inn dokument"
 
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Open image edit dialog"
+msgstr "Åpne bilderedigeringsdialog"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Edit hotspot and crop"
+msgstr "Rediger fokuspunkt og beskjær"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Hotspot & Crop"
+msgstr "Fokuspunkt & beskjæring"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Adjust the rectangle to crop image. Adjust the circle to specify the area that should always be visible."
+msgstr "Juster rektangelet for å beskjære bildet. Juster sirkelen for å spesifisere området som alltid skal være synlig."
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "%{title}: hotspot and crop"
+msgstr "%{title}: fokuspunkt og beskjæring"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Hotspot: arrow keys move it"
+msgstr "Fokuspunkt: piltastene flytter det"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "centre %{x} across, %{y} down; %{width} wide, %{height} high"
+msgstr "midtpunkt %{x} bortover, %{y} nedover; %{width} bredt, %{height} høyt"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Crop: arrow keys move it"
+msgstr "Beskjæring: piltastene flytter den"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "left %{left}, top %{top}, right %{right}, bottom %{bottom}"
+msgstr "venstre %{left}, topp %{top}, høyre %{right}, bunn %{bottom}"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Cropped image size: %{size} pixels"
+msgstr "Beskåret bildestørrelse: %{size} piksler"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgctxt "crop preview"
+msgid "Square"
+msgstr "Kvadrat"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgctxt "crop preview"
+msgid "Panorama"
+msgstr "Panorama"
+
 #: lib/barkpark_web/components/fields/tree_codelist_desk.ex
 #, elixir-autogen, elixir-format
 msgid "Not in the list"

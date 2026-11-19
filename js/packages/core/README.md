@@ -215,6 +215,9 @@ const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
 
 // Build an image URL from an asset/reference — pick a server rendition with `preset`:
 const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | og; omit for the original
+// The reference shape {asset: {_ref: 'image-<sha1>-<w>x<h>-<ext>'}} resolves to the client's own
+// dataset: <projectUrl>/w/<ws>/p/<proj>/images/barkpark/<dataset>/<sha1>-<w>x<h>.<ext>. A flat
+// client (no workspace/project) gives it no URL — the route exists only under a scope.
 
 // Manage stored assets — list (paged), fetch one, delete:
 const assets = await bp.listAssets({ limit: 20 })

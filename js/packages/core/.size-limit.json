@@ -1,14 +1,14 @@
 [
   {
-    "name": "ESM bundle (re-based 2026-10-09: measured 17.27 kB (task-cecd2cb193365b71's `nbetween` op, irremovable per js/CLAUDE.md's bundle-budget rule) + 0.05 kB headroom)",
+    "name": "ESM bundle (re-based 2026-11-18: measured 17589 B = 17.28 kB + about 0.31 kB for task-f5d63db9de4b082d's reference-shape image reader (imageUrl's {asset:{_ref}} route, dataset fence and preset bounds; irremovable per js/CLAUDE.md's bundle-budget rule) + 0.05 kB headroom)",
     "path": "dist/index.mjs",
-    "limit": "17.32 KB",
+    "limit": "17.64 KB",
     "gzip": true
   },
   {
-    "name": "CJS bundle (re-based 2026-10-09: measured 18.01 kB (task-cecd2cb193365b71's `nbetween` op) + 0.05 kB headroom)",
+    "name": "CJS bundle (re-based 2026-11-18: measured 18328 B = 18.02 kB + about 0.31 kB for task-f5d63db9de4b082d's reference-shape image reader, irremovable, + 0.05 kB headroom)",
     "path": "dist/index.cjs",
-    "limit": "18.06 KB",
+    "limit": "18.38 KB",
     "gzip": true
   }
 ]

@@ -21,7 +21,7 @@ var placeholderRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 // command's auth_tier, because the tier is the code fact for WHERE the route is
 // actually mounted:
 //
-//   - scoped_admin / scoped_read — the route exists ONLY under the
+//   - scoped_admin / scoped_read / scoped_write — the route exists ONLY under the
 //     workspace/project prefix (e.g. POST /w/:ws/p/:project/v1/tokens; there is
 //     no flat /v1/tokens). BuildURL MUST compose the prefix now, or every call
 //     hits a non-existent flat path and 404s. This is the generic fix for the
@@ -74,13 +74,14 @@ func (m *Manifest) BuildURL(cmd Command, ctx Context, args map[string]string) (s
 
 // isScopedTier reports whether an auth_tier's route is mounted ONLY under the
 // workspace/project prefix (never flat), so BuildURL must compose scoped_prefix
-// for it now rather than deferring to the mirror. These are the two per-
-// workspace-role tiers: scoped_admin (RequireWorkspaceRole admin/owner — e.g.
-// token.create) and scoped_read (a workspace-scoped read). The global tiers
-// (none/read/write/admin) keep serving their flat path_template today.
+// for it now rather than deferring to the mirror. These are the three scoped
+// tiers: scoped_admin (RequireWorkspaceRole admin/owner — e.g. token.create),
+// and scoped_read / scoped_write (a read / write mounted only under the prefix
+// — e.g. paper.masters / paper.apply-ops, task-967f2dbbc1e9131f). The global
+// tiers (none/read/write/admin) keep serving their flat path_template today.
 func isScopedTier(tier string) bool {
 	switch tier {
-	case "scoped_admin", "scoped_read":
+	case "scoped_admin", "scoped_read", "scoped_write":
 		return true
 	default:
 		return false

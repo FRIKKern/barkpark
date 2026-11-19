@@ -8,7 +8,12 @@ defmodule Barkpark.StudioChat.Recorder.RestoredAsks do
   turn, `DisplacedAsks.cancel_ended/1` finds nothing to cancel, and the ask
   stays "pending" in the store: a live card for a turn that has ended.
 
-  So, before the Recorder replays the events it missed:
+  So, as the Recorder's state is built, inside `init/1` (task-e1502531570f43a8):
+  its `:via` name is registered before `init/1` runs, so `ChatHosts` can
+  project a live event to it during init, and that call is handled before any
+  message init sends itself. Restored in the replay message instead, the
+  asking run's close could land first and cancel nothing, and the restore then
+  marked that ended turn open again. Restored here, every event finds:
 
     * `pending_asks` is the session's stored asks that are still "pending";
     * the owner (`runtime_lease`) is the newest lease that asked one of them,

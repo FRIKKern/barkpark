@@ -349,6 +349,109 @@ defmodule BarkparkWeb.ChatHostTurnOwnerTest do
     assert StudioChat.get_session(sid).pending_approvals == 0
   end
 
+  # task-e09b1a6507c8f232 (rev26735's probe (b) on #27084): the refused close
+  # ends the Recorder's turn but keeps A's ask tracked, so a third lease's turn
+  # was no split, its turn_started untracked the ask, and A's later close was
+  # ignored (C took the turn from A): a live card for good.
+  test "a third lease's turn after a refused close cancels the asking run's ask as displaced",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-third"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, lease!(ctx, "c"), 1, %{"kind" => "turn_started", "turn_id" => "t-c"})
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
+  # task-f6cca686b392c900: pins TurnOwner's `owner != lease_id` guard. The
+  # asker's own text after a refused close is not a newer lease's turn.
+  test "the asking run's own text after a refused close keeps its ask for its own close",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-own-text"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, a, 3, %{"kind" => "text_delta", "delta" => "still A"})
+    assert ask_status(sid) == "pending"
+    accept!(ctx, a, 4, @dead_close)
+
+    assert ask_meta(sid)["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
+  # task-c7adbda933510941 (rev26735's probe 114-b1 on #27114): after a refused
+  # close the turn is closed, so the asker's own turn_started (an older claude
+  # host sends one per message_start) hit the fresh-turn arm, which untracked
+  # the ask, and the asker's close then canceled nothing.
+  test "the asking run's own turn_started after a refused close keeps its ask for its own close",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-own-turn"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, a, 3, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    assert ask_status(sid) == "pending"
+    accept!(ctx, a, 4, @dead_close)
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "turn_ended"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+  end
+
+  # rev26735's probe 172-b1 on #27172: the held asks come back BEFORE
+  # boundary/3 reads the state, so a third lease's turn splits A's turn and
+  # cancels them as displaced. Put back after the boundary, the split cancels
+  # nothing and the asks return under C, canceled later as turn_ended.
+  test "a third lease's turn after the asker's own turn_started cancels its held ask as displaced",
+       %{sid: sid} = ctx do
+    a = lease!(ctx, "a")
+    accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    accept!(ctx, a, 2, ask("ap-held"))
+
+    accept!(ctx, lease!(ctx, "b"), 1, %{
+      "kind" => "terminal",
+      "terminal_state" => "error",
+      "error" => %{"message" => "session already has an active turn"}
+    })
+
+    accept!(ctx, a, 3, %{"kind" => "turn_started", "turn_id" => "t-a"})
+    c = lease!(ctx, "c")
+    accept!(ctx, c, 1, %{"kind" => "turn_started", "turn_id" => "t-c"})
+
+    assert ask_status(sid) == "canceled"
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+    assert StudioChat.get_session(sid).pending_approvals == 0
+
+    state = :sys.get_state(Recorder.whereis(sid))
+    assert MapSet.size(state.pending_asks) == 0, "nothing comes back under C"
+    assert Map.get(state, :asks_held) == nil
+    assert state.runtime_lease == c.lease_id
+
+    accept!(ctx, c, 2, @dead_close)
+    assert ask_meta(sid)["cancel_reason"] == "superseded_by_newer_turn"
+  end
+
   test "the asking run's own close cancels its pending ask", %{sid: sid} = ctx do
     a = lease!(ctx, "a")
     accept!(ctx, a, 1, %{"kind" => "turn_started", "turn_id" => "t-a"})

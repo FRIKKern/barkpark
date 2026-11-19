@@ -160,9 +160,11 @@
         "write",
         "admin",
         "scoped_admin",
+        "scoped_read",
+        "scoped_write",
         "ingest"
       ],
-      "$comment": "CODE FACT over handbook. The handbook (make_cli_handbook_paper.py §3) lists FOUR tiers — read, write, admin, ingest — and omits `none` and `scoped_admin`. The router (api/lib/barkpark_web/router.ex) proves SIX distinct auth pipelines: OptionalToken public reads => `none`/`read`, `:require_write` (RequireWritePermission) => `write`, `:require_admin` => `admin`, `:scoped_admin` (RequireWorkspaceRole, per-workspace role gate) => `scoped_admin`, `:ingest` (RequireIngestToken) => `ingest`. Per the contract spine's non-negotiable rule #2, `scoped_admin` MUST be distinct from `admin` (a global tier cannot express per-workspace role), and `none` is the existence-hiding floor an anonymous caller sees. This enum is one of the FEW closed enums in the schema because auth pipelines are fixed in code, not grown by plugins."
+      "$comment": "CODE FACT over handbook. The handbook (make_cli_handbook_paper.py §3) lists FOUR tiers — read, write, admin, ingest — and omits `none` and `scoped_admin`. The router (api/lib/barkpark_web/router.ex) proves SIX distinct auth pipelines: OptionalToken public reads => `none`/`read`, `:require_write` (RequireWritePermission) => `write`, `:require_admin` => `admin`, `:scoped_admin` (RequireWorkspaceRole, per-workspace role gate) => `scoped_admin`, `:ingest` (RequireIngestToken) => `ingest`. Per the contract spine's non-negotiable rule #2, `scoped_admin` MUST be distinct from `admin` (a global tier cannot express per-workspace role), and `none` is the existence-hiding floor an anonymous caller sees. `scoped_read` / `scoped_write` (task-967f2dbbc1e9131f) rank like `read` / `write` but name a route mounted ONLY under the command's `scoped_prefix`: bp composes the prefix on every call (internal/manifest/url.go isScopedTier), and the OpenAPI document carries no flat spelling for them. This enum is one of the FEW closed enums in the schema because auth pipelines are fixed in code, not grown by plugins."
     },
     "default_output": {
       "type": "string",

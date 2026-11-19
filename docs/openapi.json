@@ -1739,7 +1739,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       },
       "get": {
         "operationId": "pref.get.scoped",
@@ -1810,7 +1810,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       },
       "patch": {
         "operationId": "pref.patch.scoped",
@@ -1901,7 +1901,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       },
       "put": {
         "operationId": "pref.set.scoped",
@@ -1993,7 +1993,7 @@
         "tags": [
           "pref"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/v1/media/{dataset}/{id}/undo-checkout": {
@@ -2313,348 +2313,6 @@
           "webhook"
         ],
         "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/prefs/{dataset}/{key}": {
-      "delete": {
-        "operationId": "pref.rm",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete one named per-account pref (task-7d2a48dbf7e4bf34). Idempotent — deleting an absent key is still ok.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "write"
-      },
-      "get": {
-        "operationId": "pref.get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read one named per-account pref (task-7d2a48dbf7e4bf34) in the active --workspace/--dataset. value is null when unset. Identity is the caller's account session or a personal access token's owner.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "read"
-      },
-      "patch": {
-        "operationId": "pref.patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: op, field, item, max.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Edit value[field] of one per-account pref in one locked write, so two tabs, devices or servers never overwrite each other. set puts item at the top-level field, whatever it held; push_front moves item to the front of a list, dedupes and keeps the first max; add appends item unless present; remove drops it and writes nothing on an absent key. Applying an op twice in a row changes nothing; a replay after other ops re-applies it. 422 invalid_pref when a list op's value[field] is not a list.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "write"
-      },
-      "put": {
-        "operationId": "pref.set",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Set one named per-account pref (task-7d2a48dbf7e4bf34) — an upsert, never an append. Capped at 16KB.",
-        "tags": [
-          "pref"
-        ],
-        "x-barkpark-scope": "write"
-      }
-    },
-    "/v1/papers/{slug}/ops": {
-      "post": {
-        "operationId": "paper.apply-ops",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Apply an ifRev-fenced batch of block ops to paper :slug, atomically.",
-        "tags": [
-          "paper"
-        ],
-        "x-barkpark-scope": "write"
       }
     },
     "/v1/admin/orgs/{org_slug}/auth-methods": {
@@ -3233,75 +2891,6 @@
           "bulldocs"
         ],
         "x-barkpark-scope": "ingest"
-      }
-    },
-    "/v1/datasets/{dataset}/empty": {
-      "post": {
-        "operationId": "dataset.empty",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: confirm-production.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Delete every document and media file of a dataset in the active --workspace/--project, in the background, and keep the dataset and its schemas. Production needs --confirm-production production.",
-        "tags": [
-          "dataset"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/plugins/sheets/{slug}/export.md": {
@@ -4056,148 +3645,6 @@
           "workspace"
         ],
         "x-barkpark-scope": "scoped_admin"
-      }
-    },
-    "/v1/papers/{slug}/fleet-blocks": {
-      "get": {
-        "operationId": "paper.fleet-blocks",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Server-rendered HTML for paper :slug's fleet blocks (task list/board/detail, roadmap, …), by block id.",
-        "tags": [
-          "paper"
-        ],
-        "x-barkpark-scope": "read"
-      }
-    },
-    "/v1/data/doc/{dataset}/{type}/{doc_id}/actions/{name}": {
-      "post": {
-        "operationId": "doc.run-action",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "doc_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: mode.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Run one of a document's resolved actions by name, dry-run or real.",
-        "tags": [
-          "doc"
-        ],
-        "x-barkpark-scope": "admin"
       }
     },
     "/v1/media/{dataset}/search/suggestions": {
@@ -7091,99 +6538,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "write"
-      }
-    },
-    "/v1/audit": {
-      "get": {
-        "operationId": "audit.ls",
-        "parameters": [
-          {
-            "description": "content_mutation, token, access, membership, plugin_settings, secret or auth.",
-            "in": "query",
-            "name": "category",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Only events by this actor id.",
-            "in": "query",
-            "name": "actor",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "From this date or ISO 8601 time.",
-            "in": "query",
-            "name": "since",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Up to this date (the whole day) or ISO 8601 time.",
-            "in": "query",
-            "name": "until",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Max events to return (at most 200).",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "next_cursor from the previous page.",
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "This workspace's audit log, newest first: who changed content, tokens, access grants and webhooks.",
-        "tags": [
-          "audit"
-        ],
-        "x-barkpark-scope": "scoped_admin"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections/{id}/assets": {
@@ -7367,7 +6722,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/v1/plugins/bulldocs/papers/{slug}/ops": {
@@ -8731,75 +8086,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/access-requests/{id}/deny": {
-      "post": {
-        "operationId": "workspace.access-request-deny",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Deny an access request. No seat is made; the asker sees denied.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      }
-    },
     "/v1/media/{dataset}/upload": {
       "post": {
         "operationId": "media.upload",
@@ -9190,7 +8476,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/v1/chat/sessions/{id}/answer": {
@@ -9594,144 +8880,6 @@
         "x-barkpark-scope": "scoped_admin"
       }
     },
-    "/v1/tokens/{id}/rotate": {
-      "post": {
-        "operationId": "token.rotate",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: grace, now, force, grace_seconds, expires_in_days.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
-        "tags": [
-          "token"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      }
-    },
-    "/v1/access-requests/{id}/approve": {
-      "post": {
-        "operationId": "workspace.access-request-approve",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: role.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Approve an access request: the asker is seated with the role (only an owner grants owner).",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      }
-    },
     "/v1/plugins/sheets/{slug}/export.csv": {
       "get": {
         "operationId": "sheets.export-csv",
@@ -9997,71 +9145,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/data/doc/{dataset}/{type}/{doc_id}/actions": {
-      "get": {
-        "operationId": "doc.actions",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "doc_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "List a document's resolved actions (built-in + schema-declared, plugin-filtered by live state).",
-        "tags": [
-          "doc"
-        ],
-        "x-barkpark-scope": "admin"
-      }
-    },
     "/w/{workspace_slug}/p/{project_slug}/v1/papers/{slug}/masters": {
       "get": {
         "operationId": "paper.masters.scoped",
@@ -10124,7 +9207,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       },
       "post": {
         "operationId": "paper.save-master.scoped",
@@ -10217,7 +9300,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/v1/tasks/{doc_id}/pulse": {
@@ -12287,43 +11370,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/access-requests": {
-      "get": {
-        "operationId": "workspace.access-request-ls",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Pending access requests: who asked for a seat here, their note and when.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      }
-    },
     "/w/{workspace_slug}/p/{project_slug}/v1/webhooks/{dataset}": {
       "get": {
         "operationId": "webhook.ls.scoped",
@@ -12472,64 +11518,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/codelists/{codelist_id}": {
-      "get": {
-        "operationId": "codelist.show",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "codelist_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Comma-separated language preference order for labels (default nob,eng).",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read a registered codelist's values as a tree (a flat list is a tree with no children): code, resolved label and nested children, by a member token.",
-        "tags": [
-          "codelist"
-        ],
-        "x-barkpark-scope": "read"
-      }
-    },
     "/v1/webhooks/{dataset}/{id}/test-send": {
       "post": {
         "operationId": "webhook.test-send",
@@ -12605,98 +11593,6 @@
           "webhook"
         ],
         "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/workspace/locale": {
-      "get": {
-        "operationId": "workspace.locale",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "read"
-      },
-      "patch": {
-        "operationId": "workspace.set-locale",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: locale.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Set the Studio chrome language for the active --workspace (en | nb-NO). Schema titles and descriptions are never translated.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/schedules/{dataset}/{schedule_id}": {
@@ -14749,43 +13645,6 @@
         "tags": [
           "doc"
         ],
-        "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/invitations": {
-      "get": {
-        "operationId": "workspace.invitation-ls",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Pending invitations this workspace has sent, awaiting the invited user's accept.",
-        "tags": [
-          "workspace"
-        ],
         "x-barkpark-scope": "scoped_admin"
       }
     },
@@ -15433,7 +14292,7 @@
         "tags": [
           "doc"
         ],
-        "x-barkpark-scope": "admin"
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/rollback": {
@@ -15743,117 +14602,6 @@
           "task"
         ],
         "x-barkpark-scope": "read"
-      }
-    },
-    "/v1/members": {
-      "get": {
-        "operationId": "workspace.member-ls",
-        "parameters": [
-          {
-            "description": "Max seats to return.",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Seats to skip.",
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "The workspace roster — every seat (humans AND api tokens) with its role.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      },
-      "post": {
-        "operationId": "workspace.member-add",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: email, role, bind_on_sso.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Seat a human in the workspace by e-mail. A new e-mail (or an unconfirmed account) is created and seated directly. An EXISTING confirmed account is invited instead (owner ruling #7) — the answer is the invitation, and the seat appears only once the invited user accepts it (workspace.invitation-ls / auth.invitation-accept).",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/fleet/roster": {
@@ -16170,63 +14918,6 @@
           "media"
         ],
         "x-barkpark-scope": "none"
-      }
-    },
-    "/v1/workspace/time-zone": {
-      "patch": {
-        "operationId": "workspace.set-time-zone",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: time_zone.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Set the time zone the active --workspace's editors read dates in, an IANA name such as Europe/Oslo. A list preview's |date shows a date-time as its day in that zone in both Studios.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/tasks/{doc_id}/landed": {
@@ -16675,117 +15366,6 @@
           "search"
         ],
         "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/tokens": {
-      "get": {
-        "operationId": "token.ls",
-        "parameters": [
-          {
-            "description": "Max tokens to return.",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Tokens to skip.",
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "The token inventory for this workspace — label, permissions, revoked/expiry state.",
-        "tags": [
-          "token"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      },
-      "post": {
-        "operationId": "token.create",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: label, permissions, dataset.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Mint a read-only, workspace-bound API token (public-read/read only).",
-        "tags": [
-          "token"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/secrets/{name}": {
@@ -18166,131 +16746,6 @@
         "x-barkpark-scope": "write"
       }
     },
-    "/v1/members/{principal_ref}": {
-      "delete": {
-        "operationId": "workspace.member-rm",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "principal_ref",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Remove a seat (does not revoke a token — see token revoke). Refuses the last owner.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      },
-      "patch": {
-        "operationId": "workspace.member-role",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "principal_ref",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Document"
-              }
-            }
-          },
-          "description": "Request body fields: role, principal_type.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Change a seat's role. Refuses to demote the workspace's last owner.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      }
-    },
     "/v1/data/schedules/{dataset}/{schedule_id}": {
       "delete": {
         "operationId": "doc.unschedule",
@@ -18353,123 +16808,6 @@
         "summary": "Cancel a pending or paused scheduled publish.",
         "tags": [
           "doc"
-        ],
-        "x-barkpark-scope": "write"
-      }
-    },
-    "/v1/papers/{slug}/masters": {
-      "get": {
-        "operationId": "paper.masters",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Success."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "The masters an author may insert into paper :slug.",
-        "tags": [
-          "paper"
-        ],
-        "x-barkpark-scope": "read"
-      },
-      "post": {
-        "operationId": "paper.save-master",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Save a block of paper :slug as a master, published immediately.",
-        "tags": [
-          "paper"
         ],
         "x-barkpark-scope": "write"
       }
@@ -18993,84 +17331,6 @@
           "chat"
         ],
         "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/papers/{slug}/masters/blocks/{block_id}/pin": {
-      "post": {
-        "operationId": "paper.pin-master",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "block_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Pin (or unpin) linked instance :block_id in paper :slug to the master's latest published revision.",
-        "tags": [
-          "paper"
-        ],
-        "x-barkpark-scope": "write"
       }
     },
     "/v1/webhooks/{dataset}": {
@@ -20797,166 +19057,6 @@
         "x-barkpark-scope": "admin"
       }
     },
-    "/v1/datasets/{dataset}": {
-      "delete": {
-        "operationId": "dataset.delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "dataset": {
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "slug": {
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "deleted": {
-                      "enum": [
-                        true
-                      ],
-                      "type": "boolean"
-                    },
-                    "detached": {
-                      "additionalProperties": {
-                        "type": "integer"
-                      },
-                      "type": "object"
-                    },
-                    "documents": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "media_files": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "swept": {
-                      "additionalProperties": {
-                        "type": "integer"
-                      },
-                      "type": "object"
-                    },
-                    "tokens_revoked": {
-                      "minimum": 0,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "deleted",
-                    "dataset",
-                    "documents",
-                    "media_files",
-                    "swept",
-                    "detached",
-                    "tokens_revoked"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "dataset": {
-                      "type": "string"
-                    },
-                    "dataset_id": {
-                      "format": "uuid",
-                      "type": "string"
-                    },
-                    "deleting": {
-                      "enum": [
-                        true
-                      ],
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "deleting",
-                    "dataset",
-                    "dataset_id"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Still deleting. Poll with the same DELETE and ?dataset_id=<dataset_id>; it answers this run's receipt once."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "production_dataset_protected, dataset_in_shared_search, dataset_media_referenced, or dataset_recreated: an earlier delete of the name finished (its receipt in details.receipt) and the name holds a new dataset."
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "The delete stopped (timeout, contended, database error or restart) and rolled back, or too many deletes run on the node (dataset_delete_busy, Retry-After); the dataset is whole."
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production. A long delete answers 202 {deleting: true}; the same DELETE again answers the receipt (bp asks again itself).",
-        "tags": [
-          "dataset"
-        ],
-        "x-barkpark-scope": "scoped_admin"
-      }
-    },
     "/v1/schemas/{dataset}": {
       "get": {
         "operationId": "schema.ls",
@@ -21297,84 +19397,6 @@
         "x-barkpark-scope": "none"
       }
     },
-    "/v1/papers/{slug}/masters/blocks/{block_id}/detach": {
-      "post": {
-        "operationId": "paper.detach-master",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "block_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Detach linked instance :block_id in paper :slug to a plain, no-longer-following copy.",
-        "tags": [
-          "paper"
-        ],
-        "x-barkpark-scope": "write"
-      }
-    },
     "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/quarantine": {
       "post": {
         "operationId": "cycle.quarantine.scoped",
@@ -21466,64 +19488,6 @@
           "cycle"
         ],
         "x-barkpark-scope": "write"
-      }
-    },
-    "/v1/tokens/{id}": {
-      "delete": {
-        "operationId": "token.revoke",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Revoke a token that holds a seat in this workspace (idempotent, audited).",
-        "tags": [
-          "token"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/schedules/{dataset}/{schedule_id}/pause": {
@@ -21759,7 +19723,7 @@
         "tags": [
           "codelist"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       }
     },
     "/v1/auth/mfa/disable": {
@@ -22173,7 +20137,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "scoped_write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/search/{dataset}/insights": {
@@ -23562,84 +21526,6 @@
         "x-barkpark-scope": "read"
       }
     },
-    "/v1/papers/{slug}/masters/{master_id}/insert": {
-      "post": {
-        "operationId": "paper.insert-master",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "master_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "format": "binary",
-                "type": "string"
-              }
-            }
-          },
-          "description": "Request body.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Insert master :master_id into paper :slug, detached (a copy) or linked (follows latest).",
-        "tags": [
-          "paper"
-        ],
-        "x-barkpark-scope": "write"
-      }
-    },
     "/v1/data/history/{dataset}/{type}/{doc_id}": {
       "get": {
         "operationId": "doc.history",
@@ -24543,7 +22429,7 @@
         "tags": [
           "paper"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}": {
@@ -26345,7 +24231,7 @@
         "tags": [
           "workspace"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "scoped_read"
       },
       "patch": {
         "operationId": "workspace.set-locale.scoped",
@@ -26838,64 +24724,6 @@
           "org"
         ],
         "x-barkpark-scope": "admin"
-      }
-    },
-    "/v1/invitations/{id}": {
-      "delete": {
-        "operationId": "workspace.invitation-rm",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Withdraw a pending invitation before the invited user accepts it.",
-        "tags": [
-          "workspace"
-        ],
-        "x-barkpark-scope": "scoped_admin"
       }
     }
   },

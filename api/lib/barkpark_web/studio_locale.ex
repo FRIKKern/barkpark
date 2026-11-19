@@ -109,6 +109,36 @@ defmodule BarkparkWeb.StudioLocale do
       "replace_label" => gettext("Drop or paste an image to replace it"),
       "preview_alt" => gettext("Preview of uploaded image"),
       "options_menu" => gettext("Open image options menu"),
+      # The desk's "Edit hotspot and crop" dialog (bp-desk-image.js); %{…}
+      # slots are filled client-side.
+      "crop_open" => gettext("Open image edit dialog"),
+      "crop_title" => gettext("Edit hotspot and crop"),
+      "crop_close" => gettext("Close dialog"),
+      "crop_label" => gettext("Hotspot & Crop"),
+      "crop_help" =>
+        gettext(
+          "Adjust the rectangle to crop image. Adjust the circle to specify the area that should always be visible."
+        ),
+      "crop_tool" => gettext("%{title}: hotspot and crop", title: "%{title}"),
+      "crop_hotspot" => gettext("Hotspot: arrow keys move it"),
+      "crop_hotspot_value" =>
+        gettext("centre %{x} across, %{y} down; %{width} wide, %{height} high",
+          x: "%{x}",
+          y: "%{y}",
+          width: "%{width}",
+          height: "%{height}"
+        ),
+      "crop_crop" => gettext("Crop: arrow keys move it"),
+      "crop_crop_value" =>
+        gettext("left %{left}, top %{top}, right %{right}, bottom %{bottom}",
+          left: "%{left}",
+          top: "%{top}",
+          right: "%{right}",
+          bottom: "%{bottom}"
+        ),
+      "crop_size" => gettext("Cropped image size: %{size} pixels", size: "%{size}"),
+      "crop_square" => pgettext("crop preview", "Square"),
+      "crop_panorama" => pgettext("crop preview", "Panorama"),
       "download" => gettext("Download"),
       "copy_url" => gettext("Copy URL"),
       "remove_short" => gettext("Remove"),

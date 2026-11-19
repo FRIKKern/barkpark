@@ -35,7 +35,10 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
              )
     end
 
-    test "lists keep order flag and flatten nested items inline" do
+    # A nested list used to be flattened into its parent's text after " — ";
+    # it now stays a list in the item's `children` (from-markdown case
+    # nested-list-children).
+    test "lists keep order flag and nest sub-lists in the item's children" do
       md = """
       1. first
       2. second
@@ -46,7 +49,21 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
         FromMarkdown.blocks(md)
 
       assert [%{"type" => "text", "value" => "first"}] = first
-      assert Enum.any?(second, &match?(%{"value" => " — "}, &1))
+
+      assert %{
+               "content" => [%{"type" => "text", "value" => "second"}],
+               "children" => [
+                 %{"type" => "list", "ordered" => false, "items" => [[%{"value" => "nested"}]]}
+               ]
+             } = second
+    end
+
+    test "a checklist item keeps its nested list" do
+      [%{"task" => true, "items" => [first, second]}] =
+        FromMarkdown.blocks("- [ ] a\n  - b\n- [x] c")
+
+      assert %{"checked" => false, "content" => [%{"value" => "a"}], "children" => [_]} = first
+      assert second == %{"checked" => true, "content" => [%{"type" => "text", "value" => "c"}]}
     end
 
     test "code fence becomes a code block" do
@@ -183,9 +200,48 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
       assert [%{"type" => "code"}] = FromMarkdown.blocks("```portabledoc\n#{fence}\n```")
     end
 
+    test "allowed blocks nested in a list item or a callout slot are spliced in" do
+      fence =
+        ~s([{"type":"list","ordered":false,"items":[{"content":[],"children":[{"type":"divider"}]}]},) <>
+          ~s({"type":"callout","tone":"info","content":[],"slots":{"body":[{"type":"paragraph","content":[]}]}}])
+
+      assert [%{"type" => "list"}, %{"type" => "callout"}] =
+               FromMarkdown.blocks("```portabledoc\n#{fence}\n```")
+    end
+
     test "a non-array payload degrades to a code block" do
       assert [%{"type" => "code"}] =
                FromMarkdown.blocks(~s(```portabledoc\n{"type":"divider"}\n```))
+    end
+  end
+
+  # The from-markdown case `entities` pins the main rule; these are the edges.
+  describe "entity references" do
+    test "a link URL and image alt are decoded, a code span and fence info are not" do
+      [%{"content" => [link, _space, image]}] =
+        FromMarkdown.blocks("[a](https://x.example/?a=1&amp;b=2) ![&lt;](https://x.example/i)")
+
+      assert link["href"] == "https://x.example/?a=1&b=2"
+      assert image["children"] == [%{"type" => "text", "value" => "<"}]
+      assert [%{"lang" => "&#x6a;s"}] = FromMarkdown.blocks("```&#x6a;s\nx\n```")
+    end
+
+    test "an encoded javascript: URL is still refused" do
+      assert [%{"content" => [%{"type" => "text", "value" => "x"}]}] =
+               FromMarkdown.blocks("[x](javascript&#58;alert(1))")
+    end
+
+    test "an invalid code point is U+FFFD and a backslash escapes the ampersand" do
+      assert [%{"content" => [%{"value" => "� � &amp;"}]}] =
+               FromMarkdown.blocks("&#0; &#xD800; \\&amp;")
+    end
+
+    test "raw HTML text and table cells are decoded" do
+      assert [%{"content" => [%{"value" => "a & b"}]}] =
+               FromMarkdown.blocks("<div>a &amp; b</div>")
+
+      assert [%{"head" => [[%{"value" => "a &"}]], "rows" => [[[%{"value" => "<"}]]]}] =
+               FromMarkdown.blocks("| a &amp; |\n|---|\n| &lt; |")
     end
   end
 

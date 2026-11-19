@@ -571,9 +571,13 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
       assert codes(sheet.([-1, 0, 1, 2])) == [{:value_not_allowed, "/0/snapshot/merges/0/0"}]
     end
 
+    # The nested ones are render stress docs, far past every nesting limit:
+    # columns and section 4000 blocks deep (block depth 100), strong 20000 marks
+    # deep (about 40000 JSON levels, value depth 1000). The docs at each limit
+    # are the `edges`, and they pass.
     test "every limit doc but the toc and the nested ones passes it" do
       refused = for {name, block} <- limit_docs(), codes([block]) != [], do: name
-      assert refused == ["toc", "nested columns", "nested section"]
+      assert refused == ["toc", "nested columns", "nested section", "nested strong"]
     end
 
     test "the committed spec carries both maximums" do

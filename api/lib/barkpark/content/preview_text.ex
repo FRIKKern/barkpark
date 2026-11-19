@@ -201,21 +201,28 @@ defmodule Barkpark.Content.PreviewText do
   @doc """
   The first media alternative that picks something: `{:url, url}` for an
   image, `{:icon, name}` for an icon chosen by a stored value, or nil.
+  `opts[:image_ref]` turns an image in the reference shape (`{asset: {_ref}}`,
+  no `url`) into its URL; without it such an image picks nothing.
   """
-  @spec media_item(spec() | nil, map(), deref()) :: {:url, String.t()} | {:icon, String.t()} | nil
-  def media_item(spec, root, deref) when is_map(root) do
+  @spec media_item(spec() | nil, map(), deref(), keyword()) ::
+          {:url, String.t()} | {:icon, String.t()} | nil
+  def media_item(spec, root, deref, opts \\ [])
+
+  def media_item(spec, root, deref, opts) when is_map(root) do
+    image_ref = Keyword.get(opts, :image_ref)
+
     spec
     |> media_alternatives()
     |> Enum.find_value(fn
       {:path, path} ->
-        with u when is_binary(u) <- path |> value(root, deref) |> url(), do: {:url, u}
+        with u when is_binary(u) <- path |> value(root, deref) |> url(image_ref), do: {:url, u}
 
       {:icon, icon} ->
         with n when is_binary(n) <- icon_pick(icon, root, deref), do: {:icon, n}
     end)
   end
 
-  def media_item(_spec, _root, _deref), do: nil
+  def media_item(_spec, _root, _deref, _opts), do: nil
 
   @doc "True when a media spec has an alternative: an image path or an icon pick."
   @spec media?(spec() | nil) :: boolean()
@@ -296,12 +303,19 @@ defmodule Barkpark.Content.PreviewText do
   image object and the twin's denormalised image both carry one). A string
   that is not an http(s) or root-relative URL (Sanity exports write `"null"`)
   is not one.
-  """
-  @spec url(term()) :: String.t() | nil
-  def url(%{"url" => u}), do: url(u)
-  def url(%{"asset" => %{} = asset}), do: url(asset)
 
-  def url(u) when is_binary(u) do
+  An image in the reference shape, `{asset: {_ref}}` with no `url`, has its
+  URL from `image_ref` (a function of the ref, the caller's dataset and
+  scope; `nil` when it has none). Without one it has no URL.
+  """
+  @spec url(term(), (String.t() -> String.t() | nil) | nil) :: String.t() | nil
+  def url(value, image_ref \\ nil)
+  def url(%{"url" => u}, image_ref), do: url(u, image_ref)
+
+  def url(%{"asset" => %{} = asset}, image_ref),
+    do: url(asset, image_ref) || ref_url(asset, image_ref)
+
+  def url(u, _image_ref) when is_binary(u) do
     u = String.trim(u)
 
     if String.starts_with?(u, ["https://", "http://", "/"]) and not String.starts_with?(u, "//"),
@@ -309,7 +323,16 @@ defmodule Barkpark.Content.PreviewText do
       else: nil
   end
 
-  def url(_), do: nil
+  def url(_, _image_ref), do: nil
+
+  defp ref_url(%{"_ref" => ref}, image_ref) when is_binary(ref) and is_function(image_ref, 1) do
+    case image_ref.(ref) do
+      u when is_binary(u) -> url(u)
+      _ -> nil
+    end
+  end
+
+  defp ref_url(_asset, _image_ref), do: nil
 
   # ── parts ──────────────────────────────────────────────────────────────
 
