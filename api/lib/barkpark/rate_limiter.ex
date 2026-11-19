@@ -442,6 +442,14 @@ defmodule Barkpark.RateLimiter do
     end
   end
 
+  @doc """
+  The TCP peer of `conn`, as the adapter gave it, for a caller that reads the
+  forwarded chain by its own rule (`RequireLoopback.local_client?/1`). No
+  bucket reads it; `client_ip/1` is still the one answer to who the client is.
+  """
+  @spec tcp_peer(Plug.Conn.t()) :: :inet.ip_address() | nil
+  def tcp_peer(%Plug.Conn{remote_ip: peer}), do: peer
+
   # A chain may arrive as several headers AND as comma-separated hops within
   # each; order is left (originator) to right (nearest proxy).
   defp rightmost_untrusted(header_values) do
