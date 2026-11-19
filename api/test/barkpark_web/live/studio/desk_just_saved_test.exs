@@ -113,7 +113,18 @@ defmodule BarkparkWeb.Studio.DeskJustSavedTest do
 
     type(a, "From A")
     assert eventually(fn -> status(a) == "Saved" end), status(a)
-    assert eventually(fn -> status(b) == "Edited just now" end), status(b)
+
+    # B has A's save (its form is told the new value), and says no "Saved".
+    render(b)
+
+    assert_push_event(
+      b,
+      "bp:form-remote-values",
+      %{values: %{"doc[title]" => %{value: "From A"}}},
+      2_000
+    )
+
+    refute status(b) == "Saved"
     assert mark(b) == nil
   end
 
