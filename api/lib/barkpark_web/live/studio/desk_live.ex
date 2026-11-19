@@ -338,7 +338,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # A typed edit of the form: the editor's, and a step of the document's
   # undo when it landed (`DocUndo`).
   def handle_event("autosave" = event, params, socket),
-    do: event |> EditorHost.handle_event(params, socket) |> DocUndo.record(params, socket)
+    do:
+      DocUndo.around(event, params, socket, fn ->
+        EditorHost.handle_event(event, params, socket)
+      end)
 
   # The document's undo and redo, Mod+Z and Shift+Mod+Z (`DocUndo`).
   def handle_event("desk-undo", params, socket), do: DocUndo.handle_event(params, socket)
@@ -364,7 +367,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-scope-" <> _ = event, params, socket),
     do: ScopeSwitch.handle_event(event, params, socket)
 
-  def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
+  # The rest is the editor's; a list's buttons (`array_op`) are a step of the
+  # document's undo when they landed (`DocUndo`).
+  def handle_event(event, params, socket),
+    do:
+      DocUndo.around(event, params, socket, fn ->
+        EditorHost.handle_event(event, params, socket)
+      end)
 
   # The lit hit's index from the form: one of the hits, else the first.
   defp lit(index, hits) do

@@ -18,14 +18,19 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   a step holds this editor's keys and none of the words another editor's
   save brought in between. Steps of one field closer than 600 ms make one
   change, one Mod+Z. The changes belong to the document the editor holds:
-  another document's start empty. Only top-level free-text fields are kept;
-  a select, a list or a widget is not undone here.
+  another document's start empty.
+
+  Every other field the form writes (a slug, a select, a list, an object's
+  nested fields) is kept as whole-value steps (`DocUndoValues`): the value
+  the store held at the press and the value the write left, taken back
+  with `ValueUndo`. A rich-text body, a reference or an asset is not undone
+  here.
 
   ## Undo
 
   `desk-undo` (from `bp-desk-undo.js`) names its document (`PostIdentity`).
-  The last change's steps are taken back out of the text the store holds
-  now (`TextUndo`). A change someone else wrote into is left as it is and
+  The last change's steps are taken back out of the value the store holds
+  now (`TextUndo` for free text, `ValueUndo` for the rest). A change someone else wrote into is left as it is and
   dropped, as the TanStack Studio's. What comes out is saved as a typed edit
   of the field is (`EditorHost.write_built/2`, with the desk's guards), and
   merged by the save onto what the store holds by then. The page is told the
@@ -45,8 +50,10 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   alias Barkpark.Content
   alias Barkpark.Content.TextRebase
   alias Barkpark.Content.TextUndo
+  alias Barkpark.Content.ValueUndo
   alias Barkpark.Content.TitleDerivation
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Desk.DocUndoValues
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FieldGroups
@@ -68,10 +75,11 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   @max_bytes 1_000_000
 
   @doc """
-  The form names of the fields an undo is kept for (`record/3`), space
-  separated, for the form's `data-desk-undo-keys`. `bp-desk-undo.js` takes
-  Mod+Z in these inputs only; in every other input (a slug, a url, a number,
-  a nested or list string) the browser keeps its own undo.
+  The form names of the top-level fields an undo is kept for (`record/3`,
+  `DocUndoValues`), space separated, for the form's `data-desk-undo-keys`.
+  `bp-desk-undo.js` takes Mod+Z in these fields' inputs (theirs nested
+  inside too); in every other input (a url, a number, a widget's own box)
+  the browser keeps its own undo.
   """
   @spec names(map() | nil) :: String.t()
   def names(schema) do
@@ -83,8 +91,46 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
 
     ["title" | for(%{"name" => key} <- fields, is_binary(key), do: key)]
     |> Enum.uniq()
-    |> Enum.filter(&RemoteValues.free_text?(schema, &1))
+    |> Enum.filter(&(RemoteValues.free_text?(schema, &1) or DocUndoValues.recorded?(schema, &1)))
     |> Enum.map_join(" ", &"doc[#{&1}]")
+  end
+
+  @doc """
+  `event` of the form, handled by `fun`, with the step it made kept when it
+  landed: a free-text field's typed edit (`record/3`), or a write of any
+  other field kept (`DocUndoValues`), from the value the store held at the
+  press.
+  """
+  def around(event, params, socket, fun) do
+    case DocUndoValues.target(event, params, socket.assigns) do
+      nil ->
+        if event == "autosave", do: record(fun.(), params, socket), else: fun.()
+
+      {key, input} ->
+        was = DocUndoValues.stored_now(socket, key)
+        record_value(fun.(), socket, key, input, was)
+    end
+  end
+
+  defp record_value({:noreply, saved}, before, key, input, was),
+    do: {:noreply, value_step(saved, before, key, input, was)}
+
+  defp record_value({:reply, reply, saved}, before, key, input, was),
+    do: {:reply, reply, value_step(saved, before, key, input, was)}
+
+  defp record_value(other, _before, _key, _input, _was), do: other
+
+  defp value_step(saved, before, key, input, was) do
+    with mark when is_binary(mark) <- PostIdentity.of(saved),
+         ^mark <- PostIdentity.of(before),
+         true <- landed?(saved, before),
+         left = DocUndoValues.stored(saved, key),
+         true <- left != was,
+         true <- size(was) + size(left) <= @max_bytes do
+      add(saved, mark, key, {was, left}, :value, input)
+    else
+      _ -> saved
+    end
   end
 
   @doc """
@@ -108,7 +154,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
          true <-
            byte_size(from) <= TextRebase.max_bytes() and
              byte_size(posted) <= TextRebase.max_bytes() do
-      add(socket, mark, key, {from, posted})
+      add(socket, mark, key, {from, posted}, :text, nil)
     else
       _ -> socket
     end
@@ -136,17 +182,18 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
     Map.get(bases || %{}, key) || stored(before, key)
   end
 
-  defp add(socket, mark, key, step) do
+  defp add(socket, mark, key, step, kind, input) do
     state = state(socket, mark)
     now = System.monotonic_time(:millisecond)
 
     undo =
       case state.undo do
-        [%{field: ^key, at: at} = last | rest] when is_integer(at) and now - at < @group_ms ->
-          [%{last | steps: last.steps ++ [step], at: now} | rest]
+        [%{field: ^key, kind: ^kind, at: at} = last | rest]
+        when is_integer(at) and now - at < @group_ms ->
+          [%{last | steps: last.steps ++ [step], at: now, input: input || last.input} | rest]
 
         changes ->
-          [%{field: key, steps: [step], at: now} | changes]
+          [%{field: key, kind: kind, input: input, steps: [step], at: now} | changes]
       end
 
     put_state(socket, mark, trim(undo), [])
@@ -157,14 +204,16 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
     changes
     |> Enum.take(@max_changes)
     |> Enum.reduce_while({[], 0}, fn change, {kept, bytes} ->
-      bytes =
-        bytes + Enum.reduce(change.steps, 0, fn {a, b}, n -> n + byte_size(a) + byte_size(b) end)
+      bytes = bytes + Enum.reduce(change.steps, 0, fn {a, b}, n -> n + size(a) + size(b) end)
 
       if bytes > @max_bytes, do: {:halt, {kept, bytes}}, else: {:cont, {[change | kept], bytes}}
     end)
     |> elem(0)
     |> Enum.reverse()
   end
+
+  defp size(text) when is_binary(text), do: byte_size(text)
+  defp size(value), do: :erlang.external_size(value)
 
   # ── Undo and redo ───────────────────────────────────────────────────────
 
@@ -191,8 +240,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
         else: change.steps |> Enum.reverse() |> Enum.map(fn {a, b} -> {b, a} end)
 
     field = change.field
-    now = current(socket, field)
-    next = if is_binary(now), do: TextUndo.revert_steps(steps, now), else: now
+    {now, next} = reverted(socket, change, steps)
     popped = if redo?, do: {state.undo, rest}, else: {rest, state.redo}
     socket = put_state(socket, mark, elem(popped, 0), elem(popped, 1))
 
@@ -201,8 +249,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
     if next == now or FieldActions.target(socket.assigns, field) == nil do
       {:noreply, socket}
     else
-      params = %{"doc" => %{field => next}, "_target" => ["doc", field], bases: %{field => now}}
-      {:noreply, saved} = EditorHost.write_built(params, socket)
+      {:noreply, saved} = EditorHost.write_built(written(change, field, next, now), socket)
 
       if landed?(saved, socket) do
         # Undone or redone, it is a step of its own: typing next is not part of it.
@@ -215,12 +262,45 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
          saved
          |> put_state(mark, undo, redo)
          |> show_field(field)
-         |> push_event(@event, %{field: "doc[#{field}]", value: stored(saved, field), was: now})}
+         |> push_event(@event, told(change, saved, field, now))}
       else
         {:noreply, put_state(saved, mark, state.undo, state.redo)}
       end
     end
   end
+
+  # The value the store holds now, and that value with the steps taken back.
+  defp reverted(socket, %{kind: :value} = change, steps) do
+    now = DocUndoValues.stored_now(socket, change.field)
+    {now, ValueUndo.revert_steps(steps, now)}
+  end
+
+  defp reverted(socket, change, steps) do
+    now = current(socket, change.field)
+    {now, if(is_binary(now), do: TextUndo.revert_steps(steps, now), else: now)}
+  end
+
+  # The write of an undo: free text merged by the save from the text it was
+  # computed from, any other value set whole.
+  defp written(%{kind: :value}, field, next, _now),
+    do: %{"doc" => %{field => next}, "_target" => ["doc", field]}
+
+  defp written(_change, field, next, now),
+    do: %{"doc" => %{field => next}, "_target" => ["doc", field], bases: %{field => now}}
+
+  # What the page is told: the input to bring into sight and focus, and its
+  # text when it has one (`bp-desk-undo.js`).
+  defp told(%{kind: :value} = change, saved, field, now) do
+    input = change.input || "doc[#{field}]"
+
+    {value, was} =
+      DocUndoValues.told(change.input, field, DocUndoValues.stored(saved, field), now)
+
+    %{field: input, value: value, was: was}
+  end
+
+  defp told(_change, saved, field, now),
+    do: %{field: "doc[#{field}]", value: stored(saved, field), was: now}
 
   # The desk draws the chosen group tab's fields only: a change undone in a
   # field on another tab switches to a tab that draws it, so the user sees
