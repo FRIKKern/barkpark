@@ -185,9 +185,13 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
         do: name
   end
 
-  defp calls_gate?(ast) do
-    {_, found} = Macro.prewalk(ast, false, fn node, found -> {node, found or node == @gate} end)
-    found
+  # A clause is `{meta, args, guards, body}`, which the walk takes as a leaf,
+  # so each body is walked on its own.
+  defp calls_gate?(clauses) do
+    Enum.any?(clauses, fn {_meta, _args, _guards, body} ->
+      {_, found} = Macro.prewalk(body, false, &{&1, &2 or &1 == @gate})
+      found
+    end)
   end
 
   defp gated_routes do
@@ -248,7 +252,10 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
       {@lo, [{"accept", "text/html"}, {@xff, "203.0.113.9"}]}
     ]
 
-    for {verb, path} <- gated_routes(), {peer, headers} <- callers do
+    routes = gated_routes()
+    assert routes != [], "no route reads as behind the gate, so nothing below would run"
+
+    for {verb, path} <- routes, {peer, headers} <- callers do
       conn = through_endpoint(verb, path, peer, headers)
       who = "#{verb} #{path} #{inspect(peer)} #{inspect(headers)}"
 
