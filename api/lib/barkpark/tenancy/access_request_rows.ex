@@ -37,7 +37,13 @@ defmodule Barkpark.Tenancy.AccessRequestRows do
   role and `"seat"` for a seatless user's. `current_role` is the seat's role
   now (nil without one); `stale` is passed in by the caller.
   """
-  @spec admin_row(AccessRequest.t(), String.t() | nil, String.t() | nil, String.t() | nil, boolean()) ::
+  @spec admin_row(
+          AccessRequest.t(),
+          String.t() | nil,
+          String.t() | nil,
+          String.t() | nil,
+          boolean()
+        ) ::
           map()
   def admin_row(%AccessRequest{} = r, email, display_name, current_role, stale)
       when is_boolean(stale) do

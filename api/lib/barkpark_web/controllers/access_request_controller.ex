@@ -132,7 +132,13 @@ defmodule BarkparkWeb.AccessRequestController do
     do: unprocessable(conn, "role must be a role name (a-z, 0-9 and -)")
 
   defp deny(conn, :unknown_role),
-    do: fields(conn, :unprocessable_entity, "unknown_role", "that role is not a role of this workspace")
+    do:
+      fields(
+        conn,
+        :unprocessable_entity,
+        "unknown_role",
+        "that role is not a role of this workspace"
+      )
 
   defp deny(conn, :role_not_higher),
     do:

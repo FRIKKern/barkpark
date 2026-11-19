@@ -17,7 +17,9 @@ defmodule Barkpark.Tenancy.RoleRankTest do
     for action <- actions,
         do:
           {:ok, _} =
-            Repo.insert(RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: action}))
+            Repo.insert(
+              RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: action})
+            )
   end
 
   setup do

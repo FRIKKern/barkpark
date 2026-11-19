@@ -51,7 +51,9 @@ defmodule BarkparkWeb.AccessRequestRoleTest do
     for action <- actions,
         do:
           {:ok, _} =
-            Repo.insert(RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: action}))
+            Repo.insert(
+              RolePermission.changeset(%RolePermission{}, %{role_id: role.id, action: action})
+            )
   end
 
   defp seated_token!(ws, role, opts \\ []) do

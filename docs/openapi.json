@@ -11824,7 +11824,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Approve an access request: the asker is seated with the role (only an owner grants owner).",
+        "summary": "Approve an access request: seat the asker, or give a member the higher role (only an owner grants owner).",
         "tags": [
           "workspace"
         ],
@@ -13073,7 +13073,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Pending access requests: who asked for a seat here, their note and when.",
+        "summary": "Pending access requests: who asked for a seat or a higher role, their note and when.",
         "tags": [
           "workspace"
         ],
@@ -21855,7 +21855,7 @@
               }
             }
           },
-          "description": "Request body fields: workspace, note.",
+          "description": "Request body fields: workspace, note, role.",
           "required": true
         },
         "responses": {

@@ -320,7 +320,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
            %User{email: email} = user <- Repo.get(User, row.user_id),
            :ok <- not_self(row, actor),
            seat <- lock_seat(row),
-           false <- stale?(row, seat && seat.role) || {:error, :request_stale},
+           :ok <- fresh(row, seat),
            {:ok, member, granted, meta} <- grant(row, seat, email, role, actor),
            {:ok, _} <- drop_invitation(row),
            {:ok, row} <- decide(row, "approved", granted, actor),
@@ -369,6 +369,10 @@ defmodule Barkpark.Tenancy.AccessRequests do
            Members.update_role(ws, %{type: :user, id: row.user_id}, granted, actor: actor) do
       {:ok, member, granted, %{"role" => granted, "from_role" => current}}
     end
+  end
+
+  defp fresh(row, seat) do
+    if stale?(row, seat && seat.role), do: {:error, :request_stale}, else: :ok
   end
 
   defp lock_seat(%AccessRequest{workspace_id: nil}), do: nil
