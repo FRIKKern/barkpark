@@ -45,6 +45,7 @@ defmodule Barkpark.Content.Lifecycle do
     EmptyListMembers,
     PrePublishFences,
     Sheets,
+    StrengthenOnPublish,
     Writer,
     WriteScope
   }
@@ -160,7 +161,13 @@ defmodule Barkpark.Content.Lifecycle do
     # (the Writer-seam gate-position precedent). The `:door` fences run last,
     # exactly where the task publish-door lifecycle gate ran when this
     # module named it directly; each refusal is returned verbatim.
+    #
+    # A reference picked before its target was published waits as
+    # `_weak` + `_strengthenOnPublish`; it turns strong here when the target
+    # now has a published version, so the gates and the published row see the
+    # strong form (task-3fa8b7a435a9ed83).
     with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
+         draft = StrengthenOnPublish.strengthen(draft, dataset, opts),
          :ok <- ensure_bound_title_agrees(draft),
          :ok <- ensure_no_empty_list_members(draft, type, dataset, opts),
          :ok <- PrePublishFences.run(fences, :door, [type, draft, published, opts]) do
