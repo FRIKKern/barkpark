@@ -10,8 +10,7 @@ LiveViews read `session["api_token_session"]`
 
 ## Tenancy — token ↔ workspace
 
-The principal is the API token, bound to one **workspace** (tenancy boundary;
-`docs/api-v1.md` §1a) by two agreeing facts: `api_tokens.workspace_id`
+The principal is the API token, bound to one **workspace** (`docs/api-v1.md` §1a) by two agreeing facts: `api_tokens.workspace_id`
 and its `workspace_memberships` row.
 
 The path carries both
@@ -21,7 +20,7 @@ The path carries both
 
 Mutate and any `:scoped_admin` write need `write` (or 403). A token bound to a
 `dataset` (`dataset_bound`; old `bp` mints: re-mint) gets `403 dataset_not_bound`
-elsewhere, on workspace/project create, playground, import. Admin reads/writes (audit,
+elsewhere: workspace/project create, playground, import. Admin reads/writes (audit,
 export, seats, grants, shares, tokens, chat hosts, secrets, workspace
 delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 `:dataset_bound_admin_reads` `:enforce`.
@@ -44,13 +43,13 @@ delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 
 `admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
 `ops`, `read`, `write`; `ops` (no `read`/`write`) is separate so Bokbasen
-operators never see `client_secret`) and confers **no membership anywhere**.
+operators never see `client_secret`) and confers **no membership**.
 
-Three tiers (ruling #2):
-`RequireAdmin`: `admin` permission plus admin authority in the token's
-workspace (bound token) or its owner's (workspace-less PAT); a workspace-less
+Three tiers:
+`RequireAdmin`: `admin` permission plus admin authority in the bound token's
+workspace or a workspace-less PAT owner's; a workspace-less
 machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
-`permissions` AND the seat role (and a PAT owner's role) allow the action. `workspace_admin?/2`: the ROLE alone.
+`permissions` AND the seat role (and a PAT owner's) allow it. `workspace_admin?/2`: the ROLE alone.
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` (`AssignDefaultScope` stamps *Default*):
@@ -64,15 +63,15 @@ resolves it to `:global`, stamping `owner_workspace_id = NULL`
 (`ChatTokenController`).
 
 **Tier 0: instance operator** (`RequirePlatformOperator`): `admin` plus an
-env allowlist; [instance-operator-tier.md](contracts/instance-operator-tier.md).
+env allowlist (flat `/v1/secrets` too); [instance-operator-tier.md](contracts/instance-operator-tier.md).
 
 ## Minting `write`/`admin`
 
-`POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`), the only `admin` mint:
+`POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`), the only HTTP `admin` mint (offline: `admin-token` recovery and the seeds):
 caller has flat `admin` AND an admin seat, gets at most its own set; seated,
 audited `token_minted`. `bp token create --permissions read,write,admin`.
-`bp token rotate` refuses Cloud's credential
-(label `barkpark cloud admin`) without `--force`.
+`bp token rotate` needs `--force` on Cloud's credential
+(label `barkpark cloud admin`).
 Self-mint caps a PAT at `read` (member) or `read`+`write`
 (owner/admin), never `admin`; the seat
 writes ([sessions](auth-user-sessions.md)).
@@ -101,7 +100,7 @@ Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
 ## Dev token
 
 `barkpark-dev-token` (seeded by profile `demo`; `clean` mints none) carries
-`["read","write","admin"]` AND a `Default` `workspace_memberships` row: it
+`["read","write","admin"]` AND a `Default` `workspace_memberships` row;
 passes every gate.
 **MUST rotate before prod**: starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.
