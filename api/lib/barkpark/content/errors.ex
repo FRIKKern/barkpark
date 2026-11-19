@@ -549,6 +549,19 @@ defmodule Barkpark.Content.Errors do
   # `code` stays "forbidden" and the status stays 403 — byte-identical to the
   # membership arm for any client keying on those. `reason` is the only
   # discriminator, exactly as `:forbidden_membership` intends it to be.
+  # The same refusal when the route needs the `admin` capability
+  # (task-23ed7ba485104620: the scoped secrets tier). The generic hint above
+  # names `read`, which such a caller usually already holds.
+  defp build({:error, {:forbidden_capability, :admin}}),
+    do: %{
+      code: "forbidden",
+      message: "caller is a member of this workspace but lacks the required capability",
+      status: 403,
+      reason: "missing_capability",
+      hint:
+        "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. This route needs the `admin` capability: an API token needs `admin` in its permissions as well as an owner or admin seat, and a user account needs an owner or admin role. Call with a token that carries `admin`, or raise the role."
+    }
+
   defp build({:error, :forbidden_capability}),
     do: %{
       code: "forbidden",

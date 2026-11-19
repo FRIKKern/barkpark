@@ -345,7 +345,8 @@ defmodule BarkparkWeb.SecretController do
           conn
 
         _ ->
-          env = Barkpark.Content.Errors.to_envelope({:error, :forbidden_capability}, conn)
+          env =
+            Barkpark.Content.Errors.to_envelope({:error, {:forbidden_capability, :admin}}, conn)
 
           conn
           |> put_status(env.status)

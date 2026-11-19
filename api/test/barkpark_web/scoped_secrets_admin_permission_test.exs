@@ -63,6 +63,13 @@ defmodule BarkparkWeb.ScopedSecretsAdminPermissionTest do
     error = Jason.decode!(conn.resp_body)["error"]
     assert error["code"] == "forbidden"
     assert error["reason"] == "missing_capability", "#{route}: #{inspect(error)}"
+
+    assert error["hint"] =~ "needs the `admin` capability",
+           "#{route}: the hint must name the missing `admin` permission. Got: #{error["hint"]}"
+
+    refute error["hint"] =~ "needs `read`",
+           "#{route}: the caller already holds read; the generic hint sends it the wrong way. " <>
+             "Got: #{error["hint"]}"
   end
 
   for {label, key} <- [{"a read token", :read_raw}, {"a read+write token", :write_raw}] do
