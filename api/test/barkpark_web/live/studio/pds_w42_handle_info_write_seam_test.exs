@@ -81,7 +81,8 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"{:tree_codelist_change, msg}", :write},
     # Fields.tree_codelist_pick/2 — a tree codelist pick in the document
     # editor (task-0f806691db0e06dd): buffer put + Shared.do_autosave/3, the
-    # same gated seam as {:autosave_form, …}; run below
+    # same gated seam as {:autosave_form, …}, for the document its press
+    # names (PostIdentity.pressed/3); run below
     {"{:tree_codelist_pick, msg}", :write},
     # Enablement.forget/1 — drops this process's memo (task-c8a87043cb286a2f)
     {"{:plugin_enablement_changed, ws_id}", :no_write},
@@ -242,6 +243,15 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
   # LiveView to drain its mailbox before the store is read. Reading straight
   # after `send/2` reads BEFORE the message is processed and reports a false
   # "no write" — the vacuity trap this whole class invites.
+  # A tree row's pick as `TreeCodelistField` sends it: the press carries the
+  # mark the page's script puts on the row.
+  defp pick(view, code),
+    do: %{
+      name: "doc[body]",
+      value: code,
+      press: BarkparkWeb.EditorPost.named(view, %{"code" => code})
+    }
+
   defp drive_seam(view, message) do
     send(view.pid, message)
     render(view)
@@ -422,12 +432,14 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     end
 
     # The tree codelist pick (task-0f806691db0e06dd) rides the same seam: the
-    # input name and code become a buffer put and `Shared.do_autosave/3`.
+    # input name and code become a buffer put and `Shared.do_autosave/3`. The
+    # pick carries its row's press, named for the open document as the page
+    # names it (`PostIdentity.pressed/3`).
     test "a {:tree_codelist_pick, …} from a write-denied principal is refused", %{conn: conn} do
       view = open!(conn, @readonly)
       assert_write_denied_socket!(view)
 
-      drive_seam(view, {:tree_codelist_pick, %{name: "doc[body]", value: "ESCALATED-VIA-PICK"}})
+      drive_seam(view, {:tree_codelist_pick, pick(view, "ESCALATED-VIA-PICK")})
 
       assert stored_body() == @untouched
     end
@@ -436,9 +448,26 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
          %{conn: conn} do
       view = open!(conn, @writer)
 
-      drive_seam(view, {:tree_codelist_pick, %{name: "doc[body]", value: "ENTITLED-PICK"}})
+      drive_seam(view, {:tree_codelist_pick, pick(view, "ENTITLED-PICK")})
 
       assert stored_body() == {"ENTITLED-PICK", :absent}
+    end
+
+    test "a {:tree_codelist_pick, …} with no press, or pressed in another document, writes nothing",
+         %{conn: conn} do
+      view = open!(conn, @writer)
+
+      drive_seam(view, {:tree_codelist_pick, %{name: "doc[body]", value: "NO-PRESS"}})
+      assert stored_body() == @untouched
+
+      other = %{"_bp_doc" => Jason.encode!([@dataset, "post", "another-post"])}
+
+      drive_seam(
+        view,
+        {:tree_codelist_pick, %{name: "doc[body]", value: "OTHER-DOC", press: other}}
+      )
+
+      assert stored_body() == @untouched
     end
 
     # Denied WRITE is not denied READ.

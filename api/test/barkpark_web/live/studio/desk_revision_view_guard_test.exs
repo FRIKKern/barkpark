@@ -317,6 +317,40 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
     end
   end
 
+  describe "a tree codelist's pick while a revision is shown" do
+    # The pick is pressed on the tree's component, past the page's guard,
+    # and reaches the page as a message (`TreeCodelistField`): refused there.
+    test "writes nothing; the same pick on the live form is written", c do
+      d =
+        doc!(
+          [
+            %{
+              "name" => "subject",
+              "title" => "Subject",
+              "type" => "codelist",
+              "codelistId" => "onixedit:rvg-none"
+            }
+          ],
+          %{"title" => "Pub v1", "subject" => "FBA"},
+          %{"title" => "Pub draft", "subject" => "FBC"}
+        )
+
+      pick = fn code ->
+        {:tree_codelist_pick, %{name: "doc[subject]", value: code, press: own_mark(d)}}
+      end
+
+      view = open(c, d, @history <> ",rev=#{d.rev}")
+      send(view.pid, pick.("YFB"))
+      render_async(view, 5_000)
+      assert draft(d).content["subject"] == "FBC"
+
+      view = open(c, d)
+      send(view.pid, pick.("YFB"))
+      render_async(view, 5_000)
+      assert draft(d).content["subject"] == "YFB"
+    end
+  end
+
   describe "the header menu while a revision is shown" do
     test "offers no write, and Publish or Discard pressed anyway does nothing", c do
       d =

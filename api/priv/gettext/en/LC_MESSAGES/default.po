@@ -15473,6 +15473,21 @@ msgstr ""
 msgid "Unpublished %{ago}"
 msgstr ""
 
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Not in the list"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Remove code"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "The first 200 matches. Type more to narrow them."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/desk/validation_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Not a valid URL"

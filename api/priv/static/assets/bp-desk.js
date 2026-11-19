@@ -729,6 +729,8 @@
       // A tags field's Enter (bp-desk-tags.js), pushed through here: LiveView
       // drops a click on a button whose last press is still unanswered.
       deskScript("data-desk-tags", window.BarkparkDeskTags);
+      // A tree codelist's keys (bp-desk-codelist.js).
+      deskScript("data-desk-codelist", window.BarkparkDeskCodelist);
       root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
