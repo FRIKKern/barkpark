@@ -119,13 +119,13 @@ defmodule Barkpark.PortableDoc.FromMarkdownBudgetTest do
     markdown = ordinary(Budget.max_bytes())
     assert byte_size(markdown) == Budget.max_bytes()
 
-    assert {:ok, blocks, []} =
-             FromMarkdown.read(markdown,
-               max_reductions: div(Budget.max_reductions(), 9),
-               max_heap_words: div(Budget.max_heap_words(), 9)
-             )
-
+    assert {:ok, blocks, []} = FromMarkdown.read(markdown)
     assert length(blocks) > 5_000
-    assert {:ok, ^blocks, []} = FromMarkdown.read(markdown)
+
+    work = FromMarkdown.read(markdown, max_reductions: div(Budget.max_reductions(), 9))
+    assert work == {:ok, blocks, []}, "needs more than a ninth of the reductions"
+
+    heap = FromMarkdown.read(markdown, max_heap_words: div(Budget.max_heap_words(), 9))
+    assert heap == {:ok, blocks, []}, "needs more than a ninth of the heap"
   end
 end

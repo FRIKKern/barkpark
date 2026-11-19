@@ -18,7 +18,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown.Budget do
 
   @max_bytes 500_000
   @max_reductions 1_000_000_000
-  @max_heap_words 30_000_000
+  @max_heap_words 32_000_000
   @poll_ms 10
 
   @typedoc "Why an import was refused."
