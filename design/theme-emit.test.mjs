@@ -15,8 +15,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
-import { BRAND_SURFACES, DARK_GROUND } from "./emit/barkui-surfaces.mjs";
-import { contrast, hexToRgb, hslToHex, parseColor, rgbToHex, srgbToOklch } from "./derive.mjs";
+import { BRAND_SURFACES, softSides } from "./emit/barkui-surfaces.mjs";
+import { stepsFor } from "./emit/barkui-states.mjs";
+import { contrast, hexToRgb, hslToHex, oklchToSrgb, parseColor, rgbToHex, srgbToOklch, toHslTriplet } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
@@ -696,8 +697,6 @@ test("BarkUI sheet: raised and sunken stand off base; a sunken well has a rim, w
 //     chroma; primary states keep its hue within 1 degree; muted states gain at
 //     most 0.002 chroma.
 //   - A fill that stands 3:1 off its ground at rest still does in both states.
-//   - On a dark ground (OKLCH lightness under DARK_GROUND) a fill sits on the
-//     lighter side of its ground.
 const STATE = { step: 1.12, stepL: 0.03, ground: 1.1, hue: 1, softC: 0.016, greyGain: 0.002 };
 const STATE_FILLS = [["primary", "primary-foreground", "primary"], ["muted", "foreground", "muted"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`, "soft"])];
 const paint = (c) => parseColor(c).map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255) / 255);
@@ -723,7 +722,6 @@ test("BarkUI sheet: every control fill has a visible hover and pressed state tha
         if (kind === "muted" && o[k].C > o[0].C + STATE.greyGain) miss(`${n} gains chroma ${(o[k].C - o[0].C).toFixed(4)}`);
       }
       if (contrast(label, rest) < 4.5) miss(`${lab} on rest is ${contrast(label, rest).toFixed(2)}, under 4.5`);
-      if (srgbToOklch(bg).L < DARK_GROUND && g[0] >= 1.005 && contrast(rest, [0, 0, 0]) < contrast(bg, [0, 0, 0])) miss("sits below a dark ground");
       if (Math.sign(o[1].L - o[0].L) !== Math.sign(o[2].L - o[1].L)) miss("hover and pressed move in different directions");
       if (g[1] < g[0]) {
         const end = contrast(rest, contrast(rest, [0, 0, 0]) >= contrast(bg, [0, 0, 0]) ? [1, 1, 1] : [0, 0, 0]);
@@ -731,6 +729,31 @@ test("BarkUI sheet: every control fill has a visible hover and pressed state tha
         if (g[2] < 3) miss(`moves toward its ground and ends ${g[2].toFixed(2)}:1 off it, under 3`);
       }
     }
+  });
+  assert.deepEqual(misses, []);
+});
+
+// On one ground the muted fill and every soft fill sit on one side, so every
+// such button there presses the same way: the side away from the label (the
+// foreground) if every one of them fits there with both its steps, else the
+// label's side. Sides are by the painted luminance; a colour that paints the
+// same as the ground is on neither side. The muted fill's candidate on the
+// other side is itself mirrored across the ground in OKLCH lightness; a soft
+// fill's is the generator's soft fill on that side (softSides); "fits" is the
+// step rule (stepsFor), which the states test holds.
+test("BarkUI sheet: on each ground the muted and soft fills sit on one side, away from the label only where all of them fit", () => {
+  const misses = [];
+  const side = (c, g) => Math.sign(contrast(paint(c), [0, 0, 0]) - contrast(paint(g), [0, 0, 0]));
+  eachSurface((at, mode, s, get) => {
+    const ground = get("background"), labelSide = side(get("foreground"), ground);
+    const mirror = (c) => { const o = srgbToOklch(c); return `hsl(${toHslTriplet(oklchToSrgb(2 * srgbToOklch(ground).L - o.L, o.C, o.h))})`; };
+    const fills = [["muted", "muted", get("muted"), (c) => mirror(c)], ...TONES.map((t) => [`${t}-soft`, "soft", get(`${t}-soft`), (c) => softSides(get(t), ground).find((x) => x && side(x, ground) === -side(c, ground))])];
+    const sides = fills.map(([, , c]) => side(c, ground));
+    if (new Set(sides).size !== 1 || sides[0] === 0) { misses.push(`${at}: the fills sit on sides ${sides.join(" ")}`); return; }
+    if (sides[0] === labelSide) {
+      const far = fills.map(([, kind, c, other]) => [kind, other(c)]);
+      if (far.every(([kind, c]) => c && side(c, ground) === -labelSide && stepsFor(kind, c, ground))) misses.push(`${at}: every fill fits away from the label, but they sit on its side`);
+    } else for (const [role, kind, c] of fills) if (!stepsFor(kind, c, ground)) misses.push(`${at}: ${role} sits away from the label without room for its steps`);
   });
   assert.deepEqual(misses, []);
 });
