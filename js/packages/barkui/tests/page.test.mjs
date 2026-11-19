@@ -57,6 +57,11 @@ describe('renderPage proof lights', () => {
     expect(lines.map(([k]) => k).sort()).toEqual(['boundary', 'boundary:inverse', 'boundary:primary', 'boundary:raised', 'boundary:sunken'])
     expect(lines.every(([, w]) => w.needs === 3)).toBe(true)
     expect(SHEET_WAITS.boundary.hard).toBe(true)
+  })
+
+  it('holds text as proof on every surface where the sheet carries 4.5:1, and waits on primary', () => {
+    expect(['text:raised', 'text:sunken', 'text:inverse'].map((k) => SHEET_WAITS[k].hard)).toEqual([true, true, true])
+    expect(SHEET_WAITS['text:primary'].hard).toBe(false)
     expect(Object.keys(SHEET_WAITS).some((k) => k.startsWith('controlEdge'))).toBe(false)
   })
 

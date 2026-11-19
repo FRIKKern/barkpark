@@ -309,11 +309,11 @@ const CASES = [
   ...[
     ['visibility: hidden', /is hidden/],
     ['opacity: 0', /is hidden|opaque/],
-  ].map(([rule, why]) => ({
+  ].map(([rule, says]) => ({
     name: `no-script content under ${rule} turns "printed with no script" off`,
     only: ['noscript'],
     plant: inCss(`ui-button:not(:defined) > [data-slot] { ${rule}; }`, { visibility: why }),
-    expect: (p) => why.test(p.parts.button.lights.noscript.detail),
+    expect: (p) => says.test(p.parts.button.lights.noscript.detail),
   })),
   {
     name: 'no-script content clipped to a sliver turns "printed with no script" off',
