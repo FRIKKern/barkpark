@@ -113,14 +113,6 @@ const supportHealthPollDeadline = 4 * time.Minute
 // wait (3m) and the public health gate (4m) and well under the chain budget.
 const DefaultSupportSecureStepBudget = 6 * time.Minute
 
-// supportRecordTTLSeconds is the TTL the secure step pins on the support's A
-// record. The zone default (300s positive; SOA minimum 3600s for negative
-// answers) burned two live chains on 2026-07-26: a failed chain's deleted
-// record left NXDOMAIN cached for up to an hour, and a repointed slug served
-// the OLD box IP for 5 minutes. 60s bounds what any resolver may cache about
-// a record this chain creates, deletes, and repoints freely.
-const supportRecordTTLSeconds = 60
-
 // supportProvisioningTTL is the provisioning roster row's honest freshness
 // budget (PDF-D56): the whole bring-up fits inside 30 min, after which an
 // abandoned row truthfully ages to offline.
@@ -402,7 +394,7 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	fqdn := label + "." + Zone
 	report("secure", "started", "")
 	report("secure", "progress", fmt.Sprintf("pointing %s at %s", fqdn, host.IP))
-	// TTL pinned low (supportRecordTTLSeconds) so a failed-then-retried or
+	// TTL pinned low (cloud.BoxRecordTTLSeconds) so a failed-then-retried or
 	// repointed slug is never hostage to a resolver's cache of this record;
 	// CloudDNS issues the follow-up change-ttl (set-records has no --ttl flag).
 	// EVERY call below is wrapped in runSecureStep: the leg must reach a terminal
@@ -412,7 +404,7 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	// row), and only a terminal return reaches failStep, whose fresh-context
 	// teardown deletes that record.
 	if err := runSecureStep(ctx, seams.SecureStepBudget, fmt.Sprintf("the DNS upsert for %s", fqdn), func(sctx context.Context) error {
-		return seams.DNS.UpsertRecord(sctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP, TTL: supportRecordTTLSeconds})
+		return seams.DNS.UpsertRecord(sctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP, TTL: cloud.BoxRecordTTLSeconds})
 	}); err != nil {
 		return r.failStep(ctx, "secure", fmt.Errorf("dns: upsert %s: %w", fqdn, err))
 	}
