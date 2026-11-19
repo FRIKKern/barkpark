@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
-Bearer tokens (`Authorization: Bearer <token>`) in `api_tokens`;
+Bearer tokens in `api_tokens`;
 LiveViews read `session["api_token_session"]`
 (or `session["api_token"]`) via `on_mount`.
 
@@ -11,16 +11,13 @@ LiveViews read `session["api_token_session"]`
 ## Tenancy — token ↔ workspace
 
 The principal is the API token, bound to one **workspace** (tenancy boundary;
-`docs/api-v1.md` §1a) by two facts that must agree:
-
-- `api_tokens.workspace_id`: the token's workspace.
-- a `workspace_memberships` row: its membership.
+`docs/api-v1.md` §1a) by two facts that must agree: `api_tokens.workspace_id`
+and its `workspace_memberships` row.
 
 Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is checked
-**before** permissions: slug unresolved → `404 not_found`; resolved, no
-seat → `403 forbidden`, reason
-`not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`) resolve to `"Default"`.
+**before** permissions: slug unresolved → `404 not_found`; no seat → `403`
+`not_a_member` naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`) resolve to `"Default"`.
 
 Mutate and any `:scoped_admin` write need `write` (or 403). A token bound to a
 `dataset` (`dataset_bound`; old `bp` mints: re-mint) gets `403 dataset_not_bound`
@@ -38,7 +35,7 @@ delete/archive/restore/reinstate; not self-revoke): audited; 403 on
 | `public-read` | Anonymous-level GET reads | `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
 | `ops` | Bokbasen publishing | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
-| `admin` | The above + plugin-settings reveal/audit, schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
+| `admin` | The above + plugin-settings reveal/audit, secrets and webhooks (both tiers), flat schema CRUD (scoped: `write` + admin seat) | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/secrets/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
 > a token, **not** `write`: `:media_mutate`/`:scoped_media_mutate` omit `RequireWritePermission`.
@@ -71,12 +68,13 @@ env allowlist; [instance-operator-tier.md](contracts/instance-operator-tier.md).
 
 ## Minting `write`/`admin`
 
-Only `POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`) mints them:
+`POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`), the only `admin` mint:
 caller has flat `admin` AND an admin seat, gets at most its own set; seated,
 audited `token_minted`. `bp token create --permissions read,write,admin`.
-`bp token rotate` (new expiry: `--expires_in_days N`) refuses Cloud's credential
+`bp token rotate` refuses Cloud's credential
 (label `barkpark cloud admin`) without `--force`.
-Self-mint caps a member's PAT at `["read"]`, a MINTING policy; the seat
+Self-mint (a MINTING policy) caps a PAT at `read` (member) or `read`+`write`
+(owner/admin), never `admin`; the seat
 writes ([sessions](auth-user-sessions.md)).
 
 ## LiveView `on_mount` hooks
