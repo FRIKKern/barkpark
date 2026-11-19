@@ -390,34 +390,12 @@ jobs:
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
 
-      # BarkUI's showroom check: builds js/packages/barkui's static page and
-      # presses every part with real keys in the Chromium installed above, then
-      # proves each skin, light and dark, a 390px window and a script-free print.
-      # About 20 seconds. Reds on a part folder missing a file, a failed press
-      # step, a light that does not come on, any page error or network request,
-      # or a step or part past its time limit (check/proofs.mjs, check/check.mjs).
-      - name: "BarkUI showroom check (real keys in Chromium)"
-        timeout-minutes: 5
-        run: |
-          set +e
-          out="$(pnpm --filter @barkpark/barkui run check 2>&1)"
-          status=$?
-          set -e
-          echo "$out"
-          case "$out" in
-            *"No projects matched the filters"*)
-              echo "barkui check FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
-              exit 1
-              ;;
-          esac
-          exit "$status"
-
-      # Whether this change touches BarkUI: the selftest below costs about 8 minutes,
-      # so it runs only then. PR: the diff from the merge base (fetch-depth 0).
+      # Whether this change touches BarkUI: its showroom check and selftest run only
+      # then, on a change to js/packages/barkui/** or the tokens sheet
+      # (api/priv/barkui/**). PR: the diff from the merge base (fetch-depth 0).
       # Push: the diff from the previous head, fetched here (the clone is
       # shallow). --no-renames lists both sides of a move, so moving a BarkUI file
-      # out counts; the lockfile and workspace manifests count too (a UI SDK or
-      # Playwright bump). Any failure to work out the diff RUNS the selftest.
+      # out counts. Any failure to work out the diff RUNS both.
       - name: "BarkUI: did this change touch it?"
         id: barkui
         run: |
@@ -434,23 +412,47 @@ jobs:
           fi
           set -e
           if [ "$status" -ne 0 ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the selftest"; exit 0
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the check and the selftest"; exit 0
           fi
-          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|\.github/workflows/js-tests\.yml$|js/pnpm-lock\.yaml$|js/pnpm-workspace\.yaml$|js/package\.json$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the selftest"
+          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the check and the selftest"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the selftest"
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the check and the selftest"
           fi
 
-      # The check's own proof that it can still lose: it plants one break per
-      # case in a scratch copy of a part (a step that never settles, an element
-      # frozen across skins, a focus ring lost on its ground, hidden or clipped
-      # no-script content, a nameless icon button, a console error, a missing
-      # file) and reds unless each one turns the right light off. About 90 s.
-      # Skipped only when the step above says, for certain, BarkUI was not touched.
+      # BarkUI's showroom check: builds js/packages/barkui's static page and
+      # presses every part with real keys in the Chromium installed above, then
+      # proves each skin, light and dark, on every surface, a 390px window and a
+      # script-free print, reading every label and graphic from pixels. Limit:
+      # 5 minutes. Reds on a part folder missing a file, a failed press step, a
+      # light that does not come on, any page error or network request, or a step
+      # or part past its time limit (check/proofs.mjs, check/check.mjs).
+      - name: "BarkUI showroom check (real keys in Chromium)"
+        if: steps.barkui.outputs.run != 'false'
+        timeout-minutes: 5
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/barkui run check 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          case "$out" in
+            *"No projects matched the filters"*)
+              echo "barkui check FAILED: pnpm --filter matched ZERO packages; @barkpark/barkui was renamed, moved, or removed and this step ran nothing" >&2
+              exit 1
+              ;;
+          esac
+          exit "$status"
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds README.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Limit: 5 minutes; the run prints how long it took.
       - name: "BarkUI showroom check selftest (each planted break turns its light off)"
         if: steps.barkui.outputs.run != 'false'
-        timeout-minutes: 20
+        timeout-minutes: 5
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check:selftest 2>&1)"

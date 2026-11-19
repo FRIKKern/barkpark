@@ -15,10 +15,10 @@ export const STEP_MS = 5000
 const light = (pass, detail, extra = {}) => ({ pass: !!pass, detail, ...extra })
 const fmt = (n) => n.toFixed(2)
 /** How the least label and graphic draw against the same drawn alone (reading.mjs). */
-const drawsAll = (w) => `lowest label ${fmt(w.label.match)} like itself${w.label.at ? ` at ${w.label.at}` : ''}; every graphic draws ${Math.floor(Math.min(1, w.share) * 100)}% or more of itself`
+const drawsAll = (w) => `${w.label.at ? `lowest label ${w.label.match.toFixed(3)} like itself at ${w.label.at}` : 'no label'}; every graphic draws ${Math.floor(Math.min(1, w.share) * 100)}% or more of itself`
 /** The least of two weakest readings (verdict). */
 const least = (a, b) => ({ share: Math.min(a.share, b.share), label: b.label.match < a.label.match ? b.label : a.label })
-const NONE = { share: 1, label: { match: 1, at: '' } }
+const NONE = { share: 1, label: { match: Infinity, at: '' } }
 /** The surfaces a run proves its lights on: every one, unless the selftest asked for base alone. */
 export const surfacesOf = (ctx) => (ctx.surfaces === false ? ['base'] : SURFACES)
 

@@ -61,7 +61,7 @@ const NEEDS = { text: 4.5, graphic: 3 }
 export function verdict(view, where = '', waits = []) {
   const fails = []
   const waited = []
-  const weakest = { text: { ratio: Infinity, at: '' }, graphic: { ratio: Infinity, at: '' }, share: 1, label: { match: 1, at: '' } }
+  const weakest = { text: { ratio: Infinity, at: '' }, graphic: { ratio: Infinity, at: '' }, share: 1, label: { match: Infinity, at: '' } }
   for (const kind of ['text', 'graphic']) {
     for (const t of view.things.filter((x) => x.kind === kind)) {
       const label = t.match !== undefined
