@@ -11,19 +11,26 @@ defmodule Barkpark.Content.Papers.BpmlView do
 
   It refuses a Paper whose reader is shown no blocks (the reader's own
   answer: an HTML source, a redacted source, or nothing), a view with an
-  untyped block, an empty view, and a cache that holds text its stored blocks
-  lack. A refusal names its reason only; it quotes nothing stored.
+  untyped block, a view that hides a key a push matches blocks by
+  (`Bpml.Diff.match_keys/0`, at any depth), an empty view, a cache that holds
+  text its stored blocks lack, and a view whose print does not read back as
+  BPML. A refusal names its reason only; it quotes nothing stored.
+
+  A write's answer is the view of the Paper as saved: `saved_check/3` reads
+  the row back inside the write's transaction, and a refusal rolls it back.
   """
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.PortableDoc.{Bpml, Projection}
+  alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
   alias Barkpark.PortableDoc.Bpml.Diff
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
     semantic_empty: "the reader's view of this Paper is empty",
+    hidden_block_id: "the reader may not see the ids this Paper's blocks are matched by",
+    unreadable_print: "the reader's view of this Paper does not read back as BPML",
     redacted_source: "the reader may see none of this Paper's blocks",
     invalid_blocks: "a block of this Paper has no type"
   }
@@ -50,6 +57,11 @@ defmodule Barkpark.Content.Papers.BpmlView do
         cond do
           not Enum.all?(blocks, &typed?/1) ->
             {:error, :invalid_blocks}
+
+          # A push matches its blocks to the stored ones by these keys; a view
+          # without them cannot be pushed back without minting new blocks.
+          hides_match_key?(stored, blocks) ->
+            {:error, :hidden_block_id}
 
           Hollow.hollow?(blocks) ->
             {:error, :semantic_empty}
@@ -81,6 +93,20 @@ defmodule Barkpark.Content.Papers.BpmlView do
   defp typed?(%{"type" => type}) when is_binary(type), do: String.trim(type) != ""
   defp typed?(_block), do: false
 
+  # Redaction drops keys and keeps every list's length, so stored and shown
+  # positions pair up at any depth.
+  defp hides_match_key?(%{} = stored, %{} = shown) do
+    Enum.any?(Diff.match_keys(), &(Map.has_key?(stored, &1) and not Map.has_key?(shown, &1))) or
+      Enum.any?(shown, fn {key, value} -> hides_match_key?(Map.get(stored, key), value) end)
+  end
+
+  defp hides_match_key?(stored, shown) when is_list(stored) and is_list(shown) do
+    length(stored) == length(shown) and
+      stored |> Enum.zip(shown) |> Enum.any?(fn {s, v} -> hides_match_key?(s, v) end)
+  end
+
+  defp hides_match_key?(_stored, _shown), do: false
+
   @doc """
   `paper`'s view printed as `bp paper pull` gets it (flat route, published
   task rows): the bytes the pull, push and create answers carry, or the
@@ -89,22 +115,37 @@ defmodule Barkpark.Content.Papers.BpmlView do
   @spec print(Document.t(), String.t()) :: {:ok, String.t()} | {:refused, map()}
   def print(%Document{} = paper, dataset) do
     case of(paper, dataset, [], :published) do
-      {:blocks, blocks, fields} -> print(paper, blocks, fields)
-      other -> {:refused, refusal(other)}
+      {:blocks, blocks, fields} ->
+        with {:ok, bpml, _pulled} <- printed(paper, blocks, fields), do: {:ok, bpml}
+
+      other ->
+        {:refused, refusal(other)}
     end
   end
 
-  defp print(paper, blocks, fields) do
-    {:ok, Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))}
+  @doc """
+  A view `of/4` built, printed: the bytes, and the blocks they read back as,
+  which is what a push of those bytes carries. Refused when the view does not
+  print, or its print does not read back.
+  """
+  @spec printed(Document.t(), [map()], map()) :: {:ok, String.t(), [map()]} | {:refused, map()}
+  def printed(%Document{} = paper, blocks, fields) do
+    bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))
+
+    case Bpml.parse_paper(bpml) do
+      {:ok, parsed} -> {:ok, bpml, parsed["blocks"] || []}
+      {:error, _errors} -> {:refused, refusal({:error, :unreadable_print})}
+    end
   rescue
     e in Bpml.UnprintableError -> {:refused, refusal({:unprintable, Exception.message(e)})}
   end
 
   @doc """
   The ops a push of `pushed` derives against `paper`, compared with the
-  view: a pushed block that spells as the view showed it was not edited.
-  Refused, before anything is written, when the view cannot be built, or when
-  the Paper as the ops would leave it has no view that prints.
+  blocks the pull's text reads back as: a pushed block that spells as the pull
+  printed it was not edited, so an unedited push derives no op whatever the
+  view hides. Refused, writing nothing, when the view cannot be built or
+  printed. The Paper the ops leave is checked as saved (`saved_check/3`).
   """
   @spec push(Document.t(), [map()], String.t()) ::
           {:ok, [map()]} | {:refused, map()} | {:error, :diff_verification_failed}
@@ -112,48 +153,48 @@ defmodule Barkpark.Content.Papers.BpmlView do
     stored = Projection.read_blocks(paper.content || %{}) || []
 
     with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
-         {:ok, _bpml} <- print(paper, shown, fields),
-         {:ok, blocks, ops} <- Diff.derive(stored, pushed, shown),
-         nil <- if(ops != [], do: write_refusal(written(paper, blocks), dataset)) do
+         {:ok, _bpml, pulled} <- printed(paper, shown, fields),
+         {:ok, _blocks, ops} <- Diff.derive(stored, pushed, BlockIds.ensure_block_ids(pulled)) do
       {:ok, ops}
     else
       {:error, :diff_verification_failed} = failed -> failed
       {:refused, _body} = refused -> refused
-      %{} = body -> {:refused, body}
       view -> {:refused, refusal(view)}
     end
   end
 
   @doc """
-  The refusal a write of `paper` gets when the Paper it would leave has no
-  view that prints; nil when it has one.
+  The `before_commit` check a write runs inside its transaction: `read`
+  reads the saved row back and its view is printed. The bytes go to the
+  calling process as `{ref, bpml}` (the write's answer); a refusal is
+  `{:error, {:view_refused, body}}`, and the write rolls back.
   """
-  @spec write_refusal(Document.t(), String.t()) :: map() | nil
-  def write_refusal(%Document{} = paper, dataset) do
-    case print(paper, dataset) do
-      {:ok, _bpml} -> nil
-      {:refused, body} -> body
+  @spec saved_check(reference(), (-> Document.t() | nil), String.t()) ::
+          (-> :ok | {:error, term()})
+  def saved_check(ref, read, dataset) when is_reference(ref) and is_function(read, 0) do
+    fn ->
+      case read.() do
+        %Document{} = saved -> answer(ref, print(saved, dataset))
+        nil -> {:error, {:view_refused, refusal({:error, :not_found})}}
+      end
     end
   end
 
-  @doc "The Paper a create of `parsed` at `slug` would store, for `write_refusal/2`."
-  @spec created(String.t(), map(), keyword()) :: Document.t()
-  def created(slug, parsed, scope) do
-    content = Map.take(parsed, ["blocks", "description", "tags", "style"])
-
-    %Document{
-      doc_id: slug,
-      type: "paper",
-      workspace_id: scope[:workspace_id],
-      project_id: scope[:project_id],
-      content: content
-    }
+  defp answer(ref, {:ok, bpml}) do
+    send(self(), {ref, bpml})
+    :ok
   end
 
-  # The row as a write of `blocks` leaves it: the cache is rendered from them.
-  defp written(paper, blocks) do
-    content = paper.content |> Map.put("blocks", blocks) |> Map.drop(["body", "body_html"])
-    %{paper | content: content}
+  defp answer(_ref, {:refused, body}), do: {:error, {:view_refused, body}}
+
+  @doc "The bytes `saved_check/3` printed for `ref`; nil when no check ran."
+  @spec checked(reference()) :: String.t() | nil
+  def checked(ref) do
+    receive do
+      {^ref, bpml} -> bpml
+    after
+      0 -> nil
+    end
   end
 
   @doc """
