@@ -39,7 +39,8 @@ neither base.css nor a part mixes a tint of its own.
   condition on" for which light crosses what). The page shows a light only when the
   last run passed and proved it for the same part folder, tokens, base styles, UI SDK version and check
   code. It exits non-zero on an incomplete folder, a failed step, an unlit light, any page error or
-  network request, or a step (5s) or part (120s) past its time limit.
+  network request, a step (5s) or part (120s for each part running at the same time) past its time
+  limit, or more parts than CI's check step holds (see "How many parts the check holds").
 - `pnpm run check:selftest` plants breaks in a scratch copy of a part and fails unless the check fails
   for the right reason, naming the planted control. One plant per reading; plants on different controls
   share a run. Breaks in paint go in through a sheet only the selftest can add
@@ -180,6 +181,15 @@ state `example.html` never shows is not read. The motion pass reads one skin in 
 part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
 through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
 focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
+
+## How many parts the check holds
+
+The check runs 3 parts at a time; on Linux with 4 CPUs the first 3 take about 100 s and each further 3
+about 145 s more, so the 15-minute check step in CI holds 12 parts with at least 40% of its time to
+spare. That is about 48 s for each part past the first three. Past that number the check refuses to run,
+naming this sentence, before any light is read; raise `STEP_MINUTES` in `check/capacity.mjs` and the
+step's limit in `js-tests.yml` together (a test holds them equal), or split the check, and measure
+again. The selftest copies one part, so its time does not grow with the parts folder.
 
 ## What the check proves about a label, and no more
 

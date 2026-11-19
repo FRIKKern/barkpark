@@ -431,12 +431,14 @@ jobs:
       # presses every part with real keys in the Chromium installed above, then
       # proves each skin, light and dark, on every surface, a 390px window and a
       # script-free print, reading every label and graphic from pixels. Limit:
-      # 5 minutes. Reds on a part folder missing a file, a failed press step, a
-      # light that does not come on, any page error or network request, or a step
-      # or part past its time limit (check/proofs.mjs, check/check.mjs).
+      # 15 minutes, which check/capacity.mjs holds STEP_MINUTES to (a test reads
+      # this line): the check refuses to run with more parts than that holds.
+      # Reds on a part folder missing a file, a failed press step, a light that
+      # does not come on, any page error or network request, or a step or part
+      # past its time limit (check/proofs.mjs, check/check.mjs).
       - name: "BarkUI showroom check (real keys in Chromium)"
         if: steps.barkui.outputs.run != 'false'
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           set +e
           out="$(pnpm --filter @barkpark/barkui run check 2>&1)"

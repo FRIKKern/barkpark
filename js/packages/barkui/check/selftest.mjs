@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
+import { capacitySentence, PARTS_HELD } from './capacity.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss } from './cssom.mjs'
 
@@ -378,6 +379,19 @@ const CASES = [
         await browser.close()
       }
     },
+  },
+  {
+    name: 'one part more than the CI check step holds is refused, with the sentence that says how many it holds',
+    plant: (d) => {
+      for (let i = 0; i < PARTS_HELD; i++) {
+        const name = `held${String.fromCharCode(97 + i)}-button`
+        const to = join(d, '..', name)
+        cpSync(d, to, { recursive: true })
+        for (const f of ['part.json', 'example.html', 'press.mjs', 'demo.mjs'])
+          edit(join(to, f), (t) => t.replace(/(["'#,])button-/g, `$1${name}-`).replace('"name": "button"', `"name": "${name}"`))
+      }
+    },
+    expect: (p, html, ok, logs) => !ok && p === null && logs.some((l) => l.includes(`${PARTS_HELD + 1} parts, more than CI's check step holds. ${capacitySentence()}`)),
   },
   {
     name: 'a part.json that names a property to allow is refused at discovery',

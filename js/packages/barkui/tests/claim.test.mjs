@@ -29,3 +29,14 @@ describe("README.md's list of what part.css may condition on", () => {
     for (const k of KEYFRAMES) expect(readme).toContain(`\`${k}\``)
   })
 })
+
+describe('how many parts the check holds', () => {
+  it("keeps check/capacity.mjs to the check step's limit in js-tests.yml, and the README to its sentence", async () => {
+    const { STEP_MINUTES, PARTS_HELD, capacitySentence } = await import('../check/capacity.mjs')
+    const workflow = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
+    const step = workflow.slice(workflow.indexOf('name: "BarkUI showroom check (real keys in Chromium)"'))
+    expect(step.match(/timeout-minutes: (\d+)/)[1]).toBe(String(STEP_MINUTES))
+    expect(Number.isInteger(PARTS_HELD) && PARTS_HELD >= 1).toBe(true)
+    expect(readme).toContain(capacitySentence())
+  })
+})

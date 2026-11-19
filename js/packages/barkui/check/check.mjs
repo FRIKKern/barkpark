@@ -8,12 +8,15 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
+import { AT_ONCE, capacitySentence, PARTS_HELD } from './capacity.mjs'
 import { readPartCss } from './cssom.mjs'
 import { limit } from './limit.mjs'
 import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } from './proofs.mjs'
 import { waitLine } from '../build/sheet-waits.mjs'
 
-export const PART_MS = 120000
+// A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
+// sooner, by each step's own limit (STEP_MS in proofs.mjs).
+export const PART_MS = 120000 * AT_ONCE
 export const LIGHT_NAMES = ['pressed', 'skins', 'schemes', 'phone', 'noscript']
 
 /** Every --ui-* / --bark-* name the sheet and the base styles define. */
@@ -32,6 +35,10 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     bare = await buildShowroom({ dir, out: `${out}-bare`, proof: proofFile, quiet: true, plantCss, bare: true })
   } catch (e) {
     log(`check: ${e.message}`)
+    return { ok: false, proof: null }
+  }
+  if (built.parts.length > PARTS_HELD) {
+    log(`check: ${built.parts.length} parts, more than CI's check step holds. ${capacitySentence()} Raise the limit in check/capacity.mjs and js-tests.yml together, or split the check, then measure again.`)
     return { ok: false, proof: null }
   }
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
@@ -55,45 +62,61 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     return { ok: false, proof: null }
   }
   const proof = { ranAt: new Date().toISOString(), browser: `Chromium ${browser.version()}`, uiSdk: uiSdkVersion, foundation: foundationHash(), parts: {}, errors: [] }
-  try {
-    for (const part of built.parts) {
-      const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces }
-      log(part.name)
-      const lights = {}
-      let measures = {}
-      let paintFree = []
-      let textOnly = []
-      let steps = []
-      try {
-        await limit((async () => {
-          if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part))
-          if (only.includes('skins') || only.includes('schemes')) {
-            const looks = await skinsAndSchemes(ctx, part, skins)
-            Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
-            measures = looks.measures
-            paintFree = looks.paintFree
-            textOnly = looks.textOnly
-          }
-          if (only.includes('phone')) lights.phone = await phone(ctx, part, skins)
-          if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
-        })(), PART_MS, `part ${part.name}`)
-      } catch (e) {
-        ctx.errors.push(String(e.message).split('\n')[0])
-      }
-      for (const k of LIGHT_NAMES) if (!lights[k]) lights[k] = { pass: false, detail: only.includes(k) ? 'did not finish' : 'not run in this run' }
-      const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
-      const failed = ctx.errors[0] ?? offs[0]
-      for (const [k, l] of Object.entries(lights)) log(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
-      for (const w of measures.waits ?? []) log(`  ${waitLine(w, w.now)}`)
-      for (const [k, m] of Object.entries(measures))
-        if (k === 'waits') continue
-        else if (m?.againstGround) log(`  measured ${k}: against the ground ${m.againstGround.min} to ${m.againstGround.max}:1, against the primary fill ${m.againstPrimary.min} to ${m.againstPrimary.max}:1`)
-        else if (m) log(`  measured ${k}: ${m.min} to ${m.max}:1`)
-      if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
-      for (const l of Object.values(lights)) l.surfaces = surfacesOf(ctx)
-      proof.parts[part.name] = { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(failed ? { failed } : {}) }
-      proof.errors.push(...ctx.errors)
+  // Parts run AT_ONCE at a time, each in its own pages of the one browser; each part's lines print together
+  // when it ends, and proof.json keeps the parts in folder order.
+  const checkPart = async (part) => {
+    const lines = []
+    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces }
+    lines.push(part.name)
+    const lights = {}
+    let measures = {}
+    let paintFree = []
+    let textOnly = []
+    let steps = []
+    try {
+      await limit((async () => {
+        if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part))
+        if (only.includes('skins') || only.includes('schemes')) {
+          const looks = await skinsAndSchemes(ctx, part, skins)
+          Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
+          measures = looks.measures
+          paintFree = looks.paintFree
+          textOnly = looks.textOnly
+        }
+        if (only.includes('phone')) lights.phone = await phone(ctx, part, skins)
+        if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
+      })(), PART_MS, `part ${part.name}`)
+    } catch (e) {
+      ctx.errors.push(String(e.message).split('\n')[0])
     }
+    for (const k of LIGHT_NAMES) if (!lights[k]) lights[k] = { pass: false, detail: only.includes(k) ? 'did not finish' : 'not run in this run' }
+    const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
+    const failed = ctx.errors[0] ?? offs[0]
+    for (const [k, l] of Object.entries(lights)) lines.push(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
+    for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
+    for (const [k, m] of Object.entries(measures))
+      if (k === 'waits') continue
+      else if (m?.againstGround) lines.push(`  measured ${k}: against the ground ${m.againstGround.min} to ${m.againstGround.max}:1, against the primary fill ${m.againstPrimary.min} to ${m.againstPrimary.max}:1`)
+      else if (m) lines.push(`  measured ${k}: ${m.min} to ${m.max}:1`)
+    if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
+    for (const l of Object.values(lights)) l.surfaces = surfacesOf(ctx)
+    for (const l of lines) log(l)
+    return { entry: { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(failed ? { failed } : {}) }, errors: ctx.errors }
+  }
+  try {
+    const done = new Array(built.parts.length)
+    let next = 0
+    const worker = async () => {
+      while (next < built.parts.length) {
+        const i = next++
+        done[i] = await checkPart(built.parts[i])
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(AT_ONCE, built.parts.length) }, worker))
+    built.parts.forEach((part, i) => {
+      proof.parts[part.name] = done[i].entry
+      proof.errors.push(...done[i].errors)
+    })
   } finally {
     await browser.close()
   }
