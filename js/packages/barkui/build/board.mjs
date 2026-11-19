@@ -90,10 +90,12 @@ if (process.argv[1] === import.meta.filename) {
     process.exit(2)
   }
   try {
-    const block = renderBoard(collect(goal), new Date().toISOString().slice(0, 10))
+    const rows = collect(goal)
     const text = readFileSync(roadmapPath, 'utf8')
-    const next = applyBoard(text, block)
-    writeFileSync(roadmapPath, next)
+    // Same numbers as the block holds: leave it, date and all, so a daily run makes no change.
+    const same = JSON.stringify(readBlock(text).rows) === JSON.stringify(renderBoard(rows, '2000-01-01').split('\n').slice(2, -3))
+    const next = same ? text : applyBoard(text, renderBoard(rows, new Date().toISOString().slice(0, 10)))
+    if (next !== text) writeFileSync(roadmapPath, next)
     console.log(`board: docs/ROADMAP.md ${next === text ? 'unchanged' : 'written'}`)
   } catch (e) {
     console.error(`board: ${e.message}`)
