@@ -210,9 +210,22 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
         do: {verb, route.path}
   end
 
-  # The same set counted another way: off each route's own pipe_through.
+  # The same set counted another way: every route the matcher sends through
+  # `:api_local`, read without the gate's own helpers.
   defp api_local_route_count do
-    Enum.count(BarkparkWeb.Router.__routes__(), &(:api_local in Map.get(&1, :pipe_through, [])))
+    Enum.count(BarkparkWeb.Router.__routes__(), fn route ->
+      verb = route_verb(route)
+
+      case Phoenix.Router.route_info(
+             BarkparkWeb.Router,
+             verb,
+             probe_path(route.path),
+             "localhost"
+           ) do
+        %{pipe_through: pipes} -> :api_local in pipes
+        _no_match -> false
+      end
+    end)
   end
 
   defp route_verb(route), do: route.verb |> Atom.to_string() |> String.upcase()
