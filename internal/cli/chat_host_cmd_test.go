@@ -241,6 +241,29 @@ func TestChatHostNewCodeOnAnOldServer(t *testing.T) {
 	}
 }
 
+// TestChatHostNewCodeListMissDoesNotBlameTheServerVersion: when the list GET
+// itself answers 404 (no chat hosts for this scope), new-code says that, not
+// "too old for new-code": the version hint belongs to the POST's 404 only.
+func TestChatHostNewCodeListMissDoesNotBlameTheServerVersion(t *testing.T) {
+	var posted bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posted = posted || r.Method == "POST"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"document not found"}}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL), []string{"new-code", "vm"})
+	if rc == exitOK || posted {
+		t.Fatalf("rc = %d, posted = %v", rc, posted)
+	}
+	if strings.Contains(stderr.String(), "too old") {
+		t.Fatalf("a 404 on the list blames the server version:\n%s", stderr.String())
+	}
+}
+
 // TestChatHostListSurvivesAnEmptyProviderName: a host may report a provider
 // with an empty name; list reads it instead of panicking.
 func TestChatHostListSurvivesAnEmptyProviderName(t *testing.T) {
