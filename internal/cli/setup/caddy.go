@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/FRIKKern/barkpark/deploy"
 	"github.com/FRIKKern/barkpark/internal/caddyfile"
 	"github.com/FRIKKern/barkpark/internal/cli/setup/assets"
 )
@@ -187,8 +188,10 @@ func caddyInstallStep() step {
 	// 100; three managed provisions died exactly here on 2026-09-02). The
 	// function's first act is `apt-get update`, before any install.
 	// DEBIAN_FRONTEND=noninteractive is exported inside the function so apt never
-	// blocks on a prompt over the non-interactive ssh shell.
-	script := caddyInstallFunc() + "command -v caddy >/dev/null 2>&1 || install_caddy_pkg"
+	// blocks on a prompt over the non-interactive ssh shell. install_caddy_pkg
+	// runs every apt-get through bp_apt_get, so a cold box's first-boot
+	// unattended-upgrades makes this step wait instead of exit 100.
+	script := deploy.AptGetFunc() + caddyInstallFunc() + "command -v caddy >/dev/null 2>&1 || install_caddy_pkg"
 	argv := []string{"bash", "-lc", script}
 	return step{
 		Title: "install Caddy (skip when baked; else the official apt repo, else the pinned verified release)",
