@@ -332,12 +332,12 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
       resp = sync(c.slug, c.bpml, "0", c.raw, %{"project" => default_project.slug})
       assert json_response(resp, 200)["created"] == true
       # The gate approves the token's workspace and no project (the slug
-      # names none of its own); the committed row carries that workspace and
-      # either no project or one of that workspace's.
-      {ws_id, project_id} = committed_scope(c.slug)
-      assert ws_id == c.other.ws.id
-      refute project_id == default_project.id
-      assert is_nil(project_id) or Tenancy.get_project_by_id(project_id).workspace_id == ws_id
+      # names none of its own). A workspace-only stamp takes that workspace's
+      # project slugged "default", else its first (`WriteScope`), and the
+      # other workspace's one project is `c.other.project`.
+      assert Enum.map(Tenancy.list_projects(c.other.ws.id), & &1.id) == [c.other.project.id]
+      assert committed_scope(c.slug) == {c.other.ws.id, c.other.project.id}
+      refute c.other.project.id == default_project.id
     end
   end
 
