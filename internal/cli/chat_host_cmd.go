@@ -9,6 +9,7 @@ package cli
 // printed once, by `enroll` or `new-code`, to the owner who asked for it.
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -24,7 +25,7 @@ const chatHostUsage = `usage: bp chat-host <verb>
   list                              the workspace's chat hosts and their state
   enroll --name <n> --root <path>   make a one-time code and print the command to run on the machine
   new-code <name|id>                replace a waiting machine's code (the old code stops working)
-  revoke <name|id>                  remove a machine; it can no longer run turns
+  revoke <name|id> [--yes]          remove a machine; it can no longer run turns (asks first)
 
 enroll and new-code need the workspace owner's token. The code lasts 10 minutes.`
 
@@ -63,7 +64,7 @@ func runChatHost(out *writer, g globals, ctx manifest.Context, args []string) in
 	case "new-code":
 		return runChatHostNewCode(out, ctx, rest)
 	case "revoke":
-		return runChatHostRevoke(out, ctx, rest)
+		return runChatHostRevoke(out, g, ctx, rest)
 	}
 	return usageErrf(out, func() { out.errf("%s", chatHostUsage) }, "unknown chat-host verb %q", verb)
 }
@@ -169,7 +170,10 @@ func chatHostCapabilityLines(capabilities map[string]any) []string {
 	lines := make([]string, 0, len(names))
 	for _, name := range names {
 		p, _ := providers[name].(map[string]any)
-		label := strings.ToUpper(name[:1]) + name[1:]
+		label := "(unnamed provider)"
+		if name != "" {
+			label = strings.ToUpper(name[:1]) + name[1:]
+		}
 		installed, _ := p["installed"].(bool)
 		signedIn, _ := p["auth_ready"].(bool)
 		version, _ := p["version"].(string)
@@ -208,7 +212,7 @@ func parseChatHostFlags(args []string, allowSSH bool) (chatHostEnrollFlags, erro
 			continue
 		case "--ssh", "--bin", "--state":
 			if !allowSSH {
-				return f, fmt.Errorf("%s is a flag of bp chat-host add", key)
+				return f, fmt.Errorf("unknown argument %q", args[i])
 			}
 			target = map[string]*string{"--ssh": &f.ssh, "--bin": &f.bin, "--state": &f.state}[key]
 		default:
@@ -263,13 +267,17 @@ func runChatHostNewCode(out *writer, ctx manifest.Context, args []string) int {
 	return printChatHostCode(out, ctx, minted, raw, minted.Host.ApprovedRoots)
 }
 
-func runChatHostRevoke(out *writer, ctx manifest.Context, args []string) int {
+func runChatHostRevoke(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
 		return usageErrf(out, nil, "bp chat-host revoke needs one host name or id")
 	}
 	host, rc := resolveChatHost(out, ctx, "revoke", args[0])
 	if rc != exitOK {
 		return rc
+	}
+	if !confirmChatHostRevoke(out, g, ctx, host) {
+		out.errf("aborted: %s was not revoked", host.Name)
+		return exitUsage
 	}
 	status, body, err := chatHostDelete(ctx, "/"+url.PathEscape(host.ID))
 	if err != nil {
@@ -295,6 +303,29 @@ func runChatHostRevoke(out *writer, ctx manifest.Context, args []string) int {
 	}
 	out.outf("Revoked %s. It can no longer run turns; its running turns were cancelled.", host.Name)
 	return exitOK
+}
+
+// confirmChatHostRevoke follows destroy_confirm.go: it names the host and the
+// workspace, --yes proceeds, a terminal is asked, and anything else (a script
+// with no --yes) is refused before the DELETE is sent.
+func confirmChatHostRevoke(out *writer, g globals, ctx manifest.Context, host chatHost) bool {
+	what := "Revoke " + host.Name + " (" + chatHostState(host, time.Now()) + ") in workspace " + workspaceName(ctx) +
+		"? It stops running turns now and its running turns are cancelled."
+	if !host.Enrolled {
+		what = "Remove " + host.Name + " (" + chatHostState(host, time.Now()) + ") from workspace " + workspaceName(ctx) +
+			"? Its code stops working."
+	}
+	if g.yes {
+		return true
+	}
+	if !destroyStdinIsTTY(destroyStdin) {
+		out.userErr("%s This needs confirmation — re-run with --yes.", what)
+		return false
+	}
+	fmt.Fprintf(out.stderr, "%s [y/N] ", what)
+	line, _ := bufio.NewReader(destroyStdin).ReadString('\n')
+	answer := strings.TrimSpace(strings.ToLower(line))
+	return answer == "y" || answer == "yes"
 }
 
 // resolveChatHost finds a live host by exact name or id.
@@ -405,7 +436,13 @@ func chatHostRefused(out *writer, ctx manifest.Context, what string, status int,
 	case status == 401:
 		return useError(out, "unauthorized",
 			"bp chat-host "+what+": the server did not accept your token. Sign in again (bp login) or pass --token.", exitAuth)
-	case status == 403 && (what == "enroll" || what == "new-code" || what == "add"):
+	case status == 404 && what == "new-code":
+		// The host was just listed as waiting, so a 404 here is a server
+		// without the new-code route, or a host revoked a moment ago.
+		return useError(out, "not_found", fmt.Sprintf(
+			"bp chat-host new-code: the server made no new code. If bp chat-host list still shows the host waiting, this server is too old for new-code: remove it (bp chat-host revoke <name>) and enroll it again."),
+			exitGeneric)
+	case status == 403 && (what == "enroll" || what == "new-code"):
 		return useError(out, "forbidden", fmt.Sprintf(
 			"bp chat-host %s: this needs the workspace owner's token. Only the owner of workspace %s can register a machine; run it with the owner's token (--token, or bp login as the owner).",
 			what, workspaceName(ctx)), exitAuth)
