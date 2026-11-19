@@ -42,20 +42,20 @@ func runChatHostAdd(out *writer, ctx manifest.Context, args []string) int {
 	remote := remoteEnrollCommand(ctx, f)
 	out.errf("Enrolling %s on %s over ssh…", minted.Host.Name, f.ssh)
 	var remoteOut bytes.Buffer
-	sshErr := runSSH([]string{"--", f.ssh, remote}, strings.NewReader(minted.EnrollmentCode+"\n"), &remoteOut, os.Stderr)
+	// -T: never ask for a remote pty. With `RequestTTY force` in the user's
+	// ssh config a pty would echo the code on stdin back into what we print.
+	sshErr := runSSH([]string{"-T", "--", f.ssh, remote}, strings.NewReader(minted.EnrollmentCode+"\n"), &remoteOut, os.Stderr)
 	if text := strings.TrimSpace(remoteOut.String()); text != "" {
 		out.errf("%s", text)
 	}
 	if sshErr != nil {
-		return useError(out, "remote_enroll_failed", fmt.Sprintf(
-			"%s did not enroll (%v). %s is registered and waiting; fix the machine, then run bp chat-host new-code %s and try again.",
-			f.ssh, sshErr, minted.Host.Name, shellQuote(minted.Host.Name)), exitGeneric)
+		return useError(out, "remote_enroll_failed", sshFailureHint(f, minted.Host.Name, remote, sshErr), exitGeneric)
 	}
 
 	if out.emitStructured(map[string]any{"host": minted.Host, "ssh": f.ssh, "enrolled": true}) {
 		return exitOK
 	}
-	run := f.bin + " run"
+	run := shellQuote(f.bin) + " run"
 	if f.state != "" {
 		run += " --state " + shellQuote(f.state)
 	}
@@ -64,6 +64,31 @@ func runChatHostAdd(out *writer, ctx manifest.Context, args []string) int {
 	out.outf("")
 	out.outf("  ssh %s %s", shellQuote(f.ssh), shellQuote(run))
 	return exitOK
+}
+
+// sshFailureHint says what to do after ssh fails. ssh can exit non-zero (255)
+// after the remote enroll succeeded, so it says "may not have", points at the
+// list, and gives two ways on: send a new code over the same pipe, or revoke
+// and add again. Neither puts the code in argv or on the screen.
+func sshFailureHint(f chatHostEnrollFlags, name, remote string, sshErr error) string {
+	add := []string{"bp chat-host add --ssh", shellQuote(f.ssh), "--name", shellQuote(name)}
+	for _, root := range f.roots {
+		add = append(add, "--root", shellQuote(root))
+	}
+	if f.state != "" {
+		add = append(add, "--state", shellQuote(f.state))
+	}
+	if f.bin != "barkpark-chat-host" {
+		add = append(add, "--bin", shellQuote(f.bin))
+	}
+	return fmt.Sprintf("%s may not have enrolled (ssh: %v). Check bp chat-host list: if %s still reads waiting, it did not.\n"+
+		"Send it a new code over ssh's stdin (the old one stops working):\n"+
+		"  bp chat-host new-code %s -o json | jq -r .enrollment_token | ssh -T %s %s\n"+
+		"or revoke it and add it again:\n"+
+		"  bp chat-host revoke %s && %s",
+		f.ssh, sshErr, name,
+		shellQuote(name), shellQuote(f.ssh), shellQuote(remote),
+		shellQuote(name), strings.Join(add, " "))
 }
 
 // remoteEnrollCommand is the shell command ssh runs on the machine. It names

@@ -46,10 +46,10 @@ func TestChatHostAddNeverPutsCodeInSSHArgs(t *testing.T) {
 	if strings.Contains(strings.Join(*args, " "), "SECRET-CODE") {
 		t.Fatalf("the code is in ssh's argv: %q", *args)
 	}
-	if len(*args) < 3 || (*args)[0] != "--" || (*args)[1] != "bot@vm2" {
-		t.Fatalf("ssh argv = %q, want -- bot@vm2 <command>", *args)
+	if len(*args) < 4 || (*args)[1] != "--" || (*args)[2] != "bot@vm2" {
+		t.Fatalf("ssh argv = %q, want -T -- bot@vm2 <command>", *args)
 	}
-	remote := (*args)[2]
+	remote := (*args)[3]
 	for _, want := range []string{"barkpark-chat-host enroll", "--url " + srv.URL, "--root /srv/bot"} {
 		if !strings.Contains(remote, want) {
 			t.Fatalf("remote command %q lacks %q", remote, want)
@@ -60,6 +60,57 @@ func TestChatHostAddNeverPutsCodeInSSHArgs(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Enrolled vm2 on bot@vm2") {
 		t.Fatalf("stdout does not report the enroll:\n%s", stdout.String())
+	}
+}
+
+// TestChatHostAddNeverAsksForARemotePty: ssh gets -T before the host, so a
+// `RequestTTY force` in the user's ssh config cannot give the remote side a
+// pty that echoes the code on stdin back into what bp prints.
+func TestChatHostAddNeverAsksForARemotePty(t *testing.T) {
+	var seen []string
+	srv := chatHostServer(t, true, &seen)
+	defer srv.Close()
+	args, _ := stubSSH(t, nil)
+
+	var stdout, stderr bytes.Buffer
+	rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL),
+		[]string{"add", "--ssh", "bot@vm2", "--name", "vm2", "--root", "/srv/bot"})
+	if rc != exitOK {
+		t.Fatalf("rc = %d, stderr:\n%s", rc, stderr.String())
+	}
+	dashdash := -1
+	for i, a := range *args {
+		if a == "--" {
+			dashdash = i
+			break
+		}
+	}
+	hasT := false
+	for _, a := range (*args)[:max(dashdash, 0)] {
+		hasT = hasT || a == "-T"
+	}
+	if dashdash < 0 || !hasT {
+		t.Fatalf("ssh argv = %q, want -T among the options before --", *args)
+	}
+}
+
+// TestChatHostAddQuotesBinInTheRunHint: a --bin path with a space is quoted
+// in the printed `ssh … run` line, so pasting it runs that binary.
+func TestChatHostAddQuotesBinInTheRunHint(t *testing.T) {
+	var seen []string
+	srv := chatHostServer(t, true, &seen)
+	defer srv.Close()
+	stubSSH(t, nil)
+
+	var stdout, stderr bytes.Buffer
+	rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL),
+		[]string{"add", "--ssh", "bot@vm2", "--name", "vm2", "--root", "/srv/bot", "--bin", "/opt/chat host/bin"})
+	if rc != exitOK {
+		t.Fatalf("rc = %d, stderr:\n%s", rc, stderr.String())
+	}
+	want := `ssh bot@vm2 ''\''/opt/chat host/bin'\'' run'`
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("run hint does not quote --bin; want %s in:\n%s", want, stdout.String())
 	}
 }
 
@@ -114,8 +165,19 @@ func TestChatHostAddSSHFailureSaysWhatToDo(t *testing.T) {
 	if rc == exitOK {
 		t.Fatal("a failed remote enroll must not exit 0")
 	}
-	if !strings.Contains(stderr.String(), "bp chat-host new-code vm2") {
-		t.Fatalf("stderr does not say how to retry:\n%s", stderr.String())
+	for _, want := range []string{
+		// ssh can exit 255 after the remote enroll worked: no false "did not".
+		"may not have enrolled", "bp chat-host list",
+		// A way on that works as printed: only the code goes down the pipe.
+		"bp chat-host new-code vm2 -o json | jq -r .enrollment_token | ssh -T bot@vm2 'barkpark-chat-host enroll --url ",
+		"bp chat-host revoke vm2 && bp chat-host add --ssh bot@vm2 --name vm2 --root /srv/bot",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr lacks %q:\n%s", want, stderr.String())
+		}
+	}
+	if strings.Contains(stderr.String(), "did not enroll") {
+		t.Fatalf("stderr claims the enroll failed; ssh cannot know:\n%s", stderr.String())
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "SECRET-CODE") {
 		t.Fatal("a failed add printed the code")
