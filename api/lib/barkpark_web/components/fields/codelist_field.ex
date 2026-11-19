@@ -47,8 +47,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   ## Assigns
 
     * `:field` (required) — `%Field{type: "codelist", codelist_id: "<plugin>:<list>", version: int}`
-    * `:value` — selected code (string) or `nil`; any other stored value
-      (a number, an object, a list) is drawn as none, with `:kept` set
+    * `:value` — selected code (string) or `nil`
     * `:errors` — list of error strings (or `%{__self__: [...]}` for nested call sites)
     * `:on_change` — `phx-change` event name
     * `:plugin_name` — plugin scope (defaults to `"core"`; OnixEdit will pass `"onixedit"`)
@@ -108,7 +107,6 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put_new(:readonly, false)
       |> Map.put_new(:id_base, nil)
       |> Map.put_new(:kept, false)
-      |> only_code()
 
     list_id = assigns.field.codelist_id || ""
     plugin_name = assigns.plugin_name
@@ -260,15 +258,6 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       segments -> "f-" <> Enum.join(segments, "-")
     end
   end
-
-  # Every caller's value is drawn as a code or none. A top-level field comes
-  # as a string already (`Plugins.Adapter`); an object's subfield, an array's
-  # row and a paper block come raw. A stored value that is no code (a number,
-  # an object, a list) is drawn as none and marked `kept`: put in an input's
-  # `value` an object raised, and a list was drawn as its codes run together
-  # and posted back as that string (task-ab428bfe4bb189f9).
-  defp only_code(%{value: value} = assigns) when is_nil(value) or is_binary(value), do: assigns
-  defp only_code(assigns), do: %{assigns | value: nil, kept: true}
 
   defp unknown_value(value, options) when is_binary(value) and value != "" do
     if Enum.any?(options, &(&1.value == value)), do: nil, else: value

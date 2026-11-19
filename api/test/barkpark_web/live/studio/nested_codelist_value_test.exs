@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.NestedCodelistValueTest do
   alias Barkpark.Content
   alias Barkpark.Content.Codelists
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.PaperFieldBlock
 
   @dataset "production"
 
@@ -98,6 +99,12 @@ defmodule BarkparkWeb.Studio.NestedCodelistValueTest do
             object.("meta", flat),
             object.("metalong", long),
             object.("metatree", tree),
+            %{
+              "name" => "codes",
+              "title" => "Codes",
+              "type" => "arrayOf",
+              "of" => %{"name" => "c", "type" => "codelist", "codelistId" => long}
+            },
             %{"name" => "notes", "type" => "string"}
           ]
         },
@@ -129,6 +136,7 @@ defmodule BarkparkWeb.Studio.NestedCodelistValueTest do
     {:ok, conn: conn, root: root, type: type, docs: docs}
   end
 
+  defp address(c, surface, {:id, id}), do: address(%{c | docs: %{id => id}}, surface, id)
   defp address(c, :studio, kind), do: "#{c.root}/#{c.type}/#{c.docs[kind]}"
   defp address(c, :desk, kind), do: "#{c.root}/_desk/#{c.type};#{c.docs[kind]}"
 
@@ -189,5 +197,80 @@ defmodule BarkparkWeb.Studio.NestedCodelistValueTest do
       assert stored(c, :object)["meta"] == %{"code" => "B2", "label" => "x"}
       assert stored(c, :object)["metatree"] == %{"code" => %{"o" => 1}, "label" => "x"}
     end
+  end
+
+  # Review of #27482: only an object's codelist is drawn kept. An array's row
+  # (`doc[codes][0]`) and a paper block's composite (`code`) have no save that
+  # drops an untouched "", so a kept row would be written as "". They are
+  # drawn as on main, and keep a number as main does.
+  for surface <- [:studio, :desk] do
+    test "#{surface}: an array of codelists over a stored number keeps it when another field is edited",
+         c do
+      id = "nc-rows-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.create_document(
+          c.type,
+          %{"doc_id" => id, "title" => "Book", "content" => %{"codes" => [7, "L7"]}},
+          @dataset
+        )
+
+      view = open(c, unquote(surface), {:id, id})
+
+      view
+      |> form("#editor-form", %{"doc" => %{"notes" => "typed"}})
+      |> render_change(%{"_target" => ["doc", "notes"]})
+
+      {doc, _, _} = Content.fetch_doc_with_draft(c.type, id, @dataset)
+      assert doc.content["notes"] == "typed"
+      assert doc.content["codes"] == [7, "L7"]
+    end
+  end
+
+  test "a paper composite block over a stored number posts it back as main did" do
+    # A paper block reads core's lists.
+    long = "core:nc-paper-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Codelists.register("core", long, %{
+        issue: "1",
+        name: "Long",
+        values:
+          for(
+            i <- 1..120,
+            do: %{code: "L#{i}", translations: [%{language: "eng", label: "Long #{i}"}]}
+          )
+      })
+
+    block = %{
+      "id" => "c-meta",
+      "type" => "composite",
+      "fields" => [
+        %{"name" => "code", "title" => "Code", "type" => "codelist", "codelistId" => long},
+        %{"name" => "label", "title" => "Label", "type" => "string"}
+      ],
+      "value" => %{"code" => 7, "label" => "x"}
+    }
+
+    html =
+      render_component(PaperFieldBlock, %{
+        id: "paper-fb-c-meta",
+        block: block,
+        if_rev: 1
+      })
+
+    assert html =~ ~r/<input[^>]*name="code"[^>]*value="7"/
+    refute html =~ "data-codelist-kept"
+
+    # The form as the browser posts it, with `label` edited.
+    params = %{"code" => "7", "label" => "y", "_target" => ["label"]}
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}}}
+
+    {:ok, socket} =
+      PaperFieldBlock.update(%{id: "paper-fb-c-meta", block: block, if_rev: 1}, socket)
+
+    PaperFieldBlock.handle_event("inner-change", params, socket)
+
+    assert_receive {:paper_op, %{"patch" => %{"value" => %{"code" => "7", "label" => "y"}}}}
   end
 end
