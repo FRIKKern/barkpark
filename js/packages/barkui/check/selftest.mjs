@@ -262,6 +262,12 @@ const CASES = [
     expect: (p) => /never settles.*timed out after/.test(lights(p).pressed.detail),
   },
   {
+    name: 'a clear cover over a control a step clicks turns "pressed" off',
+    only: ['pressed'],
+    css: 'ui-button:has(> #button-disabled) { position: relative; }\nui-button:has(> #button-disabled)::after { content: ""; position: absolute; inset: 0; }',
+    expect: (p) => /#button-disabled is not what a click at its centre reaches/.test(lights(p).pressed.detail),
+  },
+  {
     name: 'an icon-only button with no name turns "pressed" off',
     only: ['pressed'],
     plant: (d) => edit(join(d, 'example.html'), (s) => s.replace(' aria-label="More actions"', '')),

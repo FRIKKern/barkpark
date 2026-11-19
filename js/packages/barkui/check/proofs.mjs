@@ -112,7 +112,22 @@ export async function pressed(ctx, part) {
       let result
       try {
         await limit((async () => {
-          if (step.click) await page.click(`[data-part="${part.name}"] ${step.click}`, { force: true, timeout: STEP_MS })
+          if (step.click) {
+            // A real pointer press at the control's centre, only once the control is what is on top there: a
+            // cover or anything else in the way fails the step. (Playwright's own click would wait for a
+            // disabled control to become enabled, and a forced one skips the hit test.)
+            const at = await page.barkCheck(([n, s]) => {
+              const el = document.querySelector(`[data-part="${n}"] ${s}`)
+              if (!el) return { miss: 'is not in the stage' }
+              el.scrollIntoView({ block: 'center', inline: 'center' })
+              const r = el.getBoundingClientRect()
+              const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
+              const top = document.elementFromPoint(x, y)
+              return el === top || el.contains(top) ? { x, y } : { miss: `is not what a click at its centre reaches: ${window.__barkCheck.describe(top)} is on top` }
+            }, [part.name, step.click])
+            if (at.miss) throw new Error(`${step.click} ${at.miss}`)
+            await page.mouse.click(at.x, at.y)
+          }
           for (const key of step.keys ?? []) await page.keyboard.press(key)
           if (step.wait) await new Promise((r) => setTimeout(r, step.wait))
           await settle(page)

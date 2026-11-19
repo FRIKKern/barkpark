@@ -13,7 +13,8 @@ parts/<name>/
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only
   example.html  the part in each state worth seeing, in UI SDK's printed markup (works with no script);
                 every id starts with "<name>-"
-  press.mjs     setup(root, h) and steps: real keys or a click, then expect(root, h) -> true | reason,
+  press.mjs     setup(root, h) and steps: real keys or a click (the real pointer, pressed at the control's
+                centre only if the control is what is on top there), then expect(root, h) -> true | reason,
                 and optional ax: what a screen reader must get for an element (role, name, states)
   demo.mjs      optional: `export default function (root)`, called with this part's own root
 ```
