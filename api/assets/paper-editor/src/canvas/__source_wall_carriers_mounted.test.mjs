@@ -8,7 +8,7 @@
 // as empty, so it opens read-only. And a Paper whose unedited save gives back other
 // blocks than stored opens read-only.
 // Run: node src/canvas/__source_wall_carriers_mounted.test.mjs (CASE=<shape name> or
-// CASE=refused or CASE=readme runs one case).
+// CASE=refused, edges, duplicate or readme runs one case).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -129,6 +129,62 @@ try {
     assert.deepEqual(server.map((block) => block.id), ["p0", "p2"], "a deleted sentinel line saves the delete");
   }
 
+  // The review's edges (review-source-wall/probes/sentinel-edges.mjs): a sentinel line
+  // with a key before it, or wrapped as a quote, a list item, a heading or a fence, is
+  // refused like a key inside it. Each row is judged alone and the failures listed.
+  if (runs("edges")) {
+    const carriers = {
+      paragraph: { id: "x", type: "paragraph", text: "carried" },
+      image: { id: "x", type: "image", src: "https://example.test/a.png", alt: "A", caption: "cap", width: 300 },
+    };
+    const edits = {
+      "! before": (l) => "!" + l, "quoted": (l) => "> " + l, "listed": (l) => "- " + l,
+      "headed": (l) => "# " + l, "fenced": (l) => "```\n" + l + "\n```",
+      // Refused already on b655420af7: kept as guard rows.
+      "key after": (l) => l + "!", "words after": (l) => l + " more words",
+      "key added to the JSON": (l) => l.replace('{"id":"x"', '{"id":"x","alt2":"q"'),
+      "split": (l) => l.slice(0, 20) + "\n" + l.slice(20),
+    };
+    const failed = [];
+    for (const [carrier, block] of Object.entries(carriers)) {
+      for (const [edit, change] of Object.entries(edits)) {
+        const blocks = [paragraph("p0", "Before"), block, paragraph("p2", "After")];
+        const { canvas, batches, server } = await mount(clone(blocks));
+        all.push(canvas);
+        canvas.toggleSourceMode();
+        const textarea = canvas.querySelector(".bp-canvas-source");
+        const line = textarea.value.split("\n").find((text) => text.startsWith("<!--bp:block"));
+        const next = textarea.value.replace(line, change(line));
+        watchValueWrites(textarea).type(next);
+        const flushed = canvas.flushPendingChanges();
+        canvas.toggleSourceMode();
+        const still = canvas.querySelector(".bp-canvas-source");
+        const refused = flushed === false && still !== null && still.value === next && batches.length === 0 &&
+          JSON.stringify(server) === JSON.stringify(blocks) &&
+          notice(canvas) === "Not saved: block 2 is shown as JSON, and source mode does not edit it.";
+        if (!refused) failed.push(`${carrier} ${edit}`);
+      }
+    }
+    assert.deepEqual(failed, [], "every edge is refused: nothing sent, source mode open, the text kept, block 2 named");
+  }
+
+  // A duplicated sentinel line saves a copy under a new id; the block stays as it was
+  // and no two blocks share an id.
+  if (runs("duplicate")) {
+    const carried = { id: "x", type: "paragraph", text: "carried" };
+    const { canvas, server } = await mount(clone([paragraph("p0", "Before"), carried]));
+    all.push(canvas);
+    canvas.toggleSourceMode();
+    const textarea = canvas.querySelector(".bp-canvas-source");
+    const line = textarea.value.split("\n").find((text) => text.startsWith("<!--bp:block"));
+    watchValueWrites(textarea).type(textarea.value + "\n\n" + line);
+    canvas.toggleSourceMode();
+    assert.equal(server.length, 3, "the copy is saved");
+    assert.deepEqual(server[1], carried, "the block stays as it was");
+    assert.deepEqual({ ...server[2], id: "x" }, carried, "the copy holds the same keys");
+    assert.equal(new Set(server.map((block) => block.id)).size, 3, "under an id of its own");
+  }
+
   // readme.json: an unedited save gives back other blocks than stored (its marks, and
   // the editor's own save rewrites block 4's code+strong run as nested nodes,
   // task-7a92f596371dc4c1), so source mode opens read-only and names the first.
@@ -145,7 +201,7 @@ try {
     assert.deepEqual(batches, [], "nothing is sent");
   }
 
-  console.log(`source wall carriers mounted: ${Object.keys(shapes).length} shapes, refused/put back/move/delete, readme.json: passed`);
+  console.log(`source wall carriers mounted: ${Object.keys(shapes).length} shapes, refused/put back/move/delete, edges, duplicate, readme.json: passed`);
 } finally {
   for (const canvas of all) canvas.remove();
 }

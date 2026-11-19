@@ -7,7 +7,7 @@ import {
   deepCloneBlocks,
   mergeSourceText,
 } from "./source-realign.js";
-import { sourceWallLoss } from "./source-save.js";
+import { sentinelHarm, sourceStored, sourceWallLoss } from "./source-save.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 
   // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──
@@ -75,12 +75,8 @@ export function sourceModeEnter() {
     // READ-ONLY: it shows the Markdown, takes no typing, writes nothing back, and one
     // plain line says why and names the block (sourceWallLoss in source-save.js).
     // Typing made while a batch is in flight can open read-only until its echo lands.
-    const view = {
-      toDoc: (blocks) => this._editor.schema.nodeFromJSON(this._rt(blocks)).toJSON(),
-      toOps: (...args) => this._ro(...args),
-    };
     const inflight = this._inflightOps && this._inflightOps.ops;
-    const loss = sourceWallLoss(this._blocks || [], L0, view, { inflight });
+    const loss = sourceWallLoss(this._blocks || [], L0, sourceView.call(this), { inflight });
 
     // Close any open popup — in source mode the textarea owns input, so a lingering
     // [[ / # / slash / palette popup would float over a now-hidden editor.
@@ -243,11 +239,15 @@ export function sourceModeCommit(md) {
   }
 
   // A block source mode cannot write as Markdown shows as its JSON sentinel, which
-  // source mode does not edit (changedSentinel: a sentinel line that is not one the
-  // textarea already held, whole). Such Markdown is refused, with one line naming the
+  // source mode does not edit. Such Markdown is refused, with one line naming the
   // block, until the line is put back; moving or deleting the line is saved as usual.
+  // Two checks, the second the wall: changedSentinel (a sentinel line that is not one
+  // the textarea already held, whole), then sentinelHarm on the blocks the save would
+  // store (no block gains the marker or a shown sentinel's JSON in its words, and a
+  // block shown as a sentinel is stored unchanged or not at all).
 function refuseSentinelEdit(md) {
-    const index = changedSentinel(md, this._sourceOriginalMd);
+    let index = changedSentinel(md, this._sourceOriginalMd);
+    if (index === -1) index = storedSentinelHarm.call(this, md);
     if (index === -1) {
       if (this._sourceRefusing) this._clearFigureConstraint();
       this._sourceRefusing = false;
@@ -259,6 +259,24 @@ function refuseSentinelEdit(md) {
     );
     return true;
   }
+
+// The editor's projection and runToOps, for the source-save checks.
+function sourceView() {
+    return {
+      toDoc: (blocks) => this._editor.schema.nodeFromJSON(this._rt(blocks)).toJSON(),
+      toOps: (...args) => this._ro(...args),
+    };
+}
+
+// sentinelHarm over what sourceModeCommit(md) would store: the parse laid out as the
+// commit lays it, saved over the run its ops are diffed from.
+function storedSentinelHarm(md) {
+    const L0 = this._sourceBaselineBlocks || [];
+    const laid = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
+    const base = this._inflightOps ? this._inflightOps.afterBlocks : (this._debounceBaselineBlocks || this._blocks || []);
+    const { saved } = sourceStored(base, laid, sourceView.call(this));
+    return saved ? sentinelHarm(base, L0, saved) : -1;
+}
 
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the
   // hidden rich editor while source mode is open: show it in the textarea and make it

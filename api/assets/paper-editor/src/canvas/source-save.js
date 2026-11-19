@@ -45,18 +45,30 @@ export function sourceSaved(base, parsed, view, { calloutBody = "named", realign
   const stored = deepCloneBlocks(base);
   const shownBefore = realignTo ? deepCloneBlocks(realignTo) : stored;
   const laid = clampLockedPrefix(shownBefore, realignAcrossCommits(shownBefore, shownBefore, parsed));
-  const shown = docToBlocks(normalizeCanvasDoc(view.toDoc(laid), stored));
-  const doc = view.toDoc(shown);
-  let saved;
-  try {
-    saved = applyOps(stored, view.toOps(stored, doc, { preserveNewIds: true }) || []);
-  } catch (_refused) {
-    return [];
-  }
+  const { shown, saved: folded } = sourceStored(stored, laid, view);
+  if (!folded) return [];
+  let saved = folded;
   const shownById = new Map(shown.filter((block) => block && block.id).map((block) => [block.id, block]));
   saved = saved.map((block) => withoutUnshownWords(block, shownById.get(block && block.id)));
   return calloutBody === "lifted" ? saved : saved.map(withoutCalloutBody);
 }
+
+// What a source commit of `laid` (the parse, realigned and clamped) stores over `base`:
+// the editor's projection of it (`shown`), and the ops runToOps sends from `base`
+// folded onto `base` (`saved`, null when the fold refuses the batch).
+export function sourceStored(base, laid, view) {
+  const stored = deepCloneBlocks(base);
+  // An empty run projects to a doc with no content key.
+  const doc = view.toDoc(laid);
+  const shown = docToBlocks(normalizeCanvasDoc({ ...doc, content: doc.content || [] }, stored));
+  try {
+    return { shown, saved: applyOps(stored, view.toOps(stored, view.toDoc(shown), { preserveNewIds: true }) || []) };
+  } catch (_refused) {
+    return { shown, saved: null };
+  }
+}
+
+export { sentinelHarm } from "./source-sentinel-guard.js";
 
 // The wall: the first loss opening source mode could make, or null. `stored` is what
 // the Paper holds, with the ops still in flight (`inflight`) folded on. Its own

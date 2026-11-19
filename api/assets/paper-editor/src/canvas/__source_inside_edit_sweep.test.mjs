@@ -12,6 +12,11 @@
 //   sentinel  a block shown as its JSON sentinel, after the first letter of its first
 //             string that is not an id or a type: source mode does not edit such a
 //             block, so the save must be refused (changedSentinel)
+//             Each sentinel line also gets every edit below, judged by the guard on
+//             what the save would store alone (sentinelHarm, not changedSentinel):
+//             each must store the block unchanged, store it deleted whole, or be
+//             refused, never a block holding JSON in its words, never two blocks
+//             with one id
 //   no words  a divider, a closing fence, a blank line, a diagram fence with no
 //             caption, a sentinel with no string to type in: the key changes what
 //             the line is, and the textarea shows that
@@ -31,11 +36,13 @@ import { fileURLToPath } from "node:url";
 import { mount } from "./source-flush-mounted-harness.mjs";
 import { normalizeCanvasDoc } from "./canvas-document.js";
 import { docToBlocks } from "./run-convert.js";
-import { sourceSaved, sourceWallLoss } from "./source-save.js";
+import { sentinelHarm, sourceSaved, sourceStored, sourceWallLoss } from "./source-save.js";
+import { canonicalJSON } from "./projection-json.js";
+import { clampLockedPrefix, realignAcrossCommits } from "./source-realign.js";
 import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
 import { blocksToMarkdown, changedSentinel, firstLoss, markdownToBlockSpans, markdownToBlocks } from "../markdown.js";
 import { readerInline } from "../markdown/reader-inline.js";
-import { SENTINEL_OPEN } from "../markdown/shared.js";
+import { SENTINEL_CLOSE, SENTINEL_OPEN } from "../markdown/shared.js";
 
 const REPO = fileURLToPath(new URL("../../../../../", import.meta.url));
 const TYPED = "Ж";
@@ -126,10 +133,43 @@ function placement(text, lineIndex, span, block) {
   return found === -1 ? [end, true] : [marker + found + 1, true];
 }
 
+// The edits each sentinel line `l` (line `i` of `lines`) gets: the review's, and
+// machine-made ones (a character before, after and inside the line, the line wrapped,
+// split, duplicated, deleted, moved under the next block).
+function sentinelEdits(lines, i) {
+  const l = lines[i];
+  const mid = Math.floor(l.length / 2);
+  const at = (text) => { const next = [...lines]; next[i] = text; return next.join("\n"); };
+  const without = () => { const next = [...lines]; next.splice(i, lines[i + 1] === "" ? 2 : 1); return next; };
+  const movedDown = () => {
+    const next = without();
+    let j = i;
+    while (j < next.length && next[j] !== "") j++;
+    next.splice(j, 0, "", l);
+    return next.join("\n");
+  };
+  return {
+    "key before": at(TYPED + l), "! before": at("!" + l), "key after": at(l + TYPED),
+    "words after": at(l + " more words"), "key in the middle": at(l.slice(0, mid) + TYPED + l.slice(mid)),
+    "key after the marker": at(SENTINEL_OPEN + TYPED + l.slice(SENTINEL_OPEN.length)),
+    "key added to the JSON": at(l.replace(SENTINEL_OPEN + "{", SENTINEL_OPEN + '{"alt2":"q",')),
+    "split at 20": at(l.slice(0, 20) + "\n" + l.slice(20)), "split in the middle": at(l.slice(0, mid) + "\n" + l.slice(mid)),
+    "duplicated": at(l + "\n\n" + l), "duplicated first": l + "\n\n" + lines.join("\n"),
+    "deleted": without().join("\n"), "indented": at("    " + l),
+    "quoted": at("> " + l), "listed": at("- " + l), "headed": at("# " + l), "numbered": at("1. " + l),
+    "fenced": at("```\n" + l + "\n```"), "moved under the next block": movedDown(),
+  };
+}
+
+// Every string in `value`.
+const strings = (value) => typeof value === "string" ? [value]
+  : Array.isArray(value) ? value.flatMap(strings)
+    : value && typeof value === "object" ? Object.values(value).flatMap(strings) : [];
+
 const sameBlock = (a, b) => JSON.stringify({ ...a, id: null }) === JSON.stringify({ ...b, id: null });
 
 function sweep(rule) {
-  const counts = { papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, skipped: 0, losers: [], typedTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
+  const counts = { papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
   const opts = rule === "on" ? {} : lifted;
   for (const [name, stored] of papers()) {
     counts.papers += 1;
@@ -158,6 +198,7 @@ function sweep(rule) {
       counts.shown += 1;
       if (readerDiffers(block, parsed[index])) lose(`block ${index + 1} (${block.type})`, "its line shows other words than the reader");
     });
+    const sentinelIds = new Set(live.filter((b, i) => lines[spans[i] ? spans[i][0] : -1]?.startsWith(SENTINEL_OPEN)).map((b) => b.id));
     const spanOf = (line) => spans.findIndex(([from, to]) => line >= from && line < to);
     lines.forEach((text, line) => {
       const index = spanOf(line);
@@ -174,9 +215,39 @@ function sweep(rule) {
         // A block shown as JSON is not edited: source mode must refuse the save.
         counts.refused += 1;
         if (changedSentinel(typedMd, md) === -1) lose(where, "a key typed in a sentinel was not refused");
+        const block = live[index];
+        const payload = text.trim().slice(SENTINEL_OPEN.length, -SENTINEL_CLOSE.length);
+        const was = canonicalJSON(stored[index]);
+        for (const [edit, editedMd] of Object.entries(sentinelEdits(lines, line))) {
+          counts.edits += 1;
+          const laid = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(editedMd)));
+          const { saved } = sourceStored(stored, laid, view);
+          if (!saved || sentinelHarm(stored, live, saved) !== -1) { counts.guardRefused += 1; continue; }
+          const ids = saved.map((b) => b.id);
+          if (new Set(ids).size !== ids.length) lose(where, `${edit}: two blocks share an id`);
+          const same = saved.find((b) => b.id === block.id);
+          if (same && canonicalJSON(same) !== was && canonicalJSON(same) !== canonicalJSON(block)) {
+            lose(where, `${edit}: the block shown as JSON was stored changed`);
+          }
+          const storedById = new Map(stored.map((b) => [b.id, canonicalJSON(b)]));
+          const json = saved.find((b) => storedById.get(b.id) !== canonicalJSON(b) &&
+            strings(b).some((s) => s.includes("bp:block") || s.includes(payload)));
+          if (json) lose(where, `${edit}: block ${json.id} holds the JSON in its words`);
+          if (same) counts.guardKept += 1;
+          else counts.guardDeleted += 1;
+        }
         return;
       }
       if (changedSentinel(typedMd, md) !== -1) return lose(where, "a key typed outside any sentinel was refused");
+      const laidTyped = clampLockedPrefix(live, realignAcrossCommits(live, live, markdownToBlocks(typedMd)));
+      const storedTyped = sourceStored(stored, laidTyped, view).saved;
+      if (storedTyped && sentinelHarm(stored, live, storedTyped) !== -1) {
+        // Refused rightly only when the key opened a fence that takes a sentinel line
+        // into its body: that save would store the JSON as the fence's words.
+        const whole = (text) => markdownToBlocks(text).filter((b) => b.id && sentinelIds.has(b.id)).length;
+        if (whole(typedMd) < whole(md)) { counts.fenceRefused += 1; return; }
+        return lose(where, "the stored-result guard refused a key typed outside any sentinel");
+      }
       const after = sourceSaved(stored, markdownToBlocks(typedMd), view, { ...lifted, realignTo: live });
       if (!JSON.stringify(after).includes(TYPED)) return lose(where, "the typed character was not saved");
       const clean = withoutTyped(after);
@@ -214,6 +285,9 @@ function report(label, c) {
     `${c.shown} prose blocks showing the reader's words; ${c.lines} lines typed: ` +
     `kept ${c.words + c.noWords} (${c.words} with words, ${c.noWords} without), refused ${c.refused}, ` +
     `skipped ${c.skipped}; ${c.losers.length} losers`);
+  console.log(`  sentinel lines, ${c.edits} edits judged by the stored-result guard alone: ` +
+    `kept unchanged ${c.guardKept}, deleted whole ${c.guardDeleted}, refused ${c.guardRefused}; ` +
+    `${c.fenceRefused} keys outside a sentinel refused because they opened a fence over one`);
 }
 
 try {
