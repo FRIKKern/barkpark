@@ -5,8 +5,8 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   updates or creates the Paper. And a push compares against that view, so a
   block that spells as the pull showed it is not edited.
 
-  The Paper's schema hides a block field (`text`), so the reader's view of a
-  heading is empty. The rows carry no cached `body_html`, the case in which
+  The Paper's schema hides a block field (`text`) and the description, so the
+  reader's view of a heading is empty and prints no description. The rows carry no cached `body_html`, the case in which
   the reader prints them (task-6c7b44bee33f8333 is the cached case).
   """
   use BarkparkWeb.ConnCase, async: false
@@ -37,6 +37,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
 
     fields = [
       %{"name" => "title", "type" => "string"},
+      %{"name" => "description", "type" => "string", "private" => true},
       %{
         "name" => "blocks",
         "type" => "array",
@@ -78,6 +79,8 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   # pull refuses.
   defp answers_the_pull!(slug, answer) do
     resp = pull(slug)
+    description = Content.get_paper(slug).content["description"]
+    refute (answer["bpml"] || "") =~ description
 
     if resp.status == 200,
       do: assert(answer["bpml"] == resp.resp_body),
@@ -121,6 +124,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
 
     answer = sync(slug, String.replace(bpml, "Visible.", "Edited."), rev) |> json_response(200)
     assert answer["ok"] == true
+    assert [heading(), %{"content" => [%{"value" => "Edited."}]}] = stored_blocks(slug)
     answers_the_pull!(slug, answer)
   end
 
