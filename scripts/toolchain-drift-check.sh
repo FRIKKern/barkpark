@@ -13,8 +13,9 @@
 # Everything is discovered from `git ls-files -z`, never from a watch list.
 #
 #   RULE 1  every tracked `.tool-versions` / `*.tool-versions`, at any depth, is
-#           in the table: an owner, or a consumer whose erlang line equals its
-#           owner's. Any other one fails, named.
+#           in the table: an owner, or a consumer whose erlang and elixir lines
+#           equal its owner's (a `pin` row names a number that may differ). Any
+#           other one fails, named.
 #   RULE 2  every other file READS its version from its owner:
 #           a. an erlef/setup-beam step (workflow or composite action) has
 #              `version-file: <owner>` and `version-type: strict`;
@@ -128,6 +129,7 @@ printf '  scanned: %s version file(s), %s workflow/action file(s), %s other file
   "$(grep -c . <<<"$TV_FILES" || true)" "$(grep -c . <<<"$BEAM_FILES" || true)" "$(grep -c . <<<"$SCAN_FILES" || true)"
 
 # ── RULE 1: every version file is in the table ──────────────────────────────
+PINNED=""
 CONSUMERS="$(cut -f2 <<<"$ROWS")"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -137,8 +139,15 @@ while IFS= read -r f; do
     continue
   fi
   owner="$(awk -F'\t' -v c="$f" '$2 == c { print $1; exit }' <<<"$ROWS")"
-  want="$(tv_get "$ROOT/$owner" erlang)"; got="$(tv_get "$ROOT/$f" erlang)"
-  [ "$got" = "$want" ] || drift "$f: erlang ${got:-missing}, but $owner says $want."
+  for tool in erlang elixir; do
+    want="$(tv_get "$ROOT/$owner" "$tool")"; got="$(tv_get "$ROOT/$f" "$tool")"
+    [ "$got" != "$want" ] || continue
+    if [ -n "$got" ] && has_line "$f	${got%%-otp-*}" "$(cut -f1,2 <<<"$PINS")"; then
+      PINNED="$PINNED$f|${got%%-otp-*}
+"; continue
+    fi
+    drift "$f: $tool ${got:-missing}, but $owner says $want."
+  done
 done <<<"$TV_FILES"
 
 # ── RULE 2a: each setup-beam step reads its owner ───────────────────────────
@@ -270,7 +279,7 @@ SCAN_OUT="$(cd "$ROOT" && LC_ALL=C awk -v rows="$ROWS_V" -v vers="$VERS" -v tool
        close(file) }
   END { for (f in tied) print "TIED|" f; for (f in data) print "DATA|" f; for (k in pinned) print "PINNED|" k }
 ' <<<"$SCAN_FILES")"
-TIED="" DATA="" PINNED=""
+TIED="" DATA=""
 while IFS='|' read -r kind rest; do
   case "$kind" in
     DRIFT) drift "$rest" ;;

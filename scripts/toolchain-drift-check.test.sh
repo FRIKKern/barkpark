@@ -46,6 +46,7 @@ deploy/image.tool-versions  img/Dockerfile
 tools/format.tool-versions  .github/workflows/ci.yml#format
 tools/format.tool-versions  scripts/fmt.sh
 data  scripts/names.test.sh  past check names
+pin  tools/format.tool-versions  1.19.5  the formatter's Elixir
 TSV
   cat > "$d/.github/workflows/ci.yml" <<'YML'
 name: ci
@@ -142,6 +143,10 @@ plant j;   edit j/$W '/version-type: strict/d'; stage j
 expect "version-type strict missing" j 1 'ci.yml:9 (job test): `version-type: strict` is missing'
 plant k;   edit k/tools/format.tool-versions 's/^erlang 27.3.4$/erlang 27.3.3/'; stage k
 expect "a consumer version file's erlang drifts" k 1 'tools/format.tool-versions: erlang 27.3.3, but .tool-versions says 27.3.4'
+plant ke;  edit ke/$TABLE_REL '/^pin  tools\/format.tool-versions/d'; stage ke
+expect "a consumer version file's elixir differs with no pin row" ke 1 'tools/format.tool-versions: elixir 1.19.5-otp-27, but .tool-versions says 1.18.4-otp-27'
+plant kp;  edit kp/tools/format.tool-versions 's/^elixir 1.19.5-otp-27$/elixir 1.19.6-otp-27/'; stage kp
+expect "a consumer's elixir moves off its pin" kp 1 'tools/format.tool-versions: elixir 1.19.6-otp-27, but .tool-versions says 1.18.4-otp-27'
 plant l;   printf 'FROM elixir:1.17-alpine\n' > "$T/l/Dockerfile"; stage l
 expect "an unowned Dockerfile builds FROM elixir" l 1 'Dockerfile:1: 1.17 on a line naming elixir, and no row ties'
 plant m;   printf 'jobs:\n  x:\n    steps:\n      - uses: erlef/setup-beam@v1\n        with:\n          version-file: barkpark/.tool-versions\n          version-type: strict\n' > "$T/m/.github/workflows/sub.yml"

@@ -10,10 +10,16 @@
 #   */Dockerfile, *.sh, ...       a version on a line naming a tool equals that
 #                                 tool's number here, or the file reads this
 #                                 file by path
-#   *.tool-versions               that file's erlang line equals this file's
-#   data <file> <reason>          a test or fixture file (*.test.sh, *_test.*,
-#                                 test/, tests/, fixtures/) whose versions are
-#                                 test data or past check names, not a runtime
+#   *.tool-versions               that file's erlang and elixir lines equal this
+#                                 file's, unless a pin row names the number
+#   data <file> <reason>          a test or fixture file whose versions are test
+#                                 data or past check names, not a runtime. A data
+#                                 row covers EVERY number in its file, an install
+#                                 line too, so the check allows one only on the
+#                                 paths its own test-path rule names: *.test.sh,
+#                                 *_test.*, test/, tests/, fixtures/. A test file
+#                                 that sets up a tool for anything but its own
+#                                 test takes line rows instead
 #   pin <file> <token> <what>     one token that is not an owned tool's version
 #   line <file> <hash> <words> :: <reason>
 #                                 one line whose numbers are not versions
@@ -63,16 +69,17 @@ data  scripts/required-checks.test.sh  a matrix fixture and the exclusion rows o
 data  scripts/ci-test-watchdog.test.sh  `sleep 0.5` on an `elixir -e` line is a poll interval
 data  scripts/cloud-console-gate-shape.test.sh  a planted aggregator matrix (otp 27.0) the gate must refuse
 data  scripts/security-gate-shape.test.sh  a planted aggregator matrix (otp 27.0) the gate must refuse
-data  scripts/deploy-image.test.sh  Barkpark release image tags the deploy test pulls (0.2.30-0.2.32)
-data  scripts/deploy-admin-token-recovery.test.sh  a made-up Barkpark image tag (9.9.9)
+data  scripts/deploy-image.test.sh  Barkpark image tags (0.2.30-0.2.32) fed to a fake docker
+data  scripts/deploy-admin-token-recovery.test.sh  a made-up Barkpark image tag (9.9.9) fed to a fake docker
 data  scripts/deploy-health-banner.test.sh  a made-up Barkpark image tag (9.9.9)
 data  api/test/scripts/test-plugin-node-matrix.sh  a package.json fixture's own version (0.1.0)
 
 # Other pins: `pin <file> <token> <what it pins>`. A version that is not an owned
 # tool's (a base image, a vendored package's engines field) or a number that is
 # not a version at all, on a line the check reads. The token must still be there.
+pin  tools/format.tool-versions  1.19.5  the formatter's Elixir, which the format gate measures (reason in the file); production's is 1.18.4
 pin  .github/workflows/deploy-harnesses.yml  22.04  the Ubuntu image the git 2.34 fetch harness runs in
-pin  .github/workflows/portable-doc-editor-release.yml  22.22.0  Node for the npm pack and publish jobs of the editor package
+pin  .github/workflows/portable-doc-editor-release.yml  22.22.0  Node for the editor package's npm pack and publish jobs; it DIFFERS from the owner (.tool-versions nodejs 26.5.0), and task-ba826294ea551271 decides: move to the owner Node, or write why not
 pin  deploy/azure/bicepconfig.json  1.0.0  the Microsoft Graph Bicep extension
 pin  deploy/azure/main.bicep  0.2.28  an example Barkpark image tag in a parameter description
 pin  deploy/azure/main.bicep  3.22  the Alpine image of the Azure init container
