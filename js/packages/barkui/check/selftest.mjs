@@ -16,10 +16,11 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { capacitySentence, PARTS_HELD, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { enforceCeiling } from './ceiling.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
-import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds } from './plants.mjs'
+import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
 const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
@@ -392,10 +393,13 @@ const CASES = [
       // A later control reached by structure alone, and a rule that applies to nothing.
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
+      // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
+      inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
     ),
     css: [
-      // Beyond the walls (this sheet is the selftest's own, and never pinned): the round-8 review's two hover rules.
-      '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled]) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
+      // Beyond the walls (this sheet is the selftest's own, and never pinned): the round-8 review's two hover rules,
+      // the first kept off the save button, which the dark-only plant above needs proven and held.
+      '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled], #button-save) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
     ].join('\n'),
     expect: each({
@@ -405,11 +409,13 @@ const CASES = [
       'the pin unlike the real state on the control itself': skinsSay(/real hover on button#button-destructive "Delete": .* where the control pinned /),
       'pending held at rest, in every view': drawnOff('button "Saving"'),
       'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
+      'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
       'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     }),
   },
+  ...CEILING_CASES,
   {
     name: 'one part more than the CI check step holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
@@ -443,12 +449,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const pick = process.argv.slice(2).join(' ')
   const run = CASES.filter((c) => c.name.includes(pick))
   const start = Date.now()
+  let now = ''
+  enforceCeiling(SELFTEST_CEILING, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${selftestSentence()} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest across jobs.`)
   for (const c of run) {
-    if (Date.now() - start > SELFTEST_CEILING * 1000) {
-      console.log(`FAIL the selftest passed ${SELFTEST_CEILING} s with ${run.length - run.indexOf(c)} case(s) left. ${selftestSentence()} Measure again, then change SELFTEST_CEILING and, if the step must grow, SELFTEST_STEP_MINUTES in check/capacity.mjs and the step's limit in js-tests.yml together, or trim cases.`)
-      failures++
-      break
-    }
+    now = c.name
     if (c.direct) {
       const t0 = Date.now()
       const held = await c.direct()

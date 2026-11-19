@@ -82,9 +82,10 @@ matches; a rule or a pair nobody judges fails the part by name.
   its `::before` and `::after` and everything inside it must then be what the same control shows with
   that state pinned, and nothing from the control up to the stage may change: so the control pinned is
   the control in that state. Its change must also be exactly the change of some pinned row with the same
-  `data-pin` (the check finds the row by comparing), so that row, read in every view, shows the same
-  change. Then, per state, every live control it was proven on is pinned at once and the stage is read
-  as drawn, so each pair is judged as drawn while its rule applies. A real state unlike its pin, or one no
+  `data-pin` (the check finds the row by comparing). The two are compared by computed value in that
+  one view, so a value that computes alike there can differ elsewhere: then, per state, every live
+  control it was proven on is pinned at once and the stage is read as drawn in light and in dark, so
+  each pair is judged as drawn, in both schemes, while its rule applies. A real state unlike its pin, or one no
   pinned row shows, fails by name. Which controls are driven comes from `element.matches`, never from a
   name or an attribute.
 - States the steps reach. Each press step ends with the stage read as drawn, in the first skin, light,
@@ -222,25 +223,34 @@ refused on the sheet as the browser parses it (`check/cssom.mjs`) before any lig
 
 What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
 differ there, layout can. A moment partway through a transition is not read: both its ends are. A
-real state, or a state only the steps reach, is read as drawn in that one view; a real state reaches the
-other views through the pinned row that changes the same way. A state only the steps reach (the live
+real state is driven and compared in that one view and read as drawn in light and dark there (one skin,
+base, 1440px); the pinned row that changes the same way carries the change, not the control it is on,
+to the other skins, surfaces and widths. A state only the steps reach (the live
 button's pending) is read in that one view only: the pending row shows pending at rest in every view,
 but nothing holds the live button's pending to that row. The focus ring is base.css's and is measured on every
 Tab stop, below. The motion pass reads one skin in light on purpose:
 part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
 through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
 focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
+A rule counts as read when it applied at a judged moment, through any branch of its selector list: in
+`[inert] [data-slot="button"]:not([data-pin]), #x-save[data-pending]:hover { --bark-button-hover-fg: … }`
+the first branch applies, harmlessly, at every reading, while the second (a live button pending under
+the pointer) is never driven, because no live control is pending when the states are planned. Written
+alone, the second branch fails as "a rule nothing read".
 
 ## How many parts the check holds
 
-The check runs 3 parts at a time; a run may take at most 240 s for the first 3 and 300 s more for each further 3, and stops, failing, once it passes that, so the 15-minute check step in CI holds 9 parts, whose ceiling of 840 s is 93% of it. The numbers are ceilings the check enforces
-(`check/capacity.mjs`, `check/run.mjs`), set with room over what a run took on Linux with 4 CPUs; the
-change that sets them states what was measured. Past that number of parts the check refuses to run,
-naming this sentence, before any light is read; change the ceilings in `check/capacity.mjs` and, if the
-step must grow, `STEP_MINUTES` and the step's limit in `js-tests.yml` together (a test holds them
-equal), or split the check, and measure again. The selftest copies one part, so its time does not grow
-with the parts folder. The selftest may take at most 480 s, 80% of its 10-minute step in CI, and stops, failing, once it passes that. `SELFTEST_STEP_MINUTES` and the step's limit move
-together, as above.
+On CI's hosted runner the check took 131 s for 1 part; a run may take at most 1.5 times its reading, scaled linearly past the most parts read (197 s a part), and stops, failing, once it passes that, so the 15-minute check step in CI holds 4 parts, whose ceiling of 786 s is 87% of it. The ceilings are made from readings
+(`check/capacity.mjs`): each reading is a whole run on CI's hosted runner, with its number of parts, its
+seconds, where it was read and at which commit, and each ceiling is 1.5 times its reading. A run
+stops, failing with this sentence, the moment it passes its ceiling, wherever it is then
+(`check/ceiling.mjs`, the same timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can
+lower a ceiling for a test, never raise it). Past that number of parts the check refuses to run, naming
+this sentence, before any light is read. When a part lands, its hosted reading goes into
+`check/capacity.mjs` and the number moves by measurement; a test holds the step's minutes to
+`js-tests.yml`, the most parts held under it and one more over it. The selftest copies one part, so its
+time does not grow with the parts folder. On CI's hosted runner the selftest took 301 s; it may take at most 1.5 times that, 452 s, 75% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of
+its step; a selftest that outgrows that is split across jobs, never given a longer step.
 
 ## What the check proves about a label, and no more
 

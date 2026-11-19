@@ -1,9 +1,11 @@
 // The selftest's planting tools and its ladder (check/selftest.mjs runs the cases). Each plant edits a scratch
 // copy of a part; each check reads a run's proof and log for the reason a light is off.
+import { spawnSync } from 'node:child_process'
 import { appendFileSync, cpSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
+import { capacitySentence, selftestSentence } from './capacity.mjs'
 
 export const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
 // Runs `code` at the start of the part's demo, with `root` in scope.
@@ -87,3 +89,21 @@ export const ladderHolds = async (p, html, ok, logs, out) => {
   return held && width === claim.width
 }
 
+// A ceiling passed fails the run at that moment, wherever it is (ceiling.mjs): a ceiling of 1 s, lowered for
+// the test, against a check run and a selftest case that each take longer.
+export const CEILING_CASES = [
+  {
+    name: 'a check run that passes its ceiling stops there, failing, with the sentence',
+    direct: async () => {
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'run.mjs')], { env: { ...process.env, BARKUI_CEILING_SECONDS: '1' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes(`check: FAIL the run passed its ceiling of 1 s for `) && r.stdout.includes(capacitySentence()) && !/part\(s\); /.test(r.stdout)
+    },
+  },
+  {
+    name: 'a selftest whose last case passes its ceiling stops there, failing, with the sentence',
+    direct: async () => {
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a page whose barkui.css differs from a part'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '1' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 1 s while "a page whose barkui.css differs') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
+    },
+  },
+]

@@ -7,10 +7,11 @@
 //   (no pin shows a host or an ancestor): so the control pinned is the control in that state;
 // - the control's change must be exactly the change of some pinned row with the same data-pin, so a pinned row,
 //   read in every skin, scheme, surface and width, shows this change too; the machine picks the row, by comparing.
-// Then, per state, every live control is pinned at once and the stage is read as drawn (reading.mjs); that reading
-// records what applies (coverage.mjs), so each pair is judged as drawn while its rule applies. One reading per
-// state instead of one per control: a reading costs about a second, a driven control a few frames.
-// One skin, light, base surface, 1440px.
+// Then, per state, every live control is pinned at once and the stage is read as drawn (reading.mjs), in light and
+// in dark: a value that computes alike in light can draw otherwise in dark. That reading records what applies
+// (coverage.mjs), so each pair is judged as drawn while its rule applies. Two readings per state instead of one
+// per control: a reading costs about a second, a driven control a few frames.
+// The states are driven in one skin, light, base surface, 1440px.
 import { waitsFor } from '../build/sheet-waits.mjs'
 import { readView, verdict } from './reading.mjs'
 
@@ -98,10 +99,10 @@ function differ(real, pin) {
 }
 
 /** Every way a real state differs from what the lights read, in plain words; `pairs` gets the pairs it drove. */
-export async function realStates(page, part, { skin, settle, title, entries, pairs }) {
+export async function realStates(page, part, { skin, settle, title, entries, pairs, show }) {
   const fails = []
   const where = 'base'
-  const waits = waitsFor(skin, 'light', where)
+  await show('light')
   const rest = async () => {
     await page.mouse.move(0, 0)
     await page.barkCheck((id) => document.getElementById(id).focus(), title)
@@ -177,10 +178,15 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
     await rest()
     await page.barkCheck(setPins, [part.name, list, mode])
     try {
-      await settle(page)
-      const v = await readView(page, part, waits)
-      fails.push(...verdict({ ...v, bounds: { ...v.bounds, misnamed: [] } }, `${mode.replace(' ', ' and ')} held on every live control it applies to, ${skin} light on ${where}: `, waits).fails)
+      for (const scheme of ['light', 'dark']) {
+        await show(scheme)
+        await settle(page)
+        const w = waitsFor(skin, scheme, where)
+        const v = await readView(page, part, w)
+        fails.push(...verdict({ ...v, bounds: { ...v.bounds, misnamed: [] } }, `${mode.replace(' ', ' and ')} held on every live control it applies to, ${skin} ${scheme} on ${where}: `, w).fails)
+      }
     } finally {
+      await show('light')
       await page.barkCheck(setPins, [part.name, list, null])
     }
   }

@@ -41,7 +41,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     return { ok: false, proof: null }
   }
   if (built.parts.length > PARTS_HELD) {
-    log(`check: ${built.parts.length} parts, more than CI's check step holds. ${capacitySentence()} Raise the limit in check/capacity.mjs and js-tests.yml together, or split the check, then measure again.`)
+    log(`check: ${built.parts.length} parts, more than CI's check step holds. ${capacitySentence()} Read the run on CI's runner and put the reading in check/capacity.mjs, or split the check.`)
     return { ok: false, proof: null }
   }
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
@@ -106,7 +106,8 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     // Coverage, once every light has read: a rule or a driven pair no judged reading saw fails the part.
     const missed = LIGHT_NAMES.every((k) => only.includes(k)) && states && !ctx.errors.length ? unread(ctx) : []
     for (const m of missed) lines.push(`  ${m}`)
-    const failed = ctx.errors[0] ?? missed[0] ?? offs[0]
+    // A light's own reason first: it names the cause; coverage names only what no reading saw.
+    const failed = ctx.errors[0] ?? offs[0] ?? missed[0]
     for (const [k, l] of Object.entries(lights)) lines.push(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
     for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
     for (const [k, m] of Object.entries(measures))

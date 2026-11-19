@@ -319,12 +319,12 @@ export async function skinsAndSchemes(ctx, part, skins) {
   return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })), textOnly: [...bare].map(([selector, list]) => ({ selector, controls: list })) }
 }
 
-/** Pinned equals real, in one skin, light, on base at 1440px (states.mjs). */
+/** Pinned equals real, in one skin, light, on base at 1440px, and each state read as drawn in light and dark (states.mjs). */
 async function stateFails(ctx, part, skin) {
   const page = await open(ctx, { scale: 2, height: 1600 })
   try {
-    await view(page, skin, 'light')
-    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title`, entries: ctx.entries ?? [], pairs: ctx.pairs ?? [] })
+    const show = (scheme) => view(page, skin, scheme)
+    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title`, entries: ctx.entries ?? [], pairs: ctx.pairs ?? [], show })
     await stillStyled(ctx, page, 'states')
     return fails
   } finally {
