@@ -11,7 +11,8 @@
 // is no list of shapes here; the round trip itself is the check, as in the BPML print
 // wall (Barkpark.PortableDoc.Bpml.RoundTrip).
 //
-// Four spellings are the same content and are compared as one:
+// Four spellings are the same content and are compared as one (and an `id` the save
+// gives a nested block that had none is not a loss: nothing stored goes):
 //   1. a top-level block's `id`: markdownToBlocks mints new ids and source mode gives
 //      each surviving block its id back (realignAcrossCommits);
 //   2. adjacent text runs carrying the same marks, which are one run;
@@ -142,6 +143,7 @@ function diffPath(x, y, path) {
     const keys = [...new Set([...Object.keys(x), ...Object.keys(y)])].sort();
     for (const key of keys) {
       const at = path ? `${path}.${key}` : key;
+      if (key === "id" && !(key in x)) continue;
       if (!(key in x) || !(key in y)) return missingPath(key in x ? x[key] : y[key], at);
       const found = diffPath(x[key], y[key], at);
       if (found !== null) return found;

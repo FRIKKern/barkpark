@@ -6,8 +6,8 @@ import {
   clampLockedPrefix,
   deepCloneBlocks,
   mergeSourceText,
-  settleSourceParse,
 } from "./source-realign.js";
+import { sourceSaved } from "./source-save.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 
   // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──
@@ -68,17 +68,20 @@ export function sourceModeEnter() {
     const L0 = docToBlocks(this._normalizedDoc(this._editor.getJSON()));
 
     // THE WALL. An edit in source mode saves markdownToBlocks(text) in place of the
-    // document, so source mode opens only where the Markdown reads back to the same
-    // content (sourceLoss, the one comparison), for both the blocks the canvas holds as
+    // document. A Paper opens writable only when the ops a save sends, folded onto what
+    // is stored, give back every key that was stored; anything else opens READ-ONLY: it
+    // shows the Markdown, takes no typing, writes nothing back, and one plain line says
+    // why and names the block. The save is run, not modelled (sourceSaved: realign,
+    // the editor's projection, runToOps, the patch.ex fold), and compared with
+    // sourceLoss, the one comparison. It runs for both the blocks the canvas holds as
     // stored (this._blocks: what the Paper holds, which the rich view may not show) and
-    // the live doc (L0: marks typed but not yet saved). Each is its own round
-    // trip, so unsaved typing never reads as a loss, and each parse is settled the
-    // way sourceModeCommit saves it (ids given back, a locked template prefix put
-    // back, kept keys merged as patch-block merges them: settleSourceParse), so the check
-    // judges what would be saved. Where either check loses anything, source mode opens
-    // READ-ONLY: it shows the Markdown, takes no typing, writes nothing back, and one
-    // plain line says why and names the block.
-    const saved = (base) => (parsed) => settleSourceParse(base, parsed);
+    // the live doc (L0: marks typed but not yet saved). Each is its own round trip, so
+    // unsaved typing never reads as a loss.
+    const view = {
+      toDoc: (blocks) => this._editor.schema.nodeFromJSON(this._rt(blocks)).toJSON(),
+      toOps: (...args) => this._ro(...args),
+    };
+    const saved = (base) => (parsed) => sourceSaved(base, parsed, view);
     const stored = this._blocks || [];
     const loss = sourceLoss(stored, saved(stored)) || sourceLoss(L0, saved(L0));
 

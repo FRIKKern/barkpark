@@ -2,19 +2,20 @@
 // in source mode saves markdownToBlocks(text) in place of the document. Before this
 // check, one key pressed anywhere stripped the marks from every paragraph the Markdown
 // could not mark, and one key inside a callout with a body wrote the body's text over
-// the callout's own words. Entering source mode now checks the round trip first
-// (sourceLoss, src/markdown/carries.js) of both the stored blocks and the live doc, each
-// settled as the save would store it (settleSourceParse: a block that keeps its id and
-// type is a patch-block, so a top-level key the parse leaves out stays stored, except a
-// callout's slots, which an edit inside it overwrites). Where either loses
-// anything, source mode opens read-only. It shows the Markdown, takes no typing, writes
+// the callout's own words. Entering source mode now runs the save first (sourceSaved,
+// canvas/source-save.js: the ops a save sends, folded onto what is stored as patch.ex
+// folds them) for both the stored blocks and the live doc, and compares the result with
+// what was stored (sourceLoss, src/markdown/carries.js). A Paper opens writable only
+// when that gives back every key that was stored, and it holds no callout with a body;
+// anything else opens read-only. It shows the Markdown, takes no typing, writes
 // nothing back (not on leaving, not on a flush), and one plain line says why and names
-// the block. A Paper the round trip keeps whole opens as before.
+// the block. A Paper the save keeps whole opens as before.
 // Run: node src/canvas/__source_wall_mounted.test.mjs
 
 import assert from "node:assert/strict";
 import { mount, paragraph, watchValueWrites } from "./source-flush-mounted-harness.mjs";
-import { settleSourceParse } from "./source-realign.js";
+import { sourceSaved } from "./source-save.js";
+import { runToOps, runToTiptap } from "./run-convert.js";
 import { firstLoss } from "../markdown.js";
 
 const callout = () => ({
@@ -103,13 +104,15 @@ try {
     assert.deepEqual(batches, [], "no op is sent");
   }
 
-  // 5) The settle step: a kept id and type keeps a top-level key the parse leaves out;
-  //    a type change goes as a whole block, so the key counts as lost.
+  // 5) The save is run, not modelled (sourceSaved: realign, projection, runToOps, the
+  //    patch.ex fold). A heading's role is never patched, so a parse without it keeps
+  //    it; a type change goes as a replace-block, which rebuilds the block without it.
   {
+    const view = { toDoc: runToTiptap, toOps: runToOps };
     const base = [{ id: "t1", type: "heading", level: 1, role: "title", text: "T" }];
-    assert.equal(firstLoss(base, settleSourceParse(base, [{ id: "x", type: "heading", level: 1, text: "T" }])), null,
-      "a patch-block keeps the role");
-    const replaced = firstLoss(base, settleSourceParse(base, [{ id: "x", type: "paragraph", content: [{ type: "text", value: "T" }] }]));
+    const typed = sourceSaved(base, [{ id: "x", type: "heading", level: 1, text: "T!" }], view);
+    assert.deepEqual(typed, [{ ...base[0], text: "T!" }], "the save patches the text and keeps the role");
+    const replaced = firstLoss(base, sourceSaved(base, [{ id: "x", type: "paragraph", content: [{ type: "text", value: "T" }] }], view));
     assert.ok(replaced, "a block saved whole (its type changed) loses the role, and the check says so");
   }
 
@@ -134,7 +137,23 @@ try {
     inSync("after a source edit");
   }
 
-  console.log("source wall mounted: 6 cases passed");
+  // 7) An ordered list that starts at 5, one key typed in another paragraph. The save
+  //    would patch the list too, with `start: null` (the prose patch writes a key the
+  //    parse dropped as null), and the list would count from 1. Markdown cannot carry
+  //    the start yet, so source mode opens read-only and names the list.
+  {
+    const list = () => ({ id: "l1", type: "list", ordered: true, start: 5, items: [[{ type: "text", value: "five" }]] });
+    const { canvas, batches, server } = await mount([paragraph("p1", "Before"), list()]);
+    mounted.push(canvas);
+    const seen = editInSource(canvas, "Before".length);
+    assert.equal(seen.readOnly, true, "source mode opens read-only on a list that starts at 5");
+    assert.equal(seen.notice, "Read only: Markdown cannot carry the start of block 2, a list, yet.",
+      "one plain line names the list");
+    assert.deepEqual(batches, [], "no op is sent");
+    assert.deepEqual(server[1], list(), "the list keeps its start");
+  }
+
+  console.log("source wall mounted: 7 cases passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
 }

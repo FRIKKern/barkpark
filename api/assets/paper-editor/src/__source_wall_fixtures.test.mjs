@@ -1,10 +1,13 @@
 // Every shared Portable Doc fixture through the source-mode wall (task-368b4fe38e75712d):
 // the input of each block and limit golden in api/priv/portable_doc/goldens, as a one-block
 // Paper, through sourceLoss (src/markdown/carries.js), the one comparison source mode runs
-// before it opens, with the parse settled as the save would store it (settleSourceParse).
-// The list below is what source mode refuses today and why; it is the work queue for the tasks that make Markdown carry those shapes (marks on text:
-// task-5f0ba8904b973a3a; deep lists and other source losses: task-dde1d993de85a6e3). A
-// fixture that starts or stops being refused moves this list, so the change is seen.
+// before it opens, with the save run as source mode runs it (sourceSaved: the ops a save
+// sends folded onto what is stored; the projection here is runToTiptap without the
+// editor's schema, which __source_inside_edit_sweep.test.mjs adds).
+// The list below is what source mode refuses today and why; it is the work queue for
+// the tasks that make Markdown carry those shapes (marks on text: task-5f0ba8904b973a3a;
+// deep lists and other source losses: task-dde1d993de85a6e3). A fixture that starts or
+// stops being refused moves this list, so the change is seen.
 // Run: node src/__source_wall_fixtures.test.mjs
 
 import assert from "node:assert/strict";
@@ -12,7 +15,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { firstLoss, sourceLoss } from "./markdown/carries.js";
-import { settleSourceParse } from "./canvas/source-realign.js";
+import { sourceSaved } from "./canvas/source-save.js";
+import { runToOps, runToTiptap } from "./canvas/run-convert.js";
+
+const view = { toDoc: runToTiptap, toOps: runToOps };
 
 const GOLDENS = fileURLToPath(new URL("../../../priv/portable_doc/goldens/", import.meta.url));
 
@@ -20,7 +26,6 @@ const REFUSED = [
   "blocks/paragraph paragraph content.marks",
   "limits/em-at-the-depth-limit paragraph content[0].children[0].children",
   "limits/em-one-level-above-the-depth-limit paragraph content[0].children[0].children",
-  "limits/heatmap-number-past-what-a-float-holds heatmap cells[0][0]",
   "limits/list-at-the-depth-limit list items[0]",
   "limits/list-one-level-above-the-depth-limit list items[0]",
   "limits/marks-at-the-depth-limit paragraph content.marks",
@@ -50,6 +55,11 @@ const REFUSED = [
     "a lost slot is named by the slot",
   );
   assert.deepEqual(firstLoss([para("a", [text("x")])], []).index, 0, "a lost block is a loss");
+  const section = (child) => ({ id: "s", type: "section", blocks: [child] });
+  assert.equal(firstLoss([section({ type: "divider" })], [section({ id: "m1", type: "divider" })]), null,
+    "an id the save gives a nested block that had none is not a loss");
+  assert.deepEqual(firstLoss([section({ id: "d", type: "divider" })], [section({ type: "divider" })]).path, "blocks[0].id",
+    "a nested id the save drops is a loss");
   assert.equal(firstLoss([{ id: "h", type: "heading", level: 2, text: "T" }], [{ type: "heading", text: "T", level: 2, id: "z" }]), null,
     "key order is not content");
   assert.equal(firstLoss([{ type: "list", items: [[text("a")]] }], [{ type: "list", ordered: false, lang: "", items: [[text("a")]] }]), null,
@@ -65,7 +75,7 @@ for (const dir of ["blocks", "limits"]) {
     count++;
     const { input } = JSON.parse(readFileSync(join(GOLDENS, dir, file), "utf8"));
     const block = { id: "fixture", ...input };
-    const loss = sourceLoss([block], (parsed) => settleSourceParse([block], parsed));
+    const loss = sourceLoss([block], (parsed) => sourceSaved([block], parsed, view));
     if (loss) refused.push(`${dir}/${file.replace(/\.golden\.json$/, "")} ${loss.type} ${loss.path}`);
   }
 }

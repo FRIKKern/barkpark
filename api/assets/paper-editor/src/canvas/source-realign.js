@@ -398,25 +398,3 @@ function mintClampId() {
       : Math.random().toString(36).slice(2, 10);
   return "s-" + clampMintCounter.toString(36) + "-" + nonce;
 }
-
-// What a source commit would store for `parsed`, the Markdown read back, against `base`,
-// the blocks it replaces: each surviving block gets its id back and a locked template
-// prefix is put back (as sourceModeCommit does), and a block that keeps its id and its
-// type is saved as a patch-block, a shallow merge, so a top-level key the parse leaves
-// out (a heading's role) stays stored while every key the parse writes (content, with
-// its marks) replaces what was there. A block whose type changes goes as a whole
-// (replace-block, or a remove and an insert), so nothing is kept for it. `slots` is
-// never counted as kept: the editor shows a callout's text from its body slot
-// (calloutBodyInline) and writes an edit there into `content`, so an edit inside a
-// callout with a body replaces its words. The source-mode wall compares `base` with
-// this (sourceLoss in markdown/carries.js).
-export function settleSourceParse(base, parsed) {
-  const copy = deepCloneBlocks(base);
-  const byId = new Map(copy.map((block) => [block && block.id, block]));
-  return clampLockedPrefix(copy, realignAcrossCommits(copy, copy, parsed)).map((block) => {
-    const was = block && byId.get(block.id);
-    if (!was || was.type !== block.type) return block;
-    const { slots: _slots, ...kept } = was;
-    return { ...kept, ...block };
-  });
-}
