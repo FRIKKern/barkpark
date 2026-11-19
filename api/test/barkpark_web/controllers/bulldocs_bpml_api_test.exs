@@ -461,63 +461,6 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
       assert pc(after_paper, "blocks") == blocks
       assert to_string(get_in(after_paper.content, ["rev"])) == rev
     end
-
-    test "the canonical echo degrades to bpml:nil and keeps the rev anchor" do
-      slug = "bpml-echo-degrade-#{System.unique_integer([:positive])}"
-
-      # The visible paragraph keeps the reader's view non-empty, so the echo
-      # reaches the printer and its refusal.
-      paper =
-        with_blocks!(slug, [
-          %{
-            "id" => "p1",
-            "type" => "paragraph",
-            "content" => [%{"type" => "valueref", "ref" => "stats.total"}]
-          },
-          %{
-            "id" => "p2",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Seen."}]
-          }
-        ])
-
-      # A write that LANDED must not be reported as a failure: a 500 strands the
-      # client's rev anchor and a 422 lies about what happened.
-      assert {nil, refusal} = BarkparkWeb.BulldocsIngestController.canonical_echo(paper)
-      assert refusal =~ "kind: inline"
-
-      payload =
-        BarkparkWeb.BulldocsIngestController.maybe_mark_echo(
-          %{ok: true, slug: slug, rev: "7", op_count: 2, bpml: nil},
-          refusal
-        )
-
-      assert payload.ok == true
-      assert payload.rev == "7"
-      assert payload.bpml == nil
-      assert payload.bpml_unprintable == refusal
-      assert payload.hint =~ "anchor"
-    end
-
-    test "a printable paper's echo is unchanged — the rescue is narrow" do
-      slug = "bpml-echo-clean-#{System.unique_integer([:positive])}"
-
-      paper =
-        with_blocks!(slug, [
-          %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "H"},
-          %{
-            "id" => "p2",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Seen."}]
-          }
-        ])
-
-      assert {bpml, nil} = BarkparkWeb.BulldocsIngestController.canonical_echo(paper)
-      assert bpml =~ "<h1 id=\"h1\">H</h1>"
-
-      payload = %{ok: true, bpml: bpml}
-      assert BarkparkWeb.BulldocsIngestController.maybe_mark_echo(payload, nil) == payload
-    end
   end
 
   # ── wave-6: byline map-item items no longer answer a RAW 500 ────────────────

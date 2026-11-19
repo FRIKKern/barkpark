@@ -39,7 +39,9 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
 
   defp schema!(opts) do
     item_fields =
-      if opts[:text], do: [%{"name" => "text", "type" => "string", "private" => true}], else: []
+      for {key, hidden?} <- [{"text", opts[:text]}, {"id", opts[:id]}],
+          hidden?,
+          do: %{"name" => key, "type" => "string", "private" => true}
 
     fields = [
       %{"name" => "title", "type" => "string"},
@@ -126,6 +128,8 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
       slug = slug("update")
       paper!(slug, blocks())
       {bpml, rev} = pull!(slug)
+      refute bpml =~ @hidden
+      refute bpml =~ @second
 
       answer = sync(slug, String.replace(bpml, "Visible.", "Edited."), rev) |> json_response(200)
       assert answer["ok"] == true
@@ -166,7 +170,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
       assert row(slug) == before
     end
 
-    test "a push that would leave the reader nothing to see is refused before it writes" do
+    test "a push leaving the reader nothing to see is refused and the row is unchanged" do
       slug = slug("emptied")
       paper!(slug, blocks())
       before = row(slug)
@@ -213,7 +217,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
     end
   end
 
-  test "a create that would leave the reader nothing to see is refused before it writes" do
+  test "a create leaving the reader nothing to see is refused and leaves no row" do
     # Its only text past the title heading is a heading the schema hides.
     {source, bpml} = creatable_bpml!([heading(), heading("h2", @second)])
     schema!(text: true)
@@ -228,6 +232,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   # not move): the pull and an unedited push of that pull refuse with the same
   # error, the push writes nothing, and neither error quotes a stored block.
   defp fail!("redacted_source", _slug), do: schema!(text: true, blocks: true)
+  defp fail!("hidden_block_id", _slug), do: schema!(text: true, id: true)
 
   defp fail!(code, slug), do: update_row!(slug, &failed(code, &1))
 
@@ -257,7 +262,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   end
 
   for code <-
-        ~w(bpml_unavailable redacted_source invalid_blocks semantic_empty bpml_unprintable ambiguous_source) do
+        ~w(bpml_unavailable redacted_source hidden_block_id invalid_blocks semantic_empty bpml_unprintable ambiguous_source) do
     test "a view that fails as #{code} refuses the pull and the push alike, and writes nothing" do
       schema!(text: true)
       slug = slug("fail")

@@ -345,16 +345,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
     * the paper's CURRENT blocks are unprintable → 422 `bpml_unprintable`
       BEFORE any op derives (a BPML document cannot describe them, so a sync
       would silently delete every non-kernel block behind a 200);
-    * applied but the post-write state is unprintable → still 200 with `rev`
-      (the write LANDED — a 500 would strand the anchor) and `bpml: nil` plus a
-      `bpml_unprintable` marker;
+    * the Paper as saved has no reader's view that prints → 422 with the
+      view's refusal, and the write is rolled back (`BpmlView.saved_check/3`
+      runs inside the write's transaction);
     * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
       is silently lost);
     * no changes → 200 `{ok, unchanged: true}`;
-    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the CANONICAL
-      print of the persisted blocks (post-normalization) — the client
-      overwrites its file with it, so working copies always converge on the
-      server's truth.
+    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the reader's
+      view of the Paper as saved, read back before commit: the bytes a pull
+      gives at that rev. The client overwrites its file with it.
   """
   def sync(conn, %{"slug" => slug} = params) do
     bpml = params["bpml"]
@@ -460,14 +459,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
   end
 
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
-    case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
-      {:ok, result} ->
-        {canonical, echo_refusal} =
-          case Content.get_paper(slug, dataset, scope) do
-            nil -> {nil, nil}
-            paper -> canonical_echo(paper, dataset)
-          end
+    ref = make_ref()
+    check = saved_check(ref, slug, dataset, scope)
+    opts = scope ++ [if_rev: base_rev, before_commit: check]
 
+    case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
+      {:ok, result} ->
         payload = %{
           ok: true,
           slug: result.slug,
@@ -475,12 +472,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # rev spelling for the working copy to anchor on.
           rev: to_string(result.rev),
           op_count: result.op_count,
-          bpml: canonical
+          bpml: Content.Papers.BpmlView.checked(ref)
         }
 
         conn
         |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(maybe_mark_echo(payload, echo_refusal))
+        |> json(payload)
+
+      {:error, {:view_refused, body}} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
       {:error, :precondition_failed} ->
         conn
@@ -604,16 +604,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
     violations =
       Enum.map(wall_tuples, &wall_violation(conn, &1)) ++ paper_structure_violations(blocks)
 
-    view = Content.Papers.BpmlView.created(slug, parsed, scope)
-
-    case {violations, Content.Papers.BpmlView.write_refusal(view, dataset)} do
-      {[], nil} ->
+    case violations do
+      [] ->
         sync_create_persist(conn, slug, parsed, blocks, dataset, scope)
 
-      {[], body} ->
-        ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
-
-      {violations, _} ->
+      violations ->
         conn
         |> ErrorResponse.emit_fields(:unprocessable_entity, %{
           code: "create_wall",
@@ -643,10 +638,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     # so the wall's advise band (soft-dup near-miss, off-norm tag count) rides
     # the created receipt instead of being silently dropped.
     Warnings.reset()
+    ref = make_ref()
 
-    case Content.upsert_paper(attrs) do
+    case Content.upsert_paper(attrs, before_commit: saved_check(ref, slug, dataset, scope)) do
       {:ok, paper} ->
-        {canonical, echo_refusal} = canonical_echo(paper, dataset)
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 
         payload = %{
@@ -655,12 +650,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
           created: true,
           rev: rev,
           op_count: length(get_in(paper.content || %{}, ["blocks"]) || []),
-          bpml: canonical
+          bpml: Content.Papers.BpmlView.checked(ref)
         }
 
         conn
         |> put_resp_header("x-paper-rev", rev)
-        |> json(maybe_mark_echo(with_warnings(payload), echo_refusal))
+        |> json(with_warnings(payload))
+
+      # The Paper as saved has no reader's view that prints: rolled back.
+      {:error, {:view_refused, body}} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
       # The residual refusals AFTER the validate-first precheck (a dedup race,
       # an encryption seal failure, a changeset) — routed exactly like the
@@ -707,29 +706,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
 
-  # The echo AFTER a successful write prints the reader's view of the row
-  # (`BpmlView.print/2`), the bytes a pull gives at the new rev. A write whose
-  # Paper would have no printable view is refused before it happens, so the
-  # `bpml: nil` marker is left only for a row that moved in between (a 500
-  # strands the anchor, a 422 lies). Public so the degrade contract stays testable.
-  @doc false
-  def canonical_echo(paper, dataset \\ "production") do
-    case Content.Papers.BpmlView.print(paper, dataset) do
-      {:ok, bpml} -> {bpml, nil}
-      {:refused, body} -> {nil, body.message}
-    end
-  end
-
-  @doc false
-  def maybe_mark_echo(payload, nil), do: payload
-
-  def maybe_mark_echo(payload, refusal) do
-    Map.merge(payload, %{
-      bpml_unprintable: refusal,
-      hint:
-        "the ops applied and `rev` is your new anchor, but the reader's view of the paper does not print as BPML — pull format=json to see it"
-    })
-  end
+  # A sync write's check of the Paper as saved, inside its transaction: the
+  # row is read back the way the write found it, and its view printed.
+  defp saved_check(ref, slug, dataset, scope),
+    do:
+      Content.Papers.BpmlView.saved_check(
+        ref,
+        fn -> Content.get_paper(slug, dataset, scope) end,
+        dataset
+      )
 
   # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
   defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do

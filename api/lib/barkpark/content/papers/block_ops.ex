@@ -48,6 +48,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.ChangeEvents
   alias Barkpark.Content.Papers.ContextualHistory
   alias Barkpark.Content.Papers.Hollow
+  alias Barkpark.Content.Papers.SavedCheck
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
   alias Barkpark.PortableDoc.Validate.NewErrors
@@ -681,29 +682,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
       |> Keyword.put(:workspace_id, scope[:workspace_id])
       |> Keyword.put(:project_id, scope[:project_id])
 
-    # ONLY THE ROW WRITE IS INSIDE THE BOUNDARY, and that is the whole design.
-    # Before this change `persist_blocks_doc/10` ran with NO transaction open,
-    # so all four of its tail calls ran after the row was durable. The first
-    # draft of this fix wrapped the whole function and silently moved them
-    # PRE-commit — caught in independent review (lead-api-r4), and each one is
-    # a different hazard, so name them individually:
+    # ONLY THE ROW WRITE, its history row and a caller's `SavedCheck` are inside
+    # the boundary; each tail call runs after commit, for its own reason
+    # (lead-api-r4):
     #
-    #   * `broadcast_paper_update/1` — a RAW `Phoenix.PubSub.broadcast`, NOT
-    #     routed through `Broadcast.maybe_broadcast/2`. `write_atomically/1`
-    #     defers and flushes the queued kind; it cannot defer this one. Fired
-    #     pre-commit, a subscriber that refetches on the message reads the OLD
-    #     paper. RUNS AFTER COMMIT.
-    #   * `enqueue_edge_projection/1` → `ProjectorWorker.enqueue_upsert/3` →
-    #     `Oban.insert/1`. It would RIDE the transaction (correct, and rolled
-    #     back with it) — but a debounced job scheduled for state a later arm
-    #     could still doom is not worth the coupling. RUNS AFTER COMMIT.
-    #   * `save_upsert_revision/5` → `Broadcast.save_revision/5`, which already
-    #     handles `in_transaction?` with a savepoint, so it was safe either
-    #     way. RUNS AFTER COMMIT, unchanged from before.
-    #   * `maybe_append_paper_event/3` → `Bulldocs.Events.create_event/1`,
-    #     whose own broadcast would be QUEUED by `maybe_broadcast/2` inside a
-    #     transaction and then DROPPED, because nothing flushes the queue of a
-    #     boundary this function does not own. RUNS AFTER COMMIT.
+    #   * `broadcast_paper_update/1` — a RAW `Phoenix.PubSub.broadcast` that
+    #     `write_atomically/1` cannot defer; fired pre-commit, a subscriber that
+    #     refetches on the message reads the OLD paper.
+    #   * `enqueue_edge_projection/1` — it would ride the transaction, but a job
+    #     for state a later arm could still doom is not worth the coupling.
+    #   * `maybe_append_paper_event/3` — its own broadcast would be QUEUED by
+    #     `maybe_broadcast/2` and then DROPPED, because nothing flushes the
+    #     queue of a boundary this function does not own.
     #
     # `Broadcast.write_atomically/1` rather than a bare `Repo.transaction`: it
     # is the house helper that owns the deferred-broadcast queue on any write
@@ -729,9 +719,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
           # a write that had already landed — with its history row lost. Here
           # the UPDATE still holds the row, so the snapshot is exactly what was
           # written; `save_revision` takes the savepoint path in a transaction.
+          # A caller's check of the saved row runs last, so a refusal rolls back
+          # the row and its history together (`SavedCheck`).
           with {:ok, %Document{} = doc} <-
-                 write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title) do
-            save_upsert_revision(doc, type, dataset, row, opts)
+                 write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title),
+               _ = save_upsert_revision(doc, type, dataset, row, opts),
+               :ok <- SavedCheck.run(opts) do
             {:ok, doc}
           end
         end
@@ -1183,7 +1176,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
          {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
-         {:ok, receipt, effects} <- persist_paper_block_ops(doc, slug, ops, dataset, opts) do
+         {:ok, receipt, effects} <-
+           SavedCheck.batch(opts, fn ->
+             persist_paper_block_ops(doc, slug, ops, dataset, opts)
+           end) do
       run_paper_batch_effects(effects, dataset, opts)
       {:ok, receipt}
     else

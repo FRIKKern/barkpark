@@ -10,8 +10,6 @@ defmodule BarkparkWeb.BulldocsSourceController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.PortableDoc.Bpml
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   def show(conn, %{"slug" => slug} = params) do
     dataset = requested_dataset(params)
@@ -99,24 +97,21 @@ defmodule BarkparkWeb.BulldocsSourceController do
         rev_unreadable(conn, paper, field)
 
       {:ok, rev} ->
-        bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))
+        # The view's one printer: a print that fails, or does not read back,
+        # is the refusal the push gives too.
+        case Content.Papers.BpmlView.printed(paper, blocks, fields) do
+          {:ok, bpml, _pulled} ->
+            conn
+            |> put_resp_content_type("text/bpml")
+            |> put_resp_header("x-paper-rev", to_string(rev))
+            |> send_resp(200, bpml)
 
-        conn
-        |> put_resp_content_type("text/bpml")
-        |> put_resp_header("x-paper-rev", to_string(rev))
-        |> send_resp(200, bpml)
+          {:refused, body} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{"error" => body})
+        end
     end
-  rescue
-    # The printer's ONE typed refusal, for ALL FOUR unprintable positions
-    # (block, inline node, mark, table head cell). It used to rescue only
-    # ArgumentError, so the three FunctionClauseError shapes escaped as raw HTTP
-    # 500s with an HTML error page — 141 of 776 published papers on the
-    # 2026-08-17 census. The message carries kind+type, so the census keeps
-    # bucketing what still needs kernel coverage.
-    e in UnprintableError ->
-      conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{"error" => Content.Papers.BpmlView.refusal({:unprintable, Exception.message(e)})})
   end
 
   # An UNREADABLE op-anchor is a failed READ, never a rev. Refusing here (rather
