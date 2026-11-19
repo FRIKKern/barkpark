@@ -263,7 +263,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
     await page.context().close()
   }
   // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
-  bad.light.push(...(await motionFails(ctx, part, skins[0])))
+  if (ctx.motion !== false) bad.light.push(...(await motionFails(ctx, part, skins[0])))
   const still = frozen(traces)
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }

@@ -44,7 +44,9 @@ neither base.css nor a part mixes a tint of its own.
 - `pnpm run check:selftest` plants breaks in a scratch copy of a part and fails unless the check fails
   for the right reason, naming the planted control. One plant per reading; plants on different controls
   share a run. Breaks in paint go in through a sheet only the selftest can add
-  (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route.
+  (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route. To keep within CI's
+  limit, a case reads the four other surfaces, and the reading with motion allowed, only when its plant
+  is there; the check itself always reads both.
 - In CI (`js-tests.yml`) the showroom check and the selftest run only when a change touches
   `js/packages/barkui/**` (either side of a move), the sheet (`api/priv/barkui/**`), `js-tests.yml`
   itself or `js/package.json`, or changes lines of `js/pnpm-lock.yaml` that name one of BarkUI's own

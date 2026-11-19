@@ -124,6 +124,7 @@ const CASES = [
   {
     name: 'each drawn reading turns both wide lights off at its own control',
     only: ['skins', 'schemes'],
+    motion: true,
     plant: all(wrap, inCss('#button-after > span { color: var(--ui-background); }')),
     css: [
       '[data-slot="button"][data-size="sm"] { font-size: 0; }',
@@ -435,7 +436,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, 'button'))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: !!c.surfaces, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: !!c.surfaces, motion: !!c.motion, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {
