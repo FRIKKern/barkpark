@@ -4,6 +4,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
   import BarkparkWeb.Studio.PageScroll
 
   alias Barkpark.ChatHosts
+  alias Barkpark.ChatHosts.Enrollment
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.Studio.BoundAdminWrite
 
@@ -66,8 +67,8 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
            "This workspace has reached its limit of #{limit} enrolled chat hosts. Revoke one to enroll another."
          )}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Could not create enrollment")}
+      {:error, changeset} ->
+        {:noreply, put_flash(socket, :error, enroll_error(socket, params, changeset))}
     end
   end
 
@@ -93,6 +94,34 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
         {:noreply, deny(socket)}
     end
   end
+
+  # The owner is told what to change: a taken name says whether that machine
+  # is waiting or enrolled, and a refused field names the field.
+  defp enroll_error(socket, params, changeset) do
+    workspace_id = socket.assigns.current_workspace.id
+
+    with true <- Enrollment.name_taken?(changeset),
+         {state, _host_id} <- Enrollment.name_conflict(workspace_id, params["name"]) do
+      Enrollment.name_taken_message(params["name"], state)
+    else
+      _ -> field_error(changeset)
+    end
+  end
+
+  defp field_error(%Ecto.Changeset{errors: [{field, {message, opts}} | _]}) do
+    message =
+      Regex.replace(~r"%{(\w+)}", message, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+
+    "Could not register the machine: #{field_label(field)} #{message}."
+  end
+
+  defp field_error(_), do: "Could not register the machine. Check the name and the folder."
+
+  defp field_label(:approved_roots), do: "the folder"
+  defp field_label(:name), do: "the name"
+  defp field_label(field), do: to_string(field)
 
   defp observe(socket, event, workspace),
     do:

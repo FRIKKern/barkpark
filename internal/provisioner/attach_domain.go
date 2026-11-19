@@ -329,7 +329,7 @@ func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) e
 			return fmt.Errorf("attach-domain %s: no managed box holds %s any more — the instance was deprovisioned while this job was in flight; refusing to point DNS at a freed address (fail closed)", spec.CustomHost, spec.IP)
 		}
 
-		rec := cloud.Record{Zone: spec.DNSZone, Name: spec.DNSLabel, Type: "A", Value: spec.IP}
+		rec := cloud.Record{Zone: spec.DNSZone, Name: spec.DNSLabel, Type: "A", Value: spec.IP, TTL: cloud.BoxRecordTTLSeconds}
 		if err := seams.DNS.UpsertRecord(ctx, rec); err != nil {
 			return fmt.Errorf("attach-domain %s: dns upsert: %w", spec.CustomHost, err)
 		}
