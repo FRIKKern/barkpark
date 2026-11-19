@@ -25,8 +25,13 @@ const chatHostUsage = `usage: bp chat-host <verb>
   enroll --name <n> --root <path>   make a one-time code and print the command to run on the machine
   new-code <name|id>                replace a waiting machine's code (the old code stops working)
   revoke <name|id>                  remove a machine; it can no longer run turns
+  add --ssh <user@host> --name <n> --root <path>
+                                    register a machine you can ssh to, in one step: the code
+                                    goes to its enroll on ssh's stdin and is never shown
+                                    (--bin <path> if barkpark-chat-host is not on its PATH,
+                                    --state <file> for the credential file)
 
-enroll and new-code need the workspace owner's token. The code lasts 10 minutes.`
+enroll, new-code and add need the workspace owner's token. The code lasts 10 minutes.`
 
 // chatHost is one row of GET /w/:ws/v1/chat-hosts.
 type chatHost struct {
@@ -64,6 +69,8 @@ func runChatHost(out *writer, g globals, ctx manifest.Context, args []string) in
 		return runChatHostNewCode(out, ctx, rest)
 	case "revoke":
 		return runChatHostRevoke(out, ctx, rest)
+	case "add":
+		return runChatHostAdd(out, ctx, rest)
 	}
 	return usageErrf(out, func() { out.errf("%s", chatHostUsage) }, "unknown chat-host verb %q", verb)
 }
