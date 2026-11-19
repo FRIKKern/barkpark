@@ -11,12 +11,15 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   without the option is unchanged.
   """
 
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Repo
 
   @doc """
   A block-op batch's persist (`{:ok, receipt, effects}` or `{:error, _}`),
   run with the check before it commits. A batch that wrote nothing is still
-  checked.
+  checked. The transaction owns the deferred broadcast queue
+  (`Broadcast.with_deferred_queue/1`), so anything the persist queues is sent
+  on commit and dropped on a refusal.
   """
   @spec batch(keyword(), (-> {:ok, term(), term()} | {:error, term()})) ::
           {:ok, term(), term()} | {:error, term()}
@@ -26,13 +29,15 @@ defmodule Barkpark.Content.Papers.SavedCheck do
         persist.()
 
       check when is_function(check, 0) ->
-        Repo.transaction(fn ->
-          with {:ok, receipt, effects} <- persist.(),
-               :ok <- check.() do
-            {receipt, effects}
-          else
-            {:error, reason} -> Repo.rollback(reason)
-          end
+        Broadcast.with_deferred_queue(fn ->
+          Repo.transaction(fn ->
+            with {:ok, receipt, effects} <- persist.(),
+                 :ok <- check.() do
+              {receipt, effects}
+            else
+              {:error, reason} -> Repo.rollback(reason)
+            end
+          end)
         end)
         |> case do
           {:ok, {receipt, effects}} -> {:ok, receipt, effects}
