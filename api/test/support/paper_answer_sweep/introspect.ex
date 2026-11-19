@@ -97,6 +97,8 @@ defmodule BarkparkWeb.PaperAnswerSweep.Introspect do
     end
   end
 
+  defp defs(module), do: definitions(module) || %{}
+
   @doc """
   `[{socket_path, socket_module, topic_prefix, channel_module, events}]` for
   every channel route of every endpoint socket (LiveView's own excepted: its
@@ -111,8 +113,7 @@ defmodule BarkparkWeb.PaperAnswerSweep.Introspect do
 
   defp channel_routes(socket) do
     socket
-    |> definitions()
-    |> Kernel.||(%{})
+    |> defs()
     |> Map.get({:__channel__, 1}, [])
     |> Enum.flat_map(fn {_meta, [topic], _guards, body} ->
       case {prefix(topic), channel_module(body)} do
@@ -148,8 +149,7 @@ defmodule BarkparkWeb.PaperAnswerSweep.Introspect do
 
   defp events(channel) do
     channel
-    |> definitions()
-    |> Kernel.||(%{})
+    |> defs()
     |> Map.get({:handle_in, 3}, [])
     |> Enum.flat_map(fn
       {_meta, [event | _], _guards, _body} when is_binary(event) -> [event]

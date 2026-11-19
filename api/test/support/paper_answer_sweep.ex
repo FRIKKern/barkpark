@@ -15,6 +15,7 @@ defmodule BarkparkWeb.PaperAnswerSweep do
   savepoint, so a write cannot change what the next route sees.
   """
 
+  import ExUnit.Assertions, only: [assert_receive: 2]
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest, only: [live: 2, render: 1]
   import Plug.Conn
