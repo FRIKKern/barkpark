@@ -64,15 +64,16 @@
 // from the depth shadow, as in the base.
 
 import { aaWalk, contrast, maxChroma, mixOklch, oklchToSrgb, onAccent, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
-import { LABEL_ROOM, stateNames, withStates } from "./barkui-states.mjs";
+import { stateNames, statesOf, stepsFor } from "./barkui-states.mjs";
 
 export const SURFACES = ["base", "raised", "sunken", "primary", "inverse"];
 export const TONES = ["success", "warning", "danger", "info"];
 const TONE_ROLES = TONES.flatMap((t) => [t, `${t}-foreground`, `${t}-text`, `${t}-soft`]);
-// Every fill a control can have, with its label: the primary fill, the muted
-// fill a secondary control takes, and each tone's soft fill (a destructive
-// control is the danger tone's soft fill). Each gets -hover and -pressed.
-const STATE_FILLS = [["primary", "primary-foreground"], ["muted", "foreground"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`])];
+// Every fill a control can have, with its label and its kind: the primary fill,
+// the muted fill a secondary control takes, and each tone's soft fill (a
+// destructive control is the danger tone's soft fill). Each gets -hover and
+// -pressed (design/emit/barkui-states.mjs).
+const STATE_FILLS = [["primary", "primary-foreground", "primary"], ["muted", "foreground", "muted"], ...TONES.map((t) => [`${t}-soft`, `${t}-text`, "soft"])];
 export const SURFACE_ROLES = [
   "background", "foreground", "muted", "muted-foreground", "border", "input",
   "primary", "primary-foreground", "ring", "ring-border", "accent", "selected",
@@ -177,24 +178,43 @@ function tonesOn(b, ground) {
 // stands SOFT_STEP:1 off the ground. On a dark ground it goes lighter, the only
 // side with room for colour; elsewhere it takes the side away from the label if
 // the tint keeps at least SOFT_CHROMA_SIDE there, else the side where it does
-// (on a white ground only darker keeps any colour). The label is walked after.
+// (on a white ground only darker keeps any colour). Either way a side counts
+// only where the fill's hover and pressed fit. The label is walked after.
 function softOn(fill, text, ground) {
   const { h } = srgbToOklch(fill);
   const at = (dir) => {
     for (let l = L(ground) + dir * 0.002; l >= 0 && l <= 1; l += dir * 0.002) {
       const rgb = oklchToSrgb(l, SOFT_CHROMA, h);
-      if (contrast(rgb, ground) >= SOFT_STEP + 0.005) return { rgb, c: Math.min(SOFT_CHROMA, maxChroma(l, h)) };
+      // the side is the side by luminance, as contrast measures it, not by OKLCH lightness
+      const lighter = contrast(rgb, "#000000") > contrast(ground, "#000000");
+      if (lighter === dir > 0 && contrast(rgb, ground) >= SOFT_STEP + 0.005) return { rgb, c: Math.min(SOFT_CHROMA, maxChroma(l, h)) };
     }
     return null;
   };
   const away = L(ground) < DARK_GROUND ? 1 : L(text) >= L(ground) ? -1 : 1;
-  const sides = [at(away), at(-away)].filter(Boolean);
+  // A side counts only where the fill's hover and pressed fit there.
+  const sides = [at(away), at(-away)].filter((x) => x && stepsFor("soft", css(x.rgb), ground));
   const pick = sides.find((x) => x.c >= SOFT_CHROMA_SIDE) ?? sides.sort((x, y) => y.c - x.c)[0];
   return css(pick.rgb);
 }
 
 // Each tone's -soft on surface `s`; on a computed surface (`walk`), a -text
 // that does not read at 4.5:1 on its soft fill is walked until it does.
+// A surface with hover and pressed for every control fill. The step is fixed;
+// the label gives way: it is walked away from its fill until it reads 4.5:1 on
+// rest, hover and pressed, one label for all three.
+function withStates(s, at) {
+  const out = { ...s };
+  for (const [fill, , kind] of STATE_FILLS)
+    [out[`${fill}-hover`], out[`${fill}-pressed`]] = process.env.PROBE_MUTED && kind === "muted" && !stepsFor(kind, s[fill], s.background) ? [s[fill], s[fill]] : statesOf(kind, s[fill], s.background, `${at}: ${fill}`);
+  for (const [fill, label] of STATE_FILLS) {
+    // a label that reads on the ground (a tone's text) keeps reading there too
+    const on = [fill, `${fill}-hover`, `${fill}-pressed`].map((n) => out[n]);
+    if (contrast(out[label], s.background) >= 4.5) on.push(s.background);
+    out[label] = walkTo(out[label], on, 4.5, L(out[label]) >= L(out[fill]) ? 1 : -1);
+  }
+  return out;
+}
 function withSofts(s, walk) {
   const out = { ...s };
   for (const t of TONES) {
@@ -238,18 +258,14 @@ export function surfaceValues(base, raisedGround, primaryRing) {
     const pBorder = atL(ground, L(ground) + towardFg * Math.abs(offset("border")));
     const primary = {
       background: ground, foreground: fg, muted: pMuted, "muted-foreground": quiet(fg, pMuted, [pMuted, pSelected], ground),
-      border: pBorder, input: walkTo(pBorder, ground, 3), primary: fg,
-      // The inverted fill sits at the end of the lightness range, so its states
-      // can only move toward its label: the label is the ground walked away
-      // from the fill until it leaves room for both steps.
-      "primary-foreground": walkTo(ground, fg, LABEL_ROOM, -towardFg),
+      border: pBorder, input: walkTo(pBorder, ground, 3), primary: fg, "primary-foreground": ground,
       ring: primaryRing[mode], "ring-border": fg, accent: fg, selected: pSelected,
       ...tonesOn(b, ground),
     };
     const rg = raisedGround[mode];
     const raised = { ...b, background: rg, input: walkTo(b.input, rg, 3), ...tonesOn(b, rg) };
     const out = { base: withSofts(b, false), raised: withSofts(raised, true), sunken: withSofts(sunken, true), primary: withSofts(primary, true) };
-    for (const s of Object.keys(out)) out[s] = { ...withStates(out[s], STATE_FILLS, `${mode}/${s}`), depth: depths(out[s].background, mode) };
+    for (const s of Object.keys(out)) out[s] = { ...withStates(out[s], `${mode}/${s}`), depth: depths(out[s].background, mode) };
     return out;
   };
   const light = one("light"), dark = one("dark");
