@@ -91,6 +91,21 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"and {}, null and {\"result\":null} all decode to a ZERO session with a nil error — printed as " +
 			"`unarchived   untitled session` at rc=0.",
 	},
+	// ---- chat-host -------------------------------------------------------
+	{
+		File: "internal/cli/chat_host_cmd.go", Func: "chatHostPost", Sites: 1,
+		Endpoint: "POST /w/:ws/v1/chat-hosts/enrollments | /:id/enrollment", Class: machineRendered,
+		Disposition: dispCannotLie,
+		Why: "its one caller, mintChatHostCode, reports a code only on HTTP 201 AND a decoded non-empty host.id AND " +
+			"enrollment_token; {}, null, HTML or a 201 missing either field is `the server answered HTTP 201 without a host and a code`.",
+	},
+	{
+		File: "internal/cli/chat_host_cmd.go", Func: "chatHostDelete", Sites: 1,
+		Endpoint: "DELETE /w/:ws/v1/chat-hosts/:id", Class: machineRendered,
+		Disposition: dispCannotLie,
+		Why: "its one caller, runChatHostRevoke, says Revoked only on HTTP 200 AND a decoded host.id equal to the id it sent " +
+			"AND host.revoked == true; anything else is `without the revoked host; run bp chat-host list to check`.",
+	},
 	// ---- cloud / hetzner: their own census (hzResDone), classified only ----
 	{
 		File: "internal/cli/cloud/dns.go", Func: "newUpsertRequest", Sites: 1,
