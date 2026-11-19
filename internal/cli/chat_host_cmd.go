@@ -363,6 +363,14 @@ func mintChatHostCode(out *writer, ctx manifest.Context, what, suffix string, f 
 		out.userErr("chat-host %s: %v", what, err)
 		return chatHostCode{}, nil, exitGeneric
 	}
+	if status == 404 && suffix != "" {
+		// Only the new-code POST: the host was just listed as waiting, so a
+		// 404 here is a server without the new-code route, or a host revoked
+		// a moment ago. A 404 on the list GET is chatHostRefused's own case.
+		return chatHostCode{}, nil, useError(out, "not_found",
+			"bp chat-host new-code: the server made no new code. If bp chat-host list still shows the host waiting, this server is too old for new-code: remove it (bp chat-host revoke <name>) and enroll it again.",
+			exitGeneric)
+	}
 	if status != 201 {
 		return chatHostCode{}, nil, chatHostRefused(out, ctx, what, status, body)
 	}
@@ -443,12 +451,6 @@ func chatHostRefused(out *writer, ctx manifest.Context, what string, status int,
 	case status == 401:
 		return useError(out, "unauthorized",
 			"bp chat-host "+what+": the server did not accept your token. Sign in again (bp login) or pass --token.", exitAuth)
-	case status == 404 && what == "new-code":
-		// The host was just listed as waiting, so a 404 here is a server
-		// without the new-code route, or a host revoked a moment ago.
-		return useError(out, "not_found", fmt.Sprintf(
-			"bp chat-host new-code: the server made no new code. If bp chat-host list still shows the host waiting, this server is too old for new-code: remove it (bp chat-host revoke <name>) and enroll it again."),
-			exitGeneric)
 	case status == 403 && (what == "enroll" || what == "new-code" || what == "add"):
 		return useError(out, "forbidden", fmt.Sprintf(
 			"bp chat-host %s: this needs the workspace owner's token. Only the owner of workspace %s can register a machine; run it with the owner's token (--token, or bp login as the owner).",
