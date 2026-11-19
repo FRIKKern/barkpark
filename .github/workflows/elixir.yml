@@ -664,33 +664,6 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/format-diff-scope.test.sh
 
-      # ── the Elixir pin-agreement gate (task-0c3081a2e534bdfc) ────────────
-      # The production toolchain is `.tool-versions`, which is what asdf
-      # resolves on the Hetzner box. `mix-test` and `mix-prod-compile` below are
-      # the two jobs whose green is supposed to mean "it works on the box", so
-      # their matrices must cover that pin to MAJOR.MINOR. They do today. This
-      # step is what stops a one-line edit to either side from breaking it in
-      # silence — the check reads all three files rather than restating them.
-      #
-      # It ALSO compares api/Dockerfile's build stage (the self-host image
-      # compose-smoke boots) against the same matrices. That stage was
-      # elixir:1.19-alpine — a divergence the check carried by value as its
-      # RULE 2 record until the owner ruled (via main, 2026-09-05,
-      # task-729be45412588f07): pin the image to the tested elixir
-      # 1.18.4-otp-27-alpine. The record is gone with the divergence; a new gap
-      # between the image and the matrices reds on its own, no record needed.
-      # `format`'s 1.19.5 is deliberately out of scope: that pin tracks the
-      # authoring toolchain, for the reason written above its matrix.
-      #
-      # HERE and not in `mix-prod-compile`: that job carries
-      # `if: needs.changes.outputs.compile == 'true'`, so a diff touching only
-      # `.tool-versions` or `.github/workflows/elixir.yml` — exactly the edits
-      # that create the skew — would skip it. This job has no `if:`.
-      #
-      # A STEP and not a job, for the two reasons written above the
-      # skip-disclosure ratchet: a new job here reds the sibling path-escape
-      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
-      # name, so required-checks-verify.sh's roster is unchanged.
       # ── the PR test-selector harness, riding this job ────────────────────
       # scripts/elixir-impacted-tests.sh decides WHICH ExUnit files a pull
       # request runs. Its only dangerous failure is selecting too little and
@@ -733,13 +706,21 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/elixir-main-red-attribution.test.sh
 
-      - name: The pin-agreement gate must be able to fail
+      # ── the toolchain drift gate (task-97b251c1b5d6a1db) ─────────────────
+      # CI runs the Erlang and Elixir production runs. The numbers live in the
+      # version files scripts/toolchain-owners.tsv names. It reds on a version
+      # file the table lacks, a step reading the wrong file, or a literal
+      # version that differs from its owner or has none. HERE and not in
+      # `mix-prod-compile`: this job has no `if:`, so a diff touching only a
+      # version file or a workflow still runs it. A STEP and not a job, for the
+      # two reasons written above the skip-disclosure ratchet.
+      - name: The toolchain drift gate must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/run-instrument.sh toolchain-skew-selftest -- bash scripts/toolchain-skew-check.sh --selftest
+        run: bash scripts/run-instrument.sh toolchain-drift-selftest -- bash scripts/toolchain-drift-check.test.sh
 
-      - name: The production Elixir pin is covered by the jobs that test it
+      - name: Every Erlang and Elixir version comes from its version file
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/run-instrument.sh toolchain-skew -- bash scripts/toolchain-skew-check.sh
+        run: bash scripts/run-instrument.sh toolchain-drift -- bash scripts/toolchain-drift-check.sh
 
       # ── the ACK_EX deriver (task-188100520e018ee4), riding this job ───────
       # A row added to `.github/required-checks.json`'s `.exclusions` that the
@@ -1181,16 +1162,10 @@ jobs:
         run: node --test hosts/*.test.mjs
 
   format:
-    # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
-    # DEVELOPERS RUN, not the Elixir production compiles with. `mix format`
-    # output is decided by the Elixir that types it, and everyone (and every
-    # agent) who runs `mix format` before pushing is on 1.19.5 — so that is
-    # what this job measures. Pinning it to anything else does not make the
-    # tree prod-formatted, it just makes the job a treadmill: see the matrix
-    # comment below for the measurement that settled it. Production's
-    # toolchain is a SEPARATE question with a separate owner — .tool-versions,
-    # and the mix-test / mix-prod-compile matrices further down this file,
-    # which this job does not speak for and does not touch.
+    # ADVISORY format signal — NOT a merge gate. This job runs THE FORMATTER
+    # DEVELOPERS RUN, not the Elixir production compiles with: its toolchain
+    # is tools/format.tool-versions, which says why. Production's toolchain is
+    # .tool-versions, read by mix-test and mix-prod-compile further down.
     #
     # IT RUNS THE SAME INSTRUMENT A DEVELOPER RUNS (scripts/format-check.sh,
     # format-gate-is-elixir-version-contaminated). `mix format --check-formatted`
@@ -1254,55 +1229,6 @@ jobs:
       # REFUSED when any instrument in this job exited 2 — see the refusal
       # channel note on the last step. Read by `elixir-gate` as V_FORMAT.
       verdict: ${{ steps.verdict.outputs.verdict }}
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ["27.0"]
-        # THE FORMATTER THE FLEET ACTUALLY RUNS, measured — not the declared
-        # toolchain, and deliberately not production's. `elixir --version` on
-        # this repo's dev Mac and on every ephemeral agent box, 2026-09-02:
-        # 1.19.5. `.tool-versions` says `elixir 1.18.4-otp-27` and asdf is not
-        # installed on those boxes, so nobody lands on the pin — bare
-        # `mix format` is 1.19.5 every time.
-        #
-        # The two formatters DISAGREE on line breaking, and the tell is
-        # DIRECTIONAL — read it the right way round, because the filing had it
-        # backwards. The `{:fires, "calls …"}` tuple in
-        # api/test/barkpark_web/plugin_live_session_scope_opts_guard_test.exs is
-        # EXACTLY 98 columns, which is the default `line_length`. 1.19.5 keeps
-        # it on one line; 1.18.4 splits it across two. Commit 670ab4659b
-        # ("style(test): format …") is a 1.19.5 box JOINING that tuple, and main
-        # run 33639424802 (e7e3df5b0b) is the 1.18.4 gate immediately asking for
-        # it back on two lines. A boundary disagreement at the width limit, so
-        # it fires on whatever happens to sit at 98 and no listing of affected
-        # files stays true.
-        #
-        # That is a treadmill in both directions: every 1.18-shaped repair
-        # (#14963, #15308) is undone by the next local `mix format`, and every
-        # local `mix format` re-reds this job. A permanently-red advisory gate
-        # teaches the fleet to skip the one red that is real.
-        #
-        # WHICH PIN MOVES IS THE WHOLE DECISION (orchestrator ruling 2026-09-02,
-        # task-9a08c27d897f38e6). Not this one: forcing ~30 ephemeral worktree
-        # agents onto an asdf install nothing checks is unenforceable, and it was
-        # tried — .tool-versions has said 1.18.4-otp-27 for months and the fleet
-        # has never once honoured it. Not .tool-versions either, for the same
-        # reason it was not moved when this pin last changed: it has consumers
-        # OUTSIDE CI (release-artifact.yml builds the prebuilt with
-        # `version-file: .tool-versions`; deploy/azure-base-install.sh pins every
-        # box's asdf to it), so moving it would change what production installs
-        # to settle a formatter disagreement. This matrix has no consumer but
-        # this job and scripts/format-check.sh. THE FORMAT JOB MEASURES THE
-        # FORMATTER; production's Elixir is the mix-test / mix-prod-compile
-        # matrices' business (still 1.18.1, untouched here) and the deploy row's.
-        #
-        # OTP STAYS 27.0 and did not have to move: erlef/setup-beam resolves
-        # elixir-version 1.19.5 against otp-version 27.0 to the published
-        # `elixir-otp-27` build (1.19.5 ships otp-26/27/28 artifacts). Formatter
-        # output is an Elixir-level rule — the fleet's own 1.19.5 sits on OTP 28
-        # and emits the same bytes — and OTP is the wider blast radius, so it
-        # stays where the rest of this file has it.
-        elixir: ["1.19.5"]
     defaults:
       run:
         working-directory: api
@@ -1330,16 +1256,16 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: tools/format.tool-versions
+          version-type: strict
 
       - name: Cache deps (formatter only needs deps for import_deps)
         uses: actions/cache@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-format-deps-${{ hashFiles('tools/format.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-format-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-format-deps-${{ hashFiles('tools/format.tool-versions') }}-
 
       - name: Fetch deps (required by .formatter.exs import_deps)
         run: mix deps.get
@@ -1456,7 +1382,7 @@ jobs:
         run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   mix-test:
-    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    name: Test (Elixir and OTP from .tool-versions)
     needs: changes
     # The TEST path set: compile-affecting paths PLUS the fixture/mirror trees
     # the suite reads across the repo (internal/taskboard/**,
@@ -1511,22 +1437,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # THE PROD PIN. api/mix.exs requires `~> 1.15`, but the number that
-        # matters is what guerrilla runs: measured 2026-09-02 on the box,
-        # `asdf current` in /opt/barkpark resolves elixir 1.18.4-otp-27 +
-        # erlang 27.3.4 FROM the repo-root `.tool-versions` it checked out,
-        # and the running BEAM is erts-15.2.7 under
-        # /root/.asdf/installs/elixir/1.18.4-otp-27. This job sat at 1.18.1,
-        # one patch below both the declaration and the box, so a green here
-        # never meant "runs on the box". `.tool-versions` is NOT changed by
-        # the PR that moved this line — it already equalled prod.
+        # The toolchain is not a matrix axis: the Setup BEAM step reads the
+        # repo-root `.tool-versions`, the file asdf resolves on the content
+        # server, so this job runs the exact Erlang and Elixir that server runs.
         #
-        # OTP stays "27.0" against the box's 27.3.4, matching the `format`
-        # job's ruling above: an OTP move is a wider blast radius than an
-        # Elixir move and is not settled by a CI-alignment PR. Recorded as a
-        # known residual in docs/ops/PROD_OPS.md.
-        otp: ["27.0"]
-        elixir: ["1.18.4"]
         # THE TEST PARTITIONS (task-8345bf4c2ca2b989). The serial ExUnit time
         # is the job's critical path: main run 36775391161 printed "Finished
         # in 1200.8 seconds (313.5s async, 887.3s sync)". Sync modules run
@@ -1577,8 +1491,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       # Node is a TEST DEPENDENCY of this job, not a convenience: the required
       # ExUnit case api/test/barkpark_web/live/studio/sheet_grid/js_harness_test.exs
@@ -1803,9 +1717,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-test-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-deps-v2-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-test-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-test-deps-v2-${{ hashFiles('.tool-versions') }}-
 
       # NO `restore-keys:`, deliberately. A prefix match would hand this job
       # dependency BEAM compiled from a DIFFERENT mix.lock; the completeness
@@ -1819,7 +1733,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: api/_build/test/lib
-          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
         run: mix deps.get
@@ -1910,7 +1824,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: api/_build/test/lib
-          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       # Format check now lives in the dedicated `format` job above (Task
       # #29). It used to run here but was non-blocking because mix-test
@@ -2424,7 +2338,7 @@ jobs:
 
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
-    name: Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    name: Prod compile gate (Elixir and OTP from .tool-versions)
     needs: [changes]
     # The COMPILE path set — api/** plus design/** (design/status-manifest.json
     # is an @external_resource of portable_doc/render/status_vocab.ex:20, so
@@ -2446,16 +2360,6 @@ jobs:
       # channel note on the last step. Read by `elixir-gate` as V_PROD.
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # THE PROD PIN — this is the job whose green is supposed to mean
-        # "compiles on the box". Equal to what guerrilla runs (measured
-        # 2026-09-02: elixir 1.18.4-otp-27 / erlang 27.3.4, resolved by asdf
-        # from the repo-root `.tool-versions`). See the mix-test matrix for
-        # the measurement and for why OTP stays at "27.0".
-        otp: ["27.0"]
-        elixir: ["1.18.4"]
     defaults:
       run:
         working-directory: api
@@ -2465,16 +2369,16 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-prod-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-prod-deps-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-prod-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-prod-deps-${{ hashFiles('.tool-versions') }}-
 
       # ── THE DEPENDENCY BUILD CACHE, AND WHY IT IS NOT PAST MISTAKE #1 ──
       #
@@ -2511,7 +2415,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: api/_build/prod/lib
-          key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps (prod)
         run: mix deps.get
@@ -2655,7 +2559,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: api/_build/prod/lib
-          key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-prod-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Prod compile (--warnings-as-errors)
         # The gate. If this fails, the PR must be fixed before merge.
@@ -2719,11 +2623,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ["27.0"]
-        elixir: ["1.18.1"]
     defaults:
       run:
         working-directory: api
@@ -2733,8 +2632,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       # SAME HAZARD, SAME CONTRACT AS `mix-test` ABOVE — and this job is the
       # one where a near-miss restore is worst. It was `api/deps` PLUS
@@ -2748,17 +2647,16 @@ jobs:
       #
       # Sources keep the prefix; compiled artifacts move to an EXACT key over
       # `_build/test/lib` behind the tripwire. The depbuild key is spelt
-      # identically to `mix-test`'s on purpose — both jobs run `MIX_ENV=test`,
-      # so where the matrices ever agree the two produce the same dependency
-      # tree from the same lock and may share it; where they differ (they do
-      # today: 1.18.4 vs 1.18.1) the Elixir field already separates them.
+      # identically to `mix-test`'s on purpose — both jobs run `MIX_ENV=test`
+      # on the toolchain in .tool-versions, so they produce the same dependency
+      # tree from the same lock and share it.
       - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-perf-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-perf-deps-v2-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-perf-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-perf-deps-v2-${{ hashFiles('.tool-versions') }}-
 
       # NO `restore-keys:`. See the twin step in `mix-test`: a prefix match
       # would hand this job dependency BEAM from another lock and the
@@ -2769,7 +2667,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: api/_build/test/lib
-          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
         # RETRIED, because a hex.pm blip is not a merge decision. Measured
@@ -2871,7 +2769,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: api/_build/test/lib
-          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Compile
         # NO `--warnings-as-errors` HERE, ON PURPOSE. `mix-prod-compile` above

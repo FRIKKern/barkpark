@@ -15514,3 +15514,23 @@ msgstr "Stemmer ikke overens med tillatte protokoller/skjemaer"
 #, elixir-autogen, elixir-format
 msgid "Username/password not allowed"
 msgstr "Brukernavn/passord er ikke tillatt"
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Perspective"
+msgstr "Perspektiv"
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts"
+msgstr "Utkast"
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Menu"
+msgstr "Meny"
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Close menu"
+msgstr "Lukk meny"
