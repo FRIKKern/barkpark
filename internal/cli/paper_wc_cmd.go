@@ -32,6 +32,9 @@ type paperAnchor struct {
 	Server   string `json:"server"`
 	Rev      string `json:"rev"`
 	PulledAt string `json:"pulled_at"`
+	// Print is the print mark the pull answered: the copy showed every part of
+	// the paper. A push without it may not remove parts the copy never showed.
+	Print string `json:"print,omitempty"`
 }
 
 type paperWCState struct {
@@ -130,7 +133,7 @@ func runPaperPull(out *writer, g globals, ctx manifest.Context, args []string) i
 		return exitGeneric
 	}
 
-	bpml, rev, apiErr, err := paperWCClient(ctx).PaperPullBpml(slug)
+	bpml, rev, print, apiErr, err := paperWCClient(ctx).PaperPullBpml(slug)
 	if err != nil {
 		out.userErr("paper pull %s: %v", slug, err)
 		return exitGeneric
@@ -150,7 +153,7 @@ func runPaperPull(out *writer, g globals, ctx manifest.Context, args []string) i
 		out.userErr("paper pull %s: %v", slug, err)
 		return exitGeneric
 	}
-	st.Papers[slug] = paperAnchor{Server: ctx.Server, Rev: rev, PulledAt: time.Now().UTC().Format(time.RFC3339)}
+	st.Papers[slug] = paperAnchor{Server: ctx.Server, Rev: rev, PulledAt: time.Now().UTC().Format(time.RFC3339), Print: print}
 	if err := savePaperWCState(dir, st); err != nil {
 		out.userErr("paper pull %s: %v", slug, err)
 		return exitGeneric
@@ -222,7 +225,7 @@ func runPaperStatus(out *writer, g globals, ctx manifest.Context, args []string)
 			// outage — for a scaffolded paper (rev-0 anchor, never pushed)
 			// "the server has no such paper yet" is the expected truth, and
 			// push is what will create it.
-			if _, rev, apiErr, err := client.PaperPullBpml(slug); err != nil {
+			if _, rev, _, apiErr, err := client.PaperPullBpml(slug); err != nil {
 				row["remote"] = "unreachable"
 			} else if apiErr != nil && apiErr.Status == 404 {
 				row["remote"] = "absent (push will create it)"
@@ -418,7 +421,7 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 	// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): PaperSync
 	// refuses on !result.OK — "server answered 200 without ok:true" — so every
 	// poison body is a non-zero exit before any receipt below renders.
-	result, apiErr, err := paperWCClient(ctx).PaperSync(slug, string(local), anchor.Rev)
+	result, apiErr, err := paperWCClient(ctx).PaperSync(slug, string(local), anchor.Rev, anchor.Print)
 	if err != nil {
 		out.userErr("paper push %s: %v", slug, err)
 		return exitGeneric
@@ -446,6 +449,7 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 	}
 	anchor.Rev = result.Rev
 	anchor.PulledAt = time.Now().UTC().Format(time.RFC3339)
+	anchor.Print = result.Print
 	// A scaffolded paper (bp paper new) anchors with no server — it was born
 	// offline. Its first landed push binds the anchor to the server it created
 	// the paper on, so the cross-server drift guard above works from then on.

@@ -111,6 +111,7 @@
                   "bpml",
                   "bpml_unavailable",
                   "bpml_unprintable",
+                  "bpml_unshown_removal",
                   "build_id_mismatch",
                   "bundle_import_disabled",
                   "chat_create_failed",
