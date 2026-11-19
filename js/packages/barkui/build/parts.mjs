@@ -49,9 +49,8 @@ function readPart(dir, name) {
   }
   if (json.textOnly !== undefined && !(Array.isArray(json.textOnly) && json.textOnly.every((x) => typeof x === 'string' && x)))
     throw new Error(`${where}: part.json "textOnly" must be a list of selectors (controls that draw no boundary)`)
-  const allow = json.allow ?? {}
-  if (!(allow && typeof allow === 'object' && !Array.isArray(allow)) || !Object.entries(allow).every(([k, v]) => /^-?[a-z][a-z-]*$/.test(k) && typeof v === 'string' && v.trim() && !/\n/.test(v)))
-    throw new Error(`${where}: part.json "allow" maps a property to a one-line reason why part.css needs it`)
+  if ('allow' in json)
+    throw new Error(`${where}: part.json "allow" is gone: a part cannot excuse itself; a property beyond the vocabulary is a row in build/vocabulary.mjs EXTRA, with the values it may take`)
   if (json.name !== name) throw new Error(`${where}: part.json names the part ${JSON.stringify(json.name)}; it must be the folder name`)
   // A demo is handed its own part's root and works inside it only.
   const demo = existsSync(join(dir, 'demo.mjs')) ? join(dir, 'demo.mjs') : null

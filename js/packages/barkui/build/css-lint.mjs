@@ -1,8 +1,8 @@
 // part.css may only read the skin: colours come from --ui-* and --bark-*
 // variables, never from a literal. It keeps to the vocabulary in vocabulary.mjs
-// (anything else is named in part.json "allow" with a reason), and to the views
+// (and to the values EXTRA there gives a property beyond it), and to the views
 // the check renders. Returns one message per finding.
-import { MOTION_ONLY, PHONE, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
+import { EXTRA, MOTION_ONLY, PHONE, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
 
 const NAMED = `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
 cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen
@@ -42,7 +42,7 @@ function block(text, from) {
   return [open, text.length]
 }
 
-export function lintPartCss(css, allow = {}) {
+export function lintPartCss(css) {
   const found = []
   const text = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
   const lineOf = (i) => text.slice(0, i).split('\n').length
@@ -74,7 +74,11 @@ export function lintPartCss(css, allow = {}) {
     const where = m.index + m[1].length
     const at = `line ${lineOf(where)}`
     if (prop.startsWith('--')) customs.push({ prop, value, at })
-    else if (!VOCABULARY.has(prop) && !allow[prop]) found.push(`${at}: ${prop} is outside part.css's vocabulary (build/vocabulary.mjs); name it in part.json "allow" with a one-line reason`)
+    else if (EXTRA[prop]) {
+      if (!EXTRA[prop].includes(value.toLowerCase())) found.push(`${at}: ${prop}: ${value}; part.css may only set ${prop} to ${EXTRA[prop].join(' or ')} (build/vocabulary.mjs EXTRA)`)
+    } else if (!VOCABULARY.has(prop)) found.push(`${at}: ${prop} is outside part.css's vocabulary (build/vocabulary.mjs)`)
+    if (prop === 'content' && !/^(""|''|none)$/i.test(value)) found.push(`${at}: content: ${value}; part.css may only set content to "" or none (words belong in example.html)`)
+    if (prop === 'text-decoration' && /\d|from-font/i.test(value)) found.push(`${at}: text-decoration: ${value} sets a thickness; text-decoration-thickness is outside part.css's vocabulary`)
     if (motion.some(([a, b]) => where > a && where < b) && !MOTION_ONLY.has(prop))
       found.push(`${at}: ${prop} inside @media (prefers-reduced-motion): only transition, animation and scroll-behavior properties may change there`)
     if (prop === 'font-size') {

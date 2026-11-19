@@ -272,21 +272,32 @@ export function installDrawn() {
     document.head.prepend(toggle)
   }
 
+  /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill is the first token and its ground
+      the second, both as they resolve where it stands. */
+  const fitsOf = (t, pairs) => {
+    const same = (x, y, n) => x.slice(0, n).every((v, i) => Math.abs(v - y[i]) < 0.5)
+    const fill = h.rgba(getComputedStyle(t.el).webkitTextFillColor)
+    const ground = h.effectiveBg(t.el)
+    const i = pairs.findIndex(([text, under]) => same(fill, h.rgba(h.resolve(text, t.el)), 4) && same(ground, h.rgba(h.resolve(under, t.el)), 3))
+    return i < 0 ? undefined : i
+  }
   /** Read every thing of the view from the three captures: does it draw, as itself, and how strongly. Also every
-      control that shows nothing, and every text-only control with no drawn label (see boundaries). */
-  const judge = async (drawnPng, noGlyphsPng, noGraphicsPng, clip, scale, root) => {
+      control that shows nothing, and every text-only control with no drawn label (see boundaries). `pairs` are
+      the token pairs of this view's waits on the sheet; a text drawn in one carries its index as `fits`. */
+  const judge = async (drawnPng, noGlyphsPng, noGraphicsPng, clip, scale, root, pairs = []) => {
     const [a, b, c] = await Promise.all([pixels(drawnPng), pixels(noGlyphsPng), pixels(noGraphicsPng)])
     const runs = items.filter((t) => t.run)
     const read = items.map((t) => {
       const r = { t, ...ink(a, t.kind === 'text' ? b : c, clip, scale, t.rects, t.holes) }
-      if (t.run) r.match = h.match(a, b, clip, scale, t.line, keyed.get(t.key), runs.filter((x) => x !== t).map((x) => x.line))
+      if (t.run) r.match = h.match(a, h.rgba(t.draw.ground), clip, scale, t.line, keyed.get(t.key), runs.filter((x) => x !== t).map((x) => x.line))
+      if (t.kind === 'text' && pairs.length) r.fits = fitsOf(t, pairs)
       return r
     })
     const shows = (el, kind) => read.some((r) => r.count >= 4 && el.contains(r.t.el) && (!kind || r.t.kind === kind))
     const empty = h.controls(root).filter((el) => !el.matches(h.FIELDS) && !shows(el)).map((el) => h.describe(el))
     const unlabelled = (h.state.bare ?? []).filter((el) => !shows(el, 'text')).map((el) => h.describe(el))
     return {
-      things: read.map(({ t, amount, count, ratio, match }) => ({ kind: t.kind, at: t.at, quiet: t.quiet, draws: count >= 4, ratio, ...(t.run ? { match } : { share: t.key && keyed.get(t.key) ? amount / keyed.get(t.key) : null }) })),
+      things: read.map(({ t, amount, count, ratio, match, fits }) => ({ kind: t.kind, at: t.at, quiet: t.quiet, draws: count >= 4, ratio, fits, ...(t.run ? { match } : { share: t.key && keyed.get(t.key) ? amount / keyed.get(t.key) : null }) })),
       empty,
       unlabelled,
     }

@@ -12,7 +12,7 @@ export const LIGHTS = [
   ['noscript', 'Printed with no script'],
 ]
 
-import { PROVED_ON, SHEET_WAITS } from './sheet-waits.mjs'
+import { waitLine } from './sheet-waits.mjs'
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
@@ -32,22 +32,22 @@ function lights(part, ctx) {
     const text = key === 'skins' ? `${ctx.skins.length} skins` : label
     return `<li class="sr-light" data-light="${key}" data-on="${on}"><span class="sr-dot" aria-hidden="true"></span><span>${esc(text)}</span><span class="sr-state">${on ? 'on' : 'off'}</span><span class="sr-why">${on ? '' : esc(why)}</span></li>`
   })
-  // The switch in controls.mjs greys these and says "not proved on <surface>" on any other surface.
-  return `<ul class="sr-lights" data-proved-on="${PROVED_ON}" aria-label="Proof from the last check run">${items.join('')}<li class="sr-proved">proved on ${PROVED_ON}</li></ul>`
+  // The surfaces the run proved them on; the switch in controls.mjs greys them on any other surface.
+  const on = ctx.proof?.parts?.[part.name]?.lights?.skins?.surfaces ?? SURFACES
+  const said = on.length === SURFACES.length ? 'every surface' : on.join(', ')
+  return `<ul class="sr-lights" data-proved-on="${esc(on.join(' '))}" aria-label="Proof from the last check run">${items.join('')}<li class="sr-proved" data-said="${esc(said)}">proved on ${esc(said)}</li></ul>`
 }
 
 /** Plain lines for what the sheet does not deliver yet, from the numbers the check measured. */
 function waits(part, proof) {
   const measures = proof?.parts?.[part.name]?.measures ?? {}
-  const lines = Object.entries(SHEET_WAITS)
-    .filter(([key, w]) => measures[key] && measures[key].min < w.needs)
-    .map(([key, w]) => `<p class="sr-wait">waiting on the sheet: ${esc(w.label)} ${measures[key].min.toFixed(2)}:1${measures[key].at ? ` at ${esc(measures[key].at)}` : ''}, needs ${w.needs}:1</p>`)
+  const lines = (measures.waits ?? []).filter((w) => w.now < w.needs).map((w) => `<p class="sr-wait">${esc(waitLine(w, w.now))}</p>`)
   // Proof lines: what the check holds every control to, and the controls that say they draw no boundary.
   const run = proof?.parts?.[part.name]
   const bounds = Object.entries(measures).filter(([k]) => k === 'boundary' || k.startsWith('boundary:')).map(([, m]) => m.min)
   const low = Math.min(...bounds)
-  if (measures.boundary && low >= SHEET_WAITS.boundary.needs)
-    lines.push(`<p class="sr-wait">control boundary ${low.toFixed(2)}:1 or more on every control${bounds.length > 1 ? ` on all ${bounds.length} surfaces` : ''}, needs ${SHEET_WAITS.boundary.needs}:1</p>`)
+  if (measures.boundary && low >= 3)
+    lines.push(`<p class="sr-wait">control boundary ${low.toFixed(2)}:1 or more on every control${bounds.length > 1 ? ` on all ${bounds.length} surfaces` : ''}, needs 3:1</p>`)
   const bare = (run?.textOnly ?? []).flatMap((t) => t.controls)
   if (bare.length) lines.push(`<p class="sr-wait">text-only, no boundary, label held to text rules: ${bare.map(esc).join(', ')}</p>`)
   const free = proof?.parts?.[part.name]?.paintFree ?? []
@@ -71,7 +71,6 @@ function partSection(part, ctx) {
     <p class="sr-summary">${esc(json.summary)}</p>
     ${lights(part, ctx)}
     ${waits(part, ctx.proof)}
-    ${Object.entries(json.allow ?? {}).map(([prop, why]) => `<p class="sr-wait">uses ${esc(prop)} beyond the vocabulary: ${esc(why)}</p>`).join('')}
   </header>
   <div class="sr-stage" data-part="${name}" data-surface="base">
 ${part.example}

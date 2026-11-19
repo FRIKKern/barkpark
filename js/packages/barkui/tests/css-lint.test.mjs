@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { lintPartCss } from '../build/css-lint.mjs'
-import { PHONE } from '../build/vocabulary.mjs'
+import { EXTRA, PHONE } from '../build/vocabulary.mjs'
 import { discoverParts } from '../build/parts.mjs'
 
 const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
@@ -10,7 +10,7 @@ const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
 describe('every real part.css', () => {
   for (const p of parts) {
     it(`${p.name}/part.css has no colour literal and reads only --ui-* / --bark-*`, () => {
-      expect(lintPartCss(readFileSync(join(p.dir, 'part.css'), 'utf8'), p.json.allow)).toEqual([])
+      expect(lintPartCss(readFileSync(join(p.dir, 'part.css'), 'utf8'))).toEqual([])
     })
   }
 })
@@ -63,7 +63,6 @@ describe('lintPartCss', () => {
 
   // R4: part.css is written in a small vocabulary; anything else is named in part.json with a reason.
   for (const [prop, css] of [
-    ['filter', 'a { filter: opacity(0.1); }'],
     ['mix-blend-mode', 'a { mix-blend-mode: screen; }'],
     ['clip-path', 'a { clip-path: inset(50%); }'],
     ['mask-image', 'a { mask-image: linear-gradient(transparent, transparent); }'],
@@ -72,12 +71,28 @@ describe('lintPartCss', () => {
     ['-webkit-text-fill-color', 'a { -webkit-text-fill-color: var(--ui-background); }'],
     ['background-clip', 'a { background-clip: text; }'],
     ['zoom', 'a { zoom: 0.1; }'],
+    ['text-decoration-thickness', 'a { text-decoration-thickness: 0.9em; }'],
+    ['text-shadow', 'a { text-shadow: 0 0 2px currentColor; }'],
   ]) {
-    it(`refuses ${prop} unless part.json names it with a reason`, () => {
-      expect(lintPartCss(css).join('\n')).toMatch(new RegExp(`line 1: ${prop} is outside part\\.css's vocabulary.*part\\.json "allow"`))
-      expect(lintPartCss(css, { [prop]: 'the reason, in one line' })).toEqual([])
+    it(`refuses ${prop}, and nothing in a part can excuse it`, () => {
+      expect(lintPartCss(css).join('\n')).toMatch(new RegExp(`line 1: ${prop} is outside part\\.css's vocabulary`))
+      expect(lintPartCss(css, { [prop]: 'the reason, in one line' }).join('\n')).toMatch(/outside part\.css's vocabulary/)
     })
   }
+
+  it('takes a property beyond the vocabulary only at the values EXTRA gives it', () => {
+    expect(EXTRA).toEqual({ filter: ['none'] })
+    expect(lintPartCss('a { filter: none; }')).toEqual([])
+    expect(lintPartCss('a { filter: opacity(0.1); }').join()).toMatch(/line 1: filter: opacity\(0\.1\); part\.css may only set filter to none/)
+  })
+
+  it('takes content only as "" or none, and no thickness through the text-decoration shorthand', () => {
+    for (const ok of ['a::after { content: ""; }', "a::after { content: ''; }", 'a::after { content: none; }']) expect(lintPartCss(ok)).toEqual([])
+    expect(lintPartCss('a::after { content: "Cancel"; }').join()).toMatch(/line 1: content: "Cancel"; part\.css may only set content to "" or none/)
+    expect(lintPartCss('a::after { content: attr(title); }').join()).toMatch(/may only set content/)
+    expect(lintPartCss('a { text-decoration: underline; }')).toEqual([])
+    expect(lintPartCss('a { text-decoration: line-through 0.9em; }').join()).toMatch(/line 1: text-decoration: line-through 0\.9em sets a thickness/)
+  })
 
   it('takes a font size only from a variable that holds a readable size', () => {
     expect(lintPartCss('a { font-size: 0; }').join()).toMatch(/line 1: font-size .*var\(--bark-/)

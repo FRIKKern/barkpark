@@ -7,10 +7,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { PROVED_ON } from '../build/sheet-waits.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
 import { limit } from './limit.mjs'
-import { noscript, phone, pressed, skinsAndSchemes, styleBaseline } from './proofs.mjs'
+import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } from './proofs.mjs'
+import { waitLine } from '../build/sheet-waits.mjs'
 
 export const PART_MS = 120000
 export const LIGHT_NAMES = ['pressed', 'skins', 'schemes', 'phone', 'noscript']
@@ -75,11 +75,13 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
       const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
       const failed = ctx.errors[0] ?? offs[0]
       for (const [k, l] of Object.entries(lights)) log(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
+      for (const w of measures.waits ?? []) log(`  ${waitLine(w, w.now)}`)
       for (const [k, m] of Object.entries(measures))
-        if (m?.againstGround) log(`  measured ${k}: against the ground ${m.againstGround.min} to ${m.againstGround.max}:1, against the primary fill ${m.againstPrimary.min} to ${m.againstPrimary.max}:1`)
+        if (k === 'waits') continue
+        else if (m?.againstGround) log(`  measured ${k}: against the ground ${m.againstGround.min} to ${m.againstGround.max}:1, against the primary fill ${m.againstPrimary.min} to ${m.againstPrimary.max}:1`)
         else if (m) log(`  measured ${k}: ${m.min} to ${m.max}:1`)
       if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
-      for (const l of Object.values(lights)) l.surface = PROVED_ON
+      for (const l of Object.values(lights)) l.surfaces = surfacesOf(ctx)
       proof.parts[part.name] = { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(failed ? { failed } : {}) }
       proof.errors.push(...ctx.errors)
     }

@@ -1,7 +1,7 @@
 // One function per proof light. Each opens its own page, so a light never
 // borrows state from another, and returns { pass, detail } (plus numbers).
 import { pathToFileURL } from 'node:url'
-import { PROVED_ON, SHEET_WAITS } from '../build/sheet-waits.mjs'
+import { SHEET_WAITS, waitsFor } from '../build/sheet-waits.mjs'
 import { SURFACES } from '../build/page.mjs'
 import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
@@ -14,8 +14,13 @@ import { readView, verdict } from './reading.mjs'
 export const STEP_MS = 5000
 const light = (pass, detail, extra = {}) => ({ pass: !!pass, detail, ...extra })
 const fmt = (n) => n.toFixed(2)
-/** How much of itself the least drawn thing draws, against the same thing drawn alone (reading.mjs). */
-const drawsAll = (share) => `everything draws ${Math.floor(Math.min(1, share) * 100)}% or more of itself`
+/** How the least label and graphic draw against the same drawn alone (reading.mjs). */
+const drawsAll = (w) => `lowest label ${fmt(w.label.match)} like itself${w.label.at ? ` at ${w.label.at}` : ''}; every graphic draws ${Math.floor(Math.min(1, w.share) * 100)}% or more of itself`
+/** The least of two weakest readings (verdict). */
+const least = (a, b) => ({ share: Math.min(a.share, b.share), label: b.label.match < a.label.match ? b.label : a.label })
+const NONE = { share: 1, label: { match: 1, at: '' } }
+/** The surfaces a run proves its lights on: every one, unless the selftest asked for base alone. */
+export const surfacesOf = (ctx) => (ctx.surfaces === false ? ['base'] : SURFACES)
 
 // `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
 export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1 } = {}) {
@@ -161,27 +166,30 @@ export async function skinsAndSchemes(ctx, part, skins) {
   const traces = {}
   const sig = {}
   const bad = { light: [], dark: [] }
-  const text = { light: Infinity, dark: Infinity }
   const drawnWeakest = { light: Infinity, dark: Infinity }
-  const fullest = { light: 1, dark: 1 }
+  const fullest = { light: NONE, dark: NONE }
   const focus = { min: Infinity, max: 0 }
-  const bounds = { min: Infinity, max: 0, at: '' }
+  const bounds = {}
   const bare = new Map()
-  const keepBounds = (into, b, at) => {
+  const waited = new Map()
+  const keepBounds = (surface, b, at) => {
+    const into = (bounds[surface] ??= { min: Infinity, max: 0, at: '' })
     for (const c of b.read) {
       if (c.ratio < into.min) Object.assign(into, { min: c.ratio, at: `${c.at} by its ${c.by} (${at})` })
       into.max = Math.max(into.max, c.ratio)
     }
   }
-  const textOnly = part.json.textOnly ?? []
   let controls = 0
-  const other = {}
   const disabled = {}
   const keepDisabled = (surface, list) => {
     const d = (disabled[surface] ??= { ground: [], primary: [] })
     for (const x of list) d.ground.push(x.ground), d.primary.push(x.primary)
   }
   const free = new Map()
+  const surfaceTo = async (x) => {
+    await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, x])
+    await settle(page)
+  }
   try {
     await page.mouse.move(0, 0)
     const names = await page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
@@ -196,36 +204,27 @@ export async function skinsAndSchemes(ctx, part, skins) {
         }
         const r = await page.barkCheck(([n, spec]) => window.__barkCheck.paint(document.querySelector(`[data-part="${n}"]`), spec), [part.name, part.json.paint ?? []])
         sig[at] = r.signature
-        text[scheme] = Math.min(text[scheme], r.weakest.ratio)
         if (r.wrong.length) bad[scheme].push(`${at}: ${r.wrong[0]}`)
-        if (r.weakest.ratio < 4.5) bad[scheme].push(`${at}: text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
-        // The lights rest on what is drawn: every text run and graphic draws, in full, at contrast (see reading.mjs).
-        const v = await readView(page, part)
-        const d = verdict(v, `${at}: `)
-        bad[scheme].push(...d.fails)
-        drawnWeakest[scheme] = Math.min(drawnWeakest[scheme], d.weakest.text.ratio)
-        fullest[scheme] = Math.min(fullest[scheme], d.weakest.share)
-        const b = v.bounds
-        keepBounds(bounds, b, at)
-        for (const x of b.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
-        controls = Math.max(controls, b.count)
         traces[at] = await page.barkCheck(([n, list]) => window.__barkCheck.trace(document.querySelector(`[data-part="${n}"]`), list), [part.name, names])
-        keepDisabled(PROVED_ON, await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name))
-        // The unproved surfaces: measured, recorded, never a light (see SHEET_WAITS).
-        for (const surface of ctx.surfaces === false ? [] : SURFACES.filter((x) => x !== PROVED_ON)) {
-          await page.barkCheck(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, surface])
-          await settle(page)
-          const seen = await readView(page, part)
-          const m = { bounds: seen.bounds, disabled: await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name) }
-          const w = verdict(seen).weakest.text
-          const o = (other[surface] ??= { text: { min: Infinity, max: 0, at: '' }, bounds: { min: Infinity, max: 0, at: '' } })
-          if (w.ratio < o.text.min) Object.assign(o.text, { min: w.ratio, at: `${w.at} (${at})` })
-          if (w.ratio < Infinity) o.text.max = Math.max(o.text.max, w.ratio)
-          keepBounds(o.bounds, m.bounds, at)
-          keepDisabled(surface, m.disabled)
+        // The lights rest on what is drawn, on every surface: every text run and graphic draws, as itself, at
+        // contrast (see reading.mjs), and every control's boundary holds 3:1. Only a wait on the sheet bound to
+        // this view and pair lets a text under 4.5:1 through (build/sheet-waits.mjs).
+        for (const surface of surfacesOf(ctx)) {
+          await surfaceTo(surface)
+          const waits = waitsFor(skin, scheme, surface)
+          const v = await readView(page, part, waits)
+          const d = verdict(v, `${at} on ${surface}: `, waits)
+          bad[scheme].push(...d.fails)
+          for (const x of d.waited) if (!waited.has(x.wait) || waited.get(x.wait) > x.ratio) waited.set(x.wait, x.ratio)
+          drawnWeakest[scheme] = Math.min(drawnWeakest[scheme], d.weakest.text.ratio)
+          fullest[scheme] = least(fullest[scheme], d.weakest)
+          for (const c of v.bounds.read) if (c.ratio < 3) bad[scheme].push(`${at} on ${surface}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
+          keepBounds(surface, v.bounds, at)
+          for (const x of v.bounds.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
+          controls = Math.max(controls, v.bounds.count)
+          keepDisabled(surface, await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name))
         }
-        await page.barkCheck(([n, x]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', x), [part.name, PROVED_ON])
-        await settle(page)
+        await surfaceTo('base')
         // Focus: Tab through the part with real keys and measure the ring on each stop.
         await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
         for (let i = 0; i < 60; i++) {
@@ -248,42 +247,36 @@ export async function skinsAndSchemes(ctx, part, skins) {
     await page.context().close()
   }
   const still = frozen(traces)
-  const measures = {
-    focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null,
-    boundary: bounds.max ? { min: +fmt(bounds.min), max: +fmt(bounds.max), at: bounds.at } : null,
-  }
-  for (const [surface, o] of Object.entries(other)) {
-    if (o.text.max) measures[`text:${surface}`] = { min: +fmt(o.text.min), max: +fmt(o.text.max), at: o.text.at }
-    if (o.bounds.max) measures[`boundary:${surface}`] = { min: +fmt(o.bounds.min), max: +fmt(o.bounds.max), at: o.bounds.at }
-  }
+  const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
+  for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }
+  // Each wait on the sheet that was read, with the least it measured; the page prints it while it is short.
+  measures.waits = SHEET_WAITS.filter((w) => waited.has(w)).map((w) => ({ ...w, now: +fmt(waited.get(w)) }))
   // A part with controls prints a boundary line for them, or names every one text-only.
   const named = new Set([...bare.values()].flat()).size
   if (controls > named && !measures.boundary) bad.light.push(`${controls - named} control(s) and no boundary reading`)
-  // Numbers only, no light and no wait line yet: how far a disabled fill sits from its ground and from the primary fill.
+  // Numbers only, no light: how far a disabled fill sits from its ground and from the primary fill.
   const span = (xs) => ({ min: +fmt(Math.min(...xs)), max: +fmt(Math.max(...xs)) })
   for (const [surface, d] of Object.entries(disabled)) if (d.ground.length) measures[`disabled:${surface}`] = { againstGround: span(d.ground), againstPrimary: span(d.primary) }
-  for (const [key, wait] of Object.entries(SHEET_WAITS)) {
-    const m = measures[key]
-    if (wait.hard && m && m.min < wait.needs) bad.light.push(`${wait.label} ${m.min}:1${m.at ? ` at ${m.at}` : ''}, needs ${wait.needs}:1`)
-  }
   const distinct = new Set(skins.map((k) => sig[`${k} light`])).size
   const sameAcross = skins.filter((k) => sig[`${k} light`] === sig[`${k} dark`])
-  const boundNote = measures.boundary ? `; control boundary ${measures.boundary.min}:1 or more` : ''
+  const low = Math.min(...Object.values(bounds).map((b) => b.min))
+  const boundNote = measures.boundary ? `; control boundary ${fmt(low)}:1 or more` : ''
   const focusNote = measures.focusEdge ? `; focus edge ${measures.focusEdge.min} to ${measures.focusEdge.max}:1` : ''
-  const skinsLight = still.length
-    ? light(false, still[0])
-    : bad.light.length
-      ? light(false, bad.light[0])
-      : distinct < skins.length
-        ? light(false, `only ${distinct} of ${skins.length} skins paint differently`)
-        : light(true, `every element takes each of ${skins.length} skins' values; weakest drawn text ${fmt(drawnWeakest.light)}:1; ${drawsAll(fullest.light)}${boundNote}${focusNote}`)
-  const schemesLight = still.length
-    ? light(false, still[0])
-    : bad.dark.length
-      ? light(false, bad.dark[0])
-      : sameAcross.length
-        ? light(false, `light and dark paint the same in ${sameAcross.join(', ')}`)
-        : light(true, `dark paints its own values in every skin; weakest drawn text ${fmt(drawnWeakest.dark)}:1; ${drawsAll(fullest.dark)}${boundNote}${focusNote}`)
+  const on = surfacesOf(ctx)
+  const where = on.length > 1 ? ` on all ${on.length} surfaces` : ` on ${on[0]}`
+  // Every reason a light is off, in order, so a run can be read in full (the selftest asserts on them).
+  const fails = { light: [...still, ...bad.light], dark: [...still, ...bad.dark] }
+  const off = (scheme, extra) => light(false, fails[scheme][0] ?? extra, { fails: fails[scheme].length ? fails[scheme] : [extra] })
+  const skinsLight = fails.light.length
+    ? off('light')
+    : distinct < skins.length
+      ? off('light', `only ${distinct} of ${skins.length} skins paint differently`)
+      : light(true, `every element takes each of ${skins.length} skins' values${where}; weakest drawn text ${fmt(drawnWeakest.light)}:1; ${drawsAll(fullest.light)}${boundNote}${focusNote}`)
+  const schemesLight = fails.dark.length
+    ? off('dark')
+    : sameAcross.length
+      ? off('dark', `light and dark paint the same in ${sameAcross.join(', ')}`)
+      : light(true, `dark paints its own values in every skin${where}; weakest drawn text ${fmt(drawnWeakest.dark)}:1; ${drawsAll(fullest.dark)}${boundNote}${focusNote}`)
   return { skins: skinsLight, schemes: schemesLight, measures, paintFree: [...free].map(([selector, why]) => ({ selector, why })), textOnly: [...bare].map(([selector, list]) => ({ selector, controls: list })) }
 }
 
@@ -301,7 +294,7 @@ export async function phone(ctx, part, skins) {
     // The phone view is read in full, as the wide one is: every skin and scheme, on base.
     let text = Infinity
     let edge = Infinity
-    let share = 1
+    let weakest = NONE
     for (const scheme of ['light', 'dark']) {
       for (const skin of skins) {
         const at = `${skin} ${scheme}`
@@ -311,7 +304,7 @@ export async function phone(ctx, part, skins) {
         const d = verdict(v, `${at}: `)
         if (d.fails.length) return light(false, d.fails[0])
         text = Math.min(text, d.weakest.text.ratio)
-        share = Math.min(share, d.weakest.share)
+        weakest = least(weakest, d.weakest)
         for (const c of v.bounds.read) {
           if (c.ratio < 3) return light(false, `${at}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
           edge = Math.min(edge, c.ratio)
@@ -319,7 +312,7 @@ export async function phone(ctx, part, skins) {
       }
     }
     await stillStyled(ctx, page, 'phone')
-    return light(true, `nothing scrolls sideways at 390px; weakest drawn text ${fmt(text)}:1; ${drawsAll(share)}; control boundary ${fmt(edge)}:1 or more`)
+    return light(true, `nothing scrolls sideways at 390px; weakest drawn text ${fmt(text)}:1; ${drawsAll(weakest)}; control boundary ${fmt(edge)}:1 or more`)
   } finally {
     await page.context().close()
   }
@@ -344,7 +337,7 @@ export async function noscript(ctx, part) {
     if (r.weakest.ratio < 4.5) return light(false, `text ${fmt(r.weakest.ratio)}:1 at ${r.weakest.at}`)
     const d = verdict(await readView(page, part))
     if (d.fails.length) return light(false, d.fails[0])
-    return light(true, `${shown} elements printed, seen and painted with no script; weakest drawn text ${fmt(d.weakest.text.ratio)}:1`)
+    return light(true, `${shown} elements printed, seen and painted with no script; weakest drawn text ${fmt(d.weakest.text.ratio)}:1; ${drawsAll(d.weakest)}`)
   } finally {
     await page.context().close()
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { renderPage } from '../build/page.mjs'
-import { SHEET_WAITS } from '../build/sheet-waits.mjs'
+import { renderPage, SURFACES } from '../build/page.mjs'
+import { SHEET_WAITS, waitsFor } from '../build/sheet-waits.mjs'
 
 const part = { name: 'aa', hash: 'h1', example: '<p>x</p>', json: { family: 'f', element: 'ui-x', summary: 's' } }
 const allOn = { pressed: { pass: true }, skins: { pass: true }, schemes: { pass: true }, phone: { pass: true }, noscript: { pass: true } }
@@ -23,11 +23,11 @@ describe('renderPage proof lights', () => {
     expect(lit(page({ hash: 'h1', lights: allOn }, { errors: ['console: boom'] }))).toBe(0)
   })
 
-  it('prints the sheet wait from the measured number, and drops it when the sheet delivers', () => {
-    const needs = SHEET_WAITS['boundary:primary'].needs
-    const weak = page({ hash: 'h1', lights: allOn, measures: { 'boundary:primary': { min: 1.01, max: 1.34 } } })
-    expect(weak).toContain(`waiting on the sheet: control boundary on primary 1.01:1, needs ${needs}:1`)
-    const strong = page({ hash: 'h1', lights: allOn, measures: { 'boundary:primary': { min: needs + 0.2, max: 9 } } })
+  it('prints each wait on the sheet the run measured short, bound to its view and tokens, and drops it when the sheet delivers', () => {
+    const w = { ...SHEET_WAITS.find((x) => x.skin === 'fjord' && x.scheme === 'light') }
+    const weak = page({ hash: 'h1', lights: allOn, measures: { waits: [{ ...w, now: 3.75 }] } })
+    expect(weak).toContain(`waiting on the sheet: --ui-muted-foreground on --ui-background, fjord light on primary, 3.75:1, needs 4.5:1 (${w.task})`)
+    const strong = page({ hash: 'h1', lights: allOn, measures: { waits: [{ ...w, now: 4.6 }] } })
     expect(strong).not.toContain('waiting on the sheet')
   })
 
@@ -37,32 +37,23 @@ describe('renderPage proof lights', () => {
     expect(page({ hash: 'h1', lights: allOn, paintFree: [] })).not.toContain('carry no paint')
   })
 
-  it('says the lights were proved on the base surface, so other surfaces can show them as not proved', () => {
-    const html = page({ hash: 'h1', lights: Object.fromEntries(Object.entries(allOn).map(([k, l]) => [k, { ...l, surface: 'base' }])) })
-    expect(html).toContain('data-proved-on="base"')
-    expect(html).toMatch(/proved on base/)
+  it('says which surfaces the lights were proved on, so any other can show them as not proved', () => {
+    const on = (surfaces) => page({ hash: 'h1', lights: Object.fromEntries(Object.entries(allOn).map(([k, l]) => [k, { ...l, surfaces }])) })
+    expect(on(['base'])).toContain('data-proved-on="base"')
+    expect(on(['base'])).toMatch(/proved on base</)
+    expect(on(SURFACES)).toContain(`data-proved-on="${SURFACES.join(' ')}"`)
+    expect(on(SURFACES)).toMatch(/proved on every surface</)
   })
 
-  it('prints a sheet wait per surface from the measured numbers, and drops it when the sheet delivers', () => {
-    const at = 'button#aa-d "Delete"'
-    const weak = page({ hash: 'h1', lights: allOn, measures: { 'text:primary': { min: 2.1, max: 9, at } } })
-    expect(weak).toContain(`waiting on the sheet: text on primary 2.10:1 at ${at.replaceAll('"', '&quot;')}, needs 4.5:1`)
-    const strong = page({ hash: 'h1', lights: allOn, measures: { 'text:primary': { min: 4.6, max: 9, at } } })
-    expect(strong).not.toContain('text on primary')
-    expect(Object.keys(SHEET_WAITS)).toEqual(expect.arrayContaining(['text:raised', 'text:sunken', 'text:primary', 'text:inverse', 'boundary:primary']))
-  })
-
-  it('holds the control boundary as proof on every surface the sheet carries at 3:1', () => {
-    const lines = Object.entries(SHEET_WAITS).filter(([k]) => k.startsWith('boundary'))
-    expect(lines.map(([k]) => k).sort()).toEqual(['boundary', 'boundary:inverse', 'boundary:primary', 'boundary:raised', 'boundary:sunken'])
-    expect(lines.every(([, w]) => w.needs === 3)).toBe(true)
-    expect(SHEET_WAITS.boundary.hard).toBe(true)
-  })
-
-  it('holds text as proof on every surface where the sheet carries 4.5:1, and waits on primary', () => {
-    expect(['text:raised', 'text:sunken', 'text:inverse'].map((k) => SHEET_WAITS[k].hard)).toEqual([true, true, true])
-    expect(SHEET_WAITS['text:primary'].hard).toBe(false)
-    expect(Object.keys(SHEET_WAITS).some((k) => k.startsWith('controlEdge'))).toBe(false)
+  it('binds every wait to one skin, scheme, surface and token pair, with the number it measured', () => {
+    for (const w of SHEET_WAITS) {
+      expect(Object.keys(w).sort()).toEqual(['ground', 'measured', 'needs', 'scheme', 'skin', 'surface', 'task', 'text'])
+      expect(SURFACES).toContain(w.surface)
+      expect(w.measured).toBeLessThan(w.needs)
+    }
+    expect(waitsFor('fjord', 'light', 'primary')).toHaveLength(1)
+    expect(waitsFor('fjord', 'light', 'raised')).toEqual([])
+    expect(waitsFor('fjord', 'dark', 'primary')).toEqual([])
   })
 
   it('prints the control boundary it proved, and names the controls that are text-only', () => {
@@ -74,11 +65,5 @@ describe('renderPage proof lights', () => {
     })
     expect(html).toContain('control boundary 3.04:1 or more on every control on all 2 surfaces, needs 3:1')
     expect(html).toContain('text-only, no boundary, label held to text rules: Cancel, Rest')
-  })
-
-  it('prints, beside the part, each property it uses beyond the vocabulary and why', () => {
-    const allowing = { ...part, json: { ...part.json, allow: { filter: 'the pending fade dims the label' } } }
-    const html = renderPage({ parts: [allowing], skins: ['a', 'b'], foundation: 'f1', uiSdkVersion: '0', proof: null })
-    expect(html).toContain('uses filter beyond the vocabulary: the pending fade dims the label')
   })
 })

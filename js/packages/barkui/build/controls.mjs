@@ -7,14 +7,15 @@ const html = document.documentElement
 const KEYS = { skin: 'data-skin', scheme: 'data-color-scheme', surface: 'data-surface', width: 'data-width' }
 // The surface goes on each part's stage; the rest on <html>.
 const targets = (key) => (key === 'surface' ? [...document.querySelectorAll('.sr-stage')] : [html])
-// Lights are proved on one surface; on any other they show as not proved, never as on.
+// Lights are proved on the surfaces the run read; on any other they show as not proved, never as on.
 const proved = (surface) => {
   for (const list of document.querySelectorAll('.sr-lights[data-proved-on]')) {
-    const on = list.getAttribute('data-proved-on')
-    const off = surface && surface !== on
+    const on = list.getAttribute('data-proved-on').split(' ')
+    const off = surface && !on.includes(surface)
     if (off) list.setAttribute('data-unproved', surface)
     else list.removeAttribute('data-unproved')
-    list.querySelector('.sr-proved').textContent = off ? `not proved on ${surface}` : `proved on ${on}`
+    const said = list.querySelector('.sr-proved')
+    said.textContent = off ? `not proved on ${surface}` : `proved on ${said.getAttribute('data-said')}`
     for (const li of list.querySelectorAll('.sr-light'))
       li.querySelector('.sr-state').textContent = off ? 'not proved' : li.getAttribute('data-on') === 'true' ? 'on' : 'off'
   }

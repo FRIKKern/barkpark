@@ -1,15 +1,15 @@
 // What part.css may say. The check reads every view part.css can target and
 // every pixel a part draws, so part.css keeps to properties whose effect the
-// check can see and judge. A property outside this list needs an entry in the
-// part's part.json, "allow": { "<property>": "<one-line reason>" }; the
-// showroom prints each one beside the part.
+// check can see and judge. A part cannot excuse itself: a property outside this
+// list is refused, unless EXTRA below gives it, with the exact values it may take.
 //
 // Started from what base.css and the button use, plus ordinary layout, type,
-// paint and motion. Left out on purpose (each needs a reason): filter,
+// paint and motion. Left out on purpose: filter (but see EXTRA),
 // backdrop-filter, mix-blend-mode, clip-path, clip, mask and its longhands,
 // text-indent, visibility, -webkit-text-fill-color, -webkit-text-stroke,
-// background-clip, text-shadow, zoom, contain, content-visibility, the font
-// shorthand.
+// background-clip, text-shadow, text-decoration-thickness, zoom, contain,
+// content-visibility, the font shorthand. `content` may only be "" or none, and
+// the text-decoration shorthand may not set a thickness.
 
 const LAYOUT = `display position inset top right bottom left inset-inline inset-inline-start inset-inline-end inset-block
 inset-block-start inset-block-end z-index float clear box-sizing width height min-width min-height max-width max-height
@@ -27,7 +27,7 @@ border-collapse border-spacing`
 
 const TYPE = `font-family font-size font-weight font-style font-stretch font-variant font-variant-numeric font-feature-settings
 line-height letter-spacing word-spacing text-align text-transform text-decoration text-decoration-line
-text-decoration-style text-decoration-thickness text-decoration-color text-underline-offset white-space word-break
+text-decoration-style text-decoration-color text-underline-offset white-space word-break
 overflow-wrap hyphens text-wrap tab-size -webkit-font-smoothing`
 
 const PAINT = `color background background-color background-image background-size background-position background-repeat
@@ -50,6 +50,13 @@ animation-direction animation-fill-mode animation-play-state scroll-behavior`
 const words = (s) => s.split(/\s+/).filter(Boolean)
 export const VOCABULARY = new Set([...words(LAYOUT), ...words(TYPE), ...words(PAINT), ...words(MOTION)])
 export const MOTION_ONLY = new Set(words(MOTION))
+
+// Properties beyond the vocabulary, each with the only values part.css may give
+// it. Adding a row changes this shared file, and comes with a selftest plant that
+// shows the lights still see the property misused.
+//   filter: none: the button's pending state turns UI SDK's own pending dim off,
+//   so the label is drawn at full strength (selftest: "filter on hover").
+export const EXTRA = { filter: ['none'] }
 
 // The one phone breakpoint part.css may use. The phone light renders the part
 // at 390px, inside it, and reads it in full.

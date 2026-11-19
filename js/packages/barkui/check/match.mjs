@@ -4,16 +4,16 @@
 // anything outside its own body) and adds its readers to the helper object.
 //
 // Each line a text node is laid out in is one label. Its picture is every pixel
-// in the line's box (padded by PAD) that differs from the same capture with all
-// glyphs unpainted (decorations, boxes and graphics stay painted there, so a bar
-// or a cover laid over the letters is a loss, and another word or a ghost copy
-// is extra ink). Its reference is the same string drawn alone, in the same font,
-// colours, ground and place within a device pixel. A pixel counts in each when
-// it moved at least half as far as the most any pixel there moved (the outline
-// at half cover). The score is the pixels in both over the pixels in either (a
-// pixel is in both when the other has ink there or one device pixel to its side):
-// missing ink lowers it (cut, clipped, covered, shrunk, mirrored) and so does
-// extra ink.
+// in the line's box (padded by PAD) that differs from the label's ground: all
+// that is painted there, by anyone, so a bar, a box or a cover laid over the
+// letters is a loss where it hides them and extra ink where it shows, and so is
+// another word or a ghost copy. Its reference is the same string drawn alone, in
+// the same font, colours, ground and place within a pixel. A pixel counts in
+// each when it moved at least half as far as the most any pixel there moved (the
+// outline at half cover). The score is the pixels in both over the pixels in
+// either (a pixel is in both when the other has ink there or one device pixel to
+// its side): missing ink lowers it (cut, clipped, covered, shrunk, mirrored) and
+// so does extra ink.
 export function installMatch() {
   const h = window.__barkCheck
   const PAD = 1
@@ -61,9 +61,9 @@ export function installMatch() {
   }
 
   /** How much of a label's picture is its reference: pixels in both over pixels in either, in the line's box
-      (`line`, document CSS px) padded by PAD. `a` is the drawn capture, `b` the one with glyphs unpainted;
+      (`line`, document CSS px) padded by PAD. `a` is the drawn capture and `ground` the label's ground colour;
       `holes` are other labels' boxes, left out where they reach into this one. */
-  const match = (a, b, clip, scale, line, ref, holes) => {
+  const match = (a, ground, clip, scale, line, ref, holes) => {
     const left = (line.x - clip.x) * scale
     const top = (line.y - clip.y) * scale
     const dx = Math.round(ref.tx - left)
@@ -91,7 +91,7 @@ export function installMatch() {
         }
         if (x >= 0 && y >= 0 && x < a.w && y < a.h) {
           const i = (y * a.w + x) * 4
-          page[k] = moved(a.data, i, [b.data[i], b.data[i + 1], b.data[i + 2]])
+          page[k] = moved(a.data, i, ground)
         }
         const u = x + dx
         const v = y + dy

@@ -46,7 +46,7 @@ export function pinStates(css) {
 // added after the lint, so it can plant breaks in paint that part.css may not.
 export async function buildShowroom({ dir = partsDir, out = outDir, proof: proofFile = proofPath, quiet = false, bare = false, plantCss = '' } = {}) {
   const parts = discoverParts(dir)
-  const lint = parts.flatMap((p) => lintPartCss(p.css, p.json.allow).map((f) => `parts/${p.name}/part.css ${f}`))
+  const lint = parts.flatMap((p) => lintPartCss(p.css).map((f) => `parts/${p.name}/part.css ${f}`))
   if (lint.length) throw new Error(`part.css may only read --ui-* and --bark-* colours:\n  ${lint.join('\n  ')}`)
 
   mkdirSync(out, { recursive: true })
