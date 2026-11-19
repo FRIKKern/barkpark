@@ -357,6 +357,11 @@ var codeExit = map[string]int{
 	// cap of live chat hosts. A conflict, not a retry: revoke one first.
 	"host_limit_reached": exitConflict,
 
+	// 409, chat_host_controller.ex name_taken/4: a chat host in the workspace
+	// already holds the name. A conflict: pick another name or make a new
+	// code for the waiting host.
+	"name_taken": exitConflict,
+
 	// 422, ChatSendFailure: the turn names attachments and the session's
 	// registered host does not advertise their type. Permanent until the host
 	// binary is updated, so a validation exit, never a retry.
