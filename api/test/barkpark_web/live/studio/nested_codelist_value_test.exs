@@ -199,6 +199,53 @@ defmodule BarkparkWeb.Studio.NestedCodelistValueTest do
     end
   end
 
+  # Review r3 of #27482: a pick, then another editor writes a number there,
+  # then an edit elsewhere. The page now draws the code kept and posts "" for
+  # it; the earlier pick must not let that "" through. Main keeps the 7.
+  for surface <- [:studio, :desk] do
+    test "#{surface}: a pick, then another editor's 7, then an edit elsewhere keeps the 7", c do
+      id = "nc-remote-#{System.unique_integer([:positive])}"
+      obj = fn code -> %{"code" => code, "label" => "x"} end
+      content = Map.new(@objects, &{&1, obj.("L3")}) |> Map.put("notes", "0")
+
+      {:ok, _} =
+        Content.create_document(
+          c.type,
+          %{"doc_id" => id, "title" => "Book", "content" => content},
+          @dataset
+        )
+
+      c = %{c | docs: %{id => id}}
+      view = open(c, unquote(surface), id)
+
+      view
+      |> form("#editor-form", %{"doc[metalong].code" => "L9"})
+      |> render_change(%{"_target" => ["doc[metalong].code"]})
+
+      assert stored(c, id)["metalong"] == obj.("L9")
+
+      {:ok, _} =
+        Content.upsert_document(
+          c.type,
+          %{
+            "doc_id" => "drafts." <> id,
+            "title" => "Book",
+            "content" => Map.merge(content, %{"metalong" => obj.(7)})
+          },
+          @dataset
+        )
+
+      render(view)
+
+      view
+      |> form("#editor-form", %{"doc" => %{"notes" => "typed"}})
+      |> render_change(%{"_target" => ["doc", "notes"]})
+
+      assert stored(c, id)["notes"] == "typed"
+      assert stored(c, id)["metalong"] == obj.(7)
+    end
+  end
+
   # Review of #27482: only an object's codelist is drawn kept. An array's row
   # (`doc[codes][0]`) and a paper block's composite (`code`) have no save that
   # drops an untouched "", so a kept row would be written as "". They are

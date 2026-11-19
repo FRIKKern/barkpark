@@ -506,10 +506,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     params = BarkparkWeb.Studio.StudioLive.Path.unmangle_params(params)
     touched = touched_paths(socket)
     base_form = base_form(socket)
+    targets = params |> Map.get("_target") |> List.wrap()
 
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
-        is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched)
+        is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched) and
+          not kept_value?(k, v, targets, base_form)
       end)
 
     if dotted == [] do
@@ -615,6 +617,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
     end
   end
+
+  # A "" posted at a dotted path whose stored value is not a string (a number,
+  # an object or a list an import wrote into a codelist) is what a kept field
+  # posts (`CompositeField`, "Not a code"): the input cannot show the value.
+  # It is written only when THIS post is a change of that input (`_target`),
+  # the rule `KeptCodes.only_touched/3` keeps for a top-level codelist. The
+  # session's touched set is not enough: a path picked earlier, then given a
+  # number by another editor, posts "" with every later change of the form.
+  defp kept_value?(key, "", targets, form) do
+    key not in targets and
+      case StudioLive.parse_path(key) do
+        [] -> false
+        path -> stored_at(form, path) |> then(&(not is_nil(&1) and not is_binary(&1)))
+      end
+  end
+
+  defp kept_value?(_key, _value, _targets, _form), do: false
+
+  defp stored_at(value, []), do: value
+
+  defp stored_at(%{} = map, [key | rest]) when is_binary(key),
+    do: stored_at(Map.get(map, key), rest)
+
+  defp stored_at(list, [idx | rest]) when is_list(list) and is_integer(idx),
+    do: stored_at(Enum.at(list, idx), rest)
+
+  defp stored_at(_value, _path), do: nil
 
   defp foldable?(_key, value, _touched) when is_nil(value), do: false
   defp foldable?(key, "", touched), do: MapSet.member?(touched, key)
