@@ -27,13 +27,16 @@ export const surfacesOf = (ctx) => (ctx.surfaces === false ? ['base'] : SURFACES
 
 // `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
 // `motion`: the reduced-motion setting the page opens with; the lights are read under both (see motionFails).
-export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1, motion = 'reduce' } = {}) {
+// `clock`: the page's own timers (setTimeout, Date, its animation frames) run on a clock the check moves (see
+// pressed); the check's worlds keep real time.
+export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1, motion = 'reduce', clock = false } = {}) {
   const context = await ctx.browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: motion, isMobile: mobile, hasTouch: mobile })
   const page = await context.newPage()
   const where = `${ctx.part}, ${width}px${js ? '' : ', no script'}`
   page.on('pageerror', (e) => ctx.errors.push(`${where}: ${String(e).slice(0, 200)}`))
   page.on('console', (m) => m.type() === 'error' && ctx.errors.push(`${where}: console: ${m.text().slice(0, 200)}`))
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
+  if (clock) await page.clock.install()
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })
   if (js && ctx.styles) {
@@ -106,17 +109,21 @@ async function ax(page, selector) {
 }
 
 // With `ctx.states`, each step ends with the stage read as drawn (in the first skin, light, on base), so a state
-// only the steps reach (pending, say) is read while it holds.
+// only the steps reach (pending, say) is read while it holds. A reading takes real time (a second or more on a
+// slow runner), so the page's own timers run on a clock that stands still between steps: a step's `wait` moves
+// it that far (otherwise 50ms), and a pending that lasts 2.5s lasts 2.5s of the page's time whatever the
+// readings cost.
 export async function pressed(ctx, part, skins) {
   const { setup, steps } = await import(pathToFileURL(part.press).href)
   if (!Array.isArray(steps) || !steps.length) return { light: light(false, 'press.mjs exports no steps'), steps: [] }
   const drawn = ctx.states !== false
-  const page = await open(ctx, drawn ? { scale: 2, height: 1600 } : {})
+  const page = await open(ctx, { clock: true, ...(drawn ? { scale: 2, height: 1600 } : {}) })
   const waits = waitsFor(skins[0], 'light', 'base')
   const results = []
   try {
     if (drawn) await view(page, skins[0], 'light')
     if (setup) await inPage(page, setup, part.name, 'press.mjs setup')
+    await page.clock.pauseAt(Date.now() + 1000)
     await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
     for (const step of steps) {
       let result
@@ -139,7 +146,7 @@ export async function pressed(ctx, part, skins) {
             await page.mouse.click(at.x, at.y)
           }
           for (const key of step.keys ?? []) await page.keyboard.press(key)
-          if (step.wait) await new Promise((r) => setTimeout(r, step.wait))
+          await page.clock.runFor(step.wait ?? 50)
           await settle(page)
         })(), STEP_MS + (step.wait ?? 0), `step "${step.name}"`)
         result = await inPage(page, step.expect, part.name, `step "${step.name}"`)
