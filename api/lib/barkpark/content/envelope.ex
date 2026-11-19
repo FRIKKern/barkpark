@@ -237,49 +237,28 @@ defmodule Barkpark.Content.Envelope do
   catches encrypted ciphertext. Resolving each doc's own schema closes the leak
   exactly as single-type search already does.
   """
-  def render_many_by_type(docs, schema_fun, caller_context)
-      when is_function(schema_fun, 1) or is_function(schema_fun, 2) do
+  def render_many_by_type(docs, schema_fun, caller_context) when is_function(schema_fun, 1) do
     {rendered, _cache} =
       Enum.map_reduce(docs, %{}, fn doc, cache ->
-        {schema, cache} = resolve_schema_cached(cache, doc, schema_fun)
+        {schema, cache} = resolve_schema_cached(cache, doc.type, schema_fun)
         {render(doc, schema, caller_context), cache}
       end)
 
     rendered
   end
 
-  @doc """
-  `schema_fun`'s schema for `doc`. A resolver of arity 1 is handed the
-  document's type; one of arity 2 the type and the document, for a read whose
-  rows may come from more than one tenant (each redacted by its own tenant's
-  schema).
-  """
-  def schema_for(schema_fun, doc) when is_function(schema_fun, 2),
-    do: schema_fun.(Map.get(doc, :type), doc)
-
-  def schema_for(schema_fun, doc) when is_function(schema_fun, 1),
-    do: schema_fun.(Map.get(doc, :type))
-
-  # Indexed once per type (per type and tenant for an arity-2 resolver), not
-  # once per document (`field_index/1`).
-  defp resolve_schema_cached(cache, doc, schema_fun) do
-    key = schema_key(schema_fun, doc)
-
-    case Map.fetch(cache, key) do
+  defp resolve_schema_cached(cache, type, schema_fun) do
+    case Map.fetch(cache, type) do
       {:ok, schema} ->
         {schema, cache}
 
       :error ->
-        fields = schema_for(schema_fun, doc) |> raw_fields()
+        # Indexed once per type, not once per document (`field_index/1`).
+        fields = schema_fun.(type) |> raw_fields()
         schema = {:indexed, field_index(fields), only_ciphertext_hidden?(fields)}
-        {schema, Map.put(cache, key, schema)}
+        {schema, Map.put(cache, type, schema)}
     end
   end
-
-  defp schema_key(schema_fun, doc) when is_function(schema_fun, 2),
-    do: {doc.type, Map.get(doc, :workspace_id), Map.get(doc, :project_id)}
-
-  defp schema_key(_schema_fun, doc), do: doc.type
 
   @doc """
   Content source map (task-f18edb4599e06308, candidate 1) — a `{result path
