@@ -5,13 +5,13 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
   rule's own case, nothing is lost: no character, no mark on a character, no
   link, no checked state, no block, no item child, no slot. Each alias the
   printer reads moves its body whole; and a block whose two names hold
-  different bodies is not normalised away, so its round trip shows the loss.
+  different bodies is not normalised away, so the print of it is refused.
   """
   use ExUnit.Case, async: true
 
   alias Barkpark.BpmlStoredDocuments
   alias Barkpark.PortableDoc.Bpml
-  alias Barkpark.PortableDoc.Bpml.Canonical
+  alias Barkpark.PortableDoc.Bpml.{Canonical, UnprintableError}
   alias Barkpark.PortableDoc.Bpml.Canonical.AliasKey
   alias Barkpark.PortableDoc.Render
 
@@ -26,10 +26,10 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
     parsed
   end
 
-  # The print does not give the block back: the round trip loses a part.
   defp refused!(blocks) do
-    assert {:ok, parsed} = Bpml.parse_blocks(Bpml.print_blocks(blocks))
-    refute parsed == Canonical.normalize(blocks)
+    e = assert_raise UnprintableError, fn -> Bpml.print_blocks(blocks) end
+    assert e.kind == :round_trip
+    e
   end
 
   test "the definition is closed: thirteen rewrites" do
@@ -111,10 +111,10 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
 
   defp rename(m, _from, _to), do: m
 
-  test "a block whose two names hold different bodies is not normalised away; its round trip shows the loss" do
+  test "a block whose two names hold different bodies is not normalised away, and is refused" do
     both = %{"type" => "paragraph", "content" => [t("shown")], "text" => "dropped by the print"}
     assert Canonical.normalize([both]) == [both]
-    refused!([both])
+    assert refused!([both]).type =~ "blocks[0]"
 
     heading = %{"type" => "heading", "level" => 2, "text" => "shown", "content" => [t("hidden")]}
     refused!([heading])

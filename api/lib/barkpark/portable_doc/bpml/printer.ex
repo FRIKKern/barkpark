@@ -9,9 +9,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   raises `Barkpark.PortableDoc.Bpml.UnprintableError` (kind `:block`, `:inline`,
   `:mark` or `:head_cell`) — never a bare `FunctionClauseError`, and never a
   lossy `""`. Callers turn that into an honest 422.
+
+  Every print also checks itself (`Bpml.RoundTrip`): when parsing the print
+  back does not give the blocks that were printed, the print is refused with
+  kind `:round_trip`, naming the block path the text does not carry.
   """
 
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
+  alias Barkpark.PortableDoc.Bpml.{RoundTrip, UnprintableError}
 
   @indent "  "
 
@@ -20,12 +24,15 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   def print_paper(%{} = paper) do
     attrs = attr_str(paper, ["slug", "title"])
     meta = meta_lines(paper)
-    body = Enum.map(Map.get(paper, "blocks", []), &block(&1, 1))
-    "<paper#{attrs}>\n" <> Enum.join(meta ++ body, "\n") <> "\n</paper>\n"
+    blocks = Map.get(paper, "blocks", [])
+    body = Enum.map(blocks, &block(&1, 1))
+    printed = "<paper#{attrs}>\n" <> Enum.join(meta ++ body, "\n") <> "\n</paper>\n"
+    RoundTrip.check!(blocks, printed, :paper)
   end
 
   def print_blocks(blocks) when is_list(blocks) do
-    blocks |> Enum.map(&block(&1, 0)) |> Enum.join("\n") |> Kernel.<>("\n")
+    printed = blocks |> Enum.map(&block(&1, 0)) |> Enum.join("\n") |> Kernel.<>("\n")
+    RoundTrip.check!(blocks, printed, :blocks)
   end
 
   # ── paper meta ──────────────────────────────────────────────────────────────

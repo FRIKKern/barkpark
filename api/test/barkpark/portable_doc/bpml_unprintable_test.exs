@@ -157,8 +157,8 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
       assert Plug.Exception.status(UnprintableError.new(:block, "image")) == 422
     end
 
-    test "every kind is one of the four declared positions" do
-      assert UnprintableError.kinds() == [:block, :inline, :mark, :head_cell]
+    test "every kind is one of the four declared positions, or a print that drops a part" do
+      assert UnprintableError.kinds() == [:block, :inline, :mark, :head_cell, :round_trip]
     end
   end
 end

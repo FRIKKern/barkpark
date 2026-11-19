@@ -24,7 +24,10 @@ defmodule Barkpark.PortableDoc.Bpml.UnprintableError do
       non-node where inline content belongs;
     * `:mark`      — a text mark outside strong|em|code|underline|strike|highlight|sub|sup;
     * `:head_cell` — a table head cell that is neither an inline-node list nor
-      a legacy `%{"text" => binary}` map.
+      a legacy `%{"text" => binary}` map;
+    * `:round_trip` — every part prints, but parsing the print back does not
+      give the document: `type` is the block path the text does not carry
+      (`blocks[2].items[0].children`), found by `Bpml.RoundTrip`.
 
   It stays TYPED rather than becoming a broadened rescue at the callers (charter
   D3): a blanket `rescue` would convert genuine printer bugs into the same 422,
@@ -38,14 +41,14 @@ defmodule Barkpark.PortableDoc.Bpml.UnprintableError do
   never a server fault.
   """
 
-  @kinds [:block, :inline, :mark, :head_cell]
+  @kinds [:block, :inline, :mark, :head_cell, :round_trip]
 
   defexception [:kind, :type, :message]
 
-  @type kind :: :block | :inline | :mark | :head_cell
+  @type kind :: :block | :inline | :mark | :head_cell | :round_trip
   @type t :: %__MODULE__{kind: kind(), type: String.t() | nil, message: String.t()}
 
-  @doc "The four positions BPML can fail to spell."
+  @doc "The positions BPML can fail to spell, and the round trip that can fail."
   @spec kinds() :: [kind()]
   def kinds, do: @kinds
 
@@ -58,6 +61,9 @@ defmodule Barkpark.PortableDoc.Bpml.UnprintableError do
   def new(kind, type) when kind in @kinds do
     %__MODULE__{kind: kind, type: type_name(type), message: build_message(kind, type)}
   end
+
+  defp build_message(:round_trip, path),
+    do: "BPML cannot carry #{type_name(path)} yet, so it is not printed (kind: round_trip)"
 
   defp build_message(kind, nil),
     do: "BPML printer: #{noun(kind)} #{shapeless(kind)} (kind: #{kind})"

@@ -17,6 +17,7 @@ defmodule Barkpark.PortableDoc.BpmlSectionVariantTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Bpml
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   @framed %{
     "id" => "s1",
@@ -65,17 +66,19 @@ defmodule Barkpark.PortableDoc.BpmlSectionVariantTest do
   end
 
   describe "scalar guard" do
-    test "a map-valued variant is DROPPED by the printer, never crashed" do
+    # The text cannot carry a non-scalar variant, so the print is refused
+    # (kind :round_trip) naming it, never printed without it and never crashed.
+    test "a map-valued variant is refused by the printer, naming it, never crashed" do
       poisoned = Map.put(@framed, "variant", %{"deep" => "map"})
-      bpml = Bpml.print_blocks([poisoned])
-      refute bpml =~ "variant"
-      assert {:ok, [parsed]} = Bpml.parse_blocks(bpml)
-      assert parsed == Map.delete(@framed, "variant")
+      e = assert_raise UnprintableError, fn -> Bpml.print_blocks([poisoned]) end
+      assert e.kind == :round_trip
+      assert e.type == "blocks[0].variant"
     end
 
-    test "a list-valued variant is likewise dropped" do
+    test "a list-valued variant is likewise refused" do
       poisoned = Map.put(@framed, "variant", ["framed"])
-      refute Bpml.print_blocks([poisoned]) =~ "variant"
+      e = assert_raise UnprintableError, fn -> Bpml.print_blocks([poisoned]) end
+      assert e.type == "blocks[0].variant"
     end
   end
 end
