@@ -151,11 +151,30 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(root.querySelector("button").textContent.trim(), "[…] 250 items");
   const more = () => out.querySelector("button.json-more");
   assert.equal(more().textContent, "Show 150 more");
-  click(more());
+  // Show more hands focus on to the first row it drew, not to the body.
+  const first = more();
+  first.focus();
+  click(first);
+  const rows = () => root.querySelectorAll(":scope > ul > li[role=treeitem]");
+  assert.equal(doc.activeElement, rows()[100].querySelector(":scope > button"), "focus is on row 100's toggle");
   assert.equal(more().textContent, "Show 50 more");
   click(more());
   assert.equal(more(), null);
   assert.equal(root.querySelectorAll(":scope > ul > li[role=treeitem]").length, 250);
+}
+
+// 4b. Rows of plain values have no toggle: the first drawn row itself takes focus.
+{
+  answer = { status: 200, body: { query: "*", result: Array.from({ length: 150 }, (_, i) => i), ms: 1 } };
+  query.value = "*[0...150]._id";
+  click($("[data-vision-fetch]"));
+  await settle();
+  const more = out.querySelector("button.json-more");
+  more.focus();
+  click(more);
+  const row = out.querySelectorAll("[role=tree] > li > ul > li[role=treeitem]")[100];
+  assert.equal(doc.activeElement, row);
+  assert.equal(row.tabIndex, -1);
 }
 
 // 5. An empty query is refused here; Copy says it copied.
@@ -173,6 +192,37 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   await settle();
   assert.equal(copied, "http://localhost:4000/w/a/p/b/v1/data/groq/production?query=*");
   assert.equal($("[data-vision-copied]").textContent, "The URL is copied to the clipboard");
+}
+
+// 6. Fetch keeps its focus while it runs: busy is aria-disabled, never `disabled` (Chrome blurs a
+// focused button that becomes disabled), and a press while busy sends nothing.
+{
+  asked.length = 0;
+  let release;
+  const held = new Promise((r) => (release = r));
+  const fetchAs = window.fetch;
+  window.fetch = (url) => {
+    asked.push(new URL(url, window.location.href));
+    return held.then(() => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ query: "*", result: [], ms: 1 })) }));
+  };
+  const button = $("[data-vision-fetch]");
+  query.value = "*[0...1]";
+  button.focus();
+  click(button);
+  assert.equal(button.disabled, false, "never disabled while it runs");
+  assert.equal(button.getAttribute("aria-disabled"), "true");
+  assert.equal(out.closest("section").getAttribute("aria-busy"), "true");
+  click(button);
+  query.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+  assert.equal(asked.length, 1, "a press while busy sends nothing");
+  release();
+  await settle();
+  assert.equal(button.hasAttribute("aria-disabled"), false);
+  assert.equal(doc.activeElement, button, "focus stayed on Fetch");
+  click(button);
+  assert.equal(asked.length, 2, "runs again once done");
+  await settle();
+  window.fetch = fetchAs;
 }
 
 console.log("__desk_vision: ok");

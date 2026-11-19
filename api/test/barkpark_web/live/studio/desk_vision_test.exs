@@ -122,6 +122,12 @@ defmodule BarkparkWeb.Studio.DeskVisionTest do
     assert html =~ ~r/data-desk-vision-js="[^"]*bp-desk-vision[^"]*\.js"/
   end
 
+  test "on a touch screen the result tree's rows are 44 px, as every other Vision control" do
+    sheet = render_component(&BarkparkWeb.Studio.Desk.VisionStyle.sheet/1, %{})
+    [_, touch] = String.split(sheet, "@media (max-width: 768px) and (pointer: coarse) {")
+    assert touch =~ ".dk .json-toggle, .dk .json-more { min-height: 44px; }"
+  end
+
   test "Vision is the desk's: anyone but a workspace admin lands on the Studio", c do
     raw = "dvis-read-" <> Ecto.UUID.generate()
     {:ok, _} = Auth.create_token(raw, "dvis-read", @dataset, ["read"], c.workspace.id)

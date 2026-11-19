@@ -222,6 +222,9 @@
   };
 
   var fetchIt = function (root) {
+    // One run at a time, as TanStack's Fetch. Not `disabled`: that would take focus off the
+    // button it was pressed with, to the page's body.
+    if (root.__busy) return;
     init(root);
     remember(root);
     var query = part(root, "textarea").value;
@@ -240,13 +243,15 @@
     var result = part(root, ".dk-vision-result");
     var button = part(root, "[data-vision-fetch]");
     result.setAttribute("aria-busy", "true");
-    button.disabled = true;
+    root.__busy = true;
+    button.setAttribute("aria-disabled", "true");
     var t0 = performance.now();
     var run = { query: query.trim(), groq: to.groq };
     var done = function (answer) {
       if (seq !== root.__seq) return;
       result.setAttribute("aria-busy", "false");
-      button.disabled = false;
+      root.__busy = false;
+      button.removeAttribute("aria-disabled");
       answer.total = Math.round(performance.now() - t0);
       show(root, run, answer);
     };
@@ -301,9 +306,15 @@
     if (hit.hasAttribute("data-vision-fetch")) return fetchIt(root);
     if (hit.hasAttribute("data-vision-copy")) return copy(root);
     if (hit.__more) {
+      // Focus goes on to the first entry it drew before the button leaves, not to the body.
       var m = hit.__more;
-      hit.parentNode.remove();
-      return drawFrom(root, m.li, m.group, m.from);
+      drawFrom(root, m.li, m.group, m.from);
+      // The button's own row is still at m.from: the first drawn is after it.
+      var first = m.group.children[m.from + 1];
+      var to = first.querySelector(":scope > button:not([disabled])");
+      if (!to) (to = first).tabIndex = -1;
+      to.focus();
+      return hit.parentNode.remove();
     }
     if (hit.classList.contains("json-toggle")) {
       var li = hit.parentNode;

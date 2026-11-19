@@ -10,7 +10,7 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
     query turns the result column the critical tone.
   - Under 600 px one column, scrolled inside Vision: the selects, then the
     query, then the result. On a touch screen (`pointer: coarse`) the
-    selects and buttons are 44 px.
+    selects and buttons are 44 px, the result tree's rows too.
 
   Colours are the desk's tokens (`--dk-*`, `Desk.Style`).
   """
@@ -47,7 +47,7 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-fetch { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 33px; padding: 0 18px 0 12px; border: 0; border-radius: 3px; background: var(--dk-selected); color: var(--dk-on-selected); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
       .dk .dk-vision-fetch:hover { background: color-mix(in srgb, var(--dk-selected) 88%, var(--dk-fg)); }
       .dk .dk-vision-fetch:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; }
-      .dk .dk-vision-fetch:disabled { opacity: .5; cursor: default; }
+      .dk .dk-vision-fetch[aria-disabled="true"] { opacity: .5; cursor: default; }
       .dk .dk-vision-fetch svg { width: 21px; height: 21px; }
       .dk .dk-vision-result { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 12px 0; }
       .dk .dk-vision-result > .dk-vision-label { padding: 2px 0 4px; }
@@ -86,6 +86,7 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
         .dk .dk-vision-input, .dk .dk-vision-fetch, .dk .dk-vision-url-row .icon-btn { min-height: 44px; }
         .dk .dk-vision-url-row .icon-btn { width: 44px; }
         .dk .dk-vision-save-btn, .dk .dk-vision-copy { box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; }
+        .dk .json-toggle, .dk .json-more { min-height: 44px; }
       }
     </style>
     """
