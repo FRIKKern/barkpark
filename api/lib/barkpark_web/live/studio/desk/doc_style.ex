@@ -172,6 +172,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.TagsStyle.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.CodelistStyle.css()) %>
       .dk-field-toast { box-sizing: border-box; inset: auto 16px 56px auto; margin: 0; max-width: min(420px, calc(100vw - 32px)); padding: 10px 14px; border: 0; border-radius: 6px; background: var(--surface-raised); color: var(--text); box-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); font-size: 13px; line-height: 19px; }
       .dk-field-toast strong { display: block; font-weight: 600; }
       .dk-field-toast[data-tone="critical"] { box-shadow: inset 3px 0 0 var(--danger), 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 6px 10px 0 rgba(114, 120, 146, 0.07); }
