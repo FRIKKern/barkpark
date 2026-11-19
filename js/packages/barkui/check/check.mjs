@@ -34,7 +34,9 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     return { ok: false, proof: null }
   }
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
-  const browser = await chromium.launch()
+  // Grayscale text everywhere: with LCD text on, a layer the compositor makes non-opaque (a blend mode, say)
+  // draws its glyphs another way than the reference does, and an honest label reads as cut.
+  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
   let styles
   try {
     styles = await styleBaseline(browser, pathToFileURL(bare.file).href)

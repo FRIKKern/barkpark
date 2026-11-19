@@ -7,9 +7,9 @@
 // unpainted, and with every graphic (svg, img, a pseudo-element with a box)
 // unpainted; each toggle is an !important sheet in the earliest cascade layer,
 // put there from the isolated world. A thing's ink is the pixels that differ
-// when it is toggled off; its footprint is those that moved at least a fifth as
-// far as the most any moved (so a colour, a fade or a text gamma does not change
-// it). That footprint must be at least 90% of the same
+// when it is toggled off; its footprint is those that moved at least half as far
+// as the most any moved (the outline at half cover, so a colour, a fade, a text
+// gamma or an anti-aliasing mode does not change it). That footprint must be at least 90% of the same
 // thing drawn alone by the check, unclipped and uncovered (the same string in
 // the same font for text, a copy of the node for a graphic), in its own colours
 // on its own ground and at the same place within a device pixel, so that both
@@ -184,11 +184,11 @@ export function installDrawn() {
     g.drawImage(bitmap, 0, 0)
     return { w: bitmap.width, h: bitmap.height, data: g.getImageData(0, 0, bitmap.width, bitmap.height).data }
   }
-  const FOOT = 0.2
+  const FOOT = 0.5
   const inside = (x, y, rs) => rs.some((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
-  /** The ink between two captures inside some boxes: its footprint (the pixels that moved at least a fifth as far
-      as the most any moved, so a fade or a text gamma does not change it but a cut does), how many pixels clearly
-      moved, and the contrast of its core. */
+  /** The ink between two captures inside some boxes: its footprint (the pixels that moved at least half as far as
+      the most any moved: the outline at half cover, which a fade, a text gamma or an anti-aliasing mode leaves in
+      place but a cut does not), how many pixels clearly moved, and the contrast of its core. */
   const ink = (a, b, clip, scale, rects, holes) => {
     const moved = []
     const strong = []
