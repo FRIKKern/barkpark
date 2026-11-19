@@ -4,23 +4,27 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
 
   The routes, live routes, streams and channels are read from the compiled
   application (`PaperAnswerSweep.Introspect`); a new one joins by itself.
-  For each, the caller with the right (an admin token) is driven first:
+  Every route is called, and the read-shaped ones (every GET and live route,
+  and each non-GET route whose code can answer with documents) are split
+  into two, with nothing left over:
 
-    * a GET, a live route, a stream, and a non-GET route whose code can
-      answer with documents must reach an answer (2xx, a stream, or a
-      redirect that ends on one), else the test fails by route name;
-    * a route whose admin answer holds a hidden word carries the Paper. Their
-      count may not drop below `@carries_floor`.
+    * a CARRIER: the caller with the right (an admin token) gets a 2xx or a
+      stream holding a hidden word;
+    * a route on `@no_paper_fields`, each with its reason: it cannot answer
+      with a Paper's fields, so its admin answer never holds a hidden word.
 
-  Then each caller without the right (anonymous, a read token, a write token)
-  is driven with the same params, once per search word: a visible word and
-  each hidden word. Any hidden word in any byte of any answer (status line
-  aside: headers and body, an error's text, a stream's chunks, a channel's
-  replies and pushes) is a failure, named by caller and route.
+  A read-shaped route in neither fails by name, and so does a listed route
+  whose admin answer holds a hidden word. Carriers plus listed routes must
+  equal the read-shaped routes introspection finds.
 
-  Nothing is skipped: every route is called. A route that cannot be called
-  at all would go in `@limits` with its reason; it is empty, and its count
-  may only go down.
+  Each caller without the right (anonymous, a read token, a write token) is
+  then driven on every route with the admin's params, once per search word:
+  a visible word and each hidden word. Any hidden word in any byte it is
+  answered (headers and body of any status, an error's text, a stream's
+  chunks, a channel's replies and pushes) fails, named by caller and route.
+
+  A route that cannot be called at all would go in `@limits` with its
+  reason; it is empty, and its count may only go down.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -29,9 +33,9 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
 
   @moduletag timeout: 1_800_000
 
-  # The number of routes whose admin answer carries the Paper on the first
-  # run. A change that makes fewer routes reach the Paper fails here.
-  @carries_floor 0
+  # `{verb, path, reason}`: read-shaped routes that cannot answer with a
+  # Paper's fields. Each row's controller is read by the reviewer.
+  @no_paper_fields []
 
   # `{verb, path, reason}` for a route the sweep cannot call at all.
   @limits []
@@ -52,8 +56,9 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
   defp reached?(%{status: :stream}), do: true
   defp reached?(%{status: status}), do: status in 200..299
 
-  # The admin's answer to `route`, following one redirect, with the params it
-  # was reached by.
+  # The admin's answer to `route`, following one redirect, and the params it
+  # came from: the first param set that carries the Paper, else the first
+  # that is answered 2xx, else the first.
   defp admin_answer(route, path, seed) do
     sets = Sweep.param_sets(seed, visible())
 
@@ -64,8 +69,10 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
         {params, follow(answer, seed)}
       end)
 
-    Enum.find(answers, fn {_params, answer} -> reached?(answer) end) ||
-      Enum.at(answers, 0)
+    answers = Enum.to_list(answers)
+
+    Enum.find(answers, fn {_, a} -> reached?(a) and Sweep.leaks(a.bytes) != [] end) ||
+      Enum.find(answers, fn {_, a} -> reached?(a) end) || hd(answers)
   end
 
   defp follow(%{status: status, location: "/" <> _ = to} = answer, seed)
@@ -79,7 +86,6 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
   defp sweep_route(%{live: nil} = route, seed) do
     path = Sweep.fill(route.path, seed)
     {params, admin} = admin_answer(route, path, seed)
-    must_reach? = Introspect.read_shaped?(route)
 
     leaks =
       for {who, token} <- Sweep.without_right(seed),
@@ -91,10 +97,11 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
           do: "#{who} #{route.verb} #{route.path}: #{inspect(Sweep.leaks(answer.bytes))}"
 
     %{
-      route: "#{route.verb} #{route.path}",
-      unreached: must_reach? and not reached?(admin),
+      key: {route.verb, route.path},
+      read_shaped: Introspect.read_shaped?(route),
       admin_status: admin.status,
-      carries: Sweep.leaks(admin.bytes) != [],
+      carrier: reached?(admin) and Sweep.leaks(admin.bytes) != [],
+      admin_holds: Sweep.leaks(admin.bytes) != [],
       leaks: leaks
     }
   end
@@ -114,10 +121,11 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
           do: "#{who} live #{route.path}: #{inspect(Sweep.leaks(answer.bytes))}"
 
     %{
-      route: "live #{route.path}",
-      unreached: not reached?(admin),
+      key: {route.verb, route.path},
+      read_shaped: true,
       admin_status: admin.status,
-      carries: Sweep.leaks(admin.bytes) != [],
+      carrier: reached?(admin) and Sweep.leaks(admin.bytes) != [],
+      admin_holds: Sweep.leaks(admin.bytes) != [],
       leaks: leaks
     }
   end
@@ -125,26 +133,40 @@ defmodule BarkparkWeb.PaperAnswerSweepTest do
   test "no route, live route or stream shows a hidden word to a caller without the right",
        %{seed: seed} do
     results = Enum.map(Introspect.routes(), &sweep_route(&1, seed))
+    listed = Map.new(@no_paper_fields, fn {verb, path, reason} -> {{verb, path}, reason} end)
+    name = fn {verb, path} -> "#{verb} #{path}" end
 
-    unreached =
-      for r <- results, r.unreached, do: "#{r.route}: the admin got #{inspect(r.admin_status)}"
+    neither =
+      for r <- results,
+          r.read_shaped,
+          not r.carrier,
+          not Map.has_key?(listed, r.key),
+          do: "#{name.(r.key)}: the admin got #{inspect(r.admin_status)} without the Paper"
 
-    carries = Enum.count(results, & &1.carries)
+    listed_but_carries =
+      for r <- results,
+          Map.has_key?(listed, r.key),
+          r.admin_holds,
+          do: "#{name.(r.key)} is listed (#{listed[r.key]}) but answers with Paper fields"
+
+    read_shaped = Enum.count(results, & &1.read_shaped)
+    carriers = Enum.count(results, &(&1.read_shaped and &1.carrier))
 
     no_debug_info =
-      for %{verb: verb, live: nil, plug: plug} = r <- Introspect.routes(),
+      for %{verb: verb, live: nil, plug: plug} <- Introspect.routes(),
           verb != "GET",
           Introspect.definitions(plug) == nil,
-          do: "#{r.verb} #{r.path}"
+          do: plug
 
     IO.puts(
-      "answer sweep: #{length(no_debug_info)} non-GET routes read-shaped for lack of debug info"
+      "answer sweep: #{length(results)} routes, #{read_shaped} read-shaped " <>
+        "(#{length(no_debug_info)} for lack of debug info), #{carriers} carriers, " <>
+        "#{map_size(listed)} listed, #{Sweep.requests()} requests"
     )
 
-    if carries > @carries_floor, do: IO.puts("answer sweep: #{carries} routes carry the Paper")
-
-    assert unreached == [], "not driven to an answer:\n" <> Enum.join(unreached, "\n")
-    assert carries >= @carries_floor
+    assert neither == [], "read-shaped, neither carrier nor listed:\n" <> Enum.join(neither, "\n")
+    assert listed_but_carries == [], Enum.join(listed_but_carries, "\n")
+    assert carriers + map_size(listed) == read_shaped
     assert Enum.flat_map(results, & &1.leaks) == []
     assert length(@limits) <= 0
   end

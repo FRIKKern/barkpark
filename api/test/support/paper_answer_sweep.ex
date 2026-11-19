@@ -198,6 +198,7 @@ defmodule BarkparkWeb.PaperAnswerSweep do
   call that did not return.
   """
   def call(seed, token, verb, path, params) do
+    count_request()
     conn = conn_for(token)
     method = verb |> String.downcase() |> String.to_atom()
     savepoint? = verb != "GET"
@@ -212,6 +213,7 @@ defmodule BarkparkWeb.PaperAnswerSweep do
 
   @doc "A live route's connected render, following one redirect."
   def live_call(token, path, redirects \\ 1) do
+    count_request()
     conn = conn_for(token)
 
     case safely(fn -> live(conn, path) end) do
@@ -230,6 +232,11 @@ defmodule BarkparkWeb.PaperAnswerSweep do
         %{status: 500, bytes: text, location: nil}
     end
   end
+
+  @doc "The number of calls this process has made."
+  def requests, do: Process.get(:answer_sweep_requests, 0)
+
+  defp count_request, do: Process.put(:answer_sweep_requests, requests() + 1)
 
   defp run(seed, fun) do
     :erlang.trace_pattern({Plug.Adapters.Test.Conn, :chunk, 2}, true, [:local])
