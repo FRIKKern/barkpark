@@ -395,4 +395,11 @@ defmodule BarkparkWeb.WebhookController do
       end)
     end)
   end
+
+  # The SCOPED tier needs the `admin` PERMISSION as well as an admin seat
+  # (task-3e1492d5869d66b0), like the flat tier (`:flat_admin_api`). Create and
+  # rotate return the signing secret and update can set one, so a `write` token
+  # raised to an admin seat could forge signatures to the receiver. Declared at
+  # the end so no line above moves.
+  plug(BarkparkWeb.Plugs.RequireScopedAdminPermission)
 end
