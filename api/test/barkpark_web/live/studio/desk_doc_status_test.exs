@@ -125,8 +125,12 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     # 25 px (3 + 19 + 3) and 10 px above and below: 45.
     assert coarse =~ "border-style: solid; border-color: transparent; border-width: 10px 0;"
     assert coarse =~ "background-clip: padding-box;"
-    # A 390 px phone squeezes the pills to their dot; they keep a 44 px floor.
-    assert coarse =~ "min-width: 44px;"
+    # A phone's pills, the greyed span too, are 44 px and give way only when
+    # the header has more in it: nothing is pushed past its edge.
+    assert html =~
+             ".dk .dk-chips .dk-chip { box-sizing: border-box; flex: 0 1 auto; width: 44px; min-width: 0;"
+
+    refute html =~ ".dk .dk-chips { flex-shrink: 0; }"
 
     # Round ends of 12.5 px on the drawn 25 px band, not an ellipse.
     assert coarse =~ "border-radius: 12.5px / 22.5px;"
@@ -135,9 +139,7 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     assert html =~
              ".dk button.dk-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }"
 
-    # The pills' row never shrinks under them, so Draft never slides under
-    # Share; the header makes the room as TanStack's does on a phone.
-    assert html =~ ".dk .dk-chips { flex-shrink: 0; }"
+    # The header makes the room as TanStack's does on a phone (J42).
 
     assert has_element?(
              view,
@@ -147,10 +149,10 @@ defmodule BarkparkWeb.Studio.DeskDocStatusTest do
     css = rendered_to_string(BarkparkWeb.Studio.Desk.Style.sheet(%{}))
 
     assert css =~
-             ".dk[data-narrow] .dk-doc > .pane-header [data-desk-split-right] { display: none; }"
+             ".dk[data-narrow] .dk-doc > .pane-header :is([data-desk-split-right], [data-desk-close-split]) { display: none; }"
 
     assert css =~
-             "@media (max-width: 480px) and (pointer: coarse) { .dk .dk-doc > .pane-header { padding-left: 6px; padding-right: 2px; } }"
+             "@media (max-width: 480px) and (pointer: coarse) { .dk .dk-doc > .pane-header { padding-left: 6px; padding-right: 2px; } .dk[data-narrow] .dk-doc > .pane-header > .pane-header-title:has(> nav) { display: none; } }"
 
     assert css =~ ".dk[data-narrow] .dk-doc > .pane-header .dk-close { margin-right: 0; }"
   end

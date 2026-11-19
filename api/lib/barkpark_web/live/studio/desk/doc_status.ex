@@ -21,11 +21,13 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   (`background-clip: padding-box`; an inset shadow is drawn inside the
   border), so the header looks the same. The corners are 12.5 px across
   and 22.5 px down: the padding edge then keeps the 25 px pill's round ends
-  (999 px would clamp to the 45 px box and draw an ellipse). On a phone the
-  pills ellipsize to their dot but stay 44 px wide, and their row does not
-  shrink below them, so they never slide under Share; the header makes the
-  room as TanStack's does (no split on a narrow window, its phone padding,
-  `Desk.Style`). The filled Draft
+  (999 px would clamp to the 45 px box and draw an ellipse). On a phone
+  (480 px and under) each pill, the greyed span too, is 44 px wide and its
+  word ellipsizes, as TanStack's; the header makes the room as TanStack's
+  does (no split and no close split on a narrow window, its phone padding,
+  `Desk.Style`). As TanStack's chips, the row still gives way when the
+  header has more in it (others' avatars): the pills shrink before any
+  button is pushed past the edge, and nothing overlaps. The filled Draft
   (`data-active`) is named in the rule too: its `background` shorthand
   would set the clip back and fill the clear border. The focus ring is an
   inset ring of the same token, so it traces the pill, not the 45 px box
@@ -68,12 +70,11 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
       .dk button.dk-chip { font: inherit; font-size: 13px; font-weight: 500; border: 0; background: var(--dk-bg); cursor: pointer; }
       .dk button.dk-chip:hover { box-shadow: inset 0 0 0 1px var(--dk-line-strong); }
       @media (max-width: 768px) and (pointer: coarse) {
-        .dk button.dk-chip, .dk button.dk-chip:hover, .dk button.dk-chip[data-active] { border-style: solid; border-color: transparent; border-width: 10px 0; border-radius: 12.5px / 22.5px; background-clip: padding-box; min-width: 44px; }
-        .dk .dk-chips { flex-shrink: 0; }
+        .dk button.dk-chip, .dk button.dk-chip:hover, .dk button.dk-chip[data-active] { border-style: solid; border-color: transparent; border-width: 10px 0; border-radius: 12.5px / 22.5px; background-clip: padding-box; }
         .dk button.dk-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
       }
       @media (max-width: 480px) and (pointer: coarse) {
-        .dk button.dk-chip { flex: none; width: 44px; padding-left: 6px; padding-right: 6px; gap: 6px; }
+        .dk .dk-chips .dk-chip { box-sizing: border-box; flex: 0 1 auto; width: 44px; min-width: 0; padding-left: 6px; padding-right: 6px; gap: 6px; }
       }
     </style>
     <span class="dk-chips" data-desk-status>
