@@ -265,7 +265,11 @@ defmodule BarkparkWeb.Studio.DeskGroupTabsShownTest do
     view = desk(c, id)
     pick(view, "meta")
 
-    assert has_element?(view, ~s(#{@form} input[type="datetime-local"][id="publishedAt"]))
+    assert has_element?(
+             view,
+             ~s(#{@form} input[type="text"][data-datetime-text][id="publishedAt"])
+           )
+
     assert has_element?(view, ~s(#{@form} .field label[for="publishedAt"]))
 
     assert has_element?(
