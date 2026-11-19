@@ -232,10 +232,11 @@ func startUpdateCheck(subcommand string) *pendingUpdateCheck {
 // finishUpdateNotice completes the check startUpdateCheck began: collect a
 // finished lookup (waiting at most updateFetchWait), then print the at-most-
 // one notice line. It never errors, never touches stdout, and never changes
-// the exit code — Execute defers it and ignores it entirely.
-func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
+// the exit code. It reports whether it printed, so Execute's failure line
+// (staleOnFailureLine) does not repeat it.
+func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) bool {
 	if pending == nil {
-		return
+		return false
 	}
 	cache := pending.cache
 	latest := pending.latest
@@ -260,13 +261,13 @@ func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
 	// gate keeps a hand-edited/hostile Latest (ANSI escapes, garbage) out of
 	// both the comparison and the terminal.
 	if latest == "" || !versionShape.MatchString(latest) {
-		return
+		return false
 	}
 	if cache.Notified == latest && !renotifyDue(cache.NotifiedAt, time.Now()) {
-		return
+		return false
 	}
 	if compareVersions(latest, cliVersion) <= 0 {
-		return
+		return false
 	}
 	fmt.Fprintf(stderr, "bp %s is available (you run %s) — upgrade: bp upgrade\n", latest, cliVersion)
 	// Re-load before pinning Notified so we never clobber a Notified persisted
@@ -275,6 +276,7 @@ func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
 	c.Notified = latest
 	c.NotifiedAt = time.Now().UTC().Format(time.RFC3339)
 	saveUpdateCache(c)
+	return true
 }
 
 // renotifyDue reports whether an already-announced release may be announced
@@ -326,4 +328,55 @@ func staleClientNote() string {
 		return ""
 	}
 	return fmt.Sprintf("note: you are running bp %s; %s is released. an out-of-date bp can refuse a command the server DOES have — re-check with `bp upgrade` before concluding it does not exist.", cliVersion, latest)
+}
+
+// staleOnFailureLine is the one stderr line a FAILED command adds when this bp
+// is older than the latest cli-v* release on record (task-63e7054c896a4987).
+//
+// The exit notice above is TTY-only and announces a release once a week at
+// most, so scripts, CI and coding agents never see it. They are also the
+// callers most likely to spend an hour working around a bug a newer bp has
+// already fixed. A failure (exit code not 0) is when that question matters, so
+// the line prints then, on any stderr, every time.
+//
+// It reads cli-release-cache.json only: no network, no update-check.json
+// throttle, no TTL. It is "" for a dev build, under BARKPARK_NO_UPDATE_NOTICE,
+// when the cache is empty or malformed, and when this binary is current.
+//
+// It names the two versions and no count. The cache holds only the latest
+// version, and patch numbers are not contiguous (cli-v1.26.27 and 1.26.28 were
+// never released), so a count derived from them would be wrong.
+func staleOnFailureLine() string {
+	if cliVersion == "dev" {
+		return ""
+	}
+	if os.Getenv("BARKPARK_NO_UPDATE_NOTICE") != "" {
+		return ""
+	}
+	latest := releaseCacheLatest()
+	if latest == "" || !versionShape.MatchString(latest) {
+		return ""
+	}
+	if compareVersions(latest, cliVersion) <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("bp %s is older than the latest release, %s; this may already be fixed: bp upgrade", cliVersion, latest)
+}
+
+// reportStaleOnFailure prints staleOnFailureLine after a failed command. It
+// stays silent on success, after `bp upgrade` and `bp version` (they are the
+// update surface), and when this run already printed a staleness line.
+func reportStaleOnFailure(out *writer, args []string, rc int) {
+	if rc == exitOK || out.staleNoted {
+		return
+	}
+	if _, rest, err := parseGlobals(args); err == nil && len(rest) > 0 {
+		if rest[0] == "upgrade" || rest[0] == "version" {
+			return
+		}
+	}
+	if line := staleOnFailureLine(); line != "" {
+		out.errf("%s", line)
+		out.staleNoted = true
+	}
 }

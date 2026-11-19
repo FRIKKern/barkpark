@@ -59,6 +59,11 @@ type writer struct {
 	// must not answer it with a speculation that the refusal is illegitimate.
 	lastErrorArm string
 
+	// staleNoted records that this run already told the operator bp is behind
+	// the latest release (the exit notice or the unknown-command note), so the
+	// failure line in Execute does not say it a second time. Per-invocation.
+	staleNoted bool
+
 	// credentialSent records whether the request just dispatched carried an
 	// Authorization header. Per-invocation, like lastErrorCode. It reaches
 	// apiError in handleResponseHinted so a 401 refusal can tell the two cases
