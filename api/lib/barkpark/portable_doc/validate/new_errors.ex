@@ -221,6 +221,13 @@ defmodule Barkpark.PortableDoc.Validate.NewErrors do
   @spec check_touched(term(), term()) :: :ok | {:error, {:halted, String.t()}}
   def check_touched(stored, written), do: verdict(split_touched(stored, written))
 
+  @doc """
+  The verdict on errors a caller found itself (`FromMarkdown.KeptBack`):
+  `:ok` when `added` is empty, else refused or reported as `check/2` does.
+  """
+  @spec judge([Validate.error()], [Validate.error()]) :: :ok | {:error, {:halted, String.t()}}
+  def judge(added, existing), do: verdict({added, existing})
+
   defp verdict({[], _existing}), do: :ok
   defp verdict({added, existing}), do: refuse_or_report(added, existing, refuse?())
 

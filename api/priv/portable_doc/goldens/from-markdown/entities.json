@@ -1,0 +1,18 @@
+{
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Fish & chips © # A &nosuch; &amp; "
+        },
+        {
+          "type": "code",
+          "value": "&amp;"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "markdown": "Fish &amp; chips &copy; &#35; &#x41; &nosuch; &amp;amp; `&amp;`"
+}

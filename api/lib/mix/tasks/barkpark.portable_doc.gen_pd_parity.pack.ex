@@ -15,6 +15,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
       css/code-tokens.css              the served code-token rules
       ops/<verb>.json                  before + op + after for each of the 9 edit verbs
       nested-list-carriers.json        the nested-list carrier fixture, verbatim
+      from-markdown/<name>.json        the shared Markdown-import cases, {"markdown", "blocks"} each
       limit-docs.json, limits/         the shared render limits (GenPdParity.Limits)
       canvas-forbidden-classes.json    reader literals the canvas JS must never write
       i18n/paper-canvas.<locale>.json  StudioLocale.component_strings(:paper_canvas)
@@ -40,12 +41,14 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
   @dir Path.join(@api, "priv/portable_doc/goldens")
   @surface Path.join(@api, "assets/paper-surface")
   @carriers Path.join(@api, "test/support/fixtures/nested-list-carriers.json")
+  @from_markdown Path.join(@api, "test/support/fixtures/from-markdown.json")
 
   @inputs Enum.sort([
             "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
             "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
             "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.limits.ex",
             "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.pack.ex",
+            "test/support/fixtures/from-markdown.json",
             "test/support/fixtures/nested-list-carriers.json",
             "test/support/fixtures/portable-doc-limits.json"
           ])
@@ -150,7 +153,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
         Enum.map(op_cases(), fn {verb, before, op} ->
           {"ops/#{verb}.json", json(op_fixture(before, op))}
         end),
-        Enum.map(Limits.goldens(), fn {path, golden} ->
+        Enum.map(from_markdown_cases(), fn {name, fixture} ->
+          {"from-markdown/#{name}.json", json(fixture)}
+        end),
+        Enum.map([Limits.value_depth() | Limits.goldens()], fn {path, golden} ->
           {path, Jason.encode!(ordered(golden)) <> "\n"}
         end),
         [
@@ -165,6 +171,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity.Pack do
       ])
     )
   end
+
+  # The Markdown-import cases `FromMarkdown` and `@portable-doc/text` both pass
+  # (from_markdown_fixtures_test.exs), one file per case.
+  defp from_markdown_cases, do: @from_markdown |> File.read!() |> Jason.decode!()
 
   # The /papers reader page the view-edit parity matrix measures
   # (paper-editor/src/__view_edit_parity_matrix.mjs): the Bulldocs layout, every
