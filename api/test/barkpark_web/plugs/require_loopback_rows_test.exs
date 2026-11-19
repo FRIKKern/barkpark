@@ -58,6 +58,19 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
      "127.0.0.1"},
     {"a link-local hop with a zone id", @lo, [{@xff, "fe80::1%en0"}], :refused, "fe80::1"},
     {"a loopback hop with a zone id", @lo, [{@xff, "::1%lo0"}], :refused, "127.0.0.1"},
+    {"a hop that is not valid UTF-8", @lo, [{@xff, <<0xFF>>}], :refused, :not_pinned},
+    {"invalid bytes mid-chain", @lo, [{@xff, "127.0.0.1, " <> <<0xC3, 0x28>> <> ", ::1"}],
+     :refused, :not_pinned},
+    {"a hop with a NUL", @lo, [{@xff, "127.0.0.1\0"}], :refused, "127.0.0.1"},
+    {"a very long unreadable value", @lo, [{@xff, String.duplicate("1", 100_000)}], :refused,
+     "127.0.0.1"},
+    {"a long chain of loopback hops", @lo,
+     [{@xff, Enum.join(List.duplicate("127.0.0.1", 5_000), ", ")}], :admitted, "127.0.0.1"},
+    {"the header many times, all loopback", @lo, List.duplicate({@xff, "::1"}, 1_000), :admitted,
+     "127.0.0.1"},
+    {"the header many times, one remote", @lo,
+     List.duplicate({@xff, "127.0.0.1"}, 999) ++ [{@xff, "203.0.113.9"}], :refused,
+     "203.0.113.9"},
     {"a trusted relay with an unreadable hop", @relay, [{@xff, "unknown"}], :refused,
      "198.51.100.55"},
     {"a trusted relay with a remote hop", @relay, [{@xff, "203.0.113.9"}], :refused,
@@ -87,42 +100,107 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
       conn = request(unquote(Macro.escape(peer)), unquote(Macro.escape(headers)))
       result = RequireLoopback.call(conn, RequireLoopback.init([]))
 
-      case unquote(verdict) do
-        :admitted ->
-          refute result.halted
-          assert result.status == nil
+      assert_verdict(result, unquote(verdict))
+      assert_client_ip(conn, unquote(client_ip))
+    end
+  end
 
-        :refused ->
-          assert result.halted
-          assert result.status == 403
-          assert result.resp_body == ""
-      end
+  defp assert_verdict(result, :admitted) do
+    refute result.halted
+    assert result.status == nil
+  end
 
-      assert Barkpark.RateLimiter.client_ip(conn) == unquote(client_ip)
+  defp assert_verdict(result, :refused) do
+    assert result.halted
+    assert result.status == 403
+    assert result.resp_body == ""
+  end
+
+  # The rate limiter keeps its own reading; this pins it per row.
+  # `:not_pinned`: bytes it does not read as text (task-ebbc5ec2f99c069b).
+  defp assert_client_ip(_conn, :not_pinned), do: :ok
+  defp assert_client_ip(conn, ip), do: assert(Barkpark.RateLimiter.client_ip(conn) == ip)
+
+  # ── Whatever it is given ───────────────────────────────────────────────
+
+  test "whatever forwarded-for it is given, the gate admits or answers an empty 403" do
+    :rand.seed(:exsss, {1, 2, 3})
+    pieces = ["127.0.0.1", "::1", "[::1]", "203.0.113.9", "", " ", ",", ":", "%", "[", "]", "\0"]
+
+    for _ <- 1..2_000 do
+      value =
+        Enum.map_join(1..:rand.uniform(6), fn _ ->
+          case :rand.uniform(3) do
+            1 -> Enum.random(pieces)
+            2 -> :crypto.strong_rand_bytes(:rand.uniform(8))
+            3 -> Enum.random(pieces) <> ","
+          end
+        end)
+
+      headers = List.duplicate({Enum.random([@xff, "X-Forwarded-For"]), value}, :rand.uniform(3))
+      result = RequireLoopback.call(request(Enum.random([@lo, @relay]), headers), [])
+
+      assert result.halted == false or (result.status == 403 and result.resp_body == ""),
+             inspect(headers)
+
+      if not result.halted, do: assert(result.status == nil)
     end
   end
 
   # ── The routes behind the gate ─────────────────────────────────────────
 
-  @router_source Path.expand("../../../lib/barkpark_web/router.ex", __DIR__)
+  @gate RequireLoopback
 
-  # The pipelines whose body plugs the gate, read from the router's source.
+  # The modules whose compiled code calls the gate, read from their BEAM
+  # imports. Only the router may; a controller that plugs it fails here.
+  defp modules_calling_gate do
+    for module <- Application.spec(:barkpark, :modules),
+        path = :code.which(module),
+        is_list(path),
+        {:ok, {_, [imports: imports]}} <- [:beam_lib.chunks(path, [:imports])],
+        {@gate, :call, 2} in imports,
+        do: module
+  end
+
+  # The router pipelines whose compiled function calls the gate, read from the
+  # router's own debug info: a nested block or a comment cannot hide one.
   defp gated_pipelines do
-    ~r/^\s*pipeline\(?\s*:(\w+)\)?\s+do\n(.*?)^\s*end\b/ms
-    |> Regex.scan(File.read!(@router_source), capture: :all_but_first)
-    |> Enum.filter(fn [_name, body] -> body =~ "RequireLoopback" end)
-    |> Enum.map(fn [name, _body] -> String.to_atom(name) end)
+    path = :code.which(BarkparkWeb.Router)
+
+    {:ok, {_, [debug_info: {:debug_info_v1, backend, data}]}} =
+      :beam_lib.chunks(path, [:debug_info])
+
+    {:ok, %{definitions: definitions}} =
+      backend.debug_info(:elixir_v1, BarkparkWeb.Router, data, [])
+
+    pipelines =
+      for route <- BarkparkWeb.Router.__routes__(),
+          pipe <- pipelines(route_verb(route), route.path),
+          into: MapSet.new(),
+          do: pipe
+
+    for {{name, 2}, :def, _meta, clauses} <- definitions,
+        name in pipelines,
+        calls_gate?(clauses),
+        do: name
+  end
+
+  defp calls_gate?(ast) do
+    {_, found} = Macro.prewalk(ast, false, fn node, found -> {node, found or node == @gate} end)
+    found
   end
 
   defp gated_routes do
     pipelines = gated_pipelines()
 
     for route <- BarkparkWeb.Router.__routes__(),
-        verb = route.verb |> Atom.to_string() |> String.upcase(),
+        verb = route_verb(route),
         Enum.any?(pipelines(verb, route.path), &(&1 in pipelines)),
         uniq: true,
         do: {verb, route.path}
   end
+
+  defp route_verb(route), do: route.verb |> Atom.to_string() |> String.upcase()
 
   # The route's pipelines, read off the real matcher. A probe that lands on
   # another route fails, so a shadowed path cannot drop out of the list.
@@ -144,7 +222,8 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
     |> Enum.join("/")
   end
 
-  test "the routes behind the gate are these" do
+  test "only the router calls the gate, and these routes are behind it" do
+    assert modules_calling_gate() == [BarkparkWeb.Router]
     assert gated_pipelines() == [:api_local]
 
     assert Enum.sort(gated_routes()) == [
@@ -153,17 +232,30 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackRowsTest do
            ]
   end
 
-  test "every route behind the gate refuses a remote peer and an unreadable hop" do
-    for {verb, path} <- gated_routes(),
-        {peer, headers} <- [{{203, 0, 113, 66}, []}, {@lo, [{@xff, "garbage"}]}] do
-      conn =
-        build_conn()
-        |> Map.put(:remote_ip, peer)
-        |> Map.update!(:req_headers, &(&1 ++ headers))
-        |> dispatch(@endpoint, String.downcase(verb), probe_path(path), %{})
+  defp through_endpoint(verb, path, peer, headers) do
+    build_conn()
+    |> Map.put(:remote_ip, peer)
+    |> Map.update!(:req_headers, &(&1 ++ headers))
+    |> dispatch(@endpoint, String.downcase(verb), probe_path(path), %{})
+  end
 
-      assert conn.status == 403, "#{verb} #{path} #{inspect(headers)}"
-      assert conn.resp_body == ""
+  test "every route behind the gate refuses a remote peer and an unreadable hop" do
+    callers = [
+      {{203, 0, 113, 66}, []},
+      {{203, 0, 113, 66}, [{"accept", "text/html"}]},
+      {@lo, [{@xff, "garbage"}]},
+      {@lo, [{@xff, <<0xFF>>}]},
+      {@lo, [{"accept", "text/html"}, {@xff, "203.0.113.9"}]}
+    ]
+
+    for {verb, path} <- gated_routes(), {peer, headers} <- callers do
+      conn = through_endpoint(verb, path, peer, headers)
+      who = "#{verb} #{path} #{inspect(peer)} #{inspect(headers)}"
+
+      assert conn.status == 403, who
+      assert conn.resp_body == "", who
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"], who
+      assert get_resp_header(conn, "referrer-policy") != [], who
     end
   end
 end

@@ -17,6 +17,8 @@ defmodule BarkparkWeb.Plugs.RequireLoopback do
   """
   import Plug.Conn
 
+  alias Barkpark.RateLimiter
+
   @behaviour Plug
 
   @impl true
@@ -36,22 +38,32 @@ defmodule BarkparkWeb.Plugs.RequireLoopback do
   @doc """
   Admits only when the TCP peer is loopback and every forwarded hop parses as
   loopback; no forwarded header from a loopback peer is the direct local
-  caller. A hop that is empty, carries a port or a zone id, or does not parse
-  as an address is refused, wherever it sits in the chain. The header name is matched
+  caller. A hop that is empty, is not valid UTF-8, carries a port or a zone
+  id, or does not parse as an address is refused, wherever it sits in the
+  chain. The header name is matched
   without regard to case, and every copy of it is read.
   """
   @spec local_client?(Plug.Conn.t()) :: boolean()
-  def local_client?(%Plug.Conn{remote_ip: peer, req_headers: headers}) do
-    loopback?(peer) and
+  def local_client?(%Plug.Conn{req_headers: headers} = conn) do
+    loopback?(RateLimiter.tcp_peer(conn)) and
       headers
-      |> Enum.filter(fn {name, _} -> String.downcase(name) == "x-forwarded-for" end)
-      |> Enum.flat_map(fn {_, value} -> String.split(value, ",") end)
-      |> Enum.all?(&(&1 |> String.trim() |> parse_hop() |> loopback?()))
+      |> Enum.filter(fn {name, _} -> String.downcase(name, :ascii) == "x-forwarded-for" end)
+      |> Enum.flat_map(fn {_, value} -> hops(value) end)
+      |> Enum.all?(&(&1 |> parse_hop() |> loopback?()))
+  end
+
+  # A value that is not valid UTF-8 is read as one hop that does not parse.
+  defp hops(value) do
+    if String.valid?(value),
+      do: value |> String.split(",") |> Enum.map(&String.trim/1),
+      else: [nil]
   end
 
   # Bracketed IPv6 (`[::1]`) is read as the address; anything around it (a
   # port) is not, so it does not parse. Nor does a zone id (`fe80::1%en0`):
   # it names an interface on the sender's machine, not this one.
+  defp parse_hop(nil), do: nil
+
   defp parse_hop("[" <> rest) do
     case String.split_at(rest, -1) do
       {address, "]"} -> parse_hop(address)
@@ -59,9 +71,13 @@ defmodule BarkparkWeb.Plugs.RequireLoopback do
     end
   end
 
+  # Only the characters an address is written in reach the parser, so no hop
+  # can make it raise.
   defp parse_hop(hop) do
-    case not String.contains?(hop, "%") and :inet.parse_strict_address(String.to_charlist(hop)) do
-      {:ok, address} -> address
+    with true <- hop =~ ~r/\A[0-9A-Fa-f:.]+\z/,
+         {:ok, address} <- :inet.parse_strict_address(String.to_charlist(hop)) do
+      address
+    else
       _ -> nil
     end
   end

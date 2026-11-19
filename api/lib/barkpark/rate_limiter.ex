@@ -431,6 +431,14 @@ defmodule Barkpark.RateLimiter do
   Callers that only key a rate bucket want `client_ip/1`; callers that PERSIST
   the address for someone to read later want this.
   """
+  @spec tcp_peer(Plug.Conn.t()) :: :inet.ip_address() | nil
+  @doc """
+  The TCP peer of `conn`, as the adapter gave it, for a caller that reads the
+  forwarded chain by its own rule (`RequireLoopback.local_client?/1`). No
+  bucket reads it; `client_ip/1` is still the one answer to who the client is.
+  """
+  def tcp_peer(%Plug.Conn{remote_ip: peer}), do: peer
+
   @spec client_ip_with_source(Plug.Conn.t()) :: {String.t(), :forwarded | :peer}
   def client_ip_with_source(%Plug.Conn{remote_ip: peer} = conn) do
     with true <- trusted_proxy?(peer),
