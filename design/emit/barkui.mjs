@@ -134,8 +134,13 @@ function skinRule(name, spec) {
   const selectors = [...(name === DEFAULT_THEME ? [":root"] : []), ...SKINS(name)];
   const perMode = (f) => ({ light: f("light"), dark: f("dark") });
   const base = perMode((mode) => Object.fromEntries(BARKUI_NAMES.map(([n, slot, soft]) => [ROLE_BY_NAME.get(n), slotValue(color, slot, mode, soft)])));
-  const v = surfaceValues(base, perMode((m) => slotValue(color, "studioChrome.surface-raised", m)),
-    perMode((m) => slotValue(color, "primary-fg", m, "soft")));
+  let v;
+  try {
+    v = surfaceValues(base, perMode((m) => slotValue(color, "studioChrome.surface-raised", m)),
+      perMode((m) => slotValue(color, "primary-fg", m, "soft")));
+  } catch (e) {
+    throw new Error(e.message.replace(/^barkui: /, `barkui: ${name}/`));
+  }
   const pair = (s, key, pick) => {
     const arm = (mode) => {
       const c = pick(v[mode]);
