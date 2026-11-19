@@ -6,6 +6,7 @@ import {
   clampLockedPrefix,
   deepCloneBlocks,
   mergeSourceText,
+  settleSourceParse,
 } from "./source-realign.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 
@@ -69,17 +70,15 @@ export function sourceModeEnter() {
     // THE WALL. An edit in source mode saves markdownToBlocks(text) in place of the
     // document, so source mode opens only where the Markdown reads back to the same
     // content (sourceLoss, the one comparison), for both the blocks the canvas holds as
-    // stored (this._blocks: a callout's body and any other slot the rich view does not
-    // show) and the live doc (L0: marks typed but not yet saved). Each is its own round
+    // stored (this._blocks: what the Paper holds, which the rich view may not show) and
+    // the live doc (L0: marks typed but not yet saved). Each is its own round
     // trip, so unsaved typing never reads as a loss, and each parse is settled the
     // way sourceModeCommit saves it (ids given back, a locked template prefix put
-    // back), so the check judges what would be saved. Where either loses anything,
-    // source mode opens READ-ONLY: it shows the Markdown, takes no typing, writes
-    // nothing back, and one plain line says why and names the block.
-    const saved = (base) => (parsed) => {
-      const copy = deepCloneBlocks(base);
-      return clampLockedPrefix(copy, realignAcrossCommits(copy, copy, parsed));
-    };
+    // back, kept keys merged as patch-block merges them: settleSourceParse), so the check
+    // judges what would be saved. Where either check loses anything, source mode opens
+    // READ-ONLY: it shows the Markdown, takes no typing, writes nothing back, and one
+    // plain line says why and names the block.
+    const saved = (base) => (parsed) => settleSourceParse(base, parsed);
     const stored = this._blocks || [];
     const loss = sourceLoss(stored, saved(stored)) || sourceLoss(L0, saved(L0));
 

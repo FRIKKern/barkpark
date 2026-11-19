@@ -1,8 +1,8 @@
 // Every shared Portable Doc fixture through the source-mode wall (task-368b4fe38e75712d):
 // the input of each block and limit golden in api/priv/portable_doc/goldens, as a one-block
 // Paper, through sourceLoss (src/markdown/carries.js), the one comparison source mode runs
-// before it opens. The list below is what source mode refuses today and why; it is the
-// work queue for the tasks that make Markdown carry those shapes (marks on text:
+// before it opens, with the parse settled as the save would store it (settleSourceParse).
+// The list below is what source mode refuses today and why; it is the work queue for the tasks that make Markdown carry those shapes (marks on text:
 // task-5f0ba8904b973a3a; deep lists and other source losses: task-dde1d993de85a6e3). A
 // fixture that starts or stops being refused moves this list, so the change is seen.
 // Run: node src/__source_wall_fixtures.test.mjs
@@ -12,6 +12,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { firstLoss, sourceLoss } from "./markdown/carries.js";
+import { settleSourceParse } from "./canvas/source-realign.js";
 
 const GOLDENS = fileURLToPath(new URL("../../../priv/portable_doc/goldens/", import.meta.url));
 
@@ -63,7 +64,8 @@ for (const dir of ["blocks", "limits"]) {
   for (const file of readdirSync(join(GOLDENS, dir)).filter((name) => name.endsWith(".golden.json")).sort()) {
     count++;
     const { input } = JSON.parse(readFileSync(join(GOLDENS, dir, file), "utf8"));
-    const loss = sourceLoss([input]);
+    const block = { id: "fixture", ...input };
+    const loss = sourceLoss([block], (parsed) => settleSourceParse([block], parsed));
     if (loss) refused.push(`${dir}/${file.replace(/\.golden\.json$/, "")} ${loss.type} ${loss.path}`);
   }
 }
