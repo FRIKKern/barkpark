@@ -61,10 +61,14 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
       {true, %{id: workspace_id}} ->
         hosts = ChatHosts.list_hosts(workspace_id)
         waiting = for h <- hosts, not h.enrolled, into: MapSet.new(), do: h.id
+        # A name registered again is listed above as a live machine, so its
+        # older revocation is not repeated under "Recently revoked".
+        live_names = MapSet.new(hosts, & &1.name)
 
         assign(socket,
           hosts: hosts,
-          revoked: Enrollment.recently_revoked(workspace_id),
+          revoked:
+            Enum.reject(Enrollment.recently_revoked(workspace_id), &(&1.name in live_names)),
           codes: Map.filter(socket.assigns.codes, fn {id, _} -> id in waiting end),
           now: DateTime.utc_now()
         )

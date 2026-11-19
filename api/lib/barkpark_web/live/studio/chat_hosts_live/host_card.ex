@@ -99,9 +99,16 @@ defmodule BarkparkWeb.Studio.ChatHostsLive.HostCard do
           Run this on the machine. The code works once, for {rough(elem(@state, 1))} more, and goes in on
           stdin so it never shows in the machine's process list.
         </p>
-        <div class="ch-command">
-          <%!-- The copy handler is the CSP allow-listed one that copies the
-                field just before the button, as-is (BarkparkWeb.CSP). --%>
+        <%!-- phx-update="ignore" keeps "Copied" across the 5 s refresh. The
+              id carries a hash of the code, so a new code is a new element
+              and never shows a stale command. The copy handler is the CSP
+              allow-listed one that copies the field just before the button,
+              as-is (BarkparkWeb.CSP). --%>
+        <div
+          class="ch-command"
+          id={"chat-host-command-box-#{@host.id}-#{:erlang.phash2(@code)}"}
+          phx-update="ignore"
+        >
           <textarea
             id={"chat-host-command-#{@host.id}"}
             readonly
@@ -123,11 +130,20 @@ defmodule BarkparkWeb.Studio.ChatHostsLive.HostCard do
       </div>
 
       <p :if={is_nil(@code) and match?({:waiting, _}, @state)} class="ch-host-note">
-        Waiting for the machine to enroll. The code was shown once, when it was made. Lost it?
-        Make a new code; the old one stops working.
+        Waiting for the machine to enroll. The code was shown once, when it was made.
+        <%= if @can_enroll do %>
+          Lost it? Make a new code; the old one stops working.
+        <% else %>
+          If it was lost, ask the workspace owner for a new code.
+        <% end %>
       </p>
       <p :if={@state == :expired} class="ch-host-note">
-        The code expired before the machine enrolled. Make a new code to try again.
+        The code expired before the machine enrolled.
+        <%= if @can_enroll do %>
+          Make a new code to try again.
+        <% else %>
+          Ask the workspace owner for a new code.
+        <% end %>
       </p>
       <p :if={match?({:offline, _}, @state)} class="ch-host-note">
         Start it on the machine with <code>barkpark-chat-host run</code>.

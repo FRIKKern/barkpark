@@ -142,6 +142,78 @@ defmodule BarkparkWeb.Studio.ChatHostsLiveTest do
     assert ChatHosts.list_hosts(workspace.id) == []
   end
 
+  test "Recently revoked lists each name once, and not a name that is registered again", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    enrolled_then_revoked = fn name ->
+      {:ok, %{host: host, enrollment_token: code}} =
+        ChatHosts.issue_enrollment(workspace.id, %{
+          name: name,
+          approved_roots: [System.tmp_dir!()]
+        })
+
+      {:ok, _} = ChatHosts.enroll(code)
+      {:ok, _} = ChatHosts.revoke(workspace.id, host.id)
+    end
+
+    enrolled_then_revoked.("box")
+    enrolled_then_revoked.("box")
+    enrolled_then_revoked.("mac")
+
+    {:ok, _} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "mac", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, view, _html} = live(as(conn, raw), path)
+    revoked = view |> element("#ch-revoked-title + ul") |> render()
+
+    assert length(Regex.scan(~r/box · revoked/, revoked)) == 1
+    refute revoked =~ "mac"
+  end
+
+  test "a non-owner is told to ask the owner, not to press a button it does not have", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    ws_admin_raw: raw
+  } do
+    {:ok, _} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "vm", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, _view, html} = live(as(conn, raw), path)
+
+    assert html =~ "ask the workspace owner for a new code"
+    refute html =~ "Make a new code"
+  end
+
+  test "the command box survives the refresh (phx-update=ignore) and a new code is a new box", %{
+    conn: conn,
+    workspace: workspace,
+    path: path,
+    admin_raw: raw
+  } do
+    {:ok, %{host: host}} =
+      ChatHosts.issue_enrollment(workspace.id, %{name: "vm", approved_roots: [System.tmp_dir!()]})
+
+    {:ok, view, _html} = live(as(conn, raw), path)
+    first = render_click(view, "new_code", %{"id" => host.id})
+
+    [box_one] =
+      Regex.run(~r/id="(chat-host-command-box-[^"]+)"[^>]*phx-update="ignore"/, first,
+        capture: :all_but_first
+      )
+
+    send(view.pid, :refresh)
+    assert render(view) =~ ~s(id="#{box_one}")
+
+    [%{id: new_id}] = ChatHosts.list_hosts(workspace.id)
+    second = render_click(view, "new_code", %{"id" => new_id})
+    refute second =~ ~s(id="#{box_one}")
+    assert second =~ "chat-host-command-box-"
+  end
+
   test "an enrolled host reads as online or offline, with its providers in words", %{
     conn: conn,
     workspace: workspace,

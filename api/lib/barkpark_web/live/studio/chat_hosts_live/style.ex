@@ -64,7 +64,9 @@ defmodule BarkparkWeb.Studio.ChatHostsLive.Style do
       @media (max-width: 720px) {
         .ch-page { padding: 24px 16px 48px; }
         .ch-steps, .ch-form { grid-template-columns: minmax(0, 1fr); }
-        .ch-command { flex-direction: column; }
+        .ch-command { flex-direction: column; align-items: stretch; }
+        .ch-command textarea { min-height: calc(6 * 1.6em + 20px); }
+        .ch-code, .ch-host-meta, .ch-caps, .ch-host-note { margin-left: 0; }
       }
     </style>
     """
