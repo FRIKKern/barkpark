@@ -63,7 +63,7 @@ resolves it to `:global`, stamping `owner_workspace_id = NULL`
 (`ChatTokenController`).
 
 **Tier 0: instance operator** (`RequirePlatformOperator`): `admin` plus an
-env allowlist (flat `/v1/secrets` too); [instance-operator-tier.md](contracts/instance-operator-tier.md).
+env allowlist once set (flat `/v1/secrets` too); [instance-operator-tier.md](contracts/instance-operator-tier.md).
 
 ## Minting `write`/`admin`
 
@@ -101,6 +101,6 @@ Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
 
 `barkpark-dev-token` (seeded by `demo`; `clean` mints none outside dev) carries
 `["read","write","admin"]` AND a `Default` `workspace_memberships` row;
-passes every gate but Tier 0.
+passes every gate.
 **MUST rotate before prod**: starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.
