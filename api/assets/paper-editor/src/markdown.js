@@ -2,5 +2,5 @@
 // it is split by direction so no source file becomes a second editor god file.
 export { blocksToMarkdown } from "./markdown/serialize.js";
 export { blocksToExportMarkdown } from "./markdown/export.js";
-export { markdownToBlocks, markdownToBlockSpans } from "./markdown/parse.js";
+export { changedSentinel, markdownToBlocks, markdownToBlockSpans } from "./markdown/parse.js";
 export { firstLoss, sourceLoss } from "./markdown/carries.js";

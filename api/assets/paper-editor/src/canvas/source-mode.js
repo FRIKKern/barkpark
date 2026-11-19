@@ -1,4 +1,4 @@
-import { blocksToMarkdown, markdownToBlocks, sourceLoss } from "../markdown.js";
+import { blocksToMarkdown, changedSentinel, markdownToBlocks, sourceLoss } from "../markdown.js";
 import { t } from "../i18n.js";
 import { docToBlocks } from "./run-convert.js";
 import {
@@ -174,6 +174,8 @@ export function sourceModeExit() {
     if (this._mode === "source" && this._sourceEl) {
       const md = this._sourceEl.value;
       const edited = !this._sourceReadOnly && md !== this._sourceOriginalMd;
+      // An edit to a block shown as JSON is never saved: source mode stays open.
+      if (edited && this._refuseSentinelEdit(md)) return false;
 
       // Tear down the textarea + listener and reveal the rich editor FIRST so the
       // setContent (edited path) and the refocus land on the visible editor.
@@ -226,7 +228,7 @@ export function sourceModeExit() {
   // _sourceOriginalMd then holds this markdown, so an unchanged textarea is a no-op
   // for the next flush and for exit.
 export function sourceModeCommit(md) {
-    if (this._sourceReadOnly) return false;
+    if (this._sourceReadOnly || this._refuseSentinelEdit(md)) return false;
     const L0 = this._sourceBaselineBlocks;
     const L1 = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
     this._editor
@@ -240,6 +242,24 @@ export function sourceModeCommit(md) {
     this._sourceOriginalMd = md;
     this._sourceCommitBlocks = L1;
     return this._emitOps();
+  }
+
+  // A block source mode cannot write as Markdown shows as its JSON sentinel, which
+  // source mode does not edit (changedSentinel: a sentinel line that is not one the
+  // textarea already held, whole). Such Markdown is refused, with one line naming the
+  // block, until the line is put back; moving or deleting the line is saved as usual.
+export function sourceModeRefuseSentinelEdit(md) {
+    const index = changedSentinel(md, this._sourceOriginalMd);
+    if (index === -1) {
+      if (this._sourceRefusing) this._clearFigureConstraint();
+      this._sourceRefusing = false;
+      return false;
+    }
+    this._sourceRefusing = true;
+    this._showFigureConstraint(
+      t("Not saved: block %{number} is shown as JSON, and source mode does not edit it.", { number: index + 1 }),
+    );
+    return true;
   }
 
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the

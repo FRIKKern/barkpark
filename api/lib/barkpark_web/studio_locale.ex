@@ -777,6 +777,11 @@ defmodule BarkparkWeb.StudioLocale do
       "No matching pages" => gettext("No matching pages"),
       "No video yet — paste a video url below" =>
         gettext("No video yet — paste a video url below"),
+      "Not saved: block %{number} is shown as JSON, and source mode does not edit it." =>
+        gettext(
+          "Not saved: block %{number} is shown as JSON, and source mode does not edit it.",
+          number: "%{number}"
+        ),
       "Note" => gettext("Note"),
       "Notes, one per line" => gettext("Notes, one per line"),
       "Numbered" => gettext("Numbered"),

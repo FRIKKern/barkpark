@@ -45,7 +45,8 @@ import * as serverMethods from "./canvas-server.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 import { canvasToMarkdown } from "./markdown-export.js";
 import {
-  sourceModeActive, sourceModeCommit, sourceModeEnter, sourceModeExit, sourceModeSizeTextarea,
+  sourceModeActive, sourceModeCommit, sourceModeEnter, sourceModeExit, sourceModeRefuseSentinelEdit,
+  sourceModeSizeTextarea,
   sourceModeSyncText, sourceModeTeardown, sourceModeToggle,
 } from "./source-mode.js";
 
@@ -663,6 +664,7 @@ class BpPaperCanvas extends HTMLElement {
   _enterSourceMode() { return sourceModeEnter.call(this); }
   _exitSourceMode() { return sourceModeExit.call(this); }
   _commitSource(md) { return sourceModeCommit.call(this, md); }
+  _refuseSentinelEdit(md) { return sourceModeRefuseSentinelEdit.call(this, md); }
   _syncSourceText() { return sourceModeSyncText.call(this); }
   get sourceMode() { return sourceModeActive.call(this); }
   _sizeSourceTextarea() { return sourceModeSizeTextarea.call(this); }

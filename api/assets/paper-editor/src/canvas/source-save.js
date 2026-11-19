@@ -23,7 +23,15 @@
 // callout projection and lifts this rule. `{ calloutBody: "lifted" }` lifts it, for
 // the inside-edit sweep (__source_inside_edit_sweep.test.mjs) that proves the rule is
 // the whole class.
+//
+// A second rule is derived, not named: after the save, a prose block must show in the
+// reader the words the editor showed for it (markdown/reader-inline.js mirrors the
+// reader's fallbacks). Where the editor's projection drops the key the reader reads
+// (a quote or callout holding only `text`), the save keeps that key and the reader
+// goes on showing it over what was typed, so the block counts as losing that key.
 
+import { firstLoss } from "../markdown/carries.js";
+import { readerInline, readerInlineKey } from "../markdown/reader-inline.js";
 import { normalizeCanvasDoc } from "./canvas-document.js";
 import { applyOps } from "./patch-fold.js";
 import { docToBlocks } from "./run-convert.js";
@@ -32,14 +40,33 @@ import { clampLockedPrefix, deepCloneBlocks, realignAcrossCommits } from "./sour
 export function sourceSaved(base, parsed, view, { calloutBody = "named" } = {}) {
   const stored = deepCloneBlocks(base);
   const laid = clampLockedPrefix(stored, realignAcrossCommits(stored, stored, parsed));
-  const doc = view.toDoc(docToBlocks(normalizeCanvasDoc(view.toDoc(laid), stored)));
+  const shown = docToBlocks(normalizeCanvasDoc(view.toDoc(laid), stored));
+  const doc = view.toDoc(shown);
   let saved;
   try {
     saved = applyOps(stored, view.toOps(stored, doc, { preserveNewIds: true }) || []);
   } catch (_refused) {
     return [];
   }
+  const shownById = new Map(shown.filter((block) => block && block.id).map((block) => [block.id, block]));
+  saved = saved.map((block) => withoutUnshownWords(block, shownById.get(block && block.id)));
   return calloutBody === "lifted" ? saved : saved.map(withoutCalloutBody);
+}
+
+// The saved block with the reader's key dropped when the reader would show other words
+// than the editor showed for it.
+function withoutUnshownWords(block, shown) {
+  const read = readerInline(block);
+  if (!shown || read === null || shown.type !== block.type) return block;
+  const wrap = (content) => [{ type: "paragraph", content }];
+  if (!firstLoss(wrap(readerInline(shown)), wrap(read))) return block;
+  const key = readerInlineKey(block);
+  if (key === "slots.body") {
+    const { body: _body, ...slots } = block.slots;
+    return { ...block, slots };
+  }
+  const { [key]: _words, ...rest } = block;
+  return rest;
 }
 
 function withoutCalloutBody(block) {
