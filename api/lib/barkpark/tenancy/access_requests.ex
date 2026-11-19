@@ -58,6 +58,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   """
 
   import Ecto.Query, warn: false
+  import Barkpark.Tenancy.AccessRequestRows, only: [own_row: 1]
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.User
@@ -65,6 +66,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   alias Barkpark.Repo
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.AccessRequest
+  alias Barkpark.Tenancy.AccessRequestRows
   alias Barkpark.Tenancy.Invitation
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Members
@@ -77,17 +79,6 @@ defmodule Barkpark.Tenancy.AccessRequests do
 
   @doc "How many pending requests one user may hold at once."
   def max_pending, do: @max_pending
-
-  @typedoc "A request as its asker sees it: the slug they sent and the outcome."
-  @type own_row :: %{
-          id: binary(),
-          workspace: String.t(),
-          status: String.t(),
-          note: String.t() | nil,
-          requested_role: String.t() | nil,
-          inserted_at: DateTime.t(),
-          decided_at: DateTime.t() | nil
-        }
 
   @doc """
   Ask for a seat in the workspace with slug `slug`, or, as a member, for the
@@ -103,7 +94,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   malformed slug or role or a long note.
   """
   @spec request(User.t(), String.t(), String.t() | nil, String.t() | nil) ::
-          {:ok, own_row()} | {:error, term()}
+          {:ok, AccessRequestRows.own_row()} | {:error, term()}
   def request(user, slug, note, role \\ nil)
 
   def request(%User{confirmed_at: nil}, _slug, _note, _role), do: {:error, :email_unconfirmed}
@@ -232,7 +223,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   end
 
   @doc "The user's own requests, newest first, as `own_row`s."
-  @spec list_for_user(binary()) :: [own_row()]
+  @spec list_for_user(binary()) :: [AccessRequestRows.own_row()]
   def list_for_user(user_id) when is_binary(user_id) do
     case Repo.uuid_or_nil(user_id) do
       nil ->
@@ -252,7 +243,7 @@ defmodule Barkpark.Tenancy.AccessRequests do
   Withdraw (delete) one of the user's own PENDING requests. Someone else's, a
   decided one or a missing id all answer `{:error, :not_found}`.
   """
-  @spec withdraw(binary(), binary()) :: {:ok, own_row()} | {:error, :not_found}
+  @spec withdraw(binary(), binary()) :: {:ok, AccessRequestRows.own_row()} | {:error, :not_found}
   def withdraw(user_id, id) do
     # One statement: the status is checked by the DELETE itself, so an approve
     # or deny that commits first leaves nothing for it to match.
@@ -488,36 +479,14 @@ defmodule Barkpark.Tenancy.AccessRequests do
   defp actor_ref(%User{id: id}), do: "user:" <> id
   defp actor_ref(_), do: nil
 
-  defp own_row(%AccessRequest{} = r) do
-    %{
-      id: r.id,
-      workspace: r.workspace_slug,
-      status: r.status,
-      note: r.note,
-      requested_role: r.requested_role,
-      inserted_at: r.inserted_at,
-      decided_at: r.decided_at
-    }
-  end
-
-  # `kind` is "role" for a member's request to change their role, "seat" for
-  # a seatless user's request. `current_role` is the seat's role now; `stale`
-  # says the seat is no longer what the request recorded (approve refuses it).
-  defp admin_row(%AccessRequest{} = r, email, display_name, current_role) do
-    %{
-      id: r.id,
-      user_id: r.user_id,
-      email: email,
-      display_name: display_name,
-      note: r.note,
-      status: r.status,
-      kind: if(is_nil(r.from_role), do: "seat", else: "role"),
-      stale: r.status == "pending" and stale?(r, current_role),
-      requested_role: r.requested_role,
-      current_role: current_role,
-      role: r.role,
-      inserted_at: r.inserted_at,
-      decided_at: r.decided_at
-    }
-  end
+  # The stale flag is decided here, by `stale?/2`; the row module only shapes.
+  defp admin_row(%AccessRequest{} = r, email, display_name, current_role),
+    do:
+      AccessRequestRows.admin_row(
+        r,
+        email,
+        display_name,
+        current_role,
+        r.status == "pending" and stale?(r, current_role)
+      )
 end
