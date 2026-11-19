@@ -18,6 +18,12 @@
 //   - A state keeps its fill's colour: a soft fill's states keep its OKLCH hue
 //     within 1 degree and at least SOFT_FLOOR chroma; a primary fill's keep its
 //     hue within 1 degree; a grey muted fill's gain at most GREY_GAIN chroma.
+//   - A soft fill's hover and pressed are steps toward the tone itself. A state
+//     moving toward the lightness of the tone's solid fill follows the fraction
+//     rule: its chroma moves the same fraction of the way toward the solid's
+//     chroma (inside sRGB by lowering chroma, never by turning the hue). A state
+//     moving away from the solid keeps its hue within 1 degree and the rest
+//     fill's chroma.
 
 import { contrast, oklchToSrgb, parseColor, srgbToOklch, toHslTriplet } from "../derive.mjs";
 
@@ -40,21 +46,29 @@ const hueOff = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 3
 /** Whether state `c` keeps the colour of `rest`, for a fill of `kind`. */
 export function keepsColour(kind, rest, c) {
   const r = ok(rest), o = ok(c);
-  if (kind === "soft") return hueOff(o.h, r.h) <= 1 && o.C >= SOFT_FLOOR;
+  if (kind === "soft") return hueOff(o.h, r.h) <= 1 && o.C >= SOFT_FLOOR && o.C >= r.C;
   if (kind === "muted") return o.C <= r.C + GREY_GAIN;
   return hueOff(o.h, r.h) <= 1;
 }
 
+// The chroma a state at lightness `l` takes: the rest fill's, moved toward the
+// solid's by the fraction of the way its lightness moved toward the solid's.
+function chromaAt(r, solid, l) {
+  if (!solid) return r.C;
+  const s = ok(solid), frac = (l - r.L) / (s.L - r.L);
+  return frac > 0 ? Math.max(r.C, r.C + Math.min(1, frac) * (s.C - r.C)) : r.C;
+}
+
 // Two steps from `rest` in direction `dir` (+1 lighter, -1 darker), painted, or
-// null where they do not fit.
-function twoSteps(kind, rest, ground, dir) {
+// null where they do not fit. `solid` is a soft fill's tone.
+function twoSteps(kind, rest, ground, dir, solid) {
   const r = ok(rest);
   const out = [];
   let from = paint(rest);
   for (let k = 0; k < 2; k++) {
     let step = null;
     for (let x = srgbToOklch(from).L + dir * 0.0005; x >= 0 && x <= 1; x += dir * 0.0005) {
-      const c = paint(oklchToSrgb(x, r.C, r.h));
+      const c = paint(oklchToSrgb(x, chromaAt(r, solid, x), r.h));
       if (contrast(c, from) < STEP || Math.abs(srgbToOklch(c).L - srgbToOklch(from).L) < STEP_L) continue;
       if (keepsColour(kind, rest, c)) { step = c; break; }
     }
@@ -66,19 +80,19 @@ function twoSteps(kind, rest, ground, dir) {
 }
 
 /** Hover and pressed for `rest` on `ground`, as written colours, or null where they do not fit. */
-export function stepsFor(kind, rest, ground) {
+export function stepsFor(kind, rest, ground, solid) {
   const away = contrast(paint(rest), "#000000") >= contrast(paint(ground), "#000000") ? 1 : -1;
-  let steps = twoSteps(kind, rest, ground, away);
+  let steps = twoSteps(kind, rest, ground, away, solid);
   if (!steps && contrast(paint(rest), paint(ground)) >= 3) {
-    const back = twoSteps(kind, rest, ground, -away);
+    const back = twoSteps(kind, rest, ground, -away, solid);
     if (back && contrast(back[1], paint(ground)) >= 3) steps = back;
   }
   return steps && steps.map(css);
 }
 
 /** stepsFor, throwing and naming the case where no step fits. */
-export function statesOf(kind, rest, ground, at) {
-  const steps = stepsFor(kind, rest, ground);
+export function statesOf(kind, rest, ground, at, solid) {
+  const steps = stepsFor(kind, rest, ground, solid);
   if (!steps) throw new Error(`barkui: ${at}: no room for two steps of ${STEP}:1 and ${STEP_L} lightness`);
   return steps;
 }
