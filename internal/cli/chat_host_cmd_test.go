@@ -147,11 +147,108 @@ func TestChatHostRevokeByName(t *testing.T) {
 	defer srv.Close()
 
 	var stdout, stderr bytes.Buffer
-	if rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL), []string{"revoke", "mac"}); rc != exitOK {
+	if rc := runChatHost(newWriter(&stdout, &stderr), globals{yes: true}, chatHostCtx(srv.URL), []string{"revoke", "mac"}); rc != exitOK {
 		t.Fatalf("rc = %d, stderr %s", rc, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "Revoked mac") {
 		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+// sentDelete reports whether the fake server saw a DELETE.
+func sentDelete(seen []string) bool {
+	for _, s := range seen {
+		if strings.HasPrefix(s, "DELETE ") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestChatHostRevokeSendsNoDeleteWithoutYes: revoke is destructive. In a
+// script (stdin not a terminal) with no --yes it refuses before the DELETE;
+// on a terminal it asks, and only "y" sends it.
+func TestChatHostRevokeSendsNoDeleteWithoutYes(t *testing.T) {
+	var seen []string
+	srv := chatHostServer(t, true, &seen)
+	defer srv.Close()
+
+	prevIn, prevTTY := destroyStdin, destroyStdinIsTTY
+	t.Cleanup(func() { destroyStdin, destroyStdinIsTTY = prevIn, prevTTY })
+
+	destroyStdinIsTTY = func(io.Reader) bool { return false }
+	var stdout, stderr bytes.Buffer
+	rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL), []string{"revoke", "mac"})
+	if rc != exitUsage || sentDelete(seen) {
+		t.Fatalf("rc = %d, DELETE sent = %v; want exit %d and no DELETE", rc, sentDelete(seen), exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "--yes") || !strings.Contains(stderr.String(), "Revoke mac") {
+		t.Fatalf("stderr does not name the host and --yes:\n%s", stderr.String())
+	}
+
+	destroyStdinIsTTY = func(io.Reader) bool { return true }
+	destroyStdin = strings.NewReader("n\n")
+	stderr.Reset()
+	if rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL), []string{"revoke", "mac"}); rc != exitUsage || sentDelete(seen) {
+		t.Fatalf("answering n: rc = %d, DELETE sent = %v", rc, sentDelete(seen))
+	}
+
+	destroyStdin = strings.NewReader("y\n")
+	if rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL), []string{"revoke", "mac"}); rc != exitOK || !sentDelete(seen) {
+		t.Fatalf("answering y: rc = %d, DELETE sent = %v, stderr %s", rc, sentDelete(seen), stderr.String())
+	}
+}
+
+// TestChatHostRevokeYesFromExecute: --yes after the verb reaches revoke
+// through the global flags, with no usage error.
+func TestChatHostRevokeYesFromExecute(t *testing.T) {
+	var seen []string
+	srv := chatHostServer(t, true, &seen)
+	defer srv.Close()
+
+	g, rest, err := parseGlobals([]string{"chat-host", "revoke", "mac", "--yes"})
+	if err != nil || !g.yes {
+		t.Fatalf("parseGlobals: g.yes = %v, err = %v", g.yes, err)
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runChatHost(newWriter(&stdout, &stderr), g, chatHostCtx(srv.URL), rest[1:]); rc != exitOK || !sentDelete(seen) {
+		t.Fatalf("rc = %d, DELETE sent = %v, stderr %s", rc, sentDelete(seen), stderr.String())
+	}
+}
+
+// TestChatHostNewCodeOnAnOldServer: a server without the new-code route
+// answers 404 "document not found"; bp says the server is too old and what
+// to do instead.
+func TestChatHostNewCodeOnAnOldServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"hosts":[{"id":"h1","name":"vm","enrolled":false,"approved_roots":["/srv/bot"]}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"document not found"}}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	rc := runChatHost(newWriter(&stdout, &stderr), globals{}, chatHostCtx(srv.URL), []string{"new-code", "vm"})
+	if rc == exitOK || !strings.Contains(stderr.String(), "too old for new-code") {
+		t.Fatalf("rc = %d, stderr:\n%s", rc, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "document not found") {
+		t.Fatalf("stderr passes the server's raw 404 through:\n%s", stderr.String())
+	}
+}
+
+// TestChatHostListSurvivesAnEmptyProviderName: a host may report a provider
+// with an empty name; list reads it instead of panicking.
+func TestChatHostListSurvivesAnEmptyProviderName(t *testing.T) {
+	lines := chatHostCapabilityLines(map[string]any{"providers": map[string]any{
+		"": map[string]any{"installed": true}, "claude": map[string]any{"installed": false},
+	}})
+	if len(lines) != 2 || lines[0] != "(unnamed provider): installed, not signed in" || lines[1] != "Claude: not installed" {
+		t.Fatalf("lines = %q", lines)
 	}
 }
 
