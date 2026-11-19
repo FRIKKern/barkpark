@@ -415,14 +415,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
         unprintable = unprintable_current(current_blocks)
 
         cond do
-          # ENTRY GUARD, before anything derives. If the paper's CURRENT blocks
-          # cannot be printed as BPML, the pushed document cannot describe them
-          # either — and `Diff.derive/2` would faithfully remove every block the
-          # (necessarily kernel-only) parse does not carry: a silent DESTRUCTION
-          # behind a 200. Nothing legitimate breaks, because pull already
-          # refuses such a paper (422) — no client can hold a working copy of
-          # one. Ordered before the rev check on purpose: an unprintable paper
-          # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
+          # ENTRY GUARD, before anything derives and before the rev check: a
+          # paper whose CURRENT blocks do not print has no honest BPML sync at
+          # any rev (its pull answers 422 too); a push would remove them all.
           unprintable != nil ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -455,7 +450,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+            # A block is unedited when it spells as the pull showed it.
+            shown =
+              case Content.Papers.BpmlView.of(paper, dataset, [], :published) do
+                {:blocks, blocks, _fields} -> blocks
+                _no_view -> nil
+              end
+
+            pushed = parsed["blocks"] || []
+
+            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, pushed, shown) do
               {:error, :diff_verification_failed} ->
                 conn
                 |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -482,7 +486,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         {canonical, echo_refusal} =
           case Content.get_paper(slug, dataset, scope) do
             nil -> {nil, nil}
-            paper -> canonical_echo(paper)
+            paper -> canonical_echo(paper, dataset)
           end
 
         payload = %{
@@ -658,7 +662,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
-        {canonical, echo_refusal} = canonical_echo(paper)
+        {canonical, echo_refusal} = canonical_echo(paper, dataset)
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 
         payload = %{
@@ -729,24 +733,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
     e in UnprintableError -> Exception.message(e)
   end
 
-  # The canonical echo AFTER a successful write. The ops already committed, so an
-  # unprintable post-write state must NOT change the verdict: a 500 would strand
-  # the client's rev anchor on a write that landed, and a 422 would simply lie.
-  # It degrades to `bpml: nil` plus an explicit marker, and the rev is still the
-  # anchor to pull from. Only UnprintableError is rescued — a real printer bug
-  # still crashes loudly (charter D3).
-  # Public (not an action — no route names it) so the degrade contract is
-  # directly testable: the sync path itself can no longer REACH an unprintable
-  # post-write state now that the entry guard closes that door, and a rescue
-  # nobody can prove is a rescue nobody should trust.
+  # The echo AFTER a successful write prints the reader's view of the row
+  # (`BpmlView.print/2`), as the pull does. The ops already committed, so an
+  # unprintable state degrades to `bpml: nil` plus a marker (a 500 strands the
+  # anchor, a 422 lies); only UnprintableError is rescued (charter D3). Public
+  # so the degrade contract stays testable.
   @doc false
-  def canonical_echo(paper) do
-    blocks = get_in(paper.content || %{}, ["blocks"]) || []
-
-    bpml =
-      Barkpark.PortableDoc.Bpml.print_paper(Barkpark.Content.Papers.bpml_paper_map(paper, blocks))
-
-    {bpml, nil}
+  def canonical_echo(paper, dataset \\ "production") do
+    case Content.Papers.BpmlView.print(paper, dataset) do
+      {:ok, bpml} -> {bpml, nil}
+      {:error, why} -> {nil, why}
+    end
   rescue
     e in UnprintableError -> {nil, Exception.message(e)}
   end
@@ -758,7 +755,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Map.merge(payload, %{
       bpml_unprintable: refusal,
       hint:
-        "the ops applied and `rev` is your new anchor, but the persisted blocks can no longer be printed as BPML — pull format=json to see them"
+        "the ops applied at `rev`, but the reader's view of the paper does not print as BPML, so there is no text to update your working copy with — pull format=json to see the blocks"
     })
   end
 
