@@ -82,4 +82,188 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     assert [^heading, _] = stored_blocks(slug)
   end
+
+  # ── what a push may not change ──────────────────────────────────────────────
+
+  # A paragraph whose `role` the text cannot spell: shown text, unshown role.
+  defp lede,
+    do: %{"id" => "lede", "type" => "paragraph", "role" => "lede", "content" => [t("Lede.")]}
+
+  defp plain, do: %{"id" => "p1", "type" => "paragraph", "content" => [t("Plain.")]}
+
+  defp pushed(slug, edit) do
+    {bpml, rev} = pull(slug)
+    sync(slug, edit.(bpml), rev)
+  end
+
+  defp refused!(resp, block) do
+    body = json_response(resp, 422)
+    assert body["error"]["code"] == "bpml_unshown"
+    assert body["error"]["message"] =~ block
+    body
+  end
+
+  test "editing a block that holds unshown content is refused; the block stays" do
+    slug = slug("edit")
+    paper!(slug, [lede(), plain()])
+
+    resp = pushed(slug, &String.replace(&1, "Lede.", "Lede, edited."))
+
+    assert refused!(resp, ~s(block "lede"))["error"]["message"] =~ "blocks[0].role"
+    assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  test "deleting a block that holds unshown content is refused" do
+    slug = slug("delete")
+    paper!(slug, [lede(), plain()])
+
+    pushed(slug, &String.replace(&1, ~s(<p id="lede">Lede.</p>), ""))
+    |> refused!(~s(block "lede"))
+
+    assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  test "re-adding a block that holds unshown content without its id is refused" do
+    slug = slug("re-add")
+    paper!(slug, [lede(), plain()])
+
+    pushed(slug, &String.replace(&1, ~s(<p id="lede">), "<p>")) |> refused!(~s(block "lede"))
+    assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  test "pushing the id of a block that holds unshown content twice is refused" do
+    slug = slug("twice")
+    paper!(slug, [lede(), plain()])
+
+    resp =
+      pushed(slug, &String.replace(&1, ~s(<p id="p1">Plain.</p>), ~s(<p id="lede">Lede.</p>)))
+
+    assert resp.status == 422
+    assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  test "an id-less stored block holding an item child is refused, not lost" do
+    slug = slug("idless")
+
+    list = %{
+      "type" => "list",
+      "items" => [
+        %{
+          "content" => [t("parent")],
+          "children" => [%{"type" => "list", "items" => [[t("CHILD")]]}]
+        }
+      ]
+    }
+
+    paper!(slug, [list, plain()])
+
+    pushed(slug, &String.replace(&1, "Plain.", "Plain, edited."))
+    |> refused!("block 1 (it has no id)")
+
+    assert [list, plain()] == stored_blocks(slug)
+  end
+
+  test "a templated title edit by BPML is refused" do
+    slug = slug("title")
+    title = hd(Barkpark.Content.Papers.Template.template_blocks("Templated title"))
+    paper!(slug, [title, plain()])
+
+    pushed(slug, &String.replace(&1, ">Templated title<", ">A new title<"))
+    |> refused!(~s(block "tpl-title"))
+
+    assert [^title, _] = stored_blocks(slug)
+  end
+
+  test "a mark node holding more than its children is unshown, so editing it is refused" do
+    slug = slug("mark-node")
+    node = %{"type" => "strong", "children" => [t("seen")], "value" => "HIDDEN"}
+    para = %{"id" => "m", "type" => "paragraph", "content" => [t("Text "), node]}
+    paper!(slug, [para])
+
+    pushed(slug, &String.replace(&1, "Text ", "Text, edited ")) |> refused!(~s(block "m"))
+    assert [^para] = stored_blocks(slug)
+  end
+
+  test "setting a description the pull hid is refused" do
+    paper_schema!([
+      %{"name" => "title", "type" => "string"},
+      %{"name" => "description", "type" => "text", "private" => true}
+    ])
+
+    slug = slug("hidden-description")
+    paper!(slug, [plain()])
+    before = Content.get_paper(slug).content["description"]
+
+    resp =
+      pushed(slug, fn bpml ->
+        String.replace(bpml, "<meta>", "<meta>\n    <description>Replaced.</description>")
+      end)
+
+    assert json_response(resp, 422)["error"]["code"] == "bpml_unshown"
+    assert Content.get_paper(slug).content["description"] == before
+  end
+
+  test "a copy printed from another row cannot change the written row's unshown content" do
+    slug = slug("other-row")
+    paper!(slug, [lede(), plain()])
+    {_published, rev} = pull(slug)
+
+    # A copy that shows the same block ids with other text (a draft, say).
+    draft = [Map.put(Map.delete(lede(), "role"), "content", [t("Draft text.")]), plain()]
+
+    copy =
+      Barkpark.PortableDoc.Bpml.print_paper(%{"slug" => slug, "title" => slug, "blocks" => draft})
+
+    sync(slug, copy, rev) |> refused!(~s(block "lede"))
+    assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  # ── what a push may still do ────────────────────────────────────────────────
+
+  test "an unedited push of a Paper with unshown content changes nothing" do
+    slug = slug("unchanged")
+    paper!(slug, [lede(), plain()])
+
+    assert json_response(pushed(slug, & &1), 200)["unchanged"] == true
+    assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  test "reordering blocks keeps a block with unshown content byte-equal" do
+    slug = slug("reorder")
+    paper!(slug, [lede(), plain()])
+
+    json_response(
+      pushed(slug, fn bpml ->
+        bpml
+        |> String.replace(~s(  <p id="lede">Lede.</p>\n), "")
+        |> String.replace(
+          ~s(<p id="p1">Plain.</p>),
+          ~s(<p id="p1">Plain.</p>\n  <p id="lede">Lede.</p>)
+        )
+      end),
+      200
+    )
+
+    assert [plain(), lede()] == stored_blocks(slug)
+  end
+
+  test "deleting and editing shown-only blocks beside one with unshown content lands" do
+    slug = slug("beside")
+    other = %{"id" => "p2", "type" => "paragraph", "content" => [t("Other.")]}
+    paper!(slug, [lede(), plain(), other])
+
+    json_response(
+      pushed(slug, fn bpml ->
+        bpml
+        |> String.replace("Plain.", "Plain, edited.")
+        |> String.replace(~s(  <p id="p2">Other.</p>\n), "")
+      end),
+      200
+    )
+
+    assert [kept, %{"id" => "p1", "content" => [%{"value" => "Plain, edited."}]}] =
+             stored_blocks(slug)
+
+    assert kept == lede()
+  end
 end

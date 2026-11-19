@@ -32,12 +32,24 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   """
   @spec derive([map()], [map()], [map()] | nil) ::
           {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
-  def derive(old, new, shown \\ nil) when is_list(old) and is_list(new) do
-    new =
-      new
-      |> BlockIds.ensure_block_ids()
-      |> keep_unedited(old, shown || old)
+  def derive(old, new, shown \\ nil) when is_list(old) and is_list(new),
+    do: derive_target(old, target(old, new, shown))
 
+  @doc """
+  The blocks `derive/3` writes, before any op derives: `new` with ids minted
+  and every unedited block replaced by its stored bytes.
+  """
+  @spec target([map()], [map()], [map()] | nil) :: [map()]
+  def target(old, new, shown \\ nil) when is_list(old) and is_list(new) do
+    new
+    |> BlockIds.ensure_block_ids()
+    |> keep_unedited(old, shown || old)
+  end
+
+  @doc "`derive/3` from a `target/3` already computed."
+  @spec derive_target([map()], [map()]) ::
+          {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
+  def derive_target(old, new) when is_list(old) and is_list(new) do
     if old == new do
       {:ok, new, []}
     else

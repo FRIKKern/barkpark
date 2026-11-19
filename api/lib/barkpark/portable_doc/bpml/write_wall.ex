@@ -76,8 +76,9 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   def code, do: @code
 
   @doc """
-  The push of `parsed` onto `paper`: `Diff.derive/3` against the view the pull
-  printed, then the field and block rules. The view is computed from `paper`,
+  The push of `parsed` onto `paper`: the field and block rules on the blocks
+  `Diff.target/3` would write (against the view the pull printed), then the
+  op batch. The view is computed from `paper`,
   the row being written (published task rows, the Paper's own schema), never
   re-fetched. Answers what `Diff.derive/3` answers, or `{:error, fields}` for a
   refusal.
@@ -94,10 +95,31 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
         _nothing_shown -> {[], %{}}
       end
 
-    with :ok <- check_fields(content, fields, parsed),
-         {:ok, result, ops} <- Diff.derive(stored, parsed["blocks"] || [], shown),
-         :ok <- if(ops == [], do: :ok, else: check(stored, shown, result)) do
-      {:ok, result, ops}
+    pushed = parsed["blocks"] || []
+
+    with :ok <- unique_ids(pushed),
+         :ok <- check_fields(content, fields, parsed),
+         result = Diff.target(stored, pushed, shown),
+         :ok <- check(stored, shown, result) do
+      Diff.derive_target(stored, result)
+    end
+  end
+
+  # Two top-level blocks under one id cannot both be the block the id names.
+  defp unique_ids(pushed) do
+    ids = for %{"id" => id} when is_binary(id) <- pushed, do: id
+
+    case ids -- Enum.uniq(ids) do
+      [] ->
+        :ok
+
+      [id | _] ->
+        {:error,
+         %{
+           code: "bpml",
+           message: ~s(block id "#{id}" appears twice in the pushed document),
+           hint: "give each block its own id, or leave the id off a new block"
+         }}
     end
   end
 
