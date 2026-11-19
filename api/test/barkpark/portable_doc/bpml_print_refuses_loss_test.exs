@@ -117,6 +117,24 @@ defmodule Barkpark.PortableDoc.BpmlPrintRefusesLossTest do
     end
   end
 
+  # A mark node holding more than its type and children: the print keeps only
+  # the children, so the rest would be lost.
+  @lossy_mark_nodes [
+    {"a strong node also holding a value", %{"type" => "strong", "value" => "HIDDEN"}},
+    {"a strong node carrying its own em mark", %{"type" => "strong", "marks" => ["em"]}},
+    {"an em node carrying an annotation mark", %{"type" => "em", "marks" => ["k1"]}},
+    {"a strong node carrying a link", %{"type" => "strong", "href" => "/x"}}
+  ]
+
+  for {name, node} <- @lossy_mark_nodes do
+    test "#{name} is refused at that node" do
+      node = Map.put(unquote(Macro.escape(node)), "children", [t("seen")])
+      e = refusal([%{"type" => "paragraph", "content" => [node]}])
+      assert e.kind == :round_trip
+      assert e.type =~ ~r/^blocks\[0\]\.content/
+    end
+  end
+
   test "a document the text carries prints as before" do
     blocks = [
       %{"type" => "paragraph", "content" => [t("plain")]},

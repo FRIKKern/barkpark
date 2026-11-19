@@ -5,7 +5,7 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   `Bpml.RoundTrip` compares `parse(print(doc))` with `normalize(doc)`, and
   `bpml_seal_papers_roundtrip_test.exs` uses it too. Thirteen rewrites, no others:
 
-    1. `:mark_node` — an inline mark written as a node (`code`, `strong`, `em`, `underline`, `strike`) becomes text carrying that mark.
+    1. `:mark_node` — an inline mark written as a node (`code`, `strong`, `em`, `underline`, `strike`) becomes text carrying that mark, only when the node holds nothing else (exactly type and children, or type, value and its own marks).
     2. `:expandable_children` — an `expandable`'s body key `children` becomes `blocks`.
     3. `:unchecked_item` — a list item `%{"content" => c, "checked" => false}` and nothing else becomes the plain item `c`.
     4. `:heading_level` — a heading level written as a string (`"2"`) becomes the integer.
@@ -180,7 +180,7 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     l
     |> Enum.flat_map(fn
       %{"type" => t, "children" => cs} = node
-      when t in @mark_node_types and is_list(cs) ->
+      when t in @mark_node_types and is_list(cs) and map_size(node) == 2 ->
         if :mark_node in r, do: mark_children(node, r), else: [inline(node, r)]
 
       item ->
@@ -193,7 +193,7 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
 
   defp inline(%{"type" => t, "value" => v} = node, r)
        when t in @mark_node_types and is_binary(v) do
-    if :mark_node in r,
+    if :mark_node in r and Map.keys(node) -- ["type", "value", "marks"] == [],
       do: %{"type" => "text", "value" => v, "marks" => [t | Map.get(node, "marks", [])]},
       else: node
   end

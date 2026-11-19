@@ -72,29 +72,32 @@ defmodule Barkpark.PortableDoc.Bpml.PushGuard do
 
   @doc false
   # Block paths in `stored` that `pushed` no longer holds: top-level blocks by
-  # id, every nested block id, list item children and callout bodies.
+  # id, every nested block id, and every list item's children and callout body.
+  # Those two are compared by content, not position: each stored one must still
+  # be somewhere in the pushed document (as many times as it was stored), so a
+  # reorder passes and a swap that drops one is refused.
   @spec removals([map()], [map()]) :: [String.t()]
   def removals(stored, pushed) when is_list(stored) and is_list(pushed) do
     pushed_ids = pushed |> ids() |> MapSet.new()
-    pushed_by_id = for %{"id" => id} = b <- pushed, into: %{}, do: {id, b}
 
-    stored
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {block, i} ->
-      path = "blocks[#{i}]"
+    blocks_gone =
+      stored
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {block, i} ->
+        path = "blocks[#{i}]"
 
-      case block do
-        %{"id" => id} when is_map_key(pushed_by_id, id) ->
-          nested_ids_gone(block, pushed_ids, path) ++ parts_gone(block, pushed_by_id[id], path)
+        case block do
+          %{"id" => id} when is_binary(id) ->
+            if MapSet.member?(pushed_ids, id),
+              do: nested_ids_gone(block, pushed_ids, path),
+              else: [path]
 
-        %{"id" => id} when is_binary(id) ->
-          [path]
+          _ ->
+            []
+        end
+      end)
 
-        _ ->
-          parts_gone(block, Enum.at(pushed, i), path)
-      end
-    end)
-    |> Enum.uniq()
+    blocks_gone ++ parts_gone(stored, pushed, blocks_gone)
   end
 
   def removals(_stored, _pushed), do: []
@@ -116,59 +119,49 @@ defmodule Barkpark.PortableDoc.Bpml.PushGuard do
     |> Enum.map(&"#{path} (block #{&1})")
   end
 
-  # Item children and callout bodies, compared at the same path.
-  defp parts_gone(%{"type" => "callout"} = old, new, path) do
-    gone =
-      if filled?(get_in(old, ["slots", "body"])) and not filled?(slot_body(new)),
-        do: ["#{path}.slots.body"],
-        else: []
+  # Each stored item-children list and callout body, by path, that the pushed
+  # document no longer holds. A part inside a block already named as removed is
+  # not named twice.
+  defp parts_gone(stored, pushed, blocks_gone) do
+    held = pushed |> parts("blocks") |> Enum.map(&elem(&1, 1)) |> Enum.frequencies()
 
-    gone ++ walk(old, new, path)
-  end
-
-  defp parts_gone(%{"items" => items} = old, new, path) when is_list(items) do
-    new_items = if is_map(new), do: List.wrap(new["items"]), else: []
-
-    gone =
-      items
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {item, j} ->
-        new_item = Enum.at(new_items, j)
-
-        if is_map(item) and filled?(item["children"]) and
-             not (is_map(new_item) and filled?(new_item["children"])),
-           do: ["#{path}.items[#{j}].children"],
-           else: []
+    {gone, _held} =
+      stored
+      |> parts("blocks")
+      |> Enum.reduce({[], held}, fn {path, part}, {gone, held} ->
+        case Map.get(held, part, 0) do
+          0 -> {[path | gone], held}
+          n -> {gone, Map.put(held, part, n - 1)}
+        end
       end)
 
-    gone ++ walk(old, new, path)
+    gone
+    |> Enum.reverse()
+    |> Enum.reject(fn path -> Enum.any?(blocks_gone, &String.starts_with?(path, &1 <> ".")) end)
   end
 
-  defp parts_gone(old, new, path), do: walk(old, new, path)
+  defp parts(%{} = m, path) do
+    own =
+      case m do
+        %{"type" => "callout", "slots" => %{"body" => body}} ->
+          if filled?(body), do: [{"#{path}.slots.body", body}], else: []
 
-  defp walk(%{} = old, %{} = new, path) do
-    Enum.flat_map(old, fn {k, v} ->
-      case Map.fetch(new, k) do
-        {:ok, nv} -> walk_value(v, nv, "#{path}.#{k}")
-        :error -> []
+        _ ->
+          []
       end
-    end)
+
+    items =
+      for {item, j} <- Enum.with_index(List.wrap(m["items"])),
+          is_map(item) and filled?(item["children"]),
+          do: {"#{path}.items[#{j}].children", item["children"]}
+
+    own ++ items ++ Enum.flat_map(Enum.sort(m), fn {k, v} -> parts(v, "#{path}.#{k}") end)
   end
 
-  defp walk(_old, _new, _path), do: []
+  defp parts(l, path) when is_list(l),
+    do: l |> Enum.with_index() |> Enum.flat_map(fn {x, i} -> parts(x, "#{path}[#{i}]") end)
 
-  defp walk_value(%{} = v, nv, path), do: parts_gone(v, nv, path)
-
-  defp walk_value(v, nv, path) when is_list(v) and is_list(nv) do
-    v
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {x, i} -> walk_value(x, Enum.at(nv, i), "#{path}[#{i}]") end)
-  end
-
-  defp walk_value(_v, _nv, _path), do: []
-
-  defp slot_body(%{"slots" => %{"body" => body}}), do: body
-  defp slot_body(_), do: nil
+  defp parts(_other, _path), do: []
 
   defp filled?(v), do: v not in [nil, [], %{}, ""]
 end

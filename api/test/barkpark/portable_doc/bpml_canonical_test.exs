@@ -40,9 +40,9 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
 
   # Every `alias_get(x, [...])`, `plain_alias(x, [...])` and `plain_body(x, [...])`
   # key list in printer.ex with more than one key.
-  defp printer_reads do
-    ~r/(?:alias_get|plain_alias|plain_body)\(\w+, (\[[^\]]*\])\)/
-    |> Regex.scan(File.read!(@printer), capture: :all_but_first)
+  defp printer_reads(source \\ File.read!(@printer)) do
+    ~r/(?:alias_get|plain_alias|plain_body)\(\s*\w+,\s*(\[[^\]]*\])\s*\)/s
+    |> Regex.scan(source, capture: :all_but_first)
     |> Enum.map(fn [list] -> Regex.scan(~r/"([^"]+)"/, list, capture: :all_but_first) end)
     |> Enum.map(&List.flatten/1)
     |> Enum.filter(&(length(&1) > 1))
@@ -50,6 +50,17 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
   end
 
   defp ends_with?(order, tail), do: Enum.take(order, -length(tail)) == tail
+
+  test "the scan reads a call split over lines" do
+    source = """
+    alias_get(
+      b,
+      ["one", "two"]
+    )
+    """
+
+    assert printer_reads(source) == [["one", "two"]]
+  end
 
   test "every alias the printer reads is in the copied list, and every copied read is one the printer makes" do
     reads = Enum.map(AliasKey.reads(), &elem(&1, 3))
@@ -204,6 +215,37 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
     end
   end
 
+  # Rule 1 rewrites only a mark node that is exactly its type and children; any
+  # other key on the node is something the print drops, so normalize leaves it
+  # and the wall refuses it.
+  @strong_children [%{"type" => "text", "value" => "seen"}]
+  @mark_node_extras [
+    {"a strong node also holding a value", %{"value" => "HIDDEN"}},
+    {"a strong node carrying its own em mark", %{"marks" => ["em"]}},
+    {"a strong node carrying a link", %{"href" => "/x"}}
+  ]
+
+  for {name, extra} <- @mark_node_extras do
+    test "rule 1 loses nothing: #{name} is not rewritten" do
+      node =
+        Map.merge(
+          %{"type" => "strong", "children" => @strong_children},
+          unquote(Macro.escape(extra))
+        )
+
+      block = %{"type" => "paragraph", "content" => [node]}
+      lossless!(block)
+      assert Canonical.normalize([block]) == [block]
+    end
+  end
+
+  test "rule 1 loses nothing: an em node carrying an annotation mark is not rewritten" do
+    node = %{"type" => "em", "children" => @strong_children, "marks" => ["k1"]}
+    block = %{"type" => "paragraph", "content" => [node]}
+    lossless!(block)
+    assert Canonical.normalize([block]) == [block]
+  end
+
   # ── the reader sees the same thing before and after ─────────────────────────
 
   test "rule 1: a code node and a code mark render the same" do
@@ -290,16 +332,28 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
 
   @mark_nodes ~w(strong em code underline strike)
 
-  # A mark on visible text: a text node's marks, or a mark written as a node.
-  defp marks(%{"type" => "text", "value" => v} = n) when is_binary(v) and v != "",
-    do: List.wrap(Map.get(n, "marks")) |> Enum.filter(&is_binary/1)
+  # The marks on visible text, one entry per mark per text run: a text node's
+  # own marks, plus every mark of the mark nodes it sits in (a mark node's type
+  # and its own `marks`), so a mark lost off a node shows as a missing entry.
+  defp marks(term), do: marks(term, [])
 
-  defp marks(%{"type" => t, "value" => v} = n) when t in @mark_nodes and is_binary(v) and v != "",
-    do: [t | List.wrap(Map.get(n, "marks")) |> Enum.filter(&is_binary/1)]
+  defp marks(%{"type" => "text", "value" => v} = n, held) when is_binary(v) and v != "",
+    do: held ++ own_marks(n)
 
-  defp marks(m) when is_map(m), do: m |> Map.values() |> Enum.flat_map(&marks/1)
-  defp marks(l) when is_list(l), do: Enum.flat_map(l, &marks/1)
-  defp marks(_), do: []
+  defp marks(%{"type" => t, "value" => v} = n, held)
+       when t in @mark_nodes and is_binary(v) and v != "",
+       do: held ++ [t | own_marks(n)] ++ marks(Map.drop(n, ["type", "value", "marks"]), held)
+
+  defp marks(%{"type" => t, "children" => cs} = n, held) when t in @mark_nodes,
+    do:
+      marks(cs, held ++ [t | own_marks(n)]) ++
+        marks(Map.drop(n, ["type", "children", "marks"]), held)
+
+  defp marks(m, held) when is_map(m), do: m |> Map.values() |> Enum.flat_map(&marks(&1, held))
+  defp marks(l, held) when is_list(l), do: Enum.flat_map(l, &marks(&1, held))
+  defp marks(_, _held), do: []
+
+  defp own_marks(n), do: n |> Map.get("marks") |> List.wrap() |> Enum.filter(&is_binary/1)
 
   defp sub_multiset?(a, b) do
     tb = tally(b)

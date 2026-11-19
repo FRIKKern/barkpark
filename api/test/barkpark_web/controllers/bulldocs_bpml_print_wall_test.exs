@@ -80,4 +80,43 @@ defmodule BarkparkWeb.BulldocsBpmlPrintWallTest do
     assert inspect(body) =~ "blocks[1].items[0]"
     assert stored_blocks(slug) == before
   end
+
+  # The printer wrote `task="true"` on <ul>, which the parser refused, so a
+  # pulled checklist could not be pushed back (task-c856 review).
+  test "a checklist pulls and pushes back; its checked states stay", %{conn: conn} do
+    slug = "bpml-print-wall-checklist-#{System.unique_integer([:positive])}"
+
+    checklist = %{
+      "id" => "c1",
+      "type" => "list",
+      "task" => true,
+      "items" => [
+        %{"content" => [t("Done")], "checked" => true},
+        %{"content" => [t("To do")], "checked" => false}
+      ]
+    }
+
+    with_blocks!(slug, [intro(), checklist])
+    pulled = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    copy = response(pulled, 200)
+    assert copy =~ ~s(task="true")
+    [rev] = get_resp_header(pulled, "x-paper-rev")
+    [mark] = get_resp_header(pulled, "x-bpml-print")
+    edited = String.replace(copy, "To do", "To do soon")
+
+    conn
+    |> put_req_header("authorization", "Bearer #{@token}")
+    |> put_req_header("content-type", "application/json")
+    |> post("#{@ingest_path}/#{slug}/sync", %{
+      "bpml" => edited,
+      "baseRev" => rev,
+      "bpmlPrint" => mark
+    })
+    |> json_response(200)
+
+    assert [_, %{"task" => true, "items" => [done, todo]}] = stored_blocks(slug)
+    assert %{"checked" => true, "content" => [%{"value" => "Done"}]} = done
+    refute is_map(todo) and todo["checked"] == true
+    assert inspect(todo) =~ "To do soon"
+  end
 end

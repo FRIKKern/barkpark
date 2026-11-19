@@ -57,6 +57,37 @@ defmodule Barkpark.PortableDoc.BpmlPushGuardTest do
     assert "blocks[0].slots.body" in paths
   end
 
+  defp item(text, children) do
+    base = %{"content" => [t(text)]}
+    if children, do: Map.put(base, "children", children), else: base
+  end
+
+  defp list_of(items), do: %{"id" => "l1", "type" => "list", "items" => items}
+
+  @other_child [%{"type" => "list", "items" => [[%{"type" => "text", "value" => "new child"}]]}]
+
+  test "item children are compared by content: a swap that drops one is refused" do
+    stored = [list_of([item("a", @child), item("b", nil)])]
+    pushed = [list_of([item("b", @other_child), item("a", nil)])]
+
+    assert {:error, %{paths: ["blocks[0].items[0].children"]}} =
+             PushGuard.check(stored, pushed, nil)
+  end
+
+  test "item children are compared by content: a pure reorder passes" do
+    stored = [list_of([item("a", @child), item("b", nil)])]
+    pushed = [list_of([item("b", nil), item("a", @child)])]
+    assert :ok = PushGuard.check(stored, pushed, nil)
+  end
+
+  test "two equal children stored count twice" do
+    stored = [list_of([item("a", @child), item("b", @child)])]
+    pushed = [list_of([item("a", @child), item("b", nil)])]
+
+    assert {:error, %{paths: ["blocks[0].items[1].children"]}} =
+             PushGuard.check(stored, pushed, nil)
+  end
+
   test "a copy with an older or unknown mark is treated as unmarked" do
     stored = [para("p1", "One"), para("p2", "Two")]
     assert {:error, _} = PushGuard.check(stored, [para("p1", "One")], "0")

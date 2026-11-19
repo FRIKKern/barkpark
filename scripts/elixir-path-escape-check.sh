@@ -390,7 +390,13 @@ scripts/prod-build-cache-guard.sh'
 #   STEP of mix-test (beside the unreachable-assert ratchet it drives), so
 #   without these two entries a PR editing only the hook computes
 #   test == 'false' and skips the one job that proves the hook still refuses.
+#   THE SEED PAPERS (task-c856a63a34f47cdb): .demo-content/papers and
+#   .demo-content/repo-papers are stored documents the BPML print sweep
+#   (api/test/support/bpml_stored_documents.ex) pulls and pushes back, so a PR
+#   that edits a seed Paper must run the suite that proves it still prints.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
+.demo-content/papers/**
+.demo-content/repo-papers/**
 CLAUDE.md
 js/CLAUDE.md
 AGENTS.md

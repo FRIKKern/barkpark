@@ -27,7 +27,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "ingress" => ~w(id),
     "byline" => ~w(id),
     # `start` (an ordered list's first number) rides with `ordered` for the same reason.
-    "ul" => ~w(id ordered start),
+    "ul" => ~w(id ordered start task),
     "stats" => ~w(id sourceDefault),
     "steps" => ~w(id),
     "table" => ~w(id headcol),
