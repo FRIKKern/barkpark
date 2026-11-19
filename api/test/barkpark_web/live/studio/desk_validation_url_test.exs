@@ -121,12 +121,15 @@ defmodule BarkparkWeb.Studio.DeskValidationUrlTest do
 
     # The press names the row, for the jump to open its dialog.
     assert view |> element(@problem) |> render() =~ ~s(&quot;item&quot;:&quot;0&quot;)
+  end
 
-    # The jump's target: in the item's dialog, the input is named by the
-    # problem's path, as Sanity's Studio names it.
+  test "an item's dialog names its inputs by the item's path, the jump's target", c do
+    view = open(c, draft(c, "ids", %{"links" => links("https://example.com")}))
+
+    # As Sanity's Studio names them: the problem's path is the input's id.
     assert has_element?(
              view,
-             ~s|#{@pane} dialog[data-desk-item-dialog] input[id='links[_key=="l1"].url'][value="not a url"]|
+             ~s|#{@pane} dialog[data-desk-item-dialog] input[id='links[_key=="l1"].url'][value="https://example.com"]|
            )
 
     assert has_element?(
