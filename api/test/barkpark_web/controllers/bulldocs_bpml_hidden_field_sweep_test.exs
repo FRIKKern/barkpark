@@ -6,9 +6,11 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
 
   The corpus is one Paper per block kind the BPML printer spells, read off
   the printer's own `block/2` clauses; each holds that kind's golden block
-  (`test/support/fixtures/pd-parity`, or the one written here for a kind
-  with none) behind an anchor paragraph whose text carries marks, a link and
-  inline code. A printer kind with neither fails the sweep.
+  (`test/support/fixtures/pd-parity`) behind an anchor paragraph whose text
+  carries marks, a link and inline code. A kind with no golden, or whose
+  golden does not print as BPML, uses the block written here instead
+  (`@written`); a printer kind that still does not print fails the sweep,
+  unless it is listed in `@kind_limits` with its reason.
 
   The fields are every key at every position of the reader's answer for
   those Papers with nothing hidden, nested ones included (inline nodes,
@@ -48,12 +50,41 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
   # one that now declares.
   @limits %{}
 
-  # Printer kinds with no golden block.
+  # Printer kinds no Paper of which pulls, each with its reason. Any other
+  # kind without a carrying Paper fails the sweep, and so does a listed one
+  # that now pulls.
+  @kind_limits %{}
+
+  # Printer kinds whose golden is missing (quote) or does not print: the
+  # paragraph golden carries map marks, and the card and section goldens hold
+  # headings with no level.
+  @card %{
+    "type" => "card",
+    "tone" => "info",
+    "slots" => %{
+      "title" => [%{"type" => "heading", "level" => 3, "text" => "Card title"}],
+      "body" => [
+        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Card body."}]}
+      ]
+    }
+  }
+
   @written %{
     "quote" => %{
       "type" => "quote",
       "cite" => "A. Writer",
       "content" => [%{"type" => "text", "value" => "Quoted words."}]
+    },
+    "paragraph" => %{
+      "type" => "paragraph",
+      "align" => "center",
+      "content" => [%{"type" => "text", "value" => "Leaning words.", "marks" => ["em"]}]
+    },
+    "card" => @card,
+    "section" => %{
+      "type" => "section",
+      "layout" => %{"gap" => "md", "mode" => "grid", "tracks" => 2},
+      "blocks" => [@card, Map.put(@card, "span", 2)]
     }
   }
 
@@ -86,16 +117,26 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
   end
 
   defp golden_blocks do
-    goldens =
-      for file <- File.ls!(@golden_dir), String.ends_with?(file, ".golden.json"), into: %{} do
-        type = String.replace_suffix(file, ".golden.json", "")
-        input = Map.fetch!(Jason.decode!(File.read!(Path.join(@golden_dir, file))), "input")
-        {input["type"] || type, input}
-      end
+    for file <- File.ls!(@golden_dir), String.ends_with?(file, ".golden.json"), into: %{} do
+      type = String.replace_suffix(file, ".golden.json", "")
+      input = Map.fetch!(Jason.decode!(File.read!(Path.join(@golden_dir, file))), "input")
+      {input["type"] || type, with_id(input, type)}
+    end
+  end
 
-    @written
-    |> Map.merge(goldens)
-    |> Map.new(fn {type, block} -> {type, Map.put_new(block, "id", "g-" <> type)} end)
+  defp with_id(block, type), do: Map.put_new(block, "id", "g-" <> type)
+
+  # The golden when it pulls, else the block written here; nil when neither.
+  defp printing_paper(kind, goldens) do
+    candidates =
+      [goldens[kind], @written[kind] && with_id(@written[kind], kind)]
+      |> Enum.reject(&is_nil/1)
+
+    Enum.find_value(candidates, fn block ->
+      slug = write!(kind, block)
+      pulled = pull(slug)
+      pulled.status == 200 && {slug, pulled}
+    end)
   end
 
   defp scope,
@@ -234,19 +275,20 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
     kinds = Enum.sort(printer_kinds())
     goldens = golden_blocks()
     assert length(kinds) > 10, "the printer's block clauses read as #{inspect(kinds)}"
-    missing = Enum.reject(kinds, &Map.has_key?(goldens, &1))
-    assert missing == [], "printer kinds with no golden block: #{inspect(missing)}"
+    missing = Enum.reject(kinds, &(Map.has_key?(goldens, &1) or Map.has_key?(@written, &1)))
+    assert missing == [], "printer kinds with no block to write: #{inspect(missing)}"
 
     assert {:ok, _} = declare([title_field()])
 
     # Nothing hidden: each Paper pulls, and its unedited push writes nothing.
     {bases, unprintable} =
       kinds
-      |> Enum.map(fn kind -> {kind, write!(kind, goldens[kind])} end)
-      |> Enum.reduce({[], []}, fn {kind, slug}, {bases, unprintable} ->
-        pulled = pull(slug)
+      |> Enum.map(fn kind -> {kind, printing_paper(kind, goldens)} end)
+      |> Enum.reduce({[], []}, fn
+        {kind, nil}, {bases, unprintable} ->
+          {bases, [kind | unprintable]}
 
-        if pulled.status == 200 do
+        {kind, {slug, pulled}}, {bases, unprintable} ->
           [rev] = get_resp_header(pulled, "x-paper-rev")
           before = stored(slug)
           pushed = sync(slug, pulled.resp_body, rev)
@@ -257,10 +299,20 @@ defmodule BarkparkWeb.BulldocsBpmlHiddenFieldSweepTest do
           assert stored(slug) == before, "#{kind}, nothing hidden: the push wrote"
           base = %{kind: kind, slug: slug, bpml: pulled.resp_body, rev: rev, answer: shown(slug)}
           {[base | bases], unprintable}
-        else
-          {bases, [{kind, error(pulled)["code"]} | unprintable]}
-        end
       end)
+
+    no_carrier = unprintable -- Map.keys(@kind_limits)
+    assert no_carrier == [], "printer kinds with no Paper that pulls: #{inspect(no_carrier)}"
+
+    assert Map.keys(@kind_limits) -- unprintable == [], "kind limits that now pull: remove them"
+
+    # The same count two ways: the printer's own clauses, read again, against
+    # the distinct kinds of the Papers whose pull answered 200.
+    printable = length(printer_kinds()) - map_size(@kind_limits)
+    carried = bases |> Enum.map(& &1.kind) |> Enum.uniq() |> length()
+
+    assert printable > 0 and carried == printable,
+           "#{carried} printer kinds have a Paper that pulled; the printer spells #{printable}"
 
     [first | _] = bases = Enum.reverse(bases)
 

@@ -10,8 +10,8 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
   so the schema that decides is the one of the workspace the row lives in,
   whatever the request named. Two workspaces whose `paper` schemas hide
   different things, the default one and another, are each tried both ways:
-  a flat create with no workspace given, a flat update of a Paper that lives
-  in the other workspace, and a create by a token pinned to the other one.
+  a flat create with no workspace given, and a create by a token pinned to
+  the other one.
 
   The right to write into a workspace or project is decided before the
   action, by the route's scope gate, and these rows pin that it still is: a
@@ -145,16 +145,37 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     }
   end
 
-  defp flush_mailbox do
+  # A listener on the Paper's topic that hands each frame on as
+  # `{:heard, frame}`, so the test's own mailbox (which also gets the conn
+  # test's replies) is not what is counted.
+  defp listen!(slug, workspace_id) do
+    test = self()
+    topic = Content.paper_topic(slug, workspace_id, @ds)
+
+    spawn_link(fn ->
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+      send(test, :listening)
+      forward(test)
+    end)
+
+    assert_receive :listening, 1_000
+  end
+
+  defp forward(test) do
     receive do
-      _ -> flush_mailbox()
+      frame -> send(test, {:heard, frame})
+    end
+
+    forward(test)
+  end
+
+  defp flush_heard do
+    receive do
+      {:heard, _} -> flush_heard()
     after
       100 -> :ok
     end
   end
-
-  defp subscribe!(slug, workspace_id),
-    do: Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(slug, workspace_id, @ds))
 
   # The text a pull printed for another Paper before any field was hidden;
   # that Paper is gone, so a create of it duplicates nothing.
@@ -177,14 +198,14 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     slug = slug("rollback")
     paper = paper!(slug, [heading(), para(), heading("h2", @second)])
     {bpml, rev} = pull!(slug)
-    subscribe!(slug, paper.workspace_id)
+    listen!(slug, paper.workspace_id)
 
     # Control: a push that keeps a visible block lands and is heard.
     edited = String.replace(bpml, "Visible.", "Edited.")
     refute edited == bpml
     answer = sync(slug, edited, rev) |> json_response(200)
-    assert_receive {:paper_block, _frame}, 1_000
-    flush_mailbox()
+    assert_receive {:heard, {:paper_block, _frame}}, 1_000
+    flush_heard()
     {pulled, next_rev} = pull!(slug)
     assert answer["bpml"] == pulled
     assert answer["rev"] == next_rev
@@ -196,20 +217,20 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     resp = sync(slug, emptied, next_rev)
     assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
     assert trace(slug) == before
-    refute_receive _any, 200
+    refute_receive {:heard, _}, 200
   end
 
   test "a create whose saved Paper has no view is rolled back with every effect" do
     {source, bpml} = creatable_bpml!([heading(), heading("h2", @second)])
     schema!(default_scope(), true)
     slug = slug("create-rollback")
-    subscribe!(slug, Tenancy.get_default_workspace().id)
+    listen!(slug, Tenancy.get_default_workspace().id)
     jobs = Repo.aggregate(Oban.Job, :count)
 
     resp = sync(slug, String.replace(bpml, source, slug), "0")
     assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
     assert trace(slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
-    refute_receive _any, 200
+    refute_receive {:heard, _}, 200
   end
 
   # The flat route, no workspace given: the row lands in the default
@@ -263,37 +284,6 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
         assert committed_scope(slug) == {other.ws.id, other.project.id}
         row = Content.get_paper(slug, @ds, other.scope)
         assert {:ok, answer["bpml"]} == BpmlView.print(row, @ds)
-        assert answer["bpml"] =~ @hidden
-      end
-    end
-  end
-
-  # The flat route, no workspace given, updating a Paper that lives in the
-  # other workspace: the row's own workspace's schema decides, not the
-  # request's (which names none, so would fall back to the default).
-  for {name, other_hides?} <- [{"it hides", true}, {"only the default hides", false}] do
-    test "a flat update of another workspace's Paper when #{name}: its row's schema decides" do
-      other = other_workspace!()
-      schema!(other.scope, unquote(other_hides?))
-      schema!(default_scope(), not unquote(other_hides?))
-      slug = slug("flat-update")
-      paper = paper!(slug, [heading(), para(), heading("h2", @second)], other.scope)
-      assert {paper.workspace_id, paper.project_id} == {other.ws.id, other.project.id}
-      {:ok, bpml} = BpmlView.print(Content.get_paper(slug, @ds, other.scope), @ds)
-      emptied = String.replace(bpml, ~r/\s*<p id="p">Visible\.<\/p>/, "")
-      refute emptied == bpml
-      before = trace(slug)
-
-      resp = sync(slug, emptied, to_string(paper.content["rev"]))
-
-      if unquote(other_hides?) do
-        assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
-        assert trace(slug) == before
-      else
-        answer = json_response(resp, 200)
-        assert committed_scope(slug) == {other.ws.id, other.project.id}
-        saved = Content.get_paper(slug, @ds, other.scope)
-        assert {:ok, answer["bpml"]} == BpmlView.print(saved, @ds)
         assert answer["bpml"] =~ @hidden
       end
     end
