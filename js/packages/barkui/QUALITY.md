@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: barkui-quality | budget: 1600tok -->
 # Quality
 
-![A part's lights after the Surface control is set to primary: all grey, marked "not proved on primary"](docs/images/unproved-light.png)
+![The button's name and its five proof lights in the showroom](docs/images/lights-light.png)
 
 The showroom is the scoreboard ([0004](docs/decisions/0004-ready-before-any-switch.md)). Each part shows its lights, written by `pnpm run check`, which presses every part in headless Chromium. The full rules are in [docs/PARTS.md](docs/PARTS.md); this page says what they add up to.
 
@@ -17,7 +17,7 @@ The showroom is the scoreboard ([0004](docs/decisions/0004-ready-before-any-swit
 
 A light is on only when the last run passed and proved it for the same part folder, tokens, base styles, UI SDK version and check code. Change any of them and every light it rests on goes off until the check runs again. A run that fails in any way, through a step, a page error, a network request or a time limit, turns off every light of that part and says why.
 
-Lights are proved on all five surfaces, and the page says so ([docs/PARTS.md](docs/PARTS.md#surfaces)). Text under 4.5:1 is let through only where a wait in `build/sheet-waits.mjs` names its skin, scheme, surface and tokens, and only while it measures no worse than the wait records; the showroom prints each one as a "waiting on the sheet" line. Anything else under the limit turns the lights off.
+Lights are proved on all five surfaces; [docs/PARTS.md](docs/PARTS.md#surfaces) says how, and when a "waiting on the sheet" line lets a text through.
 
 ## When a part counts as ready
 
@@ -37,4 +37,4 @@ A "waiting on the sheet" line is a gap in the sheet, not in the part. It is work
 - Picture first: the README, the roadmap and the decisions open with a picture, a diagram or a table.
 - One fact, one home ([README](README.md#where-things-live-one-fact-one-home)). Which parts exist, and what is proven for each, lives on the showroom page only, so no page here counts parts.
 - No number on these pages is typed by hand. Two scripts write the blocks that hold numbers, each with the day its numbers last changed and a stamp: `node build/status.mjs` (skins, surfaces, colour names and the UI SDK pin, from the sheet and package.json) and `node build/board.mjs <goal-task-id>` (each milestone's progress, from the task board; it needs `bp`). The daily news run calls both and its PR carries what they wrote; either can also be run by hand. No PR check reads the board. A fast test fails when a block is edited without its script or changes shape, never because the files or the board moved.
-- Pictures are real showroom shots, never mock-ups. `node build/pictures.mjs` retakes every picture these pages show, after `pnpm run build` and `pnpm run check`.
+- Pictures are real showroom shots, never mock-ups, and show one part's section, so a new part leaves them true. `node build/pictures.mjs` retakes every picture these pages show, after `pnpm run build` and `pnpm run check`, and stamps them; a fast test fails when the code that draws what they show has moved since (`build/picture-stamp.mjs`). The page prints no task id, so no picture holds one.

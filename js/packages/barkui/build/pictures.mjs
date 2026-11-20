@@ -1,19 +1,20 @@
 // node build/pictures.mjs: retakes every picture the README, QUALITY.md and the
-// decisions show, into docs/images/, from the built showroom. Run it after
-// `pnpm run build` and `pnpm run check`, so the lights in the pictures are the
-// last run's. The pictures are the real page; nothing is drawn for them. The one
-// change: a "waiting on the sheet" line ends with the task that will close it,
-// and that id is cut from the line, since these pictures are public. A picture
-// that would still show a task id is refused.
+// decisions show, into docs/images/, from the built showroom, and writes their
+// stamp (build/picture-stamp.mjs). Run it after `pnpm run build` and
+// `pnpm run check`, so the lights in the pictures are the last run's. The
+// pictures are the real page; nothing is drawn or hidden for them. Each shows
+// one part's section (PICTURED), so a new part leaves them true.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
+import { PICTURED, pictureStamp, stampPath } from './picture-stamp.mjs'
 import { outDir, root } from './showroom.mjs'
 
 const images = join(root, 'docs', 'images')
-// The page in a skin and scheme, as its address keeps them. `null` is the sheet's first skin.
-const PAGES = [
+const section = `#part-${PICTURED}`
+// The section in a skin and scheme, as the page's address keeps them. `null` is the sheet's first skin.
+const SECTIONS = [
   ['showroom-light.png', null, 'light'],
   ['showroom-dark.png', null, 'dark'],
   ['showroom-ember-dark.png', 'ember', 'dark'],
@@ -28,11 +29,6 @@ async function open(browser, skin, scheme) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, deviceScaleFactor: 2 })
   await page.goto(url(skin, scheme))
   await page.waitForSelector('html[data-ready]')
-  const left = await page.evaluate(() => {
-    for (const p of document.querySelectorAll('.sr-wait')) p.textContent = p.textContent.replace(/ \(task-[0-9a-f]+\)/g, '')
-    return document.body.innerText.match(/task-[0-9a-f]+/)?.[0]
-  })
-  if (left) throw new Error(`pictures: the page still shows ${left}; cut it before a picture is taken`)
   await page.waitForTimeout(SETTLE_MS)
   return page
 }
@@ -40,15 +36,15 @@ async function open(browser, skin, scheme) {
 mkdirSync(images, { recursive: true })
 const browser = await chromium.launch()
 try {
-  for (const [file, skin, scheme] of PAGES) {
+  for (const [file, skin, scheme] of SECTIONS) {
     const page = await open(browser, skin, scheme)
-    await page.screenshot({ path: join(images, file), fullPage: true, scale: 'css' })
+    await page.locator(section).screenshot({ path: join(images, file), scale: 'css' })
     await page.close()
   }
   // The focus ring on the primary and the secondary button, each reached by real Tab presses, side by side.
   for (const scheme of ['light', 'dark']) {
     const page = await open(browser, null, scheme)
-    await page.focus('#part-button-title')
+    await page.focus(`#part-${PICTURED}-title`)
     const crops = []
     for (const id of ['#button-primary', '#button-secondary']) {
       await page.keyboard.press('Tab')
@@ -63,12 +59,12 @@ try {
     await sheet.close()
     await page.close()
   }
-  // The button's head: its name and its lights, as the last run left them.
+  // The section's head: the part's name and its lights, as the last run left them.
   const page = await open(browser, null, 'light')
-  const head = await page.locator('#part-button .sr-part-head').boundingBox()
-  await page.screenshot({ path: join(images, 'lights-light.png'), clip: { x: head.x - 12, y: head.y - 12, width: Math.min(head.width, 900) + 24, height: head.height + 24 } })
+  await page.locator(`${section} .sr-part-head`).screenshot({ path: join(images, 'lights-light.png'), scale: 'css' })
   await page.close()
 } finally {
   await browser.close()
 }
-console.log(`pictures: ${PAGES.length + 3} written to ${images}`)
+writeFileSync(stampPath, `${pictureStamp()}\n`)
+console.log(`pictures: ${SECTIONS.length + 3} written to ${images}, stamp ${pictureStamp()}`)

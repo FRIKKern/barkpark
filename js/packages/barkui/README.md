@@ -3,7 +3,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/showroom-dark.png">
-  <img alt="The BarkUI showroom: the button in every state, with its proof lights on" src="docs/images/showroom-light.png">
+  <img alt="The button's section of the BarkUI showroom: every state, with its proof lights" src="docs/images/showroom-light.png">
 </picture>
 
 **One look for every Barkpark app.** BarkUI is meant to draw the parts our apps are made of, from buttons to page trees, and every block of a PortableDoc document, in one set of skins. What stands today: the sheet of skins, the parts the showroom lists, and the showroom check that proves each one. What is not built yet reads as planned, with no dates. It lives in Barkpark for now as the private package `@barkpark/barkui`.
@@ -52,7 +52,7 @@ Read from the sheet and package.json; last changed on 2026-11-19.
 
 | ember, dark | fjord, light |
 |---|---|
-| ![The showroom in the ember skin, dark](docs/images/showroom-ember-dark.png) | ![The showroom in the fjord skin, light](docs/images/showroom-fjord-light.png) |
+| ![The button in the ember skin, dark](docs/images/showroom-ember-dark.png) | ![The button in the fjord skin, light](docs/images/showroom-fjord-light.png) |
 
 ## Where things live (one fact, one home)
 
