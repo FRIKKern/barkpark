@@ -553,7 +553,7 @@ await checkAsync("focus mode entered on the read-only side while an undo is on i
     setTimeout(() => {
       desk.removeAttribute("data-focus-mode");
       side.removeAttribute("data-desk-focused");
-      $("side-focus").setAttribute("aria-pressed", "false");
+      side.querySelector(".dk-focus").setAttribute("aria-pressed", "false");
     }, 20);
   });
   const seen = [];
@@ -574,6 +574,55 @@ await checkAsync("focus mode entered on the read-only side while an undo is on i
     assert.deepEqual(exits, ["side-focus"], "focus mode is left by its button");
     assert.equal(desk.hasAttribute("data-focus-mode"), false);
     assert.deepEqual(seen, [false], "the field takes the focus only once the panes are back");
+    assert.equal(doc.activeElement, $("title"));
+    assert.equal($("title").value, "Fixture post 14");
+  } finally {
+    $("title").removeEventListener("focus", onFocus);
+    desk.removeAttribute("data-focus-mode");
+    side.remove();
+    $("title").value = "Fixture post 14";
+  }
+});
+
+await checkAsync("a focus mode button pressed while the undo is on its way: its patch, after the answer, is waited for and left; then the field is set and focused", async () => {
+  const side = doc.createElement("section");
+  side.id = "side3";
+  side.setAttribute("data-pane-index", "2");
+  side.innerHTML = `<header><button type="button" class="dk-focus" id="side3-focus" aria-pressed="false">Focus</button></header>`;
+  desk.appendChild(side);
+  // The server's `desk-focus`: the patch toggles the marks, a round trip later.
+  const turns = [];
+  const button = $("side3-focus");
+  button.addEventListener("click", () => {
+    const on = !desk.hasAttribute("data-focus-mode");
+    turns.push(on ? "enter" : "leave");
+    setTimeout(() => {
+      if (on) {
+        desk.setAttribute("data-focus-mode", "true");
+        side.setAttribute("data-desk-focused", "true");
+      } else {
+        desk.removeAttribute("data-focus-mode");
+        side.removeAttribute("data-desk-focused");
+      }
+      button.setAttribute("aria-pressed", String(on));
+    }, 20);
+  });
+  const seen = [];
+  const onFocus = () => seen.push(desk.hasAttribute("data-focus-mode"));
+  try {
+    $("title").value = "Fixture post 14 X";
+    $("title").focus();
+    key($("title"), { key: "z", metaKey: true });
+    $("side3-focus").focus();
+    $("side3-focus").click();
+    $("title").addEventListener("focus", onFocus);
+    // The answer comes first, the focus mode patch after it.
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 X" });
+    assert.deepEqual(seen, [], "not focused while the patch is on its way");
+    await later(150);
+    assert.deepEqual(turns, ["enter", "leave"]);
+    assert.equal(desk.hasAttribute("data-focus-mode"), false);
+    assert.deepEqual(seen, [false], "focused once, with the panes back");
     assert.equal(doc.activeElement, $("title"));
     assert.equal($("title").value, "Fixture post 14");
   } finally {

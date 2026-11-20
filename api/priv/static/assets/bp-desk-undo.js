@@ -40,9 +40,11 @@
 // new value (the server switched the tab first). A field in a folded fieldset
 // or object (folded by the schema, or by the user) has its folds opened first.
 // A field whose pane was folded to a strip while the undo was on its way has
-// the strip opened first, as a click on it does. Focus mode entered on
-// another pane while the undo was on its way (task-9acc3246edf8cf2e) is left
-// first, as that pane's button does, and the answer is taken once the panes
+// the strip opened first, as a click on it does. Focus mode on another pane
+// (task-9acc3246edf8cf2e) hides the editor: a focus mode button pressed while
+// the undo was on its way has its patch come after the answer, so the answer
+// waits for it. Focus mode that hides the editor, then or already, is left
+// by the focused pane's own button, and the answer is taken once the panes
 // are back. An open desk menu (the "…" Doc menu, Share, List options) closes
 // as the focus goes into the field (task-a8e403cee723e5f6).
 //
@@ -126,9 +128,16 @@
     return !!pane && pane.contains(f);
   }
 
+  // The order of the last undo key and the last press of a focus mode button
+  // (`FocusMode.button`, `.dk-focus`).
+  var clock = 0;
+  var pressedAt = 0;
+  var focusAt = 0;
+
   function run(redo) {
     var desk = document.getElementById("desk-panes");
     if (!desk || typeof desk.bpPush !== "function") return;
+    pressedAt = ++clock;
     if (typeof window.BarkparkFormLeave === "function") window.BarkparkFormLeave();
     var mark = typeof window.BarkparkDocMark === "function" ? window.BarkparkDocMark() : "";
     desk.bpPush("desk-undo", { redo: redo, _bp_doc: mark });
@@ -312,29 +321,54 @@
     return !!desk && !!pane && desk.hasAttribute("data-focus-mode") && !pane.hasAttribute("data-desk-focused");
   }
 
-  // Leaves focus mode by the focused pane's own button (`desk-focus`, a round
-  // trip) and runs `then` once the desk is no longer in it; never, when there
-  // is no button or it does not end within `LEAVE_MS`.
-  var LEAVE_MS = 4000;
+  // How long a focus mode round trip (`desk-focus`) is waited for.
+  var FOCUS_MS = 2000;
 
-  function leaveFocus(then) {
+  // Runs `then` (the frame after bp-desk.js lays the panes out) once the
+  // desk's focus mode is what `done` wants, or with `late` after `FOCUS_MS`.
+  function whenFocus(done, then, late) {
     var desk = document.getElementById("desk-panes");
-    var exit = desk.querySelector('#desk-panes > [data-desk-focused] .dk-focus[aria-pressed="true"]');
-    if (!exit) return;
     var timer = 0;
     var watch = new window.MutationObserver(function () {
-      if (desk.hasAttribute("data-focus-mode")) return;
+      if (!done(desk)) return;
       stop();
-      // bp-desk.js lays the panes out on the same change; the frame after it.
       (window.requestAnimationFrame || window.setTimeout)(then);
     });
     function stop() {
       watch.disconnect();
       window.clearTimeout(timer);
     }
-    watch.observe(desk, { attributes: true, attributeFilter: ["data-focus-mode"] });
-    timer = window.setTimeout(stop, LEAVE_MS);
+    watch.observe(desk, { attributes: true, subtree: true, attributeFilter: ["data-focus-mode", "data-desk-focused"] });
+    timer = window.setTimeout(function () {
+      stop();
+      if (late) late();
+    }, FOCUS_MS);
+  }
+
+  // Leaves focus mode by the focused pane's own button and runs `then` once
+  // the desk is out of it; never, with no button or no way out in time.
+  function leaveFocus(then) {
+    var desk = document.getElementById("desk-panes");
+    var exit = desk.querySelector('#desk-panes > [data-desk-focused] .dk-focus[aria-pressed="true"]');
+    if (!exit) return;
+    whenFocus(function (d) {
+      return !d.hasAttribute("data-focus-mode");
+    }, then);
     exit.click();
+  }
+
+  // A focus mode button pressed after the undo key: its patch is on its way
+  // behind the answer. Once it lands (or not, in time), focus mode that hides
+  // the editor is left, and `then` runs.
+  function afterFocus(then) {
+    var settle = function () {
+      var f = form();
+      if (f && focusedAway(f)) leaveFocus(then);
+      else then();
+    };
+    whenFocus(function () {
+      return true;
+    }, settle, settle);
   }
 
   function onUndone(e, left) {
@@ -342,6 +376,12 @@
     var f = form();
     var el = f ? named(f, d) : null;
     if (!el || !el.tagName) return;
+    if (!left && focusAt > pressedAt) {
+      focusAt = 0;
+      return afterFocus(function () {
+        onUndone(e, true);
+      });
+    }
     if (focusedAway(f)) {
       if (!left) {
         leaveFocus(function () {
@@ -376,6 +416,13 @@
     }
   }
 
+  document.addEventListener(
+    "click",
+    function (e) {
+      if (e.target && e.target.closest && e.target.closest("#desk-panes .dk-focus")) focusAt = ++clock;
+    },
+    true
+  );
   document.addEventListener("keydown", onKey);
   document.addEventListener("beforeinput", onBeforeInput, true);
   window.addEventListener("phx:desk:undone", onUndone);
