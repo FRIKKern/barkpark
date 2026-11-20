@@ -25,6 +25,12 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawer do
   While the Tasks plugin is on, the drawer's foot starts with Tasks, the
   button that opens the desk's Tasks sidebar (`Desk.TasksPanel`), as
   TanStack's: a phone's bar has no room for it.
+
+  "Your profile", before Sign out, opens the presence profile (the display
+  name and colour other people see), as the bar's own presence pill does
+  (`show-profile`). Under 600 px that pill gives way, as TanStack's phone
+  bar draws no avatar of yours, so on a phone this is the way in
+  (task-ec46e037f7a4c0c8).
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -126,8 +132,13 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawer do
           >
             <span class="menu-icon-text"><BarkparkWeb.Icons.desk_icon name={icon} size={21} />{label}</span>
           </button>
+          <hr />
+          <button type="button" class="drawer-item" phx-click="show-profile" data-desk-drawer-pick>
+            <span class="menu-icon-text">
+              <BarkparkWeb.Icons.desk_icon name="user" size={21} />{gettext("Your profile")}
+            </span>
+          </button>
           <%= if @signed_in? do %>
-            <hr />
             <.form :let={_f} for={%{}} as={:session} action="/logout" method="post" class="drawer-signout">
               <button type="submit" class="drawer-item">
                 <span class="menu-icon-text">{gettext("Sign out")}<BarkparkWeb.Icons.desk_icon name="leave" size={21} /></span>
