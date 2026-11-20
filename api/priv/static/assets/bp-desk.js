@@ -744,6 +744,8 @@
       deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
       // The document's undo and redo, Mod+Z and Shift+Mod+Z (bp-desk-undo.js).
       deskScript("data-desk-undo", window.BarkparkDeskUndo);
+      // A read-only field shows the server's value, focused too (bp-desk-locked-value.js).
+      deskScript("data-desk-locked-value", window.BarkparkDeskLockedValue);
       // Vision's query, result tree and Save (bp-desk-vision.js), on its page only.
       if (root.querySelector("[data-desk-vision]")) deskScript("data-desk-vision-js", window.BarkparkDeskVision);
       hook._onFieldAction = function (e) {

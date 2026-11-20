@@ -558,6 +558,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-image={BarkparkWeb.StaticAssets.path("bp-desk-image.js")}
       data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       data-desk-undo={BarkparkWeb.StaticAssets.path("bp-desk-undo.js")}
+      data-desk-locked-value={BarkparkWeb.StaticAssets.path("bp-desk-locked-value.js")}
       data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
