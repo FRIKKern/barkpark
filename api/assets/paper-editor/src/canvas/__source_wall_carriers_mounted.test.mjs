@@ -265,6 +265,29 @@ try {
         failed.push(`a batch the fold refuses: flushed ${flushed}, ${batches.length} batches, notice ${JSON.stringify(notice(canvas))}`);
       }
     }
+    // A remote edit lands while source mode is open, on a paragraph and on a code block
+    // stored with no id (the textarea and the blocks it was made from are refreshed:
+    // sourceModeSyncText). Deleting the JSON block alone then saves and keeps both edits;
+    // judged against the blocks from before the remote edit, the code block would read
+    // as changed and the deletion be refused.
+    {
+      const code = (value) => ({ ...transcript, children: [{ type: "code", value }] });
+      const blocks = [p("p0", "Before"), code("line one"), image("x"), p("p2", "After")];
+      const { canvas, batches, server } = await mount(clone(blocks));
+      all.push(canvas);
+      canvas.toggleSourceMode();
+      const remote = [p("p0", "Before, from elsewhere"), code("line one, from elsewhere"), image("x"), p("p2", "After")];
+      server.splice(0, server.length, ...clone(remote));
+      canvas.applyServerBlocks(clone(remote));
+      const textarea = canvas.querySelector(".bp-canvas-source");
+      watchValueWrites(textarea).type(drop(textarea.value, "x"));
+      const flushed = canvas.flushPendingChanges();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const words = server.map((block) => `${block.id}:${(block.content || block.children || []).map((run) => run.value).join("")}`);
+      if (flushed === false || JSON.stringify(words) !== JSON.stringify(["p0:Before, from elsewhere", "e:line one, from elsewhere", "p2:After"])) {
+        failed.push(`a remote edit, then a deletion alone: flushed ${flushed}, ${batches.length} batches, stored ${JSON.stringify(words)}, notice ${JSON.stringify(notice(canvas))}`);
+      }
+    }
     assert.deepEqual(failed, [], "every outcome row ends as it must");
   }
 
