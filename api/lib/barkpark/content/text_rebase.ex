@@ -80,6 +80,31 @@ defmodule Barkpark.Content.TextRebase do
   @doc false
   def max_bytes, do: @max_bytes
 
+  @doc """
+  `merge3/3` that gives nil, not `ours`, where the two changes cannot both
+  apply (they overlap, or a value is over the size bound). The desk's undo
+  (`BarkparkWeb.Studio.Desk.DocUndo`) takes one of this editor's changes
+  back out of the stored text with it, and leaves the text as it is rather
+  than take another editor's words with it.
+  """
+  @spec merge3_both(String.t(), String.t(), String.t()) :: String.t() | nil
+  def merge3_both(base, ours, theirs)
+      when is_binary(base) and is_binary(ours) and is_binary(theirs) do
+    cond do
+      ours == base or ours == theirs ->
+        theirs
+
+      theirs == base ->
+        ours
+
+      Enum.any?([base, ours, theirs], &(byte_size(&1) > @max_bytes)) ->
+        nil
+
+      true ->
+        merge_splices(String.graphemes(base), String.graphemes(ours), String.graphemes(theirs))
+    end
+  end
+
   # The merged text, or nil when the two splices overlap (the caller keeps
   # `ours`).
   defp merge_splices(base, ours, theirs) do

@@ -20,6 +20,10 @@ defmodule Barkpark.Tenancy.Membership do
     field :principal_type, :string, default: "api_token"
     field :principal_id, :binary_id
     field :role, :string
+    # A new random stamp on every insert and update, set by the database
+    # (trigger `workspace_memberships_seat_change`). Not cast, not exported in
+    # a workspace bundle (`WorkspaceBundle.LocalOnly`).
+    field :seat_change, Ecto.UUID, read_after_writes: true
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace
 

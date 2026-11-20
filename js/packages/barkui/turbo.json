@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "cache": false
+    },
+    "test": {
+      "inputs": ["build/**", "check/**", "css/**", "parts/**", "tests/**", "vitest.config.ts"]
+    }
+  }
+}

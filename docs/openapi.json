@@ -104,6 +104,7 @@
             "properties": {
               "code": {
                 "enum": [
+                  "already_enrolled",
                   "ambiguous_dataset",
                   "bad_request",
                   "batch_too_large",
@@ -173,12 +174,14 @@
                   "mfa_required",
                   "missing_slug",
                   "missing_source",
+                  "name_taken",
                   "no_mapped_group",
                   "no_user_identity",
                   "not_acceptable",
                   "not_found",
                   "owner_only",
                   "paper_exists",
+                  "paper_not_in_scope",
                   "paper_rev_unreadable",
                   "payload_too_large",
                   "precondition_failed",
@@ -11881,7 +11884,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Approve an access request: the asker is seated with the role (only an owner grants owner).",
+        "summary": "Approve an access request: seat the asker, or give a member the higher role (only an owner grants owner).",
         "tags": [
           "workspace"
         ],
@@ -13130,7 +13133,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Pending access requests: who asked for a seat here, their note and when.",
+        "summary": "Pending access requests: who asked for a seat or a higher role, their note and when.",
         "tags": [
           "workspace"
         ],
@@ -21912,7 +21915,7 @@
               }
             }
           },
-          "description": "Request body fields: workspace, note.",
+          "description": "Request body fields: workspace, note, role.",
           "required": true
         },
         "responses": {

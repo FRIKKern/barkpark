@@ -128,7 +128,9 @@ defmodule Barkpark.SchemaOwnership do
     "bp_search_vector_of(text,text,text,jsonb)",
     "media_object_address_v1(text)",
     "prepare_media_delete_v1(jsonb)",
-    "reserve_media_object_v1()"
+    "reserve_media_object_v1()",
+    # The seat change stamp (task-018e79d8734a1b08, migration 20261119090000).
+    "workspace_memberships_seat_change()"
   ]
 
   # Signatures as `to_regprocedure` reads them. The order is the order

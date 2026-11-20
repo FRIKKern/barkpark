@@ -345,13 +345,18 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp render_subfield(assigns, %{type: "codelist"} = sub) do
+    path = child_path(assigns.path, sub.name)
+    value = get_value(assigns.value, sub.name, nil)
+    kept = kept_code?(path, value)
+
     sub_assigns = %{
       field: sub,
-      value: get_value(assigns.value, sub.name, nil),
+      value: if(kept, do: nil, else: value),
+      kept: kept,
       errors: nested_errors(assigns.errors, sub.name),
       on_change: assigns.on_change,
       plugin_name: assigns.plugin_name,
-      path: child_path(assigns.path, sub.name),
+      path: path,
       readonly: assigns.readonly
     }
 
@@ -845,6 +850,20 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   defp child_path("", child), do: child
   defp child_path(parent, child), do: "#{parent}.#{child}"
+
+  # A codelist in a document's object over a stored value that is no code (a
+  # number, an object, a list) is drawn as none and marked kept: put in an
+  # input's `value` an object raised, and a list was drawn as its codes run
+  # together and posted back as that string (task-ab428bfe4bb189f9). Only a
+  # document path (`doc[meta].code`) qualifies: the save keeps the stored
+  # value under an empty dotted one unless that field is the post's `_target`
+  # (`Handlers.Fields`), so an edit elsewhere leaves it. A paper block's
+  # composite (path `code`) writes whatever its controls post, and a Portable
+  # Text block's dialog (`doc[__object]`, `ObjectBlocks`) keeps a posted
+  # value over a stored one, so both are drawn as before.
+  defp kept_code?("doc[__object]" <> _, _value), do: false
+  defp kept_code?("doc[" <> _, value), do: not (is_nil(value) or is_binary(value))
+  defp kept_code?(_path, _value), do: false
 
   # DOM id for a subfield input + its label `for`. Must be UNIQUE across the
   # whole form — when a composite is the element type of an arrayOf, the same

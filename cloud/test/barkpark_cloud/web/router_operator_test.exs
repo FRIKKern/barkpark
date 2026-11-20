@@ -601,13 +601,15 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
 
   ## 5. Warm-pool shape
 
+  # `ready` keeps its meaning; the worker_* keys (the target the worker last
+  # reported) are pinned in warm_pool_target_test.exs.
   test "GET /v1/operator/warm-pool returns {ready: count}" do
     {operator, _t} = operator_fixture()
     token = session_token(operator)
 
     conn = call(:get, "/v1/operator/warm-pool", token)
     assert conn.status == 200
-    assert json_body(conn) == %{"ready" => Registry.count_ready_warm_servers()}
+    assert json_body(conn)["ready"] == Registry.count_ready_warm_servers()
   end
 
   ## 6. The disarmed-box census — GET /v1/operator/barkparks/without-agent-token

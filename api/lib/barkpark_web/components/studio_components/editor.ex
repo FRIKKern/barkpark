@@ -957,6 +957,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   aria-allowed-role). --%>
             <%!-- Left out of the patch that opens another document, so no
                   input of the last one is kept (`DocSwap`). --%>
+            <BarkparkWeb.Studio.Desk.ReadonlyFields.fields parent_assigns={@parent_assigns}>
             <div
               :if={@nav_view == nil and not BarkparkWeb.Studio.StudioLive.DocSwap.swapping?(@parent_assigns)}
               id="editor-tabpanel"
@@ -968,6 +969,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
+              data-desk-undo-keys={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.DocUndo.names(@editor_schema)}
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page
@@ -1035,6 +1037,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <input type="hidden" name={BarkparkWeb.Studio.StudioLive.PostIdentity.end_key()} value={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)} />
             </form>
             </div>
+            </BarkparkWeb.Studio.Desk.ReadonlyFields.fields>
           <% end %>
         </div>
         <BarkparkWeb.Components.OnixPreview.content_preview

@@ -69,6 +69,8 @@ on:
       # change it exists to catch — the stylesheet could drift from the shipped
       # asset and every js PR after it would stay green on the stale copy.
       - "api/assets/paper-surface/**"
+      # The BarkUI skins. js/packages/barkui builds its showroom from this sheet
+      - "api/priv/barkui/**"
   pull_request:
     paths:
       - "js/**"
@@ -124,6 +126,8 @@ on:
       # change it exists to catch — the stylesheet could drift from the shipped
       # asset and every js PR after it would stay green on the stale copy.
       - "api/assets/paper-surface/**"
+      # The BarkUI skins. js/packages/barkui builds its showroom from this sheet
+      - "api/priv/barkui/**"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
@@ -135,6 +139,7 @@ jobs:
   test:
     name: Build + test + gates
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: js

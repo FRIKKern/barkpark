@@ -154,16 +154,22 @@ func (c *CloudDNS) UpsertRecord(ctx context.Context, rec Record) error {
 	return nil
 }
 
+// rrsetMissingText is the text hcloud prints when the zone exists but holds no
+// such rrset. It is the only "not found" DeleteRecord may treat as success.
+const rrsetMissingText = "zone rrset not found"
+
 // DeleteRecord removes the rrset of type typ at name.zone via
 // `hcloud zone rrset delete`. Deleting an absent rrset is a no-op (idempotent):
 // hcloud prints "Zone RRSet not found" and exits non-zero, which we swallow —
 // the desired end state (no such record) already holds. Any OTHER failure
-// surfaces hcloud's captured output.
+// surfaces hcloud's captured output. That includes "Zone not found": the token
+// cannot see the zone (wrong or missing DNS token), so the record may still be
+// live, and reporting the delete as clean would leave it pointing at a freed IP.
 func (c *CloudDNS) DeleteRecord(ctx context.Context, zone, name, typ string) error {
 	argv := hcloudZoneRRSetDeleteArgv(zone, name, typ)
 	out, err := c.run(ctx, argv[0], argv[1:]...)
 	if err != nil {
-		if strings.Contains(strings.ToLower(out), "not found") {
+		if strings.Contains(strings.ToLower(out), rrsetMissingText) {
 			return nil // idempotent: already absent
 		}
 		return fmt.Errorf("hcloud zone rrset delete %q: %w: %s", Fqdn(name, zone), err, strings.TrimSpace(out))

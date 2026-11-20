@@ -25,7 +25,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 
 32688 cloud/priv/static/app.js
 20118 cloud/lib/barkpark_cloud/web/router.ex
-17649 scripts/pds-elixir-receipt-census.exs
+17650 scripts/pds-elixir-receipt-census.exs
 14925 cloud/priv/static/__preview__/overflow-guard.mjs
 12892 cloud/lib/barkpark_cloud/registry.ex
 8574 api/lib/barkpark_web/live/studio/chat_live.ex
@@ -44,7 +44,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 4805 api/lib/barkpark/cycle_fleet.ex
 4784 internal/cloudclient/client.go
 4627 internal/cli/cloud_site_cmd.go
-4645 api/lib/barkpark_web/router.ex
+4642 api/lib/barkpark_web/router.ex
 4561 api/lib/barkpark_web/live/studio/studio_live/blocks.ex
 4542 deploy/site-deploy-node.sh
 4414 api/lib/barkpark/content/query.ex
@@ -98,9 +98,9 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2454 scripts/chronicle-paper.py
 2440 internal/cli/cloud_support_cmd.go
 2394 scripts/crown-reconcile.sh
-2364 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
 2354 api/lib/barkpark/search/documents_retriever.ex
 2347 internal/cli/hetzner_lb_cmd.go
+2317 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
 2282 internal/cli/sites_cmd.go
 2222 api/lib/barkpark/tasks/close.ex
 2201 scripts/pipefail-sigpipe-scan.sh

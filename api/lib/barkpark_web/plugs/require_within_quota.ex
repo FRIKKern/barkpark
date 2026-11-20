@@ -161,11 +161,19 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
       `mutations` rule, `delete`/`patch` count zero, applied per route.
 
   Without `creates:` a request with no `mutations` list needs one, as before.
+
+  ## A controller that judges its own write workspace
+
+  `deferred_to: Controller` passes a route of `Controller` whose action
+  `Controller.judges_own_quota?/1` claims: that controller resolves the
+  workspace the write lands in and calls `judge/3` on it once, so the
+  workspace judged is the one written. Every judgment emits one
+  `[:barkpark, :quota, :judged]` event tagged with `workspace_id`.
   """
 
   import Plug.Conn
 
-  alias Barkpark.Tenancy.Quota
+  alias Barkpark.Tenancy.{Quota, Workspace}
 
   # The repo's one batch cap, shared with the sheets ops door
   # (Barkpark.Plugins.Sheets.Session.max_ops_per_call/0). NOT aliased across the
@@ -199,14 +207,32 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   @spec max_delete_mutations() :: pos_integer()
   def max_delete_mutations, do: @max_delete_mutations
 
+  @doc """
+  The Paper ingest routes that can add a document (`creates:`), read by the
+  `:ingest` pipeline and by the ingest controller's own judgment alike.
+  """
+  def ingest_creates do
+    for action <- [:ingest, :create, :sync, :ingest_session],
+        do: {BarkparkWeb.BulldocsIngestController, action}
+  end
+
+  @doc """
+  The gate's judgment of `ws` for this request (see `deferred_to:`): the conn,
+  or the conn halted with the refusal.
+  """
+  @spec judge(Plug.Conn.t(), Workspace.t(), keyword()) :: Plug.Conn.t()
+  def judge(conn, %Workspace{} = ws, opts), do: gate(conn, ws, opts)
+
   def init(opts), do: opts
 
   def call(conn, opts) do
     case conn.assigns[:current_workspace] do
-      %Barkpark.Tenancy.Workspace{} = ws ->
-        if Keyword.get(opts, :only) == :writes and conn.method in ~w(GET HEAD OPTIONS),
-          do: conn,
-          else: gate(conn, ws, opts)
+      %Workspace{} = ws ->
+        cond do
+          Keyword.get(opts, :only) == :writes and conn.method in ~w(GET HEAD OPTIONS) -> conn
+          deferred?(conn, Keyword.get(opts, :deferred_to)) -> conn
+          true -> gate(conn, ws, opts)
+        end
 
       # No workspace resolved (share_public / anonymous-default paths already
       # ran ResolveWorkspace, or an unscoped route). Nothing to meter against —
@@ -216,7 +242,18 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
     end
   end
 
+  defp deferred?(_conn, nil), do: false
+
+  defp deferred?(conn, controller) do
+    case route(conn) do
+      %{plug: ^controller, plug_opts: action} -> controller.judges_own_quota?(action)
+      _other -> false
+    end
+  end
+
   defp gate(conn, ws, opts) do
+    :telemetry.execute([:barkpark, :quota, :judged], %{count: 1}, %{workspace_id: ws.id})
+
     case batch_demand(conn, opts) do
       {:error, {:batch_too_large, n}} ->
         halt_with(conn, {:error, {:batch_too_large, n, @max_mutations}})
@@ -271,12 +308,7 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   defp single_demand(_conn, nil), do: 1
 
   defp single_demand(conn, creates) do
-    case Phoenix.Router.route_info(
-           conn.private.phoenix_router,
-           conn.method,
-           conn.request_path,
-           conn.host
-         ) do
+    case route(conn) do
       %{plug: controller, plug_opts: action} ->
         if {controller, action} in creates, do: 1, else: 0
 
@@ -284,6 +316,15 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
         1
     end
   end
+
+  defp route(conn),
+    do:
+      Phoenix.Router.route_info(
+        conn.private.phoenix_router,
+        conn.method,
+        conn.request_path,
+        conn.host
+      )
 
   defp count_room_consuming(mutations) do
     Enum.count(mutations, fn

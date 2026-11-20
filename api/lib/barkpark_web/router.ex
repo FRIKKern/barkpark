@@ -241,11 +241,11 @@ defmodule BarkparkWeb.Router do
   # (the co-located caller passes workspace_id/project_id explicitly if needed).
   # Shaves the per-keystroke Phoenix floor from ~1–5 ms to the router minimum.
   pipeline :api_local do
-    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
-    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    # nosniff + referrer-policy FIRST, so a refusal carries them (task-4a882dcfb3cd44bc).
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(:accepts, ["json"])
+    # The first plug that can answer: a refused caller gets the empty 403, whatever it sends.
     plug(BarkparkWeb.Plugs.RequireLoopback)
+    plug(:accepts, ["json"])
   end
 
   # Tenancy-aware variant of :api for the path-scoped
@@ -1163,12 +1163,8 @@ defmodule BarkparkWeb.Router do
 
     plug(BarkparkWeb.Plugs.RequireWithinQuota,
       only: :writes,
-      creates: [
-        {BarkparkWeb.BulldocsIngestController, :ingest},
-        {BarkparkWeb.BulldocsIngestController, :create},
-        {BarkparkWeb.BulldocsIngestController, :sync},
-        {BarkparkWeb.BulldocsIngestController, :ingest_session}
-      ]
+      creates: BarkparkWeb.Plugs.RequireWithinQuota.ingest_creates(),
+      deferred_to: BarkparkWeb.BulldocsIngestController
     )
   end
 
@@ -2983,6 +2979,7 @@ defmodule BarkparkWeb.Router do
 
     get("/", ChatHostController, :index)
     post("/enrollments", ChatHostController, :create_enrollment)
+    post("/:id/enrollment", ChatHostController, :replace_enrollment)
     delete("/:id", ChatHostController, :revoke)
   end
 

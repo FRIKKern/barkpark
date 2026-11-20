@@ -149,6 +149,7 @@ var codeExit = map[string]int{
 	"invalid_pref":        exitValidation,
 	"rev_mismatch":        exitConflict,
 	"paper_exists":        exitConflict,
+	"paper_not_in_scope":  exitConflict,
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
 	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
@@ -356,6 +357,15 @@ var codeExit = map[string]int{
 	// 409, chat_host_controller.ex host_limit_reached/2: the workspace holds its
 	// cap of live chat hosts. A conflict, not a retry: revoke one first.
 	"host_limit_reached": exitConflict,
+
+	// 409, chat_host_controller.ex name_taken/4: a chat host in the workspace
+	// already holds the name. A conflict: pick another name or make a new
+	// code for the waiting host.
+	"name_taken": exitConflict,
+
+	// 409, chat_host_controller.ex replace_enrollment/2: the host already
+	// enrolled, so it takes no new code. Revoke it and register it again.
+	"already_enrolled": exitConflict,
 
 	// 422, ChatSendFailure: the turn names attachments and the session's
 	// registered host does not advertise their type. Permanent until the host

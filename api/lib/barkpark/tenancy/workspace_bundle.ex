@@ -217,8 +217,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       that re-judge already-validated source rows against target-local state,
       and DEFERRABLE CONSTRAINT triggers (release-gate validation) that would
       fire at commit. `ALTER TABLE … DISABLE TRIGGER USER` (ownership, not
-      superuser) suppresses exactly the same set the replica role did (no
-      trigger in this schema is `ENABLE ALWAYS`/`ENABLE REPLICA`); internally
+      superuser) suppresses them; the one `ENABLE ALWAYS` trigger, the seat
+      stamp, is turned straight back on (`LocalOnly`); internally
       generated FK triggers are outside `USER` by definition — those are
       handled by the constraint drop above. Constraint-trigger events are
       queued at statement time, so re-enabling before commit resurrects
@@ -811,7 +811,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         member_fks =
           with_ddl_lock_timeout(:drop_member_fks, fn ->
             fks = drop_member_fks!(live)
-            alter_user_triggers!(live, "DISABLE")
+            LocalOnly.disable_user_triggers!(live, &alter_user_triggers!/2)
             fks
           end)
 
@@ -832,7 +832,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           |> LocalOnly.settle!(confined, manifest)
 
         with_ddl_lock_timeout(:restore_member_fks, fn ->
-          alter_user_triggers!(live, "ENABLE")
+          LocalOnly.enable_user_triggers!(live, &alter_user_triggers!/2)
           restore_member_fks!(member_fks)
         end)
 
@@ -1281,7 +1281,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     try do
       {members, files} =
         Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, files} ->
-          cols = Catalog.non_generated_columns(Repo, table)
+          cols = Catalog.non_generated_columns(Repo, table) -- LocalOnly.columns(table)
           order_cols = Catalog.order_columns(Repo, table)
           sql = copy_out_sql(table, kind, cols, order_cols, ctx)
           spill = Map.fetch!(spills, table)

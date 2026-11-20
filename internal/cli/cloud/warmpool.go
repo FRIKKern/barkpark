@@ -1433,7 +1433,7 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	wp.progress("secure", "started", "")
 	// dwb-19: fqdn is the user's own domain — safe to narrate.
 	wp.progress("secure", "progress", fmt.Sprintf("Pointing %s at your server…", spec.fqdn()))
-	rec := Record{Zone: spec.Zone, Name: spec.Name, Type: "A", Value: host.IP}
+	rec := Record{Zone: spec.Zone, Name: spec.Name, Type: "A", Value: host.IP, TTL: BoxRecordTTLSeconds}
 	if err := wp.DNS.UpsertRecord(ctx, rec); err != nil {
 		wp.progress("secure", "failed", "dns")
 		return LiveServer{}, fmt.Errorf("dns: upsert %s: %w", spec.fqdn(), err)
