@@ -45,11 +45,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   # target ladder) look only at the open document. Without this check a
   # doc-scoped write grantee could restore ANOTHER document's revision by id,
   # and any member could write a draft under the wrong type.
-  def restore_revision(%{"id" => rev_id}, socket) when is_binary(rev_id) do
-    if revision_of_open_doc?(rev_id, socket) do
-      do_restore_revision(rev_id, socket)
+  #
+  # The button sends the state it was drawn against (task-5b74471e6a2d6de8):
+  # `if_rev`, the rev of the document the page showed, or `if_absent: "true"`,
+  # the document was gone. They become `Content.restore_revision/4`'s `:if_rev`
+  # and `:if_absent`, the history API's fence, so a press that arrives after the
+  # document moved on is refused and writes nothing. A press with neither (a
+  # page drawn before this change) restores as before.
+  def restore_revision(%{"id" => rev_id} = params, socket) when is_binary(rev_id) do
+    with true <- revision_of_open_doc?(rev_id, socket),
+         {:ok, fence} <- fence(params) do
+      do_restore_revision(rev_id, fence, socket)
     else
-      {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
+      _ -> {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
     end
   end
 
@@ -67,10 +75,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
     end
   end
 
-  defp do_restore_revision(rev_id, socket) do
+  defp fence(params) do
+    case {params["if_rev"], params["if_absent"]} do
+      {nil, nil} -> {:ok, []}
+      {rev, nil} when is_binary(rev) and rev != "" -> {:ok, [if_rev: rev]}
+      {nil, "true"} -> {:ok, [if_absent: true]}
+      _ -> :error
+    end
+  end
+
+  defp do_restore_revision(rev_id, fence, socket) do
     type = socket.assigns[:editor_type]
 
-    case restore_open_doc(socket, rev_id, type) do
+    case restore_open_doc(socket, rev_id, type, fence) do
       {:ok, _doc} ->
         socket =
           socket
@@ -86,6 +103,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
         {:noreply,
          put_flash(socket, :error, gettext("Restore cancelled: %{reason}", reason: reason))}
 
+      # The document moved on since the page was drawn: nothing was written. The
+      # form and `editor_doc` are read again from the store, so the page shows
+      # the newer words and its buttons name them; a second press is one made
+      # against them. The edits a restore would have overwritten go too.
+      {:error, {:rev_mismatch, _}} ->
+        socket =
+          socket
+          |> assign(
+            show_history: false,
+            revisions: [],
+            editor_dirty: false,
+            doc_conflict: false,
+            editor_unsaved_keys: MapSet.new()
+          )
+          |> put_flash(
+            :error,
+            gettext("The document changed since you loaded it — reload and retry.")
+          )
+          |> Shared.rebuild_panes()
+
+        {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
+
       {:error, _} ->
         {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
     end
@@ -94,7 +133,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   # A sheet's cells live in its session, which would overwrite a restored row
   # on its next persist. Session.restore/4 discards it around the write and
   # restarts it from the restored row (task-1eaa2c0dc6e60047).
-  defp restore_open_doc(socket, rev_id, "sheet") do
+  defp restore_open_doc(socket, rev_id, "sheet", fence) do
     doc = socket.assigns.editor_doc
 
     Session.restore(
@@ -106,14 +145,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
           rev_id,
           "sheet",
           socket.assigns.dataset,
-          Shared.hook_opts(socket)
+          Shared.hook_opts(socket) ++ fence
         )
       end
     )
   end
 
-  defp restore_open_doc(socket, rev_id, type),
-    do: Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
+  defp restore_open_doc(socket, rev_id, type, fence),
+    do:
+      Content.restore_revision(
+        rev_id,
+        type,
+        socket.assigns.dataset,
+        Shared.hook_opts(socket) ++ fence
+      )
 
   def show_profile(socket) do
     {:noreply, assign(socket, show_profile: true, profile_error: nil)}

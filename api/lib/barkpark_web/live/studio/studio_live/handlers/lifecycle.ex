@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
-  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, SeenRev, Shared}
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
@@ -128,7 +128,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
-         )}
+         )
+         # The form now shows this frame; a history Restore names it (`SeenRev`).
+         |> SeenRev.applied(msg)}
     end
   end
 
