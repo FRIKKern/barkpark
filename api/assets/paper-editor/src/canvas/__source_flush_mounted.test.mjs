@@ -154,9 +154,14 @@ try {
       ">[!e]O\n\nTwo\n\nThree",
       "",
     ];
+    // A JSON line source mode did not show (half-typed or whole) is not saved: source
+    // mode does not edit a block shown as JSON (changedSentinel). Every other state is.
+    const json = (md) => md.includes("<!--bp:block");
     for (const md of midway) {
       value.type(md);
-      assert.doesNotThrow(() => canvas.flushPendingChanges(), `a flush of ${JSON.stringify(md)} does not throw`);
+      let sent;
+      assert.doesNotThrow(() => { sent = canvas.flushPendingChanges(); }, `a flush of ${JSON.stringify(md)} does not throw`);
+      if (json(md)) assert.equal(sent, false, `a JSON line typed by hand is not saved: ${JSON.stringify(md)}`);
       assert.equal(canvas.sourceMode, true, `source mode stays open after ${JSON.stringify(md)}`);
       assert.equal(textarea.value, md, "the textarea keeps exactly what was typed");
       assert.equal(new Set(liveIds(canvas).filter(Boolean)).size, liveIds(canvas).filter(Boolean).length,
@@ -172,7 +177,7 @@ try {
     inSync("after the fence closes");
     canvas.toggleSourceMode();
     assert.deepEqual(liveTexts(canvas), ["One", "let x", "Two", "Three"], "leaving keeps the final text");
-    assert.ok(batches.length >= midway.length, "every half-typed state was sent");
+    assert.ok(batches.length >= midway.filter((md) => !json(md)).length, "every other half-typed state was sent");
   }
 
   // 4) A flush clamps a locked template title like leaving source mode does: deleting

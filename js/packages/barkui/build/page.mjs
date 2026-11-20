@@ -41,7 +41,7 @@ function lights(part, ctx) {
 /** Plain lines for what the sheet does not deliver yet, from the numbers the check measured. */
 function waits(part, proof) {
   const measures = proof?.parts?.[part.name]?.measures ?? {}
-  const lines = (measures.waits ?? []).filter((w) => w.now < w.needs).map((w) => `<p class="sr-wait">${esc(waitLine(w, w.now))}</p>`)
+  const lines = (measures.waits ?? []).filter((w) => w.now < w.needs).map((w) => `<p class="sr-wait" data-task="${esc(w.task)}">${esc(waitLine(w, w.now))}</p>`)
   // Proof lines: what the check holds every control to, and the controls that say they draw no boundary.
   const run = proof?.parts?.[part.name]
   const bounds = Object.entries(measures).filter(([k]) => k === 'boundary' || k.startsWith('boundary:')).map(([, m]) => m.min)

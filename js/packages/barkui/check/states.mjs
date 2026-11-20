@@ -172,7 +172,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
     }
   }
   // Each state once, with every control it was proven on pinned. Text-only is a fact about a control at rest
-  // (README), read in every view with its pin let go; here the controls are not at rest, so that one reading is
+  // (docs/PARTS.md), read in every view with its pin let go; here the controls are not at rest, so that one reading is
   // left to the views.
   for (const [mode, list] of held) {
     await rest()

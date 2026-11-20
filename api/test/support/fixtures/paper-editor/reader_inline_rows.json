@@ -1,0 +1,452 @@
+{
+  "_comment": "Rows tying markdown/reader-inline.js (the editor's copy of the reader's prose fallbacks) to the reader itself. line_types: the types serialize.js writes as a Markdown line of words. Each row: a block and the inline runs the reader shows for it. Run by api/test/barkpark/portable_doc/reader_inline_rows_test.exs against Render and by api/assets/paper-editor/src/markdown/__reader_inline_rows.test.mjs against reader-inline.js.",
+  "line_types": [
+    "blockquote",
+    "callout",
+    "heading",
+    "paragraph"
+  ],
+  "rows": [
+    {
+      "row": "paragraph: text only",
+      "block": {
+        "type": "paragraph",
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "paragraph: content only",
+      "block": {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ]
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "paragraph: content and text, content wins",
+      "block": {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ],
+        "text": "shadow"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "paragraph: empty content and text, text shows",
+      "block": {
+        "type": "paragraph",
+        "content": [],
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "paragraph: nothing",
+      "block": {
+        "type": "paragraph"
+      },
+      "inline": []
+    },
+    {
+      "row": "blockquote: text only",
+      "block": {
+        "type": "blockquote",
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "blockquote: content only",
+      "block": {
+        "type": "blockquote",
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ]
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "blockquote: content and text, content wins",
+      "block": {
+        "type": "blockquote",
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ],
+        "text": "shadow"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "blockquote: empty content and text, text shows",
+      "block": {
+        "type": "blockquote",
+        "content": [],
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "blockquote: nothing",
+      "block": {
+        "type": "blockquote"
+      },
+      "inline": []
+    },
+    {
+      "row": "callout: text only",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "callout: content only",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ]
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "callout: content and text, content wins",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ],
+        "text": "shadow"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "callout: empty content and text, text shows",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "content": [],
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "callout: nothing",
+      "block": {
+        "type": "callout",
+        "tone": "note"
+      },
+      "inline": []
+    },
+    {
+      "row": "heading: text only",
+      "block": {
+        "type": "heading",
+        "level": 2,
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "heading: content only",
+      "block": {
+        "type": "heading",
+        "level": 2,
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ]
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "heading: content and text, content wins",
+      "block": {
+        "type": "heading",
+        "level": 2,
+        "content": [
+          {
+            "type": "text",
+            "value": "from content"
+          }
+        ],
+        "text": "shadow"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from content"
+        }
+      ]
+    },
+    {
+      "row": "heading: empty content and text, text shows",
+      "block": {
+        "type": "heading",
+        "level": 2,
+        "content": [],
+        "text": "from text"
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "heading: nothing",
+      "block": {
+        "type": "heading",
+        "level": 2
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "row": "heading: a number as text, shown as its digits",
+      "block": {
+        "type": "heading",
+        "level": 2,
+        "text": 7
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "7"
+        }
+      ]
+    },
+    {
+      "row": "callout: body slot only",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "slots": {
+          "body": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "from body"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from body"
+        }
+      ]
+    },
+    {
+      "row": "callout: body slot over content",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "content": [
+          {
+            "type": "text",
+            "value": "head"
+          }
+        ],
+        "slots": {
+          "body": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "value": "from body"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from body"
+        }
+      ]
+    },
+    {
+      "row": "callout: empty body slot, text shows, content does not",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "content": [
+          {
+            "type": "text",
+            "value": "head"
+          }
+        ],
+        "text": "from text",
+        "slots": {
+          "body": []
+        }
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "callout: empty first body element, text shows",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "text": "from text",
+        "slots": {
+          "body": [
+            {
+              "type": "paragraph",
+              "content": []
+            }
+          ]
+        }
+      },
+      "inline": [
+        {
+          "type": "text",
+          "value": "from text"
+        }
+      ]
+    },
+    {
+      "row": "blockquote: attribution only, shown beside the words, not as them",
+      "block": {
+        "type": "blockquote",
+        "attribution": "from attribution"
+      },
+      "inline": []
+    },
+    {
+      "row": "blockquote: cite only, shown beside the words, not as them",
+      "block": {
+        "type": "blockquote",
+        "cite": "from cite"
+      },
+      "inline": []
+    },
+    {
+      "row": "callout: title only, shown above the words, not as them",
+      "block": {
+        "type": "callout",
+        "tone": "note",
+        "title": "from title"
+      },
+      "inline": []
+    }
+  ]
+}

@@ -113,6 +113,38 @@ check("quotes, callouts and notes are quotes with a label; a divider and an imag
   );
 });
 
+// A callout's words: markdown/callout-words.js.
+check("a callout holding content and a different body exports both, content first, then every body block", () => {
+  const p = (text) => ({ type: "paragraph", content: [t(text)] });
+  assert.equal(
+    md([{ type: "callout", tone: "note", content: [t("head words")], slots: { body: [p("body words"), { type: "list", items: [[t("body item")]] }] } }]),
+    "> **Note**\n>\n> head words\n>\n> body words\n>\n> - body item",
+  );
+  // Two fields holding the same words are both exported: nothing is skipped as equal.
+  assert.equal(
+    md([{ type: "callout", tone: "note", content: [t("same words")], slots: { body: [p("same words")] } }]),
+    "> **Note**\n>\n> same words\n>\n> same words",
+  );
+  assert.equal(md([{ type: "callout", tone: "note", slots: { body: [p("only the body")] } }]), "> **Note**\n>\n> only the body");
+});
+
+const underItem = (child) => ({ type: "list", items: [{ content: [t("item")], children: [child] }] });
+
+check("a list item keeps every word of a heading under it, indented", () => {
+  assert.equal(md([underItem({ type: "heading", level: 3, text: "child heading" })]), "- item\n  ### child heading");
+});
+
+check("a list item keeps every word of a code block under it, indented", () => {
+  assert.equal(md([underItem({ type: "code", lang: "js", value: "child code" })]), "- item\n  ```js\n  child code\n  ```");
+});
+
+check("a list item keeps every word of a callout under it, its body too, indented", () => {
+  assert.equal(
+    md([underItem({ type: "callout", tone: "note", content: [t("child head")], slots: { body: [{ type: "paragraph", content: [t("child body")] }] } })]),
+    "- item\n  > **Note**\n  >\n  > child head\n  >\n  > child body",
+  );
+});
+
 check("steps, tabs and columns keep every block inside them, in order", () => {
   const p = (text) => ({ type: "paragraph", content: [t(text)] });
   assert.equal(

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -103,11 +103,18 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
     for (const v of ['-1', 'abc', '1.5', String(top + 1), ' 3', '1e2']) expect(() => partNames(partsDir, { BARKUI_PROOF_COPIES: v }), v).toThrow(/BARKUI_PROOF_COPIES must be/)
   })
 
-  it(`the knob at its top makes exactly MOST_GROUPS (${MOST_GROUPS}) groups, and a folder past MOST_PARTS refuses with the readme's way out`, () => {
+  it(`the knob at its top makes exactly MOST_GROUPS (${MOST_GROUPS}) groups, and a folder past MOST_PARTS refuses with the way out the file it names holds`, () => {
     const top = MOST_PARTS - folderNames(partsDir).length
     expect(split(partNames(partsDir, { BARKUI_PROOF_COPIES: String(top) })).length).toBe(MOST_GROUPS)
     expect(split(partNames(folderOf(MOST_PARTS, 'at-most'), {})).length).toBe(MOST_GROUPS)
-    expect(() => partNames(folderOf(MOST_PARTS + 1, 'past-most'), {})).toThrow(/raise MOST_GROUPS in check\/jobs.mjs .*README/)
+    expect(() => partNames(folderOf(MOST_PARTS + 1, 'past-most'), {})).toThrow(/raise MOST_GROUPS in check\/jobs.mjs .*docs\/PARTS\.md/)
+    // The file the refusal names exists and holds the way out, so the pointer cannot go stale.
+    let said = ''
+    try { partNames(folderOf(MOST_PARTS + 1, 'past-most-2'), {}) } catch (e) { said = e.message }
+    const named = said.match(/as js\/packages\/barkui\/(\S+) says/)?.[1]
+    expect(named).toBeTruthy()
+    const text = readFileSync(new URL(`../${named}`, import.meta.url), 'utf8').replace(/\s+/g, ' ')
+    expect(text).toContain(`Past ${MOST_PARTS} parts the plan job refuses, red, and names the fix: raise \`MOST_GROUPS\``)
   })
 })
 
