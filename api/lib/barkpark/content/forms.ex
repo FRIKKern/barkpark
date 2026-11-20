@@ -19,10 +19,8 @@ defmodule Barkpark.Content.Forms do
   upsert_document}`.
   """
 
-  # The desk's unset marker (`unset/0`).
-  @unset :__bp_unset__
-
   alias Barkpark.Content
+  alias Barkpark.Content.Forms.Unset
 
   alias Barkpark.Content.{
     CanonicalShapes,
@@ -454,7 +452,9 @@ defmodule Barkpark.Content.Forms do
     # A subfield posted as the unset marker (`unset/0`) is taken off: the
     # desk writes it for a language field left with no text, as TanStack's
     # `write()` unsets it. A stored null is not the marker and is kept.
-    unset = for %{"name" => name} <- subs, Map.fetch(coerced, name) == {:ok, @unset}, do: name
+    unset =
+      for %{"name" => name} <- subs, match?({:ok, %Unset{}}, Map.fetch(coerced, name)), do: name
+
     coerced = Map.drop(coerced, unset)
 
     restored =
@@ -534,6 +534,8 @@ defmodule Barkpark.Content.Forms do
         if field["type"] == "composite", do: written, else: {:value, posted}
     end
   end
+
+  defp prune_absent(_field, %Unset{}), do: :absent
 
   defp prune_absent(%{"type" => "composite"} = field, %{} = value) do
     pruned =
@@ -681,7 +683,7 @@ defmodule Barkpark.Content.Forms do
   # reach here (build_content/2 drops them — the existing field-clearing
   # semantics). Non-binary values (API callers already sending numbers)
   # pass through unchanged.
-  defp coerce_field_value(_field, @unset), do: @unset
+  defp coerce_field_value(_field, %Unset{} = unset), do: unset
 
   defp coerce_field_value(%{"type" => "number"}, val) when is_binary(val) do
     trimmed = String.trim(val)
@@ -1070,11 +1072,15 @@ defmodule Barkpark.Content.Forms do
   # re-rendered body HTML to the document's own workspace; with no scope the
   # dataset resolved to the Default workspace's, so another workspace's saved
   # HTML showed Default's titles (task-af1a7cc9cd523586).
-  defp classic_save_content(base_doc, current_doc, params, schema, dataset, scope) do
+  #
+  # `whole` is the posted fields written exactly as posted, nulls and empty
+  # subfields included: an undo or redo's whole value (`field_bases` marks
+  # them `:whole`), which the store held before and must hold again.
+  defp classic_save_content(base_doc, current_doc, whole, params, schema, dataset, scope) do
     snapshot = Map.get(base_doc, :content) || %{}
     base_content = Map.get(current_doc, :content) || %{}
 
-    params = edits(params, snapshot, schema)
+    params = params |> edits(snapshot, schema) |> Map.merge(whole)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
@@ -1103,20 +1109,27 @@ defmodule Barkpark.Content.Forms do
   object (TanStack's `write()`): the save takes the key off. No stored or
   posted data can hold it, so a stored null is never mistaken for it.
   """
-  @spec unset() :: atom()
-  def unset, do: @unset
+  @spec unset() :: Unset.t()
+  def unset, do: %Unset{}
 
-  @doc "`value` with every unset marker in it made nil: the form buffer's view."
+  @doc """
+  `value` with every unset marker in it made nil: the form buffer's view.
+  Every path that puts posted values into the buffer goes through it
+  (`PostedEdits.put/2`).
+  """
   @spec unset_as_nil(term()) :: term()
-  def unset_as_nil(@unset), do: nil
-  def unset_as_nil(%{} = map), do: Map.new(map, fn {k, v} -> {k, unset_as_nil(v)} end)
+  def unset_as_nil(%Unset{}), do: nil
+
+  def unset_as_nil(%{} = map) when not is_struct(map),
+    do: Map.new(map, fn {k, v} -> {k, unset_as_nil(v)} end)
+
   def unset_as_nil(list) when is_list(list), do: Enum.map(list, &unset_as_nil/1)
   def unset_as_nil(value), do: value
 
   # A marker the composite restore did not take (the object was gone from
   # storage) is taken off here, so it is never written.
   defp drop_unset(%{} = map) when not is_struct(map),
-    do: for({k, v} <- map, v !== @unset, into: %{}, do: {k, drop_unset(v)})
+    do: for({k, v} <- map, not is_struct(v, Unset), into: %{}, do: {k, drop_unset(v)})
 
   defp drop_unset(list) when is_list(list), do: Enum.map(list, &drop_unset/1)
   defp drop_unset(value), do: value
@@ -1389,6 +1402,7 @@ defmodule Barkpark.Content.Forms do
     # attempt, so a writer that landed in between is merged in too.
     {bases, write_opts} = Keyword.pop(write_opts, :field_bases, %{})
     params_now = TextRebase.rebase(params, bases, text_values(current))
+    write_opts = Keyword.put(write_opts, :whole_fields, for({key, :whole} <- bases, do: key))
 
     case upsert_draft_once(base_doc, current, type, schema, params_now, dataset, write_opts) do
       {:error, {:rev_mismatch, _}} when attempts > 1 ->
@@ -1476,10 +1490,13 @@ defmodule Barkpark.Content.Forms do
     do: posted == Map.get(base_doc, String.to_existing_atom(key))
 
   defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
+    {whole, opts} = Keyword.pop(opts, :whole_fields, [])
+
     with content when is_map(content) <-
            classic_save_content(
              base_doc,
              current,
+             Map.take(params, whole),
              params,
              CanonicalShapes.for_type(schema, type),
              dataset,

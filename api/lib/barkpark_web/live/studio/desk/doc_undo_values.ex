@@ -22,7 +22,6 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.Forms
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.StudioLive
@@ -152,32 +151,12 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
 
   @doc """
   The post of an undo or redo that turns `now` (what the store holds) into
-  `next`. A key `next` no longer has, in an object or a keyed list's item,
-  is posted as `Forms.unset/0`: the save keeps a key a post leaves out, so
-  a redo of an emptied language field would leave it. A field `next` has
-  no value for is posted "", which takes it off the document.
+  `next`: `next` itself, which the save writes whole, nulls and emptied
+  keys as they are (`Fields.autosave_built/2` marks the field `:whole`). A
+  field `next` has no value for is posted "", which takes it off the
+  document.
   """
   @spec post(term(), term()) :: term()
   def post(now, nil) when not is_nil(now), do: ""
-  def post(now, next), do: gone(now, next)
-
-  defp gone(%{} = now, %{} = next) do
-    Enum.reduce(now, next, fn {key, was}, acc ->
-      case Map.fetch(acc, key) do
-        {:ok, value} -> Map.put(acc, key, gone(was, value))
-        :error -> Map.put(acc, key, Forms.unset())
-      end
-    end)
-  end
-
-  defp gone(now, next) when is_list(now) and is_list(next) do
-    by_key = for %{"_key" => k} = item <- now, into: %{}, do: {k, item}
-
-    Enum.map(next, fn
-      %{"_key" => k} = item when is_map_key(by_key, k) -> gone(by_key[k], item)
-      item -> item
-    end)
-  end
-
-  defp gone(_now, next), do: next
+  def post(_now, next), do: next
 end

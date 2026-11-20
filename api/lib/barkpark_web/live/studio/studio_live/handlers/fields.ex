@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
+  alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -421,7 +422,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   The params may carry, under the atom key `:bases`, the value each free-text
   field was computed from (the desk's undo, `Desk.DocUndo`): the save merges
   it onto what the store holds by then, as it does a typed post from the base
-  the page reports. A page's params never carry an atom key.
+  the page reports. A field whose base is `:whole` is written exactly as
+  posted (an undo of a value, `Desk.DocUndoValues.post/2`). A page's params
+  never carry an atom key.
   """
   def autosave_built(params, socket) when is_map(params) do
     {bases, params} = Map.pop(params, :bases, %{})
@@ -613,7 +616,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # language only loses its key, and an object left empty stays `{}`.
   defp unset_language(doc, parent, lang) do
     case value_at(doc, parent) do
-      %{} = map ->
+      %{} = map when not is_struct(map) ->
         left = Map.delete(map, lang)
 
         if blank_map?(left) and not in_row?(parent),
@@ -634,7 +637,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {parent, [key]} = Enum.split(path, -1)
 
     case value_at(doc, parent) do
-      %{} = map ->
+      %{} = map when not is_struct(map) ->
         left = Map.put(map, key, Forms.unset())
 
         if blank_map?(left) and not in_row?(parent),
@@ -957,7 +960,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         |> Barkpark.Content.Forms.coerce_params(socket.assigns[:editor_schema])
         |> Map.take(keys)
 
-      assign(socket, editor_form: Map.merge(socket.assigns[:editor_form] || %{}, posted))
+      PostedEdits.put(socket, posted)
     else
       socket
     end
