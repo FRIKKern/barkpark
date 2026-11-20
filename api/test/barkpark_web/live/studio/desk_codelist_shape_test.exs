@@ -14,8 +14,8 @@ defmodule BarkparkWeb.Studio.DeskCodelistShapeTest do
   The page says so (#27955 review, B2): the field draws the stored value and
   reads "Not saved", in the desk and the old Studio, also after Save. A
   write the server built from a stored value is not read for shape (B1):
-  Review changes' Revert puts a stored list back, and a paste never writes a
-  codelist at all.
+  Review changes' Revert puts a stored list back. A paste is read by
+  `FieldPaste` (#27970), which refuses a list for a codelist in words.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -323,7 +323,7 @@ defmodule BarkparkWeb.Studio.DeskCodelistShapeTest do
   defp pressed(view, params),
     do: Map.merge(Map.take(EditorPost.marks(view), ["_bp_doc"]), params)
 
-  test "Paste field never writes a codelist: a copied list is refused in words", c do
+  test "Paste field never writes a list into a codelist: it is refused in words", c do
     view = desk(c)
     copied = %{"name" => "subject", "sig" => "codelist", "value" => ["A1", "B2"]}
 
@@ -341,13 +341,14 @@ defmodule BarkparkWeb.Studio.DeskCodelistShapeTest do
     assert_push_event(view, @toast, %{
       tone: "critical",
       title: "Invalid clipboard item",
-      description: ~s(A field of type "codelist" cannot be pasted into)
+      description: "Not a code (kept as stored)"
     })
 
     assert stored(c)["subject"] == "FBA"
   end
 
-  test "Paste document writes the fields that fit and leaves a codelist as stored", c do
+  test "Paste document writes the fields that fit and leaves a codelist under a list as stored",
+       c do
     view = desk(c)
 
     clip =
