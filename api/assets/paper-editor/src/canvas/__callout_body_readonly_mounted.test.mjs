@@ -1,13 +1,31 @@
-// A callout that holds a body is shown whole and read-only in the rich editor
-// (task-c6355c4cb9cb7707; markdown/callout-words.js holds what a callout's words are).
-// Until the editor can edit a body in place, such a callout shows content then every
-// body block, takes no typing, says so, and sends nothing for itself. A callout with
-// no body, or an empty one, stays editable.
+// A callout that holds a body opens read-only in the rich editor and sends nothing
+// for itself (task-c6355c4cb9cb7707; markdown/callout-words.js holds what a callout's
+// words are). Until the editor can edit a body in place, such a callout shows its
+// content, then each body block with every word it holds or as one line naming its
+// kind, never a part of itself; it takes no typing and says so. A callout with no
+// body, or an empty one, stays editable.
 // Run: node src/canvas/__callout_body_readonly_mounted.test.mjs
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { NodeSelection } from "@tiptap/pm/state";
 import { mount, paragraph } from "./source-flush-mounted-harness.mjs";
+import { UNCHECKED, diffWords, goldenWords, loadPack } from "../../../../priv/portable_doc/conformance/conformance.mjs";
+
+const readJson = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
+
+// The reader's words for the shared nested-list fixture, in reader order: the same
+// words render/nested_list_carriers_test.exs and src/__nested_list_carriers.test.mjs
+// assert. No golden in the conformance pack holds nested list items.
+const NESTED_LIST_CARRIER_WORDS = ["Plan", "Build", "Verify", "Ship", "Flat", "sibling", "Fallback", "parent", "Alias", "child"];
+
+// The words an element shows, one text node apart from the next.
+function shownText(node) {
+  const parts = [];
+  const walker = node.ownerDocument.createTreeWalker(node, 4);
+  while (walker.nextNode()) parts.push(walker.currentNode.nodeValue);
+  return parts.join(" ");
+}
 
 const callout = () => ({
   id: "c1",
@@ -38,7 +56,7 @@ function typingSpot(editor, words) {
 
 const mounted = [];
 try {
-  // 1) A callout with content and a body: shown whole, in order, read-only.
+  // 1) A callout with content and a body: shown in order, read-only.
   {
     const { canvas, batches, server, inSync } = await mount([paragraph("p1", "Before"), callout()]);
     mounted.push(canvas);
@@ -110,7 +128,58 @@ try {
     if (!extra.slots) inSync(`after a key in a callout with ${label}`);
   }
 
-  console.log("callout body read-only mounted: 3 cases passed");
+  // 4) A list's nested items are shown with their words.
+  {
+    const list = readJson("../../test-inputs/nested-list-carriers.json").blocks[0];
+    const block = { id: "c1", type: "callout", tone: "note", slots: { body: [list] } };
+    const { canvas } = await mount([paragraph("p1", "Before"), block]);
+    mounted.push(canvas);
+    const shown = shownText(canvas.querySelector('[data-bp-callout-readonly="c1"] [data-bp-callout-words]'));
+    for (const word of ["Build", "Verify", "Alias"]) assert.ok(shown.includes(word), `the nested item word "${word}" is shown: ${JSON.stringify(shown)}`);
+  }
+
+  // 5) Each body block shows every word it holds or its marker, never a part. The
+  //    body holds every block kind the schema allows, with the reader's own words for
+  //    each from the conformance pack, plus the shared nested-list fixture and a
+  //    callout whose body holds a table.
+  {
+    const kinds = Object.keys(readJson("../../../../priv/portable_doc/spec/blocks.schema.json").definitions.blocks);
+    const golden = new Map(loadPack().cases.map((c) => [c.type, c]));
+    const expected = new Map();
+    const body = [];
+    const add = (block, words) => { const id = `k${body.length}`; body.push({ ...block, id }); expected.set(id, words); };
+    for (const kind of kinds) {
+      const c = golden.get(kind);
+      add(c ? c.input : { type: kind }, c ? goldenWords(c.shape) : []);
+    }
+    add(readJson("../../test-inputs/nested-list-carriers.json").blocks[0], NESTED_LIST_CARRIER_WORDS.map((w) => w.toLowerCase()));
+    const table = golden.get("table");
+    const inner = { ...golden.get("callout").input, slots: { body: [{ ...table.input, id: "inner-table" }] } };
+    add(inner, goldenWords(golden.get("callout").shape));
+    expected.set("inner-table", goldenWords(table.shape));
+    const block = { id: "c1", type: "callout", tone: "note", content: [{ type: "text", value: "head words" }], slots: { body } };
+    const { canvas } = await mount([paragraph("p1", "Before"), block]);
+    mounted.push(canvas);
+    const words = canvas.querySelector('[data-bp-callout-readonly="c1"] [data-bp-callout-words]');
+    const check = (holder, blocks, where) => {
+      const shown = [...holder.children].filter((child) => child.hasAttribute("data-bp-callout-body-block"));
+      assert.equal(shown.length, blocks.length, `${where}: one shown block per body block`);
+      blocks.forEach((stored, i) => {
+        const view = shown[i];
+        const label = `${where} block ${i + 1} (${stored.type})`;
+        const text = view.textContent;
+        if (text === `↪ ${stored.type}`) return;
+        const want = expected.get(stored.id);
+        const missing = diffWords(shownText(view), want);
+        assert.notEqual(missing, UNCHECKED, `${label}: a block with no reader words shows its marker, got ${JSON.stringify(text)}`);
+        assert.deepEqual(missing, [], `${label}: drawn with every word it holds, or its marker; got ${JSON.stringify(text)}`);
+        if (stored.type === "callout") check(view, (stored.slots && stored.slots.body) || [], label);
+      });
+    };
+    check(words, body, "body");
+  }
+
+  console.log("callout body read-only mounted: 5 cases passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
 }

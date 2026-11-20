@@ -1,7 +1,7 @@
 {
   "contract": "1.23.0",
   "editor": "0.1.0-alpha.2",
-  "build": "3150389412ce",
+  "build": "d106097fe42c",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -1344,6 +1344,7 @@
       "data-body-key",
       "data-bp-block",
       "data-bp-body",
+      "data-bp-callout-body-block",
       "data-bp-callout-readonly",
       "data-bp-callout-readonly-note",
       "data-bp-callout-words",
