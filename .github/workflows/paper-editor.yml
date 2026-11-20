@@ -213,8 +213,11 @@ jobs:
           node ../paper-editor-host-tests/__desk_slice_doc_keys.test.mjs
           node ../paper-editor-host-tests/__desk_slice_keep_link.test.mjs
           node ../paper-editor-host-tests/__desk_slice_keep_header_focus.test.mjs
+          node ../paper-editor-host-tests/__desk_undo_modal.test.mjs
           node ../paper-editor-host-tests/__desk_saves_pending.test.mjs
           node ../paper-editor-host-tests/__desk_undo.test.mjs
+          node ../paper-editor-host-tests/__desk_undo_answer.test.mjs
+          node ../paper-editor-host-tests/__desk_undo_focus.test.mjs
           node ../paper-editor-host-tests/__desk_vision.test.mjs
           node ../paper-editor-host-tests/__field_canvas_hook.test.mjs
           node ../paper-editor-host-tests/__columns_track_controls.test.mjs
