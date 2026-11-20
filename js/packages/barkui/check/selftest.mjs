@@ -395,6 +395,34 @@ const CASES = [
     expect: refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/),
   },
   {
+    name: 'a sheet the check cannot read rule for rule the way the browser does is refused, and one it reads is not',
+    direct: async () => {
+      const browser = await chromium.launch()
+      const cannot = /the check cannot read this sheet the way the browser does/
+      const either = /the check cannot read this sheet the way the browser does|the browser drops this rule/
+      try {
+        const said = []
+        for (const [css, re, wanted] of [
+          // A string left open at a newline, between a dropped rule and a plain one.
+          ['[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-y: "a\n; }\n[data-slot="button"].k { gap: 0px; }', /\[data-slot="button"\]:bark-made-up: the browser drops this rule/, true],
+          // A rule with no block, so the counts would even out: the dropped rule is still named, and the count refused.
+          ['@layer x;\na:bark-made-up { gap: 0; }', /^a:bark-made-up: the browser drops this rule/, true],
+          ['@layer x;\na:bark-made-up { gap: 0; }', /does: at the top of part\.css: part\.css writes 0 rule\(s\) the browser reads alone, and the browser reads 1/, true],
+          // A brace inside an unquoted url(), which the text reader takes for a block.
+          ['a { --x: url({); }\nb { gap: 0; }', cannot, true],
+          // Nothing refused where the two readings agree.
+          ['[title="{"] { content: "}"; } a\\{b { gap: 0 } /* } */ c { gap: 0; }', either, false],
+          ['a { gap: 0; &:hover { gap: 1px; } gap: 2px; @media (max-width: 600px) { gap: 3px; } }', either, false],
+          ['@keyframes bark-x { from { gap: 0; } to { gap: 1px; } }\n@media (prefers-reduced-motion: no-preference) { a { & > b { gap: 0; } } }', either, false],
+        ]) said.push((await readPartCss(browser, css)).found.some((f) => re.test(f)) === wanted)
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.indexOf(false) + 1}`)
+        return said.every(Boolean)
+      } finally {
+        await browser.close()
+      }
+    },
+  },
+  {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
     only: ['skins', 'schemes'],
     plant: all(
