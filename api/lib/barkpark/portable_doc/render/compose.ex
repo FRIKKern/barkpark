@@ -443,21 +443,32 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do
-    # Body inline comes from the `body` slot (STEP 3 slot model): the slot's lone
-    # paragraph when materialized, else the legacy `content` array — the SAME inline
-    # array either way (Slots.callout_body_inline/1), so this composes a byte-
-    # identical single PdText. The callout FLATTENS its single-paragraph body slot to
-    # INLINE; it never composes the paragraph as a block <p> (that would add a wrapper
-    # + 12pt margin and break parity).
-    body = %{
+    # A callout's words are its content (else its text), then every block of its
+    # body slot, in that order (api/assets/paper-editor/src/markdown/callout-words.js).
+    # The first line is one inline PdText, as it always was. Each body block is
+    # composed by compose_block/2, the same function that composes a top-level
+    # block, so a list, a table or a callout in a body shows whole. A callout with
+    # no body composes the one PdText it always did (byte-identical); one with a
+    # body and no first-line words leaves the empty PdText out.
+    head = %{
       "kind" => "PdText",
-      "children" => compose_inline_children(Barkpark.PortableDoc.Slots.callout_body_inline(b))
+      "children" => compose_inline_children(Barkpark.PortableDoc.Slots.callout_head_inline(b))
     }
+
+    body =
+      case Barkpark.PortableDoc.Slots.callout_body_blocks(b) do
+        [] ->
+          [head]
+
+        blocks ->
+          composed = Enum.map(blocks, &compose_body_block(&1, b, style))
+          if head["children"] == [], do: composed, else: [head | composed]
+      end
 
     tone = Map.get(b, "tone") || "info"
 
     base =
-      %{"kind" => "PdCallout", "tone" => tone, "children" => [body]}
+      %{"kind" => "PdCallout", "tone" => tone, "children" => body}
       |> maybe_put("title", Map.get(b, "title"))
 
     # Collapse is a SCREEN-only affordance: thread collapsible/collapsed ONLY in
@@ -472,6 +483,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> maybe_put_true("collapsed", Map.get(b, "collapsed"))
     else
       base
+    end
+  end
+
+  # A body block composes as a top-level block does. With the callout's carried
+  # render options (Render.prepare_block/2) it gets the same pre-pass first, as a
+  # section's stack children do.
+  defp compose_body_block(block, callout, style) do
+    case render_opts(callout) do
+      nil -> compose_block(block, style)
+      opts -> compose_block(Barkpark.PortableDoc.Render.prepare_block(block, opts), style)
     end
   end
 

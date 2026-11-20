@@ -28,8 +28,10 @@
 // no words must keep every block the key did not change. Before any typing, each prose
 // block's line must show the words the reader shows.
 //   - With the callout rule on, nothing is lost: a callout with a body never opens.
-//   - With the rule lifted (here only), the sweep finds the callout body and nothing
-//     else, so the one named rule covers the class.
+//   - With the rule lifted (here only), nothing is lost either: the rich editor shows
+//     a callout's words from its first body block, the reader shows its content first
+//     (markdown/reader-inline.js, task-e70b11497064225b), so the derived rule opens
+//     the built callout with a body read-only for its content.
 // Run: node src/canvas/__source_inside_edit_sweep.test.mjs
 
 import assert from "node:assert/strict";
@@ -373,7 +375,11 @@ try {
   tally("lifted", off);
   const kinds = [...new Set(off.losers.map((loser) => loser.replace(/^.* \((\w+)\) line \d+: (\w+) (\S+).*$/, "$1 $3").replace(/\[\d+\]/g, "")))];
   for (const loser of off.losers.slice(0, 20)) console.log(`  ${loser}`);
-  assert.deepEqual(kinds, ["callout content.value"], "lifted, the sweep finds the callout body and nothing else");
+  const built = off.rows.filter(([name]) => name.startsWith("built/"));
+  for (const [name, says] of built) console.log(`  ${name}: ${says}`);
+  assert.deepEqual(kinds, [], "lifted, the sweep finds nothing lost");
+  assert.deepEqual(built, [["built/callout-with-a-body", "read-only: callout content"]],
+    "lifted, the callout with a body opens read-only: the editor shows its body's first words, the reader its content");
   console.log("source inside-edit sweep: passed");
 } finally {
   canvas.remove();

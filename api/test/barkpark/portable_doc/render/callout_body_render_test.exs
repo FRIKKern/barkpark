@@ -1,9 +1,10 @@
 defmodule Barkpark.PortableDoc.Render.CalloutBodyRenderTest do
   @moduledoc """
   A callout's words, as api/assets/paper-editor/src/markdown/callout-words.js
-  answers them: the article page and the email show its content, then every block of
-  its body slot, in order (task-e70b11497064225b). A legacy callout (content only,
-  or a body of one paragraph and no content) renders as before.
+  answers them: the article page and the email show its content (or its text when it
+  has no content), then every block of its body slot, in order, each body block drawn
+  by the same function that draws a top-level block (task-e70b11497064225b). A callout
+  with no body renders byte-identical to before.
   """
   use ExUnit.Case, async: true
 
@@ -12,33 +13,59 @@ defmodule Barkpark.PortableDoc.Render.CalloutBodyRenderTest do
   defp text(value), do: [%{"type" => "text", "value" => value}]
   defp para(value), do: %{"type" => "paragraph", "content" => text(value)}
 
-  # The shapes Portable Doc's importer writes under a callout: content, then a body
-  # of a paragraph, a list, a code block and a nested callout.
+  # A body of every shape the reader draws as a block: a paragraph, a list, code, a
+  # quote with its cite, a table and a callout holding its own body.
+  defp body do
+    [
+      para("body paragraph"),
+      %{"type" => "list", "ordered" => false, "items" => [text("body item")]},
+      %{"type" => "code", "lang" => "js", "value" => "body_code()"},
+      %{"type" => "blockquote", "content" => text("body quote"), "cite" => "Quote Author"},
+      %{
+        "type" => "table",
+        "head" => [text("Head cell")],
+        "rows" => [[text("Row cell")]]
+      },
+      %{
+        "type" => "callout",
+        "tone" => "warning",
+        "title" => "Inner title",
+        "content" => text("inner callout"),
+        "slots" => %{"body" => [para("inner body")]}
+      }
+    ]
+  end
+
   defp nested do
     %{
       "id" => "c1",
       "type" => "callout",
       "tone" => "info",
       "content" => text("head words"),
-      "slots" => %{
-        "body" => [
-          para("body paragraph"),
-          %{"type" => "list", "ordered" => false, "items" => [text("body item")]},
-          %{"type" => "code", "lang" => "js", "value" => "body_code()"},
-          %{"type" => "callout", "tone" => "warning", "content" => text("inner callout")}
-        ]
-      }
+      "slots" => %{"body" => body()}
     }
   end
 
-  @words ["head words", "body paragraph", "body item", "body_code()", "inner callout"]
+  @words [
+    "head words",
+    "body paragraph",
+    "body item",
+    "body_code()",
+    "body quote",
+    "Quote Author",
+    "Head cell",
+    "Row cell",
+    "Inner title",
+    "inner callout",
+    "inner body"
+  ]
 
-  defp positions(html), do: Enum.map(@words, &:binary.match(html, &1))
+  defp count(html, word), do: length(:binary.matches(html, word))
 
   for style <- [:article, :email] do
     test "#{style}: a callout shows its content, then every body block, in order" do
       html = Render.render_block(nested(), %{style: unquote(style)})
-      found = positions(html)
+      found = Enum.map(@words, &:binary.match(html, &1))
 
       for {word, at} <- Enum.zip(@words, found) do
         assert at != :nomatch, "#{unquote(style)} shows #{inspect(word)}: #{html}"
@@ -46,25 +73,47 @@ defmodule Barkpark.PortableDoc.Render.CalloutBodyRenderTest do
 
       starts = Enum.map(found, fn {start, _} -> start end)
       assert starts == Enum.sort(starts), "#{unquote(style)} shows them in order: #{html}"
+
+      for word <- @words do
+        assert count(html, word) == 1, "#{unquote(style)} shows #{inspect(word)} once: #{html}"
+      end
     end
 
-    test "#{style}: a body of one paragraph and no content renders as content alone did" do
-      legacy = %{
+    test "#{style}: each body block is drawn as the same block at the top level" do
+      html = Render.render_block(nested(), %{style: unquote(style)})
+
+      for block <- body() do
+        alone = Render.render_block(block, %{style: unquote(style)})
+
+        assert String.contains?(html, alone),
+               "#{unquote(style)} draws the #{block["type"]} as it does at the top level: #{alone} in #{html}"
+      end
+    end
+
+    test "#{style}: a callout with a body and no content shows each body word once, as a block" do
+      only_body = %{
         "id" => "c2",
         "type" => "callout",
         "tone" => "info",
-        "content" => text("one words")
+        "slots" => %{"body" => [para("one words"), para("two words")]}
       }
 
-      slot = %{
-        "id" => "c2",
-        "type" => "callout",
-        "tone" => "info",
-        "slots" => %{"body" => [para("one words")]}
-      }
+      html = Render.render_block(only_body, %{style: unquote(style)})
+      assert count(html, "one words") == 1, html
+      assert count(html, "two words") == 1, html
+      {one, _} = :binary.match(html, "one words")
+      {two, _} = :binary.match(html, "two words")
+      assert one < two, html
 
-      assert Render.render_block(slot, %{style: unquote(style)}) ==
-               Render.render_block(legacy, %{style: unquote(style)})
+      for words <- ["one words", "two words"] do
+        assert String.contains?(html, Render.render_block(para(words), %{style: unquote(style)})),
+               "#{unquote(style)} draws #{inspect(words)} as a paragraph block: #{html}"
+      end
+    end
+
+    test "#{style}: a callout with content only shows its words once" do
+      own = %{"id" => "c3", "type" => "callout", "tone" => "note", "content" => text("own words")}
+      assert count(Render.render_block(own, %{style: unquote(style)}), "own words") == 1
     end
   end
 end

@@ -301,7 +301,7 @@ defmodule Barkpark.PortableDoc.Render do
   # embed placed inside a columns block fell back to its unresolved placeholder
   # on the public reader while the same block at top level resolved
   # (task-00c1e5bae06da161).
-  @container_types ~w(section columns terminal tabs figure card expandable steps)
+  @container_types ~w(section columns terminal tabs figure card expandable steps callout)
 
   @doc """
   The per-block pre-pass `render_block/2` runs before composition: resolves
