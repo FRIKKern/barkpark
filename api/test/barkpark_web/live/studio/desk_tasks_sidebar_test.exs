@@ -141,6 +141,8 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
       set: [updated_at: ~U[2026-01-01 00:00:00Z]]
     )
 
+    task("dts-c-#{c.n}", "Done task", c.ws_id, %{"lifecycle_status" => "done"})
+
     {:ok, view, _html} = live(c.conn, c.base)
     open_sidebar(view)
 
@@ -171,6 +173,12 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
     view |> element(~s(#{crumbs} button[phx-click="back"])) |> render_click()
     assert has_element?(view, ~s(#dk-task-dts-b-#{c.n}[phx-mounted]))
     refute has_element?(view, ~s(#dk-task-dts-a-#{c.n}[phx-mounted]))
+    refute has_element?(view, ~s(details.tasks-done[open]))
+
+    # A done task's row is in Done, which unfolds so the focus can land there.
+    view |> element("#dk-task-dts-c-#{c.n}") |> render_click()
+    view |> element(~s(#{crumbs} button[phx-click="back"])) |> render_click()
+    assert has_element?(view, ~s(details.tasks-done[open] #dk-task-dts-c-#{c.n}[phx-mounted]))
   end
 
   test "Active Document lists the tasks that link to the open document", c do

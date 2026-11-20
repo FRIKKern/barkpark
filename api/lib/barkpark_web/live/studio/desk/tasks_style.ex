@@ -43,7 +43,8 @@ defmodule BarkparkWeb.Studio.Desk.TasksStyle do
       .dk .tasks-panel :is(button, a, summary):focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
       .dk .tasks-tabs { display: flex; gap: 4px; padding: 2px 12px 13px; border-bottom: 1px solid var(--dk-border); }
       .dk .tasks-tabs button { padding: 6px 8px; border: 0; border-radius: 3px; background: none; font: inherit; font-size: 13px; font-weight: 500; color: var(--dk-fg); cursor: pointer; }
-      .dk .tasks-tabs button:hover, .dk .tasks-tabs button[aria-selected="true"] { background: var(--dk-nav-hover); }
+      .dk .tasks-tabs button:hover { background: var(--dk-card-hover); }
+      .dk .tasks-tabs button[aria-selected="true"] { background: var(--dk-fill-soft); }
       .dk .tasks-body { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
       .dk .tasks-empty { padding: 120px 16px; text-align: center; }
       .dk .tasks-empty h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--dk-fg-header); }
@@ -64,7 +65,6 @@ defmodule BarkparkWeb.Studio.Desk.TasksStyle do
       .dk .task-title:hover { text-decoration: underline; }
       .dk .task-row[data-done] .task-title { color: var(--dk-muted); text-decoration: line-through; }
       .dk .task-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; line-height: 19px; color: var(--dk-muted); }
-      .dk .task-meta:empty { display: none; }
       .dk .task-meta-target { display: inline-flex; align-items: center; gap: 2px; min-width: 0; margin-left: -2px; font-weight: 500; color: var(--dk-fg); }
       .dk .task-assignee { flex: none; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: var(--dk-fill-soft); font-size: 10px; font-weight: 600; color: var(--dk-fg-header); }
       .dk .tasks-more { margin: 8px 0 0; color: var(--dk-muted); }
@@ -86,8 +86,14 @@ defmodule BarkparkWeb.Studio.Desk.TasksStyle do
       @media (pointer: coarse) {
         .dk .tasks-panel .icon-btn { width: 44px; height: 44px; }
         .dk .tasks-tabs button, .dk .tasks-crumbs .btn-text, .dk .tasks-group > summary, .dk .task-open { min-height: 44px; }
+        .dk .tasks-tabs button { min-width: 44px; }
         .dk .tasks-crumbs .btn-text { padding: 4px 8px; }
-        .dk .task-title { min-height: 44px; }
+        .dk .task-row { padding: 0; }
+        .dk .task-title { min-height: 44px; padding: 12px 0; }
+        .dk .task-text { gap: 0; }
+        .dk .task-meta { padding-bottom: 8px; }
+        .dk .task-row > .task-state { margin-top: 12px; }
+        .dk .task-row > .task-assignee { margin-top: 9px; }
       }
     </style>
     """

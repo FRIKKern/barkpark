@@ -16,8 +16,8 @@ defmodule BarkparkWeb.Studio.Desk.TasksPanel do
   next buttons walk the list it was opened from.
 
   The focus never falls to the page: a task's view puts it on "Tasks", and
-  going back puts it on the task's title in the list (or on the tab, when the
-  task is not listed there). The previous and next buttons stay focusable at
+  going back puts it on the task's title in the list, unfolding Done when the
+  task is done (or on the tab, when the task is not listed there). The previous and next buttons stay focusable at
   the ends (`aria-disabled`), so the focus stays on them.
 
   The open state is `DeskLive`'s (`:desk_tasks_open?`), so the navbar's
@@ -187,7 +187,13 @@ defmodule BarkparkWeb.Studio.Desk.TasksPanel do
         <p>{empty(@tab, @target) |> elem(1)}</p>
       </div>
       <%= if !@empty? do %>
-        <details :if={@lists.todo != []} class="tasks-group" open>
+        <%!-- Open or folded is the reader's once drawn: a patch keeps it. --%>
+        <details
+          :if={@lists.todo != []}
+          class="tasks-group"
+          open
+          phx-mounted={JS.ignore_attributes(["open"])}
+        >
           <summary>{gettext("To Do")}<BarkparkWeb.Icons.desk_icon name="chevron-down" size={21} /></summary>
           <ul class="tasks-list" aria-label={gettext("To Do")}>
             <.row :for={task <- @lists.todo} task={task} back_to={@back_to} myself={@myself} />
@@ -196,7 +202,12 @@ defmodule BarkparkWeb.Studio.Desk.TasksPanel do
             {ngettext("1 more task to do is not shown", "%{count} more tasks to do are not shown", @lists.more)}
           </p>
         </details>
-        <details class="tasks-group tasks-done">
+        <%!-- Folded, unless the task the view came back from is in it. --%>
+        <details
+          class="tasks-group tasks-done"
+          open={Enum.any?(@lists.done, &(&1.doc_id == @back_to))}
+          phx-mounted={JS.ignore_attributes(["open"])}
+        >
           <summary>{gettext("Done")}<BarkparkWeb.Icons.desk_icon name="chevron-down" size={21} /></summary>
           <ul class="tasks-list" aria-label={gettext("Done")}>
             <.row :for={task <- @lists.done} task={task} back_to={@back_to} myself={@myself} />
@@ -228,7 +239,10 @@ defmodule BarkparkWeb.Studio.Desk.TasksPanel do
           phx-target={@myself}
           phx-mounted={@back_to == @task.doc_id && JS.focus()}
         >{@task.title || @task.doc_id}</button>
-        <span class="task-meta">
+        <span
+          :if={@task.status not in ["open", "done"] or @task.parent_title || @task.due_at}
+          class="task-meta"
+        >
           <span :if={@task.status not in ["open", "done"]}>{status_label(@task.status)}</span>
           <span :if={@task.parent_title} class="task-meta-target">
             <BarkparkWeb.Icons.desk_icon name="document" size={21} />{@task.parent_title}
