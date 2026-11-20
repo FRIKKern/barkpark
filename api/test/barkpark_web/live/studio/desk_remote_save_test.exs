@@ -156,6 +156,33 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveTest do
     end
   end
 
+  # M1 (r5): a second save in the same field does not stand for the first.
+  describe "two saves of this tab in one field" do
+    test "another editor drops the first save's words, keeps the second's: A is told", c do
+      a = open(c)
+      b = open(c)
+      send_post(a, "title", %{"title" => "Hello world A1"})
+      send_post(a, "title", %{"title" => "Z Hello world A1"})
+      told(b)
+      send_post(b, "title", %{"title" => "Z Hello world"})
+      assert stored(c)["title"] == "Z Hello world"
+
+      assert settled(a) == "Updated by another user"
+    end
+
+    test "another editor keeps both saves' words: not named", c do
+      a = open(c)
+      b = open(c)
+      send_post(a, "title", %{"title" => "Hello world A1"})
+      send_post(a, "title", %{"title" => "Z Hello world A1"})
+      told(b)
+      send_post(b, "title", %{"title" => "Z Hello World A1"})
+      assert stored(c)["title"] == "Z Hello World A1"
+
+      assert settled(a) == "Edited just now"
+    end
+  end
+
   describe "another editor's save that kept every value this tab saved is not named" do
     test "another field", c do
       a = open(c)

@@ -249,7 +249,7 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveValuesTest do
       refute_received {:revert, _}
 
       for {:noreply, s} <- runs,
-          do: assert(s.assigns[:desk_own_values] == {"cost", %{"big" => {big, big <> " A"}}})
+          do: assert(s.assigns[:desk_own_values] == {"cost", %{"big" => [{big, big <> " A"}]}})
     end
 
     test "a frame that moves the text far from this tab's words: no merge, the step follows" do
@@ -261,7 +261,7 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveValuesTest do
 
       for {:noreply, s} <- runs do
         assert s.assigns[:desk_own_values] ==
-                 {"cost", %{"big" => {"C B " <> big, "C B " <> big <> " A"}}}
+                 {"cost", %{"big" => [{"C B " <> big, "C B " <> big <> " A"}]}}
 
         refute s.assigns[:desk_overwritten]
       end
@@ -318,7 +318,7 @@ defmodule BarkparkWeb.Studio.DeskRemoteSaveValuesTest do
         # The Studio's clean path put the frame in the form.
         editor_form: Content.doc_to_form(frame, schema),
         doc_conflict: false,
-        desk_own_values: {"cost", %{"big" => {big, big <> " A"}}},
+        desk_own_values: {"cost", %{"big" => [{big, big <> " A"}]}},
         desk_remote_seen: {"cost", form}
       )
 

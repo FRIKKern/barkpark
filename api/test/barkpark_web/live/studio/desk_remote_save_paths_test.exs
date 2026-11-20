@@ -332,4 +332,42 @@ defmodule BarkparkWeb.Studio.DeskRemoteSavePathsTest do
     send_post(b, "excerpt", %{"excerpt" => "B again"})
     assert settled(a) == "Edited just now"
   end
+
+  # #27888's guard (`shut?/1`) on the other writes the page sends itself.
+  describe "a write the page sends itself while the published version is shown" do
+    setup c do
+      {:ok, _} = Content.publish_document(c.doc_id, c.type, @dataset)
+      draft(c, %{"excerpt" => "Draft"})
+      :ok
+    end
+
+    defp draft_row(c) do
+      {:ok, doc} = Content.get_document("drafts." <> c.doc_id, c.type, @dataset)
+      doc
+    end
+
+    test "a reference or image pick's form write leaves the draft as it was", c do
+      before = draft_row(c)
+      {:ok, view, _html} = live(c.conn, c.desk <> "?perspective=published")
+      render_async(view, 5_000)
+
+      send(view.pid, {:autosave_form, Map.put(form_of(view), "excerpt", "Forged")})
+      render(view)
+
+      assert draft_row(c) == before
+    end
+
+    test "a block op waiting for its answer is told it was not saved", c do
+      before = draft_row(c)
+      {:ok, view, _html} = live(c.conn, c.desk <> "?perspective=published")
+      render_async(view, 5_000)
+      op = %{"op" => "patch-block", "id" => "b1", "patch" => %{"value" => "x"}}
+
+      send(view.pid, {:paper_op, op, "req-1"})
+      render(view)
+
+      assert_push_event(view, "bp:paper-field-save-result", %{saved: false, request_id: "req-1"})
+      assert draft_row(c) == before
+    end
+  end
 end

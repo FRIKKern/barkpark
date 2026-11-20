@@ -14,9 +14,10 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   - This tab's own change is read from the write itself (`after_write/4`):
     every user field whose stored value moved from the last stored value
     this tab knew (its own last write or the last frame it took, `@seen`)
-    is this tab's, kept per field as `{before, after}` in form shape. A
-    field only another editor changed is in the last frame already, so it
-    is not counted as this tab's. That holds for any write that moves the
+    is this tab's, kept per field as `{before, after}` in form shape, every
+    save of it (`push/3`), not only the last. A field only another editor
+    changed is in the last frame already, so it is not counted as this
+    tab's. That holds for any write that moves the
     document's revision: a typed save, the form's submit (Enter, no
     `_target`), a pick, a paste, an undo, a Restore from History.
   - Free text typed into one field (`_target`) keeps the text the post was
@@ -127,13 +128,65 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
     shown = before.assigns[:editor_form] || %{}
     mine = typed(moved, before, params, shown)
 
-    socket =
-      assign(socket, [
-        {@own, {pub, Map.merge(kept(socket.assigns, pub), mine)}},
-        {@seen, {pub, stored}}
-      ])
+    own =
+      Enum.reduce(mine, kept(socket.assigns, pub), fn {key, step}, own ->
+        Map.put(own, key, push(Map.get(own, key, []), step, RemoteValues.free_text?(schema, key)))
+      end)
+
+    socket = assign(socket, [{@own, {pub, own}}, {@seen, {pub, stored}}])
 
     if mine == %{}, do: socket, else: assign(socket, @overwritten, nil)
+  end
+
+  # Every save of this tab is kept per field, newest first, until the field
+  # holds none of its words: a second save does not stand for the first,
+  # whose words another editor can still drop. Any value but free text is
+  # whole, written by the last post: its last save alone. A free text save
+  # that continues the newest (typing on in one place) joins it as one
+  # change; one apart from a kept save leaves it, moved onto the new text.
+  # A kept save this tab's own text no longer holds is gone, not lost.
+  # Bounded: past `@steps` saves the oldest is forgotten.
+  @steps 8
+
+  defp push(_steps, step, false), do: [step]
+
+  defp push(steps, {from, posted} = step, true) when is_binary(from) and is_binary(posted) do
+    {step, kept} =
+      Enum.reduce(steps, {step, []}, fn kept_step, {step, kept} ->
+        case onto(kept_step, step) do
+          {:joined, joined} -> {joined, kept}
+          {:ok, moved} -> {step, [moved | kept]}
+          :gone -> {step, kept}
+        end
+      end)
+
+    [step | Enum.reverse(kept)]
+    |> Enum.reject(fn {before, value} -> before == value end)
+    |> Enum.take(@steps)
+  end
+
+  defp push(_steps, step, _text?), do: [step]
+
+  # A kept save `{before, value}` on this tab's new one `{from, posted}`.
+  # Continued: its words and the new ones are one change unless the two lie
+  # apart. A field empty before it holds no one else's words to keep apart.
+  # A save that takes the kept one back (a Restore of what was there) is
+  # still a value this tab saved: it stays, alone.
+  defp onto({nil, from}, {from, posted}), do: {:joined, {nil, posted}}
+
+  defp onto({before, from}, {from, posted} = step) when is_binary(before) do
+    case apart(before, from, posted) do
+      {:ok, without} -> {:ok, {without, posted}}
+      :near when before == posted -> {:joined, step}
+      :near -> {:joined, {before, posted}}
+    end
+  end
+
+  defp onto(kept, {_from, posted}) do
+    case intact(kept, posted, true) do
+      {:ok, moved} -> {:ok, moved}
+      :lost -> :gone
+    end
   end
 
   # Free text: the text the post was typed from (the base the save merged it
@@ -241,21 +294,30 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
       {intact, lost} =
         socket.assigns
         |> kept(pub)
-        |> Enum.reduce({%{}, []}, fn {key, step}, {intact, lost} ->
-          verdict =
+        |> Enum.reduce({%{}, []}, fn {key, steps}, {intact, lost} ->
+          {held, dropped} =
             if MapSet.member?(moved, key),
-              do: intact(step, Map.get(now, key), RemoteValues.free_text?(schema, key)),
-              else: {:ok, step}
+              do: hold(steps, Map.get(now, key), RemoteValues.free_text?(schema, key)),
+              else: {steps, false}
 
-          case verdict do
-            {:ok, step} -> {Map.put(intact, key, step), lost}
-            :lost -> {intact, [key | lost]}
-          end
+          intact = if held == [], do: intact, else: Map.put(intact, key, held)
+          {intact, if(dropped, do: [key | lost], else: lost)}
         end)
 
       socket = assign(socket, @own, {pub, intact})
       if lost == [], do: socket, else: assign(socket, @overwritten, pub)
     end
+  end
+
+  # Every kept save of one field on the value it holds now: the saves still
+  # intact, and whether any was replaced or dropped.
+  defp hold(steps, now, text?) do
+    Enum.reduce(steps, {[], false}, fn step, {held, dropped} ->
+      case intact(step, now, text?) do
+        {:ok, step} -> {held ++ [step], dropped}
+        :lost -> {held, true}
+      end
+    end)
   end
 
   # Cheap first: the field still holds this tab's value (intact), or holds
