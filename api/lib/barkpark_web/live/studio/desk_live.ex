@@ -552,6 +552,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-doc-clip={BarkparkWeb.StaticAssets.path("bp-desk-doc-clip.js")}
       data-desk-tags={BarkparkWeb.StaticAssets.path("bp-desk-tags.js")}
       data-desk-codelist={BarkparkWeb.StaticAssets.path("bp-desk-codelist.js")}
+      data-desk-lang-tabs={BarkparkWeb.StaticAssets.path("bp-desk-lang-tabs.js")}
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
       data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}

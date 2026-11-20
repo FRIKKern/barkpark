@@ -315,8 +315,12 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
 
   # The write of an undo: free text merged by the save from the text it was
   # computed from, any other value set whole.
-  defp written(%{kind: :value}, field, next, _now),
-    do: %{"doc" => %{field => next}, "_target" => ["doc", field]}
+  defp written(%{kind: :value}, field, next, now),
+    do: %{
+      "doc" => %{field => DocUndoValues.post(now, next)},
+      "_target" => ["doc", field],
+      bases: %{field => :whole}
+    }
 
   defp written(_change, field, next, now),
     do: %{"doc" => %{field => next}, "_target" => ["doc", field], bases: %{field => now}}
