@@ -1,6 +1,6 @@
-FRIKKern/portable-doc e84921c08f3e81b9a8732aacaa200049ca970d17
+FRIKKern/portable-doc 1238586bd033e0af65e2fba2d59761b44823431d
 fixtures/broken and fixtures/valid, copied byte for byte. The lines below are
-git -C portable-doc ls-tree -r e84921c08f3e81b9a8732aacaa200049ca970d17 fixtures/broken fixtures/valid
+git -C portable-doc ls-tree -r 1238586bd033e0af65e2fba2d59761b44823431d fixtures/broken fixtures/valid
 
 100644 blob 57b8ccb26fb147705ca409b6478f8bedbcc3492b	fixtures/broken/block_not_object-bare-array.json
 100644 blob 5c75ac5d0f77ee09e177c4b7c2c971aa409ae17b	fixtures/broken/block_not_object-column.json
@@ -41,5 +41,6 @@ git -C portable-doc ls-tree -r e84921c08f3e81b9a8732aacaa200049ca970d17 fixtures
 100644 blob e77c03e0de17828e3bde78b09db15c4a68f70bb4	fixtures/valid/card-media.json
 100644 blob cf541632c4324d5660fd273bfb2aca936f451f64	fixtures/valid/envelope.json
 100644 blob 5550e59484a9f50f750fc9b1113f14bbb86f5d9b	fixtures/valid/heading-levels.json
+100644 blob 98d87bbd10697f1790895d62be6650224058030d	fixtures/valid/list-item-block-after-nested-list.json
 100644 blob 9c4ff33e95f725ab9ae057f4f2b2681d2c9e0dd3	fixtures/valid/nested-containers.json
 100644 blob a4e2b444c7ce17fea5feb6c548323c48332fa9a1	fixtures/valid/open-fields.json

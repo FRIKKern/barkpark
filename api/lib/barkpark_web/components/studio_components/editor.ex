@@ -832,7 +832,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <% end %>
 
           <.cross_violations_banner violations={@cross_violations} />
-          <.doc_conflict_banner conflict={@doc_conflict} />
+          <.doc_conflict_banner
+            conflict={@doc_conflict}
+            disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.readonly?(@parent_assigns)}
+          />
           <.paper_halt_banner reason={@paper_halt} />
 
           <%= if @show_diff do %>
@@ -911,12 +914,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     (task-9bf415c3d78b42d6). The editor form is the panel. --%>
               <div class="bp-tab-bar" role="tablist">
                 <%!-- The desk leads with All fields, as the TanStack Studio and
-                      Sanity do: every field, grouped or not (nav_group nil). --%>
+                      Sanity do: every field, grouped or not (nav_group nil).
+                      While the groups wait (History open) it is the tab shown,
+                      so it stays live and takes the focus; the rest wait
+                      (DocumentPane.tsx `GroupTabs`). --%>
                 <button
                   :if={desk?(@parent_assigns)}
                   type="button"
                   id="bp-group-tab-all-fields"
-                  disabled={desk_groups_waiting?(@parent_assigns)}
                   phx-click="select-group"
                   phx-value-group=""
                   role="tab"
@@ -1375,6 +1380,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   """
   attr :conflict, :boolean, default: false
 
+  attr :disabled, :boolean,
+    default: false,
+    doc:
+      "a read-only view (`Desk.ReadonlyFields`): Reload is refused there, so it is drawn disabled"
+
   def doc_conflict_banner(assigns) do
     ~H"""
     <%= if @conflict do %>
@@ -1389,6 +1399,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           type="button"
           class="btn btn-sm"
           phx-click="reload-remote-doc"
+          disabled={@disabled}
           data-test-id="doc-conflict-reload"
         ><%= gettext("Reload") %></button>
       </div>

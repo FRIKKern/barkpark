@@ -209,7 +209,7 @@ jobs:
 
       # The check's own proof that it can still lose: plants on different controls
       # share a run, one plant per reading (a label not drawn as itself, the ladder
-      # that holds README.md's claim, a faint or clipped icon, a frozen colour, a
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
       # bound wait on the sheet, the demo guards, refusals at discovery), and it
       # reds unless each turns the right light off, naming the planted control.
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds

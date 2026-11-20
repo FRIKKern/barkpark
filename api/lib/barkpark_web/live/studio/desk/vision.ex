@@ -20,8 +20,11 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
   The page is the desk's (`DeskLive`, workspace admins only) at
   `…/studio/_desk/_tools/vision`, so it keeps the desk's navbar, drawer and
   dialogs. `bp-desk-vision.js` runs it (named here for the first load, and
-  loaded by the desk's hook after a live patch); this draws the form and
-  hands the script its words. The form is `phx-update="ignore"`: what the script
+  loaded by the desk's hook after a live patch), with its parts
+  `bp-desk-vision-query.js` (what a query reads) and `bp-desk-vision-tree.js`
+  (the result tree): named here before it, and on a live patch loaded by it
+  from the root's `data-vision-query-js` and `data-vision-tree-js`. This draws
+  the form and hands the script its words. The form is `phx-update="ignore"`: what the script
   draws stays through the page's patches.
 
   As TanStack's (and Sanity's), Vision picks its own dataset and API version.
@@ -74,6 +77,8 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
       phx-update="ignore"
       data-desk-vision
       data-scope={@scope_prefix}
+      data-vision-query-js={BarkparkWeb.StaticAssets.path("bp-desk-vision-query.js")}
+      data-vision-tree-js={BarkparkWeb.StaticAssets.path("bp-desk-vision-tree.js")}
       data-dataset={@dataset}
       {@words}
     >
@@ -197,7 +202,9 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
       <%!-- For the first page load, run as the form is parsed (it is small,
             and the form is above it), so a query typed at once is not lost
             while the desk's hook loads it. The hook's load is for a live
-            patch here, where this tag does not run. --%>
+            patch here, where these tags do not run. Its parts first. --%>
+      <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision-query.js")}></script>
+      <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision-tree.js")}></script>
       <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}></script>
     </div>
     """

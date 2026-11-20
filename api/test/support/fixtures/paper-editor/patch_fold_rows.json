@@ -1,0 +1,374 @@
+{
+  "about": "Rows tying the editor's patch.ex mirror (api/assets/paper-editor/src/canvas/patch-fold.js) to patch.ex: each row's ops folded onto before give after, in api/test/barkpark/portable_doc/patch_fold_rows_test.exs (Patch.apply_patches) and api/assets/paper-editor/src/canvas/__patch_fold_rows.test.mjs (applyOps). The one-per-verb op goldens (api/priv/portable_doc/goldens/ops) are the other shared set.",
+  "rows": [
+    {
+      "row": "patch-block keeps a key the patch leaves out (start)",
+      "before": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ],
+          "start": 5
+        }
+      ],
+      "ops": [
+        {
+          "op": "patch-block",
+          "id": "l1",
+          "patch": {
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "five!"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "after": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five!"
+              }
+            ]
+          ],
+          "start": 5
+        }
+      ]
+    },
+    {
+      "row": "patch-block stores a key set to null as null (start)",
+      "before": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ],
+          "start": 5
+        }
+      ],
+      "ops": [
+        {
+          "op": "patch-block",
+          "id": "l1",
+          "patch": {
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "five"
+                }
+              ]
+            ],
+            "start": null
+          }
+        }
+      ],
+      "after": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ],
+          "start": null
+        }
+      ]
+    },
+    {
+      "row": "replace-block replaces the whole block (start goes)",
+      "before": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ],
+          "start": 5
+        }
+      ],
+      "ops": [
+        {
+          "op": "replace-block",
+          "id": "l1",
+          "block": {
+            "id": "l1",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "five"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "after": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "row": "patch-block never sets or strips locked and role",
+      "before": [
+        {
+          "id": "t1",
+          "type": "heading",
+          "level": 1,
+          "role": "title",
+          "locked": true,
+          "text": "T"
+        }
+      ],
+      "ops": [
+        {
+          "op": "patch-block",
+          "id": "t1",
+          "patch": {
+            "text": "T!",
+            "role": null,
+            "locked": false
+          }
+        }
+      ],
+      "after": [
+        {
+          "id": "t1",
+          "type": "heading",
+          "level": 1,
+          "role": "title",
+          "locked": true,
+          "text": "T!"
+        }
+      ]
+    },
+    {
+      "row": "patch-block keeps the id and type it targets",
+      "before": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        }
+      ],
+      "ops": [
+        {
+          "op": "patch-block",
+          "id": "p0",
+          "patch": {
+            "id": "other",
+            "content": [
+              {
+                "type": "text",
+                "value": "After"
+              }
+            ]
+          }
+        }
+      ],
+      "after": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "After"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "row": "remove-block then insert-after rebuilds the block without its keys",
+      "before": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l1",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ],
+          "start": 5
+        }
+      ],
+      "ops": [
+        {
+          "op": "remove-block",
+          "id": "l1"
+        },
+        {
+          "op": "insert-after",
+          "afterId": "p0",
+          "block": {
+            "id": "l2",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "five"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "after": [
+        {
+          "id": "p0",
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "value": "Before"
+            }
+          ]
+        },
+        {
+          "id": "l2",
+          "type": "list",
+          "ordered": true,
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "five"
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}
