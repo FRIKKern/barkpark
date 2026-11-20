@@ -33,6 +33,17 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   reload, another document, a new value) counts for nothing.
 
   With no field to name, `status/1` adds the reason to "Save failed".
+
+  ## A refused clear is not held
+
+  A clear the desk makes (an emptied language unset, with the field or the
+  object it leaves blank: `Forms.unset/0` in the post, or "" over a field the
+  form draws as an object) is not held (task-48b10c6eb7ec20c5). Held, it was
+  in the buffer, so the next post of another field wrote it, and undo then
+  took back only that other field. The field stays as stored and the save
+  region says why the save failed. Until the field is changed again, a later
+  post leaves it out, as the page can still show it empty (the input had the
+  focus when the refusal came back): `editor_refused_clears`.
   """
   use Gettext, backend: BarkparkWeb.Gettext
 
@@ -69,6 +80,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   """
   def write(socket, params, trigger, writer) when is_map(params) and is_function(writer, 3) do
     keys = target_keys(socket, params)
+    {socket, params} = drop_refused_clears(socket, params, keys)
 
     socket =
       assign(socket,
@@ -143,6 +155,8 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   defp hold(socket, params, keys) do
     named = socket.assigns[:editor_save_error_fields]
     keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
+    {clears, keys} = Enum.split_with(keys, &clear?(socket.assigns, &1, Map.get(params, &1)))
+    socket = refuse_clears(socket, clears)
     reason = fn key -> (is_map(named) && named[key]) || socket.assigns[:editor_save_error] end
 
     values =
@@ -164,6 +178,51 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     socket
     |> assign(editor_refused: {doc_key, held})
     |> PostedEdits.put(values)
+  end
+
+  # A clear the desk folded into the post (`Fields.unset_at/2`): the unset
+  # marker anywhere in the value, or "" over a field the buffer holds as an
+  # object (a top-level field the clear unsets whole). Only the desk makes one.
+  defp clear?(%{desk_base: base} = assigns, key, value) when is_binary(base) do
+    Forms.unset_as_nil(value) != value or
+      (value == "" and is_map(Map.get(assigns[:editor_form] || %{}, key)))
+  end
+
+  defp clear?(_assigns, _key, _value), do: false
+
+  defp refuse_clears(socket, []), do: socket
+
+  defp refuse_clears(socket, keys) do
+    assign(
+      socket,
+      :editor_refused_clears,
+      {doc_key(socket.assigns), Enum.uniq(clears(socket) ++ keys)}
+    )
+  end
+
+  @doc "The top-level fields of the open document whose clear was refused."
+  def clears(%{assigns: assigns}) do
+    doc_key = doc_key(assigns)
+
+    case assigns[:editor_refused_clears] do
+      {^doc_key, keys} -> keys
+      _ -> []
+    end
+  end
+
+  # A post of another field leaves a refused clear out; a change of the field
+  # itself is a new try, so it is posted and no longer left out.
+  defp drop_refused_clears(socket, params, keys) do
+    case clears(socket) do
+      [] ->
+        {socket, params}
+
+      refused ->
+        socket =
+          assign(socket, :editor_refused_clears, {doc_key(socket.assigns), refused -- keys})
+
+        {socket, Map.drop(params, refused -- keys)}
+    end
   end
 
   @doc "The held top-level fields of the open document."

@@ -938,13 +938,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       dirty? = MapSet.size(held) > 0
       assign(socket, editor_dirty: dirty?, editor_unsaved_keys: held, doc_conflict: false)
     else
-      unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
-
-      assign(socket,
-        editor_dirty: true,
-        editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
-      )
+      settle_unsaved(socket, keys -- RefusedSave.clears(socket))
     end
+  end
+
+  # A refused clear is not kept (`RefusedSave`): the field is as stored.
+  defp settle_unsaved(socket, []), do: socket
+
+  defp settle_unsaved(socket, keys) do
+    unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
+
+    assign(socket,
+      editor_dirty: true,
+      editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
+    )
   end
 
   # A save that did not land leaves the typed field's posted value in the form
@@ -952,13 +959,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # the value from before it (#25880 review). Only `keys`, the field typed in:
   # every other posted value is what the browser showed, which can be older
   # than what the server already took from the other editor (#25946 review).
-  # Same shape as a landed save's buffer (`Forms.coerce_params/2`).
+  # Same shape as a landed save's buffer (`Forms.coerce_params/2`). A refused
+  # clear is left out: the field stays as stored (`RefusedSave`).
   defp keep_unsaved_values(socket, posted, keys) do
     if socket.assigns[:save_status] in ["Save failed", "Save cancelled"] do
       posted =
         posted
         |> Barkpark.Content.Forms.coerce_params(socket.assigns[:editor_schema])
-        |> Map.take(keys)
+        |> Map.take(keys -- RefusedSave.clears(socket))
 
       PostedEdits.put(socket, posted)
     else
