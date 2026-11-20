@@ -23,7 +23,9 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
       token. It creates and updates the same way.
     * a token seated only in A never changes the default workspace's row at
       the same slug, and a sync of a copy pulled from there is refused with a
-      reason, never answered as an update.
+      reason, never answered as an update;
+    * the workspace a write lands in is the one judged, once: suspended or
+      archived refuses every write, and full refuses the ones that add a row.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -35,6 +37,8 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
   alias Barkpark.Content.{Document, MutationEvent, Papers}
   alias Barkpark.PortableDoc.Bpml
   alias Barkpark.Plugins.Bulldocs.Web.WriteGate
+  alias Barkpark.Tenancy.Quota
+  alias BarkparkWeb.Plugs.RequireWithinQuota
   alias BarkparkWeb.BulldocsIngestController
 
   @ds "production"
@@ -97,6 +101,16 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
 
     raw
   end
+
+  # A fresh workspace with a "default" project; `restrict!/2` puts it in a state.
+  defp tenant! do
+    ws = create_workspace!()
+    %{ws: ws, project: create_project!(ws, "default"), token: nil}
+  end
+
+  defp restrict!(%{ws: ws}, :suspended), do: {:ok, _} = Quota.suspend(ws, "write gate")
+  defp restrict!(%{ws: ws}, :archived), do: {:ok, _} = Tenancy.archive_workspace(ws)
+  defp restrict!(%{ws: ws}, :full), do: {:ok, _} = Quota.set_quota(ws, 0)
 
   # ── requests ───────────────────────────────────────────────────────────
 
@@ -398,7 +412,66 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
           refute rows(slug, c.a.ws.id) == in_a
         end
       end
+
+      test "the workspace written is judged: suspended, archived or full refuses", _c do
+        creates? = {BulldocsIngestController, @action} in RequireWithinQuota.ingest_creates()
+        full = if creates?, do: "quota_exceeded"
+        states = [suspended: "workspace_suspended", archived: "workspace_archived", full: full]
+
+        for mode <- modes(@action), {state, code} <- states do
+          {_path, _kind, create, update} = write(@action)
+          t = tenant!()
+          slug = "write-gate-#{@action}-#{state}-#{System.unique_integer([:positive])}"
+          if mode == :update, do: seed!(@action, slug, %{t | token: pinned!(t.ws)})
+          body = if mode == :create, do: create.(slug), else: update.(slug, t.ws.id)
+          restrict!(t, state)
+          before = trace(slug)
+
+          resp = send_as(:post, route_path(@action, slug), homeless!([t.ws]), body)
+
+          if code do
+            assert error(resp)["code"] == code, "#{mode} #{state}: #{resp.resp_body}"
+            assert trace(slug) == before, "#{mode} #{state}"
+          else
+            assert resp.status in 200..201, "#{mode} #{state}: #{resp.resp_body}"
+          end
+        end
+      end
     end
+  end
+
+  test "each write is judged once, on the workspace it lands in", c do
+    test = self()
+    id = "write-gate-judged-#{System.unique_integer([:positive])}"
+
+    handler = fn _event, _measure, meta, _config ->
+      if self() == test, do: send(test, {:judged, meta.workspace_id})
+    end
+
+    :telemetry.attach(id, [:barkpark, :quota, :judged], handler, nil)
+    on_exit(fn -> :telemetry.detach(id) end)
+
+    for {token, ws} <- [{c.a.token, c.a.ws}, {homeless!([c.other.ws]), c.other.ws}] do
+      slug = "write-gate-judged-#{System.unique_integer([:positive])}"
+      resp = send_as(:post, route_path(:ingest, slug), token, paper_body(slug))
+      assert resp.status == 200, resp.resp_body
+      assert_received {:judged, ws_id}
+      assert ws_id == ws.id
+      refute_received {:judged, _}
+    end
+  end
+
+  test "the shared secret naming a suspended workspace is refused", _c do
+    t = tenant!()
+    restrict!(t, :suspended)
+    slug = "write-gate-secret-#{System.unique_integer([:positive])}"
+    before = trace(slug)
+    body = Map.put(paper_body(slug), "workspace", t.ws.slug)
+
+    resp = send_as(:post, route_path(:ingest, slug), "barkpark-test-ingest-token", body)
+
+    assert error(resp)["code"] == "workspace_suspended", resp.resp_body
+    assert trace(slug) == before
   end
 
   test "a sync of a copy pulled from a workspace the token does not write is refused", c do

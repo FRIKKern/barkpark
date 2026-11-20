@@ -1163,12 +1163,8 @@ defmodule BarkparkWeb.Router do
 
     plug(BarkparkWeb.Plugs.RequireWithinQuota,
       only: :writes,
-      creates: [
-        {BarkparkWeb.BulldocsIngestController, :ingest},
-        {BarkparkWeb.BulldocsIngestController, :create},
-        {BarkparkWeb.BulldocsIngestController, :sync},
-        {BarkparkWeb.BulldocsIngestController, :ingest_session}
-      ]
+      creates: BarkparkWeb.Plugs.RequireWithinQuota.ingest_creates(),
+      deferred_to: BarkparkWeb.BulldocsIngestController
     )
   end
 

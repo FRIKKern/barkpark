@@ -112,6 +112,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Content.Papers.{BlockOps, MixedWriteGuard}
+  alias Barkpark.Plugins.Bulldocs.Web.WriteGate
   alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Validate.NewErrors
   alias Barkpark.PortableDoc.Bpml.UnprintableError
@@ -885,16 +886,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # moving the 200/4xx renders behind an extra `ingest_body/2` hop made this route an
   # UNDISPOSED ARRIVAL and reddened the required Elixir gate. Keeping the accepting body
   # in `ingest/2` itself keeps the receipts where the census can see them.
-  # THE INGEST SCOPE RULE's gate (see the moduledoc), run at the door of every
-  # action that writes; only the actions that store nothing skip it, so an
-  # action added later is gated unless it is named here.
-  @scope_free_actions [:validate, :render_doc, :show_session]
+  # THE INGEST SCOPE RULE's gate (see the moduledoc): every action is gated and judged
+  # unless it stores nothing; the `:ingest` quota plug skips what this claims.
   @write_scope :bulldocs_write_scope
   @doc false
-  def scope_free_actions, do: @scope_free_actions
+  def scope_free_actions, do: [:validate, :render_doc, :show_session]
+  @doc false
+  def judges_own_quota?(action), do: action not in scope_free_actions()
   plug(Barkpark.Plugins.Bulldocs.Web.ScopeText)
   plug(:require_named_workspace_access)
-  plug(:require_resolvable_scope when action not in @scope_free_actions)
+  plug(:require_resolvable_scope)
 
   def create(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
   def create(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
@@ -2211,13 +2212,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
       not is_nil(req_ws) ->
         {:ok, {req_ws, req_proj}}
 
-      # Nothing named anything. A SCOPE-LESS TOKEN takes the ruled
-      # infer-or-refuse path (task-6fa023cdabdc5f6a) — never the seeded
-      # Default, which is the silent misattribution that ruling retired.
+      # Nothing named: a token writes in its seat (`WriteGate.seat/2`).
       true ->
         case conn.assigns[:api_token] do
           %{} = token ->
-            Barkpark.Plugins.Bulldocs.Web.WriteGate.seat(token, action_name(conn))
+            WriteGate.seat(token, action_name(conn))
 
           # The SHARED-SECRET arm carries no principal at all
           # (`Barkpark.Secrets.ingest_token/0` is the instance-wide `:global`
@@ -2233,12 +2232,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp project_under(ws, conn, params),
     do: resolve_project(ws, scope_value(conn, params, "project", "x-barkpark-project"))
 
-  # The plug half of the gate (mounted above every writing action): passes the
-  # conn when its scope resolves, else renders the typed refusal and HALTS.
   defp require_resolvable_scope(conn, _opts) do
-    case resolve_write_scope(conn, conn.params) do
-      {:ok, scope} -> put_private(conn, @write_scope, scope)
-      {:error, reason} -> Barkpark.Plugins.Bulldocs.Web.WriteGate.refuse(conn, reason)
+    with true <- judges_own_quota?(action_name(conn)),
+         {:ok, scope} <- resolve_write_scope(conn, conn.params) do
+      conn |> put_private(@write_scope, scope) |> WriteGate.admit(scope)
+    else
+      false -> conn
+      {:error, reason} -> WriteGate.refuse(conn, reason)
     end
   end
 

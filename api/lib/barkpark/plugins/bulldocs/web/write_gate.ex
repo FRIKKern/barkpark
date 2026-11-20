@@ -1,20 +1,24 @@
 defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   @moduledoc """
-  The two halves of the Paper ingest write gate that need no controller state:
+  The parts of the Paper ingest write gate that need no controller state:
   where a token with no home workspace writes when the request names nothing
-  (`seat/2`), and the typed refusal a write the gate does not approve gets
-  (`refuse/2`). `BulldocsIngestController` resolves the scope and calls these.
+  (`seat/2`), the typed refusal a write the gate does not approve gets
+  (`refuse/2`), and the judgment of the approved workspace itself (`admit/2`:
+  refused when archived, then quota and suspension, judged once).
+  `BulldocsIngestController` resolves the scope and calls these.
 
   The seat rule: a token writes in its one seat. For the actions in
   `seat_default_actions/0`, a seat in the default workspace wins among several,
-  so a token seated there keeps writing there. Any other number of seats is
+  so a token seated there writes there. Any other number of seats is
   refused with the workspaces the token may name and the command that pins a
   token to one of them, since `bp paper push` and `pull` send no workspace.
   """
 
   alias Barkpark.Content.{CallerContext, WriteScope}
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Workspace
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.Plugs.RequireWithinQuota
 
   @seat_default_actions [
     :sync,
@@ -61,6 +65,36 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   end
 
   defp slugs(seats), do: Enum.map(seats, & &1.slug)
+
+  @doc """
+  Judge the workspace the gate approved: 409 `workspace_archived` when it is
+  archived, else `RequireWithinQuota.judge/3` (suspended, over quota, batch
+  caps). The shared secret's `{nil, nil}` is judged on the pipeline's workspace.
+  """
+  def admit(conn, {ws_id, _project_id}) do
+    case approved_workspace(conn, ws_id) do
+      nil ->
+        conn
+
+      %Workspace{} = ws ->
+        if Workspace.archived?(ws) do
+          conn
+          |> ErrorResponse.emit({:error, {:workspace_archived, ws.slug}})
+          |> Plug.Conn.halt()
+        else
+          RequireWithinQuota.judge(conn, ws, creates: RequireWithinQuota.ingest_creates())
+        end
+    end
+  end
+
+  defp approved_workspace(conn, nil), do: conn.assigns[:current_workspace]
+
+  defp approved_workspace(conn, ws_id) do
+    case conn.assigns[:current_workspace] do
+      %Workspace{id: ^ws_id} = ws -> ws
+      _other -> Tenancy.get_workspace_by_id(ws_id)
+    end
+  end
 
   @doc "Render the gate's typed refusal for `reason` and halt."
   def refuse(conn, {:workspace_scope_required, slugs}) do
