@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PER_JOB } from './capacity.mjs'
-import { copyAs, edit } from './copy.mjs'
+import { copyAs } from './copy.mjs'
 
 // The closing check's name in .github/workflows/barkui.yml, written here once; a test holds the workflow to it.
 export const AGGREGATE = 'BarkUI showroom check'
@@ -65,9 +65,6 @@ export function materialize(dir = partsDir, env = process.env, base = env.RUNNER
   const into = mkdtempSync(join(base, 'barkui-proof-parts-'))
   for (const name of folderNames(dir)) cpSync(join(dir, name), join(into, name), { recursive: true })
   for (let i = 1; i <= n; i++) copyAs(join(into, 'button'), copyName(i))
-  // PROOF BREAK (b), reverted before merge: the last copy's first press step takes one Tab too many, so its
-  // focus lands on the wrong button and its own pressed light goes off. Only the last group holds that copy.
-  edit(join(into, copyName(n), 'press.mjs'), (t) => t.replace("keys: ['Tab'],", "keys: ['Tab', 'Tab'],"))
   return into
 }
 

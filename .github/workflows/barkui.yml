@@ -23,10 +23,9 @@ concurrency:
   group: barkui-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# TEMPORARY proof (b), reverted before merge: 13 copies of the button beside the real parts, and a planted break
-# in the last copy (check/jobs.mjs, PROOF BREAK), so the last group goes red.
+# TEMPORARY proof (c), reverted before merge: the plan answers "not touched" whatever the diff says.
 env:
-  BARKUI_PROOF_COPIES: "13"
+  BARKUI_PROOF_NO_MATCH: "1"
 
 jobs:
   barkui-plan:
@@ -62,6 +61,7 @@ jobs:
       - name: "BarkUI: did this change touch it?"
         id: barkui
         run: |
+          if [ -n "${BARKUI_PROOF_NO_MATCH:-}" ]; then echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: PROOF (c), not touched by override"; exit 0; fi
           set +e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             files=$(git -C .. diff --name-only --no-renames "origin/${{ github.base_ref }}...HEAD")
