@@ -88,7 +88,26 @@ export function selectorFindings(text, parentHas = false) {
     if (parentHas && subject && !subject.nest && !subject.nestInside && !compounds.some((c) => c.nest || c.nestInside))
       found.push(`the rule it is nested in pins a state, and this rule styles a descendant of that element`)
   }
+  // An arm of :is(), :where() or :has() is a choice, as a branch is, but coverage reads a rule branch by branch only.
+  for (const c of choiceLists(text)) if (c.arms.length > 1) found.push(`:${c.name}(${c.arms.join(', ')}) holds a list of ${c.arms.length}; coverage reads a rule branch by branch, and an arm inside :${c.name}() is not a branch, so one that applies would hide one that never does; write each arm as a branch of the rule's own list`)
   return [...new Set(found)]
+}
+
+/** Each :is(), :where() and :has() in a selector, with its arms (its list split at its own top-level commas).
+    :not() is left out: its list is one negation, not a choice. */
+export function choiceLists(text) {
+  const open = []
+  const out = []
+  scan(text, (i, depth, c) => {
+    if (c === ':') {
+      const m = text.slice(i + 1).match(/^(is|where|has)\(/i)
+      if (m) open.push({ name: m[1].toLowerCase(), from: i + m[0].length + 1, depth })
+    } else if (c === ')' && open.length && open[open.length - 1].depth === depth) {
+      const o = open.pop()
+      out.push({ name: o.name, arms: splitList(text.slice(o.from, i)) })
+    }
+  })
+  return out
 }
 
 /** The states of a pinned sheet that the pin did not reach: each must read `:is(:x, [data-pin~="x"])`. */

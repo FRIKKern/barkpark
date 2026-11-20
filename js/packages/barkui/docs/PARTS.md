@@ -161,7 +161,8 @@ matches; a rule or a pair nobody judges fails the part by name.
   ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
   come from a short list of structure (`check/selectors.mjs`): one a person changes by clicking or
   typing (`:checked`, `:placeholder-shown`, `:enabled` and the like) is refused until a part needs it,
-  when it comes back as a state, driven and read like `:hover`. Pseudo-elements are the four the check
+  when it comes back as a state, driven and read like `:hover`; `:is()`, `:where()` and `:has()` take
+  one selector each (why: "every branch", below). Pseudo-elements are the four the check
   reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
   the page loads it, in the same browser, and each part's section must hold, rule by rule and with its
   states pinned, what was read from that part alone; a difference refuses the run, naming the part.
@@ -241,11 +242,14 @@ Tab stop, below. The motion pass reads one skin in light on purpose:
 part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
 through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
 focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
-A rule counts as read when it applied at a judged moment, through any branch of its selector list: in
+A rule counts as read only when every branch of its selector list applied at a judged moment. A branch
+is one selector of the rule's own list; a nested rule's branches are each of its own crossed with each of
+its parent's. In
 `[inert] [data-slot="button"]:not([data-pin]), #x-save[data-pending]:hover { --bark-button-hover-fg: … }`
-the first branch applies, harmlessly, at every reading, while the second (a live button pending under
-the pointer) is never driven, because no live control is pending when the states are planned. Written
-alone, the second branch fails as "a rule nothing read".
+the first branch applies at every reading, but the second (a live button pending under the pointer) is
+never driven, because no live control is pending when the states are planned, so the rule fails as
+"a branch nothing read". A list inside `:is()`, `:where()` or `:has()` is a choice the branches would not
+show, so part.css may not hold one: write each arm as a branch. `:not(a, b)` is one negation, not a choice.
 
 ## How many parts the check holds
 

@@ -369,6 +369,12 @@ const CASES = [
     expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
   },
   {
+    name: 'a list inside :is() in part.css is refused at the browser read, as a branch coverage cannot see',
+    only: ['pressed'],
+    plant: inCss('[data-slot="button"]:is([data-size="sm"], [data-size="huge"]) { --bark-button-text: 0.875rem; }'),
+    expect: refused(/:is\(\[data-size="sm"\], \[data-size="huge"\]\) holds a list of 2; coverage reads a rule branch by branch/),
+  },
+  {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
     only: ['skins', 'schemes'],
     plant: all(
@@ -393,6 +399,8 @@ const CASES = [
       // A later control reached by structure alone, and a rule that applies to nothing.
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
+      // A dead branch beside one that applies at every reading.
+      inCss('[data-slot="button"], [data-slot="button"][data-variant="huge"] { --bark-button-text: 0.875rem; }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
       inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
     ),
@@ -411,6 +419,7 @@ const CASES = [
       'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
       'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
       'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
+      'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     }),
