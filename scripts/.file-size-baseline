@@ -100,7 +100,7 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2394 scripts/crown-reconcile.sh
 2354 api/lib/barkpark/search/documents_retriever.ex
 2347 internal/cli/hetzner_lb_cmd.go
-2317 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
+2304 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
 2282 internal/cli/sites_cmd.go
 2222 api/lib/barkpark/tasks/close.ex
 2201 scripts/pipefail-sigpipe-scan.sh

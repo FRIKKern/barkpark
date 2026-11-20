@@ -45,11 +45,20 @@ defmodule Barkpark.Content.Papers.BpmlView do
   The view of `paper`. `scope` is the caller's tenant scope (`[]` for a flat
   route; the Paper's own workspace and project fill any gap), and
   `perspective` decides which task rows a task block resolves to. Pure but
-  for the schema and label reads: it writes nothing.
+  for the schema and label reads: it writes nothing. A Paper whose scope and
+  dataset resolve no `paper` schema, not even the global one (a dataset
+  outside the seeded one with none registered), has no view
+  (`scope_unresolved`).
   """
   @spec of(Document.t(), String.t(), keyword(), atom()) :: t()
   def of(%Document{} = paper, dataset, scope, perspective) do
-    schema = Content.Papers.reader_schema(paper, "paper", dataset, scope)
+    case Content.Papers.reader_schema(paper, "paper", dataset, scope) do
+      nil -> {:error, :scope_unresolved}
+      schema -> of_schema(paper, schema, dataset, scope, perspective)
+    end
+  end
+
+  defp of_schema(paper, schema, dataset, scope, perspective) do
     content = paper.content || %{}
     stored = Projection.read_blocks(content)
 
@@ -183,18 +192,9 @@ defmodule Barkpark.Content.Papers.BpmlView do
         )
 
       case Content.get_paper(row.doc_id, row.dataset, scope) do
-        %Document{} = saved -> answer(ref, schema_resolved(saved))
+        %Document{} = saved -> answer(ref, print(saved, saved.dataset))
         nil -> {:error, {:view_refused, refusal({:error, :not_found})}}
       end
-    end
-  end
-
-  # A saved row whose own workspace and project resolve no reader schema has
-  # no view to answer with, so the write is refused (fail closed).
-  defp schema_resolved(%Document{} = saved) do
-    case Content.Papers.reader_schema(saved, "paper", saved.dataset, []) do
-      nil -> {:refused, refusal({:error, :scope_unresolved})}
-      _schema -> print(saved, saved.dataset)
     end
   end
 

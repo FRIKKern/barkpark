@@ -12,13 +12,19 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   so a token seated there writes there. Any other number of seats is
   refused with the workspaces the token may name and the command that pins a
   token to one of them, since `bp paper push` and `pull` send no workspace.
+
+  The write rule (`may_write?/2`) is the one answer to "may this token write
+  in workspace X", asked by the controller's door about a workspace the
+  request names and, through `write_check/1`, inside a Paper write's
+  transaction about the saved row's workspace.
   """
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.{CallerContext, WriteScope}
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Workspace
   alias BarkparkWeb.ErrorResponse
-  alias BarkparkWeb.Plugs.RequireWithinQuota
+  alias BarkparkWeb.Plugs.{RequirePlatformOperator, RequireWithinQuota}
 
   @seat_default_actions [
     :sync,
@@ -65,6 +71,37 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   end
 
   defp slugs(seats), do: Enum.map(seats, & &1.slug)
+
+  @doc """
+  May `token` write in workspace `ws_id`: its home workspace, a seat that
+  allows `:write` (`Tenancy.Auth.authorize/3`), or an instance operator on an
+  ARMED allowlist. False for anything but a workspace id.
+  """
+  @spec may_write?(ApiToken.t(), term()) :: boolean()
+  def may_write?(%ApiToken{} = token, ws_id) when is_binary(ws_id) do
+    ws_id == token.workspace_id or Tenancy.Auth.authorize(token, ws_id, :write) == :ok or
+      armed_operator?(token)
+  end
+
+  def may_write?(_token, _ws_id), do: false
+
+  @doc """
+  The `may_write:` predicate a Paper write runs inside its transaction on the
+  saved row's workspace (`Content.Papers.SavedCheck`): `may_write?/2` for
+  `token`, or nil for no token (the shared-secret producer).
+  """
+  @spec write_check(ApiToken.t() | nil) :: (term() -> boolean()) | nil
+  def write_check(%ApiToken{} = token), do: &may_write?(token, &1)
+  def write_check(_no_token), do: nil
+
+  # The instance operator, only when the allowlist is ARMED: an unset allowlist
+  # admits every admin token, which is exactly the population this closes.
+  defp armed_operator?(token) do
+    case RequirePlatformOperator.allowlist() do
+      %{emails: [], token_ids: []} -> false
+      _ -> RequirePlatformOperator.permits?(token)
+    end
+  end
 
   @doc """
   Judge the workspace the gate approved: 409 `workspace_archived` when it is

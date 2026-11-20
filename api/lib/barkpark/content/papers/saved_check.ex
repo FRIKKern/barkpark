@@ -13,9 +13,9 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   Before the caller's check, the saved row's scope is checked, failing closed:
   its project must belong to its workspace (`scope_unowned`), and the write's
   `may_write:` predicate, given the saved row's workspace id, must answer
-  `true` (`write_forbidden`). The caller builds it (a token's, from
-  `Tenancy.Auth.write_check/1`); a write with none (the shared-secret
-  producer) has only the first check.
+  `true` (`write_forbidden`). The caller builds it from the writing token's
+  own write rule; a write with none (the shared-secret producer) has only the
+  first check.
   """
 
   alias Barkpark.Content.{Broadcast, Document}

@@ -6,13 +6,15 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
     * a row whose project is not one of its workspace's is refused
       (`scope_unowned`), with or without a token;
     * a row in a workspace the writing token may not write in is refused
-      (`write_forbidden`), on the upsert path and the block-op batch path;
+      (`write_forbidden`), on the upsert path and the block-op batch path; the
+      token's rule is `WriteGate.may_write?/2` (its home, a seat allowing
+      write, or an armed operator allowlist naming it);
     * the write's `may_write:` predicate is asked, inside the transaction,
       about the saved row's own workspace; a no refuses;
     * a refusal leaves no row, history, change event or job, and an existing
       row is unchanged;
-    * the view check refuses a row whose own workspace and project resolve no
-      reader schema (`scope_unresolved`).
+    * the view check refuses a row in a dataset with no `paper` schema, not
+      the seeded one (`scope_unresolved`).
 
   A row in the token's own workspace and project is written and answered.
   The rows are written through `Content`, not through an HTTP door.
@@ -24,6 +26,8 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
   alias Barkpark.{Auth, Content, LabelFixtures, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Content.Papers.BpmlView
+  alias Barkpark.Plugins.Bulldocs.Web.WriteGate
+  alias Barkpark.Tenancy.Membership
 
   @ds "production"
 
@@ -58,7 +62,22 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
     })
   end
 
-  defp checked(token), do: checked_by(Tenancy.Auth.write_check(token))
+  defp checked(token), do: checked_by(WriteGate.write_check(token))
+
+  defp seatless! do
+    raw = "saved-scope-op-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "saved scope op", @ds, ["admin"], nil)
+    token
+  end
+
+  defp arm(ids) do
+    prev = Application.get_env(:barkpark, :operator_token_ids, [])
+    Application.put_env(:barkpark, :operator_token_ids, ids)
+    on_exit(fn -> Application.put_env(:barkpark, :operator_token_ids, prev) end)
+  end
+
+  defp upsert(slug, ws, opts),
+    do: Content.upsert_paper(attrs(slug, ws.ws.id, ws.project.id), opts)
 
   defp checked_by(may_write),
     do: [before_commit: BpmlView.saved_check(make_ref()), may_write: may_write]
@@ -85,6 +104,33 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
     result = Content.upsert_paper(attrs(slug, c.b.ws.id, c.b.project.id), checked(c.b.token))
     assert {:ok, %Document{workspace_id: ws, project_id: proj}} = result
     assert {ws, proj} == {c.b.ws.id, c.b.project.id}
+  end
+
+  test "a pinned token writes in its home without a seat row; a seatless token does not", c do
+    Repo.delete_all(from m in Membership, where: m.principal_id == ^c.b.token.id)
+    assert Tenancy.Auth.authorize(c.b.token, c.b.ws.id, :write) != :ok
+    assert {:ok, %Document{workspace_id: ws}} = upsert(slug(), c.b, checked(c.b.token))
+    assert ws == c.b.ws.id
+
+    slug = slug()
+    before = trace(slug)
+    assert code(upsert(slug, c.b, checked(seatless!()))) == "write_forbidden"
+    assert trace(slug) == before
+  end
+
+  test "a seatless token on the armed operator allowlist writes; off it, refused", c do
+    op = seatless!()
+    arm([op.id])
+    assert {:ok, %Document{workspace_id: ws}} = upsert(slug(), c.a, checked(op))
+    assert ws == c.a.ws.id
+
+    for ids <- [[], [seatless!().id]] do
+      arm(ids)
+      slug = slug()
+      before = trace(slug)
+      assert code(upsert(slug, c.a, checked(op))) == "write_forbidden"
+      assert trace(slug) == before
+    end
   end
 
   test "a row under another workspace's project is refused and leaves nothing", c do
@@ -151,28 +197,25 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
     assert_received {:asked, ^ws_id, true}
   end
 
-  test "the view check refuses a row whose workspace and project resolve no reader schema", c do
-    # The migrations seed a global `paper` schema, which any scope falls back
-    # to; drop it in this test's transaction so nothing resolves.
-    Repo.delete_all(
-      from s in Barkpark.Content.SchemaDefinition,
-        where: s.name == "paper" and is_nil(s.workspace_id)
-    )
+  test "the view check refuses a row in a dataset with no paper schema (scope_unresolved)", c do
+    # The seeded `paper` schemas are `production`'s; a dataset outside it with
+    # none registered resolves no reader schema for any scope.
+    ds = "saved-scope-noschema"
 
     row =
       Repo.insert!(%Document{
         doc_id: slug(),
         type: "paper",
-        dataset: @ds,
+        dataset: ds,
         title: "Saved scope",
         status: "published",
         rev: Content.Writer.generate_rev(),
         content: %{"blocks" => blocks("Visible.")},
         workspace_id: c.b.ws.id,
-        project_id: c.a.project.id
+        project_id: c.b.project.id
       })
 
-    assert Content.Papers.reader_schema(row, "paper", @ds, []) == nil
+    assert Content.Papers.reader_schema(row, "paper", ds, []) == nil
     assert code(BpmlView.saved_check(make_ref()).(row)) == "scope_unresolved"
   end
 end

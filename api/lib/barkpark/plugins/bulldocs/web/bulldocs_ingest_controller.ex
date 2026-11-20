@@ -470,7 +470,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  defp write_check(conn), do: Tenancy.Auth.write_check(conn.assigns[:api_token])
+  defp write_check(conn), do: WriteGate.write_check(conn.assigns[:api_token])
 
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
@@ -2192,8 +2192,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # `is_nil(ws)` arm) used to honour a named workspace for ANY credential. A
   # workspace-less admin token seated only in A could then create, overwrite
   # and edit B's papers and sessions by naming B. Now a TOKEN that names a
-  # workspace must hold write access there (`Tenancy.Auth.authorize/3`) or be
-  # on an ARMED instance-operator allowlist; else 403 `workspace_forbidden`.
+  # workspace must be able to write there (`WriteGate.may_write?/2`: a seat
+  # allowing write, or an ARMED operator allowlist); else 403 `workspace_forbidden`.
   # The shared-secret producer carries no `:api_token` and is unchanged; a
   # workspace-bound token is already confined by the reconciliations
   # themselves. One door for every action, so the read twin is covered too.
@@ -2201,7 +2201,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     with %Barkpark.Auth.ApiToken{} = token <- conn.assigns[:api_token],
          nil <- pipeline_workspace(conn),
          {ws_id, _project} when is_binary(ws_id) <- requested_scope(conn, conn.params),
-         false <- may_address_workspace?(token, ws_id) do
+         false <- WriteGate.may_write?(token, ws_id) do
       conn
       |> ErrorResponse.emit_custom(
         :forbidden,
@@ -2213,19 +2213,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
       |> halt()
     else
       _ -> conn
-    end
-  end
-
-  defp may_address_workspace?(token, ws_id) do
-    Tenancy.Auth.authorize(token, ws_id, :write) == :ok or armed_operator?(token)
-  end
-
-  # The instance operator, only when the allowlist is ARMED: an unset allowlist
-  # admits every admin token, which is exactly the population this closes.
-  defp armed_operator?(token) do
-    case BarkparkWeb.Plugs.RequirePlatformOperator.allowlist() do
-      %{emails: [], token_ids: []} -> false
-      _ -> BarkparkWeb.Plugs.RequirePlatformOperator.permits?(token)
     end
   end
 
