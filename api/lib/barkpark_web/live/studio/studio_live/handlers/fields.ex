@@ -352,7 +352,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     PostIdentity.pressed(Map.get(msg, :press), socket, fn _params, socket ->
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
-          form = StudioLive.Path.put_value_at(base_form(socket), path, code)
+          form = picked_form(socket, path, code)
           socket = socket |> assign(editor_form: form) |> RefusedSave.target(Enum.take(path, 1))
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
           {:noreply, settle_dirty(saved, Enum.take(path, 1))}
@@ -364,6 +364,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   def tree_codelist_pick(_msg, socket), do: {:noreply, socket}
+
+  # In the desk a Remove unsets the code, nested too, as TanStack does; the
+  # old Studio stores "" at a nested path, as it did.
+  defp picked_form(%{assigns: %{desk_base: base}} = socket, path, "") when is_binary(base),
+    do: StudioLive.UnsetPath.unset(base_form(socket), path)
+
+  defp picked_form(socket, path, code),
+    do: StudioLive.Path.put_value_at(base_form(socket), path, code)
 
   @doc """
   The slug Generate derives from a title: Latin letters with accents or

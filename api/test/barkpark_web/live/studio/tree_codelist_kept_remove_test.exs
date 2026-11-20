@@ -3,8 +3,9 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
   task-9ae4a10efeab3bc9: a tree codelist over a stored value that is no code
   (7), top-level and in an object, offers Remove, in the desk and the old
   Studio. The value is kept as stored on an edit of another field; Remove's
-  own press writes "" for that field only (a top-level "" takes the key
-  off the document, as Remove over a code does).
+  own press clears that field only. A top-level Remove takes the key off the
+  document. A nested one does too in the desk, and an object left empty goes
+  with it (TanStack's `write()`); the old Studio stores "" there, as on main.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -60,6 +61,24 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
                 %{"name" => "label", "title" => "Label", "type" => "string"}
               ]
             },
+            %{
+              "name" => "solo",
+              "title" => "Solo",
+              "type" => "composite",
+              "fields" => [Map.merge(tree, %{"name" => "scode", "title" => "Solo code"})]
+            },
+            %{
+              "name" => "items",
+              "title" => "Items",
+              "type" => "arrayOf",
+              "of" => %{
+                "type" => "composite",
+                "fields" => [
+                  Map.merge(tree, %{"name" => "icode", "title" => "Item code"}),
+                  %{"name" => "ilabel", "title" => "Item label", "type" => "string"}
+                ]
+              }
+            },
             %{"name" => "notes", "type" => "string"}
           ]
         },
@@ -78,7 +97,14 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
 
   defp doc!(c) do
     id = "tk-#{System.unique_integer([:positive])}"
-    content = %{"subject" => 7, "meta" => %{"code" => 7, "label" => "x"}, "notes" => "0"}
+
+    content = %{
+      "subject" => 7,
+      "meta" => %{"code" => 7, "label" => "x"},
+      "solo" => %{"scode" => "FB2"},
+      "items" => [%{"_key" => "ka", "icode" => 7}, %{"_key" => "kb", "icode" => 7}],
+      "notes" => "0"
+    }
 
     {:ok, _} =
       Content.create_document(
@@ -138,7 +164,7 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
       end
     end
 
-    test "#{surface}: an edit elsewhere keeps the 7; Remove writes \"\" for its own field only",
+    test "#{surface}: an edit elsewhere keeps the 7; Remove clears its own field only",
          c do
       id = doc!(c)
       {view, form} = open(c, @surface, id)
@@ -155,11 +181,54 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
 
       EditorPost.press_on(view, element(view, remove(form, :nested)))
       render(view)
-      assert stored(c, id)["meta"] == %{"code" => "", "label" => "x"}
+      # The desk unsets the key, as TanStack does; the old Studio stores "".
+      meta = if @surface == :desk, do: %{"label" => "x"}, else: %{"code" => "", "label" => "x"}
+      assert stored(c, id)["meta"] == meta
 
       edit_notes(view, form, "again")
       assert stored(c, id)["notes"] == "again"
-      assert stored(c, id)["meta"]["code"] == ""
+      assert stored(c, id)["meta"] == meta
     end
+  end
+
+  test "desk: a nested tree has the desk's toolbar and says a 7 is kept", c do
+    {view, form} = open(c, :desk, doc!(c))
+
+    assert has_element?(
+             view,
+             ~s(#{field(form, :nested)} .codelist-current[data-codelist-kept]),
+             "Not a code (kept as stored)"
+           )
+  end
+
+  test "desk: Remove over an object's only code takes the object off", c do
+    id = doc!(c)
+    {view, form} = open(c, :desk, id)
+    before = stored(c, id)
+
+    EditorPost.press_on(
+      view,
+      element(view, ~s(#{form} [data-field-name="scode"] [data-test-id="tree-codelist-remove"]))
+    )
+
+    render(view)
+
+    refute Map.has_key?(stored(c, id), "solo")
+    assert Map.delete(stored(c, id), "solo") == Map.delete(before, "solo")
+  end
+
+  test "desk: Remove in an array item takes the code off that row only; the row stays", c do
+    id = doc!(c)
+    {view, form} = open(c, :desk, id)
+    row = ~s(#{form} li[data-item-path='items[_key=="kb"]'] [data-field-name="icode"])
+
+    assert has_element?(view, ~s(#{row} .codelist-current[data-codelist-kept]))
+    EditorPost.press_on(view, element(view, row <> ~s( [data-test-id="tree-codelist-remove"])))
+    render(view)
+
+    assert stored(c, id)["items"] == [%{"_key" => "ka", "icode" => 7}, %{"_key" => "kb"}]
+
+    edit_notes(view, form, "again")
+    assert stored(c, id)["items"] == [%{"_key" => "ka", "icode" => 7}, %{"_key" => "kb"}]
   end
 end

@@ -448,6 +448,12 @@ defmodule Barkpark.Content.Forms do
         _ -> []
       end
 
+    # A subfield posted as nil is unset: the desk writes that for a language
+    # field left with no text (`Handlers.Fields`), as TanStack's `write()`
+    # unsets it. A form never posts nil, so no other edit reaches this.
+    unset = for %{"name" => name} <- subs, Map.fetch(coerced, name) == {:ok, nil}, do: name
+    coerced = Map.drop(coerced, unset)
+
     restored =
       Enum.reduce(subs, coerced, fn sub, acc ->
         name = Map.get(sub, "name")
@@ -476,7 +482,7 @@ defmodule Barkpark.Content.Forms do
 
     # A stored key the form never rendered (a read-only structured subfield, an
     # undeclared key) is absent from the post — keep it.
-    Map.merge(Map.drop(stored, Map.keys(restored)), restored)
+    Map.merge(Map.drop(stored, Map.keys(restored) ++ unset), restored)
   end
 
   # A richText subfield is restored from the HTML the editor posted, not from
