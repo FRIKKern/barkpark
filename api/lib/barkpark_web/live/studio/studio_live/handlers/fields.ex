@@ -978,7 +978,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   # The top-level field a `phx-change` typed in, from its `_target`:
   # `["doc", "title"]` for a bracket name, `["doc[altText].nob"]` for a dotted one.
-  defp target_key(%{"_target" => ["doc", key | _]}) when is_binary(key), do: [key]
+  # A checkbox list in an object or a row names its whole path in one
+  # bracket, dotted (`doc[obj.tags][]`): its field is the first part.
+  defp target_key(%{"_target" => ["doc", key | _]}) when is_binary(key),
+    do: [key |> String.split(".", parts: 2) |> hd()]
 
   defp target_key(%{"_target" => [name]}) when is_binary(name) do
     case StudioLive.parse_path(name) do

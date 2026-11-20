@@ -62,6 +62,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
       name = prefix <> "[" <> to_string(k) <> "]"
 
       cond do
+        dotted_list?(prefix, k, v) ->
+          {clean, Map.put(flat, dotted_name(k), Enum.reject(v, &(&1 == "")))}
+
         is_binary(k) and String.contains?(k, ["]", "[", "."]) ->
           {clean, Map.merge(flat, flatten_value(name, v))}
 
@@ -74,6 +77,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
           {Map.put(clean, k, v), flat}
       end
     end)
+  end
+
+  # A checkbox list inside an object or an array row posts its whole path
+  # dotted in one bracket (`doc[obj.tags][]`, `ArrayField`), so Plug gives
+  # back a list under `"obj.tags"`. It goes back to the name the fold reads,
+  # `doc[obj].tags`, without the empty value that keeps the key in a post
+  # with nothing ticked.
+  defp dotted_list?("doc", k, v) when is_binary(k) and is_list(v),
+    do: String.contains?(k, ".") and not String.contains?(k, ["[", "]"])
+
+  defp dotted_list?(_prefix, _k, _v), do: false
+
+  defp dotted_name(k) do
+    [root | rest] = String.split(k, ".")
+    "doc[" <> root <> "]." <> Enum.join(rest, ".")
   end
 
   defp flatten_value(name, %{} = v) when map_size(v) > 0 do
