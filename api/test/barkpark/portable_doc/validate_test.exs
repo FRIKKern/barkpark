@@ -52,7 +52,7 @@ defmodule Barkpark.PortableDoc.ValidateTest do
           {Path.relative_to(file, @fixtures), sha}
         end
 
-      assert map_size(pinned) == 41
+      assert map_size(pinned) == 42
       assert vendored == pinned
     end
 
@@ -82,7 +82,7 @@ defmodule Barkpark.PortableDoc.ValidateTest do
 
   test "every valid fixture passes" do
     files = json_in(Path.join(@fixtures, "valid"))
-    assert length(files) == 8
+    assert length(files) == 9
     for file <- files, do: assert({file, Validate.validate(read(file))} == {file, :ok})
   end
 

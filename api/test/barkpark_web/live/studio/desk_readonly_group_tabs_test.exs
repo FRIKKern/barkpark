@@ -169,6 +169,64 @@ defmodule BarkparkWeb.Studio.DeskReadonlyGroupTabsTest do
     assert has_element?(view, ~s(#{holder} [name="doc[excerpt]"][value="Old"]))
   end
 
+  # task-2dd6262184d64bb4: as the TanStack Studio's `GroupTabs` (`disabled &&
+  # value !== g.name`), the tab shown while the groups wait, All fields, stays
+  # live and is the tab stop, so the open focus (bp-tab-keys.js `formStart`)
+  # has a tab to take; the other tabs wait. All three were disabled, and the
+  # focus sat on BODY.
+  for {name, query} <- [revision: :revision, draft: ""] do
+    test "History open on the #{name}: All fields stays live and the tab stop, the other tabs wait",
+         c do
+      query = if unquote(query) == :revision, do: ",rev=#{c.rev}", else: ""
+      view = open(c, @history <> query)
+
+      assert has_element?(
+               view,
+               "#{@pane} #bp-group-tab-all-fields:not([disabled])[aria-selected=\"true\"][tabindex=\"0\"]"
+             )
+
+      assert has_element?(view, "#{@pane} #bp-group-tab-content[disabled]")
+      assert has_element?(view, "#{@pane} #bp-group-tab-meta[disabled]")
+    end
+  end
+
+  # The conflict banner sits above the read-only fields: Reload is refused in
+  # both views (`refuses?/2`), so it is drawn disabled there, as it was inside
+  # the old disabled holder. A conflict with unsaved edits is set on the
+  # socket here: no event reaches a read-only view with them.
+  for {name, query} <- [published: "?perspective=published", revision: :revision, draft: ""] do
+    test "a conflict banner on the #{name}: Reload is drawn #{if name == :draft, do: "enabled", else: "disabled"}",
+         c do
+      query = if unquote(query) == :revision, do: ",rev=#{c.rev}", else: unquote(query)
+      view = open(c, query)
+
+      :sys.replace_state(view.pid, fn %{socket: socket} = state ->
+        %{state | socket: Phoenix.Component.assign(socket, :doc_conflict, true)}
+      end)
+
+      view |> element("#{@pane} #bp-group-tab-meta") |> render_click()
+      assert has_element?(view, ~s(#{@pane} [data-test-id="doc-conflict-reload"]))
+
+      disabled? = has_element?(view, ~s(#{@pane} [data-test-id="doc-conflict-reload"][disabled]))
+      assert disabled? == (unquote(name) != :draft)
+    end
+  end
+
+  # task-2dd6262184d64bb4: the Studio's phone trail (`desk_crumbs`) was drawn
+  # in the desk too, a bare "/" before the pane row from the narrow bucket on.
+  # Arriving there it moved the row (`#studio-panes`, the WidthBucket hook's
+  # element), and the focused group tab with it fell to BODY.
+  test "a narrower width bucket draws nothing new before the desk's pane row", c do
+    view = open(c, "")
+    assert has_element?(view, "#{@pane} #studio-panes")
+
+    for bucket <- ~w(narrow phone standard wide) do
+      render_hook(view, "width-bucket", %{"bucket" => bucket})
+      refute has_element?(view, ".bp-desk-crumbs"), "a trail at #{bucket}"
+      assert has_element?(view, "#{@pane} #studio-panes #bp-group-tab-meta")
+    end
+  end
+
   test "the draft: the tabs and the fields sit in no disabled fieldset", c do
     view = open(c, "")
 
