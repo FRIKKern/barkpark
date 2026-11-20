@@ -454,17 +454,23 @@ check("a field in a list item's closed dialog: the dialog opens as a click on th
   }
 });
 
-check("a field in an item dialog that cannot be opened is not changed out of sight: the change is put back", () => {
+// task-c20e285ee18797c6: a redo here re-applied the change the press had just
+// undone, and its own answer named the same dialog, so the writes chained.
+check("a field in an item dialog that cannot be opened: one Mod+Z sends one undo and no redo; nothing is set or focused", () => {
   const box = drawIn(
     `<dialog id="lost-dialog" data-desk-item-dialog><input type="text" id="lost" name="doc[cards][1].note" value="N2 X2"></dialog>`
   );
   try {
-    $("lost-dialog").showModal = undefined;
+    $("lost-dialog").showModal = () => {
+      throw new Error("InvalidStateError");
+    };
     $("title").focus();
+    key($("title"), { key: "z", metaKey: true });
     undone({ field: "doc[cards][1].note", value: "N2", was: "N2 X2", path: "cards" });
+    assert.equal($("lost-dialog").open, false);
     assert.equal($("lost").value, "N2 X2", "the field is not set");
     assert.equal(doc.activeElement, $("title"), "the focus stays");
-    assert.deepEqual(pushes, [{ event: "desk-undo", payload: { redo: true, _bp_doc: MARK } }]);
+    assert.deepEqual(pushes, [{ event: "desk-undo", payload: { redo: false, _bp_doc: MARK } }]);
   } finally {
     box.remove();
   }

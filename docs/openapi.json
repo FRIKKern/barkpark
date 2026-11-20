@@ -181,6 +181,7 @@
                   "not_found",
                   "owner_only",
                   "paper_exists",
+                  "paper_not_in_scope",
                   "paper_rev_unreadable",
                   "payload_too_large",
                   "precondition_failed",

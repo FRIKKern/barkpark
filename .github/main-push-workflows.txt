@@ -9,6 +9,7 @@
 .github/workflows/astro-finder-drift.yml	CONDITIONAL
 .github/workflows/astro-finder-render-smoke.yml	ALWAYS
 .github/workflows/astro-search-finder-test.yml	CONDITIONAL
+.github/workflows/barkui.yml	ALWAYS
 .github/workflows/bp-graph-drift.yml	CONDITIONAL
 .github/workflows/breakglass-watch.yml	ALWAYS
 .github/workflows/ci.yml	CONDITIONAL

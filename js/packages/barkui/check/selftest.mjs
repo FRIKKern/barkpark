@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PARTS_HELD, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
@@ -417,11 +417,11 @@ const CASES = [
   },
   ...CEILING_CASES,
   {
-    name: 'one part more than the CI check step holds is refused, with the sentence that says how many it holds',
+    name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
-      for (let i = 0; i < PARTS_HELD; i++) copyAs(d, `held${String.fromCharCode(97 + i)}-button`)
+      for (let i = 0; i < PER_JOB; i++) copyAs(d, `held${String.fromCharCode(97 + i)}-button`)
     },
-    expect: (p, html, ok, logs) => !ok && p === null && logs.some((l) => l.includes(`${PARTS_HELD + 1} parts, more than CI's check step holds. ${capacitySentence()}`)),
+    expect: (p, html, ok, logs) => !ok && p === null && logs.some((l) => l.includes(`${PER_JOB + 1} parts in one job, more than one CI job holds. ${capacitySentence()}`)),
   },
   {
     name: 'a part.json that names a property to allow is refused at discovery',

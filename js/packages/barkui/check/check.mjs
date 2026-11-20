@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
-import { AT_ONCE, capacitySentence, PARTS_HELD } from './capacity.mjs'
+import { AT_ONCE, capacitySentence, PER_JOB } from './capacity.mjs'
 import { unread } from './coverage.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { limit } from './limit.mjs'
@@ -29,8 +29,10 @@ function variableNames() {
 // `surfaces: false` skips measuring the four unproved surfaces, `motion: false` the reading with motion
 // allowed, and `states: false` the real states held to their pins (the selftest skips each, except in the cases
 // that plant there);
-// `plantCss` is the selftest's planted sheet (see buildShowroom).
-export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '' } = {}) {
+// `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
+// (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
+// page CI ships, but only those parts are pressed and read. Without it, every part is.
+export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null } = {}) {
   let built
   let bare
   try {
@@ -40,8 +42,14 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     log(`check: ${e.message}`)
     return { ok: false, proof: null }
   }
-  if (built.parts.length > PARTS_HELD) {
-    log(`check: ${built.parts.length} parts, more than CI's check step holds. ${capacitySentence()} Read the run on CI's runner and put the reading in check/capacity.mjs, or split the check.`)
+  const unknown = (names ?? []).filter((n) => !built.parts.some((p) => p.name === n))
+  if (unknown.length) {
+    log(`check: no part folder named ${unknown.join(', ')}`)
+    return { ok: false, proof: null }
+  }
+  const mine = names ? built.parts.filter((p) => names.includes(p.name)) : built.parts
+  if (mine.length > PER_JOB) {
+    log(`check: ${mine.length} parts in one job, more than one CI job holds. ${capacitySentence()} Split them across more jobs (check/jobs.mjs does), or read a job on CI's runner and put the reading in check/capacity.mjs.`)
     return { ok: false, proof: null }
   }
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
@@ -120,16 +128,16 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     return { entry: { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(missed.length ? { unread: missed } : {}), ...(failed ? { failed } : {}) }, errors: ctx.errors }
   }
   try {
-    const done = new Array(built.parts.length)
+    const done = new Array(mine.length)
     let next = 0
     const worker = async () => {
-      while (next < built.parts.length) {
+      while (next < mine.length) {
         const i = next++
-        done[i] = await checkPart(built.parts[i])
+        done[i] = await checkPart(mine[i])
       }
     }
-    await Promise.all(Array.from({ length: Math.min(AT_ONCE, built.parts.length) }, worker))
-    built.parts.forEach((part, i) => {
+    await Promise.all(Array.from({ length: Math.min(AT_ONCE, mine.length) }, worker))
+    mine.forEach((part, i) => {
       proof.parts[part.name] = done[i].entry
       proof.errors.push(...done[i].errors)
     })
@@ -140,6 +148,6 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   await buildShowroom({ dir, out, proof: proofFile, quiet: true })
   for (const e of proof.errors) log(`error: ${e}`)
   const failedParts = Object.entries(proof.parts).filter(([, p]) => p.failed)
-  log(`${built.parts.length} part(s); ${failedParts.length ? `failed: ${failedParts.map(([n]) => n).join(', ')}` : 'every light on'}; ${proof.errors.length} page error(s)`)
+  log(`${mine.length} part(s); ${failedParts.length ? `failed: ${failedParts.map(([n]) => n).join(', ')}` : 'every light on'}; ${proof.errors.length} page error(s)`)
   return { ok: !failedParts.length && !proof.errors.length, proof }
 }
