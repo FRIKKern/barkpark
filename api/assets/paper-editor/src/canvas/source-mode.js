@@ -7,7 +7,7 @@ import {
   deepCloneBlocks,
   mergeSourceText,
 } from "./source-realign.js";
-import { sentinelRefusal, sourceStored, sourceWallLoss } from "./source-save.js";
+import { sentinelRefusal, settledBlocks, sourceStored, sourceWallLoss } from "./source-save.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 
   // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──
@@ -279,8 +279,9 @@ function storedSentinelHarm(md) {
     const L0 = this._sourceBaselineBlocks || [];
     const laid = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
     const base = this._inflightOps ? this._inflightOps.afterBlocks : (this._debounceBaselineBlocks || this._blocks || []);
-    const { saved } = sourceStored(base, laid, sourceView.call(this));
-    return sentinelRefusal(base, L0, this._sourceOriginalMd, saved);
+    const view = sourceView.call(this);
+    const { saved } = sourceStored(base, laid, view);
+    return sentinelRefusal(base, L0, this._sourceOriginalMd, saved, (blocks) => settledBlocks(blocks, view));
 }
 
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the

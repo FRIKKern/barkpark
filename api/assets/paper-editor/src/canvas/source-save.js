@@ -58,14 +58,21 @@ export function sourceSaved(base, parsed, view, { calloutBody = "named", realign
 // folded onto `base` (`saved`, null when the fold refuses the batch).
 export function sourceStored(base, laid, view) {
   const stored = deepCloneBlocks(base);
-  // An empty run projects to a doc with no content key.
-  const doc = view.toDoc(laid);
-  const shown = docToBlocks(normalizeCanvasDoc({ ...doc, content: doc.content || [] }, stored));
+  const shown = settledBlocks(laid, view, stored);
   try {
     return { shown, saved: applyOps(stored, view.toOps(stored, view.toDoc(shown), { preserveNewIds: true }) || []) };
   } catch (_refused) {
     return { shown, saved: null };
   }
+}
+
+// The editor's projection of `blocks`: through its schema and back, with the ids it
+// gives a nested block that has none, as the live doc and every save get them.
+// `against` is what normalizeCanvasDoc keeps ids from.
+export function settledBlocks(blocks, view, against = blocks) {
+  // An empty run projects to a doc with no content key.
+  const doc = view.toDoc(blocks);
+  return docToBlocks(normalizeCanvasDoc({ ...doc, content: doc.content || [] }, against));
 }
 
 export { sentinelHarm, sentinelRefusal } from "./source-sentinel-guard.js";

@@ -215,6 +215,14 @@ try {
         [`${kind}: deleted with a plain paragraph`, mid, (md) => drop(md, "x").replace("After", "").replace(/\n+$/, ""), ["p0"]],
       );
     }
+    // The editor gives an id to a nested block stored without one, on every save; a
+    // block that only gains such an id is unchanged.
+    const transcript = { id: "e", type: "expandable", summary: "Transcript", children: [{ type: "code", value: "line one" }] };
+    const withTranscript = [p("p0", "Before"), transcript, image("x"), p("p2", "After")];
+    rows.push(
+      ["deleted alone, beside a code block stored with no id", withTranscript, (md) => drop(md, "x"), ["p0", "e", "p2"]],
+      ["deleted, and a letter typed in that code block", withTranscript, (md) => drop(md, "x").replace("line one", "line onez"), "refused"],
+    );
     const failed = [];
     for (const [name, blocks, change, want] of rows) {
       const { canvas, batches, server } = await mount(clone(blocks));
