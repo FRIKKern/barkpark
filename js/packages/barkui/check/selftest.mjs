@@ -432,7 +432,7 @@ const CASES = [
     ),
     expect: each({
       'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
-      'checked held on the driven box, blank': skinsSay(/checked held on every live control it applies to, .*control boundary [\d.]+:1 at input#button-tick "" by/),
+      'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
       'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
     }),
   },
