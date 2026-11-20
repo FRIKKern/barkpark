@@ -5,12 +5,15 @@
 
 // The states the showroom pins with data-pin (build/showroom.mjs pinStates). One may appear only on the element
 // the selector styles (its last compound, not inside :not(), :has() and the like), so data-pin on that element
-// shows it; never on a host, ancestor or sibling, where no pin can reach.
-export const PINNED = ['hover', 'active', 'focus-visible']
+// shows it; never on a host, ancestor or sibling, where no pin can reach. The check drives each one with real
+// input (check/states.mjs): the pointer for hover and active, a click for checked.
+export const PINNED = ['hover', 'active', 'focus-visible', 'checked']
+// What a person changes by clicking or typing. Each is refused until it is a pinned state the check drives; a test
+// holds STATIC apart from this list, so none comes back as always allowed.
+export const CHANGED_BY_A_PERSON = ['hover', 'active', 'focus', 'focus-visible', 'focus-within', 'checked', 'indeterminate', 'placeholder-shown', 'enabled', 'disabled', 'read-only', 'read-write', 'valid', 'invalid', 'user-valid', 'user-invalid', 'in-range', 'out-of-range', 'blank', 'autofill', 'open', 'closed', 'popover-open', 'modal', 'target', 'target-within', 'visited', 'link', 'any-link', 'local-link', 'default', 'playing', 'paused', 'fullscreen']
 // Every other pseudo-class part.css may use, anywhere: structure and the element's own attributes, nothing that a
-// person's pointer, keys, typing or history sets. Anything else (:focus, :target, :checked, ...) is refused.
-// A pseudo-class a person changes by clicking or typing (:checked, :placeholder-shown, :enabled and the like) is
-// not here: it comes back as a state, driven and read like :hover, when a part first needs it.
+// person's pointer, keys, typing or history sets. Anything else (:focus, :target, :placeholder-shown, ...) is
+// refused until it joins PINNED with a way for the check to drive it.
 export const STATIC = ['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type']
 // The pseudo-elements the check reads (docs/PARTS.md "Read").
 export const PSEUDO_ELEMENTS = ['before', 'after', 'marker', 'placeholder']

@@ -415,6 +415,27 @@ const CASES = [
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     }),
   },
+  // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
+  // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
+  {
+    name: 'a checked box drawn blank, and a checked change no pinned row shows, each fail by name',
+    only: ['skins'],
+    states: true,
+    secs: 120,
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
+      inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
+      // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
+      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
+      // A change only the real click shows: no pinned row carries it.
+      inCss('#button-tick:checked { border-width: 3px; }'),
+    ),
+    expect: each({
+      'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
+      'checked held on the driven box, blank': skinsSay(/checked held on every live control it applies to, .*control boundary [\d.]+:1 at input#button-tick "" by/),
+      'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
+    }),
+  },
   ...CEILING_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
