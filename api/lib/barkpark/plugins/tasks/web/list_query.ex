@@ -18,7 +18,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
   ## Field visibility
 
   `readable?` is the board's fail-closed predicate
-  (`Barkpark.Tasks.Board.field_visibility_gate/1`). A field the reader may not
+  (`Barkpark.Tasks.Board.field_visibility_gate/2`). A field the reader may not
   see is left out of the row, and its filter and sort are dropped in
   `parse/2`, so a hidden value cannot be found by narrowing the count either.
   Title, doc id and lifecycle status are the fields the board shows ungated.

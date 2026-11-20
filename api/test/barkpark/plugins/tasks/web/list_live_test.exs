@@ -146,7 +146,12 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLiveTest do
       })
 
       scoped = scoped_conn() |> init_test_session(%{"api_token" => raw})
-      {:ok, scoped: scoped, ws_b: ws_b, base: "/w/#{ws_b.slug}/p/#{proj_b.slug}/admin/projects"}
+
+      {:ok,
+       scoped: scoped,
+       ws_b: ws_b,
+       proj_b: proj_b,
+       base: "/w/#{ws_b.slug}/p/#{proj_b.slug}/admin/projects"}
     end
 
     test "a scoped list shows and counts its own workspace's tasks only",
@@ -186,6 +191,51 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLiveTest do
 
       bound = scoped_conn() |> init_test_session(%{"api_token" => "list-bound-#{n}"})
       assert {:error, {:redirect, %{to: "/studio"}}} = live(bound, base <> "/list")
+    end
+
+    # task-c626f2be5264f61a: the gate read Default's schema for every mount.
+    test "a scoped list hides what its own workspace's schema hides, never what Default's does",
+         %{scoped: scoped, base: base, ws_b: ws_b, proj_b: proj_b} do
+      private = fn field ->
+        [%{"name" => field, "type" => "string", "visibility" => "private"}]
+      end
+
+      schema = fn fields ->
+        %{
+          "name" => "task",
+          "title" => "Task",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"} | fields]
+        }
+      end
+
+      # Default hides labels; workspace B hides priority.
+      {:ok, _} = Barkpark.Content.upsert_schema(schema.(private.("labels")), "production")
+
+      {:ok, _} =
+        Barkpark.Content.upsert_schema(schema.(private.("priority")), "production",
+          workspace_id: ws_b.id,
+          project_id: proj_b.id
+        )
+
+      task("ws-b-sealed", "Workspace B zebra two",
+        lifecycle: "done",
+        workspace_id: ws_b.id,
+        priority: 0,
+        labels: ["b-own-label"]
+      )
+
+      {:ok, view, html} = live(scoped, base <> "/list?q=zebra")
+      assert "ws-b-sealed" in ids(view)
+      assert html =~ "b-own-label"
+      refute html =~ ~s(data-role="priority-chip")
+      refute html =~ ~s(data-sort="priority")
+
+      # B's label filter narrows; a priority filter is dropped.
+      {:ok, view, _html} = live(scoped, base <> "/list?q=zebra&label=b-own-label")
+      assert has_element?(view, ~s([data-role="match-count"][data-total="1"]))
+      {:ok, view, _html} = live(scoped, base <> "/list?q=zebra&priority=0")
+      assert has_element?(view, ~s([data-role="match-count"][data-total="2"]))
     end
 
     test "a field the schema hides is not shown, filterable or sortable", %{conn: conn} do
