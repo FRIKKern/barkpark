@@ -274,10 +274,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       "Saved" ->
         # An explicit save reloads the editor from the just-persisted row —
         # the local buffer is now clean, so drop the dirty flag and any
-        # stale concurrent-edit banner.
+        # stale concurrent-edit banner. A refused clear it left out is still
+        # not saved (`RefusedSave`), and the page says so, not "Saved".
         socket =
           socket
-          |> put_flash(:info, gettext("Saved"))
+          |> saved_flash()
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
           |> clear_touched()
@@ -289,13 +290,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
+  defp saved_flash(socket) do
+    if RefusedSave.token(socket.assigns) == "Saved",
+      do: put_flash(socket, :info, gettext("Saved")),
+      else: socket
+  end
+
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
   def reload_remote_doc(socket) do
     socket =
       socket
       |> Shared.rebuild_panes()
-      |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+      |> assign(
+        editor_dirty: false,
+        doc_conflict: false,
+        editor_unsaved_keys: MapSet.new(),
+        editor_refused_clears: nil
+      )
       |> clear_touched()
 
     {:noreply, socket}
@@ -948,13 +960,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       dirty? = MapSet.size(held) > 0
       assign(socket, editor_dirty: dirty?, editor_unsaved_keys: held, doc_conflict: false)
     else
-      unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
-
-      assign(socket,
-        editor_dirty: true,
-        editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
-      )
+      settle_unsaved(socket, keys -- RefusedSave.clears(socket))
     end
+  end
+
+  # A refused clear is not kept (`RefusedSave`): the field is as stored.
+  defp settle_unsaved(socket, []), do: socket
+
+  defp settle_unsaved(socket, keys) do
+    unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
+
+    assign(socket,
+      editor_dirty: true,
+      editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
+    )
   end
 
   # A save that did not land leaves the typed field's posted value in the form
@@ -962,13 +981,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # the value from before it (#25880 review). Only `keys`, the field typed in:
   # every other posted value is what the browser showed, which can be older
   # than what the server already took from the other editor (#25946 review).
-  # Same shape as a landed save's buffer (`Forms.coerce_params/2`).
+  # Same shape as a landed save's buffer (`Forms.coerce_params/2`). A refused
+  # clear is left out: the field stays as stored (`RefusedSave`).
   defp keep_unsaved_values(socket, posted, keys) do
     if socket.assigns[:save_status] in ["Save failed", "Save cancelled"] do
       posted =
         posted
         |> Barkpark.Content.Forms.coerce_params(socket.assigns[:editor_schema])
-        |> Map.take(keys)
+        |> Map.take(keys -- RefusedSave.clears(socket))
 
       PostedEdits.put(socket, posted)
     else
