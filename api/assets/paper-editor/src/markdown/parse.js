@@ -41,11 +41,14 @@ export function markdownToBlockSpans(md) {
       continue;
     }
 
-    // 1b) EMPTY-PARAGRAPH marker.
+    // 1b) EMPTY-PARAGRAPH marker. Text typed after it is the paragraph's text.
     if (line.trim() === EMPTY_PARAGRAPH_MARKER) {
       blocks.push({ id: mintId(), type: "paragraph", content: [] });
       i += 1;
       continue;
+    }
+    if (line.trimStart().startsWith(EMPTY_PARAGRAPH_MARKER)) {
+      line = lines[i] = line.trimStart().slice(EMPTY_PARAGRAPH_MARKER.length);
     }
 
     // 2) FENCED code / mermaid — ``` (or longer) optionally with an info string.
@@ -133,6 +136,37 @@ export function markdownToBlockSpans(md) {
   }
 
   return { blocks, spans };
+}
+
+// Source mode shows a block it cannot write as Markdown as its JSON sentinel, and does
+// not edit it: an edit there would go through the editor's projection of that block,
+// which does not keep all of it, and a key in its punctuation would turn it into a
+// paragraph of JSON. changedSentinel(md, was) is the index of the first block of `md`
+// holding a sentinel line that is not one of `was`'s, whole and at the start of its
+// block, or -1. Moving or deleting a sentinel line is not a change to it.
+export function changedSentinel(md, was) {
+  const before = new Set(sentinelLines(was).map(([, text]) => text));
+  for (const [index, text, first] of sentinelLines(md)) {
+    if (!first || !before.has(text)) return index;
+  }
+  return -1;
+}
+
+// [block index, trimmed line, whether it starts its block] for every line outside a
+// code fence's body that opens a block sentinel.
+function sentinelLines(md) {
+  const text = typeof md === "string" ? md : "";
+  const lines = text.split("\n");
+  const { blocks, spans } = markdownToBlockSpans(text);
+  const out = [];
+  spans.forEach(([from, to], index) => {
+    const fenced = blocks[index].type === "code" || blocks[index].type === "diagram";
+    for (let line = from; line < (fenced ? from + 1 : to); line++) {
+      const trimmed = lines[line].trim();
+      if (trimmed.startsWith(SENTINEL_OPEN)) out.push([index, trimmed, line === from]);
+    }
+  });
+  return out;
 }
 
 // ── sentinel parse ───────────────────────────────────────────────────────────
