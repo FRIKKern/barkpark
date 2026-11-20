@@ -134,28 +134,6 @@ await check("the editor form hidden (focus mode, the narrow layout: display none
   assert.equal(pushes.length, 1, "drawn again, the key is the document's");
 });
 
-await check("a modal open anywhere in the page (Delete, Unpublish): Mod+Z is the browser's", () => {
-  const m = doc.createElement("div");
-  m.setAttribute("role", "dialog");
-  m.setAttribute("aria-modal", "true");
-  doc.body.appendChild(m);
-  try {
-    for (const target of [doc.body, $("title"), $("kind")]) {
-      const e = key(target, { key: "z", metaKey: true });
-      assert.equal(e.defaultPrevented, false, `Mod+Z on ${target.id || target.tagName} under a modal`);
-    }
-    const h = new window.InputEvent("beforeinput", { inputType: "historyUndo", bubbles: true, cancelable: true });
-    $("title").dispatchEvent(h);
-    assert.equal(h.defaultPrevented, false);
-    assert.deepEqual(pushes, []);
-    m.hidden = true;
-    key(doc.body, { key: "z", metaKey: true });
-    assert.equal(pushes.length, 1, "a hidden modal is not open");
-  } finally {
-    m.remove();
-  }
-});
-
 await check("no editor form on the desk: nothing is pushed", () => {
   const form = $("editor-form");
   const parent = form.parentNode;

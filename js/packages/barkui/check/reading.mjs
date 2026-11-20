@@ -52,7 +52,7 @@ export async function readView(page, part, waits = []) {
 }
 
 /** The least a label's picture may match its reference (match.mjs). An honest label reads 1.00 on macOS and
-    Linux; the selftest's ladder pins what a step below this costs (README "What the check proves"). */
+    Linux; the selftest's ladder pins what a step below this costs (docs/PARTS.md "What the check proves"). */
 export const MATCH_MIN = 0.975
 const NEEDS = { text: 4.5, graphic: 3 }
 
