@@ -83,7 +83,7 @@ defmodule Barkpark.Content.Revisions do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.Revision
+  alias Barkpark.Content.{InsertOnly, Revision}
 
   import Barkpark.Content.Scope,
     only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
@@ -296,7 +296,9 @@ defmodule Barkpark.Content.Revisions do
       patch's `ifRevisionID`. It must equal the current rev. On a match the
       upsert fences its UPDATE of the draft row on that rev as well.
     * `opts[:if_absent]` (`true`): "I saw no document". There must be no draft
-      and no published row; `expected` is then `nil`.
+      and no published row; `expected` is then `nil`. The write is then insert
+      only (`Content.InsertOnly`), so a row born after this compare is refused
+      the same way.
 
   With neither, nothing is compared. The HTTP door refuses a call that names
   both.
@@ -312,8 +314,17 @@ defmodule Barkpark.Content.Revisions do
         "content" => rev.content
       }
 
-      Content.upsert_document(type, attrs, dataset, opts)
+      InsertOnly.seam!(:restore_after_state_check)
+      Content.upsert_document(type, attrs, dataset, write_opts(opts))
     end
+  end
+
+  # `:if_absent` becomes an insert-only write, so a row born after the compare
+  # above is refused by the writer too (`Content.InsertOnly`).
+  defp write_opts(opts) do
+    if Keyword.get(opts, :if_absent) == true,
+      do: opts |> Keyword.delete(:if_absent) |> Keyword.put(:insert_only, true),
+      else: opts
   end
 
   # Defence-in-depth on top of get_revision's dataset scoping: refuse to restore

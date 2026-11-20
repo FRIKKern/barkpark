@@ -233,4 +233,59 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert title_of("drafts.both") == "Words B"
     assert rev_of("drafts.both") == current
   end
+
+  # Two ifAbsent restores of one deleted document, driven by order: the second
+  # (over HTTP) has passed its compare when the first (`Content.restore_revision`
+  # with `if_absent: true`) runs and lands, at the named seam of the second's
+  # write (`Content.InsertOnly`). Whichever step the first lands before, the
+  # second is refused 412 and the first one's words stay.
+  defp race_at(conn, doc_id, site) do
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "drafts.#{doc_id}", "title" => "Words A"}, "test")
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => "drafts.#{doc_id}", "title" => "Words B"}, "test")
+
+    first = revision_titled(doc_id, "Words B")
+    second = revision_titled(doc_id, "Words A")
+    {:ok, _} = Content.delete_document("drafts.#{doc_id}", "post", "test")
+
+    on_exit(fn -> Application.delete_env(:barkpark, :writer_fault) end)
+
+    Application.put_env(:barkpark, :writer_fault, {site, fn ->
+      Application.delete_env(:barkpark, :writer_fault)
+      Process.put(:first_restore, Content.restore_revision(first.id, "post", "test", if_absent: true))
+    end})
+
+    resp = restore(conn, second.id, %{"ifAbsent" => true})
+    assert {:ok, _} = Process.get(:first_restore)
+    {resp, rev_of("drafts.#{doc_id}")}
+  end
+
+  defp assert_second_refused({resp, landed}, doc_id) do
+    assert resp.status == 412
+    details = Jason.decode!(resp.resp_body)["error"]["details"]
+    assert details["expected"] == nil
+    assert details["actual"] == landed
+    assert title_of("drafts.#{doc_id}") == "Words B"
+    assert rev_of("drafts.#{doc_id}") == landed
+  end
+
+  test "two ifAbsent restores: the first lands after the second's compare, before its writer reads",
+       %{conn: conn} do
+    race_at(conn, "race-read", :restore_after_state_check) |> assert_second_refused("race-read")
+  end
+
+  test "two ifAbsent restores: the first lands after the second's writer read, before its insert",
+       %{conn: conn} do
+    race_at(conn, "race-lock", :insert_only_before_lock) |> assert_second_refused("race-lock")
+  end
+
+  test "two ifAbsent restores: the first lands after the second's last read, so its insert hits the unique id",
+       %{conn: conn} do
+    result = race_at(conn, "race-unique", :insert_only_before_insert)
+    {:ok, row} = Content.get_document("drafts.race-unique", "post", "test")
+    assert is_binary(row.dataset_id), "the unique index needs a dataset_id to fire"
+    assert_second_refused(result, "race-unique")
+  end
 end

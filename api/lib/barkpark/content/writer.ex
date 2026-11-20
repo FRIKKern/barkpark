@@ -35,7 +35,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
-  alias Barkpark.Content.{PreWriteFences, PreWriteTransforms}
+  alias Barkpark.Content.{InsertOnly, PreWriteFences, PreWriteTransforms}
 
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Projection, Render, Synthesis}
 
@@ -1542,7 +1542,10 @@ defmodule Barkpark.Content.Writer do
     # required, born adjudicated, surface declared, find-or-create dedup) keep
     # the order they had when this chain named them. With plugins off the list
     # is empty and this step is `:ok`.
-    with :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
+    # An insert-only write (a restore with `ifAbsent`) that read a row is refused
+    # here, before any fence or hook runs (`Content.InsertOnly`).
+    with :ok <- InsertOnly.refuse_existing(prev_doc, opts),
+         :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -1629,7 +1632,10 @@ defmodule Barkpark.Content.Writer do
                 Broadcast.write_atomically(fn ->
                   %Document{}
                   |> Document.changeset(enc_attrs)
-                  |> Repo.insert()
+                  |> InsertOnly.insert(
+                    {Map.get(enc_attrs, "doc_id"), type, dataset},
+                    opts
+                  )
                   |> Broadcast.tap_broadcast(
                     dataset,
                     type,
