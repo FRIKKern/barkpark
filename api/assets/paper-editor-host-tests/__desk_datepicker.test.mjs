@@ -241,6 +241,53 @@ const mousedown = (el) => {
   assert.equal(f.text.value, "2026-12-01 09:00");
 }
 
+// Typing that ends on the text the box showed is no change: a key, then
+// Backspace; or a key, then the browser's undo. Another editor's date then
+// arrives; it is shown, and leaving the box writes nothing.
+for (const how of ["Backspace", "undo"]) {
+  const f = mount("2026-09-06T09:00:00.000Z");
+  f.text.focus();
+  const shown = f.text.value;
+  type(f.text, shown + "5");
+  if (how === "undo") {
+    f.text.value = shown;
+    f.text.dispatchEvent(new window.InputEvent("input", { bubbles: true, inputType: "historyUndo" }));
+  } else {
+    type(f.text, shown);
+  }
+  remote(f, "2026-10-10T08:10:00Z");
+  assert.equal(f.text.value, "2026-10-10 10:10", `${how}: the box shows the other editor's date`);
+  leave(f.text);
+  assert.equal(f.hidden.value, "2026-10-10T08:10:00Z", `${how}: the other editor's date stays`);
+  assert.equal(f.posts.length, 0, `${how}: nothing posts`);
+
+  // The same, with the date arriving after the box is left.
+  const g = mount("2026-09-06T09:00:00.000Z");
+  g.text.focus();
+  type(g.text, g.text.value + "5");
+  type(g.text, g.text.value.slice(0, -1));
+  g.hidden.value = "2026-10-10T08:10:00Z";
+  leave(g.text);
+  assert.equal(g.posts.length, 0, `${how}: leaving after an unchanged edit posts nothing`);
+  assert.equal(g.text.value, "2026-10-10 10:10", `${how}: and the box takes the server's value`);
+}
+
+// A typo, then a redraw while the box is not focused: the box shows the
+// stored date again and the mark goes.
+{
+  const f = mount("2026-09-06T09:00:00Z");
+  f.text.focus();
+  type(f.text, "2026-13-40 10:00");
+  leave(f.text);
+  f.text.blur();
+  assert.ok(f.el.hasAttribute("data-invalid"));
+  f.hook.updated();
+  assert.equal(f.text.value, "2026-09-06 11:00", "the box shows the stored date");
+  assert.ok(!f.el.hasAttribute("data-invalid"), "the mark goes");
+  assert.equal(f.error.hidden, true, "the alert goes");
+  assert.equal(f.text.getAttribute("aria-invalid"), null);
+}
+
 // A press outside the calendar closes it and the focus goes back to its
 // button: on a spot that takes no focus the press's default is stopped (it
 // moved the focus to <body>); a press on a control is left alone.

@@ -20,7 +20,7 @@ defmodule BarkparkWeb.Studio.Desk.ChoiceStyle do
       "Set to current time".
 
   On a touch screen (`pointer: coarse`) every control is at least 44 px:
-  a radio's row, Clear, the calendar button, the month and year, the days,
+  a dropdown, a radio's row, Clear, the calendar button, the month and year, the days,
   the time and "Set to current time".
 
   `DocStyle.sheet/1` draws these rules with the rest of the edit pane's.
@@ -72,6 +72,7 @@ defmodule BarkparkWeb.Studio.Desk.ChoiceStyle do
     .dk .dk-edit .dp-foot .btn-text { padding: 3px 8px; font: inherit; font-size: 13px; line-height: 19px; border: 0; border-radius: 3px; background: none; color: var(--dk-menu-fg); cursor: pointer; }
     .dk .dk-edit .dp-foot .btn-text:hover { background: var(--dk-icon-btn-hover); }
     @media (pointer: coarse) {
+      .dk .dk-edit select.form-input { min-height: 44px; }
       .dk .dk-edit .radio { min-height: 44px; min-width: 44px; }
       .dk .dk-edit .radio-box .icon-btn, .dk .dk-edit .dp-head .icon-btn { width: 44px; height: 44px; }
       .dk .dk-edit .radio-box[data-direction=vertical] .radio-row .icon-btn { margin: 0 -1px 0 auto; }

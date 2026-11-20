@@ -171,6 +171,39 @@ defmodule BarkparkWeb.Studio.DeskSelectDatetimeKeptTest do
     end
   end
 
+  test "desk: another editor's date survives this page's next edit elsewhere", c do
+    id = doc!(c, %{"dt" => "2026-09-06T09:00:00Z"})
+    {view, form} = open(c, :desk, id)
+    before = stored(c, id)
+
+    {:ok, _} =
+      Content.upsert_document(
+        c.type,
+        %{
+          "doc_id" => "drafts." <> id,
+          "title" => "Post",
+          "content" => Map.put(before, "dt", "2026-10-10T08:10:00Z")
+        },
+        @dataset
+      )
+
+    render(view)
+    edit_notes(view, form, "typed")
+
+    assert stored(c, id)["dt"] == "2026-10-10T08:10:00Z"
+    assert stored(c, id)["notes"] == "typed"
+  end
+
+  # The old Studio draws a select declared Sanity's way (`options: {list}`)
+  # as a dropdown too, no longer as a text box.
+  test "studio: a select from options.list is a dropdown of its options", c do
+    {view, form} = open(c, :studio, doc!(c, %{"sdm" => "b"}))
+
+    assert has_element?(view, ~s(#{form} select[name="doc[sdm]"] option[value="b"][selected]))
+    assert has_element?(view, ~s(#{form} select[name="doc[sdm]"] option[value="c"]))
+    refute has_element?(view, ~s(#{form} input[type="text"][name="doc[sdm]"]))
+  end
+
   test "desk: picking an option over a value that is none writes it", c do
     id = doc!(c, %{"sdm" => "legacy"})
     {view, form} = open(c, :desk, id)

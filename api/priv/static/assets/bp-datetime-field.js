@@ -178,11 +178,19 @@
       };
       // Only what was typed is written: a box that was only focused shows
       // what the server holds (`_sync`), so leaving it never writes back a
-      // value another editor has changed since.
+      // value another editor has changed since. Text typed back to what the
+      // box showed (a key, then Backspace; or the browser's undo) is no
+      // change either: the box takes the server's value again.
+      this._mark = mark;
       var commit = function () {
         var hidden = self._hidden();
         if (!hidden || text.readOnly || !self._typed) return;
-        if (text.value === toText(hidden.value)) return (self._typed = false), mark(false);
+        if (text.value === self._shown || text.value === toText(hidden.value)) {
+          self._typed = false;
+          mark(false);
+          self._show(text, hidden.value);
+          return;
+        }
         if (text.value.trim() === "") return (self._typed = false), mark(false), self._set("");
         var d = fromText(text.value);
         if (!d) return mark(true);
@@ -248,11 +256,21 @@
       var hidden = this._hidden();
       var text = this._text();
       if (!hidden) return;
-      if (text) text.value = toText(value);
+      if (text) this._show(text, value);
       if (hidden.value === value) return;
       hidden.value = value;
       this._hold(value);
       hidden.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+
+    // Put the server's value in the box, and remember what it shows: typing
+    // that ends on the same text has changed nothing.
+    // A redraw replaces what was typed, so a mark on it goes too.
+    _show: function (text, value) {
+      text.value = toText(value);
+      this._shown = text.value;
+      this._typed = false;
+      if (this._mark) this._mark(false);
     },
 
     _hidden: function () {
@@ -294,8 +312,13 @@
       var text = this._text && this._text();
       var hidden = this._hidden();
       if (text && hidden) {
-        if (typeof document === "undefined" || document.activeElement !== text || !this._typed)
-          text.value = toText(hidden.value);
+        if (
+          typeof document === "undefined" ||
+          document.activeElement !== text ||
+          !this._typed ||
+          text.value === this._shown
+        )
+          this._show(text, hidden.value);
         return;
       }
       var picker = this._picker();
