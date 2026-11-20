@@ -29,6 +29,9 @@ async function open(browser, skin, scheme) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, deviceScaleFactor: 2 })
   await page.goto(url(skin, scheme))
   await page.waitForSelector('html[data-ready]')
+  // A second guard beside the fast test on the built page: no picture is taken of a page that prints a task id.
+  const id = await page.evaluate(() => document.body.innerText.match(/task-[0-9a-f]{6,}/)?.[0])
+  if (id) throw new Error(`pictures: the page prints ${id}; the page must say it in plain words (build/page.mjs)`)
   await page.waitForTimeout(SETTLE_MS)
   return page
 }
