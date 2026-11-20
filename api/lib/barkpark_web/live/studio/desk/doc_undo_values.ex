@@ -148,4 +148,15 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
     do: Enum.find(fields, &(is_map(&1) and &1["name"] == key))
 
   def field(_schema, _key), do: nil
+
+  @doc """
+  The post of an undo or redo that turns `now` (what the store holds) into
+  `next`: `next` itself, which the save writes whole, nulls and emptied
+  keys as they are (`Fields.autosave_built/2` marks the field `:whole`). A
+  field `next` has no value for is posted "", which takes it off the
+  document.
+  """
+  @spec post(term(), term()) :: term()
+  def post(now, nil) when not is_nil(now), do: ""
+  def post(_now, next), do: next
 end
