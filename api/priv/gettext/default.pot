@@ -15724,6 +15724,129 @@ msgstr ""
 msgid ", has an error"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Active Document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "To Do"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Go to previous task"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Go to next task"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Deadline"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Worker"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Criteria"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Task id"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Open the task to edit it"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Open a document to see its task"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks on your active document will be shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "This document doesn't have any tasks yet"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Once a document has connected tasks, they will be shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "No tasks"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks in this workspace and dataset will be shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgctxt "task status"
+msgid "Open"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "In progress"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Cancelled"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Considering"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Researching"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Worker: %{worker}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "%{met} of %{total} met"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "1 more task to do is not shown"
+msgid_plural "%{count} more tasks to do are not shown"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/barkpark_web/live/studio/desk/vision.ex
 #, elixir-autogen, elixir-format
 msgid "Listen"
