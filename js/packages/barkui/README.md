@@ -79,7 +79,7 @@ Read from the sheet and package.json; last changed on 2026-11-19.
 build/       the showroom page, part discovery, the page blocks, the pictures
 check/       the browser check, its selftest, the surfaces shot
 css/         base styles: the page ground, type and the one focus ring
-parts/       one folder per part; adding a part is adding a folder
+parts/       one folder per part; the build, the check and the tests find parts here
 tests/       the fast tests
 docs/        roadmap, the part folder and the check, decisions, pictures
 ```

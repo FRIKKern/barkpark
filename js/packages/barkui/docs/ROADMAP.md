@@ -52,7 +52,7 @@ The first six parts set the look: button, text field, select, dialog, menu and t
 6. Dates
 7. Data
 
-Hard parts run beside the batches, two at a time. One folder per part and nothing shared: adding a part changes no file outside its folder, so builders work at once.
+Hard parts run beside the batches, two at a time. One folder per part, so builders work at once; the few shared files a new part can move, such as a hosted timing or the CI group rows, are named in [PARTS.md](PARTS.md).
 
 ## Where things stand
 

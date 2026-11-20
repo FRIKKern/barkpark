@@ -16,7 +16,7 @@ UI SDK has a testing kit of its own, `@ui-sdk/core/testing`. Its docs say it pro
 
 ## Decision
 
-- Each part's `press.mjs` lists steps: keys to press or an element to click, then what must be true. The check runs them in headless Chromium. Keys go through the browser's own input, the same path a keyboard takes. A click goes through the browser's input too, but with Playwright's `force` option, which skips its checks that the element is visible, enabled and the one that would receive the click.
+- Each part's `press.mjs` lists steps: keys to press or an element to click, then what must be true. The check runs them in headless Chromium. Keys go through the browser's own input, the same path a keyboard takes. A click is a real pointer press at the element's centre, made only when the element is what is on top there; a cover or anything else in the way fails the step.
 - Each step's setup and expectation run in an isolated world: they share the page's elements but none of its script, so page script cannot patch the check's helpers or the functions a step calls. What a part's demo wires into the page is part of what the steps test.
 - Where a step names them, the role, name and states are read from the browser's accessibility tree, which is what a screen reader gets.
 - The "Pressed by real keys" light is on only when every step passed in the last run ([QUALITY.md](../../QUALITY.md)).
