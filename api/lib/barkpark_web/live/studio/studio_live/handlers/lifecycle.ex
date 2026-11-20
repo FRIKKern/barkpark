@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
-  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, SeenRev, Shared}
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
@@ -94,7 +94,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   #
   # A frame older than this tab's own last save is read as that save
   # (`fresher/2`): the save was written over it, so the store already holds
-  # what it carried.
+  # what it carried. A frame older than the last one the form took
+  # (`SeenRev.stale?/2`) is dropped: the form already shows a newer state, and
+  # a Restore names that one (task-5b74471e6a2d6de8).
   def doc_updated(%{sender: sender, doc: doc_data} = msg, socket) do
     doc_data = fresher(doc_data, socket.assigns[:editor_doc])
 
@@ -103,6 +105,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       other_project?(msg, socket) ->
+        {:noreply, socket}
+
+      SeenRev.stale?(msg, socket.assigns) ->
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
@@ -129,7 +134,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
-         )}
+         )
+         # The form now shows this frame; a history Restore names it (`SeenRev`).
+         |> SeenRev.applied(msg)}
     end
   end
 
