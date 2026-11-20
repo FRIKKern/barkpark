@@ -71,17 +71,27 @@
     part(root, "[data-vision-url]").hidden = true;
   };
 
+  // The socket's start, once the desk hook is there: a press made while the page's
+  // LiveView is still joining waits for it ("Connecting…"), and after 10 s the listener closed.
+  var send = function (root, id, ask, tries) {
+    var l = root.__listen;
+    if (!l || l.id !== id || l.error) return;
+    var push = pusher(root);
+    if (push) return push("vision-listen-start", Object.assign({ id: id }, ask));
+    if (tries <= 0) return heard(root, { id: id, kind: "closed" });
+    setTimeout(function () { send(root, id, ask, tries - 1); }, 100);
+  };
+
   /** Listen to what `ask` names ({error} or `target`'s `listen` plus `dataset`). */
   var start = function (root, ask) {
     stop(root);
     clear(root);
     var id = (root.__listenSeq = (root.__listenSeq || 0) + 1);
-    var push = pusher(root);
     root.__listen = { id: id, open: false, events: [], skipped: 0 };
-    if (ask.error || !push) root.__listen.error = ask.error || window.BarkparkDeskVisionTree.word(root, "listen-closed");
-    else push("vision-listen-start", Object.assign({ id: id }, ask));
+    if (ask.error) root.__listen.error = ask.error;
     button(root);
     draw(root);
+    if (!ask.error) send(root, id, ask, 100);
   };
 
   /** Stop listening: the server ends its subscription, and the Result is empty again. */

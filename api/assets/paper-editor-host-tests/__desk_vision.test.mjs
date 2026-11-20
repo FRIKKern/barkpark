@@ -481,6 +481,22 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(out.querySelector("[role=alert]").textContent, "The listener closed", "a dropped socket closes the listener");
   assert.equal(listen.getAttribute("aria-pressed"), "false");
 
+  // Pressed before the page's socket has joined: "Connecting…" until the desk hook is there, then sent.
+  const host = doc.getElementById("desk-panes");
+  const hook = host.bpPush;
+  delete host.bpPush;
+  pushed.length = 0;
+  click(listen);
+  assert.equal(html(out), "Connecting…");
+  assert.equal(listen.getAttribute("aria-pressed"), "true");
+  await new Promise((r) => setTimeout(r, 150));
+  assert.deepEqual(pushed, [], "nothing to send it with yet");
+  host.bpPush = hook;
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pushed.length, 1);
+  assert.equal(pushed[0][0], "vision-listen-start", "sent once the hook is there");
+  click(listen);
+
   // Params that are not an object: Listen waits and sends nothing, as Fetch does.
   pushed.length = 0;
   type(params, '{"t":');
