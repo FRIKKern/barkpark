@@ -19,7 +19,8 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLive do
       because a patch link reaches it without passing the gate's event hook;
     * the flat mount reads every workspace, a scoped mount reads its own;
     * fields go through `Barkpark.Tasks.Board.field_visibility_gate/2`, the
-      board's fail-closed predicate (see `ListQuery` for what it hides).
+      board's fail-closed predicate, one for each workspace and project
+      (`Barkpark.Tasks.FieldGates`; see `ListQuery` for what it hides).
 
   ## State
 
@@ -36,6 +37,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLive do
   alias Barkpark.Plugins.Tasks.Web.ListQuery
   alias Barkpark.Plugins.Tasks.Web.ListStyles
   alias Barkpark.Tasks.Board
+  alias Barkpark.Tasks.FieldGates
   alias BarkparkWeb.OpsOperatorGate
 
   @dataset "production"
@@ -95,11 +97,13 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLive do
 
   defp load(socket, params) do
     ws_id = OpsOperatorGate.scoped_workspace_id(socket)
-    readable? = Board.field_visibility_gate(@dataset, workspace_id: ws_id)
-    filters = ListQuery.parse(params, readable?)
 
-    result =
-      ListQuery.page(filters, dataset: @dataset, workspace_id: ws_id, readable?: readable?)
+    # Each row by its own workspace and project's gate, the filters and sort
+    # by all of them (`FieldGates`).
+    gates = FieldGates.for_dataset(@dataset, ws_id)
+    readable? = FieldGates.all(gates)
+    filters = ListQuery.parse(params, readable?)
+    result = ListQuery.page(filters, dataset: @dataset, workspace_id: ws_id, readable?: gates)
 
     socket
     |> assign(:loading, false)
