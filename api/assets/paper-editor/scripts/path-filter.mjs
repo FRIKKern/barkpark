@@ -10,7 +10,7 @@
 //      `npm run`, `esbuild <entry>`), and through scripts/test-chain.mjs, which
 //      runs every file its chain() lists;
 //   2. from each reachable file, every path it names that exists: "./x" and
-//      "../x" literals, bare repo paths ("api/x"), `${ROOT}/x` templates,
+//      "../x" literals, bare repo paths ("api/x", ".demo-content/x"), `${ROOT}/x` templates,
 //      ROOT + "/x" concats, join/resolve(ROOT, "a", "b/c", …), and CSS url(x).
 //      Each resolves against the file's folder, the package root and the repo
 //      root, first hit wins. Inside the package it is followed, outside it is a
@@ -104,7 +104,7 @@ export function scanner({ repo, pkg, notRead = new Map(), self = null, runs = ne
     for (const m of text.matchAll(LITERAL)) {
       const lit = m[2];
       if (/^\.\.?\//.test(lit)) add(lit, here);
-      else if (/^[A-Za-z_][\w.@-]*\//.test(lit)) add(lit, [repo]);
+      else if (/^\.?[A-Za-z_][\w.@-]*\//.test(lit)) add(lit, [repo]);
       const head = lit.match(/^\$\{[A-Za-z_$][\w$.]*\}\/(.+)$/s);
       if (head) add(head[1], anywhere);
     }

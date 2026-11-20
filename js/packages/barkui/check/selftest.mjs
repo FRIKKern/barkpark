@@ -8,14 +8,14 @@
 // One plant per reading, and plants on different controls share a run: a light
 // carries every reason it is off (`fails`), and each plant asserts that one of
 // them names its own control. The ladder measures what the label reading's
-// limit costs and holds README.md's sentence to it.
+// limit costs and holds docs/PARTS.md's sentence to it.
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PARTS_HELD, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
@@ -25,7 +25,7 @@ import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, says, skinsSay, p
 const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
-    name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds README.md to its numbers',
+    name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
     only: ['skins', 'schemes'],
     plant: (d) => appendFileSync(join(d, 'example.html'), `\n${ladderHtml}\n`),
     css: [
@@ -417,11 +417,11 @@ const CASES = [
   },
   ...CEILING_CASES,
   {
-    name: 'one part more than the CI check step holds is refused, with the sentence that says how many it holds',
+    name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
-      for (let i = 0; i < PARTS_HELD; i++) copyAs(d, `held${String.fromCharCode(97 + i)}-button`)
+      for (let i = 0; i < PER_JOB; i++) copyAs(d, `held${String.fromCharCode(97 + i)}-button`)
     },
-    expect: (p, html, ok, logs) => !ok && p === null && logs.some((l) => l.includes(`${PARTS_HELD + 1} parts, more than CI's check step holds. ${capacitySentence()}`)),
+    expect: (p, html, ok, logs) => !ok && p === null && logs.some((l) => l.includes(`${PER_JOB + 1} parts in one job, more than one CI job holds. ${capacitySentence()}`)),
   },
   {
     name: 'a part.json that names a property to allow is refused at discovery',

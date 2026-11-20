@@ -17,8 +17,10 @@
 // menu, `historyUndo`) is the document's too: the field would otherwise save
 // the browser's undo as a new edit, and the next Mod+Z put it back. None of
 // it while the editor form is not drawn (its pane folded to a strip, or
-// hidden by focus mode or the narrow layout), or while a modal is open: the
-// key stays the browser's.
+// hidden by focus mode or the narrow layout): the key stays the browser's.
+// While a modal is open (Delete, Unpublish) the key is no one's but a modal
+// field's (task-c291650f9285acb5): the browser's own undo is the page's, so
+// it would take back a field behind the modal, and the autosave write it.
 // With nothing focused the key is the document's, as the TanStack Studio's
 // Edit-menu undo is: the browser's own undo has nothing to give there once a
 // script has set a field's value.
@@ -40,7 +42,16 @@
 // new value (the server switched the tab first). A field in a folded fieldset
 // or object (folded by the schema, or by the user) has its folds opened first.
 // A field whose pane was folded to a strip while the undo was on its way has
-// the strip opened first, as a click on it does.
+// the strip opened first, as a click on it does. An open desk menu (the "…"
+// Doc menu, Share, List options) closes as the focus goes into the field
+// (task-a8e403cee723e5f6).
+// A focus the user moved while the undo was on its way (into another
+// control, or by a press of a focus mode button, which a click need not
+// focus) stays where they put it, as TanStack's undo, done before the next
+// key, leaves it (task-3fb0efdfc94a7ad6): focus mode stays on, the pressed
+// button keeps the focus, and the server's render draws the value. Only the
+// field the user is in is set, as a patch leaves a focused input alone.
+// Focus mode on another pane hides the editor: the page is left as it is.
 //
 // A document-level listener, no phx-hook: bp-desk.js loads it when the desk
 // mounts (the address is on the desk's root, `data-desk-undo`).
@@ -84,19 +95,36 @@
     return typeof el.checkVisibility !== "function" || el.checkVisibility();
   }
 
-  // Whether a modal is open anywhere in the page (Delete, Unpublish: a
+  // The modals open anywhere in the page (Delete, Unpublish: a
   // `role=dialog aria-modal=true`, or a <dialog> opened with showModal): the
-  // page under it is not the user's to change, so the key stays the browser's.
-  function modal() {
+  // page under one is not the user's to change.
+  function modals() {
+    var open = [];
     var all = document.querySelectorAll('[role=dialog][aria-modal=true], dialog[open]');
     for (var i = 0; i < all.length; i++) {
       var m = all[i];
       if (m.closest("[hidden]")) continue;
       if (m.tagName === "DIALOG" && m.getAttribute("aria-modal") !== "true" && !isModal(m)) continue;
       if (typeof m.checkVisibility === "function" && !m.checkVisibility()) continue;
-      return true;
+      open.push(m);
     }
-    return false;
+    return open;
+  }
+
+  function modal() {
+    return modals().length > 0;
+  }
+
+  // Whether `el` is under an open modal: one is open, and `el` is in none.
+  function behind(el) {
+    var open = modals();
+    for (var i = 0; i < open.length; i++) if (el && open[i].contains(el)) return false;
+    return open.length > 0;
+  }
+
+  // A field of a modal, whose own undo the browser keeps: typed in the modal.
+  function modalField(el) {
+    return !!el && !behind(el) && (el.isContentEditable || (FIELD.test(el.tagName) && !el.readOnly && !el.disabled));
   }
 
   function isModal(dialog) {
@@ -122,9 +150,23 @@
     return !!pane && pane.contains(f);
   }
 
+  // The order of the last undo key and of the last focus the user moved
+  // while an undo was on its way, the undos on their way (the server sends
+  // no answer when there is nothing to undo, so it may stay above), the
+  // focus at the last key, and whether the answer is moving the focus itself.
+  var clock = 0;
+  var pressedAt = 0;
+  var movedAt = 0;
+  var waiting = 0;
+  var from = null;
+  var self = false;
+
   function run(redo) {
     var desk = document.getElementById("desk-panes");
     if (!desk || typeof desk.bpPush !== "function") return;
+    pressedAt = ++clock;
+    waiting++;
+    from = document.activeElement;
     if (typeof window.BarkparkFormLeave === "function") window.BarkparkFormLeave();
     var mark = typeof window.BarkparkDocMark === "function" ? window.BarkparkDocMark() : "";
     desk.bpPush("desk-undo", { redo: redo, _bp_doc: mark });
@@ -134,6 +176,13 @@
     if (e.defaultPrevented || e.altKey || e.isComposing || !(e.metaKey || e.ctrlKey)) return;
     var key = String(e.key).toLowerCase();
     if (key !== "z" && key !== "y") return;
+    // With a modal open the key is no one's but a modal field's: the
+    // browser's own undo is the page's, so from anywhere else it would take
+    // back a field behind the modal, and its autosave write it.
+    if (modal()) {
+      if (!modalField(e.target)) e.preventDefault();
+      return;
+    }
     if (!ours(e.target)) return;
     e.preventDefault();
     run(key === "y" || e.shiftKey);
@@ -141,6 +190,12 @@
 
   function onBeforeInput(e) {
     if (e.inputType !== "historyUndo" && e.inputType !== "historyRedo") return;
+    // The browser's own undo of a field behind an open modal (the Edit menu,
+    // or the key in a modal field with nothing of its own to take back).
+    if (behind(e.target)) {
+      e.preventDefault();
+      return;
+    }
     var f = form();
     if (!f || !e.target || !f.contains(e.target) || !ours(e.target)) return;
     e.preventDefault();
@@ -282,11 +337,66 @@
     });
   }
 
+  // The desk's popover menus (bp-desk.js `MENU`). Hidden, each fires its own
+  // `toggle`, so its button says it is collapsed again.
+  var MENU = ".dk-doc-menu-list[popover], .dk-list-menu[popover]";
+
+  function closeMenus() {
+    var all = document.querySelectorAll(MENU);
+    for (var i = 0; i < all.length; i++) {
+      var m = all[i];
+      var open = false;
+      try {
+        open = m.matches(":popover-open");
+      } catch (_) {
+        // No popover support: nothing is open.
+      }
+      if (open && typeof m.hidePopover === "function") m.hidePopover();
+    }
+  }
+
+  // Whether focus mode shows a pane other than the editor's (FocusMode: the
+  // desk marked, and the shown pane marked focused).
+  function focusedAway(f) {
+    var desk = document.getElementById("desk-panes");
+    var pane = f.closest("#desk-panes > [data-pane-index]");
+    return !!desk && !!pane && desk.hasAttribute("data-focus-mode") && !pane.hasAttribute("data-desk-focused");
+  }
+
+  // A focus the user moved while an undo is on its way: into a control
+  // other than the one the key was pressed in (the answer's own moves left
+  // out), or a press of a focus mode button (`FocusMode.button`, `.dk-focus`).
+  function onMoved(e) {
+    if (!waiting || self || !e.target || !e.target.closest) return;
+    if (e.type === "focusin" ? e.target === from : !e.target.closest("#desk-panes .dk-focus")) return;
+    movedAt = ++clock;
+  }
+
+  // The answer once the user has moved the focus, or while focus mode hides
+  // the editor: the focus stays, and only the field the user is in takes the
+  // value (a LiveView patch leaves a focused input alone).
+  function keep(el, d) {
+    if (el !== document.activeElement || !valued(el)) return;
+    if (typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was)) el.value = d.value;
+  }
+
   function onUndone(e) {
     var d = (e && e.detail) || {};
+    var stay = movedAt > pressedAt;
+    if (waiting > 0 && --waiting === 0) movedAt = 0;
     var f = form();
     var el = f ? named(f, d) : null;
     if (!el || !el.tagName) return;
+    if (stay || focusedAway(f)) return keep(el, d);
+    self = true;
+    try {
+      reveal(f, el, d);
+    } finally {
+      self = false;
+    }
+  }
+
+  function reveal(f, el, d) {
     unstrip(el);
     // A field in an item dialog that cannot be opened is left as it is: not
     // set and not focused. A redo here would write again, and its own answer
@@ -296,6 +406,7 @@
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
     unfold(el);
+    closeMenus();
     var to = focusable(el);
     if (document.activeElement !== to && typeof to.focus === "function") to.focus();
     // Drawn with the new value already (the undo switched to its tab): the
@@ -312,6 +423,8 @@
     }
   }
 
+  document.addEventListener("focusin", onMoved, true);
+  document.addEventListener("click", onMoved, true);
   document.addEventListener("keydown", onKey);
   document.addEventListener("beforeinput", onBeforeInput, true);
   window.addEventListener("phx:desk:undone", onUndone);

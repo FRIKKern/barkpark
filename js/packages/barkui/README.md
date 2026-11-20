@@ -1,258 +1,108 @@
-# @barkpark/barkui
+<!-- doc-tier: human | canonical-for: barkui-home | budget: 5000tok -->
+# BarkUI
 
-BarkUI is one look for UI SDK's parts (`@ui-sdk/web`, pinned to `0.1.0-beta.10`). It reads only the
-`--ui-*` and `--bark-*` variables of `api/priv/barkui/tokens.css`, the one source of the skins.
-Private; not published.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/showroom-dark.png">
+  <img alt="The button's section of the BarkUI showroom: every state, with its proof lights" src="docs/images/showroom-light.png">
+</picture>
+
+**One look for every Barkpark app.** BarkUI is meant to draw the parts our apps are made of, from buttons to page trees, and every block of a PortableDoc document, in one set of skins. What stands today: the sheet of skins, the parts the showroom lists, and the showroom check that proves each one. What is not built yet reads as planned, with no dates. It lives in Barkpark for now as the private package `@barkpark/barkui`.
+
+## Vision
+
+Barkpark Studio, Barkdown, Barkever, BarkBot and the Barkpark desk each draw their own controls and name their own colours today. BarkUI is to give them one set, and an app will pick a skin. Each skin file names a ground, an ink and an accent colour for light and for dark; the deriver works out the rest, and where a worked-out colour has to stay as it was, the skin pins it in `overrides` with a reason for each pin.
+
+UI SDK supplies the behaviour: focus, menus, trees, grids, drag. BarkUI supplies the look and follows UI SDK's own way of naming parts, states and colours ([0001](docs/decisions/0001-ui-sdk-names-are-the-contract.md)). The plan: PortableDoc keeps what a document is and BarkUI draws it ([0002](docs/decisions/0002-barkui-draws-portable-doc-defines.md)); a table in a document and a table in an app become one part ([0003](docs/decisions/0003-a-block-is-a-part.md)).
+
+No app moves before the step written in [0004](docs/decisions/0004-ready-before-any-switch.md). Then apps will move a screen at a time, and a new look will be a change of skin.
+
+## What we get
+
+| Reward | Milestone |
+|---|---|
+| One colour source writes every skin under UI SDK's names | M2 |
+| One page shows every part in every skin, light and dark, and what is proven for it | Ready |
+| The editor's menus and Barkdown's page tree run on BarkUI parts | M3 |
+| A table in a document and a table in an app are one part | M4 |
+| Studio, Barkdown, Barkever, BarkBot and the Barkpark desk wear one look | M5 |
+| New app designs that separate kits could not carry | M6 |
+
+## News
+
+The daily news run fills this block from merged work that touches BarkUI. Nothing here is written by hand.
+
+<!-- news:start -->
+<!-- news:end -->
+
+## Where things stand
+
+The showroom is the one home for which parts exist and what is proven for each: `pnpm run build`, then open `dist/showroom/index.html`. How far each milestone has come is on the [roadmap](docs/ROADMAP.md#where-things-stand). The block below is written by `node build/status.mjs`; [QUALITY.md](QUALITY.md#docs) says when it runs and what guards it.
+
+<!-- status:start -->
+| What | Read from the files |
+|---|---|
+| Skins in the sheet | 5: evergreen, charple, ember, fjord, iris |
+| Surfaces a part can sit on | 5: base, raised, sunken, primary, inverse |
+| Colour names in the sheet | 15 `--ui-*` (UI SDK's), 262 `--bark-*` (BarkUI's own) |
+| UI SDK | `@ui-sdk/core` and `@ui-sdk/web` 0.1.0-beta.10, pinned to that exact version |
+
+Read from the sheet and package.json; last changed on 2026-11-19.
+<!-- stamp: d530f31c45bd0f58 -->
+<!-- status:end -->
+
+| ember, dark | fjord, light |
+|---|---|
+| ![The button in the ember skin, dark](docs/images/showroom-ember-dark.png) | ![The button in the fjord skin, light](docs/images/showroom-fjord-light.png) |
+
+## Where things live (one fact, one home)
+
+| What | Where |
+|---|---|
+| Why, the plan, the order of work, the contests and trials | Barkpark Paper `/papers/barkui-plan` |
+| Milestones, and how far each has come | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
+| Decisions | [`docs/decisions/`](docs/decisions/), one page each |
+| What the lights mean; when a part counts as ready | [`QUALITY.md`](QUALITY.md) |
+| What a part folder holds and what the check does with it | [`docs/PARTS.md`](docs/PARTS.md) |
+| Which parts exist and what is proven for each | The showroom, built from [`parts/`](parts/) |
+| The colour source: each skin's colours and pins | [`design/themes/`](../../../design/themes/), derived by [`design/derive.mjs`](../../../design/derive.mjs) |
+| The name table: today's colour slots to `--ui-*` and `--bark-*` | [`design/emit/barkui.mjs`](../../../design/emit/barkui.mjs), with its surfaces and states beside it |
+| The sheet (generated; never edited) | [`api/priv/barkui/tokens.css`](../../../api/priv/barkui/tokens.css) |
+| Base styles and the one focus ring | [`css/base.css`](css/base.css) |
+| The checks | [`check/`](check/) in a browser, [`tests/`](tests/) without one; in CI the fast tests by `.github/workflows/js-tests.yml`, the browser check by `.github/workflows/barkui.yml`, one job per group of parts |
+| The blocks on these pages | [`build/status.mjs`](build/status.mjs) from the files; [`build/board.mjs`](build/board.mjs) from the task board |
+| The pictures on these pages | [`build/pictures.mjs`](build/pictures.mjs) |
+| Status, who does what | The BarkUI goal on Barkpark's task board |
+
+## Layout
 
 ```
-parts/<name>/
-  part.json     name (= folder), family, element, imports, summary; optional paint (selector -> variable
-                per property: a wrong entry turns "every skin" off, and with none the trace still holds every
-                colour to one skin variable); optional textOnly (selectors of controls that draw no
-                boundary, such as a ghost button)
-  part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
-                color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
-                build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
-                no escape, no keyframes of its own (see "part.css is judged as the browser parses it")
-  example.html  the part in each state worth seeing, in UI SDK's printed markup (works with no script);
-                every id starts with "<name>-"
-  press.mjs     setup(root, h) and steps: real keys or a click (the real pointer, pressed at the control's
-                centre only if the control is what is on top there), then expect(root, h) -> true | reason,
-                and optional ax: what a screen reader must get for an element (role, name, states)
-  demo.mjs      optional: `export default function (root)`, called with this part's own root
+build/       the showroom page, part discovery, the page blocks, the pictures
+check/       the browser check, its selftest, the surfaces shot
+css/         base styles: the page ground, type and the one focus ring
+parts/       one folder per part; the build, the check and the tests find parts here
+tests/       the fast tests
+docs/        roadmap, the part folder and the check, decisions, pictures
 ```
 
-Adding a part is adding a folder. The build, the check and the tests find parts by reading `parts/`;
-no other file changes.
+Outside this folder: the colour source in `design/` and the sheet it writes, `api/priv/barkui/tokens.css`.
 
-`css/base.css` holds what every part shares: the page ground and type, and the one focus ring (a 2px
-gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `--ui-ring` halo). Hover and pressed fills
-are the sheet's (`--ui-primary-hover`, `--ui-muted-pressed`, `--bark-danger-soft-hover` and so on);
-neither base.css nor a part mixes a tint of its own.
+## Run it
 
-- `pnpm run build` writes `dist/showroom/index.html`, which opens from disk with no server and no network.
-- `pnpm run check` builds, presses every part in headless Chromium, and writes `dist/proof.json`:
-  pressed by real keys, every skin (each element takes one skin variable in every skin and scheme, and
-  everything in the stage is drawn in full, as itself, at contrast, on every surface; the focus ring's
-  edge is at least 3:1 on every Tab stop), light and dark (the same, in dark), a 390px window read in
-  full in every skin, scheme and surface, printed and seen with no script (see "What part.css may
-  condition on" for which light crosses what). The page shows a light only when the
-  last run passed and proved it for the same part folder, tokens, base styles, UI SDK version and check
-  code. It exits non-zero on an incomplete folder, a failed step, an unlit light, any page error or
-  network request, a step (5s) or part (120s for each part running at the same time) past its time
-  limit, or more parts than CI's check step holds (see "How many parts the check holds").
-- `pnpm run check:selftest` plants breaks in a scratch copy of a part and fails unless the check fails
-  for the right reason, naming the planted control. One plant per reading; plants on different controls
-  share a run. Breaks in paint go in through a sheet only the selftest can add
-  (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route. To keep within CI's
-  limit, a case reads the four other surfaces, the reading with motion allowed, and real states against
-  their pins, only when its plant is there; the check itself always reads all three.
-- In CI (`js-tests.yml`) the showroom check and the selftest run only when a change touches
-  `js/packages/barkui/**` (either side of a move), the sheet (`api/priv/barkui/**`), `js-tests.yml`
-  itself or `js/package.json`, or changes lines of `js/pnpm-lock.yaml` that name one of BarkUI's own
-  dependencies (a Playwright bump brings a new Chromium), and whenever the changed files cannot be
-  worked out. The fast tests run with the rest of the js suite.
-- `build/sheet-waits.mjs` lists the contrast the tokens sheet does not deliver yet, each wait bound to one
-  skin, scheme, surface and pair of tokens, with the ratio measured there (see "Surfaces" below).
-- `pnpm test` runs the fast tests: discovery, refusals, and the part.css lint.
-- `node check/shots.mjs <dir>` writes light and dark shots of the built page.
+Node 22 and pnpm, from the repo root.
 
-In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`) holds that state for viewing (a
-pressed row pins `hover active`, as a real pointer press is both), and `data-paint-free` marks an
-element that carries no paint of its own. It excuses that element (never
-its children) from the "takes the skin's values" comparison only. It must truly carry none: transparent
-background, no border, shadow, outline or image, and its parent's text colour; otherwise the light
-fails and names it. Every such element is listed in `proof.json` and counted under the part. Every other
-light applies to it.
+```sh
+cd js && pnpm install && cd packages/barkui
+pnpm run build             # dist/showroom/index.html; opens from disk, no server
+pnpm run check             # press every part in headless Chromium and light the page
+pnpm test                  # the fast tests
+node build/pictures.mjs    # retake every picture these pages show (after build and check)
+node build/status.mjs      # refresh the block above from the sheet and package.json
+node build/board.mjs <goal-task-id>   # refresh the roadmap's block from the board (needs bp)
+node ../../../design/emit.mjs --write   # rewrite the sheet after a skin changes
+```
 
-The rule: **nothing a person can see inside a part's stage, in the views listed under "What part.css
-may condition on", goes unread, and nothing but `part.css` and the base styles can style it.**
-Every rule in part.css, on every stage element it can match, is judged as drawn at a moment when it
-matches; a rule or a pair nobody judges fails the part by name.
+Up to 40 parts, a new part is its folder and a changeset. What a part folder needs, what each light reads and how the check runs in CI: [docs/PARTS.md](docs/PARTS.md).
 
-- Coverage is checked, not assumed (`check/coverage.mjs`). Every drawn reading, in every light, first
-  asks the browser which of the part's rules apply right then and to which stage elements
-  (`element.matches` with the selector the page holds, inside the media conditions that hold in that
-  page). After a full run, a rule that sets anything and applied at no judged moment fails the part as
-  "a rule nothing read", naming its selector, and so does a state pair (below) that no reading saw.
-- States, per pair (`check/states.mjs`). For every rule that holds `:hover` or `:active`, and every live
-  control (outside the inert rows, not a pinned row) that matches the rest of its selector, the check
-  produces that state on that control with the real pointer, at its centre or held down there (a real
-  press is both), in the first skin, light, on base at 1440px. Every computed property of the control,
-  its `::before` and `::after` and everything inside it must then be what the same control shows with
-  that state pinned, and nothing from the control up to the stage may change: so the control pinned is
-  the control in that state. Its change must also be exactly the change of some pinned row with the same
-  `data-pin` (the check finds the row by comparing). The two are compared by computed value in that
-  one view, so a value that computes alike there can differ elsewhere: then, per state, every live
-  control it was proven on is pinned at once and the stage is read as drawn in light and in dark, so
-  each pair is judged as drawn, in both schemes, while its rule applies. A real state unlike its pin, or one no
-  pinned row shows, fails by name. Which controls are driven comes from `element.matches`, never from a
-  name or an attribute.
-- States the steps reach. Each press step ends with the stage read as drawn, in the first skin, light,
-  on base at 1440px, so a state only an action reaches (pending, after Enter on a live button) is read
-  while it holds. A reading takes real time, so on the pressed page the page's own timers run on a clock
-  that stands still while the check reads: a step's wait moves it that far, and a pending that lasts
-  2.5 s lasts 2.5 s of the page's time whatever the readings cost. `example.html` also shows pending at
-  rest, in its own row, so every view reads it; under reduced motion (`css/base.css`) an animation runs
-  one round, so its spinner stands still.
+## When BarkUI leaves home
 
-- Read: the check walks every element in the stage (not only `[data-slot]`) and every `::before`,
-  `::after`, `::marker` and `::placeholder` that draws. Each colour it shows must be one skin variable
-  in every skin and scheme: text and its fill, background colour and gradients, all four borders,
-  outline, column rule, shadows (box, text, drop), decoration, emphasis, text stroke, caret, accent,
-  scrollbar, SVG fill, stroke, stop, flood and lighting colours.
-- Drawn in full, as itself. Every visible thing in the stage is read from pixels: each line of text,
-  and each graphic (an `svg`, an `img`, a `::before` or `::after` with a box). The check captures the
-  stage as drawn, with every glyph unpainted, and with every graphic unpainted (each a first-layer
-  `!important` sheet put there from the isolated world), once per skin, scheme and surface, at 1440px
-  and at 390px, at a pixel ratio of 2; the browser draws text in grayscale, never LCD. For reference it draws
-  each thing alone, in a blank tab of its own: the same words in the same font, or a copy of the node,
-  in its own colours, on its own ground, at its own place within a pixel.
-  - A label (each line a text node is laid out in) is its picture against its reference. The picture is
-    every pixel in the line's box, padded by 1px, that differs from the label's ground: all that is
-    painted there, by anyone. A pixel counts when it moved at least half as far as the most any pixel
-    there moved (the outline at half cover), in the picture and in the reference alike, so a colour, a
-    fade or a text gamma does not change it. The score is the pixels in both over the pixels in either;
-    a pixel is in both when the other has ink there or one device pixel to its side (where a glyph
-    lands within a pixel is rounded per glyph). Missing ink lowers it (cut, clipped, covered, shrunk,
-    mirrored) and so does extra ink (a bar, a box, another word, a ghost copy). Under 0.975
-    (`MATCH_MIN`, `check/reading.mjs`) it fails as "label is not drawn as itself".
-  - A graphic, or the text of a pseudo-element, must draw at least 90% of its footprint drawn alone,
-    or it fails as "graphic is cut: 41% of it draws" ("label is cut" for a pseudo-element's text).
-  - Contrast is the core of the ink (the strongest tenth, not the anti-aliased rim) against what is
-    drawn there without it: 4.5:1 for text, 3:1 for a graphic. A thing with no ink fails as "does not
-    draw", and a control whose text and graphics add up to nothing fails as "control has nothing to
-    show". Disabled things must draw in full but are not held to contrast. The computed-colour reading
-    stays as a fast first pass; a light goes on only from the drawn one.
-- A control's boundary is measured whatever token draws it. Every interactive element in the stage
-  (button, input, select, textarea, summary, a link, anything with a control role or a tabindex) must
-  mark where it is at 3:1 or more against the ground next to it: the best of its fill and its drawn
-  edge (border, outline, inset ring), at the opacity it is drawn at. Nothing is read from part.json's
-  paint entries. A stage with controls and no boundary reading fails.
-- Text-only is a fact the check verifies. A control named in part.json's `textOnly` is left out of the
-  boundary only if, at rest (its showroom pin let go), it draws no fill and no edge that differs from
-  its ground, and it has a drawn text label. One that draws an edge or a fill is held to 3:1 like any
-  other ("text-only … draws its edge at 1.01:1; drop it or meet 3:1"); one with no text fails. The
-  showroom prints the controls that pass ("text-only, no boundary, label held to text rules").
-- part.css is judged as the browser parses it, not only as text. The text lint refuses any backslash
-  (so no escape can spell a name one way for the lint and another for the browser), braces that do not
-  balance, and any at-rule but the three `@media` conditions below. Then the check parses part.css in
-  its own Chromium, wrapped in the `bark-parts` layer exactly as the build places it, and walks the
-  rules that come out (`check/cssom.mjs`). It allows one `bark-parts` layer block and nothing beside
-  it, and part.css must end where its rules end: a rule placed after it must come back as a rule of its
-  own, so no open bracket, parenthesis, string or comment runs on into the next part on the page. Inside it, style rules, their nested declarations, and `@media` whose condition, as the browser
-  writes it, is `(max-width: 600px)` (the phone breakpoint: inside it only layout and type may change),
-  `(prefers-reduced-motion: reduce)` or `(prefers-reduced-motion: no-preference)`. Inside a
-  reduced-motion query only transition, animation and scroll-behavior properties may change. Every
-  other rule type (`@keyframes`, `@layer`, `@container`, `@supports`, `@property`, `@font-face`, and
-  any the browser adds later) and every other condition refuses the run before a light is read, and so
-  do `!important`, a `var()` with a fallback, and a custom property inside a reduced-motion query.
-  Selectors are read as the browser writes them back: a pinned state (`:hover`, `:active`,
-  `:focus-visible`, in any case) may stand only on the element the rule styles, never on a host,
-  ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
-  come from a short list of structure (`check/selectors.mjs`): one a person changes by clicking or
-  typing (`:checked`, `:placeholder-shown`, `:enabled` and the like) is refused until a part needs it,
-  when it comes back as a state, driven and read like `:hover`. Pseudo-elements are the four the check
-  reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
-  the page loads it, in the same browser, and each part's section must hold, rule by rule and with its
-  states pinned, what was read from that part alone; a difference refuses the run, naming the part.
-- Motion: a part defines no keyframes. It may name the shared ones in `css/base.css` (today one,
-  `bark-spin`, which only turns its element; a test holds base.css to that), by name as the browser
-  reads it. Transitions are free, because both ends are states the lights read anyway. Where motion is
-  read: "What part.css may condition on".
-- part.css keeps to a small vocabulary, `build/vocabulary.mjs`: layout, type, paint and motion
-  properties, held both as written and as the browser expands them (each longhand a shorthand sets
-  must belong to a property in the vocabulary, or be left at its initial value). A longhand the
-  vocabulary leaves out but a shorthand in it can set (`LEFT_OUT_INITIAL`: background-clip,
-  text-decoration-thickness, the border-image longhands, animation-timeline and its range) is read again
-  as computed on every element in the stage and its `::before` and `::after`, in every skin, scheme and
-  surface, so a value that arrives through a `var()` is held to its initial value too. A font size is read from a variable set to a rem size of 0.75rem or more (the sheet has
-  no type tokens yet). A part cannot excuse itself: anything else (mix-blend-mode, clip-path, mask,
-  text-indent, visibility, `-webkit-text-fill-color`, background-clip, text-shadow,
-  text-decoration-thickness, zoom and the like) is refused. The one way past is `EXTRA` in that shared
-  file, a property with the exact values it may take, today one row: `filter` may be `none`. A row comes
-  with a selftest plant showing the lights still see the property misused. `content` may only be `""`
-  or `none`, so words live in `example.html`, and the `text-decoration` shorthand may not set a
-  thickness.
-- Read where the page cannot reach: every reading the lights rest on (computed styles, boxes, text,
-  pseudo-elements, the paint trace, contrast, focus, the phone width) runs in an isolated world over
-  CDP. It shares the DOM with the page but none of its script, so a demo that patches
-  `getComputedStyle`, a prototype or `querySelector` changes nothing the check reads. press.mjs runs
-  in a second isolated world with its own copy of the helpers, so it cannot reach the check either.
-  Keys, clicks and the screen-reader tree go through the browser's own CDP domains.
-- Styled only by part.css: `example.html` is markup only (no `<style>`, `<script>`, `style=`,
-  `on*=`, `<font>`, `bgcolor=` or other colour attributes, a declared shadow root, or a `<canvas>`,
-  `<iframe>`, `<video>`, `<audio>`, `<object>` or `<embed>`), and `demo.mjs` wires behaviour only. Its
-  lint refuses inline styles, style attributes, new
-  `<style>`/`<link>`, stylesheet edits, adopted sheets, script animations and classes part.css does
-  not declare, naming the line. (Patching the page's globals is not refused: the check never reads
-  through them.) At run time a guard, reading from
-  an isolated world the page cannot touch, compares the page with the same build run without any demo:
-  after the demo has run, after every press step and at the end of each light's run, no element in a
-  stage may carry a `style` attribute, the stylesheets, their rules and the adopted sheets must be the
-  build's own, and no animation may run from script. A failure names what changed.
-
-## Surfaces
-
-The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage.
-The check reads every surface in every skin and scheme, at 1440px and at 390px, and the lights are
-proved on all five; the page says so. A drawn text under 4.5:1 is let through only by a wait in `build/sheet-waits.mjs` that
-names its skin, scheme and surface, whose two tokens its fill and ground resolve to, and only while it
-measures no worse than the wait records. Any other text under 4.5:1, any control boundary under 3:1, and
-any label gone, cut or not drawn as itself, on any surface, turns "every skin" (light views), "light
-and dark" (dark views) or "phone" (390px) off. Each wait prints as "waiting on the sheet" with what the last run measured,
-and the sheet's work that ends it. Today eight wait, all `--ui-muted-foreground` on `--ui-background` on
-primary (the demo labels), at 3.75 to 3.78:1. For each surface the check also records, as numbers only,
-a disabled control's fill against its ground and against the primary fill.
-
-## What part.css may condition on
-
-These are the only things a part's look can depend on in the showroom, and where each is read. A
-condition not listed here (another `@media`, `@container`, `@supports`, a skin or scheme selector) is
-refused on the sheet as the browser parses it (`check/cssom.mjs`) before any light is read.
-
-| Axis | Values read | How part.css reaches it | Read with |
-|---|---|---|---|
-| Skin | all 5 | only through `--ui-*` / `--bark-*` values; a skin selector is refused | every scheme, surface and width: "every skin" and "light and dark" at 1440px, "phone" at 390px |
-| Scheme | light, dark | only through those values; `prefers-color-scheme` and a scheme selector are refused | the same |
-| Surface | base, raised, sunken, primary, inverse | those values, and `[data-surface]` selectors | every skin and scheme, at 1440px and at 390px |
-| Width | 1440px, 390px | `@media (max-width: 600px)`, inside which only layout and type may change: no paint, no decoration, no custom property | 390px with every skin, scheme and surface ("phone") |
-| Motion | reduced, allowed | `@media (prefers-reduced-motion: …)`, inside which only transition, animation and scroll-behavior may change; animation names from the shared keyframes, which only turn their element | every light reads with motion reduced; the drawn readings run again with motion allowed in one skin, light, on every surface at 1440px and on base at 390px, animations held finished and halfway |
-| State | as `example.html` shows it, and as the real pointer and the press steps make it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) and each state shown at rest (the pending row) with every skin, scheme, surface and width. Each real state, on every live control a state rule matches, held to equal that control pinned and read as drawn so in the first skin, light, on base at 1440px, and held to change exactly as a pinned row changes, which carries it to every other view ("every skin"). Each press step's result read as drawn in that same view ("pressed by real keys") |
-| Script | on, off | not at all (`@media (scripting)` is refused) | "printed with no script" reads the page as it opens with no script: base surface, 1440px |
-
-What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
-differ there, layout can. A moment partway through a transition is not read: both its ends are. A
-real state is driven and compared in that one view and read as drawn in light and dark there (one skin,
-base, 1440px); the pinned row that changes the same way carries the change, not the control it is on,
-to the other skins, surfaces and widths. A state only the steps reach (the live
-button's pending) is read in that one view only: the pending row shows pending at rest in every view,
-but nothing holds the live button's pending to that row. The focus ring is base.css's and is measured on every
-Tab stop, below. The motion pass reads one skin in light on purpose:
-part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
-through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
-focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
-A rule counts as read when it applied at a judged moment, through any branch of its selector list: in
-`[inert] [data-slot="button"]:not([data-pin]), #x-save[data-pending]:hover { --bark-button-hover-fg: … }`
-the first branch applies, harmlessly, at every reading, while the second (a live button pending under
-the pointer) is never driven, because no live control is pending when the states are planned. Written
-alone, the second branch fails as "a rule nothing read".
-
-## How many parts the check holds
-
-<!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->
-On CI's hosted runner the check took 135 s for 1 part; a run may take at most 1.5 times its reading, scaled linearly past the most parts read (203 s a part), and stops, failing, once it passes that, so the 15-minute check step in CI holds 4 parts, whose ceiling of 810 s is 90% of it. The ceilings are made from readings (`check/capacity.mjs`): each is a whole run on CI's hosted runner, and each ceiling is 1.5 times its reading. The readings: the check, 1 part in 135 s (run 44623848758 at ddb4ba55b6); the selftest, 308 s (run 44623848758 at ddb4ba55b6). The check runs 3 parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (`check/ceiling.mjs`, one timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can lower a ceiling, down to 0 s, for a test, never raise it). With more than 4 parts the check refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into `check/capacity.mjs` and the numbers move by measurement; a test holds the steps' minutes to `js-tests.yml`, the ceiling of 4 parts under the check step and of one more over it, and this passage word for word.
-
-The selftest copies one part, so its time does not grow with the parts folder. On CI's hosted runner the selftest took 308 s; it may take at most 1.5 times that, 462 s, 77% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of its step; a selftest that outgrows that is split across jobs, never given a longer step.
-<!-- /capacity -->
-
-## What the check proves about a label, and no more
-
-Every label in the showroom, as built, matches its reference at 0.995 or more on macOS and on Linux, on
-every surface, at 1440px and at 390px (the check prints the lowest on every run; in the last runs it was
-1.000 on macOS and 0.995 on Linux, the "Sizes" heading at 390px). A label must match at 0.975 or more. What that limit costs is measured by the
-selftest's ladder, which cuts and covers one label step by step, and the selftest fails until this
-sentence moves with it: a ten-letter label 74 px wide (in CI, on Linux; 70 px on macOS) turns the
-lights off when its last 3 px are cut away, when a 5 px square of its ground covers its end, or when a
-4 px square of its ink is laid over its end; 2 px, 4 px and 3 px leave them on. A smaller loss or gain
-than that, and a way of hiding a label that leaves its pixels as they are, is outside this claim.
+BarkUI grows up inside Barkpark for now. What holds it here, what would make it leave and what would move are in [0007](docs/decisions/0007-incubated-in-barkpark.md).

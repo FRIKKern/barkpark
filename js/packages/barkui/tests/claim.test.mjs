@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { MATCH_MIN } from '../check/reading.mjs'
 import { ladderClaim } from '../check/plants.mjs'
 
-const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+const readme = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
 
-describe("README.md's claim about a label", () => {
+describe("docs/PARTS.md's claim about a label", () => {
   it('states the limit the check holds a label to', () => {
     expect(readme).toContain(`A label must match at ${MATCH_MIN} or more`)
     expect(readme).toContain(`Under ${MATCH_MIN} (\`MATCH_MIN\``)
@@ -20,7 +20,7 @@ describe("README.md's claim about a label", () => {
   })
 })
 
-describe("README.md's list of what part.css may condition on", () => {
+describe("docs/PARTS.md's list of what part.css may condition on", () => {
   it('names every @media condition the parsed-sheet check allows, and the shared keyframes', async () => {
     const { KEYFRAMES, MEDIA } = await import('../build/vocabulary.mjs')
     const table = readme.slice(readme.indexOf('## What part.css may condition on'), readme.indexOf('## What the check proves about a label'))
@@ -32,30 +32,31 @@ describe("README.md's list of what part.css may condition on", () => {
 })
 
 describe('how many parts the check holds', () => {
-  it("makes the ceilings from the readings, holds them under the steps' limits in js-tests.yml, and README.md's passage word for word", async () => {
+  it("makes the ceilings from the readings, holds them under the steps' limits in barkui.yml, and docs/PARTS.md's passage word for word", async () => {
     const c = await import('../check/capacity.mjs')
     const p = c.plan()
-    const workflow = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
+    const workflow = readFileSync(new URL('../../../../.github/workflows/barkui.yml', import.meta.url), 'utf8')
     const minutes = (name) => workflow.slice(workflow.indexOf(name)).match(/timeout-minutes: (\d+)/)[1]
-    expect(minutes('name: "BarkUI showroom check (real keys in Chromium)"')).toBe(String(p.STEP_MINUTES))
-    expect(minutes('name: "BarkUI showroom check selftest')).toBe(String(p.SELFTEST_STEP_MINUTES))
+    expect(minutes('name: "Check this group\'s parts (real keys in Chromium)"')).toBe(String(p.STEP_MINUTES))
+    expect(minutes('name: "Each planted break turns its light off"')).toBe(String(p.SELFTEST_STEP_MINUTES))
     // Every reading names its run and commit; every ceiling has room over its own reading.
     for (const r of [...p.READINGS.check, p.READINGS.selftest]) expect(r.run > 0 && /^[0-9a-f]{10}$/.test(r.commit) && r.seconds > 0).toBe(true)
+    for (const r of p.READINGS.check) expect(Number.isInteger(r.folder) && r.folder >= r.parts).toBe(true)
     expect(p.HEADROOM).toBeGreaterThan(1)
     for (const r of p.READINGS.check) expect(p.ceilingFor(r.parts)).toBeGreaterThanOrEqual(p.HEADROOM * r.seconds)
     expect(p.SELFTEST_CEILING).toBeGreaterThanOrEqual(p.HEADROOM * p.READINGS.selftest.seconds)
     // The ceiling of the most parts held stays under the check step; one part more would not.
-    expect(p.PARTS_HELD).toBeGreaterThanOrEqual(1)
-    expect(p.ceilingFor(p.PARTS_HELD)).toBeLessThan(p.STEP_MINUTES * 60)
-    expect(p.ceilingFor(p.PARTS_HELD + 1)).toBeGreaterThanOrEqual(p.STEP_MINUTES * 60)
+    expect(p.PER_JOB).toBeGreaterThanOrEqual(1)
+    expect(p.ceilingFor(p.PER_JOB)).toBeLessThan(p.STEP_MINUTES * 60)
+    expect(p.ceilingFor(p.PER_JOB + 1)).toBeGreaterThanOrEqual(p.STEP_MINUTES * 60)
     expect(p.SELFTEST_CEILING).toBeLessThanOrEqual(p.SELFTEST_MOST * p.SELFTEST_STEP_MINUTES * 60)
     // The passage between the marks is exactly what the numbers make, and any other input makes another.
-    const raw = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+    const raw = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8')
     const [a, b] = c.MARKS.map((m) => raw.indexOf(m))
     const passage = raw.slice(a + c.MARKS[0].length, b).trim()
     expect(a >= 0 && b > a).toBe(true)
     expect(passage).toBe(c.capacityPassage())
-    for (const change of [{ HEADROOM: 1.4 }, { SELFTEST_MOST: 0.75 }, { STEP_MINUTES: 20 }, { AT_ONCE: 2 }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, seconds: 300 } } }])
+    for (const change of [{ HEADROOM: 1.4 }, { SELFTEST_MOST: 0.75 }, { STEP_MINUTES: 20 }, { AT_ONCE: 2 }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, seconds: 300 } } }, { READINGS: { ...c.INPUT.READINGS, check: c.INPUT.READINGS.check.map((r) => ({ ...r, folder: r.folder + 12 })) } }])
       expect(c.capacityPassage(c.plan({ ...c.INPUT, ...change })), JSON.stringify(change)).not.toBe(passage)
   })
 
