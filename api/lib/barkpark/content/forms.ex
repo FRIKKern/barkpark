@@ -325,6 +325,13 @@ defmodule Barkpark.Content.Forms do
       coerced === stored ->
         stored
 
+      # An array of select values is a checkbox list: it draws the stored
+      # values as text, in option order, and a post says only which are
+      # ticked. A post that ticks the stored values is untouched, so the
+      # store keeps their order and types (task-1f922079ee439e18).
+      select_list?(field) and is_list(stored) and same_ticks?(posted, stored) ->
+        stored
+
       # Plain rich text stored as HTML becomes Portable Text blocks on its
       # next save, touched or not (owner ruling #44).
       plain_rich_text?(field) and is_binary(stored) and is_list(coerced) ->
@@ -438,6 +445,26 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp keyed_rows?(_posted, _stored), do: false
+
+  defp select_list?(%{"type" => "arrayOf", "of" => %{"type" => "select"}}), do: true
+  defp select_list?(_field), do: false
+
+  # The ticked values of a checkbox list, as the form draws them (text; a
+  # blank is never a tick), for the post and for the stored list alike.
+  defp same_ticks?(posted, stored) do
+    case indexed_map_to_list(posted) do
+      list when is_list(list) -> ticks(list) == ticks(stored)
+      _ -> false
+    end
+  end
+
+  defp ticks(values),
+    do: values |> Enum.map(&tick/1) |> Enum.reject(&(&1 == "")) |> MapSet.new()
+
+  defp tick(nil), do: ""
+  defp tick(value) when is_binary(value), do: value
+  defp tick(value) when is_number(value) or is_boolean(value), do: to_string(value)
+  defp tick(value), do: Jason.encode!(value)
 
   defp reference_descriptor?(%{"type" => "reference"}), do: true
   defp reference_descriptor?(_), do: false
