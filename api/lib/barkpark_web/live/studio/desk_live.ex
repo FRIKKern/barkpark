@@ -51,6 +51,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.ScopeSwitch
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
+  alias BarkparkWeb.Studio.Desk.TasksPanel
+  alias BarkparkWeb.Studio.Desk.TasksRead
   alias BarkparkWeb.Studio.Desk.DocStyle
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
@@ -108,6 +110,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
       |> assign(:desk_scope, nil)
       |> Bulk.init()
+      # The navbar's Tasks sidebar (`TasksPanel`): offered while the Tasks
+      # plugin is on for the workspace, closed until its button is pressed.
+      |> assign(:desk_tasks?, TasksRead.available?(socket.assigns[:current_workspace]))
+      |> assign(:desk_tasks_open?, false)
       # The search's hits: up to 50, as the TanStack Studio's text search,
       # the first 40 drawn, then more as the list's end scrolls near (`Search`).
       |> assign(desk_search_limit: Search.limit(), desk_search_drawn: Search.step())
@@ -376,6 +382,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("bulk-" <> _ = event, params, socket),
     do: Bulk.handle_event(event, params, socket)
 
+  # The navbar's and the drawer's Tasks button (`TasksPanel`).
+  def handle_event("desk-tasks-toggle", _params, socket) do
+    if socket.assigns.desk_tasks?,
+      do: {:noreply, assign(socket, :desk_tasks_open?, !socket.assigns.desk_tasks_open?)},
+      else: {:noreply, socket}
+  end
+
   # The navbar's workspace, project and dataset switcher (`ScopeSwitch`).
   def handle_event("desk-scope-" <> _ = event, params, socket),
     do: ScopeSwitch.handle_event(event, params, socket)
@@ -506,7 +519,23 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <BarkparkWeb.Studio.Desk.NavbarStyle.sheet />
     <BarkparkWeb.Studio.Desk.NavDrawerStyle.sheet />
     <BarkparkWeb.Studio.Desk.VisionStyle.sheet :if={@desk_tool == :vision} />
-    <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
+    <BarkparkWeb.Studio.Desk.TasksStyle.sheet :if={@desk_tasks?} />
+    <div
+      class="dk dk-tasks-host"
+      data-tasks-open={@desk_tasks_open?}
+      style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column"
+    >
+    <%!-- The navbar's Tasks sidebar (`TasksPanel`), at the right of the panes. --%>
+    <.live_component
+      :if={@desk_tasks_open?}
+      module={TasksPanel}
+      id="dk-tasks"
+      dataset={@dataset}
+      workspace_id={@current_workspace.id}
+      target={active_doc_id(@active, assigns[:editor_doc])}
+      base={@base}
+      root={@desk.root}
+    />
     <%!-- The search is a dialog, as the TanStack Studio's: the navbar's
           search button (`data-desk-search-open`), Cmd+K and "/" open it
           (`bp-desk.js`). A patch keeps it open: `open` is the browser's. --%>
@@ -598,6 +627,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
     </div>
     """
   end
+
+  # The document open in the desk, for the Tasks sidebar's Active Document.
+  defp active_doc_id(active, %{doc_id: id}) when is_integer(active) and is_binary(id),
+    do: Barkpark.Content.published_id(id)
+
+  defp active_doc_id(_active, _doc), do: nil
 
   # The tree is the same for every click in a dataset: build it once.
   defp desk(%{dataset: dataset} = desk, dataset, _scope), do: desk

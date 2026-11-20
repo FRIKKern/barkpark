@@ -50,6 +50,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
           assignee: String.t(),
           label: String.t(),
           parent: nil | :none | String.t(),
+          target: nil | String.t(),
           sort: String.t(),
           dir: :asc | :desc,
           page: pos_integer()
@@ -82,6 +83,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
       assignee: if(worker?, do: text(params["assignee"]), else: ""),
       label: if(readable?.("labels"), do: text(params["label"]), else: ""),
       parent: if(readable?.("parent_id"), do: parse_parent(params["parent"])),
+      target: nil,
       sort: sort,
       dir: parse_dir(params["dir"], sort),
       page: parse_page(params["page"])
@@ -135,7 +137,12 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
     readable? = Keyword.fetch!(opts, :readable?)
     ws_id = Keyword.get(opts, :workspace_id)
 
-    matched = dataset |> scope(ws_id) |> apply_filters(filters)
+    matched =
+      dataset
+      |> scope(ws_id)
+      |> apply_filters(filters)
+      |> filter_target(Map.get(filters, :target), readable?)
+
     total = Repo.aggregate(matched, :count)
     pages = max(1, ceil(total / @page_size))
     page = min(filters.page, pages)
@@ -222,6 +229,50 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
 
   defp filter_parent(query, parent_id), do: Query.maybe_filter_parent_id(query, parent_id)
 
+  # The desk's Tasks sidebar, Active Document (`BarkparkWeb.Studio.Desk.TasksRead`):
+  # the tasks that link to one document, through the fields the reader may see.
+  # Its linked papers, its design paper, or (for a task) its parent. With none of
+  # them readable, nothing matches: a hidden link cannot be found by narrowing.
+  defp filter_target(query, nil, _readable?), do: query
+
+  defp filter_target(query, id, readable?) when is_binary(id) do
+    links =
+      Enum.filter(
+        [
+          readable?.("papers") &&
+            dynamic([d], fragment("?->'papers' @> to_jsonb(?::text)", d.content, ^id)),
+          readable?.("design_doc") &&
+            dynamic(
+              [d],
+              fragment(
+                "regexp_replace(COALESCE(?->>'design_doc', ''), '^drafts\\.', '') = ?",
+                d.content,
+                ^id
+              )
+            ),
+          readable?.("parent_id") &&
+            dynamic(
+              [d],
+              fragment(
+                "regexp_replace(COALESCE(?->>'parent_id', ''), '^drafts\\.', '') = ?",
+                d.content,
+                ^id
+              )
+            )
+        ],
+        & &1
+      )
+
+    case links do
+      [] ->
+        from(d in query, where: false)
+
+      [first | rest] ->
+        linked = Enum.reduce(rest, first, fn link, acc -> dynamic([d], ^acc or ^link) end)
+        from(d in query, where: ^linked)
+    end
+  end
+
   defp escape_like(s), do: String.replace(s, ["\\", "%", "_"], fn c -> "\\" <> c end)
 
   # ── order ───────────────────────────────────────────────────────────────────
@@ -300,6 +351,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
       labels: Enum.take(labels, @label_cap),
       more_labels: max(0, length(labels) - @label_cap),
       criteria: Tasks.criteria_progress(content),
+      due_at: if(readable?.("due_at"), do: text_or_nil(Map.get(content, "due_at"))),
       updated_at: doc.updated_at
     }
   end
@@ -310,6 +362,9 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
       Map.get(content, "assignee") || get_in(content, ["claim", "worker"])
     end
   end
+
+  defp text_or_nil(value) when is_binary(value) and value != "", do: value
+  defp text_or_nil(_), do: nil
 
   defp labels(content) do
     case Map.get(content, "labels") do
