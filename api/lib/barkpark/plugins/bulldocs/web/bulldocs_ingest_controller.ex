@@ -470,7 +470,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  defp write_check(conn), do: WriteGate.write_check(conn.assigns[:api_token])
+  defp write_check(conn), do: WriteGate.write_check(conn.assigns)
 
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
@@ -2192,16 +2192,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # `is_nil(ws)` arm) used to honour a named workspace for ANY credential. A
   # workspace-less admin token seated only in A could then create, overwrite
   # and edit B's papers and sessions by naming B. Now a TOKEN that names a
-  # workspace must be able to write there (`WriteGate.may_write?/2`: a seat
-  # allowing write, or an ARMED operator allowlist); else 403 `workspace_forbidden`.
+  # workspace must be able to write there (`WriteGate.may_write?/2` on its `:write_caller`:
+  # a seat allowing write, or an ARMED operator allowlist); else 403 `workspace_forbidden`.
   # The shared-secret producer carries no `:api_token` and is unchanged; a
   # workspace-bound token is already confined by the reconciliations
   # themselves. One door for every action, so the read twin is covered too.
   defp require_named_workspace_access(conn, _opts) do
-    with %Barkpark.Auth.ApiToken{} = token <- conn.assigns[:api_token],
+    with token when not is_nil(token) <- conn.assigns[:api_token],
          nil <- pipeline_workspace(conn),
          {ws_id, _project} when is_binary(ws_id) <- requested_scope(conn, conn.params),
-         false <- WriteGate.may_write?(token, ws_id) do
+         false <- WriteGate.may_write?(conn.assigns[:write_caller], ws_id) do
       conn
       |> ErrorResponse.emit_custom(
         :forbidden,

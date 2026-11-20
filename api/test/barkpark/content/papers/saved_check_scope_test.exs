@@ -7,8 +7,9 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
       (`scope_unowned`), with or without a token;
     * a row in a workspace the writing token may not write in is refused
       (`write_forbidden`), on the upsert path and the block-op batch path; the
-      token's rule is `WriteGate.may_write?/2` (its home, a seat allowing
-      write, or an armed operator allowlist naming it);
+      rule is `WriteGate.may_write?/2` on the token's `WriteCaller` (its
+      permission writes, and its home, a seat allowing write, or an armed
+      operator allowlist naming it);
     * the write's `may_write:` predicate is asked, inside the transaction,
       about the saved row's own workspace; a no refuses;
     * a refusal leaves no row, history, change event or job, and an existing
@@ -28,6 +29,7 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
   alias Barkpark.Content.Papers.BpmlView
   alias Barkpark.Plugins.Bulldocs.Web.WriteGate
   alias Barkpark.Tenancy.Membership
+  alias BarkparkWeb.Plugs.AssignWriteCaller
 
   @ds "production"
 
@@ -62,7 +64,13 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
     })
   end
 
-  defp checked(token), do: checked_by(WriteGate.write_check(token))
+  defp checked(nil), do: checked_by(WriteGate.write_check(%{}))
+
+  defp checked(token),
+    do:
+      checked_by(
+        WriteGate.write_check(%{write_caller: AssignWriteCaller.build(token), api_token: token})
+      )
 
   defp seatless! do
     raw = "saved-scope-op-#{System.unique_integer([:positive])}"

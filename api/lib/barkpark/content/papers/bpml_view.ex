@@ -236,6 +236,22 @@ defmodule Barkpark.Content.Papers.BpmlView do
         to_string(reason)
       )
 
+  @doc """
+  The error the JSON source read gives when the reader source refuses: the
+  code `refusal/1` would give, worded for a read rather than a text pull. It
+  names the reason only and quotes nothing stored.
+  """
+  @spec read_refusal(atom()) :: map()
+  def read_refusal(reason) when is_atom(reason) do
+    %{
+      code: to_string(reason),
+      message:
+        (@reasons[reason] || "the reader's source of this Paper cannot be built") <>
+          ", so its blocks cannot be read",
+      hint: "nothing was written; this read answers the same until the Paper changes"
+    }
+  end
+
   defp body(message, code) do
     %{
       code: code,

@@ -74,7 +74,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
         source_json(conn, paper, paper.title, %{"kind" => "html", "html" => html})
 
       {{:error, reason}, _schema} ->
-        refuse(conn, Content.Papers.BpmlView.refusal({:error, reason}))
+        refuse(conn, Content.Papers.BpmlView.read_refusal(reason))
     end
   end
 

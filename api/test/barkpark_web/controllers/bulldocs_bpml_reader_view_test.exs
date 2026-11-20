@@ -252,7 +252,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
     assert inspect(shown) =~ "Visible."
   end
 
-  test "the JSON read refuses what the reader source refuses, with main's code" do
+  test "the JSON read refuses with the reader source's code, worded for a read" do
     schema!(text: true, blocks: true)
     slug = slug("json-redacted")
     paper!(slug, blocks())
@@ -261,6 +261,9 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
     assert Map.keys(read) == ["error"]
     assert read["error"]["code"] == "redacted_source"
     assert Enum.sort(Map.keys(read["error"])) == ~w(code hint message)
+    assert read["error"]["message"] =~ "cannot be read"
+    refute read["error"]["message"] =~ "as text"
+    refute read["error"]["hint"] =~ "bp paper pull"
   end
 
   # Each way the view can fail, set on the row after a pull (the op rev does
