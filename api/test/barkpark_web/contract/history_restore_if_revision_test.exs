@@ -1,9 +1,10 @@
 defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   @moduledoc """
-  A history restore that names the state it was asked against (`ifRevisionID`,
-  the same fence a `/v1` mutate patch takes) is refused when the document has
-  moved on, and writes nothing (task-e89ff0279fb83fc6). A restore that names no
-  state restores as before. Studio's row "a late restore after newer edits is
+  A history restore that names the state it was asked against is refused when
+  the document has moved on, and writes nothing (task-e89ff0279fb83fc6). The
+  state is `ifRevisionID` ("I saw this rev", the same fence a `/v1` mutate patch
+  takes) or `ifAbsent: true` ("I saw no document"); naming both is a 400. A
+  restore that names no state restores as before. Studio's row "a late restore after newer edits is
   refused and keeps them" (barkpark-studio, test/a012-restore-stuck) holds the
   same order from the browser.
   """
@@ -131,6 +132,7 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert fresh.status == 200
     assert title_of("drafts.pub") == "Words A"
   end
+
   # A document written once, then deleted: the state the restore was asked against
   # is gone.
   defp deleted_draft(doc_id) do
@@ -164,5 +166,71 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
 
     assert resp.status == 200
     assert title_of("drafts.back") == "Words A"
+  end
+
+  test "ifAbsent on a document still deleted: the restore lands", %{conn: conn} do
+    %{revision: revision} = deleted_draft("absent")
+
+    resp = restore(conn, revision.id, %{"ifAbsent" => true})
+
+    assert resp.status == 200
+    assert title_of("drafts.absent") == "Words A"
+  end
+
+  test "ifAbsent on a document made again since: refused, and the new document stays",
+       %{conn: conn} do
+    %{revision: revision} = deleted_draft("again")
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "drafts.again", "title" => "Words N"}, "test")
+
+    current = rev_of("drafts.again")
+
+    resp = restore(conn, revision.id, %{"ifAbsent" => true})
+
+    assert resp.status == 412
+    details = Jason.decode!(resp.resp_body)["error"]["details"]
+    assert details["expected"] == nil
+    assert details["actual"] == current
+    assert title_of("drafts.again") == "Words N"
+    assert rev_of("drafts.again") == current
+  end
+
+  test "the late order in Studio's shape: a late restore after a restore and newer edits is refused and keeps them",
+       %{conn: conn} do
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "drafts.studio", "title" => "Words A"}, "test")
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => "drafts.studio", "title" => "Words B"}, "test")
+
+    first = revision_titled("studio", "Words A")
+    second = revision_titled("studio", "Words B")
+    {:ok, _} = Content.delete_document("drafts.studio", "post", "test")
+
+    assert restore(conn, second.id, %{"ifAbsent" => true}).status == 200
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => "drafts.studio", "title" => "Words C"}, "test")
+
+    edited = rev_of("drafts.studio")
+
+    late = restore(conn, first.id, %{"ifAbsent" => true})
+
+    assert late.status == 412
+    assert Jason.decode!(late.resp_body)["error"]["details"]["actual"] == edited
+    assert title_of("drafts.studio") == "Words C"
+    assert rev_of("drafts.studio") == edited
+  end
+
+  test "naming both ifRevisionID and ifAbsent is a 400, and nothing is written", %{conn: conn} do
+    %{current: current, revision: revision} = edited_draft("both")
+
+    resp = restore(conn, revision.id, %{"ifRevisionID" => current, "ifAbsent" => true})
+
+    assert resp.status == 400
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "malformed"
+    assert title_of("drafts.both") == "Words B"
+    assert rev_of("drafts.both") == current
   end
 end

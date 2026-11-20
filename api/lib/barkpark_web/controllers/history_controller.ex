@@ -88,13 +88,22 @@ defmodule BarkparkWeb.HistoryController do
     end
   end
 
-  # `ifRevisionID` (optional): the document state the caller asked against, the
-  # same fence a `/v1` mutate patch takes. A restore naming a state the document
-  # has moved on from is refused 412 `precondition_failed` and writes nothing
-  # (task-e89ff0279fb83fc6); `Content.restore_revision/4` holds the compare.
+  # The state the caller asked against, optional (task-e89ff0279fb83fc6):
+  # `ifRevisionID` ("I saw this rev", the same fence a `/v1` mutate patch takes)
+  # or `ifAbsent: true` ("I saw no document"). A restore naming a state the
+  # document has moved on from is refused 412 `precondition_failed` and writes
+  # nothing; `Content.restore_revision/4` holds the compare. Naming both, or an
+  # `ifAbsent` that is not a boolean, is a 400 `malformed`.
   def restore(conn, %{"dataset" => dataset, "id" => id} = params) do
+    case restore_fence(params) do
+      {:ok, fence} -> restore_with(conn, dataset, id, params, fence)
+      {:error, message} -> malformed_fence(conn, message)
+    end
+  end
+
+  defp restore_with(conn, dataset, id, params, fence) do
     type = get_type(conn, params)
-    opts = restore_if_rev([source: :api] ++ scope_opts(conn), params["ifRevisionID"])
+    opts = [source: :api] ++ scope_opts(conn) ++ fence
 
     with :ok <- validate_uuid(id),
          {:ok, doc} <- Content.restore_revision(id, type, dataset, opts) do
@@ -137,9 +146,26 @@ defmodule BarkparkWeb.HistoryController do
 
   defp get_type(_conn, params), do: params["type"]
 
-  defp restore_if_rev(opts, nil), do: opts
-  defp restore_if_rev(opts, ""), do: opts
-  defp restore_if_rev(opts, expected), do: Keyword.put(opts, :if_rev, expected)
+  defp restore_fence(params) do
+    if_rev = params["ifRevisionID"]
+    if_rev = if is_binary(if_rev) and if_rev != "", do: if_rev
+
+    case {if_rev, Map.get(params, "ifAbsent")} do
+      {nil, absent} when absent in [nil, false] -> {:ok, []}
+      {nil, true} -> {:ok, [if_absent: true]}
+      {rev, absent} when absent in [nil, false] -> {:ok, [if_rev: rev]}
+      {_rev, true} -> {:error, "send ifRevisionID or ifAbsent, not both"}
+      {_, other} -> {:error, "ifAbsent must be true or false, got: #{inspect(other)}"}
+    end
+  end
+
+  defp malformed_fence(conn, message) do
+    BarkparkWeb.ErrorResponse.emit_fields(conn, :bad_request, %{
+      code: "malformed",
+      message: message,
+      details: %{fields: ["ifRevisionID", "ifAbsent"]}
+    })
+  end
 
   @uuid_regex ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   defp validate_uuid(id) when is_binary(id) do

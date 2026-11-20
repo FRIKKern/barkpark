@@ -286,14 +286,20 @@ defmodule Barkpark.Content.Revisions do
   `opts` is forwarded to `Barkpark.Content.upsert_document/4` so callers can
   supply lifecycle-hook context (`:source`, `:user_id`).
 
-  `opts[:if_rev]` is the state the caller asked against, the same fence as a
-  `/v1` mutate patch's `ifRevisionID` (task-e89ff0279fb83fc6). It is compared
-  with the document's current rev: its draft row's, or its published row's when
-  it has no draft. When they differ the restore writes nothing and answers
+  A restore can name the state it was asked against (task-e89ff0279fb83fc6),
+  and is refused when the document has moved on since, writing nothing:
   `{:error, {:rev_mismatch, %{expected, actual, id}}}` (412
-  `precondition_failed`). When they match it goes on to the upsert, which fences
-  its UPDATE of the draft row on the same rev. With no `:if_rev` nothing is
-  compared.
+  `precondition_failed`). The document's current state is its draft row, or its
+  published row when it has no draft, or none when it has neither.
+
+    * `opts[:if_rev]`: "I saw this rev". The same fence as a `/v1` mutate
+      patch's `ifRevisionID`. It must equal the current rev. On a match the
+      upsert fences its UPDATE of the draft row on that rev as well.
+    * `opts[:if_absent]` (`true`): "I saw no document". There must be no draft
+      and no published row; `expected` is then `nil`.
+
+  With neither, nothing is compared. The HTTP door refuses a call that names
+  both.
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
     with {:ok, rev} <- get_revision(revision_id, dataset, opts),
@@ -319,41 +325,45 @@ defmodule Barkpark.Content.Revisions do
 
   defp assert_revision_dataset(_rev, _dataset), do: {:error, :not_found}
 
-  # The state a restore was asked against (`opts[:if_rev]`) against the
-  # document's current one: the draft row when there is one, else the published
-  # row. A document with neither has moved on too (it was deleted), so a named
-  # state is refused there as well.
+  # The state a restore was asked against (`:if_rev` or `:if_absent`) against
+  # the document's current one. A delete removes the row, so a document deleted
+  # since a named rev has moved on, and one made again since `:if_absent` has too.
   defp assert_current_rev(doc_id, type, dataset, opts) do
-    case Keyword.get(opts, :if_rev) do
-      nil ->
-        :ok
-
-      "" ->
-        :ok
-
-      expected ->
-        published = Content.published_id(doc_id)
-
-        current =
-          Enum.find_value([Content.draft_id(published), published], fn id ->
-            case Content.get_document(id, type, dataset, opts) do
-              {:ok, doc} -> doc
-              _ -> nil
-            end
-          end)
-
-        case current do
-          %{rev: ^expected} ->
-            :ok
-
-          %{rev: actual, doc_id: id} ->
-            {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
-
-          nil ->
-            {:error, {:rev_mismatch, %{expected: expected, actual: nil, id: published}}}
-        end
+    case expected_state(opts) do
+      :any -> :ok
+      expected -> compare_state(expected, current_row(doc_id, type, dataset, opts), doc_id)
     end
   end
+
+  defp expected_state(opts) do
+    case {Keyword.get(opts, :if_rev), Keyword.get(opts, :if_absent)} do
+      {rev, _} when is_binary(rev) and rev != "" -> rev
+      {_, true} -> nil
+      _ -> :any
+    end
+  end
+
+  defp current_row(doc_id, type, dataset, opts) do
+    published = Content.published_id(doc_id)
+
+    Enum.find_value([Content.draft_id(published), published], fn id ->
+      case Content.get_document(id, type, dataset, opts) do
+        {:ok, doc} -> doc
+        _ -> nil
+      end
+    end)
+  end
+
+  defp compare_state(nil, nil, _doc_id), do: :ok
+  defp compare_state(expected, %{rev: expected}, _doc_id) when is_binary(expected), do: :ok
+
+  defp compare_state(expected, %{rev: actual, doc_id: id}, _doc_id),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
+
+  defp compare_state(expected, nil, doc_id),
+    do:
+      {:error,
+       {:rev_mismatch, %{expected: expected, actual: nil, id: Content.published_id(doc_id)}}}
 
   # The restore writes `drafts.<rev.doc_id>` under the CALLER's `type`. A
   # revision of one type restored under another created or overwrote a draft
