@@ -63,20 +63,19 @@
     return { params: v };
   };
 
-  // The query-string form takes each $key in its query string as the value itself, a list comma-joined
-  // (Barkpark's `in`), encoded: so a value is one parameter's value, never another parameter or a path.
+  // The query-string form's $key: the value, a list comma-joined (Barkpark's `in`), encoded where it is put.
   var valueOf = function (v) {
     return Array.isArray(v) ? v.map(String).join(",") : v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
   };
 
-  /** What a query reads, under the project's `scope` path: {error} or {path, groq}. Pure, so the host tests load it. */
+  /** What a query reads, under the project's `scope` path: {error} or {path, groq, shown}; `shown`, the Query URL, keeps a query string's brackets as typed (TanStack's). Pure, so the host tests load it. */
   var target = function (scope, dataset, text, perspective, version, given) {
     var values = given || {};
     var raw = String(text || "").trim();
     if (!raw) return { error: "empty" };
     var p = PERSPECTIVES.indexOf(perspective) >= 0 ? perspective : "drafts";
     var ds = encodeURIComponent(dataset);
-    var path, groq;
+    var path, groq, shown;
     if (QUERY_STRING.test(raw)) {
       var at = raw.indexOf("?");
       var type = at < 0 ? raw : raw.slice(0, at);
@@ -89,6 +88,7 @@
       var params = new URLSearchParams(qs);
       if (!params.has("perspective")) params.set("perspective", p);
       path = scope + "/v1/data/query/" + ds + "/" + type + "?" + params.toString();
+      shown = scope + "/v1/data/query/" + ds + "/" + type + "?" + decodeURIComponent(params.toString());
       groq = false;
     } else {
       var v = VERSION.test(version) ? version : today();
@@ -99,7 +99,7 @@
       groq = true;
     }
     if (path.length > MAX_URL) return { error: "long" };
-    return { path: path, groq: groq };
+    return { path: path, groq: groq, shown: shown || path };
   };
 
   /** The version a run sends: the picked one, or under "Other" the last typed that read as one. */
@@ -377,7 +377,7 @@
       url.hidden = true;
       return show(root, { query: query }, { error: to.text || word(root, to.error, { name: to.name }) });
     }
-    var href = root.ownerDocument.location.origin + to.path;
+    var href = root.ownerDocument.location.origin + to.shown;
     url.hidden = false;
     part(root, "#vision-url").value = href;
     var result = part(root, ".dk-vision-result");

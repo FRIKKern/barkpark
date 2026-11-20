@@ -308,6 +308,8 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(s.searchParams.get("filter[title][contains]"), "x&dataset=staging/../../v1/tasks#");
   assert.equal(s.searchParams.get("limit"), "5");
   assert.equal(s.searchParams.get("dataset"), null);
+  const shown = Vision.target(api, "production", "post?filter[title][contains]=$t&limit=$n", "drafts", "v1", { t: "post 1", n: 2 }).shown;
+  assert.match(shown, /\/post\?filter\[title\]\[contains\]=post\+1&limit=2&perspective=drafts$/, "the Query URL shows the query string as typed, as TanStack's");
   // The page's objects are jsdom's: compared as JSON.
   const plain = (v) => JSON.parse(JSON.stringify(v));
   assert.deepEqual(plain(Vision.target(api, "production", "post?filter[_id]=$id", "drafts", "v1", {})), { error: "params-missing", name: "id" });
