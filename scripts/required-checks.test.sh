@@ -2828,7 +2828,22 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # nightly and workflow_dispatch only, so its name renders on main and on a
         # PR head only after a hand dispatch; the row lands after the frozen
         # fixture pair. DERIVED by scripts/required-checks-ack-derive.sh.
-        --expect-unrendered "tooling/grip full node --test suite")
+        --expect-unrendered "tooling/grip full node --test suite"
+        # barkui.yml (task-3a8552dc2063494a): a new workflow, so none of its names renders
+        # on the frozen fixture pair; groups 2 to 8 render only when the split makes that
+        # many groups. DERIVED by scripts/required-checks-ack-derive.sh.
+        --expect-unrendered 'BarkUI check, group ${{ matrix.group }}'
+        --expect-unrendered "BarkUI check, group 1"
+        --expect-unrendered "BarkUI check, group 2"
+        --expect-unrendered "BarkUI check, group 3"
+        --expect-unrendered "BarkUI check, group 4"
+        --expect-unrendered "BarkUI check, group 5"
+        --expect-unrendered "BarkUI check, group 6"
+        --expect-unrendered "BarkUI check, group 7"
+        --expect-unrendered "BarkUI check, group 8"
+        --expect-unrendered "BarkUI plan (does this change touch it, and which groups)"
+        --expect-unrendered "BarkUI selftest"
+        --expect-unrendered "BarkUI showroom check")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

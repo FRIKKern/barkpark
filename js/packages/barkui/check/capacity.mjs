@@ -22,13 +22,16 @@ export const INPUT = {
   // The one headroom rule: a ceiling is this many times its reading.
   HEADROOM: 1.5,
   READINGS: {
-    // One reading per job. The four with 14 in the folder are proof run (a): the real button and 13 copies of it.
+    // One reading per job. Those with 14 in the folder are proof runs (a) and (b): the real button and 13 copies of
+    // it; from (b), only the two groups without its planted break.
     check: [
       { parts: 1, folder: 1, seconds: 135, run: 44623848758, commit: 'ddb4ba55b6' },
       { parts: 4, folder: 14, seconds: 430, run: 44642580444, commit: 'fa14e54128' },
       { parts: 4, folder: 14, seconds: 432, run: 44642580444, commit: 'fa14e54128' },
       { parts: 3, folder: 14, seconds: 252, run: 44642580444, commit: 'fa14e54128' },
       { parts: 3, folder: 14, seconds: 211, run: 44642580444, commit: 'fa14e54128' },
+      { parts: 5, folder: 14, seconds: 570, run: 44662694458, commit: 'd9d277ad73' },
+      { parts: 5, folder: 14, seconds: 567, run: 44662694458, commit: 'd9d277ad73' },
     ],
     selftest: { seconds: 308, run: 44623848758, commit: 'ddb4ba55b6' },
   },
