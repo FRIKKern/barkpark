@@ -446,7 +446,12 @@ defmodule Barkpark.Content.Forms do
 
   defp keyed_rows?(_posted, _stored), do: false
 
-  defp select_list?(%{"type" => "arrayOf", "of" => %{"type" => "select"}}), do: true
+  # Only a select the page draws as a checkbox list (`ArrayField`): one whose
+  # options read as a list. Without them it is a row list, whose order and
+  # duplicates are the person's edits.
+  defp select_list?(%{"type" => "arrayOf", "of" => %{"type" => "select"} = of}),
+    do: Barkpark.Content.SelectOptions.normalize(of["options"]) != []
+
   defp select_list?(_field), do: false
 
   # The ticked values of a checkbox list, as the form draws them (text; a

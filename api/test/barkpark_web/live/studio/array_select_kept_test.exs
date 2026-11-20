@@ -8,7 +8,8 @@ defmodule BarkparkWeb.Studio.ArraySelectKeptTest do
 
   A post that holds the same values the form drew for the stored list is
   untouched, and the store keeps its bytes. A change of the list is still
-  saved.
+  saved. A select whose options do not read as a list is drawn as a row
+  list, where a reorder or a removed duplicate is an edit (#27958 review).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -38,6 +39,20 @@ defmodule BarkparkWeb.Studio.ArraySelectKeptTest do
               "type" => "arrayOf",
               "of" => %{"name" => "s", "type" => "select", "options" => ["a", "b"]}
             },
+            # Drawn as a row list, not checkboxes: Sanity's options shape,
+            # and no options.
+            %{
+              "name" => "arrlist",
+              "title" => "Arr list",
+              "type" => "arrayOf",
+              "of" => %{"name" => "s", "type" => "select", "options" => %{"list" => ["a", "b"]}}
+            },
+            %{
+              "name" => "arrnone",
+              "title" => "Arr none",
+              "type" => "arrayOf",
+              "of" => %{"name" => "s", "type" => "select"}
+            },
             %{"name" => "notes", "title" => "Notes", "type" => "string"}
           ]
         },
@@ -55,13 +70,15 @@ defmodule BarkparkWeb.Studio.ArraySelectKeptTest do
      type: type}
   end
 
-  defp doc!(c, arr) do
+  defp doc!(c, arr) when is_list(arr), do: doc!(c, %{"arr" => arr})
+
+  defp doc!(c, content) do
     id = "arrsel-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
       Content.create_document(
         c.type,
-        %{"doc_id" => id, "title" => "Book", "content" => %{"arr" => arr, "notes" => "n0"}},
+        %{"doc_id" => id, "title" => "Book", "content" => Map.put(content, "notes", "n0")},
         @dataset
       )
 
@@ -137,6 +154,36 @@ defmodule BarkparkWeb.Studio.ArraySelectKeptTest do
       |> render_change(%{"_target" => ["doc", "arr"]})
 
       assert stored(c, id)["arr"] == ["a", "b", "true"]
+    end
+
+    test "#{surface}: a row list's move down is saved, options as {list: [...]} or none", c do
+      for name <- ["arrlist", "arrnone"] do
+        id = doc!(c, %{name => ["a", "b"]})
+        {view, _form} = open(c, @surface, id)
+
+        BarkparkWeb.EditorPost.press(view, "array_op", %{
+          "action" => "move_down",
+          "field" => name,
+          "path" => "doc[#{name}]",
+          "index" => "0"
+        })
+
+        assert stored(c, id)[name] == ["b", "a"], name
+      end
+    end
+
+    test "#{surface}: a row list's removed duplicate is saved", c do
+      id = doc!(c, %{"arrlist" => ["a", "a", "b"]})
+      {view, _form} = open(c, @surface, id)
+
+      BarkparkWeb.EditorPost.press(view, "array_op", %{
+        "action" => "remove_row",
+        "field" => "arrlist",
+        "path" => "doc[arrlist]",
+        "index" => "0"
+      })
+
+      assert stored(c, id)["arrlist"] == ["a", "b"]
     end
   end
 end
