@@ -158,7 +158,7 @@ function blockMd(block, ctx) {
       const cite = oneLine(block.cite ?? block.attribution);
       return quote(joined([inline(block.content ?? block.text, ctx), cite ? "— " + escapeInlineText(cite) : ""]));
     }
-    // A callout's words, as callout-words.js answers them: its content, then its body.
+    // A callout's words: callout-words.js holds the rule.
     case "callout": {
       const tone = TONES[str(block.tone).toLowerCase()] || humanize(block.tone || "note");
       const title = oneLine(block.title);
