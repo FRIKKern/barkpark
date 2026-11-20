@@ -17,8 +17,10 @@
 // menu, `historyUndo`) is the document's too: the field would otherwise save
 // the browser's undo as a new edit, and the next Mod+Z put it back. None of
 // it while the editor form is not drawn (its pane folded to a strip, or
-// hidden by focus mode or the narrow layout), or while a modal is open: the
-// key stays the browser's.
+// hidden by focus mode or the narrow layout): the key stays the browser's.
+// While a modal is open (Delete, Unpublish) the key is no one's but a modal
+// field's (task-c291650f9285acb5): the browser's own undo is the page's, so
+// it would take back a field behind the modal, and the autosave write it.
 // With nothing focused the key is the document's, as the TanStack Studio's
 // Edit-menu undo is: the browser's own undo has nothing to give there once a
 // script has set a field's value.
@@ -90,19 +92,36 @@
     return typeof el.checkVisibility !== "function" || el.checkVisibility();
   }
 
-  // Whether a modal is open anywhere in the page (Delete, Unpublish: a
+  // The modals open anywhere in the page (Delete, Unpublish: a
   // `role=dialog aria-modal=true`, or a <dialog> opened with showModal): the
-  // page under it is not the user's to change, so the key stays the browser's.
-  function modal() {
+  // page under one is not the user's to change.
+  function modals() {
+    var open = [];
     var all = document.querySelectorAll('[role=dialog][aria-modal=true], dialog[open]');
     for (var i = 0; i < all.length; i++) {
       var m = all[i];
       if (m.closest("[hidden]")) continue;
       if (m.tagName === "DIALOG" && m.getAttribute("aria-modal") !== "true" && !isModal(m)) continue;
       if (typeof m.checkVisibility === "function" && !m.checkVisibility()) continue;
-      return true;
+      open.push(m);
     }
-    return false;
+    return open;
+  }
+
+  function modal() {
+    return modals().length > 0;
+  }
+
+  // Whether `el` is under an open modal: one is open, and `el` is in none.
+  function behind(el) {
+    var open = modals();
+    for (var i = 0; i < open.length; i++) if (el && open[i].contains(el)) return false;
+    return open.length > 0;
+  }
+
+  // A field of a modal, whose own undo the browser keeps: typed in the modal.
+  function modalField(el) {
+    return !!el && !behind(el) && (el.isContentEditable || (FIELD.test(el.tagName) && !el.readOnly && !el.disabled));
   }
 
   function isModal(dialog) {
@@ -147,6 +166,13 @@
     if (e.defaultPrevented || e.altKey || e.isComposing || !(e.metaKey || e.ctrlKey)) return;
     var key = String(e.key).toLowerCase();
     if (key !== "z" && key !== "y") return;
+    // With a modal open the key is no one's but a modal field's: the
+    // browser's own undo is the page's, so from anywhere else it would take
+    // back a field behind the modal, and its autosave write it.
+    if (modal()) {
+      if (!modalField(e.target)) e.preventDefault();
+      return;
+    }
     if (!ours(e.target)) return;
     e.preventDefault();
     run(key === "y" || e.shiftKey);
@@ -154,6 +180,12 @@
 
   function onBeforeInput(e) {
     if (e.inputType !== "historyUndo" && e.inputType !== "historyRedo") return;
+    // The browser's own undo of a field behind an open modal (the Edit menu,
+    // or the key in a modal field with nothing of its own to take back).
+    if (behind(e.target)) {
+      e.preventDefault();
+      return;
+    }
     var f = form();
     if (!f || !e.target || !f.contains(e.target) || !ours(e.target)) return;
     e.preventDefault();
