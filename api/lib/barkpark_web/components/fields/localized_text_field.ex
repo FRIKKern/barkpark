@@ -53,17 +53,11 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   # is then `id="blurb.nob"`, as Sanity's Studio names it. nil keeps `f-…`.
   attr :id_base, :string, default: nil
 
-  def localized_text_field(assigns) do
-    assigns =
-      assigns
-      |> Map.put_new(:value, %{})
-      |> Map.put_new(:errors, %{})
-      |> Map.put_new(:on_change, nil)
-      |> Map.put_new(:path, "")
-      |> Map.put_new(:readonly, false)
-      |> Map.put_new(:wrap_key, "")
-      |> Map.put_new(:id_base, nil)
+  def localized_text_field(%{id_base: id_base} = assigns) when is_binary(id_base),
+    do: BarkparkWeb.Components.Fields.LocalizedTabs.localized_tabs(defaults(assigns))
 
+  def localized_text_field(assigns) do
+    assigns = defaults(assigns)
     field = assigns.field
     value_map = assigns.value || %{}
     languages = field.languages || []
@@ -116,37 +110,18 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
             <%= lang %><%= if @warning && @warning.primary == lang,
               do: " " <> gettext("(primary, missing)") %>
           </label>
-          <%= if @format == :rich do %>
-            <div id={"bp-rt-wrap-#{@field.name}-#{lang}" <> if(@wrap_key == "", do: "", else: "-" <> @wrap_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
-              <input
-                type="hidden"
-                id={lang_id(@id_base, @base_id, lang)}
-                name={input_name(@base_path, lang)}
-                value={Map.get(@value_map, lang, "")}
-                phx-debounce="500"
-                data-lang={lang}
-              />
-              <%!-- The row's label names the hidden input, so the editor body
-                    is named here: "<field> (<lang>)" (task-05710d91d03d7fc9). --%>
-              <bp-rich-text-editor
-                value={Map.get(@value_map, lang, "")}
-                data-bridge-target={lang_id(@id_base, @base_id, lang)}
-                data-lang={lang}
-                data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}
-                data-label={"#{@title} (#{lang})"}
-                class="bp-localized-rich"
-              ></bp-rich-text-editor>
-            </div>
-          <% else %>
-            <textarea
-              class={textarea_class(@format)}
-              id={lang_id(@id_base, @base_id, lang)}
-              name={input_name(@base_path, lang)}
-              phx-change={@on_change}
-              disabled={@readonly}
-              data-lang={lang}
-            ><%= Map.get(@value_map, lang, "") %></textarea>
-          <% end %>
+          <.lang_control
+            field_name={@field.name}
+            lang={lang}
+            format={@format}
+            value={Map.get(@value_map, lang, "")}
+            id={lang_id(@id_base, @base_id, lang)}
+            name={input_name(@base_path, lang)}
+            on_change={@on_change}
+            readonly={@readonly}
+            wrap_key={@wrap_key}
+            title={@title}
+          />
           <%= for err <- lang_errors(@errors, lang) do %>
             <span class="error" data-error-for={lang}><%= err %></span>
           <% end %>
@@ -154,6 +129,73 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
       <% end %>
     </fieldset>
     """
+  end
+
+  @doc """
+  One language's control: a `<textarea>` for plain text, or the rich-text
+  editor bridged through a hidden input. The rows here and the desk's tabs
+  (`LocalizedTabs`) draw the same one. `:aria_label` names a textarea that
+  has no `<label>` of its own (the desk's tab panel).
+  """
+  attr :field_name, :string, required: true
+  attr :lang, :string, required: true
+  attr :format, :atom, default: :plain
+  attr :value, :string, default: ""
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :on_change, :string, default: nil
+  attr :readonly, :boolean, default: false
+  attr :wrap_key, :string, default: ""
+  attr :title, :string, default: ""
+  attr :aria_label, :string, default: nil
+
+  def lang_control(assigns) do
+    ~H"""
+    <%= if @format == :rich do %>
+      <div id={"bp-rt-wrap-#{@field_name}-#{@lang}" <> if(@wrap_key == "", do: "", else: "-" <> @wrap_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+        <input
+          type="hidden"
+          id={@id}
+          name={@name}
+          value={@value}
+          phx-debounce="500"
+          data-lang={@lang}
+        />
+        <%!-- The row's label names the hidden input, so the editor body
+              is named here: "<field> (<lang>)" (task-05710d91d03d7fc9). --%>
+        <bp-rich-text-editor
+          value={@value}
+          data-bridge-target={@id}
+          data-lang={@lang}
+          data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}
+          data-label={"#{@title} (#{@lang})"}
+          class="bp-localized-rich"
+        ></bp-rich-text-editor>
+      </div>
+    <% else %>
+      <textarea
+        class={textarea_class(@format)}
+        id={@id}
+        name={@name}
+        phx-change={@on_change}
+        disabled={@readonly}
+        data-lang={@lang}
+        aria-label={@aria_label}
+      ><%= @value %></textarea>
+    <% end %>
+    """
+  end
+
+  @doc false
+  def defaults(assigns) do
+    assigns
+    |> Map.put_new(:value, %{})
+    |> Map.put_new(:errors, %{})
+    |> Map.put_new(:on_change, nil)
+    |> Map.put_new(:path, "")
+    |> Map.put_new(:readonly, false)
+    |> Map.put_new(:wrap_key, "")
+    |> Map.put_new(:id_base, nil)
   end
 
   # ─── private ────────────────────────────────────────────────────────────────

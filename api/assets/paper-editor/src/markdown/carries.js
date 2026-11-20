@@ -8,8 +8,9 @@
 // markdownToBlocks(text) in place of the document. So it may open only where that
 // round trip gives the document back: every character, every mark on a character,
 // every link, every checked state, every block, every item child and every slot. There
-// is no list of shapes here; the round trip itself is the check, as in the BPML print
-// wall (Barkpark.PortableDoc.Bpml.RoundTrip).
+// is no list of shapes here; the round trip itself is the check, as in BPML's own law
+// (Barkpark.PortableDoc.Bpml: printing a block tree and parsing it back gives the same
+// tree, held by the property test in bpml_test.exs).
 //
 // Four spellings are the same content and are compared as one (and an `id` the save
 // gives a nested block that had none is not a loss: nothing stored goes):

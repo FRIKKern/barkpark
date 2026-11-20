@@ -26,7 +26,8 @@ describe('renderPage proof lights', () => {
   it('prints each wait on the sheet the run measured short, bound to its view and tokens, and drops it when the sheet delivers', () => {
     const w = { ...SHEET_WAITS.find((x) => x.skin === 'fjord' && x.scheme === 'light') }
     const weak = page({ hash: 'h1', lights: allOn, measures: { waits: [{ ...w, now: 3.75 }] } })
-    expect(weak).toContain(`waiting on the sheet: --ui-muted-foreground on --ui-background, fjord light on primary, 3.75:1, needs 4.5:1 (${w.task})`)
+    expect(weak).toContain(`waiting on the sheet: --ui-muted-foreground on --ui-background, fjord light on primary, 3.75:1, needs 4.5:1, until the sheet makes muted text on the primary surface readable in every skin`)
+    expect(weak).toContain(`data-task="${w.task}"`)
     const strong = page({ hash: 'h1', lights: allOn, measures: { waits: [{ ...w, now: 4.6 }] } })
     expect(strong).not.toContain('waiting on the sheet')
   })
@@ -47,7 +48,7 @@ describe('renderPage proof lights', () => {
 
   it('binds every wait to one skin, scheme, surface and token pair, with the number it measured', () => {
     for (const w of SHEET_WAITS) {
-      expect(Object.keys(w).sort()).toEqual(['ground', 'measured', 'needs', 'scheme', 'skin', 'surface', 'task', 'text'])
+      expect(Object.keys(w).sort()).toEqual(['ground', 'measured', 'needs', 'scheme', 'skin', 'surface', 'task', 'text', 'until'])
       expect(SURFACES).toContain(w.surface)
       expect(w.measured).toBeLessThan(w.needs)
     }
