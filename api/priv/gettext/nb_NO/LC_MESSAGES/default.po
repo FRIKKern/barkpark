@@ -15856,3 +15856,28 @@ msgid "1 more task to do is not shown"
 msgid_plural "%{count} more tasks to do are not shown"
 msgstr[0] "1 oppgave til vises ikke"
 msgstr[1] "%{count} oppgaver til vises ikke"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:39
+#, elixir-autogen, elixir-format
+msgid "Global presence"
+msgstr "Global tilstedeværelse"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:40
+#, elixir-autogen, elixir-format
+msgid "Who is here"
+msgstr "Hvem er her"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:56
+#, elixir-autogen, elixir-format
+msgid "No one else is here"
+msgstr "Ingen andre er her"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:57
+#, elixir-autogen, elixir-format
+msgid "Invite people to the project to see their online status."
+msgstr "Inviter folk til prosjektet for å se om de er pålogget."
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:69
+#, elixir-autogen, elixir-format
+msgid "Not in a document"
+msgstr "Ikke i et dokument"
