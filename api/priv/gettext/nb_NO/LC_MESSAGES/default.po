@@ -6338,7 +6338,7 @@ msgstr "Bare lesing: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}
 #: lib/barkpark_web/studio_locale.ex:831
 #, elixir-autogen, elixir-format
 msgid "Read only: this callout has a body, which the editor cannot edit yet."
-msgstr "Bare lesing: denne merknadsboksen har en brødtekst som redigereren ikke kan redigere ennå."
+msgstr "Bare lesing: denne merknadsboksen har en brødtekst som redigeringsverktøyet ikke kan endre ennå."
 
 #: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
