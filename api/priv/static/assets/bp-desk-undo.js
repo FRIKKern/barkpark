@@ -5,10 +5,11 @@
 // the changes and writes the undo (`BarkparkWeb.Studio.Desk.DocUndo`).
 //
 // THE KEY. Mod+Z in a field the server keeps an undo for (the form's
-// `data-desk-undo-keys`: top-level free text), anywhere else in the editing
-// pane that is not an input (its header, a label, a button), or with nothing
-// focused, is the document's. Every other input (a slug, a url, a number, a
-// nested or list string) keeps the browser's own undo: taking the key there
+// `data-desk-undo-keys`: free text, a slug, a select, a list, an object,
+// and the text inputs and selects nested in them), anywhere else in the
+// editing pane that is not an input (its header, a label, a button), or with
+// nothing focused, is the document's. Every other input (a url, a number, a
+// widget's own box) keeps the browser's own undo: taking the key there
 // would undo another field and leave this one's typing with no undo at all.
 // Rich text and a canvas keep their own undo: a key one of them took
 // (defaultPrevented) or one pressed in a contenteditable is left alone, and
@@ -27,8 +28,12 @@
 // undo reads it. `desk-undo` names the document the page shows
 // (`BarkparkDocMark`) and goes through the desk's hook (`bpPush`, bp-desk.js).
 //
-// THE ANSWER. `desk:undone` names the field, its new value and the value it
-// showed. The field takes the new value only while it still shows that one
+// THE ANSWER. `desk:undone` names the input (a list or an object: the field's
+// wrapper, by `path`, its name), its new value and the value it showed (none
+// for a list: the server's render draws it). A field in an object item's
+// closed dialog has the dialog opened first, as a click on the item does; a
+// dialog that cannot be opened has the change put back (a redo), so nothing
+// is changed out of sight. The field takes the new value only while it still shows that one
 // (a LiveView patch leaves the focused input alone), the caret goes to the
 // end of what changed, and the focus goes into the field, as TanStack's. A
 // field on a group tab that was not shown arrives drawn, on its tab, with the
@@ -54,13 +59,20 @@
 
   var FIELD = /^(INPUT|TEXTAREA|SELECT)$/;
 
-  // Whether `el` is a text field the server keeps an undo for, and one the
+  // Whether `el` is a field of one the server keeps an undo for (its own
+  // input, or one nested in it: an object's, a list item's), and one the
   // user can write in now (a read-only one is the browser's).
   function kept(f, el) {
     if (el.readOnly || el.disabled) return false;
-    var text = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type));
     var keys = (f.getAttribute("data-desk-undo-keys") || "").split(/\s+/);
-    return text && !!el.name && keys.indexOf(el.name) !== -1;
+    var top = /^doc\[[^\]]+\]/.exec(el.name || "");
+    return valued(el) && !!top && keys.indexOf(top[0]) !== -1;
+  }
+
+  // A field whose value the user types or picks: a text input, a textarea,
+  // a select.
+  function valued(el) {
+    return el.tagName === "TEXTAREA" || el.tagName === "SELECT" || (el.tagName === "INPUT" && TEXT.test(el.type));
   }
 
   // Whether `el` is drawn where the user can see it: not in a pane folded to
@@ -200,25 +212,101 @@
     });
   }
 
+  // What the answer names: the input itself; for a list, or an object with
+  // no input of its own, the field's wrapper (`path`, its name), found
+  // whether or not an input is left in it (an undo can empty a list); with
+  // no wrapper, the first input inside it.
+  function named(f, d) {
+    var el = typeof d.field === "string" ? f.elements.namedItem(d.field) : null;
+    if (el && el.tagName) return el;
+    var w = typeof d.path === "string" ? wrapper(f, d.path) : null;
+    if (w) return w;
+    for (var i = 0; typeof d.field === "string" && i < f.elements.length; i++) {
+      var x = f.elements[i];
+      if (x.name && x.name.indexOf(d.field + "[") === 0) return x;
+    }
+    return null;
+  }
+
+  // A top-level field's wrapper (`data-field-name`, under no other field).
+  function wrapper(f, name) {
+    var all = f.querySelectorAll("[data-field-name]");
+    for (var i = 0; i < all.length; i++) {
+      var w = all[i];
+      if (w.getAttribute("data-field-name") !== name) continue;
+      var up = w.parentElement && w.parentElement.closest(".bp-field");
+      if (!up || !f.contains(up)) return w;
+    }
+    return null;
+  }
+
+  // Where the focus goes for `el`: the input itself, or in a wrapper the
+  // first control the user can reach (not one in a shut item dialog), else
+  // the wrapper.
+  function focusable(el) {
+    if (FIELD.test(el.tagName) || el.tagName === "BUTTON") return el;
+    var all = el.querySelectorAll("input, select, textarea, button");
+    for (var i = 0; i < all.length; i++) {
+      var c = all[i];
+      var box = c.closest("dialog");
+      if (!c.disabled && c.type !== "hidden" && (!box || box.open)) return c;
+    }
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    return el;
+  }
+
+  // The shut item dialogs around `el`, outermost first (`ArrayItemDialog`:
+  // an object item's fields stay in the form inside its <dialog>).
+  function shutDialogs(el) {
+    var shut = [];
+    for (var n = el.closest("dialog"); n; n = n.parentElement && n.parentElement.closest("dialog")) {
+      if (!n.open && n.hasAttribute("data-desk-item-dialog")) shut.unshift(n);
+    }
+    return shut;
+  }
+
+  // Opens each as a click on the item's preview does (bp-desk-array-menu.js);
+  // whether they all opened.
+  function openDialogs(f, el) {
+    return shutDialogs(el).every(function (dialog) {
+      var preview = f.querySelector('[data-desk-item-open="' + dialog.id + '"]');
+      if (preview) preview.click();
+      if (!dialog.open && typeof dialog.showModal === "function") {
+        try {
+          dialog.showModal();
+        } catch (_) {
+          // Not in the document's tree, or already open elsewhere.
+        }
+      }
+      return dialog.open;
+    });
+  }
+
   function onUndone(e) {
     var d = (e && e.detail) || {};
     var f = form();
-    var el = f && typeof d.field === "string" ? f.elements.namedItem(d.field) : null;
-    if (!el || !el.tagName || typeof el.focus !== "function") return;
-    var text = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type));
+    var el = f ? named(f, d) : null;
+    if (!el || !el.tagName) return;
+    unstrip(el);
+    // A field in an item dialog that cannot be opened is not changed out of
+    // sight: the change goes back in (a redo).
+    if (!openDialogs(f, el)) return run(true);
+    var text = valued(el);
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
-    unstrip(el);
     unfold(el);
-    if (document.activeElement !== el) el.focus();
+    var to = focusable(el);
+    if (document.activeElement !== to && typeof to.focus === "function") to.focus();
     // Drawn with the new value already (the undo switched to its tab): the
     // caret still goes to the change.
     if (set || (text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.value))) {
       var at = end(lf(d.was), lf(d.value));
-      try {
-        el.setSelectionRange(at, at);
-      } catch (_) {
-        // A type with no caret.
+      if (typeof el.setSelectionRange === "function") {
+        try {
+          el.setSelectionRange(at, at);
+        } catch (_) {
+          // A type with no caret.
+        }
       }
     }
   }

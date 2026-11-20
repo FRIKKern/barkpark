@@ -62,7 +62,19 @@ defmodule BarkparkWeb.ChatHostEnrollReasonTest do
     error = refusal(issued.enrollment_token)
     assert error["details"]["reason"] == "expired"
     assert error["message"] =~ "expired"
-    assert error["message"] =~ "Make a new code"
+    assert error["message"] =~ "bp chat-host new-code"
+  end
+
+  test "a code whose machine enrolled and was then revoked is refused as revoked, not used",
+       %{ws: ws} do
+    issued = issue(ws)
+    assert enroll(issued.enrollment_token).status == 201
+    {:ok, _} = ChatHosts.revoke(ws.id, issued.host.id)
+
+    error = refusal(issued.enrollment_token)
+    assert error["details"]["reason"] == "revoked"
+    assert error["message"] =~ "register it again"
+    refute error["message"] =~ "barkpark-chat-host run"
   end
 
   test "a code whose host was revoked and registered again is refused as replaced", %{ws: ws} do

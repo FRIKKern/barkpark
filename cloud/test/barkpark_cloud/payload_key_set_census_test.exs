@@ -1093,8 +1093,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   @reconciled [
     {"barkpark_json/6", :unread, "provision_steps",
      "BROWSER-ONLY. The /new page's refresh-durable provisioning narration (dwb-14); app.js reads provision_steps/provision_console at 17 call sites. `bp` narrates provisioning off its own poll, so decoding a live step list into a Go struct would be a SECOND renderer of the same bytes."},
-    {"barkpark_json/6", :unread, "provision_console",
-     "BROWSER-ONLY, same reader as provision_steps above (dwb-16)."},
+    # `provision_console` LEFT THIS LIST (task-9de1dbcf13951044): Go now decodes
+    # it (`cloudclient.Barkpark.ProvisionConsole`) and `bp cloud status` reads ONE
+    # line of it, the warm-or-cold line a Hetzner launch writes
+    # (internal/cli/cloud/launch_host_line.go). It is not a second console
+    # renderer; the browser still owns that.
     {"site_deployment_json/3", :unread, "console",
      "BROWSER-ONLY. gh-5's live build console; the CLI streams its own lines from the deploy stream rather than re-rendering this list."},
     {"barkpark_json/6", :phantom, "team",
@@ -2152,7 +2155,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # (`ready`, `worker_target`, `worker_pool`, `worker_seen_at`,
   # `worker_seen_ago_s`). None rides an existing name, so the SITE register
   # does not move. MEASURED by the PIN CO-EDIT arm ("437 -> 442").
-  @go_tag_pinned 442
+  # 442 -> 444 (task-9de1dbcf13951044, `bp cloud status` says warm or new
+  # server): `Barkpark.ProvisionConsole` and its `ProvisionConsoleLine` decode
+  # TWO new NAMES, `provision_console` and `line`. The entry's `at` is not
+  # decoded, so the SITE register does not move. The :unread row for
+  # `provision_console` left @reconciled in the same change. MEASURED by the
+  # PIN CO-EDIT arm on the tree merged with #27647 ("999 -> 444").
+  @go_tag_pinned 444
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2694,7 +2703,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # task-48a556bfbe221dcf: warm_pool.go added, the client half of
   # `bp cloud warm-pool`. Its five tags are all new NAMES, so only
   # `@go_tag_pinned` moves.
-  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go warm_pool.go)
+  # task-9de1dbcf13951044: provision_console.go added (ProvisionConsoleLine, one
+  # `line` tag). Same: only `@go_tag_pinned` moves.
+  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go media_sha1_backfill.go provision_console.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go token_seat_restore.go tokens.go warm_pool.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

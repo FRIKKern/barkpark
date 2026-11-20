@@ -5,8 +5,11 @@
 //
 // A query is Barkpark's older form, a type and a query string
 // (`post?filter[title][contains]=x&limit=5`, GET …/v1/data/query/<ds>/<type>),
-// or else GROQ, sent in the query parameter of GET …/v1/data/groq/<ds>: so
-// nothing typed ever becomes a path. Reads only. It runs once a page, from the
+// or else GROQ, sent in the query parameter of GET …/v<apiVersion>/data/query/<ds>
+// (Sanity's address): so nothing typed ever becomes a path. Reads only. The
+// dataset and API version are picked beside the perspective, as TanStack's, and
+// Params is a JSON object whose keys the query names as $key: each goes as
+// $key=<JSON>, as Sanity's client sends them, so a value is never a path. It runs once a page, from the
 // desk hook's loader; everything is delegated from the document, so a page
 // drawn after it loaded works the same.
 (function () {
@@ -18,6 +21,8 @@
   // The GROQ read answers a longer GET with 414 (docs/contracts/groq-query.md).
   var MAX_URL = 32753;
   var PERSPECTIVES = ["raw", "published", "drafts"];
+  // An API version as sent: Sanity's 1, X or a date (lib/vision-groq.ts).
+  var VERSION = /^v(1|X|\d{4}-\d{2}-\d{2})$/;
   // A big array or object draws this many entries, then "Show n more".
   var CHUNK = 100;
   // Open this deep, as Sanity's: GROQ's result is the tree; the query string's
@@ -35,45 +40,175 @@
     return root.querySelector(sel);
   };
 
-  /** What a query reads: {error} or {path, groq}. Pure, so the host tests load it. */
-  var target = function (api, dataset, text, perspective) {
+  var today = function () {
+    return "v" + new Date().toISOString().split("T")[0];
+  };
+
+  /** A version typed under "Other" (Sanity's validateApiVersion): the "v" optional, 1, X or a date. As sent, or null. */
+  var customApiVersion = function (text) {
+    var v = String(text || "").replace(/^v/, "").trim().toUpperCase();
+    if (v === "1" || v === "X") return "v" + v;
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)) ? "v" + v : null;
+  };
+
+  /** The Params box as an object, or why not ({error, detail}): JSON, as TanStack's; blank is none. */
+  var parseParams = function (text) {
+    if (!String(text || "").trim()) return { params: {} };
+    try {
+      var v = JSON.parse(text);
+    } catch (e) {
+      return { error: "params-json", detail: (e && e.message) || "" };
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) return { error: "params-object" };
+    return { params: v };
+  };
+
+  // The query-string form's $key: the value, a list comma-joined (Barkpark's `in`), encoded where it is put.
+  var valueOf = function (v) {
+    return Array.isArray(v) ? v.map(String).join(",") : v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  };
+
+  /** What a query reads, under the project's `scope` path: {error} or {path, groq, shown}; `shown`, the Query URL, keeps a query string's brackets as typed (TanStack's). Pure, so the host tests load it. */
+  var target = function (scope, dataset, text, perspective, version, given) {
+    var values = given || {};
     var raw = String(text || "").trim();
     if (!raw) return { error: "empty" };
     var p = PERSPECTIVES.indexOf(perspective) >= 0 ? perspective : "drafts";
     var ds = encodeURIComponent(dataset);
-    var path, groq;
+    var path, groq, shown;
     if (QUERY_STRING.test(raw)) {
       var at = raw.indexOf("?");
       var type = at < 0 ? raw : raw.slice(0, at);
-      var params = new URLSearchParams(at < 0 ? "" : raw.slice(at + 1));
+      var missing = null;
+      var qs = (at < 0 ? "" : raw.slice(at + 1)).replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, function (all, key) {
+        if (Object.prototype.hasOwnProperty.call(values, key)) return encodeURIComponent(valueOf(values[key]));
+        return (missing = missing || key), all;
+      });
+      if (missing) return { error: "params-missing", name: missing };
+      var params = new URLSearchParams(qs);
       if (!params.has("perspective")) params.set("perspective", p);
-      path = api + "/query/" + ds + "/" + type + "?" + params.toString();
+      path = scope + "/v1/data/query/" + ds + "/" + type + "?" + params.toString();
+      shown = scope + "/v1/data/query/" + ds + "/" + type + "?" + decodeURIComponent(params.toString());
       groq = false;
     } else {
-      path = api + "/groq/" + ds + "?" + new URLSearchParams({ query: raw, perspective: p }).toString();
+      var v = VERSION.test(version) ? version : today();
+      var sent = new URLSearchParams({ query: raw });
+      for (var key in values) if (Object.prototype.hasOwnProperty.call(values, key)) sent.set("$" + key, JSON.stringify(values[key]));
+      sent.set("perspective", p);
+      path = scope + "/" + v + "/data/query/" + ds + "?" + sent.toString();
       groq = true;
     }
     if (path.length > MAX_URL) return { error: "long" };
-    return { path: path, groq: groq };
+    return { path: path, groq: groq, shown: shown || path };
+  };
+
+  /** The version a run sends: the picked one, or under "Other" the last typed that read as one. */
+  var version = function (root) {
+    var pick = part(root, "[data-vision-version]");
+    if (!root.__version) root.__version = pick.value === "other" ? today() : pick.value;
+    return pick.value === "other" ? root.__version : pick.value;
+  };
+
+  // Params that are not a JSON object tint their pane, say why on its icon (and in the result, on a
+  // Fetch), and Fetch waits until they are, as TanStack's. Returns what parseParams read.
+  var checkParams = function (root) {
+    var box = part(root, "[data-vision-params]");
+    var read = parseParams(box ? box.value : "");
+    var why = read.error ? (read.error === "params-json" ? word(root, "params-json", { detail: read.detail }) : word(root, "params-object")) : "";
+    if (box) {
+      box.closest("[data-vision-params-pane]").toggleAttribute("data-invalid", !!why);
+      box.setAttribute("aria-invalid", why ? "true" : "false");
+      var icon = part(root, "[data-vision-params-error]");
+      icon.hidden = !why;
+      icon.title = why;
+    }
+    root.__badParams = !!why;
+    fetchState(root);
+    return why ? { error: why } : read;
+  };
+
+  // Fetch is aria-disabled while a run is out or Params are not an object.
+  var fetchState = function (root) {
+    var button = part(root, "[data-vision-fetch]");
+    root.__busy || root.__badParams ? button.setAttribute("aria-disabled", "true") : button.removeAttribute("aria-disabled");
   };
 
   var remember = function (root) {
+    var params = part(root, "[data-vision-params]");
     try {
-      localStorage.setItem(KEY, JSON.stringify({ query: part(root, "textarea").value, perspective: part(root, "[data-vision-perspective]").value }));
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          query: part(root, "#dk-vision-query").value,
+          params: params ? params.value : undefined,
+          perspective: part(root, "[data-vision-perspective]").value,
+          dataset: part(root, "[data-vision-dataset]").value,
+          version: version(root),
+        })
+      );
     } catch (_e) {}
   };
 
-  // The last query and perspective stay in this browser, as TanStack's.
+  // "Other" shows the field for a typed version, as Sanity's: it starts as "v", not yet one.
+  var other = function (root, text) {
+    var field = part(root, "[data-vision-custom]");
+    var input = field.querySelector("input");
+    field.hidden = text === null;
+    if (text === null) return;
+    input.value = text;
+    input.setAttribute("aria-invalid", customApiVersion(text) ? "false" : "true");
+  };
+
+  var pickDataset = function (root) {
+    part(root, "[data-vision-json]").setAttribute("download", "vision-" + part(root, "[data-vision-dataset]").value + ".json");
+  };
+
+  // A picker changed, or "Other"'s version was typed.
+  var picked = function (root, el) {
+    if (el.hasAttribute("data-vision-version")) {
+      if (el.value === "other") other(root, "v");
+      else (other(root, null), (root.__version = el.value));
+    } else if (el.hasAttribute("data-vision-dataset")) {
+      pickDataset(root);
+    } else if (el.hasAttribute("data-vision-params")) {
+      checkParams(root);
+    } else if (el.closest("[data-vision-custom]")) {
+      var v = customApiVersion(el.value);
+      el.setAttribute("aria-invalid", v ? "false" : "true");
+      if (v) root.__version = v;
+    }
+  };
+
+  var option = function (select, value) {
+    for (var i = 0; i < select.options.length; i++) if (select.options[i].value === value) return select.options[i];
+    return null;
+  };
+
+  // The last query, perspective, dataset and API version stay in this browser, as TanStack's.
   var init = function (root) {
     if (root.__visionReady) return;
     root.__visionReady = true;
     try {
       var kept = JSON.parse(localStorage.getItem(KEY) || "null");
       // Not over what was typed before this script came.
-      var box = part(root, "textarea");
+      var box = part(root, "#dk-vision-query");
       if (kept && typeof kept.query === "string" && kept.query.trim() && box.value === box.defaultValue) box.value = kept.query;
+      var params = part(root, "[data-vision-params]");
+      if (params && kept && typeof kept.params === "string" && params.value === params.defaultValue) params.value = kept.params;
       if (kept && PERSPECTIVES.indexOf(kept.perspective) >= 0) part(root, "[data-vision-perspective]").value = kept.perspective;
+      // A kept dataset only if this page lists it for this token; a kept version as listed, or as typed.
+      var ds = kept && option(part(root, "[data-vision-dataset]"), kept.dataset);
+      if (ds && !ds.disabled) (part(root, "[data-vision-dataset]").value = kept.dataset), pickDataset(root);
+      var pick = part(root, "[data-vision-version]");
+      if (kept && kept.version !== "other" && option(pick, kept.version)) {
+        pick.value = kept.version;
+      } else if (kept && customApiVersion(kept.version)) {
+        pick.value = "other";
+        root.__version = customApiVersion(kept.version);
+        other(root, root.__version);
+      }
     } catch (_e) {}
+    checkParams(root);
   };
 
   var el = function (doc, tag, cls, text) {
@@ -223,35 +358,39 @@
 
   var fetchIt = function (root) {
     // One run at a time, as TanStack's Fetch. Not `disabled`: that would take focus off the
-    // button it was pressed with, to the page's body.
+    // button it was pressed with, to the page's body. Fetch is `aria-disabled` while busy,
+    // which Playwright's toBeEnabled() also reads as not enabled.
     if (root.__busy) return;
     init(root);
     remember(root);
-    var query = part(root, "textarea").value;
-    var to = target(root.getAttribute("data-api"), root.getAttribute("data-dataset"), query, part(root, "[data-vision-perspective]").value);
+    var query = part(root, "#dk-vision-query").value;
+    // Params that are not an object send nothing: the result says why.
+    var given = checkParams(root);
+    var to = given.error
+      ? { error: "params", text: given.error }
+      : target(root.getAttribute("data-scope"), part(root, "[data-vision-dataset]").value, query, part(root, "[data-vision-perspective]").value, version(root), given.params);
     var seq = (root.__seq = (root.__seq || 0) + 1);
     var url = part(root, "[data-vision-url]");
     // "Copied" was said of the URL before this one.
     part(root, "[data-vision-copied]").textContent = "";
     if (to.error) {
       url.hidden = true;
-      return show(root, { query: query }, { error: word(root, to.error) });
+      return show(root, { query: query }, { error: to.text || word(root, to.error, { name: to.name }) });
     }
-    var href = root.ownerDocument.location.origin + to.path;
+    var href = root.ownerDocument.location.origin + to.shown;
     url.hidden = false;
-    part(root, "#dk-vision-url").value = href;
+    part(root, "#vision-url").value = href;
     var result = part(root, ".dk-vision-result");
-    var button = part(root, "[data-vision-fetch]");
     result.setAttribute("aria-busy", "true");
     root.__busy = true;
-    button.setAttribute("aria-disabled", "true");
+    fetchState(root);
     var t0 = performance.now();
     var run = { query: query.trim(), groq: to.groq };
     var done = function (answer) {
       if (seq !== root.__seq) return;
       result.setAttribute("aria-busy", "false");
       root.__busy = false;
-      button.removeAttribute("aria-disabled");
+      fetchState(root);
       answer.total = Math.round(performance.now() - t0);
       show(root, run, answer);
     };
@@ -273,7 +412,7 @@
   };
 
   var copy = function (root) {
-    var input = part(root, "#dk-vision-url");
+    var input = part(root, "#vision-url");
     var said = part(root, "[data-vision-copied]");
     var tell = function (ok) {
       said.textContent = word(root, ok ? "copied" : "not-copied");
@@ -337,13 +476,16 @@
 
   document.addEventListener("change", function (e) {
     var root = vision(e.target);
-    if (root) (init(root), remember(root));
+    if (root) (init(root), picked(root, e.target), remember(root));
   });
 
   // What is typed is kept as it is typed, as TanStack's.
   document.addEventListener("input", function (e) {
     var root = vision(e.target);
-    if (root && e.target.tagName === "TEXTAREA") (init(root), remember(root));
+    if (!root || (e.target.tagName !== "TEXTAREA" && !e.target.closest("[data-vision-custom]"))) return;
+    init(root);
+    picked(root, e.target);
+    remember(root);
   });
 
   document.addEventListener("focusin", function (e) {
@@ -353,5 +495,5 @@
 
   document.querySelectorAll("[data-desk-vision]").forEach(init);
 
-  window.BarkparkDeskVision = { target: target, frame: frame, fetchIt: fetchIt, init: init };
+  window.BarkparkDeskVision = { target: target, parseParams: parseParams, customApiVersion: customApiVersion, frame: frame, fetchIt: fetchIt, init: init };
 })();

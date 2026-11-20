@@ -139,7 +139,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # The desk's Vision: the desk's page with the query tool for its panes.
       params["panes"] == ["_tools", "vision"] ->
         {:noreply, socket} = follow(Map.delete(params, "panes"), uri, socket)
-        {:noreply, assign(socket, desk_tool: :vision, page_title: gettext("Vision"))}
+
+        {:noreply,
+         assign(socket,
+           desk_tool: :vision,
+           page_title: gettext("Vision"),
+           vision_datasets: Vision.datasets(socket.assigns)
+         )}
 
       true ->
         follow(params, uri, socket)
@@ -207,6 +213,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         desk_base: base,
         desk_uri: uri,
         desk_tool: nil,
+        vision_datasets: [],
         titles: titles,
         page_title: titles[last.id] || kept_title(socket.assigns, last) || last.title
       )
@@ -347,7 +354,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # A typed edit of the form: the editor's, and a step of the document's
   # undo when it landed (`DocUndo`).
   def handle_event("autosave" = event, params, socket),
-    do: event |> EditorHost.handle_event(params, socket) |> DocUndo.record(params, socket)
+    do:
+      DocUndo.around(event, params, socket, fn ->
+        EditorHost.handle_event(event, params, socket)
+      end)
 
   # The document's undo and redo, Mod+Z and Shift+Mod+Z (`DocUndo`).
   def handle_event("desk-undo", params, socket), do: DocUndo.handle_event(params, socket)
@@ -373,7 +383,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-scope-" <> _ = event, params, socket),
     do: ScopeSwitch.handle_event(event, params, socket)
 
-  def handle_event(event, params, socket), do: EditorHost.handle_event(event, params, socket)
+  # The rest is the editor's; a list's buttons (`array_op`) are a step of the
+  # document's undo when they landed (`DocUndo`).
+  def handle_event(event, params, socket),
+    do:
+      DocUndo.around(event, params, socket, fn ->
+        EditorHost.handle_event(event, params, socket)
+      end)
 
   # The lit hit's index from the form: one of the hits, else the first.
   defp lit(index, hits) do
@@ -547,7 +563,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
       phx-hook="Desk"
     >
       <%!-- The desk's Vision (`Desk.Vision`) in place of the panes. --%>
-      <Vision.tool :if={@desk_tool == :vision} dataset={@dataset} scope_prefix={@scope_prefix} />
+      <Vision.tool
+        :if={@desk_tool == :vision}
+        dataset={@dataset}
+        datasets={@vision_datasets}
+        scope_prefix={@scope_prefix}
+      />
       <%!-- One loop, so the panes are in the page in chain order: the layout
             and the keys read that order. --%>
       <%= for view <- @desk_panes, @desk_tool != :vision do %>

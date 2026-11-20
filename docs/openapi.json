@@ -104,6 +104,7 @@
             "properties": {
               "code": {
                 "enum": [
+                  "already_enrolled",
                   "ambiguous_dataset",
                   "bad_request",
                   "batch_too_large",

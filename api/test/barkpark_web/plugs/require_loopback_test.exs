@@ -7,8 +7,9 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackTest do
   `conn.remote_ip` is loopback for EVERY request, including ones from the open
   internet. The inherited gate read exactly that raw peer, which meant the
   route served drafts and private types to anyone, tokenless (proven live
-  2026-07-26). The fix gates on `Barkpark.RateLimiter.client_ip/1`, the one
-  canonical `x-forwarded-for` resolver.
+  2026-07-26). The gate reads the forwarded chain itself
+  (`RequireLoopback.local_client?/1`); every shape of it is a row in
+  `require_loopback_rows_test.exs`.
 
   PROTECTIVE, not vacuous — substitute the old read
   (`loopback?(conn.remote_ip)` on the raw tuple) and "a public caller relayed
@@ -16,7 +17,7 @@ defmodule BarkparkWeb.Plugs.RequireLoopbackTest do
   loopback peer admits everyone the proxy fronts.
 
   `async: false`: one test moves the global `:trusted_proxies` config, which
-  `client_ip/1` reads.
+  the gate must not need to refuse a relayed public caller.
   """
   use ExUnit.Case, async: false
 
