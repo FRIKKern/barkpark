@@ -190,6 +190,21 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     forward(test, topic, only)
   end
 
+  # The list and relations topics hear a write only through the jobs it
+  # leaves after commit (the block-op batch's settle burst, the edge
+  # projection), so each listening row runs them before it counts frames: a
+  # landed write is then heard on every topic, and a refused one leaves
+  # nothing to run.
+  defp drain_jobs! do
+    for queue <- [:default, :edge_projector],
+        do: Oban.drain_queue(queue: queue, with_scheduled: true)
+  end
+
+  defp assert_heard!(topics) do
+    for topic <- topics, do: assert_receive({:heard, ^topic, _frame}, 1_000)
+    flush_heard()
+  end
+
   defp flush_heard do
     receive do
       {:heard, _topic, _frame} -> flush_heard()
@@ -221,13 +236,15 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     {bpml, rev} = pull!(slug)
     topics = listen!(slug, paper.workspace_id)
 
-    # Control: a push that keeps a visible block lands and is heard.
+    # Control: a push that keeps a visible block lands and is heard on every
+    # topic, the Paper's own with its block frame.
     edited = String.replace(bpml, "Visible.", "Edited.")
     refute edited == bpml
     answer = sync(slug, edited, rev) |> json_response(200)
     paper_topic = hd(topics)
     assert_receive {:heard, ^paper_topic, {:paper_block, _frame}}, 1_000
-    flush_heard()
+    drain_jobs!()
+    assert_heard!(topics)
     {pulled, next_rev} = pull!(slug)
     assert answer["bpml"] == pulled
     assert answer["rev"] == next_rev
@@ -239,6 +256,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     resp = sync(slug, emptied, next_rev)
     assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
     assert trace(slug) == before
+    drain_jobs!()
     refute_receive {:heard, _topic, _frame}, 200
   end
 
@@ -246,13 +264,22 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     {source, bpml} = creatable_bpml!([heading(), heading("h2", @second)])
     schema!(default_scope(), true)
     slug = slug("create-rollback")
-    listen!(slug, Tenancy.get_default_workspace().id)
+    topics = listen!(slug, Tenancy.get_default_workspace().id)
     jobs = Repo.aggregate(Oban.Job, :count)
+    bpml = String.replace(bpml, source, slug)
 
-    resp = sync(slug, String.replace(bpml, source, slug), "0")
+    resp = sync(slug, bpml, "0")
     assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
     assert trace(slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
+    drain_jobs!()
     refute_receive {:heard, _topic, _frame}, 200
+
+    # Control: once the schema shows the headings, the same create lands and
+    # is heard on every topic.
+    schema!(default_scope(), false)
+    assert json_response(sync(slug, bpml, "0"), 200)["created"] == true
+    drain_jobs!()
+    assert_heard!(topics)
   end
 
   # The flat route, no workspace given: the row lands in the default

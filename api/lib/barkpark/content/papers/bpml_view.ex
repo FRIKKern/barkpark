@@ -30,7 +30,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
     semantic_empty: "the reader's view of this Paper is empty",
     hidden_block_id: "the reader may not see the ids this Paper's blocks are matched by",
-    scope_unresolved: "no reader schema resolves for the workspace and project this Paper is in",
+    scope_unresolved: "no reader schema resolves for this Paper's dataset, workspace and project",
     unreadable_print: "the reader's view of this Paper does not read back as BPML",
     redacted_source: "the reader may see none of this Paper's blocks",
     invalid_blocks: "a block of this Paper has no type"
