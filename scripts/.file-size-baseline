@@ -97,8 +97,8 @@ exempt templates/astro-search-starter/public/bp-graph.js :: byte-identical mirro
 2486 api/assets/paper-surface/paper-surface.css
 2454 scripts/chronicle-paper.py
 2440 internal/cli/cloud_support_cmd.go
-2420 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
 2394 scripts/crown-reconcile.sh
+2373 api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex
 2354 api/lib/barkpark/search/documents_retriever.ex
 2347 internal/cli/hetzner_lb_cmd.go
 2282 internal/cli/sites_cmd.go

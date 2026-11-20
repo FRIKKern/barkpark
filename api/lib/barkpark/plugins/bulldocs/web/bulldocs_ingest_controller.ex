@@ -91,11 +91,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
        Unchanged: the named workspace is used (the shared-secret producer that
        addresses a workspace by slug).
     3. **Nothing named anything, and the caller is a TOKEN** (the admin arm,
-       bound to no workspace). The ruled infer-or-refuse path of
-       task-6fa023cdabdc5f6a applies — `WriteScope.infer_write_workspace/1`:
-       the one workspace the credential can mean, else a typed 422
-       `workspace_scope_required` that writes nothing. NEVER the seeded
-       Default.
+       bound to no workspace). `WriteGate.seat/2`: the one workspace the
+       token is seated in (for sync and the op, proposal and session writes,
+       a seat in the default workspace wins among several), else a typed 422
+       `workspace_scope_required` that writes nothing. Never a workspace the
+       token holds no seat in.
     4. **Nothing named anything, and the caller is the SHARED SECRET** (no
        principal at all — `Secrets.ingest_token/0` is the instance-wide
        `:global` tier). It keeps the pipeline's Default, byte-identical: that
@@ -103,9 +103,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
        principal to infer from and refusing would refuse a write nobody can
        ever scope.
 
-  The READ twin (`resolve_scope/2` → `session_scope_opts/2`) follows the same
-  precedence with no refusal leg: a disagreeing request slug is dropped and the
-  pipeline's tenant stands.
+  Every writing action finds and stores rows only inside the scope the gate
+  approved (`write_scope_opts/1`). The READ twin (`session_scope_opts/2`), for
+  the actions that store nothing, drops a disagreeing slug.
   """
   use BarkparkWeb, :controller
 
@@ -183,7 +183,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
           }
         }
 
-        scope = paper_scope_opts(conn, params)
+        scope = session_scope_opts(conn, params)
 
         violations =
           paper_wall_violations(conn, ref, scope) ++ paper_structure_violations(blocks)
@@ -361,7 +361,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     bpml = params["bpml"]
     base_rev = params["baseRev"]
     dataset = params["dataset"] || Content.paper_default_dataset()
-    scope = paper_scope_opts(conn, params)
+    scope = write_scope_opts(conn)
 
     cond do
       not is_binary(bpml) ->
@@ -396,6 +396,18 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp sync_apply(conn, slug, parsed, base_rev, dataset, scope) do
     case Content.get_paper(slug, dataset, scope) do
+      nil when base_rev != "0" and is_map(conn.assigns.api_token) ->
+        conn
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "paper_not_in_scope",
+          message:
+            "no paper #{slug} where this token writes, but your copy anchored on rev " <>
+              "#{base_rev} — nothing was written",
+          hint:
+            "pull it with a token seated in the workspace that holds it, or start a new " <>
+              "paper here with bp paper new (it pushes from rev 0)"
+        })
+
       nil ->
         sync_create(conn, slug, parsed, dataset, scope)
 
@@ -873,14 +885,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # moving the 200/4xx renders behind an extra `ingest_body/2` hop made this route an
   # UNDISPOSED ARRIVAL and reddened the required Elixir gate. Keeping the accepting body
   # in `ingest/2` itself keeps the receipts where the census can see them.
-  # THE INGEST SCOPE RULE's gate (see the moduledoc). A controller plug, not a
-  # line in each action: the refusal is a property of {credential, request
-  # scope} alone, so running it once at the door keeps every action body
-  # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition.
-  # Halts on refusal; else the conn passes and `put_scope/3` re-resolves it.
+  # THE INGEST SCOPE RULE's gate (see the moduledoc), run at the door of every
+  # action that writes; only the actions that store nothing skip it, so an
+  # action added later is gated unless it is named here.
+  @scope_free_actions [:validate, :render_doc, :show_session]
+  @write_scope :bulldocs_write_scope
+  @doc false
+  def scope_free_actions, do: @scope_free_actions
   plug(Barkpark.Plugins.Bulldocs.Web.ScopeText)
   plug(:require_named_workspace_access)
-  plug(:require_resolvable_scope when action in [:ingest, :ingest_session, :create])
+  plug(:require_resolvable_scope when action not in @scope_free_actions)
 
   def create(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
   def create(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
@@ -903,7 +917,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   # Session auto-log (task-bc34e83515bbd91f): arm the before_send callback that
   # appends a `paper-published` event when `ingest/2`'s success arm `mark/3`ed
-  # the conn. Scoped by the SAME `session_scope_opts/2` the explicit
+  # the conn. Scoped by the SAME `write_scope_opts/1` the explicit
   # `/sessions/:slug/events` door threads, so the header reaches exactly the
   # sessions this caller could log by hand. A plug, not a call from the
   # receipt body: see `BarkparkWeb.SessionAutolog`'s moduledoc.
@@ -1413,7 +1427,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
                "session",
                op,
                dataset,
-               session_scope_opts(conn, params)
+               write_scope_opts(conn)
              ) do
           {:ok,
            %{
@@ -1491,7 +1505,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   Append one server-stamped event to a session's trail (session-handoff
   Task 4), via `Barkpark.Content.Sessions.append_event/5`. `params` may carry
   `"ref"` and/or `"note"`; `ts` is always server-minted. Scoped by the SAME
-  `session_scope_opts/2` the read/op actions above thread, so two workspaces
+  `write_scope_opts/1` the op actions above thread, so two workspaces
   holding their own row at the same slug each append to their OWN trail.
   """
   def append_session_event(conn, %{"slug" => slug} = params) do
@@ -1502,7 +1516,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
            params["kind"],
            params,
            dataset,
-           session_scope_opts(conn, params)
+           write_scope_opts(conn)
          ) do
       {:ok, %{count: count}} ->
         conn
@@ -1540,7 +1554,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   is the conversation id; the rest of `params` is passed through as attrs and
   whitelisted inside the context (`harness`/`account`/`machine`/`cwd`) — the
   server always stamps `first_seen`/`last_active`, never the caller. Scoped by
-  the SAME `session_scope_opts/2` the other session actions thread.
+  the SAME `write_scope_opts/1` the other session writes thread.
   """
   def touch_session_conversation(conn, %{"slug" => slug} = params) do
     dataset = params["dataset"] || Content.paper_default_dataset()
@@ -1550,7 +1564,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
            params["conversation"],
            params,
            dataset,
-           session_scope_opts(conn, params)
+           write_scope_opts(conn)
          ) do
       {:ok, %{count: count}} ->
         conn
@@ -1641,7 +1655,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
                slug,
                op,
                dataset,
-               paper_scope_opts(conn, params)
+               write_scope_opts(conn)
              ) do
           {:ok, result} ->
             conn
@@ -1719,7 +1733,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       true ->
         op_opts =
-          paper_scope_opts(conn, params) ++
+          write_scope_opts(conn) ++
             case Map.get(params, "ifRev") do
               nil -> []
               if_rev -> [if_rev: if_rev]
@@ -1847,11 +1861,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  # W1.5-C / session-handoff parity: Paper block ops, like reads and session
-  # ops, must resolve the row in the request's workspace/project. Without this
-  # option threading, two tenants sharing a slug can patch whichever Default
-  # row the server happens to resolve.
-  defp paper_scope_opts(conn, params), do: session_scope_opts(conn, params)
+  # The scope the gate approved, as lookup/write opts: every writing action
+  # finds and stores rows only inside it. `[]` only for the shared secret.
+  defp write_scope_opts(conn) do
+    case Map.fetch!(conn.private, @write_scope) do
+      {nil, nil} -> []
+      {ws_id, project_id} -> [workspace_id: ws_id, project_id: project_id]
+    end
+  end
 
   @doc """
   The AI-proposes loop (lvw-t4). Apply INSERT-ONLY block ops to the paper's
@@ -1898,7 +1915,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
                ops,
                source,
                dataset,
-               paper_scope_opts(conn, params)
+               write_scope_opts(conn)
              ) do
           {:ok, receipt} ->
             conn
@@ -2102,13 +2119,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # W1.5-C: thread the write's workspace/project into the upsert attrs so a
   # paper (and its emitted lifecycle event) lands in the right tenant.
   #
-  # PRECONDITION: the `:require_resolvable_scope` plug above has already run
-  # `resolve_write_scope/2` for this same conn and halted on a refusal, so it
-  # cannot answer `{:error, _}` here. The strict match is deliberate — a future
-  # caller that skips the guard must fail LOUDLY rather than silently fall back
-  # to the seeded Default, which is the whole defect this rule closes.
+  # The scope is the one `:require_resolvable_scope` approved; the strict
+  # fetch fails loudly for an action that skipped the gate.
   defp put_scope(attrs, conn, params) do
-    {:ok, {ws_id, project_id}} = resolve_write_scope(conn, params)
+    {ws_id, project_id} = Map.fetch!(conn.private, @write_scope)
 
     attrs
     |> maybe_put("workspace_id", ws_id)
@@ -2119,11 +2133,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     |> maybe_put("dataset", blank_to_nil(params["dataset"]))
   end
 
-  # ── THE INGEST SCOPE RULE (task-3f027a24e1330c6f) ─────────────────────────
-  # See the moduledoc section of the same name. Three helpers implement it:
-  # `requested_scope/2` (what the REQUEST named), `pipeline_workspace/1` (what
-  # the `:ingest` PIPELINE resolved), and `resolve_write_scope/2` /
-  # `resolve_scope/2` (the write and read reconciliations).
+  # ── THE INGEST SCOPE RULE (task-3f027a24e1330c6f) — see the moduledoc ────
 
   # What the REQUEST named — the pre-rule `resolve_scope/2`, verbatim. Explicit
   # ids in the body win; then a workspace/project slug (body field or header).
@@ -2140,15 +2150,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  # The workspace the `:ingest` PIPELINE resolved for this request, or nil.
-  #
-  # `conn.assigns.current_workspace` alone cannot answer this: `AssignDefaultScope`
-  # runs last on the pipeline and stamps the seeded Default on EVERY request that
-  # resolved nothing, so the assign is never nil once the Default is seeded. The
-  # `:api_token` assign is the PROOF that the assign came from
-  # `DeriveWorkspaceFromToken` (whose only source is `api_token.workspace_id`)
-  # rather than from that shim — so we read the assign, and confirm it with the
-  # token.
+  # The workspace the `:ingest` PIPELINE resolved, or nil. The assign alone is
+  # never nil (`AssignDefaultScope` stamps the Default); the token's own
+  # `workspace_id` proves it came from `DeriveWorkspaceFromToken`.
   defp pipeline_workspace(conn) do
     with %{id: ws_id} = ws <- conn.assigns[:current_workspace],
          %{workspace_id: ^ws_id} <- conn.assigns[:api_token] do
@@ -2213,7 +2217,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         case conn.assigns[:api_token] do
           %{} = token ->
-            infer_or_refuse(token)
+            Barkpark.Plugins.Bulldocs.Web.WriteGate.seat(token, action_name(conn))
 
           # The SHARED-SECRET arm carries no principal at all
           # (`Barkpark.Secrets.ingest_token/0` is the instance-wide `:global`
@@ -2226,59 +2230,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  defp infer_or_refuse(token) do
-    ctx = Barkpark.Content.CallerContext.from_token(token)
-
-    case Barkpark.Content.WriteScope.infer_write_workspace(ctx) do
-      {:ok, ws} ->
-        {:ok, {ws.id, nil}}
-
-      {:error, :workspace_scope_required} ->
-        slugs = Enum.map(Tenancy.list_workspaces_for(token.id), & &1.slug)
-        {:error, {:workspace_scope_required, slugs}}
-    end
-  end
-
   defp project_under(ws, conn, params),
     do: resolve_project(ws, scope_value(conn, params, "project", "x-barkpark-project"))
 
-  # The plug half of the gate (mounted above the ingest actions). Passes the
-  # conn through when this request's scope resolves; renders the typed refusal
-  # and HALTS when it does not — so a refused write never reaches an action and
-  # leaves no row.
+  # The plug half of the gate (mounted above every writing action): passes the
+  # conn when its scope resolves, else renders the typed refusal and HALTS.
   defp require_resolvable_scope(conn, _opts) do
     case resolve_write_scope(conn, conn.params) do
-      {:ok, _scope} ->
-        conn
-
-      # Reuses the ruling's own curated envelope (`Content.Errors` owns the
-      # code, the 422, and the hint that names the scope door to send instead).
-      {:error, {:workspace_scope_required, slugs}} ->
-        conn
-        |> render_error({:error, {:workspace_scope_required, slugs}})
-        |> halt()
-
-      {:error, {:project_scope_conflict, sent, workspace_id}} ->
-        conn
-        |> BarkparkWeb.ErrorResponse.emit_custom(
-          :unprocessable_entity,
-          "project_scope_conflict",
-          "project #{sent} is not a project of workspace #{workspace_id} — the write " <>
-            "was refused rather than stamped with a workspace/project pair no tenant owns",
-          %{sent: sent, workspace_id: workspace_id}
-        )
-        |> halt()
-
-      {:error, {:workspace_scope_conflict, sent, resolved}} ->
-        BarkparkWeb.ErrorResponse.emit_custom(
-          conn,
-          :unprocessable_entity,
-          "workspace_scope_conflict",
-          "this credential resolves to workspace #{resolved}, but the request addressed " <>
-            "#{sent || "another workspace"} — a body field or header is not a credential, so " <>
-            "the write was refused rather than retargeted",
-          %{sent: sent, resolved: resolved}
-        )
+      {:ok, scope} -> put_private(conn, @write_scope, scope)
+      {:error, reason} -> Barkpark.Plugins.Bulldocs.Web.WriteGate.refuse(conn, reason)
     end
   end
 
@@ -2340,17 +2300,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  # Read-side twin of `put_scope/3`: the SAME `resolve_scope/2` resolution
-  # (explicit `workspace_id`/`project_id`, else a `workspace`/`project` slug
-  # from the body or the `x-barkpark-workspace`/`x-barkpark-project` header),
-  # reshaped into the `Content.get_blocks_doc/4` / `apply_document_block_op/5`
-  # opts keyword list. `{nil, nil}` (no scope given at all) yields `[]`, which
-  # `Content.Scope.scope_to_workspace_or_global/3` treats as an EXPLICIT
-  # global read — matching the write side's own Default-workspace fallback
-  # posture (a scope-less write still stamps a real workspace_id; a
-  # scope-less read here just doesn't narrow by one).
+  # Read-side twin of `write_scope_opts/1` for the actions that store nothing:
+  # `resolve_scope/2` as opts; `{nil, nil}` yields `[]`, an unnarrowed read.
   defp arm_session_autolog(conn, _opts),
-    do: BarkparkWeb.SessionAutolog.arm(conn, &session_scope_opts(&1, &1.params))
+    do: BarkparkWeb.SessionAutolog.arm(conn, &write_scope_opts/1)
 
   defp session_scope_opts(conn, params) do
     case resolve_scope(conn, params) do
