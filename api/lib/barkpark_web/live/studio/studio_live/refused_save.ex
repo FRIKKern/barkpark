@@ -69,6 +69,37 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   def target(socket, keys) when is_list(keys), do: assign(socket, :editor_save_target, keys)
 
   @doc """
+  Codelist fields whose post was not a code (`Forms.CodelistShape.split/2`)
+  and was not written: the form buffer takes the stored value back, so the
+  page draws what the store holds, and each field is held over it with the
+  reason. So the field reads "Not saved: Not a code (kept as stored)" and the
+  save region names it, until the buffer gets another value (a code typed or
+  picked, a reload).
+  """
+  def not_codes(socket, []), do: socket
+
+  def not_codes(socket, keys) when is_list(keys) do
+    stored =
+      socket.assigns[:editor_doc]
+      |> Forms.doc_to_form(socket.assigns[:editor_schema])
+      |> Map.take(keys)
+
+    socket = PostedEdits.put(socket, Map.merge(Map.new(keys, &{&1, nil}), stored))
+    form = socket.assigns[:editor_form] || %{}
+    reason = gettext("Not a code (kept as stored)")
+    doc_key = doc_key(socket.assigns)
+
+    held =
+      case socket.assigns[:editor_refused] do
+        {^doc_key, held} -> held
+        _ -> %{}
+      end
+
+    held = Enum.reduce(keys, held, &Map.put(&2, &1, {Map.get(form, &1), reason}))
+    assign(socket, editor_refused: {doc_key, held})
+  end
+
+  @doc """
   The refusal branch of the write: the save token and the reason, as words.
   A changeset, a hook's own text or a known tag; never an inspected term.
   """

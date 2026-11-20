@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   alias Barkpark.Content
   alias Barkpark.Content.Forms
+  alias Barkpark.Content.Forms.CodelistShape
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
@@ -262,20 +263,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => doc} -> do_save(doc, socket)
-      _ -> {:noreply, socket}
+      %{"doc" => doc} ->
+        {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
+        do_save(doc, not_codes, socket)
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
-  defp do_save(params, socket) do
-    socket = Shared.do_autosave(socket, params, :save)
+  defp do_save(params, not_codes, socket) do
+    socket =
+      socket
+      |> Shared.do_autosave(params, :save)
+      |> RefusedSave.not_codes(not_codes)
 
     case socket.assigns[:save_status] do
       "Saved" ->
         # An explicit save reloads the editor from the just-persisted row —
         # the local buffer is now clean, so drop the dirty flag and any
-        # stale concurrent-edit banner. A refused clear it left out is still
-        # not saved (`RefusedSave`), and the page says so, not "Saved".
+        # stale concurrent-edit banner. A field it left out (a refused clear,
+        # a value that is not a code) is still not saved (`RefusedSave`), and
+        # the page says so, not "Saved".
         socket =
           socket
           |> saved_flash()
@@ -427,7 +436,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def autosave(params, socket) when is_map(params) do
     if PostIdentity.ours?(params, socket),
-      do: autosave_open(params, socket),
+      do: autosave_open(params, socket, :page),
       else: {:noreply, socket}
   end
 
@@ -449,10 +458,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   """
   def autosave_built(params, socket) when is_map(params) do
     {bases, params} = Map.pop(params, :bases, %{})
-    autosave_open(params, socket, bases)
+    autosave_open(params, socket, {:built, bases})
   end
 
-  defp autosave_open(params, socket, built_bases \\ %{}) do
+  # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
+  # server built. Only a browser post is read for codelist shape
+  # (`CodelistShape`): a built one writes a stored value back as it is.
+  defp autosave_open(params, socket, origin) do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
@@ -464,6 +476,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
+        {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
         saved =
           socket
@@ -473,12 +486,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> Shared.do_autosave(doc, :change)
           |> RemoteValues.settle(socket, keys, doc)
 
-        {:noreply, saved |> keep_unsaved_values(doc, keys) |> settle_dirty(keys)}
+        {:noreply,
+         saved
+         |> keep_unsaved_values(doc, keys)
+         |> RefusedSave.not_codes(not_codes)
+         |> settle_dirty(keys)}
 
       _ ->
         {:noreply, socket}
     end
   end
+
+  defp page_codes(doc, socket, :page) do
+    {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
+    {doc, not_codes, %{}}
+  end
+
+  defp page_codes(doc, _socket, {:built, bases}), do: {doc, [], bases}
 
   # ── The dot-path fold (S9 crit 3, task-6d80c6cc7d97b1d1) ────────────────────
   #
