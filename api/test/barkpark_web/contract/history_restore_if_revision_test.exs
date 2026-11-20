@@ -131,4 +131,23 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert fresh.status == 200
     assert title_of("drafts.pub") == "Words A"
   end
+  test "a deleted document: a named state is refused, a restore naming none brings it back",
+       %{conn: conn} do
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "drafts.gone", "title" => "Words A"}, "test")
+
+    seen = rev_of("drafts.gone")
+    revision = revision_titled("gone", "Words A")
+    {:ok, _} = Content.delete_document("drafts.gone", "post", "test")
+
+    fenced = restore(conn, revision.id, %{"ifRevisionID" => seen})
+    assert fenced.status == 412
+    assert Jason.decode!(fenced.resp_body)["error"]["details"]["actual"] == nil
+    assert match?({:error, :not_found}, Content.get_document("drafts.gone", "post", "test")),
+           "nothing was written"
+
+    unfenced = restore(conn, revision.id, %{})
+    assert unfenced.status == 200
+    assert title_of("drafts.gone") == "Words A"
+  end
 end
