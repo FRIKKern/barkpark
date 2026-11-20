@@ -207,12 +207,14 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
          pub = Content.published_id(id),
          true <- pub == Content.published_id(frame_id),
          true <- newer?(frame, doc) do
-      seen = Content.doc_to_form(frame, socket.assigns[:editor_schema])
+      schema = socket.assigns[:editor_schema]
+      stored = Content.doc_to_form(frame, schema)
+      was = seen(socket.assigns, pub, schema)
 
       socket
-      |> judge(pub)
+      |> judge(pub, moved(stored, was))
       |> draft_state(pub, msg, frame)
-      |> assign(@seen, {pub, seen})
+      |> assign(@seen, {pub, stored})
     else
       _ -> socket
     end
@@ -220,19 +222,32 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
 
   defp frame_into(socket, _msg), do: socket
 
+  # The fields whose stored value the frame moved from the last one this
+  # tab knew. Only those can have lost this tab's value.
+  defp moved(stored, was) do
+    for {key, value} <- stored, Map.get(was, key) != value, into: MapSet.new(), do: key
+  end
+
   # The form now holds the frame (the Studio's clean path); a clash with
-  # typing here is the Studio's own warning.
-  defp judge(socket, pub) do
+  # typing here is the Studio's own warning. A field the frame did not move
+  # keeps its step as it is, unread.
+  defp judge(socket, pub, moved) do
     if socket.assigns[:doc_conflict] == true do
       socket
     else
       now = socket.assigns[:editor_form] || %{}
+      schema = socket.assigns[:editor_schema]
 
       {intact, lost} =
         socket.assigns
         |> kept(pub)
         |> Enum.reduce({%{}, []}, fn {key, step}, {intact, lost} ->
-          case intact(step, Map.get(now, key)) do
+          verdict =
+            if MapSet.member?(moved, key),
+              do: intact(step, Map.get(now, key), RemoteValues.free_text?(schema, key)),
+              else: {:ok, step}
+
+          case verdict do
             {:ok, step} -> {Map.put(intact, key, step), lost}
             :lost -> {intact, [key | lost]}
           end
@@ -243,19 +258,76 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
     end
   end
 
-  # The field still holds this tab's value, or this tab's words still come
-  # back out of the text: kept on the text it holds now.
-  defp intact({_before, value} = step, value), do: {:ok, step}
+  # Cheap first: the field still holds this tab's value (intact), or holds
+  # again what it held before this tab's change (dropped). Any value but free
+  # text is written by the last post, with no merge: another value replaced
+  # this tab's. Only free text can still hold this tab's words among another
+  # editor's: they must come back out of it (`TextUndo.revert/3`), and the
+  # step is then kept on the text it holds now.
+  defp intact({_before, value} = step, value, _text?), do: {:ok, step}
+  defp intact({before, _value}, before, _text?), do: :lost
 
-  defp intact({before, value}, now)
+  defp intact({before, value}, now, true)
        when is_binary(before) and is_binary(value) and is_binary(now) do
-    case TextUndo.revert(value, before, now) do
-      ^now -> :lost
-      without -> {:ok, {without, now}}
+    case apart(before, value, now) do
+      {:ok, without} ->
+        {:ok, {without, now}}
+
+      :near ->
+        :telemetry.execute(
+          [:barkpark, :desk, :remote_save, :revert],
+          %{bytes: byte_size(now)},
+          %{}
+        )
+
+        case TextUndo.revert(value, before, now) do
+          ^now -> :lost
+          without -> {:ok, {without, now}}
+        end
     end
   end
 
-  defp intact(_step, _now), do: :lost
+  defp intact(_step, _now, _text?), do: :lost
+
+  # Bytes of untouched text the two changes must have between them: closer
+  # than that, which editor's words are which is a judgement for the merge.
+  @gap 8
+
+  # The common case, in bytes and without a merge: the other editor's change
+  # (`value` -> `now`) lies wholly before or wholly after this tab's own
+  # (`before` -> `value`), not touching it. This tab's words are then intact,
+  # and the text without them is `now` with this tab's splice undone. Any
+  # other shape (the two touch or overlap) is `:near`, for the full merge.
+  defp apart(before, value, now) do
+    {p, e_v, e_b} = splice(before, value)
+    {q, _f_now, f_v} = splice(value, now)
+    d = byte_size(now) - byte_size(value)
+
+    cond do
+      q > e_v + @gap and starts?(now, e_v) ->
+        {:ok, binary_part(now, 0, p) <> part(before, p, e_b) <> rest(now, e_v)}
+
+      f_v + @gap < p and starts?(now, p + d) ->
+        {:ok, binary_part(now, 0, p + d) <> part(before, p, e_b) <> rest(now, e_v + d)}
+
+      true ->
+        :near
+    end
+  end
+
+  # Whether byte `at` of `bin` starts a character (or is its end).
+  defp starts?(bin, at), do: at >= byte_size(bin) or :binary.at(bin, at) not in 0x80..0xBF
+
+  # Where `to` differs from `from`: the common prefix's length, and where the
+  # common suffix starts in `to` and in `from` (the two never cross).
+  defp splice(from, to) do
+    p = :binary.longest_common_prefix([from, to])
+    s = min(:binary.longest_common_suffix([from, to]), min(byte_size(from), byte_size(to)) - p)
+    {p, byte_size(to) - s, byte_size(from) - s}
+  end
+
+  defp part(bin, from, to), do: binary_part(bin, from, to - from)
+  defp rest(bin, from), do: binary_part(bin, from, byte_size(bin) - from)
 
   defp draft_state(socket, pub, msg, frame) do
     meta = %{id: pub, at: frame[:updated_at]}
