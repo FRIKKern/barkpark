@@ -38,10 +38,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
   dotted name already arrives in. LiveView's `_unused_` bookkeeping names are
   dropped. A post without such keys comes back unchanged.
   """
-  def unmangle_params(%{} = params) do
+  def unmangle_params(params, names \\ [])
+
+  def unmangle_params(%{} = params, names) do
     Enum.reduce(params, params, fn
       {root, %{} = tree}, acc when root in ["doc"] ->
-        {clean, flat} = split_mangled(tree, root)
+        {clean, flat} = split_mangled(tree, root, names)
 
         if flat == %{} do
           acc
@@ -55,21 +57,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
     end)
   end
 
-  def unmangle_params(other), do: other
+  def unmangle_params(other, _names), do: other
 
-  defp split_mangled(map, prefix) do
+  @doc """
+  The top-level field a key under `doc` in `_target` names, given the
+  schema's top-level field `names`. A checkbox list in an object or a row
+  posts its whole path dotted in one bracket (`obj.tags`), so its field is
+  the first part. A key that is a top-level field's own name is that field:
+  a schema may name a field `x.y`.
+  """
+  def target_field(key, names) when is_binary(key) do
+    if key in names or not String.contains?(key, "."),
+      do: key,
+      else: key |> String.split(".", parts: 2) |> hd()
+  end
+
+  @doc "A schema's top-level field names, for `unmangle_params/2` and `target_field/2`."
+  def field_names(%{fields: fields}) when is_list(fields), do: names_of(fields)
+  def field_names(%{"fields" => fields}) when is_list(fields), do: names_of(fields)
+  def field_names(_schema), do: []
+
+  defp names_of(fields), do: for(%{"name" => name} when is_binary(name) <- fields, do: name)
+
+  defp split_mangled(map, prefix, names) do
     Enum.reduce(map, {%{}, %{}}, fn {k, v}, {clean, flat} ->
       name = prefix <> "[" <> to_string(k) <> "]"
 
       cond do
-        dotted_list?(prefix, k, v) ->
+        dotted_list?(prefix, k, v) and k not in names ->
           {clean, Map.put(flat, dotted_name(k), Enum.reject(v, &(&1 == "")))}
 
         is_binary(k) and String.contains?(k, ["]", "[", "."]) ->
           {clean, Map.merge(flat, flatten_value(name, v))}
 
         is_map(v) and map_size(v) > 0 ->
-          {inner, inner_flat} = split_mangled(v, name)
+          {inner, inner_flat} = split_mangled(v, name, [])
           clean = if inner == %{}, do: clean, else: Map.put(clean, k, inner)
           {clean, Map.merge(flat, inner_flat)}
 
@@ -83,7 +105,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
   # dotted in one bracket (`doc[obj.tags][]`, `ArrayField`), so Plug gives
   # back a list under `"obj.tags"`. It goes back to the name the fold reads,
   # `doc[obj].tags`, without the empty value that keeps the key in a post
-  # with nothing ticked.
+  # with nothing ticked. A key that is a top-level field's own name (`x.y`)
+  # is that field's list, and stays as Plug gave it.
   defp dotted_list?("doc", k, v) when is_binary(k) and is_list(v),
     do: String.contains?(k, ".") and not String.contains?(k, ["[", "]"])
 

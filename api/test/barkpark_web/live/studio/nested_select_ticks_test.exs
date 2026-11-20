@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.NestedSelectTicksTest do
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @dataset "production"
 
@@ -75,6 +76,8 @@ defmodule BarkparkWeb.Studio.NestedSelectTicksTest do
                 ]
               }
             },
+            # A schema may name a field with a dot (review r1 B2).
+            %{"name" => "x.y", "title" => "Dotted", "type" => "arrayOf", "of" => sel()},
             %{"name" => "notes", "title" => "Notes", "type" => "string"}
           ]
         },
@@ -241,6 +244,17 @@ defmodule BarkparkWeb.Studio.NestedSelectTicksTest do
       assert stored(c, id)["obj"] == %{"label" => "l", "arr" => "b"}
     end
 
+    test "#{surface}: a top-level list whose name has a dot saves its ticks under that name", c do
+      id = doc!(c, %{"x.y" => ["a"]})
+      {view, form} = open(c, @surface, id)
+
+      tick(view, form, "x\\.y", ["a", "b"])
+
+      assert stored(c, id)["x.y"] == ["a", "b"]
+      refute Map.has_key?(stored(c, id), "x")
+      assert Map.take(stored(c, id), Map.keys(@stored)) == @stored
+    end
+
     test "#{surface}: an edit of another field leaves every list as stored", c do
       id = doc!(c, %{})
       {view, form} = open(c, @surface, id)
@@ -251,5 +265,32 @@ defmodule BarkparkWeb.Studio.NestedSelectTicksTest do
       assert Map.take(stored(c, id), Map.keys(@stored)) == @stored
       assert has_element?(view, form)
     end
+  end
+
+  defp undo(view, c, id, redo \\ false) do
+    mark = %{PostIdentity.key() => PostIdentity.value(@dataset, c.type, id)}
+    render_hook(view, "desk-undo", Map.put(mark, "redo", redo))
+  end
+
+  # Review r1 B1: a tick in an object is its own undo step. Undo took back
+  # the step before it (the top-level tick) and left the nested one.
+  test "desk: undo takes back a tick in an object, and redo puts it back", c do
+    id = doc!(c, %{})
+    {view, form} = open(c, :desk, id)
+
+    tick(view, form, "top", ["a", "b"])
+    # Past the undo's grouping of quick edits to one field.
+    Process.sleep(650)
+    tick(view, form, "obj", ["a", "b"])
+    assert stored(c, id)["obj"]["arr"] == ["a", "b"]
+    Process.sleep(650)
+
+    undo(view, c, id)
+    assert stored(c, id)["obj"]["arr"] == ["b"]
+    assert stored(c, id)["top"] == ["a", "b"]
+
+    undo(view, c, id, true)
+    assert stored(c, id)["obj"]["arr"] == ["a", "b"]
+    assert stored(c, id)["top"] == ["a", "b"]
   end
 end

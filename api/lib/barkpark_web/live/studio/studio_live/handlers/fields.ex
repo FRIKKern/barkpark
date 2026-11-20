@@ -463,7 +463,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       %{"doc" => doc} ->
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
-        keys = target_key(params)
+        keys = target_key(params, socket.assigns[:editor_schema])
 
         saved =
           socket
@@ -537,7 +537,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
   defp fold_dot_paths(params, socket) do
-    params = BarkparkWeb.Studio.StudioLive.Path.unmangle_params(params)
+    names = StudioLive.Path.field_names(socket.assigns[:editor_schema])
+    params = StudioLive.Path.unmangle_params(params, names)
     touched = touched_paths(socket)
     base_form = base_form(socket)
     targets = params |> Map.get("_target") |> List.wrap()
@@ -999,16 +1000,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # The top-level field a `phx-change` typed in, from its `_target`:
   # `["doc", "title"]` for a bracket name, `["doc[altText].nob"]` for a dotted one.
   # A checkbox list in an object or a row names its whole path in one
-  # bracket, dotted (`doc[obj.tags][]`): its field is the first part.
-  defp target_key(%{"_target" => ["doc", key | _]}) when is_binary(key),
-    do: [key |> String.split(".", parts: 2) |> hd()]
+  # bracket, dotted (`doc[obj.tags][]`): its field is the first part, unless
+  # the key is a top-level field's own name (`Path.target_field/2`).
+  defp target_key(%{"_target" => ["doc", key | _]}, schema) when is_binary(key),
+    do: [StudioLive.Path.target_field(key, StudioLive.Path.field_names(schema))]
 
-  defp target_key(%{"_target" => [name]}) when is_binary(name) do
+  defp target_key(%{"_target" => [name]}, _schema) when is_binary(name) do
     case StudioLive.parse_path(name) do
       [key | _] when is_binary(key) -> [key]
       _ -> []
     end
   end
 
-  defp target_key(_params), do: []
+  defp target_key(_params, _schema), do: []
 end
