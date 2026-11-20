@@ -15854,3 +15854,28 @@ msgid "1 more task to do is not shown"
 msgid_plural "%{count} more tasks to do are not shown"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:39
+#, elixir-autogen, elixir-format
+msgid "Global presence"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:40
+#, elixir-autogen, elixir-format
+msgid "Who is here"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:56
+#, elixir-autogen, elixir-format
+msgid "No one else is here"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:57
+#, elixir-autogen, elixir-format
+msgid "Invite people to the project to see their online status."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:69
+#, elixir-autogen, elixir-format
+msgid "Not in a document"
+msgstr ""

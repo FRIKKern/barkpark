@@ -1,7 +1,7 @@
 // The desk navbar's menus (Desk.UserMenu, Desk.HelpMenu, Desk.ScopeSwitch,
-// Desk.PerspectivePicker, Desk.NavDrawer), as the TanStack Studio's Navbar.tsx:
+// Desk.PerspectivePicker, Desk.WhoMenu, Desk.NavDrawer), as the TanStack Studio's Navbar.tsx:
 // the appearance radios, the help menu's two dialogs and its "New version
-// available", the perspective menu and the phone drawer. The menus open and close as popovers by
+// available", the perspective menu, who is here and the phone drawer. The menus open and close as popovers by
 // themselves; this script does what a popover cannot. It runs once a page,
 // from the help menu's script tag or from the desk hook's loader.
 (function () {
@@ -9,6 +9,45 @@
 
   var KEY = "barkpark_theme";
   var EVERY_MS = 60000;
+  // The navbar's menus by keyboard, one rule for all, as TanStack's menus
+  // (focus-scope.ts, `menu`): opened, an item has the focus (`start`, else
+  // the first); ArrowDown, ArrowUp, Home and End move between the items one
+  // can use; Tab leaves the menu closed and moves on, as the desk's doc menus
+  // do. Escape and a click outside are the popover's own, and give the focus
+  // back to the button. An item in use but kept for its tip (aria-disabled)
+  // and someone in no document (disabled) are skipped.
+  var MENU_ITEM = '[role^="menuitem"]:not([disabled]):not([aria-disabled="true"])';
+  var MENUS = {
+    "dk-perspective-menu": '[aria-checked="true"]',
+    "dk-who-menu": null,
+    "dk-help-menu": null,
+    "dk-user-menu": null
+  };
+  var navMenu = function (el) {
+    var menu = el && el.closest ? el.closest("[popover][role=menu]") : null;
+    return menu && Object.prototype.hasOwnProperty.call(MENUS, menu.id) ? menu : null;
+  };
+  var menuItems = function (menu) {
+    return Array.prototype.slice.call(menu.querySelectorAll(MENU_ITEM));
+  };
+  var openMenu = function (menu) {
+    var start = MENUS[menu.id];
+    var to = (start && menu.querySelector(start)) || menuItems(menu)[0];
+    if (to) to.focus();
+  };
+  var menuKey = function (doc, e) {
+    var menu = navMenu(e.target);
+    if (!menu || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Tab") return menu.hidePopover();
+    var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+    if (step === undefined) return;
+    var items = menuItems(menu);
+    if (!items.length) return;
+    e.preventDefault();
+    var at = items.indexOf(doc.activeElement);
+    var to = Math.abs(step) === Infinity ? (step < 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
+    items[to].focus();
+  };
 
   // The appearance: one stored in localStorage ("light" or "dark"), else
   // the system's (none stored), as the head's pre-paint script reads it.
@@ -184,6 +223,15 @@
       return;
     }
 
+    // A person picked in who is here (Desk.WhoMenu): their document opens and
+    // the menu closes at once, as TanStack's row (onDone).
+    var person = target.closest("#dk-who-menu .who-row");
+    if (person) {
+      var people = person.closest("[popover]");
+      if (people && people.matches(":popover-open")) people.hidePopover();
+      return;
+    }
+
     var radio = target.closest("[data-desk-appearance]");
     if (radio) {
       // The drawer's stay open, as TanStack's: the change shows at once.
@@ -250,23 +298,11 @@
     // The menu is drawn again by a live navigation: checked when it opens.
     doc.addEventListener("toggle", function (e) {
       if (e.target && e.target.id === "dk-user-menu" && e.newState === "open") checkAppearance(doc);
-      // The perspective menu opens on the one in use, as TanStack's (autoFocus).
-      if (e.target && e.target.id === "dk-perspective-menu" && e.newState === "open") {
-        var on = e.target.querySelector('[aria-checked="true"]');
-        if (on) on.focus();
-      }
+      // A navbar menu opens on an item: the perspective in use, else the first.
+      if (e.newState === "open" && e.target && MENUS.hasOwnProperty(e.target.id)) openMenu(e.target);
     }, true);
     doc.addEventListener("keydown", function (e) { trapDrawer(doc, e); }, true);
-    // In the perspective menu the arrows move between the two.
-    doc.addEventListener("keydown", function (e) {
-      var menu = e.target && e.target.closest ? e.target.closest("#dk-perspective-menu") : null;
-      if (!menu || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
-      var items = Array.prototype.slice.call(menu.querySelectorAll("[role=menuitemradio]"));
-      if (!items.length) return;
-      e.preventDefault();
-      var at = items.indexOf(doc.activeElement);
-      items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
-    });
+    doc.addEventListener("keydown", function (e) { menuKey(doc, e); });
     doc.addEventListener("click", onClick);
     // The drawer shut (Escape, Close menu, a tool, the backdrop): its button says so.
     doc.addEventListener("close", function (e) {
