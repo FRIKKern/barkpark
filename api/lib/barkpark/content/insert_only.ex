@@ -7,17 +7,17 @@ defmodule Barkpark.Content.InsertOnly do
   refusal, `{:error, {:rev_mismatch, %{expected: nil, actual: rev, id: id}}}`
   (412 `precondition_failed`), and writes nothing:
 
-    1. the writer's own read finds the draft row (`refuse_existing/2`, before
-       any hook or fence runs);
+    1. the writer's own read finds the draft row (`refuse_existing/6`, the first
+       pre-write fence, before any plugin fence or hook runs);
     2. inside the write's transaction, under a lock on the document's identity,
-       a second read finds a draft or published row (`insert/3`). Two
+       a second read finds a draft or published row (`insert/4`). Two
        insert-only writes of one document take that lock in turn, so the second
        reads the first's row;
     3. the insert hits the documents unique index (a writer that took no lock
        got there first). The insert runs in its own savepoint so the
        transaction can still read the row that won.
 
-  Without `:insert_only` nothing here changes a write: `insert/3` is the plain
+  Without `:insert_only` nothing here changes a write: `insert/4` is the plain
   `Repo.insert/1`.
 
   Test seams. The sandbox runs one process on one connection, so a race is
@@ -35,19 +35,27 @@ defmodule Barkpark.Content.InsertOnly do
   @doc "Whether this write was asked to be insert-only."
   def requested?(opts), do: Keyword.get(opts, :insert_only) == true
 
-  @doc "Refuses an insert-only write whose writer already read a row."
-  def refuse_existing(%Document{} = existing, opts) do
+  @doc """
+  Refuses an insert-only write whose writer already read a row. It is the first of
+  `Content.Writer.upsert_document/4`'s pre-write fences, so it takes their arguments
+  and runs before any plugin fence or hook.
+  """
+  def refuse_existing(_type, _attrs, _dataset, _doc_id, %Document{} = existing, opts) do
     if requested?(opts), do: {:error, mismatch(existing)}, else: :ok
   end
 
-  def refuse_existing(_prev_doc, _opts), do: :ok
+  def refuse_existing(_type, _attrs, _dataset, _doc_id, _prev_doc, _opts), do: :ok
 
   @doc """
-  Inserts `changeset` for `doc_id`. Insert-only, it first takes the identity
-  lock and reads again; a row found there, or a unique-index conflict, is the
-  refusal.
+  Births the document row for `attrs`: the INSERT of `Content.Writer`'s upsert
+  door. Insert-only, it first takes the identity lock and reads again; a row found
+  there, or a unique-index conflict, is the refusal. Otherwise it is the plain
+  `Repo.insert/1` of the changeset.
   """
-  def insert(%Ecto.Changeset{} = changeset, {doc_id, type, dataset}, opts) do
+  def insert(attrs, type, dataset, opts) do
+    changeset = Document.changeset(%Document{}, attrs)
+    doc_id = Map.get(attrs, "doc_id")
+
     if requested?(opts) and is_binary(doc_id) do
       seam!(:insert_only_before_lock)
       published = DraftId.published_id(doc_id)
