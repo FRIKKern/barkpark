@@ -216,6 +216,25 @@ const CASES = [
     expect: (p) => /cut off|clipped/.test(lights(p).noscript.detail),
   },
   // Pressed by real keys.
+  // A caret in one capture of a reading and not another: this one never blinks (caret-animation: manual) and has
+  // no colour until a sheet sets transition: none, as the glyph capture's does, so only that capture would draw it.
+  {
+    name: 'a reading is the same whether or not the caret is drawn',
+    only: ['pressed'],
+    plant: (d) => {
+      appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" placeholder="Caret">\n</div>\n')
+      appendFileSync(join(d, 'press.mjs'), "\nsteps.push({ name: 'a focused empty field', expect: (root) => (root.querySelector('#button-caret').focus(), true) })\n")
+    },
+    css: [
+      '#button-caret { font: inherit; padding: 4px 8px; border: 1px solid var(--ui-foreground); background: var(--ui-background); color: var(--ui-foreground); caret-animation: manual; caret-color: transparent; transition: caret-color 1000000s steps(1, end); }',
+      '#button-caret::placeholder { color: var(--ui-muted-foreground); }',
+      '#button-caret:focus { caret-color: var(--ui-foreground); }',
+    ].join('\n'),
+    expect: each({
+      'the step ran': (p) => /a focused empty field|\d+ steps by real keys/.test(lights(p).pressed?.detail ?? ''),
+      'a focused empty field with a placeholder draws in full': (p) => !reasons(p, 'pressed').some((f) => /at input#button-caret/.test(f)),
+    }),
+  },
   {
     name: 'a press step that never settles fails by name within its time limit',
     only: ['pressed'],
