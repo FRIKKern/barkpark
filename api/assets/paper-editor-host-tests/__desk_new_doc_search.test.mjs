@@ -152,4 +152,41 @@ fire(other, "beforetoggle");
 fire(other, "toggle");
 assert.deepEqual(shown(), ["Category"], "another popover opening leaves this one alone");
 
+// Review of #27813: a press on a spot in the open list that is not a control
+// (the search row's padding, the No results note, the list's gaps) sent the
+// focus to BODY, so the next keys were lost and Escape left it there. It is
+// held: the focus stays in the box.
+const press = (el, extra = {}) => {
+  const e = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, ...extra });
+  el.dispatchEvent(e);
+  return e.defaultPrevented;
+};
+picker.removeAttribute("data-open");
+open();
+type("zebra");
+for (const [el, what] of [
+  [picker.querySelector(".dk-new-doc-find"), "the search row's padding"],
+  [empty, "the No results note"],
+  [empty.querySelector("strong"), "the No results text"],
+  [list, "the list's gap"],
+  [picker, "the dialog itself"],
+]) {
+  find.focus();
+  assert.equal(press(el), true, `a press on ${what} is held`);
+  assert.equal(doc.activeElement, find, `a press on ${what} keeps the focus in the box`);
+  doc.body.focus();
+  find.blur();
+  press(el);
+  assert.equal(doc.activeElement, find, `a press on ${what} brings the focus back to the box`);
+}
+// A control's press is its own: the box, a way, and a right press.
+find.focus();
+assert.equal(press(find), false, "a press in the box is the browser's");
+assert.equal(press(options[0]), false, "a press on a way is the browser's");
+assert.equal(press(picker.querySelector(".dk-new-doc-find"), { button: 2 }), false, "a right press is the browser's");
+// Outside the list, nothing is held.
+const outside = doc.createElement("p");
+doc.body.appendChild(outside);
+assert.equal(press(outside), false, "a press outside the list is the browser's");
+
 console.log("__desk_new_doc_search: ok");

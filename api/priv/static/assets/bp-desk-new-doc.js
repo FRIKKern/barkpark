@@ -8,6 +8,7 @@
 //   accident; ArrowDown and ArrowUp light the next or previous shown way
 //   (aria-selected, aria-activedescendant), and Enter opens the lit one.
 // - The pointer lights the way under it, as Sanity's.
+// - A press in the list on anything but a control keeps the focus in the box.
 // - Each time the list opens it starts over: the box empty, every way shown,
 //   nothing lit, the focus in the box (the popover's autofocus).
 //
@@ -92,6 +93,22 @@
     if (box && !option.hidden) light(parts(box), option);
   };
 
+  // A press in the open list on anything but a control (the padding round
+  // the box, the "No results" note, the gaps between ways, the heading)
+  // would move the focus to the page body: the list stays open and the next
+  // keys go nowhere. It is held, so the focus stays in the box. A press on
+  // the list's scroll bar is the browser's.
+  var onPress = function (e) {
+    var box = picker(e.target);
+    if (!box || e.button !== 0) return;
+    if (e.target.closest("button, input, a, select, textarea, [tabindex]")) return;
+    var el = e.target;
+    if (el.clientWidth && e.offsetX >= el.clientWidth) return;
+    e.preventDefault();
+    var find = box.querySelector("[data-desk-new-doc-find]");
+    if (find && document.activeElement !== find) find.focus();
+  };
+
   // The start-over is made in `beforetoggle`, which runs before the list is
   // drawn. `toggle` is queued and can come after the first keys typed into the
   // autofocused box, and would then wipe them. Neither bubbles: both are
@@ -115,6 +132,7 @@
   document.addEventListener("input", onInput);
   document.addEventListener("keydown", onKey);
   document.addEventListener("pointerover", onPointer);
+  document.addEventListener("mousedown", onPress);
   document.addEventListener("beforetoggle", onBeforeToggle, true);
   document.addEventListener("toggle", onToggle, true);
 
