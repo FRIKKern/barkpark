@@ -64,7 +64,7 @@ defmodule Barkpark.Content.CrossValidator do
     |> Enum.reject(& &1["satisfied"])
   end
 
-  @operators ~w(eq neq in empty non_empty starts_with count_eq count_neq count_gt count_lt)
+  @operators ~w(eq neq in empty non_empty starts_with count_eq count_neq count_gt count_lt gt gte lt lte)
 
   @doc """
   The rules split into `{evaluable, unevaluable}` (task-9754deb160e95a80).
@@ -136,7 +136,8 @@ defmodule Barkpark.Content.CrossValidator do
   defp unevaluable_reason(_rule, _names), do: "not a map"
 
   defp body_reason(body, names) do
-    case Map.get(body, "all", Map.get(body, :all)) || Map.get(body, "any", Map.get(body, :any)) do
+    case Map.get(body, "all", Map.get(body, :all)) || Map.get(body, "any", Map.get(body, :any)) ||
+           Map.get(body, "one", Map.get(body, :one)) do
       preds when is_list(preds) and preds != [] ->
         Enum.find_value(preds, fn
           p when is_map(p) -> body_reason(p, names)
@@ -147,20 +148,36 @@ defmodule Barkpark.Content.CrossValidator do
         leaf_reason(body, names)
 
       _ ->
-        "an all/any list is empty or not a list"
+        "an all/any/one list is empty or not a list"
     end
   end
 
   defp leaf_reason(leaf, names) do
     field = Map.get(leaf, "field", Map.get(leaf, :field))
     op = Map.get(leaf, "operator", Map.get(leaf, :operator))
+    other = Map.get(leaf, "valueField", Map.get(leaf, :valueField))
 
     cond do
-      not is_binary(field) or field == "" -> "a predicate has no field"
-      not is_binary(op) -> "a predicate has no operator"
-      op not in @operators -> "unknown operator #{inspect(op)}"
-      is_list(names) and hd(String.split(field, ".")) not in names -> "no field #{inspect(field)}"
-      true -> nil
+      not is_binary(field) or field == "" ->
+        "a predicate has no field"
+
+      not is_binary(op) ->
+        "a predicate has no operator"
+
+      op not in @operators ->
+        "unknown operator #{inspect(op)}"
+
+      is_list(names) and hd(String.split(field, ".")) not in names ->
+        "no field #{inspect(field)}"
+
+      other != nil and (not is_binary(other) or other == "") ->
+        "valueField is not a field name"
+
+      is_list(names) and is_binary(other) and hd(String.split(other, ".")) not in names ->
+        "no field #{inspect(other)} (valueField)"
+
+      true ->
+        nil
     end
   end
 
@@ -200,6 +217,15 @@ defmodule Barkpark.Content.CrossValidator do
     Enum.any?(preds, &eval_leaf(&1, doc))
   end
 
+  # Exactly one of its predicates holds (task-606283a5dedc2403).
+  defp evaluate(%{"one" => preds}, doc) when is_list(preds) do
+    Enum.count(preds, &eval_leaf(&1, doc)) == 1
+  end
+
+  defp evaluate(%{one: preds}, doc) when is_list(preds) do
+    Enum.count(preds, &eval_leaf(&1, doc)) == 1
+  end
+
   defp evaluate(pred, doc) when is_map(pred) and map_size(pred) > 0 do
     eval_leaf(pred, doc)
   end
@@ -215,6 +241,8 @@ defmodule Barkpark.Content.CrossValidator do
   defp eval_leaf(%{all: _} = pred, doc), do: evaluate(pred, doc)
   defp eval_leaf(%{"any" => _} = pred, doc), do: evaluate(pred, doc)
   defp eval_leaf(%{any: _} = pred, doc), do: evaluate(pred, doc)
+  defp eval_leaf(%{"one" => _} = pred, doc), do: evaluate(pred, doc)
+  defp eval_leaf(%{one: _} = pred, doc), do: evaluate(pred, doc)
 
   defp eval_leaf(pred, doc) when is_map(pred) do
     FieldVisibility.visible?(%{"visibleWhen" => pred}, doc)
