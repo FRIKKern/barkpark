@@ -27,7 +27,8 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
   As TanStack's (and Sanity's), Vision picks its own dataset and API version.
   The datasets are the page's project's (`datasets/1`): the scope the desk
   was opened in, so another workspace's never shows; a dataset-bound token's
-  others are greyed. The API versions are Sanity's list, today's last and the
+  others are greyed. The page's own dataset is always listed and picked, also
+  an older one with documents but no datasets row. The API versions are Sanity's list, today's last and the
   default, and "Other", a version typed beside it.
 
   Not yet here, as TanStack has them: Params, Listen, saved queries and Save
@@ -53,11 +54,7 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
         example: @example,
         words: words(),
         versions: api_versions(Date.utc_today()),
-        datasets:
-          with(
-            [] <- assigns.datasets,
-            do: [%{slug: assigns.dataset, label: assigns.dataset, off?: false}]
-          )
+        datasets: with_own(assigns.datasets, assigns.dataset)
       )
 
     ~H"""
@@ -198,6 +195,14 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
       _ ->
         []
     end
+  end
+
+  # The page's own dataset is always listed, so it is the one picked: an older
+  # dataset has documents but no datasets row, and is then not in the project's list.
+  defp with_own(datasets, own) do
+    if Enum.any?(datasets, &(&1.slug == own)),
+      do: datasets,
+      else: [%{slug: own, label: own, off?: false} | datasets]
   end
 
   @doc "Sanity Vision's API versions, `today`'s (UTC) last: the default."

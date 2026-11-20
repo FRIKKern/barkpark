@@ -84,6 +84,25 @@ defmodule BarkparkWeb.Studio.DeskVisionPickersTest do
     refute html =~ "dvp-a2-other-#{c.tag}", "another project's dataset is not this page's"
   end
 
+  # task-bd50893c00e93fe1: an older dataset has documents but no datasets row. The page
+  # is that dataset's, so the picker lists it, picked; Fetch reads the picked one
+  # (`__desk_vision.test.mjs` §7), never another dataset of the project.
+  test "a page dataset with no datasets row is listed and picked, not the project's first", c do
+    norow = "dvp-norow-#{c.tag}"
+    refute Enum.any?(Tenancy.list_datasets(c.project.id), &(&1.slug == norow))
+    vision = String.replace(c.vision, "/d/#{@dataset}/", "/d/#{norow}/")
+
+    {:ok, view, html} = live(signed_in(c), vision)
+    picked = choices(html, "data-vision-dataset")
+
+    assert [%{value: ^norow, label: ^norow, disabled: false}] = Enum.filter(picked, & &1.selected)
+
+    assert "dvp-staging-#{c.tag}" in Enum.map(picked, & &1.value),
+           "the project's others are still listed"
+
+    assert has_element?(view, ~s{#dk-vision[data-dataset="#{norow}"]})
+  end
+
   test "a dataset-bound token sees the project's other datasets greyed", c do
     {:ok, _view, html} = live(signed_in(c, dataset_bound: true), c.vision)
     picked = choices(html, "data-vision-dataset")
