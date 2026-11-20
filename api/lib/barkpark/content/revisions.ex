@@ -292,8 +292,8 @@ defmodule Barkpark.Content.Revisions do
   `precondition_failed`). The document's current state is its draft row, or its
   published row when it has no draft, or none when it has neither.
 
-    * `opts[:if_rev]`: "I saw this rev". The same fence as a `/v1` mutate
-      patch's `ifRevisionID`. It must equal the current rev. On a match the
+    * `opts[:if_rev]`: "I saw this rev", named like a `/v1` mutate patch's
+      `ifRevisionID`. It must equal the current rev. On a match the
       upsert fences its UPDATE of the draft row on that rev as well.
     * `opts[:if_absent]` (`true`): "I saw no document". There must be no draft
       and no published row; `expected` is then `nil`. The write is then insert

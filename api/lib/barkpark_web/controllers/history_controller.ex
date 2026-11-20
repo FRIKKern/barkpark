@@ -89,7 +89,7 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   # The state the caller asked against, optional (task-e89ff0279fb83fc6):
-  # `ifRevisionID` ("I saw this rev", the same fence a `/v1` mutate patch takes)
+  # `ifRevisionID` ("I saw this rev", named like a `/v1` mutate patch's field)
   # or `ifAbsent: true` ("I saw no document"). A restore naming a state the
   # document has moved on from is refused 412 `precondition_failed` and writes
   # nothing; `Content.restore_revision/4` holds the compare. `ifRevisionID` must

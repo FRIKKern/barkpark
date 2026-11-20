@@ -2,8 +2,8 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   @moduledoc """
   A history restore that names the state it was asked against is refused when
   the document has moved on, and writes nothing (task-e89ff0279fb83fc6). The
-  state is `ifRevisionID` ("I saw this rev", the same fence a `/v1` mutate patch
-  takes) or `ifAbsent: true` ("I saw no document"). Any other value of a sent
+  state is `ifRevisionID` ("I saw this rev", named like a `/v1` mutate patch's
+  field) or `ifAbsent: true` ("I saw no document"). Any other value of a sent
   field, or both at once, is a 400 and writes nothing. A restore that names no
   state restores as before. Studio's row "a late restore after newer edits is
   refused and keeps them" (barkpark-studio, test/a012-restore-stuck) holds the
