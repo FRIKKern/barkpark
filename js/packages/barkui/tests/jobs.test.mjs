@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
-import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, PROOF_MOST, split } from '../check/jobs.mjs'
+import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, split } from '../check/jobs.mjs'
 
 const scratch = mkdtempSync(join(tmpdir(), 'barkui-jobs-test-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -90,7 +90,8 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
   it('the proof knob can only add parts: every real part stays in a group for every value it takes, and other values refuse', () => {
     const real = folderNames(partsDir)
     const alone = split(real).length
-    for (const v of [undefined, '', '0', '1', '13', String(PROOF_MOST)]) {
+    const top = MOST_PARTS - real.length
+    for (const v of [undefined, '', '0', '1', '13', String(top)]) {
       const env = v === undefined ? {} : { BARKUI_PROOF_COPIES: v }
       const names = partNames(partsDir, env)
       for (const r of real) expect(names, `value ${v}`).toContain(r)
@@ -99,7 +100,14 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
       for (const r of real) expect(groups.filter((g) => g.parts.includes(r)).length, `${r} with ${v}`).toBe(1)
       expect(materialize(partsDir, env, scratch) === partsDir, `value ${v}`).toBe(!Number(v))
     }
-    for (const v of ['-1', 'abc', '1.5', String(PROOF_MOST + 1), ' 3', '1e2']) expect(() => partNames(partsDir, { BARKUI_PROOF_COPIES: v }), v).toThrow(/BARKUI_PROOF_COPIES must be/)
+    for (const v of ['-1', 'abc', '1.5', String(top + 1), ' 3', '1e2']) expect(() => partNames(partsDir, { BARKUI_PROOF_COPIES: v }), v).toThrow(/BARKUI_PROOF_COPIES must be/)
+  })
+
+  it(`the knob at its top makes exactly MOST_GROUPS (${MOST_GROUPS}) groups, and a folder past MOST_PARTS refuses with the readme's way out`, () => {
+    const top = MOST_PARTS - folderNames(partsDir).length
+    expect(split(partNames(partsDir, { BARKUI_PROOF_COPIES: String(top) })).length).toBe(MOST_GROUPS)
+    expect(split(partNames(folderOf(MOST_PARTS, 'at-most'), {})).length).toBe(MOST_GROUPS)
+    expect(() => partNames(folderOf(MOST_PARTS + 1, 'past-most'), {})).toThrow(/raise MOST_GROUPS in check\/jobs.mjs .*README/)
   })
 })
 
@@ -121,6 +129,14 @@ const redWith = (v, re) => v.ok === false && v.rows.some((r) => r.startsWith('RE
 const withLast = (fn) => goodReports().map((r, i, all) => (i === all.length - 1 ? fn(r) : r))
 
 describe(`the closing check, "${AGGREGATE}"`, () => {
+  it('refuses an empty or missing commit id, even when every job and report would be green against it', () => {
+    const blank = (r) => ({ ...r, data: { ...r.data, sha: '' } })
+    for (const sha of ['', ' ', undefined, null]) {
+      const v = judge({ needs: needsWith(MATRIX), reports: goodReports().map(blank), names: NAMES, sha, perJob: 4 })
+      expect(redWith(v, /no commit id/), JSON.stringify(sha)).toBe(true)
+    }
+  })
+
   it('is green when the plan, every group and the selftest passed, and names them', () => {
     const v = verdict(needsWith(MATRIX))
     expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and the selftest passed'] })

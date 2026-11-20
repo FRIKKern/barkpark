@@ -33,14 +33,24 @@ export function folderNames(dir = partsDir) {
     .sort()
 }
 
+// The most groups, written here once. .github/required-checks.json holds one row for each of groups 1 to
+// MOST_GROUPS (a test holds the rows to this number), so the split never makes a group without a row: the parts,
+// real and proof copies together, stop at MOST_GROUPS × PER_JOB, and past that the run is refused (the readme says
+// what to do then).
+export const MOST_GROUPS = 8
+export const MOST_PARTS = MOST_GROUPS * PER_JOB
+const OUTGROWN = (n) =>
+  `jobs: ${n} parts, more than ${MOST_GROUPS} groups of ${PER_JOB} hold (${MOST_PARTS}); raise MOST_GROUPS in check/jobs.mjs and add the new group rows to .github/required-checks.json, as js/packages/barkui/README.md says`
+
 // The proof knob, read here and nowhere else: BARKUI_PROOF_COPIES adds that many copies of the button to the
 // real parts, made under a scratch root (never in parts/), so CI can be shown a folder larger than the real one.
-// It can only add: every real part stays in the set, and a value it cannot read refuses the run.
-export const PROOF_MOST = 39
-export function proofCopies(env = process.env) {
+// It can only add: every real part stays in the set, and a value it cannot read, or one that takes the parts past
+// MOST_PARTS, refuses the run.
+export function proofCopies(env = process.env, dir = partsDir) {
   const v = env.BARKUI_PROOF_COPIES
   if (v === undefined || v === '') return 0
-  if (!/^\d+$/.test(v) || Number(v) > PROOF_MOST) throw new Error(`jobs: BARKUI_PROOF_COPIES must be a whole number from 0 to ${PROOF_MOST}, not ${JSON.stringify(v)}`)
+  const top = Math.max(0, MOST_PARTS - folderNames(dir).length)
+  if (!/^\d+$/.test(v) || Number(v) > top) throw new Error(`jobs: BARKUI_PROOF_COPIES must be a whole number from 0 to ${top} beside these parts, not ${JSON.stringify(v)}`)
   return Number(v)
 }
 const copyName = (i) => `proof${String(i).padStart(2, '0')}-button`
@@ -48,7 +58,8 @@ const copyName = (i) => `proof${String(i).padStart(2, '0')}-button`
 /** The names the split runs: every real part folder, plus the proof copies when the knob asks for them. */
 export function partNames(dir = partsDir, env = process.env) {
   const real = folderNames(dir)
-  const n = proofCopies(env)
+  if (real.length > MOST_PARTS) throw new Error(OUTGROWN(real.length))
+  const n = proofCopies(env, dir)
   if (!n) return real
   if (!real.includes('button')) throw new Error('jobs: BARKUI_PROOF_COPIES copies parts/button, and there is none')
   const copies = Array.from({ length: n }, (_, i) => copyName(i + 1))
@@ -60,7 +71,7 @@ export function partNames(dir = partsDir, env = process.env) {
 /** The folder a job builds from: parts/ itself, or, with proof copies, a fresh scratch root holding a copy of
     every real part and the copies beside them. */
 export function materialize(dir = partsDir, env = process.env, base = env.RUNNER_TEMP || tmpdir()) {
-  const n = proofCopies(env)
+  const n = proofCopies(env, dir)
   if (!n) return dir
   const into = mkdtempSync(join(base, 'barkui-proof-parts-'))
   for (const name of folderNames(dir)) cpSync(join(dir, name), join(into, name), { recursive: true })
@@ -131,6 +142,7 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   const result = (id) => needs?.[id]?.result ?? 'missing'
   const state = (id) => said[result(id)] ?? `ended "${result(id)}"`
   const red = (rows) => ({ ok: false, rows: rows.map((r) => `RED ${r}`) })
+  if (typeof sha !== 'string' || !sha.trim()) return red(['no commit id to read the reports against; a report is never matched to an empty commit'])
   if (result(JOBS.plan) !== 'success') return red([`${named[JOBS.plan]} ${state(JOBS.plan)}; that is never read as "not touched"`])
   const { run, groups: planned } = needs[JOBS.plan].outputs ?? {}
   const rows = []

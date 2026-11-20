@@ -252,6 +252,12 @@ In CI the check runs as jobs side by side. `check/jobs.mjs` splits the sorted pa
 The selftest copies one part, so its time does not grow with the parts folder. On CI's hosted runner the selftest took 308 s; it may take at most 1.5 times that, 462 s, 77% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of its step; a selftest that outgrows that is split across jobs, never given a longer step.
 <!-- /capacity -->
 
+The check runs at most 8 groups (`MOST_GROUPS` in `check/jobs.mjs`), so at most 40 parts, and
+`.github/required-checks.json` has one row for each of groups 1 to 8; the proof knob stops there too. Past
+40 parts the plan job refuses, red, and names the fix: raise `MOST_GROUPS`, add a row for each new group to
+`.github/required-checks.json` and its acknowledgement line to `scripts/required-checks.test.sh` (from
+`scripts/required-checks-ack-derive.sh`), in one change. A test holds the rows to `MOST_GROUPS`.
+
 ## What the check proves about a label, and no more
 
 Every label in the showroom, as built, matches its reference at 0.995 or more on macOS and on Linux, on
