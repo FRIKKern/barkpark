@@ -12,9 +12,9 @@ func TestHostDecisionCaption(t *testing.T) {
 		d    hostDecision
 		want string
 	}{
-		{hostDecision{hostWarm, "warm-52d0bbcf"}, "Warm server warm-52d0bbcf assigned"},
-		{poolOffDecision(Seams{}), "No warm server: warm pool is off on this worker (WARM_POOL_SIZE=0) — creating a new server"},
-		{poolOffDecision(Seams{WarmPoolSize: 2}), "No warm server: warm pool has no claim client on this worker — creating a new server"},
+		{hostDecision{hostWarm, "warm-52d0bbcf"}, "Warm server warm-52d0bbcf claimed"},
+		{poolOffDecision(Seams{}), "No warm server: warm pool is off on the worker (WARM_POOL_SIZE=0) — creating a new server"},
+		{poolOffDecision(Seams{WarmPoolSize: 2}), "No warm server: warm pool has no claim client on the worker — creating a new server"},
 		{hostDecision{hostPoolEmpty, "no warm server ready"}, "No warm server: no warm server ready — creating a new server"},
 		{pinMismatchDecision(cloud.ServerSpec{Region: "fsn1"}, cloud.ServerSpec{Region: "nbg1", ServerType: "cx23"}),
 			"No warm server: this launch pins region fsn1 / type -, the pool is nbg1/cx23 — creating a new server"},
