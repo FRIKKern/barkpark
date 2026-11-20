@@ -63,6 +63,20 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
               ]
             },
             %{
+              "name" => "solo",
+              "title" => "Solo",
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "scap",
+                  "title" => "Solo caption",
+                  "type" => "localizedText",
+                  "languages" => ["nob", "eng"],
+                  "fallbackChain" => ["nob", "eng"]
+                }
+              ]
+            },
+            %{
               "name" => "lrows",
               "title" => "Rows",
               "type" => "arrayOf",
@@ -259,6 +273,47 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
 
     assert stored(c, id)["comp"] == %{"note" => "nn"}
     assert stored(c, id)["notes"] == "typed"
+  end
+
+  defp undo(view, c, id, redo \\ false) do
+    mark = %{
+      BarkparkWeb.Studio.StudioLive.PostIdentity.key() =>
+        BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, c.type, id)
+    }
+
+    render_hook(view, "desk-undo", Map.put(mark, "redo", redo))
+    render(view)
+  end
+
+  # Review r3 B5: a redo posts the emptied key as unset, so the save takes
+  # it off; a key the post only left out would be kept as stored.
+  test "undo and redo of emptying an object's language field, and of an object emptied whole",
+       c do
+    comp = %{"cap" => %{"nob" => "cn", "eng" => "ce"}, "note" => "nn"}
+    id = doc_with!(c, %{"comp" => comp, "solo" => %{"scap" => %{"nob" => "sn"}}})
+    view = desk(c, id)
+
+    change(view, "doc[comp].cap.nob", "")
+    Process.sleep(650)
+    change(view, "doc[comp].cap.eng", "")
+    assert stored(c, id)["comp"] == %{"note" => "nn"}
+
+    undo(view, c, id)
+    undo(view, c, id)
+    assert stored(c, id)["comp"] == comp
+
+    undo(view, c, id, true)
+    assert stored(c, id)["comp"] == %{"cap" => %{"eng" => "ce"}, "note" => "nn"}
+    undo(view, c, id, true)
+    assert stored(c, id)["comp"] == %{"note" => "nn"}
+
+    Process.sleep(650)
+    change(view, "doc[solo].scap.nob", "")
+    refute Map.has_key?(stored(c, id), "solo")
+    undo(view, c, id)
+    assert stored(c, id)["solo"] == %{"scap" => %{"nob" => "sn"}}
+    undo(view, c, id, true)
+    refute Map.has_key?(stored(c, id), "solo")
   end
 
   # TanStack's `write()` unsets no parent inside an array item: the row
