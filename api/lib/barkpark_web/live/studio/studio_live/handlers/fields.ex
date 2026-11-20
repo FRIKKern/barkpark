@@ -274,10 +274,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       "Saved" ->
         # An explicit save reloads the editor from the just-persisted row —
         # the local buffer is now clean, so drop the dirty flag and any
-        # stale concurrent-edit banner.
+        # stale concurrent-edit banner. A refused clear it left out is still
+        # not saved (`RefusedSave`), and the page says so, not "Saved".
         socket =
           socket
-          |> put_flash(:info, gettext("Saved"))
+          |> saved_flash()
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
           |> clear_touched()
@@ -289,13 +290,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
+  defp saved_flash(socket) do
+    if RefusedSave.token(socket.assigns) == "Saved",
+      do: put_flash(socket, :info, gettext("Saved")),
+      else: socket
+  end
+
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
   def reload_remote_doc(socket) do
     socket =
       socket
       |> Shared.rebuild_panes()
-      |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+      |> assign(
+        editor_dirty: false,
+        doc_conflict: false,
+        editor_unsaved_keys: MapSet.new(),
+        editor_refused_clears: nil
+      )
       |> clear_touched()
 
     {:noreply, socket}

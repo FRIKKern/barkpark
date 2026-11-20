@@ -13,9 +13,11 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
   (task-48b10c6eb7ec20c5, task-8513709a4e52f781; #27533 review r5, N1 and N2).
 
   The desk unsets an emptied language (B06), and the field or object it
-  leaves blank with it. When that save is refused, the field stays as stored:
-  the next post, of another field, writes only that field, and undo after it
-  takes back only that post.
+  leaves blank with it. When that save is refused, the field stays as stored
+  and reads "Not saved": the next post, of another field, writes only that
+  field, and undo after it takes back only that post. So for a refusal that
+  names another field (an enforcing dataset's check), one language of two,
+  a language in an array row, and the explicit Save (#27936 review).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -53,6 +55,12 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
       lt("cap"),
       comp("comp", [lt("cap"), str("note"), str("nul")]),
       comp("deep", [comp("inner", [lt("cap"), str("n")])]),
+      %{
+        "name" => "lrows",
+        "title" => "lrows",
+        "type" => "arrayOf",
+        "of" => %{"type" => "composite", "fields" => [lt("cap"), str("note")]}
+      },
       str("notes")
     ]
 
@@ -63,6 +71,18 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
           "title" => "Refused #{n}",
           "visibility" => "public",
           "fields" => fields
+        },
+        @dataset
+      )
+
+    # The same type with a required field, for an enforcing dataset.
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => type <> "_req",
+          "title" => "Refused req #{n}",
+          "visibility" => "public",
+          "fields" => fields ++ [Map.put(str("must"), "validation", %{"required" => true})]
         },
         @dataset
       )
@@ -92,7 +112,7 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
 
     {:ok, _} =
       Content.create_document(
-        c.type,
+        c[:req] || c.type,
         %{"doc_id" => id, "title" => "Book", "content" => Map.put(content, "notes", "0")},
         @dataset
       )
@@ -101,7 +121,7 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
   end
 
   defp desk(c, id) do
-    {:ok, view, _html} = live(c.conn, "#{c.root}/_desk/#{c.type};#{id}")
+    {:ok, view, _html} = live(c.conn, "#{c.root}/_desk/#{c[:req] || c.type};#{id}")
     render_async(view, 5_000)
     assert eventually(fn -> has_element?(view, @form) end)
     view
@@ -110,7 +130,7 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
   defp eventually(fun), do: Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
 
   defp stored(c, id) do
-    {doc, _, _} = Content.fetch_doc_with_draft(c.type, id, @dataset)
+    {doc, _, _} = Content.fetch_doc_with_draft(c[:req] || c.type, id, @dataset)
     doc.content || %{}
   end
 
@@ -119,7 +139,7 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
     %{rows: [[text]]} =
       Barkpark.Repo.query!(
         "select content::text from documents where type = $1 and doc_id = $2 and dataset = $3",
-        [c.type, "drafts." <> id, @dataset]
+        [c[:req] || c.type, "drafts." <> id, @dataset]
       )
 
     text
@@ -141,7 +161,7 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
   end
 
   defp undo(view, c, id, redo \\ false) do
-    mark = %{PostIdentity.key() => PostIdentity.value(@dataset, c.type, id)}
+    mark = %{PostIdentity.key() => PostIdentity.value(@dataset, c[:req] || c.type, id)}
     render_hook(view, "desk-undo", Map.put(mark, "redo", redo))
     render(view)
   end
@@ -185,10 +205,9 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
 
     html = refused(view, "doc[cap].nob")
 
-    # The field is drawn as stored again, and the save region says why.
+    # The field is drawn as stored again, and reads not saved, with why.
     assert text_value(view, "doc[cap].nob") == "cn"
-    assert html =~ "held"
-    refute html =~ "Not saved"
+    assert html =~ "Not saved: held"
 
     change(view, "doc[notes]", "n1")
     assert stored(c, id)["notes"] == "n1"
@@ -239,5 +258,97 @@ defmodule BarkparkWeb.Studio.DeskRefusedClearTest do
     refused(view, "doc[deep].inner.cap.nob")
     change(view, "doc[deep].inner.cap.nob", "")
     refute Map.has_key?(stored(c, id), "deep")
+  end
+
+  # An enforcing dataset refuses the clear for a field the stored document
+  # lacks (`must`), so the refusal names another field. The document is
+  # stored before the dataset enforces.
+  defp enforcing!(c, content) do
+    c = Map.put(c, :req, c.type <> "_req")
+    id = doc!(c, content)
+    prev = Application.get_env(:barkpark, Barkpark.Content.Validation)
+    Application.put_env(:barkpark, Barkpark.Content.Validation, enforce_datasets: [@dataset])
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, Barkpark.Content.Validation, prev),
+        else: Application.delete_env(:barkpark, Barkpark.Content.Validation)
+    end)
+
+    {c, id}
+  end
+
+  test "a clear refused over another field is not written when that field is then posted", c do
+    comp = %{"cap" => %{"nob" => "cn"}, "note" => "nn"}
+    {c, id} = enforcing!(c, %{"comp" => comp})
+    view = desk(c, id)
+
+    html = change(view, "doc[comp].cap.nob", "")
+    assert stored(c, id)["comp"] == comp
+
+    change(view, "doc[must]", "now")
+    assert stored(c, id)["must"] == "now"
+    assert stored(c, id)["comp"] == comp
+    refute row(c, id) =~ ~s("cap": null)
+    assert html =~ "Not saved"
+  end
+
+  test "a whole-field clear refused over another field survives that field's post and its undo",
+       c do
+    deep = %{"inner" => %{"cap" => %{"nob" => "dn"}}}
+    {c, id} = enforcing!(c, %{"deep" => deep})
+    view = desk(c, id)
+
+    change(view, "doc[deep].inner.cap.nob", "")
+    change(view, "doc[must]", "now")
+    assert stored(c, id)["deep"] == deep
+
+    # The undo takes back `must` (which the dataset refuses: it is
+    # required); either way it never removes `deep`.
+    undo(view, c, id)
+    assert stored(c, id)["deep"] == deep
+  end
+
+  test "the explicit Save after a refused clear leaves it out and says not saved", c do
+    deep = %{"inner" => %{"cap" => %{"nob" => "dn"}}}
+    id = doc!(c, %{"deep" => deep})
+    view = desk(c, id)
+
+    refused(view, "doc[deep].inner.cap.nob")
+    view |> form(@form, %{"doc[deep].inner.cap.nob" => ""}) |> render_submit()
+
+    assert stored(c, id)["deep"] == deep
+    html = render(view)
+    assert html =~ "Not saved"
+    refute :sys.get_state(view.pid).socket.assigns.flash["info"] == "Saved"
+  end
+
+  test "a refused clear of one language of two is not written by the next post", c do
+    cap = %{"nob" => "tn", "eng" => "te"}
+    id = doc!(c, %{"cap" => cap})
+    view = desk(c, id)
+
+    assert refused(view, "doc[cap].nob") =~ "Not saved: held"
+    assert text_value(view, "doc[cap].nob") == "tn"
+
+    change(view, "doc[notes]", "n1")
+    assert stored(c, id)["notes"] == "n1"
+    assert stored(c, id)["cap"] == cap
+
+    undo(view, c, id)
+    assert stored(c, id)["notes"] == "0"
+    assert stored(c, id)["cap"] == cap
+  end
+
+  test "a refused clear of a language in an array row is not written by the next post", c do
+    rows = [%{"_key" => "r1", "cap" => %{"nob" => "rn", "eng" => "re"}, "note" => "rr"}]
+    id = doc!(c, %{"lrows" => rows})
+    view = desk(c, id)
+
+    assert refused(view, "doc[lrows][0].cap.nob") =~ "Not saved"
+
+    change(view, "doc[notes]", "n1")
+    assert stored(c, id)["notes"] == "n1"
+    assert stored(c, id)["lrows"] == rows
   end
 end
