@@ -254,6 +254,10 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       for params <- [%{"field" => "title"}, %{"field" => "summary"}, %{"all" => "true"}],
           do: render_hook(view, "desk-field-revert", Map.merge(own_mark(d), params))
 
+      # The document's undo and redo (`DocUndo`).
+      for redo <- [false, true],
+          do: render_hook(view, "desk-undo", Map.put(own_mark(d), "redo", redo))
+
       for {event, params} <- [
             {"sidebar-label-add", %{"value" => "x"}},
             {"duplicate-doc", %{}},
@@ -314,6 +318,40 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
 
       render_async(view, 5_000)
       assert draft(d).content["mainImage"] == image
+    end
+  end
+
+  describe "a tree codelist's pick while a revision is shown" do
+    # The pick is pressed on the tree's component, past the page's guard,
+    # and reaches the page as a message (`TreeCodelistField`): refused there.
+    test "writes nothing; the same pick on the live form is written", c do
+      d =
+        doc!(
+          [
+            %{
+              "name" => "subject",
+              "title" => "Subject",
+              "type" => "codelist",
+              "codelistId" => "onixedit:rvg-none"
+            }
+          ],
+          %{"title" => "Pub v1", "subject" => "FBA"},
+          %{"title" => "Pub draft", "subject" => "FBC"}
+        )
+
+      pick = fn code ->
+        {:tree_codelist_pick, %{name: "doc[subject]", value: code, press: own_mark(d)}}
+      end
+
+      view = open(c, d, @history <> ",rev=#{d.rev}")
+      send(view.pid, pick.("YFB"))
+      render_async(view, 5_000)
+      assert draft(d).content["subject"] == "FBC"
+
+      view = open(c, d)
+      send(view.pid, pick.("YFB"))
+      render_async(view, 5_000)
+      assert draft(d).content["subject"] == "YFB"
     end
   end
 

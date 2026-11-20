@@ -2458,6 +2458,14 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # single-quoted: the name carries a literal `${{ … }}` — in double quotes
         # bash reads it as a parameter expansion and dies with `bad substitution`.
         --expect-unrendered 'Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})'
+        # task-97b251c1b5d6a1db: mix-test and mix-prod-compile read their
+        # toolchain from .tool-versions, not a matrix axis, so they render new
+        # names that no frozen head carries. The rows above stay for open PRs.
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions)"
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions) (1)"
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions) (2)"
+        --expect-unrendered "Test (Elixir and OTP from .tool-versions) (3)"
+        --expect-unrendered "Prod compile gate (Elixir and OTP from .tool-versions)"
         --expect-unrendered "Billing tier floor (rendered)"
         --expect-unrendered "Overflow guard (rendered)"
         --expect-unrendered "Modal CSSOM oracle (rendered)"
@@ -2820,7 +2828,25 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # nightly and workflow_dispatch only, so its name renders on main and on a
         # PR head only after a hand dispatch; the row lands after the frozen
         # fixture pair. DERIVED by scripts/required-checks-ack-derive.sh.
-        --expect-unrendered "tooling/grip full node --test suite")
+        --expect-unrendered "tooling/grip full node --test suite"
+        # barkui.yml (task-3a8552dc2063494a): added after the frozen fixture pair, so none
+        # of its names renders ON THAT PAIR (the third cause of absence above). This is
+        # not "may be missing on a live head": the plan and the closing check render on
+        # every live head by design; the groups and the selftest are skipped or absent
+        # there when BarkUI is not touched, and groups 2 to 8 render only when the split
+        # makes that many. DERIVED by scripts/required-checks-ack-derive.sh.
+        --expect-unrendered 'BarkUI check, group ${{ matrix.group }}'
+        --expect-unrendered "BarkUI check, group 1"
+        --expect-unrendered "BarkUI check, group 2"
+        --expect-unrendered "BarkUI check, group 3"
+        --expect-unrendered "BarkUI check, group 4"
+        --expect-unrendered "BarkUI check, group 5"
+        --expect-unrendered "BarkUI check, group 6"
+        --expect-unrendered "BarkUI check, group 7"
+        --expect-unrendered "BarkUI check, group 8"
+        --expect-unrendered "BarkUI plan (does this change touch it, and which groups)"
+        --expect-unrendered "BarkUI selftest"
+        --expect-unrendered "BarkUI showroom check")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

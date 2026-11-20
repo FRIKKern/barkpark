@@ -1,7 +1,7 @@
 // node build/status.mjs: writes what the sheet and the UI SDK pin hold into
 // README.md, between <!-- status:start --> and <!-- status:end -->, with the
-// day its numbers last changed and a stamp. It is run by hand until the daily
-// news run calls it with the board block; a PR never has to. When the facts
+// day its numbers last changed and a stamp. The daily news run calls it after
+// the board block, and it can be run by hand; a PR never has to. When the facts
 // have not moved, the page is left as it is, date and all.
 //
 // Parts are not counted here: the showroom page is their one home, so adding a

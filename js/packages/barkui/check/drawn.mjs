@@ -1,23 +1,24 @@
-// Everything in a stage is judged by what is drawn, and drawn in full.
-// installDrawn runs inside the check's isolated world after installHelpers and
-// installBoundary (it is serialised, so it may not reach anything outside its
-// own body) and adds its readers to the same helper object.
+// Everything in a stage is judged by what is drawn. installDrawn runs inside
+// the check's isolated world after installHelpers, installBoundary and
+// installMatch (it is serialised, so it may not reach anything outside its own
+// body) and adds its readers to the same helper object.
 //
-// The check captures the stage three times: as drawn, with every glyph
-// unpainted, and with every graphic (svg, img, a pseudo-element with a box)
-// unpainted; each toggle is an !important sheet in the earliest cascade layer,
-// put there from the isolated world. A thing's ink is the pixels that differ
-// when it is toggled off; its footprint is those that moved at least half as far
-// as the most any moved (the outline at half cover, so a colour, a fade, a text
-// gamma or an anti-aliasing mode does not change it). That footprint must be at least 90% of the same
-// thing drawn alone by the check, unclipped and uncovered (the same string in
-// the same font for text, a copy of the node for a graphic), in its own colours
-// on its own ground and at the same place within a device pixel, so that both
-// are rasterised alike: anything less is cut. Contrast is read from the core
-// of the ink (the strongest tenth), the
-// colour as drawn against what is drawn there without it: 4.5:1 for text, 3:1
-// for a graphic. Covers, filters, blend modes, opacity anywhere above, masks,
-// clips, transforms and font sizes all show up in the pixels.
+// References are drawn in a tab of their own (the same browser context, so the
+// same pixel ratio and fonts): laying them out in the page under test can change
+// how the browser rasterises it. The check captures the stage three times: as drawn, with every glyph
+// unpainted (decorations stay), and with every graphic (svg, img, a
+// pseudo-element with a box) unpainted; each toggle is an !important sheet in
+// the earliest cascade layer, put there from the isolated world.
+//
+// A label (each line of a text node) is read by match.mjs: its picture against
+// the same string drawn alone by the check, in its own font, colours and ground
+// and at its own place within a device pixel. Any other thing (a graphic, or
+// text a pseudo-element or the browser draws) is read by its footprint: the
+// pixels that differ when it is toggled off by at least half as far as the most
+// any moved, against the same thing drawn alone (a copy of the node for a
+// graphic). Contrast is read from the core of the ink (the strongest tenth),
+// the colour as drawn against what is drawn there without it: 4.5:1 for text,
+// 3:1 for a graphic. reading.mjs holds the limits.
 export function installDrawn() {
   const h = window.__barkCheck
   const box = (r, pad = 0) => ({ x: r.left + scrollX - pad, y: r.top + scrollY - pad, w: r.width + 2 * pad, h: r.height + 2 * pad })
@@ -42,7 +43,7 @@ export function installDrawn() {
     }
     return false
   }
-  const FONT = ['font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch', 'font-variant', 'font-feature-settings', 'font-variation-settings', 'font-kerning', 'font-optical-sizing', 'text-transform', '-webkit-font-smoothing']
+  const FONT = ['font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch', 'font-variant', 'font-feature-settings', 'font-variation-settings', 'font-kerning', 'font-optical-sizing', 'text-transform', '-webkit-font-smoothing', 'letter-spacing', 'word-spacing', 'text-rendering']
   const fontOf = (s) => FONT.map((p) => `${p}: ${s.getPropertyValue(p)}`).join('; ')
   /** A colour laid solid over a ground, as rgb(): how it is drawn there with no fade above it. */
   const solid = (colour, ground) => {
@@ -50,8 +51,8 @@ export function installDrawn() {
     return `rgb(${c.slice(0, 3).map((v, i) => Math.round(v * c[3] + ground[i] * (1 - c[3]))).join(', ')})`
   }
   const rgb = (ground) => `rgb(${ground.slice(0, 3).map(Math.round).join(', ')})`
-  /** Where a box starts within a device pixel, in CSS px, in eighths of a device pixel. */
-  const phase = (r) => [r.left, r.top].map((v) => Math.round((((v * devicePixelRatio) % 1) + 1) % 1 * 8) / 8 / devicePixelRatio)
+  /** Where a box starts within a CSS pixel, to the layout unit (1/64 px): text is placed and snapped from it. */
+  const phase = (r) => [r.left, r.top].map((v) => Math.round((((v % 1) + 1) % 1) * 64) / 64)
   /** The text a pseudo-element's content says, or null when it comes from a counter or an attribute. */
   const said = (content) => {
     if (/counter|attr\(/.test(content)) return null
@@ -92,15 +93,17 @@ export function installDrawn() {
         }
       }
     }
+    // Each line of a text node is one label, matched against its own string drawn alone (match.mjs).
     for (const n of textNodes(root)) {
       const el = n.parentElement
       if (el instanceof SVGElement || !el.checkVisibility() || forReadersOnly(el, root)) continue
       const s = getComputedStyle(el)
       const ground = h.effectiveBg(el)
-      const range = document.createRange()
-      range.selectNodeContents(n)
-      const draw = { font: fontOf(s), str: n.textContent.replace(/\s+/g, ' ').trim(), ink: solid(s.webkitTextFillColor, ground), ground: rgb(ground), at: phase(range.getBoundingClientRect()) }
-      items.push({ kind: 'text', el, at: h.describe(el), quiet: quiet(el), rects: textRects(n, 1), key: `text|${JSON.stringify(draw)}`, draw })
+      for (const l of h.lines(n)) {
+        const draw = { font: fontOf(s), str: l.str, ink: solid(s.webkitTextFillColor, ground), ground: rgb(ground), at: phase(l), run: true }
+        const line = box(l)
+        items.push({ kind: 'text', run: true, el, at: h.describe(el), quiet: quiet(el), rects: [box(l, 1)], line, key: `run|${JSON.stringify(draw)}`, draw })
+      }
     }
     const owner = (g) => g.closest(h.CONTROLS) ?? g.parentElement
     for (const g of graphicEls) {
@@ -139,29 +142,35 @@ export function installDrawn() {
     copy.style.setProperty('color', solid(getComputedStyle(node).color, ground))
     return copy
   }
+  /** What the reference tab needs to draw some things alone: plain data, so it can cross to another page. */
+  const specs = (keys) =>
+    keys.map((key) => {
+      const t = items.find((x) => x.key === key)
+      const spec = { key, run: !!t.draw.run, ground: typeof t.draw.ground === 'string' ? t.draw.ground : rgb(t.draw.ground), ink: t.draw.ink ?? '#000', at: t.draw.at }
+      if (t.draw.str) Object.assign(spec, { font: t.draw.font, str: t.draw.str })
+      else if (t.draw.node) spec.html = copyOf(t.draw).outerHTML
+      else spec.html = t.draw.looks.map((look) => Object.assign(document.createElement('div'), { style: `all: initial; display: block; ${look}` }).outerHTML).join('')
+      return spec
+    })
   let sheet = null
-  /** Lay out every thing not yet measured, alone on its own ground, at the top of the document; returns its box. */
-  const alone = (keys) => {
+  /** In the reference tab: lay out each thing alone on its own ground, at the top of the document; returns the box. */
+  const alone = (list) => {
     sheet?.remove()
     sheet = document.createElement('div')
-    sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; z-index: 2147483647; display: block; background: #fff; color: #000;')
+    sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; display: block; background: #fff; color: #000;')
     document.documentElement.append(sheet)
     let top = 8
     let wide = 0
-    for (const key of keys) {
-      const t = items.find((x) => x.key === key)
+    for (const t of list) {
       const cell = document.createElement('div')
-      const ground = typeof t.draw.ground === 'string' ? t.draw.ground : rgb(t.draw.ground)
-      cell.dataset.key = key
-      cell.dataset.ground = ground
+      cell.dataset.key = t.key
+      cell.dataset.ground = t.ground
+      if (t.run) cell.dataset.run = ''
       // Whole CSS pixels at both scales the check uses, plus the thing's own place within a device pixel.
-      const [dx, dy] = t.draw.at
-      cell.setAttribute('style', `all: initial; position: absolute; left: 8px; top: ${top}px; display: block; padding: ${4 + dy}px 4px 4px ${4 + dx}px; background: ${ground}; color: ${t.draw.ink ?? '#000'}; line-height: normal; white-space: pre;`)
-      if (t.draw.str) {
-        cell.setAttribute('style', `${cell.getAttribute('style')} ${t.draw.font};`)
-        cell.textContent = t.draw.str
-      } else if (t.draw.node) cell.append(copyOf(t.draw))
-      else for (const look of t.draw.looks) cell.append(Object.assign(document.createElement('div'), { style: `all: initial; display: block; ${look}` }))
+      const [dx, dy] = t.at
+      cell.setAttribute('style', `all: initial; position: absolute; left: 8px; top: ${top}px; display: block; padding: ${4 + dy}px 4px 4px ${4 + dx}px; background: ${t.ground}; color: ${t.ink}; line-height: normal; white-space: pre;${t.str ? ` ${t.font};` : ''}`)
+      if (t.str) cell.textContent = t.str
+      else cell.innerHTML = t.html
       sheet.append(cell)
       // A cell of whole pixels, so its ground ends on a pixel edge and only the thing differs from it.
       const r = cell.getBoundingClientRect()
@@ -213,10 +222,12 @@ export function installDrawn() {
     const core = strong.slice(0, Math.max(1, Math.ceil(strong.length / 10)))
     return { amount, count: strong.length, ratio: strong.length ? core[Math.floor(core.length / 2)] : 1 }
   }
-  /** Measure the things drawn alone: each against its own ground, which is all that is under it. */
+  /** In the reference tab: measure the things drawn alone, each against its own ground (all that is under it).
+      Returns plain data for the page's world: a footprint size, or a label's pixels as base64. */
   const measureAlone = async (png, clip, scale) => {
     const a = await pixels(png)
     const under = { w: a.w, h: a.h, data: new Uint8ClampedArray(a.data.length) }
+    const out = []
     for (const cell of sheet.children) {
       const [r, g, b] = h.rgba(cell.dataset.ground)
       const at = box(cell.getBoundingClientRect())
@@ -224,16 +235,29 @@ export function installDrawn() {
       const x1 = Math.min(a.w, Math.ceil((at.x + at.w - clip.x) * scale))
       for (let y = Math.max(0, Math.floor((at.y - clip.y) * scale)); y < Math.min(a.h, Math.ceil((at.y + at.h - clip.y) * scale)); y++)
         for (let x = x0; x < x1; x++) under.data.set([r, g, b, 255], (y * a.w + x) * 4)
-      keyed.set(cell.dataset.key, ink(a, under, clip, scale, [at]).amount)
+      if (cell.dataset.run === undefined) out.push({ key: cell.dataset.key, amount: ink(a, under, clip, scale, [at]).amount })
+      else {
+        const range = document.createRange()
+        range.selectNodeContents(cell.firstChild)
+        const ref = h.reference(a, at, box(range.getBoundingClientRect()), clip, scale, [r, g, b])
+        let bin = ''
+        for (let i = 0; i < ref.d.length; i += 0x8000) bin += String.fromCharCode(...ref.d.subarray(i, i + 0x8000))
+        out.push({ key: cell.dataset.key, ref: { ...ref, d: btoa(bin) } })
+      }
     }
     sheet.remove()
     sheet = null
+    return out
+  }
+  /** In the page's world: keep what the reference tab measured. */
+  const keep = (list) => {
+    for (const x of list) keyed.set(x.key, x.ref ? { ...x.ref, d: Uint8Array.from(atob(x.ref.d), (c) => c.charCodeAt(0)) } : x.amount)
   }
 
   const TOGGLES = {
+    // Decorations stay painted: a bar laid over a label is part of what covers it, not part of its ink.
     glyphs: `*, *::before, *::after, *::marker, *::placeholder, *::first-letter, *::first-line { -webkit-text-fill-color: transparent !important;
-      -webkit-text-stroke-color: transparent !important; text-shadow: none !important; text-decoration-color: transparent !important;
-      text-emphasis-color: transparent !important; transition: none !important; }`,
+      -webkit-text-stroke-color: transparent !important; text-shadow: none !important; transition: none !important; }`,
     graphics: 'svg, img, *::before, *::after { opacity: 0 !important; transition: none !important; }',
   }
   let toggle = null
@@ -248,20 +272,36 @@ export function installDrawn() {
     document.head.prepend(toggle)
   }
 
-  /** Read every thing of the view from the three captures: does it draw, in full, and how strongly. Also every
-      control that shows nothing, and every text-only control with no drawn label (see boundaries). */
-  const judge = async (drawnPng, noGlyphsPng, noGraphicsPng, clip, scale, root) => {
+  /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill is the first token and its ground
+      the second, both as they resolve where it stands. */
+  const fitsOf = (t, pairs) => {
+    const same = (x, y, n) => x.slice(0, n).every((v, i) => Math.abs(v - y[i]) < 0.5)
+    const fill = h.rgba(getComputedStyle(t.el).webkitTextFillColor)
+    const ground = h.effectiveBg(t.el)
+    const i = pairs.findIndex(([text, under]) => same(fill, h.rgba(h.resolve(text, t.el)), 4) && same(ground, h.rgba(h.resolve(under, t.el)), 3))
+    return i < 0 ? undefined : i
+  }
+  /** Read every thing of the view from the three captures: does it draw, as itself, and how strongly. Also every
+      control that shows nothing, and every text-only control with no drawn label (see boundaries). `pairs` are
+      the token pairs of this view's waits on the sheet; a text drawn in one carries its index as `fits`. */
+  const judge = async (drawnPng, noGlyphsPng, noGraphicsPng, clip, scale, root, pairs = []) => {
     const [a, b, c] = await Promise.all([pixels(drawnPng), pixels(noGlyphsPng), pixels(noGraphicsPng)])
-    const read = items.map((t) => ({ t, ...ink(a, t.kind === 'text' ? b : c, clip, scale, t.rects, t.holes) }))
+    const runs = items.filter((t) => t.run)
+    const read = items.map((t) => {
+      const r = { t, ...ink(a, t.kind === 'text' ? b : c, clip, scale, t.rects, t.holes) }
+      if (t.run) r.match = h.match(a, h.rgba(t.draw.ground), clip, scale, t.line, keyed.get(t.key), runs.filter((x) => x !== t).map((x) => x.line))
+      if (t.kind === 'text' && pairs.length) r.fits = fitsOf(t, pairs)
+      return r
+    })
     const shows = (el, kind) => read.some((r) => r.count >= 4 && el.contains(r.t.el) && (!kind || r.t.kind === kind))
     const empty = h.controls(root).filter((el) => !el.matches(h.FIELDS) && !shows(el)).map((el) => h.describe(el))
     const unlabelled = (h.state.bare ?? []).filter((el) => !shows(el, 'text')).map((el) => h.describe(el))
     return {
-      things: read.map(({ t, amount, count, ratio }) => ({ kind: t.kind, at: t.at, quiet: t.quiet, draws: count >= 4, share: t.key && keyed.get(t.key) ? amount / keyed.get(t.key) : null, alone: t.key ? keyed.get(t.key) : null, ratio })),
+      things: read.map(({ t, amount, count, ratio, match, fits }) => ({ kind: t.kind, at: t.at, quiet: t.quiet, draws: count >= 4, ratio, fits, ...(t.run ? { match } : { share: t.key && keyed.get(t.key) ? amount / keyed.get(t.key) : null }) })),
       empty,
       unlabelled,
     }
   }
 
-  Object.assign(h, { things, alone, measureAlone, unpaint, judge })
+  Object.assign(h, { things, specs, alone, measureAlone, keep, unpaint, judge })
 }

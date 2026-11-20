@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { lintPartCss } from '../build/css-lint.mjs'
-import { PHONE } from '../build/vocabulary.mjs'
+import { EXTRA, KEYFRAMES, PHONE, PHONE_ONLY } from '../build/vocabulary.mjs'
 import { discoverParts } from '../build/parts.mjs'
 
 const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
@@ -10,7 +10,7 @@ const parts = discoverParts(join(import.meta.dirname, '..', 'parts'))
 describe('every real part.css', () => {
   for (const p of parts) {
     it(`${p.name}/part.css has no colour literal and reads only --ui-* / --bark-*`, () => {
-      expect(lintPartCss(readFileSync(join(p.dir, 'part.css'), 'utf8'), p.json.allow)).toEqual([])
+      expect(lintPartCss(readFileSync(join(p.dir, 'part.css'), 'utf8'))).toEqual([])
     })
   }
 })
@@ -40,6 +40,8 @@ describe('lintPartCss', () => {
     'own outline': 'a { outline: 2px solid var(--ui-ring); }',
     'url image': 'a { background-image: url("photo.png"); }',
     'data svg with its own colour': "a { background-image: url(\"data:image/svg+xml,%3Csvg fill='black'/%3E\"); }",
+    'bitmap whose url holds a semicolon': 'a { background-image: url(data:image/png;base64,iVBORw0KGgo); }',
+    'quoted svg whose url holds a semicolon and its own colour': "a { background-image: url(\"data:image/svg+xml;utf8,<svg fill='black'/>\"); }",
   }
   for (const [what, css] of Object.entries(bad)) {
     it(`refuses a ${what}`, () => {
@@ -63,7 +65,6 @@ describe('lintPartCss', () => {
 
   // R4: part.css is written in a small vocabulary; anything else is named in part.json with a reason.
   for (const [prop, css] of [
-    ['filter', 'a { filter: opacity(0.1); }'],
     ['mix-blend-mode', 'a { mix-blend-mode: screen; }'],
     ['clip-path', 'a { clip-path: inset(50%); }'],
     ['mask-image', 'a { mask-image: linear-gradient(transparent, transparent); }'],
@@ -72,12 +73,52 @@ describe('lintPartCss', () => {
     ['-webkit-text-fill-color', 'a { -webkit-text-fill-color: var(--ui-background); }'],
     ['background-clip', 'a { background-clip: text; }'],
     ['zoom', 'a { zoom: 0.1; }'],
+    ['text-decoration-thickness', 'a { text-decoration-thickness: 0.9em; }'],
+    ['text-shadow', 'a { text-shadow: 0 0 2px currentColor; }'],
   ]) {
-    it(`refuses ${prop} unless part.json names it with a reason`, () => {
-      expect(lintPartCss(css).join('\n')).toMatch(new RegExp(`line 1: ${prop} is outside part\\.css's vocabulary.*part\\.json "allow"`))
-      expect(lintPartCss(css, { [prop]: 'the reason, in one line' })).toEqual([])
+    it(`refuses ${prop}, and nothing in a part can excuse it`, () => {
+      expect(lintPartCss(css).join('\n')).toMatch(new RegExp(`line 1: ${prop} is outside part\\.css's vocabulary`))
+      expect(lintPartCss(css, { [prop]: 'the reason, in one line' }).join('\n')).toMatch(/outside part\.css's vocabulary/)
     })
   }
+
+  it('takes a property beyond the vocabulary only at the values EXTRA gives it', () => {
+    expect(EXTRA).toEqual({ filter: ['none'] })
+    expect(lintPartCss('a { filter: none; }')).toEqual([])
+    expect(lintPartCss('a { filter: opacity(0.1); }').join()).toMatch(/line 1: filter: opacity\(0\.1\); part\.css may only set filter to none/)
+  })
+
+  it('refuses any escape, and keyframes of its own (a part names the shared ones in base.css)', () => {
+    expect(lintPartCss(String.raw`@\6d edia (min-width: 1600px) { a { gap: 1px; } }`).join()).toMatch(/line 1: a backslash/)
+    expect(lintPartCss(String.raw`a { fil\000074er: blur(2px); }`).join()).toMatch(/line 1: a backslash/)
+    expect(lintPartCss('/* a \\ in a comment */ a { gap: 1px; }')).toEqual([])
+    expect(lintPartCss('@keyframes x { to { color: var(--ui-primary); } }').join()).toMatch(/line 1: @keyframes x: a part defines no keyframes/)
+    expect(lintPartCss('} a { box-shadow: none; } @layer bark-parts {').join()).toMatch(/line 1: a \} with no \{ before it/)
+    expect(lintPartCss('a { gap: 1px;').join()).toMatch(/a \{ is never closed/)
+  })
+
+  it('lets only layout and type change at phone width', () => {
+    const r = '@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); } }'
+    expect(lintPartCss(r).join()).toMatch(/--bark-button-fg inside @media \(max-width: 600px\): only layout and type/)
+    expect(lintPartCss('@media (max-width: 600px) { a { color: var(--ui-x); } }').join()).toMatch(/color inside @media/)
+    expect(lintPartCss('@media (max-width: 600px) { a { flex-direction: column; padding: 0.5rem; } }')).toEqual([])
+    for (const p of ['color', 'background', 'border-color', 'opacity', 'box-shadow', 'text-decoration-color']) expect(PHONE_ONLY.has(p)).toBe(false)
+  })
+
+  it('shares keyframes from base.css that only turn their element', () => {
+    const base = readFileSync(join(import.meta.dirname, '..', 'css', 'base.css'), 'utf8')
+    const defined = [...base.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)]
+    expect(defined.map((m) => m[1]).sort()).toEqual([...KEYFRAMES].sort())
+    for (const m of defined) for (const d of m[2].matchAll(/([\w-]+)\s*:/g)) expect(['rotate', 'transform']).toContain(d[1])
+  })
+
+  it('takes content only as "" or none, and no thickness through the text-decoration shorthand', () => {
+    for (const ok of ['a::after { content: ""; }', "a::after { content: ''; }", 'a::after { content: none; }']) expect(lintPartCss(ok)).toEqual([])
+    expect(lintPartCss('a::after { content: "Cancel"; }').join()).toMatch(/line 1: content: "Cancel"; part\.css may only set content to "" or none/)
+    expect(lintPartCss('a::after { content: attr(title); }').join()).toMatch(/may only set content/)
+    expect(lintPartCss('a { text-decoration: underline; }')).toEqual([])
+    expect(lintPartCss('a { text-decoration: line-through 0.9em; }').join()).toMatch(/line 1: text-decoration: line-through 0\.9em sets a thickness/)
+  })
 
   it('takes a font size only from a variable that holds a readable size', () => {
     expect(lintPartCss('a { font-size: 0; }').join()).toMatch(/line 1: font-size .*var\(--bark-/)

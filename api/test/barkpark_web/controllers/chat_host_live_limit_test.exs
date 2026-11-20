@@ -379,8 +379,12 @@ defmodule BarkparkWeb.ChatHostLiveLimitTest do
       })
       |> render_submit()
 
-    assert html =~ "reached its limit of 1 enrolled chat hosts. Revoke one to enroll another."
-    refute html =~ "One-time enrollment token"
+    assert html =~
+             "This workspace already has 1 enrolled machine, the most it can hold. Revoke it to register another."
+
+    # No code was made, so no command to run it with is shown.
+    refute html =~ "| barkpark-chat-host enroll --url"
+    refute html =~ "Made a one-time code"
     assert [%{name: "laptop"}] = live_hosts(ws)
   end
 

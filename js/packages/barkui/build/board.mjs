@@ -2,8 +2,8 @@
 // into docs/ROADMAP.md, between <!-- board:start --> and <!-- board:end -->,
 // read from the task board with `bp task get <id> -o json`.
 //
-// It needs a signed-in `bp`, so it runs on a machine, by hand until the daily
-// news run calls it, and never in a PR check. The goal's id is given on the command line and kept out
+// It needs a signed-in `bp`, so it runs on a machine: the daily news run calls
+// it, it can be run by hand, and it never runs in a PR check. The goal's id is given on the command line and kept out
 // of the repo. The block ends with a stamp over its own lines (build/stamped.mjs);
 // the fast tests fail when the block was edited by hand or no longer has the
 // shape below, never because the board moved.

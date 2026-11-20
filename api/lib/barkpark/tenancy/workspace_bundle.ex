@@ -67,9 +67,9 @@ end
 defmodule Barkpark.Tenancy.WorkspaceBundle do
   @moduledoc """
   Export ANY workspace into one complete, self-describing bp-export-v1 bundle
-  and re-import it into a clean database with ZERO silent loss — the keystone
-  the five Cloud consumers (backup, eject, rebalance, graduation, migration)
-  inherit.
+  and re-import it into a clean database. The import leaves out one table,
+  `workspace_access_requests` (`LocalOnly`: people ask again). The keystone the
+  five Cloud consumers (backup, eject, rebalance, graduation, migration) inherit.
 
   Completeness is PROVEN, never asserted by grep: an `information_schema` +
   `pg_constraint` partition diff plus per-table count-parity and
@@ -217,8 +217,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       that re-judge already-validated source rows against target-local state,
       and DEFERRABLE CONSTRAINT triggers (release-gate validation) that would
       fire at commit. `ALTER TABLE … DISABLE TRIGGER USER` (ownership, not
-      superuser) suppresses exactly the same set the replica role did (no
-      trigger in this schema is `ENABLE ALWAYS`/`ENABLE REPLICA`); internally
+      superuser) suppresses them; the one `ENABLE ALWAYS` trigger, the seat
+      stamp, is turned straight back on (`LocalOnly`); internally
       generated FK triggers are outside `USER` by definition — those are
       handled by the constraint drop above. Constraint-trigger events are
       queued at statement time, so re-enabling before commit resurrects
@@ -232,7 +232,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   Two modes:
 
-    * `:clean` (default) — byte-identical restore into a CLEAN target. E1/E2/
+    * `:clean` (default) — restore into a CLEAN target, minus `LocalOnly`. E1/E2/
       root members re-import via `COPY … FROM STDIN`; the string-keyed E3 +
       allowlist members re-import via `INSERT … ON CONFLICT DO NOTHING`,
       because their key is NOT workspace-unique (the same
@@ -271,7 +271,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     InvalidBundleError
   }
 
-  alias Barkpark.Tenancy.WorkspaceBundle.{ImportConfinement, Janitor}
+  alias Barkpark.Tenancy.WorkspaceBundle.{ImportConfinement, Janitor, LocalOnly}
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
@@ -380,16 +380,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   @doc """
   Re-import a bundle binary. Returns `{:ok, stats}` where `stats.manifest` is
   the bundle's own manifest (so the caller can stamp pull provenance without
-  re-inflating the tar) and `stats.tables` maps
-  each table to the rows imported into it (rows already present via the
-  ON-CONFLICT path are not double-counted at the SQL level but ARE included in
-  the member's row_count — the return counts rows the bundle CARRIED, in BOTH
-  modes: a merge that updated-in-place rather than inserted still reports the
-  carried row count, never a per-row insert/update split).
+  re-inflating the tar) and `stats.tables` maps each table to the rows the bundle
+  CARRIED for it, in both modes: rows already present via the ON-CONFLICT path
+  count too, and a merge that updated in place still reports the carried count,
+  never an insert/update split. `workspace_access_requests` maps to 0, since the
+  import leaves it out (`LocalOnly`); `stats.access_requests_left_out` holds the
+  bundle's count of it.
 
   ## Options
 
-    * `:mode` — `:clean` (default; byte-identical restore into a clean target)
+    * `:mode` — `:clean` (default; restore into a clean target, minus `LocalOnly`)
       or `:merge` (PDS-D8; convergent upsert over a possibly-populated target).
     * `:grant_admin_to` — the principal bringing this workspace onto this
       instance, as `{principal_id, principal_type}`. It is granted an `admin`
@@ -412,8 +412,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       project; the other codes are listed on the exception). Only `:clean` mode;
       `:grant_admin_to` does not apply, because the target workspace already
       exists. See `Barkpark.Tenancy.WorkspaceBundle.DatasetRemap` for the table
-      of what is rewritten and what is not. Defaults to `nil` (the byte-for-byte
-      restore above, unchanged).
+      of what is rewritten and what is not. Defaults to `nil` (the restore above,
+      unchanged).
 
   In `:merge` mode a same-slug/different-id root collision returns
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
@@ -811,14 +811,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         member_fks =
           with_ddl_lock_timeout(:drop_member_fks, fn ->
             fks = drop_member_fks!(live)
-            alter_user_triggers!(live, "DISABLE")
+            LocalOnly.disable_user_triggers!(live, &alter_user_triggers!/2)
             fks
           end)
 
         stats =
           manifest["tables"]
           |> Enum.reduce({%{}, 0}, fn entry, {acc, total} ->
-            n = ImportConfinement.import!(confined, entry, dumps, mode, &import_member/3)
+            n = LocalOnly.import!(confined, entry, dumps, mode, &import_member/3)
             # ROW-COPY TIME, deliberately: see
             # assert_no_foreign_blob_path_collision!/3 for why a push-time
             # refusal reproduces the very state it is meant to prevent.
@@ -829,10 +829,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             # The manifest rides back out: provenance needs no second unpack.
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
-          |> ImportConfinement.settle!(confined)
+          |> LocalOnly.settle!(confined, manifest)
 
         with_ddl_lock_timeout(:restore_member_fks, fn ->
-          alter_user_triggers!(live, "ENABLE")
+          LocalOnly.enable_user_triggers!(live, &alter_user_triggers!/2)
           restore_member_fks!(member_fks)
         end)
 
@@ -1281,7 +1281,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     try do
       {members, files} =
         Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, files} ->
-          cols = Catalog.non_generated_columns(Repo, table)
+          cols = Catalog.non_generated_columns(Repo, table) -- LocalOnly.columns(table)
           order_cols = Catalog.order_columns(Repo, table)
           sql = copy_out_sql(table, kind, cols, order_cols, ctx)
           spill = Map.fetch!(spills, table)

@@ -75,6 +75,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
   use BarkparkWeb, :live_component
 
   alias Barkpark.Content.Codelists
+  alias BarkparkWeb.Components.Fields.TreeCodelistDesk
 
   @default_languages ["nob", "eng"]
   @search_limit 200
@@ -101,7 +102,10 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
        options: [],
        tree_loader: nil,
        notify_id: nil,
-       desk: false
+       desk: false,
+       list_name: nil,
+       kept: false,
+       hit_count: 0
      )}
   end
 
@@ -127,6 +131,8 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
       |> assign(:tree_loader, Map.get(assigns, :tree_loader, socket.assigns.tree_loader))
       |> assign(:notify_id, Map.get(assigns, :notify_id, socket.assigns.notify_id))
       |> assign(:desk, Map.get(assigns, :desk, socket.assigns.desk))
+      |> assign(:list_name, Map.get(assigns, :list_name, socket.assigns.list_name))
+      |> assign(:kept, Map.get(assigns, :kept, false))
       |> maybe_load_tree()
       |> auto_expand_to_selected()
 
@@ -147,64 +153,77 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     {:noreply, assign(socket, expanded: expanded)}
   end
 
-  def handle_event("tree_node_select", %{"code" => code}, socket) do
+  def handle_event("tree_node_select", %{"code" => code} = params, socket) do
     # The code comes from the browser. Only a code of this codelist is taken
     # (task-ceef65b09ceebb9c): a hand-made event with another code stored it.
     if socket.assigns.readonly or not Map.has_key?(socket.assigns.nodes_by_code, code) do
       {:noreply, socket}
     else
-      # A row select only mutates this component's OWN `:selected` state — it
-      # re-renders the hidden `<input>`, but a server-driven value change does
-      # NOT fire the surrounding form's `phx-change`. So when a host wires
-      # `:notify_id`, push the picked code to the LiveView process; the host
-      # (StudioLive) routes it to that LiveComponent via `send_update/3`,
-      # which persists the value (the paper editor's patch-block path). In the
-      # document editor's form, the LiveView saves the pick (see
-      # `maybe_notify_select/2`).
-      maybe_notify_select(socket, code)
-      {:noreply, assign(socket, selected: code)}
+      {:noreply, pick(socket, code, params)}
     end
   end
 
   # Back to no code, as the flat select's empty option does
-  # (task-03d337bc001f0a5b). The document editor saves "" like that option.
-  def handle_event("tree_node_clear", _params, socket) do
+  # (task-03d337bc001f0a5b). The document editor saves "" like that option,
+  # which takes the field off the document.
+  def handle_event("tree_node_clear", params, socket) do
     if socket.assigns.readonly do
       {:noreply, socket}
     else
-      maybe_notify_select(socket, "")
-      {:noreply, assign(socket, selected: nil)}
+      {:noreply, pick(socket, nil, params)}
     end
   end
 
-  def handle_event("tree_search_input", %{"value" => query}, socket) do
+  def handle_event("tree_search_input", %{"value" => query}, socket) when is_binary(query) do
     apply_search(socket, query)
   end
+
+  # The desk's search box posts itself on input (`TreeCodelistDesk`). Its
+  # change posts the whole form, every tree's box with it, so each box is
+  # named for its tree (`codelist_search[<id>]`) and a tree reads only its
+  # own: one name for all would hand every tree the last box's text.
+  def handle_event("tree_search_input", %{"codelist_search" => %{} = boxes}, socket) do
+    case Map.get(boxes, socket.assigns.id) do
+      query when is_binary(query) -> apply_search(socket, query)
+      _ -> {:noreply, socket}
+    end
+  end
+
+  # Any other shape (a crafted `codelist_search` string or list, a `value`
+  # that is no string, no box at all) searches nothing and leaves the page
+  # running.
+  def handle_event("tree_search_input", _params, socket), do: {:noreply, socket}
 
   def handle_event("tree_search_clear", _params, socket) do
     {:noreply, assign(socket, search_query: "", matched: nil)}
   end
 
-  # Push the picked code to the LiveView process when a host wired `:notify_id`
-  # (the dom id of the LiveComponent to update). The LiveView's handle_info
-  # routes it via `send_update/3`.
+  # A row select only mutates this component's OWN state: a server-driven
+  # value change does NOT fire the surrounding form's `phx-change`.
   #
   # With no `:notify_id`, a tree inside the document editor's form (its input
   # is named `doc[…]`) tells the LiveView which input took which code, and the
-  # editor saves it like any other field change (task-0f806691db0e06dd): the
-  # re-rendered hidden input alone fires no `phx-change`, so the pick was lost
-  # unless another field's change submitted the form later. Any other host
-  # (`input_name` not under `doc[`) is a self-contained picker, as before.
-  defp maybe_notify_select(%{assigns: %{notify_id: nil, input_name: "doc[" <> _ = name}}, code) do
-    send(self(), {:tree_codelist_pick, %{name: name, value: code}})
-    :ok
+  # editor saves it like any other field change (task-0f806691db0e06dd). The
+  # press's params go along: they name the document it was pressed in, and
+  # the LiveView writes only into that one (`PostIdentity.pressed/3`). The
+  # tree shows the code once the LiveView draws it back, so a refused pick
+  # shows nothing picked. Any other host (`input_name` not under `doc[`) is a
+  # self-contained picker, as before.
+  #
+  # When a host wires `:notify_id` (the dom id of the LiveComponent to
+  # update), the LiveView's handle_info routes the code to it via
+  # `send_update/3` (the paper editor's patch-block path).
+  defp pick(%{assigns: %{notify_id: nil, input_name: "doc[" <> _ = name}} = socket, code, params) do
+    send(self(), {:tree_codelist_pick, %{name: name, value: code || "", press: params}})
+    socket
   end
 
-  defp maybe_notify_select(%{assigns: %{notify_id: nil}}, _code), do: :ok
+  defp pick(%{assigns: %{notify_id: nil}} = socket, code, _params),
+    do: assign(socket, selected: code)
 
-  defp maybe_notify_select(%{assigns: %{notify_id: notify_id}}, code) do
-    send(self(), {:tree_codelist_change, %{id: notify_id, value: code}})
-    :ok
+  defp pick(%{assigns: %{notify_id: notify_id}} = socket, code, _params) do
+    send(self(), {:tree_codelist_change, %{id: notify_id, value: code || ""}})
+    assign(socket, selected: code)
   end
 
   # ── Loading ───────────────────────────────────────────────────────────────
@@ -284,30 +303,45 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     query = String.trim(query)
 
     if query == "" do
-      {:noreply, assign(socket, search_query: "", matched: nil)}
+      {:noreply, assign(socket, search_query: "", matched: nil, hit_count: 0)}
     else
-      matched = compute_matched(socket.assigns, query)
-      {:noreply, assign(socket, search_query: query, matched: matched)}
+      {matched, hit_count} = compute_matched(socket.assigns, query)
+      {:noreply, assign(socket, search_query: query, matched: matched, hit_count: hit_count)}
     end
   end
 
+  # The first `@search_limit` codes whose code or label holds the query, in
+  # the list's own order (depth first), as the TanStack Studio's `search`:
+  # the map's order picked an arbitrary 200 of a longer match list.
   defp compute_matched(assigns, query) do
-    %{nodes_by_code: nodes} = assigns
+    %{nodes_by_code: nodes, roots: roots} = assigns
     needle = String.downcase(query)
 
     hits =
-      nodes
-      |> Map.values()
-      |> Enum.filter(fn %{code: code, label: label} ->
+      roots
+      |> depth_first(nodes)
+      |> Stream.filter(fn %{code: code, label: label} ->
         String.contains?(String.downcase(code), needle) or
           String.contains?(String.downcase(label || ""), needle)
       end)
       |> Enum.take(@search_limit)
 
-    Enum.reduce(hits, MapSet.new(), fn %{code: code}, acc ->
-      acc
-      |> MapSet.put(code)
-      |> add_ancestors(code, nodes)
+    matched =
+      Enum.reduce(hits, MapSet.new(), fn %{code: code}, acc ->
+        acc
+        |> MapSet.put(code)
+        |> add_ancestors(code, nodes)
+      end)
+
+    {matched, length(hits)}
+  end
+
+  defp depth_first(codes, nodes) do
+    Stream.flat_map(codes, fn code ->
+      case Map.get(nodes, code) do
+        nil -> []
+        node -> Stream.concat([node], depth_first(node.children, nodes))
+      end
     end)
   end
 
@@ -365,6 +399,45 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
   # ── Render ────────────────────────────────────────────────────────────────
 
   @impl true
+  def render(%{desk: true, loaded?: true, nodes_by_code: nodes} = assigns)
+      when map_size(nodes) > 0 do
+    assigns =
+      assigns
+      |> assign(:rows, TreeCodelistDesk.rows(assigns))
+      |> assign(:current, current(assigns))
+      |> assign(:title, field_title(assigns.field))
+      |> assign(:searching, not is_nil(assigns.matched))
+      |> assign(:search_limit, @search_limit)
+
+    ~H"""
+    <div
+      id={@id}
+      class="codelist-tree-field"
+      data-field-type="codelist"
+      data-field-name={@field && @field.name}
+      data-codelist-id={"#{@plugin_name}:#{@list_id}"}
+      data-searching={@searching}
+    >
+      <TreeCodelistDesk.tree
+        id={@id}
+        myself={@myself}
+        title={@title}
+        list_name={@list_name}
+        input_name={@input_name}
+        kept={@kept}
+        selected={@selected}
+        current={@current}
+        readonly={@readonly}
+        search_query={@search_query}
+        searching={@searching}
+        hit_count={@hit_count}
+        search_limit={@search_limit}
+        rows={@rows}
+      />
+    </div>
+    """
+  end
+
   def render(assigns) do
     assigns =
       assigns
@@ -375,7 +448,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
     ~H"""
     <div
       id={@id}
-      class={"bp-field bp-field-codelist bp-tree-codelist" <> if(@desk, do: " codelist-tree-field", else: "")}
+      class="bp-field bp-field-codelist bp-tree-codelist"
       data-field-type="codelist"
       data-field-name={@field && @field.name}
       data-codelist-id={"#{@plugin_name}:#{@list_id}"}
@@ -397,14 +470,6 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           value={@selected || ""}
           data-tree-selected="true"
         />
-
-        <%!-- The desk names the current code above the search, as the TanStack
-              Studio's `.codelist-current` (B05): a collapsed branch or a
-              search hides the row that marks it. --%>
-        <div :if={@current} class="codelist-current" data-unknown={@current.label == nil}>
-          <span class="bp-tree-code"><%= @current.code %></span>
-          <span :if={@current.label} class="codelist-label"><%= @current.label %></span>
-        </div>
 
         <div class="bp-tree-toolbar">
           <input
@@ -514,6 +579,12 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
   end
 
   defp current(_assigns), do: nil
+
+  # The search box's name in the desk: the field's title, as the TanStack
+  # Studio's field label names its input.
+  defp field_title(%{title: t}) when is_binary(t) and t != "", do: t
+  defp field_title(%{name: n}) when is_binary(n), do: n
+  defp field_title(_field), do: nil
 
   # Pre-compute row maps so HEEx change tracking stays cheap.
   defp visible_rows(assigns) do

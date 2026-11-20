@@ -52,6 +52,35 @@ require_root() {
 require_root
 
 # ── 1. apt: postgres + caddy + build toolchain ───────────────────────────────
+# bp_apt_get BEGIN
+# apt-get that WAITS while another apt or dpkg run holds a lock, instead of
+# failing. A fresh Ubuntu box runs unattended-upgrades on first boot: on
+# 2026-11-19 the go-live of bp-hovinbyen-020ce1 died at step 7c with
+# "E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process
+# 14066 (unattended-upgr)", apt-get exit 100. DPkg::Lock::Timeout makes an
+# install or remove wait for the dpkg locks. `apt-get update` does NOT honour it
+# for /var/lib/apt/lists/lock (measured on apt 2.4.14, Ubuntu 22.04: exit 100 at
+# once while another process held that lock), so a lock refusal is retried every
+# 10 s until 600 s have passed. Any other failure returns at once. Every box
+# apt-get goes through this function; this block is byte-identical in each box
+# script, and deploy/apt_lock_wait_test.go reds on a drifted copy or a bare call.
+bp_apt_get() {
+  local deadline=$((SECONDS + 600)) err rc
+  while :; do
+    rc=0
+    { err="$(apt-get -o DPkg::Lock::Timeout=600 "$@" 2>&1 >&3 3>&-)" || rc=$?; } 3>&1
+    [ -z "$err" ] || printf '%s\n' "$err" >&2
+    case "$rc:$err" in
+      0:*) return 0 ;;
+      *"Could not get lock"*) [ "$SECONDS" -lt "$deadline" ] || return "$rc" ;;
+      *) return "$rc" ;;
+    esac
+    echo "!! apt-get $1: another apt or dpkg run holds a lock; retrying in 10 s" >&2
+    sleep 10
+  done
+}
+# bp_apt_get END
+
 # install_caddy_pkg BEGIN
 # ONE Caddy installer, byte-identical in deploy.sh (and its go:embedded copy),
 # deploy/azure-base-install.sh, and — extracted from the embedded deploy.sh at
@@ -71,12 +100,12 @@ require_root
 install_caddy_pkg() {
   local v=2.11.4 arch sum deb
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq || true
-  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg curl ca-certificates >/dev/null || return 1
+  bp_apt_get update -qq || true
+  bp_apt_get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg curl ca-certificates >/dev/null || return 1
   if [ "${BARKPARK_CADDY_SKIP_APT:-0}" != 1 ]; then
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-    if apt-get update -qq && apt-get install -y -qq caddy; then
+    if bp_apt_get update -qq && bp_apt_get install -y -qq caddy; then
       echo ">> caddy: installed from the upstream apt repo"
       return 0
     fi
@@ -96,7 +125,7 @@ install_caddy_pkg() {
     rm -f "$deb"
     return 1
   fi
-  apt-get install -y -qq "$deb" || return 1
+  bp_apt_get install -y -qq "$deb" || return 1
   rm -f "$deb"
   echo ">> caddy: installed v$v from the pinned, sha512-verified release .deb"
 }
@@ -108,8 +137,8 @@ install_apt() {
   # serves gzip only (task-c57dd84f98c1296c).
   log "apt: base packages (postgres, caddy prereqs, build toolchain, brotli)"
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  apt-get install -y -qq \
+  bp_apt_get update -qq
+  bp_apt_get install -y -qq \
     git curl unzip build-essential autoconf m4 \
     libssl-dev libncurses5-dev libncursesw5-dev \
     postgresql postgresql-contrib \

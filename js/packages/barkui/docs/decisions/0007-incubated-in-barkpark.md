@@ -17,7 +17,7 @@ design/emit/*  (the rest)   Elixir, Go, web    ───    stays: Barkpark's ow
 BarkUI is as large and as important as Barkpark's other projects, and is run as one: its own roadmap, decisions, quality bar and pictures. It lives inside Barkpark for now because two things hold it there:
 
 - **The colour source is shared.** `design/themes/` and `design/derive.mjs` write BarkUI's sheet and also Barkpark's own Elixir, Go and web output. Moving BarkUI alone would leave one source writing into two repos.
-- **The checks already run here.** Barkpark's hosted `js-tests` workflow runs the fast tests and the showroom check in a real browser on every change that touches BarkUI's files: anything under `js/`, the sheet in `api/priv/barkui/`, or the workflow itself (the workflow lists its other paths).
+- **The checks already run here.** Barkpark's hosted `js-tests` workflow runs the fast tests on every change under `js/` or to the sheet in `api/priv/barkui/`. Its `barkui` workflow runs the showroom check in a real browser, one job per group of parts, on every change that touches BarkUI's files, the sheet or that workflow (its plan job lists the other paths).
 
 ## Decision
 

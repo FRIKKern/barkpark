@@ -763,9 +763,11 @@ defmodule BarkparkWeb.WorkspaceController do
       409 `workspace_slug_conflict` (PDS-D9) instead of an opaque 25P02.
 
   Returns the import stats — `{tables, total_rows}` — as JSON (plus
-  `mode: "merge"` on the merge path), and a `provenance` receipt: pulled data
-  says WHERE it came from, both in the response and, durably, in the target
-  workspace's `settings["pull_provenance"]` (PDS-D15/PDS-D16).
+  `mode: "merge"` on the merge path), `access_requests_left_out` (an import
+  does not carry access requests; people ask again), and a `provenance`
+  receipt: pulled data says WHERE it came from, both in the response and,
+  durably, in the target workspace's `settings["pull_provenance"]`
+  (PDS-D15/PDS-D16).
 
   An empty or truncated body answers 422 `invalid_bundle` — an honest refusal
   rather than the MatchError-driven 500 it used to raise (PDS-D50).
@@ -1404,8 +1406,12 @@ defmodule BarkparkWeb.WorkspaceController do
   # `WorkspaceBundle.ImportConfinement`).
   defp confine?(conn), do: not RequirePlatformOperator.listed?(conn.assigns[:api_token])
 
-  defp put_withheld(receipt, stats),
-    do: Map.merge(receipt, Map.take(stats, [:withheld, :withheld_columns, :withheld_user_rows]))
+  # `access_requests_left_out`: an import does not carry access requests;
+  # people ask again (`WorkspaceBundle.LocalOnly`).
+  defp put_withheld(receipt, stats) do
+    keys = [:withheld, :withheld_columns, :withheld_user_rows, :access_requests_left_out]
+    Map.merge(receipt, Map.take(stats, keys))
+  end
 
   defp operator_grant(conn) do
     case conn.assigns[:api_token] do

@@ -191,7 +191,7 @@ func (e *RestoreExecutor) RepointDNS(ctx context.Context, fqdn, ip string) error
 	if name == "" || zone == "" {
 		return fmt.Errorf("resurrect secure: fqdn %q is not <label>.<zone>", fqdn)
 	}
-	return e.DNS.UpsertRecord(ctx, Record{Zone: zone, Name: name, Type: "A", Value: ip})
+	return e.DNS.UpsertRecord(ctx, Record{Zone: zone, Name: name, Type: "A", Value: ip, TTL: BoxRecordTTLSeconds})
 }
 
 // InstallSecrets unseals the bundle's identity secrets with the CARRIED kek

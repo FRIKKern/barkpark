@@ -3,7 +3,7 @@
 
 ![A part's lights after the Surface control is set to primary: all grey, marked "not proved on primary"](docs/images/unproved-light.png)
 
-The showroom is the scoreboard ([0004](docs/decisions/0004-ready-before-any-switch.md)). Each part shows its lights, written by `pnpm run check`, which presses every part in headless Chromium. The full rules are in the README, under "The part folder and the check"; this page says what they add up to.
+The showroom is the scoreboard ([0004](docs/decisions/0004-ready-before-any-switch.md)). Each part shows its lights, written by `pnpm run check`, which presses every part in headless Chromium. The full rules are in [docs/PARTS.md](docs/PARTS.md); this page says what they add up to.
 
 ## The lights
 
@@ -30,11 +30,11 @@ A "waiting on the sheet" line is a gap in the sheet, not in the part. It is work
 
 ## The check guards itself
 
-`pnpm run check:selftest` plants one break per case in a scratch copy of a part, such as a colour from outside the sheet, a cut label or a demo that styles the page, and fails unless the check fails for the right reason. When CI runs it is in the README, under "The part folder and the check".
+`pnpm run check:selftest` plants one break per case in a scratch copy of a part, such as a colour from outside the sheet, a cut label or a demo that styles the page, and fails unless the check fails for the right reason. When CI runs it is in [docs/PARTS.md](docs/PARTS.md).
 
 ## Docs
 
 - Picture first: the README, the roadmap and the decisions open with a picture, a diagram or a table.
 - One fact, one home ([README](README.md#where-things-live-one-fact-one-home)). Which parts exist, and what is proven for each, lives on the showroom page only, so adding a part changes no other file.
-- No number on these pages is typed by hand. Two scripts write the blocks that hold numbers, each with the day its numbers last changed and a stamp: `node build/status.mjs` (skins, surfaces, colour names and the UI SDK pin, from the sheet and package.json) and `node build/board.mjs <goal-task-id>` (each milestone's progress, from the task board; it needs `bp`). Both are run by hand until the daily news run calls them; no PR check reads the board. A fast test fails when a block is edited without its script or changes shape, never because the files or the board moved.
+- No number on these pages is typed by hand. Two scripts write the blocks that hold numbers, each with the day its numbers last changed and a stamp: `node build/status.mjs` (skins, surfaces, colour names and the UI SDK pin, from the sheet and package.json) and `node build/board.mjs <goal-task-id>` (each milestone's progress, from the task board; it needs `bp`). The daily news run calls both and its PR carries what they wrote; either can also be run by hand. No PR check reads the board. A fast test fails when a block is edited without its script or changes shape, never because the files or the board moved.
 - Pictures are real showroom shots, never mock-ups. `node build/pictures.mjs` retakes every picture these pages show, after `pnpm run build` and `pnpm run check`.

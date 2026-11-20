@@ -8,6 +8,7 @@
 <div data-demo-row>
   <span data-demo-label>Disabled</span>
   <ui-button disabled><button id="button-disabled" data-slot="button" data-disabled="" disabled type="button">Unavailable</button></ui-button>
+  <ui-button disabled><button id="button-quiet-disabled" data-slot="button" data-variant="ghost" data-disabled="" disabled type="button">Not now</button></ui-button>
   <ui-button><button id="button-after" data-slot="button" type="button">Duplicate</button></ui-button>
 </div>
 <div data-demo-row>
@@ -26,22 +27,28 @@
   <span data-demo-label>Primary: rest, hover, pressed, focus</span>
   <button data-slot="button" data-variant="solid" type="button">Rest</button>
   <button data-slot="button" data-variant="solid" data-pin="hover" type="button">Hover</button>
-  <button data-slot="button" data-variant="solid" data-pin="active" type="button">Pressed</button>
+  <button data-slot="button" data-variant="solid" data-pin="hover active" type="button">Pressed</button>
   <button data-slot="button" data-variant="solid" data-pin="focus-visible" type="button">Focus</button>
 </div>
 <div data-demo-row inert>
   <span data-demo-label>Secondary: rest, hover, pressed, focus</span>
   <button data-slot="button" type="button">Rest</button>
   <button data-slot="button" data-pin="hover" type="button">Hover</button>
-  <button data-slot="button" data-pin="active" type="button">Pressed</button>
+  <button data-slot="button" data-pin="hover active" type="button">Pressed</button>
   <button data-slot="button" data-pin="focus-visible" type="button">Focus</button>
 </div>
 <div data-demo-row inert>
   <span data-demo-label>Quiet and destructive: rest, hover, pressed, focus</span>
   <button data-slot="button" data-variant="ghost" type="button">Rest</button>
   <button data-slot="button" data-variant="ghost" data-pin="hover" type="button">Hover</button>
+  <button data-slot="button" data-variant="ghost" data-pin="hover active" type="button">Pressed</button>
   <button data-slot="button" data-variant="destructive" type="button">Rest</button>
   <button data-slot="button" data-variant="destructive" data-pin="hover" type="button">Hover</button>
-  <button data-slot="button" data-variant="destructive" data-pin="active" type="button">Pressed</button>
+  <button data-slot="button" data-variant="destructive" data-pin="hover active" type="button">Pressed</button>
   <button data-slot="button" data-variant="destructive" data-pin="focus-visible" type="button">Focus</button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Pending, held</span>
+  <button data-slot="button" data-variant="solid" data-pending="" aria-busy="true" type="button"><span data-slot="spinner" data-show="pending" aria-hidden="true"></span>Saving</button>
+  <button data-slot="button" data-pending="" aria-busy="true" type="button"><span data-slot="spinner" data-show="pending" aria-hidden="true"></span>Saving</button>
 </div>

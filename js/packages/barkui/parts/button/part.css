@@ -103,9 +103,8 @@
     border: 2px solid currentColor;
     border-inline-end-color: transparent;
     border-radius: 50%;
-    animation: bark-button-spin 0.7s linear infinite;
+    animation: bark-spin 0.7s linear infinite;
   }
   &[aria-label]:has(> svg:only-child) { width: var(--bark-button-height); padding: 0; }
 }
 
-@keyframes bark-button-spin { to { rotate: 1turn; } }

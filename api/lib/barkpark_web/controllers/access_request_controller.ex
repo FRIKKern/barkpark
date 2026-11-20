@@ -18,6 +18,14 @@ defmodule BarkparkWeb.AccessRequestController do
   inserted_at, decided_at}}` whether the slug names a workspace or not, and the
   same row again for a repeat while one is pending. A member gets `409
   already_member` (a member knows the workspace exists).
+
+  ## A member asks for a higher role
+
+  `role` names the role asked for (task-018e79d8734a1b08). From a member it
+  must rank above the role they hold: same or lower is `409 role_not_higher`,
+  a role the workspace does not have is `422 unknown_role`. From a seatless
+  user it is a hint for the admin, checked for shape only, so the answer
+  still says nothing about the workspace or its roles.
   """
   use BarkparkWeb, :controller
 
@@ -32,14 +40,15 @@ defmodule BarkparkWeb.AccessRequestController do
   @per_hour 5
   @window_seconds 3600
 
-  @doc "`POST /v1/auth/access-requests` — `{\"workspace\": slug, \"note\"?: text}`."
+  @doc "`POST /v1/auth/access-requests` — `{\"workspace\": slug, \"note\"?: text, \"role\"?: name}`."
   def create(conn, params) do
     user = conn.assigns.current_user
 
     with {:ok, slug} <- fetch_slug(params),
          {:ok, note} <- fetch_note(params),
+         {:ok, role} <- fetch_role(params),
          :ok <- throttle(conn, user.id) do
-      case AccessRequests.request(user, slug, note) do
+      case AccessRequests.request(user, slug, note, role) do
         {:ok, row} -> conn |> put_status(:accepted) |> json(%{access_request: row})
         {:error, reason} -> deny(conn, reason)
       end
@@ -78,6 +87,22 @@ defmodule BarkparkWeb.AccessRequestController do
     end
   end
 
+  defp fetch_role(params) do
+    case Map.get(params, "role") do
+      nil ->
+        {:ok, nil}
+
+      role when is_binary(role) ->
+        case String.trim(role) do
+          "" -> {:error, :invalid_role}
+          trimmed -> {:ok, trimmed}
+        end
+
+      _ ->
+        {:error, :invalid_role}
+    end
+  end
+
   defp throttle(conn, user_id) do
     opts = [capacity: @per_hour, refill_per_sec: @per_hour / @window_seconds]
 
@@ -102,6 +127,27 @@ defmodule BarkparkWeb.AccessRequestController do
 
   defp deny(conn, :invalid_note),
     do: unprocessable(conn, "note must be text of at most #{AccessRequest.note_max()} characters")
+
+  defp deny(conn, :invalid_role),
+    do: unprocessable(conn, "role must be a role name (a-z, 0-9 and -)")
+
+  defp deny(conn, :unknown_role),
+    do:
+      fields(
+        conn,
+        :unprocessable_entity,
+        "unknown_role",
+        "that role is not a role of this workspace"
+      )
+
+  defp deny(conn, :role_not_higher),
+    do:
+      fields(
+        conn,
+        :conflict,
+        "role_not_higher",
+        "you already hold that role or a higher one in this workspace"
+      )
 
   defp deny(conn, :already_member),
     do: fields(conn, :conflict, "already_member", "you already have a seat in this workspace")
@@ -128,9 +174,11 @@ defmodule BarkparkWeb.AccessRequestController do
     do: fields(conn, :not_found, "not_found", "no such pending access request for this account")
 
   defp deny(conn, %Ecto.Changeset{} = cs) do
-    if Keyword.has_key?(cs.errors, :note),
-      do: deny(conn, :invalid_note),
-      else: unprocessable(conn, "workspace must be a workspace slug (a-z, 0-9 and -)")
+    cond do
+      Keyword.has_key?(cs.errors, :note) -> deny(conn, :invalid_note)
+      Keyword.has_key?(cs.errors, :requested_role) -> deny(conn, :invalid_role)
+      true -> unprocessable(conn, "workspace must be a workspace slug (a-z, 0-9 and -)")
+    end
   end
 
   defp deny(conn, _), do: unprocessable(conn, "could not record the request")

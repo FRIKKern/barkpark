@@ -14,8 +14,10 @@
 # manifests, so the same Dockerfile resolves the right arch with no edits.
 
 # ── Stage 1: build the release ────────────────────────────────────────────────
-# Pinned: Elixir 1.18.4 on OTP 27.3.4, Debian bookworm. The -slim variant keeps
-# the builder lean; we add the toolchain (build-essential, git) explicitly.
+# Pinned: Elixir 1.18.4 on OTP 27.3.4.13, Debian bookworm, as
+# deploy/image.tool-versions says; scripts/toolchain-drift-check.sh reds if the
+# tag and the file part ways. The -slim variant keeps the builder lean; we add
+# the toolchain (build-essential, git) explicitly.
 FROM hexpm/elixir:1.18.4-erlang-27.3.4.13-debian-bookworm-20260623-slim AS build
 
 # git: some hex/rebar deps fetch from git refs. build-essential: native NIFs

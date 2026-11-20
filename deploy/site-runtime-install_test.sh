@@ -186,8 +186,14 @@ check "arm box downloads the arm64 tarball" \
 echo "== git is installed, never assumed =="
 git_block="$(extract_block 'git ensure')"
 check "the git-ensure block is marked in the script" "[ -n \"\$git_block\" ]"
+# The block calls bp_apt_get (the dpkg-lock-waiting apt-get wrapper), so the
+# replay defines it first, from the script's own bp_apt_get BEGIN/END block.
+apt_block="$(awk '$0 == "# bp_apt_get BEGIN" { b = 1 } b { print } $0 == "# bp_apt_get END" { exit }' "$SCRIPT")"
+check "the bp_apt_get block is marked in the script" "[ -n \"\$apt_block\" ]"
+git_block="$apt_block
+$git_block"
 check "git rides the bare-box apt run beside docker" \
-  "grep -qE 'apt-get install .*docker\.io git' '$SCRIPT'"
+  "grep -qE 'bp_apt_get install .*docker\.io git' '$SCRIPT'"
 check "the probe header prints git --version" "grep -qx 'git --version' '$SCRIPT'"
 
 # git MISSING (PATH holds only the fakes): the block must install it and the
@@ -195,7 +201,7 @@ check "the probe header prints git --version" "grep -qx 'git --version' '$SCRIPT
 dir="$TMP/git-absent"; make_fakes "$dir"
 out="$(PATH="$dir" "$BASH_BIN" -c "$git_block" 2>&1)"; rc=$?
 check "git absent: block exits 0"                 "[ '$rc' = '0' ]"
-check "git absent: apt-get install git was run"   "grep -q 'apt-get install .* git' '$TMP/git-absent/apt.log'"
+check "git absent: apt-get install git was run"   "grep -q 'apt-get -o DPkg::Lock::Timeout=600 install .* git' '$TMP/git-absent/apt.log'"
 check "git absent: probe then reports a version"  "[ -n \"\$(printf %s \"$out\" | grep 'git version')\" ]"
 
 # git PRESENT: no apt run at all (idempotent re-install on a warm box).

@@ -15467,3 +15467,222 @@ msgstr ""
 msgctxt "crop preview"
 msgid "Panorama"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/published_view.ex
+#, elixir-autogen, elixir-format
+msgid "Unpublished %{ago}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Not in the list"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "Remove code"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_desk.ex
+#, elixir-autogen, elixir-format
+msgid "The first 200 matches. Type more to narrow them."
+msgstr ""
+
+#: lib/barkpark_web/components/fields/codelist_field.ex
+#, elixir-autogen, elixir-format
+msgid "Not a code (kept as stored)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Not a valid URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Does not match allowed protocols/schemes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/validation_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Username/password not allowed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Perspective"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Close menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/navbar.ex
+#, elixir-autogen, elixir-format
+msgid "Vision"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "No perspective (raw)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Copy to clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Fetch"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Execution: %{time}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "n/a"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "End-to-end: %{time}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Save result as"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "1 item"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "%{count} items"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "1 property"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "%{count} properties"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Show %{count} more"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Write a GROQ query, like *[_type == \"post\"][0...10]"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The query is too long to send: its URL is over 32,753 bytes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query failed: %{error}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query error: %{error}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "1 result in %{ms} ms"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} results in %{ms} ms"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query done in %{ms} ms"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The URL is copied to the clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The URL could not be copied"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "API version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Custom API version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON: %{detail}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params must be a JSON object, like {\"title\": \"post\"}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Param $%{name} referenced, but not provided"
+msgstr ""

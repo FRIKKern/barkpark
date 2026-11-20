@@ -241,11 +241,11 @@ defmodule BarkparkWeb.Router do
   # (the co-located caller passes workspace_id/project_id explicitly if needed).
   # Shaves the per-keystroke Phoenix floor from ~1–5 ms to the router minimum.
   pipeline :api_local do
-    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
-    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    # nosniff + referrer-policy FIRST, so a refusal carries them (task-4a882dcfb3cd44bc).
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(:accepts, ["json"])
+    # The first plug that can answer: a refused caller gets the empty 403, whatever it sends.
     plug(BarkparkWeb.Plugs.RequireLoopback)
+    plug(:accepts, ["json"])
   end
 
   # Tenancy-aware variant of :api for the path-scoped
@@ -2983,6 +2983,7 @@ defmodule BarkparkWeb.Router do
 
     get("/", ChatHostController, :index)
     post("/enrollments", ChatHostController, :create_enrollment)
+    post("/:id/enrollment", ChatHostController, :replace_enrollment)
     delete("/:id", ChatHostController, :revoke)
   end
 
@@ -4072,18 +4073,18 @@ defmodule BarkparkWeb.Router do
   end
 
   # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
-  # membership at :read). An editing Studio needs the schema with its API token
-  # or account-session bearer (task-b21d1b647d448142), without a shared service
-  # credential. The desk tree is read the same way: it names the same types and
-  # counts their documents, which a member token can already query
-  # (task-472c206eeff80777). PublicRead still refuses a public-read token here.
-  # The schema write gate below is unchanged.
+  # membership at :read), by API token or account-session bearer, with no shared
+  # service credential (task-b21d1b647d448142). The desk tree names the same
+  # types (task-472c206eeff80777); the role names are the workspace's, one list
+  # for every dataset, names only. PublicRead still refuses a public-read token
+  # here. The schema write gate below is unchanged.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token_or_member_login_session])
 
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
     get("/v1/structure/:dataset", StructureController, :show)
+    get("/v1/workspace/roles", RoleNamesController, :index)
   end
 
   # Personal members may inspect actions; API tokens retain the existing

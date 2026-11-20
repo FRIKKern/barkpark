@@ -38,7 +38,8 @@
   :where(::selection) { background: var(--bark-selected); color: var(--ui-foreground); }
 
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    /* One round only: an endless spinner at 0.01ms would flicker at a new angle every frame; it stands still. */
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   }
 }
 
@@ -57,3 +58,8 @@
       0 0 0 8px var(--ui-ring);
   }
 }
+
+/* The keyframes parts may name (part.css defines none of its own; see
+   build/vocabulary.mjs KEYFRAMES). Each only turns its element, so no shared
+   motion can change a colour, a size or whether a thing is seen. */
+@keyframes bark-spin { to { rotate: 1turn; } }

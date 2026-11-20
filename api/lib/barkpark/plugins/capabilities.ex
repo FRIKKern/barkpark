@@ -1158,12 +1158,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/codelists/:codelist_id",
         "scoped_read",
         args: [
-          arg(
-            "codelist_id",
-            true,
-            "string",
-            "Codelist id, e.g. onixedit:thema (<plugin>:<name>)."
-          )
+          arg("codelist_id", true, "string", "Codelist id <plugin>:<name>, e.g. onixedit:thema.")
         ],
         flags: [
           flag(
@@ -1611,11 +1606,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("name", true, "string", "The action's name, as doc.actions lists it.")
         ],
         flags: [
-          flag(
-            "mode",
-            "string",
-            "\"dryrun\" (preview, no side effects) or \"real\". Required."
-          )
+          flag("mode", "string", "\"dryrun\" (preview, no side effects) or \"real\". Required.")
         ],
         writes: true,
         default_output: "json",
@@ -3045,7 +3036,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "workspace.access-request-ls",
         "workspace",
         "access-request-ls",
-        "Pending access requests: who asked for a seat here, their note and when.",
+        "Pending access requests: who asked for a seat or a higher role, their note and when.",
         "GET",
         "/v1/access-requests",
         "scoped_admin",
@@ -3057,16 +3048,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "workspace.access-request-approve",
         "workspace",
         "access-request-approve",
-        "Approve an access request: the asker is seated with the role (only an owner grants owner).",
+        "Approve an access request: seat the asker, or give a member the higher role (only an owner grants owner).",
         "POST",
         "/v1/access-requests/:id/approve",
         "scoped_admin",
         args: [arg("id", true, "string", "Access request id.")],
-        flags: [
-          flag("role", "string", "owner | admin | member | contributor (or a custom role).",
-            default: "member"
-          )
-        ],
+        flags: [flag("role", "string", "Role to grant; default: member, or the role asked for")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -3117,6 +3104,18 @@ defmodule Barkpark.Plugins.Capabilities do
         "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
         "GET",
         "/v1/workspace/locale",
+        "scoped_read",
+        writes: false,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.roles",
+        "workspace",
+        "roles",
+        "Every role name a seat in the active --workspace may hold: built-ins, then custom roles A-Z. Names only; any seated member may read it.",
+        "GET",
+        "/v1/workspace/roles",
         "scoped_read",
         writes: false,
         default_output: "minimal",
@@ -4401,7 +4400,10 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/auth/access-requests",
         "read",
         args: [arg("workspace", true, "string", "Workspace slug.")],
-        flags: [flag("note", "string", "A note for the admins (at most 500 characters).")],
+        flags: [
+          flag("note", "string", "A note for the admins (at most 500 characters)."),
+          flag("role", "string", "The role to ask for. A member must name one above their own.")
+        ],
         writes: true,
         default_output: "minimal"
       ),
@@ -4995,12 +4997,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [
           arg("id", true, "string", "Chat session id."),
-          arg(
-            "request_id",
-            true,
-            "string",
-            "The question ask's request id (≤256 UTF-8 bytes)."
-          ),
+          arg("request_id", true, "string", "The question ask's request id (≤256 UTF-8 bytes)."),
           arg(
             "answers",
             true,

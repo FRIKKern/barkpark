@@ -729,6 +729,8 @@
       // A tags field's Enter (bp-desk-tags.js), pushed through here: LiveView
       // drops a click on a button whose last press is still unanswered.
       deskScript("data-desk-tags", window.BarkparkDeskTags);
+      // A tree codelist's keys (bp-desk-codelist.js).
+      deskScript("data-desk-codelist", window.BarkparkDeskCodelist);
       root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
@@ -740,6 +742,10 @@
       deskScript("data-desk-image", window.BarkparkDeskImage);
       // The navbar's menus (bp-desk-navbar.js), when a live navigation came here.
       deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
+      // The document's undo and redo, Mod+Z and Shift+Mod+Z (bp-desk-undo.js).
+      deskScript("data-desk-undo", window.BarkparkDeskUndo);
+      // Vision's query, result tree and Save (bp-desk-vision.js), on its page only.
+      if (root.querySelector("[data-desk-vision]")) deskScript("data-desk-vision-js", window.BarkparkDeskVision);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.

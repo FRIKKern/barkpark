@@ -324,7 +324,7 @@ defmodule BarkparkWeb.Studio.BoundAdminWriteTest do
 
       html = enroll(view, "bound laptop")
       assert html =~ @refusal
-      refute html =~ "One-time enrollment token"
+      refute html =~ "| barkpark-chat-host enroll --url"
       refute "bound laptop" in host_names(ws)
       assert records() == []
     end
@@ -343,7 +343,9 @@ defmodule BarkparkWeb.Studio.BoundAdminWriteTest do
       before = records()
 
       log =
-        capture_log(fn -> assert enroll(view, "bound laptop") =~ "One-time enrollment token" end)
+        capture_log(fn ->
+          assert enroll(view, "bound laptop") =~ "| barkpark-chat-host enroll --url"
+        end)
 
       assert "bound laptop" in host_names(ws)
       one_row!(bound, ws.id, "live ChatHostsLive.enroll", "tokens_write", log, before)
@@ -363,7 +365,7 @@ defmodule BarkparkWeb.Studio.BoundAdminWriteTest do
         {:ok, view, _} = hosts_view(ctx, ws, session)
         render_click(view, "revoke", %{"id" => old})
         refute old in host_ids(ws)
-        assert enroll(view, name) =~ "One-time enrollment token"
+        assert enroll(view, name) =~ "| barkpark-chat-host enroll --url"
       end
 
       assert records() == []

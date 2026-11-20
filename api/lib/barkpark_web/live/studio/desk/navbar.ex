@@ -1,14 +1,16 @@
 defmodule BarkparkWeb.Studio.Desk.Navbar do
   @moduledoc """
   The Studio top bar's tabs on the desk, drawn as the TanStack Studio's navbar:
-  three text tabs (Structure, Media, API) and every other tab in one "More"
-  popover at the end of the bar.
+  four text tabs (Structure, Vision, Media, API) and every other tab in one
+  "More" popover at the end of the bar.
 
   The tabs are the ones `BarkparkWeb.StudioComponents.Nav.top_menu_tabs/1`
   resolves for the old bar, the same list in the same order, so the nav-parity
   contract (one tab-label set on every Studio page) holds and every tab keeps
   `data-test-id="top-menu-tab"` and its name. Structure points at the desk
-  itself. A tab in the popover is a plain link: the popover is opened by its
+  itself. Vision (`Desk.Vision`, the query tool) is the desk's own, after
+  Structure as in TanStack's bar; the old bar has no such tab, so it carries
+  no `data-test-id`. A tab in the popover is a plain link: the popover is opened by its
   button, Tab moves from the button into it, Escape and a click outside close
   it (the browser's own popover).
 
@@ -23,6 +25,7 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias BarkparkWeb.Studio.StudioLive.Paths
   alias BarkparkWeb.StudioComponents.Nav
 
   attr :dataset, :string, required: true
@@ -44,7 +47,7 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
         href={tab.href}
         class={["studio-tab dk-nav-tab", tab.active && "active"]}
         aria-current={tab.active && "page"}
-        data-test-id="top-menu-tab"
+        data-test-id={tab.test_id}
       >{tab.label}</a>
       <button
         :if={@main != [] or @more != []}
@@ -96,8 +99,8 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
   @doc """
   The resolved tabs split in two: the built-in Structure, Media and API (in
   the bar, as text) and the rest (in the popover), each in its resolved order.
-  Structure's link is the desk. A disabled built-in goes to the popover, where
-  its reason can be read.
+  Structure's link is the desk, and the desk's Vision follows it. A disabled
+  built-in goes to the popover, where its reason can be read.
   """
   @spec split(map()) :: {[map()], [map()]}
   def split(assigns) do
@@ -115,11 +118,44 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
       api.path => api.path
     }
 
-    assigns
-    |> Nav.top_menu_tabs()
-    |> Enum.map(&view(&1, in_bar, assigns[:current_path]))
-    |> Enum.split_with(&(&1.in_bar and not &1.disabled))
+    vision = vision_path(assigns)
+    on_vision? = assigns[:current_path] == vision
+
+    {main, more} =
+      assigns
+      |> Nav.top_menu_tabs()
+      |> Enum.map(&view(&1, in_bar, assigns[:current_path]))
+      # Structure's pattern takes every Studio path but a few tools'.
+      |> Enum.map(
+        &%{&1 | active: &1.active and not (on_vision? and &1.href == assigns.desk_base)}
+      )
+      |> Enum.split_with(&(&1.in_bar and not &1.disabled))
+
+    tool = %{
+      label: gettext("Vision"),
+      href: vision,
+      in_bar: true,
+      active: on_vision?,
+      disabled: false,
+      reason: nil,
+      test_id: nil
+    }
+
+    case Enum.split_with(main, &(&1.href == assigns.desk_base)) do
+      {[structure], rest} -> {[structure, tool | rest], more}
+      _ -> {[tool | main], more}
+    end
   end
+
+  @doc "The desk's Vision tool, beside the desk: `…/studio/_desk/_tools/vision`."
+  @spec vision_path(map()) :: String.t()
+  def vision_path(assigns),
+    do:
+      Paths.studio_path(
+        assigns[:scope_prefix] || "",
+        ["_desk", "_tools", "vision"],
+        assigns.dataset
+      )
 
   defp view(tab, in_bar, current_path) do
     disabled = tab[:disabled] == true
@@ -130,7 +166,8 @@ defmodule BarkparkWeb.Studio.Desk.Navbar do
       in_bar: Map.has_key?(in_bar, tab[:path]),
       active: not disabled and Nav.plugin_tab_active?(tab, current_path),
       disabled: disabled,
-      reason: if(disabled, do: Nav.disabled_reason(tab))
+      reason: if(disabled, do: Nav.disabled_reason(tab)),
+      test_id: "top-menu-tab"
     }
   end
 end

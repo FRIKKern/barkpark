@@ -63,7 +63,7 @@ Done, in progress and open under each milestone, copied from the task board by `
 |---|---|---|---|---|
 | M0.5 | Proof round | 0 | 0 | 1 |
 | M1 | The map | 1 | 0 | 0 |
-| M2 | One skin everywhere | 7 | 0 | 9 |
+| M2 | One skin everywhere | 8 | 1 | 10 |
 | Ready | The showroom and the first six parts | 0 | 1 | 1 |
 | M3 | Editor menus and Barkdown's tree | 0 | 0 | 2 |
 | M4 | Blocks are parts | 0 | 0 | 1 |
@@ -71,6 +71,6 @@ Done, in progress and open under each milestone, copied from the task board by `
 | M6 | Re-imagining | 0 | 0 | 1 |
 | Beside | Groundwork: every shared piece has one source | 1 | 1 | 2 |
 
-Read from the board; numbers last changed on 2026-11-19.
-<!-- stamp: 48d3ca53753a53cd -->
+Read from the board; numbers last changed on 2026-11-20.
+<!-- stamp: cec2f6d6da9a0d1d -->
 <!-- board:end -->

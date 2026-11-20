@@ -44,7 +44,8 @@ describe('discoverParts', () => {
     const before = discoverParts(root).map((p) => p.name)
     plantPart(root, 'zz-planted')
     const after = discoverParts(root).map((p) => p.name)
-    expect(after).toEqual([...before, 'zz-planted'])
+    // Whatever the real parts are called: the planted one is added, and nothing else changes.
+    expect([...after].sort()).toEqual([...before, 'zz-planted'].sort())
     const planted = discoverParts(root).find((p) => p.name === 'zz-planted')
     expect(planted.example).toContain('ui-button')
     expect(planted.json.summary).toBe('A planted part.')
@@ -153,13 +154,13 @@ describe('discoverParts', () => {
     expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
   })
 
-  it('refuses a part.json whose allow is not property -> one-line reason', () => {
+  it('refuses a part.json that tries to excuse a property (allow is gone)', () => {
     const root = scratch()
     const dir = plantPart(root, 'aa')
     const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
-    for (const allow of [['filter'], { filter: '' }, { filter: 'two\nlines' }, { 'not-a-property!': 'x' }]) {
+    for (const allow of [{ filter: 'a reason' }, {}]) {
       writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, allow }))
-      expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "allow" maps a property to a one-line reason/)
+      expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "allow" is gone: a part cannot excuse itself/)
     }
   })
 })

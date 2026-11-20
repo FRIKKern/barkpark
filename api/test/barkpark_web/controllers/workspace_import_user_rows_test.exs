@@ -9,6 +9,7 @@ defmodule BarkparkWeb.WorkspaceImportUserRowsTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{AccountsFixtures, Auth, Repo, Tenancy, TenancyFixtures}
+  alias Barkpark.Tenancy.AccessRequests
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
@@ -166,6 +167,28 @@ defmodule BarkparkWeb.WorkspaceImportUserRowsTest do
     assert receipt["withheld_user_rows"] == %{
              "api_tokens" => %{"rows" => 1, "user_ids" => [outsider.id]}
            }
+  end
+
+  test "the receipt counts the access requests an import leaves out; none is carried" do
+    Application.put_env(:barkpark, :allow_bundle_import, true)
+    on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+    asker = Barkpark.Accounts.confirm_provisioned_user(user!("asker"))
+    ws = workspace!("asks")
+    {raw, op} = importer("asks")
+    {:ok, _} = TenancyAuth.create_membership(ws.id, op.id, "admin", "api_token")
+    {:ok, %{id: id}} = AccessRequests.request(asker, ws.slug, nil)
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+    {:ok, _} = AccessRequests.withdraw(asker.id, id)
+
+    receipt = import!(raw, ws.slug, bundle, "?mode=merge")
+
+    assert receipt["access_requests_left_out"] == 1
+
+    refute Repo.exists?(
+             from r in "workspace_access_requests",
+               where: r.workspace_id == type(^ws.id, :binary_id)
+           )
   end
 
   # Aim a bundle at `target`: its root row dropped, only `keep` members kept,

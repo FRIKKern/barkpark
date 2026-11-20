@@ -599,9 +599,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   # An object row's fields: the composite drawn `bare`, the row drawing its
   # frame. The old Studio's open-in-place row and the desk's item dialog
-  # draw the same fields under the same names.
-  defp composite_row_body(assigns, item, row_value, idx) do
+  # draw the same fields under the same names. In the desk's dialog an
+  # input's id is the item's path and the field's name
+  # (`links[_key=="l1"].url`), as Sanity's Studio names it.
+  defp composite_row_body(assigns, item, row_value, idx, id_base \\ nil) do
     CompositeField.composite_field(%{
+      id_base: id_base,
       field: item,
       value: row_value || %{},
       errors: row_subfield_errors(assigns.errors, idx),
@@ -627,9 +630,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp desk_item(assigns, row_value, idx) do
     item = element_field(assigns.field)
     dupes = Map.get(assigns, :dup_keys, %{})
+    stem = item_stem(assigns.id_base, row_value, idx, dupes)
 
     ArrayItemDialog.row(%{
-      stem: item_stem(assigns.id_base, row_value, idx, dupes),
+      stem: stem,
       row_id: item_row_id(assigns.field.name, assigns.path, idx, row_value, dupes),
       idx: idx,
       key: row_key(row_value),
@@ -643,7 +647,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       on_reorder: assigns.on_reorder,
       target: assigns.target,
       help_id: help_id(assigns),
-      body: composite_row_body(assigns, typed_member(item, row_value), row_value, idx),
+      body: composite_row_body(assigns, typed_member(item, row_value), row_value, idx, stem),
       errors: row_errors(assigns.errors, idx),
       warnings: row_errors(assigns.warnings, idx)
     })
