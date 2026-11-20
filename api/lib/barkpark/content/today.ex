@@ -56,9 +56,12 @@ defmodule Barkpark.Content.Today do
 
   # One workspace read per request: a list read runs its page, count and facet
   # queries one after another, each resolving the same filter. So the zone is
-  # kept in the calling process for a second; a changed zone shows after that.
+  # kept in the calling process for a second, keyed by workspace id (a process
+  # serving several workspaces keeps one entry each); a changed zone shows after
+  # that. Only a binary id is read: a request whose workspace did not resolve
+  # carries `:shared_only` (ScopeHelpers), and nil or any other value reads UTC.
   @memo_ms 1_000
-  defp zone(nil), do: "Etc/UTC"
+  defp zone(workspace_id) when not is_binary(workspace_id), do: "Etc/UTC"
 
   defp zone(workspace_id) do
     key = {__MODULE__, workspace_id}

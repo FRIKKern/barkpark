@@ -5,9 +5,28 @@ defmodule Barkpark.Content.TodayTest do
   this module's answers (its `scripts/today-cases.exs`), and the Studio's
   `app/src/lib/today.ts` is tested against them, so both give one date.
   """
-  use ExUnit.Case, async: true
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.Today
+
+  # Every value a scope's `workspace_id` can carry that names no workspace with a
+  # zone: today reads UTC, never a raise (a raise was a 500 on the read).
+  @no_zone [
+    {"nil (an internal global reader)", nil},
+    {":shared_only (a request whose workspace did not resolve)", :shared_only},
+    {"another atom", :global},
+    {"a number", 123},
+    {"an empty string", ""},
+    {"a malformed id", "not-a-uuid"},
+    {"a deleted workspace's id", "6f1d0c3a-9b8e-4d2f-a1c7-5e3b2a9d8c01"}
+  ]
+
+  for {name, id} <- @no_zone do
+    @id id
+    test "no workspace zone for #{name}: UTC, no raise" do
+      assert Today.clock(@id, now: ~U[2026-11-20 23:30:00Z]).zone == "Etc/UTC"
+    end
+  end
 
   # {name, now (UTC), zone, value, answer}. Oslo is UTC+1, and UTC+2 from
   # 2026-03-29 01:00Z to 2026-10-25 01:00Z.

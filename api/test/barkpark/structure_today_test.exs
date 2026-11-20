@@ -156,6 +156,33 @@ defmodule Barkpark.StructureTodayTest do
     refute_received :workspace_read
   end
 
+  test "a read whose workspace did not resolve (:shared_only) answers in UTC, never a raise" do
+    events!([{"i-dag", "2026-11-20"}])
+    opts = [now: ~U[2026-11-20 23:30:00Z], workspace_id: :shared_only]
+    assert is_list(titles(%{"content.sluttdato" => "$today"}, opts))
+
+    assert Content.count_documents("arrangement", @dataset,
+             filter_map: %{"title" => "$today"},
+             workspace_id: :shared_only
+           ) == 0
+  end
+
+  test "one process, two workspaces: each gets its own zone, never the other's" do
+    [oslo, pago] =
+      for zone <- ["Europe/Oslo", "Pacific/Pago_Pago"] do
+        ws = create_workspace!("today-#{System.unique_integer([:positive])}")
+        {:ok, _} = Tenancy.set_workspace_time_zone(ws.id, zone)
+        ws
+      end
+
+    at = [now: ~U[2026-11-20 23:30:00Z]]
+    # Read back to back, inside the one-second memo, and again in the other order.
+    assert Content.Today.date(Content.Today.clock(oslo.id, at)) == "2026-11-21"
+    assert Content.Today.date(Content.Today.clock(pago.id, at)) == "2026-11-20"
+    assert Content.Today.clock(oslo.id, at).zone == "Europe/Oslo"
+    assert Content.Today.clock(pago.id, at).zone == "Pacific/Pago_Pago"
+  end
+
   test "the query API resolves $today in a filter param, as today's Studio sends it", %{
     conn: conn
   } do
