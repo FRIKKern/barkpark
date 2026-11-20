@@ -62,6 +62,24 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
                 %{"name" => "note", "title" => "Note", "type" => "string"}
               ]
             },
+            %{
+              "name" => "lrows",
+              "title" => "Rows",
+              "type" => "arrayOf",
+              "of" => %{
+                "type" => "composite",
+                "fields" => [
+                  %{
+                    "name" => "cap",
+                    "title" => "Caption",
+                    "type" => "localizedText",
+                    "languages" => ["nob", "eng"],
+                    "fallbackChain" => ["nob", "eng"]
+                  },
+                  %{"name" => "note", "title" => "Note", "type" => "string"}
+                ]
+              }
+            },
             %{"name" => "notes", "type" => "string"}
           ]
         },
@@ -241,6 +259,19 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
 
     assert stored(c, id)["comp"] == %{"note" => "nn"}
     assert stored(c, id)["notes"] == "typed"
+  end
+
+  # TanStack's `write()` unsets no parent inside an array item: the row
+  # keeps its language field, emptied.
+  test "in an array row a language field emptied in every language stays, as {}", c do
+    row = %{"_key" => "r1", "cap" => %{"nob" => "rn", "eng" => "re"}, "note" => "rr"}
+    id = doc_with!(c, %{"lrows" => [row]})
+    view = desk(c, id)
+
+    change(view, "doc[lrows][0].cap.nob", "")
+    change(view, "doc[lrows][0].cap.eng", "")
+
+    assert stored(c, id)["lrows"] == [%{"_key" => "r1", "cap" => %{}, "note" => "rr"}]
   end
 
   test "an edit sent while the published version is shown is refused", c do

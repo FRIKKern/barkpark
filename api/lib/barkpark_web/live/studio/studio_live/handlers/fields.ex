@@ -609,14 +609,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # an object left with only blanks is unset in turn, as TanStack's `write()`
   # (`edits.ts`) does, so no `{}` shell is stored that `defined()` reads as
   # set. A top-level field is unset by writing "" (the save takes the key
-  # off). An array row is never unset, and a language map that is itself an
-  # array row only loses the key.
+  # off). Inside an array row nothing is unset outward, as TanStack's: the
+  # language only loses its key, and an object left empty stays `{}`.
   defp unset_language(doc, parent, lang) do
     case value_at(doc, parent) do
       %{} = map ->
         left = Map.delete(map, lang)
 
-        if blank_map?(left) and not row?(parent),
+        if blank_map?(left) and not in_row?(parent),
           do: unset_at(doc, parent),
           else: put_at(doc, parent, left)
 
@@ -637,7 +637,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       %{} = map ->
         left = Map.put(map, key, Forms.unset())
 
-        if blank_map?(left) and not row?(parent),
+        if blank_map?(left) and not in_row?(parent),
           do: unset_at(doc, parent),
           else: put_at(doc, parent, left)
 
@@ -649,13 +649,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp put_at(doc, [root], value), do: Map.put(doc, root, value)
   defp put_at(doc, path, value), do: StudioLive.put_value_at(doc, path, value)
 
+  # Blank as TanStack's `write()` reads it: "" or none; `_type` alone does
+  # not make an object set.
   defp blank_map?(map),
-    do: Enum.all?(map, fn {_key, value} -> value in [nil, "", Forms.unset()] end)
+    do: Enum.all?(map, fn {key, value} -> key == "_type" or value in [nil, "", Forms.unset()] end)
 
-  # The path names an array row (its last step is an index) or the top of
-  # the document.
-  defp row?([]), do: true
-  defp row?(path), do: is_integer(List.last(path))
+  # The path is the document's top, or lies inside an array row (any step
+  # is an index): TanStack's `write()` unsets no parent there.
+  defp in_row?([]), do: true
+  defp in_row?(path), do: Enum.any?(path, &is_integer/1)
 
   defp value_at(value, []), do: value
   defp value_at(%{} = map, [key | rest]), do: value_at(Map.get(map, key), rest)
