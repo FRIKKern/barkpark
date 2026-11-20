@@ -1,0 +1,165 @@
+{
+  "_comment": "One key typed at the start of block 1 in the rich editor, on the first four blocks of .demo-content/repo-papers/readme.json: the batch the mounted editor sends, and Keep mine resends (src/canvas/__keep_mine_batch.test.mjs checks both). It also patches block 4, which the key did not touch (task-7a92f596371dc4c1). paper_keep_mine_stale_block_test.exs replays it against two mounted readers.",
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "The workspace your AI works in.",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " Barkpark is a headless CMS built for AI agents: a place where an AI stores, sorts, and structures content — "
+        },
+        {
+          "type": "text",
+          "value": "tasks, papers, media",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes; both see every change in real time."
+        }
+      ]
+    },
+    {
+      "id": "b2",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Live demo:",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " "
+        },
+        {
+          "type": "link",
+          "href": "https://api.barkpark.cloud/studio",
+          "children": [
+            {
+              "type": "text",
+              "value": "https://api.barkpark.cloud/studio"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "b3",
+      "type": "heading",
+      "level": 2,
+      "text": "Setup"
+    },
+    {
+      "id": "b4",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Install the ",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "bp",
+          "marks": [
+            "code",
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " CLI:",
+          "marks": [
+            "strong"
+          ]
+        }
+      ]
+    }
+  ],
+  "typed": {
+    "at": 1,
+    "key": "x"
+  },
+  "ops": [
+    {
+      "op": "patch-block",
+      "id": "b1",
+      "patch": {
+        "content": [
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "xThe workspace your AI works in."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " Barkpark is a headless CMS built for AI agents: a place where an AI stores, sorts, and structures content — "
+          },
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "text",
+                "value": "tasks, papers, media"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " — while you edit the same documents in a browser Studio. The agent drives the API; you drive the panes; both see every change in real time."
+          }
+        ]
+      }
+    },
+    {
+      "op": "patch-block",
+      "id": "b4",
+      "patch": {
+        "content": [
+          {
+            "type": "text",
+            "value": "Install the ",
+            "marks": [
+              "strong"
+            ]
+          },
+          {
+            "type": "strong",
+            "children": [
+              {
+                "type": "code",
+                "value": "bp"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "value": " CLI:",
+            "marks": [
+              "strong"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
