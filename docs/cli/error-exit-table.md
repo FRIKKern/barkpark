@@ -54,7 +54,7 @@ gets the right behaviour without parsing the message.
 | Exit | Bucket | Meaning |
 |---|---|---|
 | `0` | success | Command completed. |
-| `1` | generic / unexpected | Other / network / timeout; the fallback for an unknown envelope `code`. (A non-JSON, no-`code` gateway body instead keys off HTTP status — see the fallback note.) |
+| `1` | generic / unexpected | Other / network / timeout; the fallback for an unknown envelope `code`. |
 | `2` | usage / unknown command | Bad arguments, malformed request body, unknown command/sub-command. |
 | `3` | auth / forbidden | Missing/invalid credential or insufficient permission. |
 | `4` | not-found | Resource or schema does not exist. |
@@ -96,10 +96,11 @@ the API actually returns for that code.
 | `empty_body` | 422 | `5` | Blob push rejected: zero-byte body (usually a mislabeled content-type `Plug.Parsers` consumed). | `empty blob body` — send raw bytes as `application/octet-stream`. |
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
 | `paper_exists` | 409 | `6` | Create-only slug is occupied. | Choose a new slug; existing content is preserved. |
+| `paper_not_in_scope` | 409 | `6` | Anchored push for a Paper this token may not write; nothing written. | Pull with a token seated in its workspace, or push from rev 0. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
 | `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string shape is handled too (below); both bucket to `6`. |
-| `fenced_off` · `stale_claim` · `stale_rev` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) the API does not currently emit; the others are confirmed server-side reasons. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
+| `fenced_off` · `stale_claim` · `stale_rev` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`); the API does not emit it. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
 | `not_holder` · `not_in_progress` | 409 | `6` | Stamp/close refused: the lease moved (another worker holds the claim) or the task left `in_progress`. Minted COMPOUND — `not_holder:<worker>`, `not_in_progress:<status>` (`tasks_controller/params.ex`); the CLI keys on the part before the first `:`. | `bp task get`, re-claim under your worker id, retry — RETRYABLE. |
 | `doc_changed_since_claim` · `claimed_has_worker` | 409 | `6` | The brief changed under your claim, or a named worker holds it. | Re-read / reconcile, then retry (the CLI hint names the recovery). |
 | `acknowledgement_unposted` | 409 | `5` | The task was born from an OUTSIDER's GitHub issue (`gh-<num>`) and its `ack_gate` criterion is unmet, so a `done`/`cancelled` close would end the row with the reporter never told. Compound: `acknowledgement_unposted:<issue>`. | Post the outcome on the issue and stamp the criterion with the comment URL — or `--set ack_override="<why not>"`. NOT retryable as sent; `criteria_override` does not discharge it. |
