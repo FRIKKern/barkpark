@@ -9,7 +9,7 @@
 //   (aria-selected, aria-activedescendant), and Enter opens the lit one.
 // - The pointer lights the way under it, as Sanity's.
 // - Each time the list opens it starts over: the box empty, every way shown,
-//   nothing lit, the focus in the box.
+//   nothing lit, the focus in the box (the popover's autofocus).
 //
 // It runs once a page, from the desk hook's loader; everything is delegated
 // from the document, so a page drawn after it loaded works the same.
@@ -92,19 +92,30 @@
     if (box && !option.hidden) light(parts(box), option);
   };
 
-  // `toggle` does not bubble: listened for in the capture phase.
-  var onToggle = function (e) {
-    if (!e.target || e.target.id !== PICKER || e.newState !== "open") return;
+  // The start-over is made in `beforetoggle`, which runs before the list is
+  // drawn. `toggle` is queued and can come after the first keys typed into the
+  // autofocused box, and would then wipe them. Neither bubbles: both are
+  // listened for in the capture phase. `toggle` only makes sure of the focus.
+  var opening = function (e) {
+    if (!e.target || e.target.id !== PICKER || e.newState !== "open") return null;
     var p = parts(e.target);
-    if (!p.find || !p.list) return;
+    return p.find && p.list ? p : null;
+  };
+  var onBeforeToggle = function (e) {
+    var p = opening(e);
+    if (!p) return;
     p.find.value = "";
     filter(p);
-    p.find.focus();
+  };
+  var onToggle = function (e) {
+    var p = opening(e);
+    if (p && document.activeElement !== p.find && e.target.matches(":popover-open")) p.find.focus();
   };
 
   document.addEventListener("input", onInput);
   document.addEventListener("keydown", onKey);
   document.addEventListener("pointerover", onPointer);
+  document.addEventListener("beforetoggle", onBeforeToggle, true);
   document.addEventListener("toggle", onToggle, true);
 
   window.BarkparkDeskNewDoc = { filter: filter, parts: parts };

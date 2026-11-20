@@ -379,7 +379,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .dk-split { justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-doc-menu-button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-menu-item { min-height: 44px; }
-        .dk .dk-new-doc-find input { min-height: 44px; }
+        .dk .dk-new-doc-find input, .dk .dk-new-doc .dk-new-doc-list > .dk-menu-item { min-height: 44px; }
+        .dk .dk-new-doc-head .icon-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; margin-right: -12px; }
         .dk .dk-inspect-close, .dk .dk-inspect-tabs [role="tab"] { min-width: 44px; min-height: 44px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
       }

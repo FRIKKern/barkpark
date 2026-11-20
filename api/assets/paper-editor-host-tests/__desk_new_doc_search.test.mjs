@@ -49,10 +49,21 @@ const lit = () => options.filter((o) => o.getAttribute("aria-selected") === "tru
 const picked = [];
 options.forEach((o) => o.addEventListener("click", () => picked.push(o.textContent.trim())));
 
-const open = () => {
-  const e = new window.Event("toggle");
+// The browser's order: beforetoggle, the popover drawn (its autofocus taken),
+// then a queued toggle. jsdom has no popovers: :popover-open is the attribute.
+const fire = (el, name) => {
+  const e = new window.Event(name);
   Object.defineProperty(e, "newState", { value: "open" });
-  picker.dispatchEvent(e);
+  el.dispatchEvent(e);
+};
+window.Element.prototype.matches = ((m) => function (sel) {
+  return sel === ":popover-open" ? this.hasAttribute("data-open") : m.call(this, sel);
+})(window.Element.prototype.matches);
+const open = () => {
+  fire(picker, "beforetoggle");
+  picker.setAttribute("data-open", "");
+  find.focus();
+  fire(picker, "toggle");
 };
 const type = (text) => {
   find.value = text;
@@ -113,6 +124,7 @@ assert.equal(key("ArrowDown"), true);
 assert.deepEqual(lit(), [], "an arrow over nothing lights nothing");
 
 // Open again: it starts over.
+picker.removeAttribute("data-open");
 find.blur();
 open();
 assert.equal(find.value, "", "the box is empty again");
@@ -121,13 +133,23 @@ assert.equal(empty.hidden, true);
 assert.equal(find.getAttribute("aria-expanded"), "true");
 assert.equal(doc.activeElement, find, "the focus is in the box again");
 
-// Another popover's toggle is not this one's.
+// Keys typed before the queued toggle arrives are kept (it came late under
+// load and wiped them, so Enter opened the first way, not the typed one).
+picker.removeAttribute("data-open");
+fire(picker, "beforetoggle");
+picker.setAttribute("data-open", "");
+find.focus();
+type("alan");
+fire(picker, "toggle");
+assert.equal(find.value, "alan", "a late toggle keeps what was typed");
+assert.deepEqual(shown(), ["Post by Alan Turing"], "a late toggle keeps the filter");
+
+// Another popover's opening is not this one's.
 type("cat");
 const other = doc.createElement("div");
 doc.body.appendChild(other);
-const e = new window.Event("toggle");
-Object.defineProperty(e, "newState", { value: "open" });
-other.dispatchEvent(e);
+fire(other, "beforetoggle");
+fire(other, "toggle");
 assert.deepEqual(shown(), ["Category"], "another popover opening leaves this one alone");
 
 console.log("__desk_new_doc_search: ok");
