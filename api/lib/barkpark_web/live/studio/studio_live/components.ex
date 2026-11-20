@@ -1408,8 +1408,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           byte-identical to pre-spd-s4 main. --%>
     <%!-- The phone drill trail — a SIBLING BEFORE the pane row (D27), and at
           the phone bucket the ONLY route back out of a drilled pane or an open
-          document. See `desk_crumbs/1` above. --%>
+          document. See `desk_crumbs/1` above. Not in the desk (`desk_base`), which
+          has its own panes: there it drew a bare "/" and, arriving at narrow, moved
+          the pane row, so a focused group tab fell to BODY (task-2dd6262184d64bb4). --%>
     <.desk_crumbs
+      :if={not is_binary(Map.get(assigns, :desk_base))}
       panes={@panes}
       editor_doc={@editor_doc}
       width_bucket={@width_bucket}
