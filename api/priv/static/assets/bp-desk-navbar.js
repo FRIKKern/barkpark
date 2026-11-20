@@ -279,7 +279,8 @@
       items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
     });
     // In who is here the arrows, Home and End move between the people, and
-    // Tab leaves it closed (the focus goes back to its button).
+    // Tab leaves it closed and moves on to the next control, as the desk's
+    // doc menus do.
     doc.addEventListener("keydown", function (e) {
       var menu = e.target && e.target.closest ? e.target.closest("#dk-who-menu") : null;
       if (!menu || e.metaKey || e.ctrlKey || e.altKey) return;
