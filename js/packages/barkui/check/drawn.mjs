@@ -37,6 +37,9 @@ export function installDrawn() {
     for (let n; (n = walk.nextNode()); ) if (n.textContent.trim()) out.push(n)
     return out
   }
+  /** The words a field shows as its value: a textarea's, or a text-like input's. A password shows dots, and a
+      date, a colour, a range or a button input draws its value its own way, so none of those is read as words. */
+  const valueOf = (el) => (el.matches('textarea, input:is([type="text" i], [type="search" i], [type="email" i], [type="url" i], [type="tel" i], [type="number" i], :not([type]))') ? el.value : '')
   const quiet = (el) => !!el.closest('[data-disabled], :disabled')
   /** Text kept for screen readers only: inside a box of at most 1px that clips what overflows it. */
   const forReadersOnly = (el, root) => {
@@ -104,6 +107,14 @@ export function installDrawn() {
           const draw = str ? { font: fontOf(ps), str, ink: solid(textFill(el, p), ground), ground: rgb(ground), at: phase(el.getBoundingClientRect()) } : null
           items.push({ kind: 'text', el, pseudo: p, at: `${h.describe(el)}${p}`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes, key: draw ? `text|${JSON.stringify(draw)}` : null, draw })
         }
+      }
+      // A field's value is drawn text, read the way its placeholder is: its words, its own text fill and the
+      // field's box, so its contrast and whether it draws in full are judged. Whether it draws as itself (a value
+      // the field scrolls sideways among them) is not judged here.
+      const value = valueOf(el)
+      if (value) {
+        const draw = { font: fontOf(getComputedStyle(el)), str: value, ink: solid(textFill(el), ground), ground: rgb(ground), at: phase(el.getBoundingClientRect()) }
+        items.push({ kind: 'text', el, pseudo: null, at: `${h.describe(el)} value`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], key: `text|${JSON.stringify(draw)}`, draw })
       }
     }
     // Each line of a text node is one label, matched against its own string drawn alone (match.mjs).
