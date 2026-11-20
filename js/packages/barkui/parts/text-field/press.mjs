@@ -1,10 +1,8 @@
 // Real-key steps for the text field. `setup` and each `expect` run in an isolated world of the page (its DOM,
-// none of its script) with the part's example element and a copy of the check's helpers (`h`). An expect
-// returns true or a reason. Keys go through the browser's own input pipeline, one key per entry, on a US
-// layout. The check focuses the part's heading first; the first Tab lands on the first field.
-
-const at = (root, id) => root.querySelector(`#text-field-${id}`)
-const focusOn = (root, h, id) => document.activeElement === at(root, id) || `focus is on ${h.describe(document.activeElement)}`
+// none of its script) with the part's example element and a copy of the check's helpers (`h`). Each function
+// is sent alone, so it may not reach anything else in this file. An expect returns true or a reason. Keys go
+// through the browser's own input pipeline, one key per entry, on a US layout. The check focuses the part's
+// heading first; the first Tab lands on the first field.
 
 export function setup() {}
 
@@ -13,22 +11,25 @@ export const steps = [
     name: 'Tab reaches the title field, focus-visible',
     keys: ['Tab'],
     expect: (root, h) => {
-      const f = focusOn(root, h, 'title')
-      if (f !== true) return f
-      return at(root, 'title').matches(':focus-visible') || 'not :focus-visible'
+      const t = root.querySelector('#text-field-title')
+      if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
+      return t.matches(':focus-visible') || 'not :focus-visible'
     },
     ax: { '#text-field-title': { role: 'textbox', name: 'Title' }, '#text-field-email': { role: 'textbox', name: 'Email', invalid: true } },
   },
   {
     name: 'Typing writes the value',
     keys: ['S', 'p', 'r', 'i', 'n', 'g'],
-    expect: (root) => at(root, 'title').value === 'Spring' || `value is ${JSON.stringify(at(root, 'title').value)}`,
+    expect: (root) => {
+      const v = root.querySelector('#text-field-title').value
+      return v === 'Spring' || `value is ${JSON.stringify(v)}`
+    },
   },
   {
     name: 'Backspace clears it, and the placeholder shows again',
     keys: ['Backspace', 'Backspace', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
     expect: (root) => {
-      const t = at(root, 'title')
+      const t = root.querySelector('#text-field-title')
       if (t.value !== '') return `value is ${JSON.stringify(t.value)}`
       return t.matches(':placeholder-shown') || 'the placeholder is not shown'
     },
@@ -36,15 +37,15 @@ export const steps = [
   {
     name: 'Tab walks slug, summary and the read-only id, and skips the disabled owner',
     keys: ['Tab', 'Tab', 'Tab', 'Tab'],
-    expect: (root, h) => focusOn(root, h, 'email'),
+    expect: (root, h) => document.activeElement === root.querySelector('#text-field-email') || `focus is on ${h.describe(document.activeElement)}`,
   },
   {
     name: 'The read-only id takes focus but no typing',
     keys: ['Shift+Tab', 'x'],
     expect: (root, h) => {
-      const f = focusOn(root, h, 'id')
-      if (f !== true) return f
-      return at(root, 'id').value === 'post-1042' || `value is ${JSON.stringify(at(root, 'id').value)}`
+      const t = root.querySelector('#text-field-id')
+      if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
+      return t.value === 'post-1042' || `value is ${JSON.stringify(t.value)}`
     },
   },
 ]
