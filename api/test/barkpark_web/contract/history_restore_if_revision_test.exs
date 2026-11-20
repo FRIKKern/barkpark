@@ -131,23 +131,38 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert fresh.status == 200
     assert title_of("drafts.pub") == "Words A"
   end
-  test "a deleted document: a named state is refused, a restore naming none brings it back",
-       %{conn: conn} do
+  # A document written once, then deleted: the state the restore was asked against
+  # is gone.
+  defp deleted_draft(doc_id) do
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "drafts.gone", "title" => "Words A"}, "test")
+      Content.create_document("post", %{"doc_id" => "drafts.#{doc_id}", "title" => "Words A"}, "test")
 
-    seen = rev_of("drafts.gone")
-    revision = revision_titled("gone", "Words A")
-    {:ok, _} = Content.delete_document("drafts.gone", "post", "test")
+    seen = rev_of("drafts.#{doc_id}")
+    revision = revision_titled(doc_id, "Words A")
+    {:ok, _} = Content.delete_document("drafts.#{doc_id}", "post", "test")
+    %{seen: seen, revision: revision}
+  end
 
-    fenced = restore(conn, revision.id, %{"ifRevisionID" => seen})
-    assert fenced.status == 412
-    assert Jason.decode!(fenced.resp_body)["error"]["details"]["actual"] == nil
+  test "a deleted document: a restore naming the state before the delete is refused, and no draft is born",
+       %{conn: conn} do
+    %{seen: seen, revision: revision} = deleted_draft("gone")
+
+    resp = restore(conn, revision.id, %{"ifRevisionID" => seen})
+
+    assert resp.status == 412
+    assert Jason.decode!(resp.resp_body)["error"]["details"]["actual"] == nil
     assert match?({:error, :not_found}, Content.get_document("drafts.gone", "post", "test")),
-           "nothing was written"
+           "no draft was born"
+    assert match?({:error, :not_found}, Content.get_document("gone", "post", "test")),
+           "no published row was written"
+  end
 
-    unfenced = restore(conn, revision.id, %{})
-    assert unfenced.status == 200
-    assert title_of("drafts.gone") == "Words A"
+  test "a deleted document: a restore naming no state brings it back, as before", %{conn: conn} do
+    %{revision: revision} = deleted_draft("back")
+
+    resp = restore(conn, revision.id, %{})
+
+    assert resp.status == 200
+    assert title_of("drafts.back") == "Words A"
   end
 end
