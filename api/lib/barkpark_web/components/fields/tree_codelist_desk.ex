@@ -6,8 +6,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistDesk do
   state (the tree, what is open, the search); this module draws it.
 
     * `.codelist-current`: the picked code, its label path from the root
-      (`Fiction › Modern fiction`), or "Not in the list", and a ×
-      ("Remove code") that takes the code off the document.
+      (`Fiction › Modern fiction`), or "Not in the list", or "Not a code
+      (kept as stored)" over a value that is no code, and a × ("Remove
+      code") that takes the value off the document.
     * `.codelist-search`: a search box named by the field's title. It posts
       itself on input (`phx-change`, 200 ms), so a value set without keys
       searches too. ArrowDown moves into the tree; Enter submits nothing.
@@ -26,7 +27,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistDesk do
 
   The hidden input posts the stored code back with every change to another
   field, so the code stays. A stored value that is not a string (`kept`)
-  has no input: the post then leaves it as it is stored.
+  has no input: the post then leaves it as it is stored. Its line says "Not
+  a code (kept as stored)" and offers Remove, whose own press writes "" for
+  the field; no other post touches the value.
   """
 
   use Phoenix.Component
@@ -95,9 +98,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistDesk do
 
     ~H"""
       <input :if={not @kept} type="hidden" name={@input_name} value={@selected || ""} data-tree-selected="true" />
-      <div :if={@current} class="codelist-current">
-        <span class="mono">{@current.code}</span>
-        <span class={["codelist-label", @current.label == nil && "invalid"]}>{@current.label || gettext("Not in the list")}</span>
+      <div :if={@current} class="codelist-current" data-codelist-kept={@kept && "true"}>
+        <span :if={@current.code} class="mono">{@current.code}</span>
+        <span class={["codelist-label", @current.label == nil && "invalid"]}>{current_label(@current, @kept)}</span>
         <button
           :if={not @readonly}
           type="button"
@@ -167,6 +170,10 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistDesk do
       </p>
     """
   end
+
+  defp current_label(_current, true), do: gettext("Not a code (kept as stored)")
+  defp current_label(%{label: nil}, _kept), do: gettext("Not in the list")
+  defp current_label(%{label: label}, _kept), do: label
 
   defp toggle_glyph(%{branch?: false}), do: ""
   defp toggle_glyph(%{open?: true}), do: "▼"
