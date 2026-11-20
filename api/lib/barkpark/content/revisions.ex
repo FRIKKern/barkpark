@@ -285,11 +285,21 @@ defmodule Barkpark.Content.Revisions do
 
   `opts` is forwarded to `Barkpark.Content.upsert_document/4` so callers can
   supply lifecycle-hook context (`:source`, `:user_id`).
+
+  `opts[:if_rev]` is the state the caller asked against, the same fence as a
+  `/v1` mutate patch's `ifRevisionID` (task-e89ff0279fb83fc6). It is compared
+  with the document's current rev: its draft row's, or its published row's when
+  it has no draft. When they differ the restore writes nothing and answers
+  `{:error, {:rev_mismatch, %{expected, actual, id}}}` (412
+  `precondition_failed`). When they match it goes on to the upsert, which fences
+  its UPDATE of the draft row on the same rev. With no `:if_rev` nothing is
+  compared.
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
     with {:ok, rev} <- get_revision(revision_id, dataset, opts),
          :ok <- assert_revision_dataset(rev, dataset),
-         :ok <- assert_revision_type(rev, type) do
+         :ok <- assert_revision_type(rev, type),
+         :ok <- assert_current_rev(rev.doc_id, type, dataset, opts) do
       attrs = %{
         "doc_id" => Content.draft_id(rev.doc_id),
         "title" => rev.title,
@@ -308,6 +318,42 @@ defmodule Barkpark.Content.Revisions do
        do: :ok
 
   defp assert_revision_dataset(_rev, _dataset), do: {:error, :not_found}
+
+  # The state a restore was asked against (`opts[:if_rev]`) against the
+  # document's current one: the draft row when there is one, else the published
+  # row. A document with neither has moved on too (it was deleted), so a named
+  # state is refused there as well.
+  defp assert_current_rev(doc_id, type, dataset, opts) do
+    case Keyword.get(opts, :if_rev) do
+      nil ->
+        :ok
+
+      "" ->
+        :ok
+
+      expected ->
+        published = Content.published_id(doc_id)
+
+        current =
+          Enum.find_value([Content.draft_id(published), published], fn id ->
+            case Content.get_document(id, type, dataset, opts) do
+              {:ok, doc} -> doc
+              _ -> nil
+            end
+          end)
+
+        case current do
+          %{rev: ^expected} ->
+            :ok
+
+          %{rev: actual, doc_id: id} ->
+            {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
+
+          nil ->
+            {:error, {:rev_mismatch, %{expected: expected, actual: nil, id: published}}}
+        end
+    end
+  end
 
   # The restore writes `drafts.<rev.doc_id>` under the CALLER's `type`. A
   # revision of one type restored under another created or overwrote a draft

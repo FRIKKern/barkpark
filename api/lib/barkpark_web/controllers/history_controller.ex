@@ -88,12 +88,16 @@ defmodule BarkparkWeb.HistoryController do
     end
   end
 
+  # `ifRevisionID` (optional): the document state the caller asked against, the
+  # same fence a `/v1` mutate patch takes. A restore naming a state the document
+  # has moved on from is refused 412 `precondition_failed` and writes nothing
+  # (task-e89ff0279fb83fc6); `Content.restore_revision/4` holds the compare.
   def restore(conn, %{"dataset" => dataset, "id" => id} = params) do
     type = get_type(conn, params)
+    opts = restore_if_rev([source: :api] ++ scope_opts(conn), params["ifRevisionID"])
 
     with :ok <- validate_uuid(id),
-         {:ok, doc} <-
-           Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
+         {:ok, doc} <- Content.restore_revision(id, type, dataset, opts) do
       schema =
         case Content.Schema.get_schema_for_redaction(type, dataset, scope_opts(conn)) do
           {:ok, s} -> s
@@ -111,6 +115,13 @@ defmodule BarkparkWeb.HistoryController do
       {:error, :not_found} ->
         not_found(conn, "revision not found")
 
+      {:error, {:rev_mismatch, _details}} = mismatch ->
+        env = Errors.to_envelope(mismatch, conn)
+
+        conn
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
+
       {:error, {:halted, _reason}} = halt ->
         # Plugin lifecycle veto on the restore. Render the CANONICAL envelope
         # (code "halted", 409, request_id, hint) via the same Errors.to_envelope
@@ -125,6 +136,10 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   defp get_type(_conn, params), do: params["type"]
+
+  defp restore_if_rev(opts, nil), do: opts
+  defp restore_if_rev(opts, ""), do: opts
+  defp restore_if_rev(opts, expected), do: Keyword.put(opts, :if_rev, expected)
 
   @uuid_regex ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   defp validate_uuid(id) when is_binary(id) do
