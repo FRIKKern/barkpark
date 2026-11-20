@@ -128,21 +128,25 @@ try {
     if (!extra.slots) inSync(`after a key in a callout with ${label}`);
   }
 
+  // Cases 4 and 5 each run to the end, so a break shows in both.
+  const failures = [];
+  const own = async (name, run) => { try { await run(); } catch (error) { failures.push(`${name}: ${error.message}`); } };
+
   // 4) A list's nested items are shown with their words.
-  {
+  await own("4) nested list items", async () => {
     const list = readJson("../../test-inputs/nested-list-carriers.json").blocks[0];
     const block = { id: "c1", type: "callout", tone: "note", slots: { body: [list] } };
     const { canvas } = await mount([paragraph("p1", "Before"), block]);
     mounted.push(canvas);
     const shown = shownText(canvas.querySelector('[data-bp-callout-readonly="c1"] [data-bp-callout-words]'));
     for (const word of ["Build", "Verify", "Alias"]) assert.ok(shown.includes(word), `the nested item word "${word}" is shown: ${JSON.stringify(shown)}`);
-  }
+  });
 
   // 5) Each body block shows every word it holds or its marker, never a part. The
   //    body holds every block kind the schema allows, with the reader's own words for
   //    each from the conformance pack, plus the shared nested-list fixture and a
   //    callout whose body holds a table.
-  {
+  await own("5) every block kind", async () => {
     const kinds = Object.keys(readJson("../../../../priv/portable_doc/spec/blocks.schema.json").definitions.blocks);
     const golden = new Map(loadPack().cases.map((c) => [c.type, c]));
     const expected = new Map();
@@ -177,7 +181,8 @@ try {
       });
     };
     check(words, body, "body");
-  }
+  });
+  if (failures.length > 0) throw new Error(failures.join("\n"));
 
   console.log("callout body read-only mounted: 5 cases passed");
 } finally {
