@@ -161,7 +161,7 @@ function blockMd(block, ctx) {
       const tone = TONES[str(block.tone).toLowerCase()] || humanize(block.tone || "note");
       const title = oneLine(block.title);
       const head = title ? "**" + tone + ":** " + escapeInlineText(title) : "**" + tone + "**";
-      return quote(joined([head, inline(block.content, ctx), ...inside(block, ctx)]));
+      return quote(joined([head, inline(block.content, ctx), ...chunks(calloutBody(block), ctx), ...inside(block, ctx)]));
     }
     case "note": return quote(noteLine(block, ctx));
     case "notes": return quote(joined((Array.isArray(block.items) ? block.items : []).map((item) => noteLine(item, ctx)))) || placeholder(block, ctx);
@@ -212,6 +212,17 @@ function blockMd(block, ctx) {
       if (/^field-/.test(type) || ["composite", "arrayOf", "codelist", "localizedText"].includes(type)) return fieldMd(block);
       return fallback(block, ctx);
   }
+}
+
+// A callout's body slot, after its own words. The reader shows the first body
+// block's words in place of `content` (Slots.callout_body_inline/1); when that block
+// is a paragraph holding the callout's own words, they are said once.
+function calloutBody(block) {
+  const body = isMap(block.slots) && Array.isArray(block.slots.body) ? block.slots.body : [];
+  const [first, ...rest] = body;
+  const same = isMap(first) && first.type === "paragraph" && Array.isArray(block.content) && block.content.length > 0 &&
+    JSON.stringify(first.content) === JSON.stringify(block.content);
+  return same ? rest : body;
 }
 
 function noteLine(note, ctx) {

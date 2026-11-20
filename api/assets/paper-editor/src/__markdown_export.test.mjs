@@ -113,6 +113,30 @@ check("quotes, callouts and notes are quotes with a label; a divider and an imag
   );
 });
 
+check("a callout keeps every word of its body after its own words (task-6a8137419e0153e4)", () => {
+  const p = (text) => ({ type: "paragraph", content: [t(text)] });
+  assert.equal(
+    md([{ type: "callout", tone: "note", content: [t("head words")], slots: { body: [p("body words"), { type: "list", items: [[t("body item")]] }] } }]),
+    "> **Note**\n>\n> head words\n>\n> body words\n>\n> - body item",
+  );
+  // A callout whose body is its own words, in the slot form, says them once.
+  assert.equal(
+    md([{ type: "callout", tone: "note", content: [t("same words")], slots: { body: [p("same words")] } }]),
+    "> **Note**\n>\n> same words",
+  );
+  assert.equal(md([{ type: "callout", tone: "note", slots: { body: [p("only the body")] } }]), "> **Note**\n>\n> only the body");
+});
+
+check("a list item keeps every word of a heading, a code block and a callout under it, indented", () => {
+  const item = (child) => ({ type: "list", items: [{ content: [t("item")], children: [child] }] });
+  assert.equal(md([item({ type: "heading", level: 3, text: "child heading" })]), "- item\n  ### child heading");
+  assert.equal(md([item({ type: "code", lang: "js", value: "child code" })]), "- item\n  ```js\n  child code\n  ```");
+  assert.equal(
+    md([item({ type: "callout", tone: "note", content: [t("child head")], slots: { body: [{ type: "paragraph", content: [t("child body")] }] } })]),
+    "- item\n  > **Note**\n  >\n  > child head\n  >\n  > child body",
+  );
+});
+
 check("steps, tabs and columns keep every block inside them, in order", () => {
   const p = (text) => ({ type: "paragraph", content: [t(text)] });
   assert.equal(
