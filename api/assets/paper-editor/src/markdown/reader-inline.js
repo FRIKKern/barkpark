@@ -11,14 +11,13 @@
 // The reader's fallbacks, each mirrored here:
 //   paragraph, blockquote  compose.ex paragraph_inline/1: `content` when a non-empty
 //                          list, else `text` when a non-empty string, else nothing
-//                          (api/lib/barkpark/portable_doc/render/compose.ex:2124; the
-//                          blockquote clause at :1835 reads through it)
+//                          (compose.ex's compose_block "blockquote" reads through it)
 //   heading                compose.ex compose_block "heading": `content` when a
-//                          non-empty list, else `text` (:211)
-//   callout                slots.ex callout_body_inline/1 (:300): the first element of
-//                          slots.body when that slot is a list (slot_elements/2, :234),
-//                          else `content` as the legacy body (:243); that element's
-//                          `content` when non-empty, else the callout's `text`
+//                          non-empty list, else `text`
+//   callout                slots.ex callout_body_inline/1: the first element of
+//                          slots.body when that slot is a list (slot_elements/2),
+//                          else `content` as the legacy body (legacy_slot/2); that
+//                          element's `content` when non-empty, else the callout's `text`
 // The Markdown line carries `text` for a heading and `content` for the rest
 // (serialize.js), so a paragraph, quote or callout showing `text`, a heading showing
 // `content`, and a callout showing its body slot all differ.
