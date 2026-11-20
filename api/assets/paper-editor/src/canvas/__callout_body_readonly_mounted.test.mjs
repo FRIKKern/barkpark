@@ -1,5 +1,5 @@
 // A callout that holds a body is shown whole and read-only in the rich editor
-// (task-c6355c4cb9cb7707). Its words are its content, then every block of its body.
+// (task-c6355c4cb9cb7707; markdown/callout-words.js holds what a callout's words are).
 // Until the editor can edit a body in place, such a callout shows content then every
 // body block, takes no typing, says so, and sends nothing for itself. A callout with
 // no body, or an empty one, stays editable.

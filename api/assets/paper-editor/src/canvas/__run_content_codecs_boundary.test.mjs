@@ -159,7 +159,7 @@ for (const name of DECLARATIONS) {
 const importSpecifiers = source => [...source.matchAll(
   /(?:^|\n)\s*(?:import|export)\s+(?:[^"'\n]*?\s+from\s+)?["']([^"']+)["']/g,
 )].map(match => match[1]);
-assert.deepEqual(importSpecifiers(leafSource), ["../convert.js", "./projection-json.js", "./run-kinds.js"]);
+assert.deepEqual(importSpecifiers(leafSource), ["../convert.js", "./projection-json.js", "./run-kinds.js", "../markdown/callout-words.js"]);
 const contentConsumers = new Set([
   "run-project.js", "run-container-codecs.js", "run-reverse-echo.js", "run-ops.js",
 ]);

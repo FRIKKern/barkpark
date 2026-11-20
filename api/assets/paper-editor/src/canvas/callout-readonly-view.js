@@ -1,8 +1,8 @@
 // callout-readonly-view.js — how the rich editor shows a callout that holds a body
 // (task-c6355c4cb9cb7707).
 //
-// A callout's words are its content, then every block of its body, in that order. The
-// editable callout node holds one inline run, so a callout with a body is carried
+// markdown/callout-words.js holds what a callout's words are. The editable callout
+// node holds one inline run, so a callout with a body is carried
 // whole (run-content-codecs.js calloutBlockToNode → bpOpaque) and opaque-node.js hands
 // it to this view: the callout's tone card with its title, its content and every body
 // block as plain words, and one line saying it is read-only. The view never writes;
@@ -11,6 +11,7 @@
 
 import { t } from "../i18n.js";
 import { calloutToneClass } from "./callout-node.js";
+import { calloutBodyBlocks } from "../markdown/callout-words.js";
 
 // Plain words of an inline array (marks dropped), or of a string.
 function inlineWords(value) {
@@ -66,8 +67,7 @@ function calloutWordsView(block) {
   }
   head.appendChild(document.createTextNode(inlineWords(block.content ?? block.text)));
   if (head.textContent.trim() !== "") words.appendChild(head);
-  const body = block.slots && Array.isArray(block.slots.body) ? block.slots.body : [];
-  for (const child of body) {
+  for (const child of calloutBodyBlocks(block)) {
     const view = bodyBlockView(child);
     if (view) words.appendChild(view);
   }

@@ -58,8 +58,8 @@
 //     attrs and also feed the patch on change.
 //
 // ── CONTENT AND BODY ─────────────────────────────────────────────────────────
-//   A callout's words are its content, then every block of its body slot. This
-//   node's `contentDOM` is `inline*` and edits the callout's `content` only. A
+//   markdown/callout-words.js holds what a callout's words are. This node's
+//   `contentDOM` is `inline*` and edits the callout's `content` only. A
 //   callout that holds a body is never this node: run-content-codecs.js
 //   calloutBlockToNode carries it whole and callout-readonly-view.js shows it
 //   read-only (task-c6355c4cb9cb7707).

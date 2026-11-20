@@ -1,6 +1,7 @@
 import { inlineArrayToTiptap, tiptapInlineToPd } from "../convert.js";
 import { canonicalJSON, deepClone } from "./projection-json.js";
 import { CANVAS_CARD_NODE_NAME, isPlainObject } from "./run-kinds.js";
+import { calloutBodyBlocks } from "../markdown/callout-words.js";
 
 // ── callout ⇄ canvas content node (S3.2) ────────────────────────────────────
 //
@@ -19,14 +20,13 @@ import { CANVAS_CARD_NODE_NAME, isPlainObject } from "./run-kinds.js";
 // maybe_put / maybe_put_true only thread these when present, so a callout that
 // never had a title must round-trip WITHOUT a title key (not title:"").
 
-// Whether a callout holds a body: a non-empty `slots.body` list. A callout's words are
-// its content, then every block of its body, and no field is a copy of another. The
-// callout node below edits one inline run, so it cannot show or save a body: a
-// callout that holds one is carried whole instead (bpOpaque, shown read-only by
-// callout-readonly-view.js), and nothing is sent for it (task-c6355c4cb9cb7707).
+// Whether a callout holds a body (markdown/callout-words.js holds what a callout's
+// words are). The callout node below edits one inline run, so it cannot show or save
+// a body: a callout that holds one is carried whole instead (bpOpaque, shown
+// read-only by callout-readonly-view.js), and nothing is sent for it
+// (task-c6355c4cb9cb7707).
 function calloutHasBody(block) {
-  const body = block && isPlainObject(block.slots) ? block.slots.body : null;
-  return Array.isArray(body) && body.length > 0;
+  return calloutBodyBlocks(block).length > 0;
 }
 
 // calloutBlockToNode(block) → { type:"callout", attrs:{…}, content:[inline…] }, or

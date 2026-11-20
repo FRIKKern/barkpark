@@ -1,6 +1,6 @@
 // __slots.test.mjs — the callout body slot in the run pipeline (task-c6355c4cb9cb7707).
-// A callout's words are its content, then every block of its body; no field is a copy
-// of another. The editable callout node holds one inline run, so:
+// markdown/callout-words.js holds what a callout's words are; no field is a copy of
+// another. The editable callout node holds one inline run, so:
 //
 //   * a callout with only `content` projects to that node, and an edit patches
 //     `content` alone, chrome kept;
