@@ -2504,7 +2504,7 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unexamined},
     # BPML working-copy sync — the APPLIED receipt.
     %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.sync_persist/6", "94329464", "19447210"},
+            "BarkparkWeb.BulldocsIngestController.sync_persist/6", "94329464", "81353091"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED BY THE FALSIFIER'S OWN LENS, same shape as its apply_op siblings. The cycle test (bulldocs_bpml_api_test.exs `the full cycle: pull, edit the file, push, converge on canonical`) pushes, then re-PULLS the paper over the public HTTP read path and asserts the stored document byte-equals the receipt's canonical BPML — a real read-back the arm cannot see, because it keys on a `Repo.` read in the cited block. The row says what the lens can stand behind."},
@@ -2512,7 +2512,7 @@ defmodule PDS.Census do
     # receipt: `ok: true, created: true` after Content.upsert_paper births the paper
     # through the full publish wall on an absent slug.
     %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.sync_create_persist/6", "68602513", "127789733"},
+            "BarkparkWeb.BulldocsIngestController.sync_create_persist/6", "68602513", "68119797"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "A RECEIPT, not a phantom, but UNJUDGED by this lens — same shape as its sync_persist/6 sibling. The create test (bulldocs_ingest_controller_test.exs `a wall-passing document CREATES the paper (200 created), and pulls back clean`) drives the create-on-push sync route AND reads the stored row back with `Content.get_paper(slug)`, asserting the persisted title, blocks, description and tags — a genuine receipt-vs-stored-row differential. But `Content.get_paper(` is not in @repo_tokens (`Repo.` · `Content.get_document(` · `Conflicts.list(`), so end_to_end's falsifier cannot see the second hop; the row says what the lens can stand behind, not more."},
