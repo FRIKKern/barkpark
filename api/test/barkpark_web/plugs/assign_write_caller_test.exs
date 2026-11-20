@@ -82,10 +82,13 @@ defmodule BarkparkWeb.Plugs.AssignWriteCallerTest do
       {"a user-owned token whose owner may not write", owner_reads, false}
     ]
 
-    for {name, token, expected} <- cases do
-      assert caller(token).may_write_in.(ws) == writes?(token, ws), name
-      assert writes?(token, ws) == expected, name
-    end
+    assert for({name, token, want} <- cases, writes?(token, ws) != want, do: name) == []
+
+    assert for(
+             {name, token, _want} <- cases,
+             caller(token).may_write_in.(ws) != writes?(token, ws),
+             do: name
+           ) == []
   end
 
   test "a pinned token writes in its home, elsewhere only by a seat or an armed allowlist" do
