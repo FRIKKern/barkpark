@@ -227,7 +227,8 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
         user_id: "me"
       })
 
-    refute render_component(&DocStatus.chips/1, Map.put(alone, :doc, doc)) =~ "p-avatar"
+    # The chips' stylesheet names the class; no avatar is drawn.
+    refute render_component(&DocStatus.chips/1, Map.put(alone, :doc, doc)) =~ ~s(class="p-avatar)
   end
 
   test "(e) past three people, a counter of the rest before the last two" do
