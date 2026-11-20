@@ -65,6 +65,7 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
     socket =
       socket
       |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+      |> assign(:editor_refused_clears, nil)
       |> Shared.rebuild_panes()
 
     socket

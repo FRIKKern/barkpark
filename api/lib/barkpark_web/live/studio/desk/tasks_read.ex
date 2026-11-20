@@ -18,7 +18,7 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
   as `/v1/tasks` holds them (`Scope.scope_to_workspace/3`, so a row with no
   project is not listed), draft twins collapsed. Every read needs a workspace
   id and a project id; there is no read across workspaces or projects. Fields go through the board's fail-closed predicate
-  (`Board.field_visibility_gate/1`), so a field the task schema keeps private
+  (`Board.field_visibility_gate/2`), so a field the workspace's own task schema keeps private
   is left out here as it is on the board.
 
   The views, against TanStack's (`TasksPanel.tsx`):
@@ -72,15 +72,10 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
 
   defp read_list(opts, target) do
     dataset = Keyword.fetch!(opts, :dataset)
-    ws_id = workspace!(opts)
-    readable? = Board.field_visibility_gate(dataset)
+    scope = [workspace_id: workspace!(opts), project_id: project!(opts)]
 
-    page_opts = [
-      dataset: dataset,
-      workspace_id: ws_id,
-      project_id: project!(opts),
-      readable?: readable?
-    ]
+    page_opts =
+      [dataset: dataset, readable?: Board.field_visibility_gate(dataset, scope)] ++ scope
 
     todo = ListQuery.page(filters(ListQuery.statuses() -- (@done ++ @hidden), target), page_opts)
     done = ListQuery.page(filters(@done, target), page_opts)
@@ -128,8 +123,14 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
     |> Enum.sort_by(&DraftId.draft?(&1.doc_id))
     |> List.first()
     |> case do
-      nil -> nil
-      doc -> view(doc, Board.field_visibility_gate(dataset))
+      nil ->
+        nil
+
+      doc ->
+        view(
+          doc,
+          Board.field_visibility_gate(dataset, workspace_id: ws_id, project_id: project_id)
+        )
     end
   end
 
