@@ -80,4 +80,29 @@ defmodule BarkparkWeb.Studio.DeskDocStatusPhoneStackTest do
     assert phone =~
              ".dk .dk-chips .p-avatars > .p-avatar.more.p-avatar-phone { display: inline-grid; }"
   end
+
+  # Review of #27830: the phone counter is the first child and hidden off
+  # the phone, so the avatar after it must not take the stack's overlap,
+  # or the stack and the pills sit 6 px left with a mouse and at 390.
+  test "the avatar after the hidden phone counter draws with no overlap margin" do
+    {html, _avatars} = stack(3)
+    [wide | _] = String.split(html, "@media (max-width: 389px)", parts: 2)
+    assert wide =~ ".dk .dk-chips .p-avatar-phone + .p-avatar { margin-left: 0; }"
+  end
+
+  test "each counter's title names the people it stands for; the label counts everyone" do
+    {html, _avatars} = stack(5)
+    doc = LazyHTML.from_fragment(html)
+
+    titles =
+      doc |> LazyHTML.query(".p-avatar.more") |> Enum.map(&hd(LazyHTML.attribute(&1, "title")))
+
+    assert titles == [
+             "Person 1, Person 2, Person 3, Person 4",
+             "Person 1, Person 2, Person 3"
+           ]
+
+    assert doc |> LazyHTML.query(".p-avatars") |> LazyHTML.attribute("aria-label") ==
+             ["5 others are editing: Person 1, Person 2, Person 3, Person 4, Person 5"]
+  end
 end

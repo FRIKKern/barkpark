@@ -227,8 +227,13 @@ defmodule BarkparkWeb.Studio.DeskPaneTop2Test do
         user_id: "me"
       })
 
-    # The chips' stylesheet names the class; no avatar is drawn.
-    refute render_component(&DocStatus.chips/1, Map.put(alone, :doc, doc)) =~ ~s(class="p-avatar)
+    # No stack and no avatar is drawn.
+    drawn =
+      render_component(&DocStatus.chips/1, Map.put(alone, :doc, doc))
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s(.p-avatars, .p-avatar, [data-testid="presence"]))
+
+    assert Enum.count(drawn) == 0
   end
 
   test "(e) past three people, a counter of the rest before the last two" do
