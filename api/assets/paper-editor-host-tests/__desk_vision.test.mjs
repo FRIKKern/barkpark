@@ -46,9 +46,9 @@ doc.body.innerHTML = `<div id="dk-vision" class="dk-vision" data-desk-vision dat
   <select data-vision-perspective><option value="raw">No perspective (raw)</option><option value="published">published</option><option value="drafts" selected>drafts</option></select>
   <div data-vision-url hidden><button type="button" data-vision-copy>[Copy to clipboard]</button><span role="status" data-vision-copied></span><input id="vision-url" readonly></div>
   <textarea id="dk-vision-query">*[_type == "post"]</textarea>
-  <div data-vision-params-pane><span role="img" data-vision-params-error hidden></span><textarea id="vision-params" data-vision-params>{
+  <div data-vision-params-pane><span role="img" data-vision-params-error hidden></span><textarea id="vision-params" aria-describedby="vision-params-why" data-vision-params>{
   
-}</textarea></div>
+}</textarea><span id="vision-params-why" data-vision-params-why></span></div>
   <button type="button" data-vision-fetch>Fetch</button>
   <section class="dk-vision-result" aria-label="Result" aria-busy="false"><div data-vision-out></div>
     <footer><span data-vision-ms>Execution: n/a</span><span data-vision-total>End-to-end: n/a</span>
@@ -311,6 +311,10 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(s.searchParams.get("dataset"), null);
   const shown = Vision.target(api, "production", "post?filter[title][contains]=$t&limit=$n", "drafts", "v1", { t: "post 1", n: 2 }).shown;
   assert.match(shown, /\/post\?filter\[title\]\[contains\]=post\+1&limit=2&perspective=drafts$/, "the Query URL shows the query string as typed, as TanStack's");
+  // Only the brackets: a value's & and # stay encoded, so the copied URL is the same request.
+  const tricky = Vision.target(api, "production", "post?filter[title][contains]=$t", "drafts", "v1", { t: "a&limit=1#x" });
+  assert.match(tricky.shown, /filter\[title\]\[contains\]=a%26limit%3D1%23x&perspective=drafts$/);
+  assert.deepEqual([...new URL(tricky.shown, "http://x").searchParams], [...new URL(tricky.path, "http://x").searchParams], "the shown URL reads as the sent one");
   // The page's objects are jsdom's: compared as JSON.
   const plain = (v) => JSON.parse(JSON.stringify(v));
   assert.deepEqual(plain(Vision.target(api, "production", "post?filter[_id]=$id", "drafts", "v1", {})), { error: "params-missing", name: "id" });
@@ -342,6 +346,8 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(params.getAttribute("aria-invalid"), "true");
   assert.equal(icon.hidden, false);
   assert.match(icon.title, /^Parameters are not valid JSON: ./);
+  assert.equal(icon.getAttribute("aria-label"), icon.title, "the icon is named by the reason");
+  assert.equal(doc.getElementById(params.getAttribute("aria-describedby")).textContent, icon.title, "the box is described by it");
   assert.equal(button.getAttribute("aria-disabled"), "true");
   click(button);
   params.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
@@ -351,10 +357,13 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal($("[data-vision-url]").hidden, true);
   type(params, "[1]");
   assert.equal(icon.title, "Params must be a JSON object");
+  assert.equal(icon.getAttribute("aria-label"), "Params must be a JSON object", "not \"not valid JSON\" for valid JSON that is not an object");
+  assert.equal($("[data-vision-params-why]").textContent, "Params must be a JSON object");
   // An object again: Fetch is back, and Ctrl+Enter in Params runs, as in the query.
   type(params, '{"t": "page"}');
   assert.equal(pane.hasAttribute("data-invalid"), false);
   assert.equal(icon.hidden, true);
+  assert.equal($("[data-vision-params-why]").textContent, "", "no reason while Params are an object");
   assert.equal(button.hasAttribute("aria-disabled"), false);
   params.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
   await settle();

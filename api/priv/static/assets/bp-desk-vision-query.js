@@ -41,7 +41,7 @@
     return Array.isArray(v) ? v.map(String).join(",") : v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
   };
 
-  /** What a query reads, under the project's `scope` path: {error} or {path, groq, shown}; `shown`, the Query URL, keeps a query string's brackets as typed (TanStack's). Pure, so the host tests load it. */
+  /** What a query reads, under the project's `scope` path: {error} or {path, groq, shown}; `shown`, the Query URL, keeps a query string's brackets as typed. Pure, so the host tests load it. */
   var target = function (scope, dataset, text, perspective, version, given) {
     var values = given || {};
     var raw = String(text || "").trim();
@@ -61,7 +61,8 @@
       var params = new URLSearchParams(qs);
       if (!params.has("perspective")) params.set("perspective", p);
       path = scope + "/v1/data/query/" + ds + "/" + type + "?" + params.toString();
-      shown = scope + "/v1/data/query/" + ds + "/" + type + "?" + decodeURIComponent(params.toString());
+      // Only the brackets read as typed: a value's own & or # stays encoded, so the copied URL is this request.
+      shown = scope + "/v1/data/query/" + ds + "/" + type + "?" + params.toString().replace(/%5B/gi, "[").replace(/%5D/gi, "]");
       groq = false;
     } else {
       var v = VERSION.test(version) ? version : today();

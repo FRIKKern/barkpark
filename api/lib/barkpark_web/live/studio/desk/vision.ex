@@ -169,8 +169,11 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
               class="dk-vision-code"
               spellcheck="false"
               aria-keyshortcuts="Control+Enter Meta+Enter"
+              aria-describedby="vision-params-why"
               data-vision-params
             >{@no_params}</textarea>
+            <%!-- Why Params are refused, read with the box; empty while they are an object. --%>
+            <span id="vision-params-why" class="sr-only" data-vision-params-why></span>
           </div>
           <div class="dk-vision-actions">
             <button

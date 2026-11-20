@@ -76,6 +76,9 @@
         var icon = part(root, "[data-vision-params-error]");
         icon.hidden = !why;
         icon.title = why;
+        // Its name is the reason itself (not JSON, or not an object), and the box is described by it.
+        if (why) icon.setAttribute("aria-label", why);
+        part(root, "[data-vision-params-why]").textContent = why;
       }
       root.__badParams = !!why;
       fetchState(root);
