@@ -10,8 +10,6 @@ defmodule BarkparkWeb.BulldocsSourceController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.PortableDoc.Bpml
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   def show(conn, %{"slug" => slug} = params) do
     dataset = requested_dataset(params)
@@ -42,62 +40,60 @@ defmodule BarkparkWeb.BulldocsSourceController do
       nil ->
         send_resp(conn, 404, "not found")
 
+      paper when format == "bpml" ->
+        # The working copy: the reader's view (`Papers.BpmlView`), which the
+        # push and create answers print and refuse alike.
+        bpml_source(conn, paper, Content.Papers.BpmlView.of(paper, dataset, scope, perspective))
+
       paper ->
-        # The schema the blocks were redacted under also redacts the BPML
-        # label spine (description, tags) — no second lookup.
-        {reader_source, schema} = Content.Papers.reader_source_with_schema(paper, dataset, scope)
-
-        source =
-          case reader_source do
-            {:blocks, blocks} ->
-              resolved =
-                Content.Papers.resolve_tasks_in_blocks(
-                  blocks,
-                  task_scope(paper, perspective),
-                  dataset
-                )
-
-              %{"kind" => "blocks", "blocks" => resolved}
-
-            {:html, html} ->
-              %{"kind" => "html", "html" => html}
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-
-        case {source, format} do
-          {{:error, reason}, _} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{"error" => %{"code" => to_string(reason)}})
-
-          # BPML is a VIEW of blocks only — an html-source paper has no block
-          # truth to print, so the isomorphic format honestly refuses.
-          {%{"kind" => "blocks", "blocks" => blocks}, "bpml"} ->
-            send_bpml(conn, paper, blocks, Content.Papers.anonymous_content(paper, schema))
-
-          {%{"kind" => "html"}, "bpml"} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              "error" => %{
-                "code" => "bpml_unavailable",
-                "message" =>
-                  "this paper was ingested as opaque body_html — it has no block source",
-                "hint" => "re-ingest with blocks (or BPML) to make the isomorphic view available"
-              }
-            })
-
-          {source, _json} ->
-            json(conn, %{
-              "id" => paper.doc_id,
-              "title" => paper.title,
-              "_rev" => paper.rev,
-              "source" => source
-            })
-        end
+        json_source(conn, paper, dataset, scope, perspective)
     end
+  end
+
+  # BPML is a VIEW of blocks only: an html-source paper has no block truth to
+  # print, so the isomorphic format refuses it.
+  defp bpml_source(conn, paper, {:blocks, blocks, fields}),
+    do: send_bpml(conn, paper, blocks, fields)
+
+  defp bpml_source(conn, _paper, view), do: refuse(conn, Content.Papers.BpmlView.refusal(view))
+
+  # The JSON read is what a reader renders (`bp paper view`, `bp paper export`,
+  # the mirrors), never pushed back through sync, so the working copy's own
+  # refusals do not reach it: the blocks and refusals are the reader source's.
+  defp json_source(conn, paper, dataset, scope, perspective) do
+    case Content.Papers.reader_source_with_schema(paper, dataset, scope) do
+      {{:blocks, blocks}, schema} ->
+        resolved =
+          Content.Papers.resolve_tasks_in_blocks(blocks, task_scope(paper, perspective), dataset)
+
+        fields = Content.Papers.anonymous_content(paper, schema)
+        title = Content.Papers.BpmlView.title(paper, resolved, fields)
+        source_json(conn, paper, title, %{"kind" => "blocks", "blocks" => resolved})
+
+      {{:html, html}, _schema} ->
+        source_json(conn, paper, paper.title, %{"kind" => "html", "html" => html})
+
+      {{:error, reason}, _schema} ->
+        refuse(conn, Content.Papers.BpmlView.read_refusal(reason))
+    end
+  end
+
+  defp source_json(conn, paper, title, source) do
+    json(conn, %{"id" => paper.doc_id, "title" => title, "_rev" => paper.rev, "source" => source})
+  end
+
+  defp refuse(conn, body),
+    do: conn |> put_status(:unprocessable_entity) |> json(%{"error" => body})
+
+  defp task_scope(paper, perspective) do
+    ws_id =
+      paper.workspace_id ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    [workspace_id: ws_id, project_id: paper.project_id, published_only: perspective == :published]
   end
 
   # The readable isomorphic view: a complete, self-describing <paper> document
@@ -111,31 +107,21 @@ defmodule BarkparkWeb.BulldocsSourceController do
         rev_unreadable(conn, paper, field)
 
       {:ok, rev} ->
-        bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))
+        # The view's one printer: a print that fails, or does not read back,
+        # is the refusal the push gives too.
+        case Content.Papers.BpmlView.printed(paper, blocks, fields) do
+          {:ok, bpml, _pulled} ->
+            conn
+            |> put_resp_content_type("text/bpml")
+            |> put_resp_header("x-paper-rev", to_string(rev))
+            |> send_resp(200, bpml)
 
-        conn
-        |> put_resp_content_type("text/bpml")
-        |> put_resp_header("x-paper-rev", to_string(rev))
-        |> send_resp(200, bpml)
+          {:refused, body} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{"error" => body})
+        end
     end
-  rescue
-    # The printer's ONE typed refusal, for ALL FOUR unprintable positions
-    # (block, inline node, mark, table head cell). It used to rescue only
-    # ArgumentError, so the three FunctionClauseError shapes escaped as raw HTTP
-    # 500s with an HTML error page — 141 of 776 published papers on the
-    # 2026-08-17 census. The message carries kind+type, so the census keeps
-    # bucketing what still needs kernel coverage.
-    e in UnprintableError ->
-      conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{
-        "error" => %{
-          "code" => "bpml_unprintable",
-          "message" => Exception.message(e),
-          "hint" =>
-            "this paper uses a #{e.kind} shape outside the BPML kernel vocabulary; fetch format=json"
-        }
-      })
   end
 
   # An UNREADABLE op-anchor is a failed READ, never a rev. Refusing here (rather
@@ -215,27 +201,5 @@ defmodule BarkparkWeb.BulldocsSourceController do
       %{id: id} -> [workspace_id: id]
       _ -> nil
     end
-  end
-
-  # The task-block scope carries the caller's OWN perspective, resolved once in
-  # `show/2` by `BarkparkWeb.AnonPerspective` — the single owner of "who may see
-  # drafts". A plain anonymous caller (no token, no preview JWT, not an `:edit`
-  # share) is pinned to `:published` there, so `published_only: true` and a
-  # draft-only task never reaches this surface (task-b10e10b944f6f55b); a
-  # preview/edit-share caller keeps `:drafts`/`:raw` and still sees them, which
-  # is the authoring contract this endpoint has always served.
-  defp task_scope(paper, perspective) do
-    ws_id =
-      paper.workspace_id ||
-        case Barkpark.Tenancy.get_default_workspace() do
-          %{id: id} -> id
-          _ -> nil
-        end
-
-    [
-      workspace_id: ws_id,
-      project_id: paper.project_id,
-      published_only: perspective == :published
-    ]
   end
 end

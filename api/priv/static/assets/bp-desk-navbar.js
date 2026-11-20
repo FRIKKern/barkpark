@@ -140,6 +140,11 @@
       var d = drawer(doc);
       if (d && !d.open) {
         checkAppearance(doc);
+        // The drawer is the page's to keep (phx-update="ignore"): its Tasks
+        // button reads the bar's, which the server keeps pressed or not.
+        var tasks = d.querySelector("[data-desk-drawer-tasks]");
+        var bar = doc.getElementById("dk-tasks-btn");
+        if (tasks && bar) tasks.setAttribute("aria-pressed", bar.getAttribute("aria-pressed") || "false");
         d.showModal();
         var opener = doc.getElementById("dk-drawer-open");
         if (opener) opener.setAttribute("aria-expanded", "true");

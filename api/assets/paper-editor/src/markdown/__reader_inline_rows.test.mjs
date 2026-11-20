@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { blocksToMarkdown } from "../markdown.js";
 import { readerInline } from "./reader-inline.js";
-import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
+import { sharedFixtureWalk } from "../__source_wall_goldens.mjs";
 
 const fixture = JSON.parse(readFileSync(fileURLToPath(new URL(
   "../../../../test/support/fixtures/paper-editor/reader_inline_rows.json", import.meta.url)), "utf8"));
@@ -26,7 +26,7 @@ for (const row of fixture.rows) {
 }
 
 const WORD = "Wordmark";
-const types = [...new Set(sourceWallGoldens().map(([, block]) => block.type))].sort();
+const types = [...new Set(sharedFixtureWalk().docs.flatMap(([, blocks]) => blocks.map((block) => block.type)))].sort();
 const lineTypes = types.filter((type) => [{ content: [{ type: "text", value: WORD }] }, { text: WORD }].some((words) => {
   const md = blocksToMarkdown([{ id: "x", type, ...words }]);
   return !md.startsWith("<!--bp:block") && md.includes(WORD);

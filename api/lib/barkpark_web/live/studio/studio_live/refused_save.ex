@@ -41,6 +41,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   alias Barkpark.Content
   alias Barkpark.Content.Forms
   alias BarkparkWeb.Studio.SaveStatus
+  alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @failed ["Save failed", "Save cancelled"]
@@ -143,7 +144,13 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     named = socket.assigns[:editor_save_error_fields]
     keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
     reason = fn key -> (is_map(named) && named[key]) || socket.assigns[:editor_save_error] end
-    values = params |> Forms.coerce_params(socket.assigns[:editor_schema]) |> Map.take(keys)
+
+    values =
+      params
+      |> Forms.coerce_params(socket.assigns[:editor_schema])
+      |> Map.take(keys)
+      |> Forms.unset_as_nil()
+
     doc_key = doc_key(socket.assigns)
 
     held =
@@ -154,10 +161,9 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
     held = Enum.reduce(values, held, fn {k, v}, acc -> Map.put(acc, k, {v, reason.(k)}) end)
 
-    assign(socket,
-      editor_refused: {doc_key, held},
-      editor_form: Map.merge(socket.assigns[:editor_form] || %{}, values)
-    )
+    socket
+    |> assign(editor_refused: {doc_key, held})
+    |> PostedEdits.put(values)
   end
 
   @doc "The held top-level fields of the open document."
