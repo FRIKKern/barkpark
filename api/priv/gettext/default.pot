@@ -15648,3 +15648,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "The URL could not be copied"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "API version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Custom API version"
+msgstr ""

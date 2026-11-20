@@ -15653,3 +15653,13 @@ msgstr "URL-en er kopiert til utklippstavlen"
 #, elixir-autogen, elixir-format
 msgid "The URL could not be copied"
 msgstr "URL-en kunne ikke kopieres"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "API version"
+msgstr "API-versjon"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Custom API version"
+msgstr "Egendefinert API-versjon"
