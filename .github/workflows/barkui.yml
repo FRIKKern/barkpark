@@ -1,0 +1,252 @@
+name: barkui
+# BarkUI's showroom check (js/packages/barkui), as jobs side by side.
+#
+#   barkui-plan      the dispatcher: does this change touch BarkUI, and which groups of parts
+#                    (check/jobs.mjs --matrix). Checkout and plain node, no install.
+#   barkui-check     one job per group, from that list and no other; each splits again and must agree.
+#   barkui-selftest  the check's own proof that it can still lose.
+#   barkui           the closing check (AGGREGATE in check/jobs.mjs): always runs, and is red unless the plan, every
+#                    group and the selftest passed, or the plan said BarkUI was not touched and the rest were
+#                    skipped (check/jobs.mjs, judge). A test holds this file's job names to check/jobs.mjs.
+#
+# THIS WORKFLOW HAS NO `on: … paths:` FILTER AND MUST NEVER GAIN ONE. A paths filter emits no run and no check
+# on a head it does not match, so the closing name would be absent exactly where it must say "not touched"
+# (scripts/shim-trigger-filter-check.sh). The path decision is the plan job's. On a head that touches no BarkUI
+# path only the plan and the closing job run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: barkui-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  barkui-plan:
+    name: "BarkUI plan (does this change touch it, and which groups)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.barkui.outputs.run }}
+      groups: ${{ steps.split.outputs.groups }}
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # PRs need the base ref's history for the diff below; main keeps the shallow clone.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # Whether this change touches BarkUI: its showroom check and selftest run only
+      # then, on a change to js/packages/barkui/**, the tokens sheet
+      # (api/priv/barkui/**), this workflow, js/package.json (pnpm overrides), or
+      # js/pnpm-lock.yaml where the changed lines name one of BarkUI's own
+      # dependencies (a Playwright bump brings a new Chromium, which can move the
+      # pixel readings). PR: the diff from the merge base (fetch-depth 0).
+      # Push: the diff from the previous head, fetched here (the clone is
+      # shallow). --no-renames lists both sides of a move, so moving a BarkUI file
+      # out counts. Any failure to work out the diff RUNS both.
+      - name: "BarkUI: did this change touch it?"
+        id: barkui
+        run: |
+          set +e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(git -C .. diff --name-only --no-renames "origin/${{ github.base_ref }}...HEAD")
+            status=$?
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            git -C .. fetch --quiet --depth=1 origin "${{ github.event.before }}" &&
+              files=$(git -C .. diff --name-only --no-renames "${{ github.event.before }}" "${{ github.sha }}")
+            status=$?
+          else
+            status=1
+          fi
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: diff unknown (status $status), running the check and the selftest"; exit 0
+          fi
+          deps=$(node -e "const p = require('./packages/barkui/package.json'); console.log(Object.keys({ ...p.dependencies, ...p.devDependencies }).join('|'))")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then range="origin/${{ github.base_ref }}...HEAD"; else range="${{ github.event.before }} ${{ github.sha }}"; fi
+          lockstatus=0
+          if printf '%s\n' "$files" | grep -qx 'js/pnpm-lock.yaml'; then
+            lock=$(git -C .. diff --no-renames $range -- js/pnpm-lock.yaml) || lockstatus=$?
+          else
+            lock=""
+          fi
+          if printf '%s\n' "$files" | grep -qE '^(js/packages/barkui/|api/priv/barkui/|js/package\.json$|\.github/workflows/barkui\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: touched, running the check and the selftest"
+          elif [ "$lockstatus" -ne 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: lockfile diff unknown (status $lockstatus), running the check and the selftest"
+          elif printf '%s\n' "$lock" | grep -E '^[-+]' | grep -qE "($deps)"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "barkui: the lockfile moves one of its dependencies, running the check and the selftest"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "barkui: not touched, skipping the check and the selftest"
+          fi
+
+      # The groups, split from the part folders. Made on every run, touched or not, so the list is never empty
+      # by accident; no part folders at all is a refusal here, never zero groups and a green close.
+      - name: "BarkUI: the groups, split from the part folders"
+        id: split
+        run: |
+          groups=$(node packages/barkui/check/jobs.mjs --matrix)
+          echo "groups=$groups" >> "$GITHUB_OUTPUT"
+          echo "barkui: $groups"
+
+  barkui-check:
+    name: "BarkUI check, group ${{ matrix.group }}"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # One red group must not cancel the others: the closing check names every red group.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.barkui-plan.outputs.groups) }}
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # This group's parts, pressed with real keys in Chromium and proved in each skin, light and dark, on every
+      # surface, a 390px window and a script-free print, reading every label and graphic from pixels, on the
+      # page built from every part folder. The job splits the folder again and refuses unless its group is the
+      # list the plan gave it. Its limit below is STEP_MINUTES in check/capacity.mjs (a test holds them equal);
+      # the job refuses more parts than that holds and stops, failing, once it passes its ceiling, under this
+      # limit. Its report (group, parts, commit, pass) goes to the closing check.
+      - name: "Check this group's parts (real keys in Chromium)"
+        timeout-minutes: 15
+        working-directory: js/packages/barkui
+        env:
+          GROUP: ${{ matrix.group }}
+          PARTS: ${{ matrix.parts }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
+
+      - name: Upload this group's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-${{ matrix.group }}
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  barkui-selftest:
+    name: "BarkUI selftest"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit.
+      - name: "Each planted break turns its light off"
+        timeout-minutes: 10
+        working-directory: js/packages/barkui
+        run: node check/selftest.mjs
+
+  barkui:
+    name: "BarkUI showroom check"
+    needs: [barkui-plan, barkui-check, barkui-selftest]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # No report at all is not an error here: the closing check reads it as every group missing.
+      - name: Download the groups' reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: barkui-report-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/barkui-reports
+
+      # The jobs' results first, their reports second: a report cannot turn a red or cancelled job green, and
+      # one from another group, part list or commit counts as missing (check/jobs.mjs, judge).
+      - name: "The plan, every group and the selftest passed"
+        working-directory: js/packages/barkui
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node check/jobs.mjs --judge "$RUNNER_TEMP/barkui-reports"

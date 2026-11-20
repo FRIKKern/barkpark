@@ -4624,6 +4624,21 @@ msgstr ""
 msgid "None"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:781
+#, elixir-autogen, elixir-format
+msgid "Not saved: block %{number} is shown as JSON, and source mode does not edit it."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:786
+#, elixir-autogen, elixir-format
+msgid "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:791
+#, elixir-autogen, elixir-format
+msgid "Not saved: source mode could not read this change. Your text is kept."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4631
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
@@ -6313,6 +6328,11 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:673
 #, elixir-autogen, elixir-format
 msgid "source"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:834
+#, elixir-autogen, elixir-format
+msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:674
@@ -15660,4 +15680,49 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/vision.ex
 #, elixir-autogen, elixir-format
 msgid "Custom API version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON: %{detail}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params must be a JSON object, like {\"title\": \"post\"}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Param $%{name} referenced, but not provided"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has text"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "%{lang} (primary)"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "No %{primary} text: readers get the %{fallback} text instead."
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has an error"
 msgstr ""

@@ -364,6 +364,7 @@ assert.deepEqual(importSources(sourceModeSource).sort(), [
   "./figure-context.js",
   "./run-convert.js",
   "./source-realign.js",
+  "./source-save.js",
 ]);
 assert.deepEqual(importSources(figureSource), [], "the Figure predicate stays dependency-free");
 for (const [name, source] of [["source-mode.js", sourceModeSource], ["figure-context.js", figureSource]]) {

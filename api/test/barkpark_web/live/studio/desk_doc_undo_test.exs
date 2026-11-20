@@ -237,11 +237,16 @@ defmodule BarkparkWeb.Studio.DeskDocUndoTest do
   end
 
   describe "which inputs the key is the document's in" do
-    test "the form names the top-level free-text fields only, not a slug, url or select", c do
+    test "the form names the fields it keeps an undo for: free text, a slug, a select, not a url",
+         c do
       view = open(c)
-      assert has_element?(view, ~s(#editor-form[data-desk-undo-keys="doc[title] doc[excerpt]"]))
-      # The fields it leaves to the browser are on the form.
-      assert has_element?(view, ~s(#editor-form [name^="doc[slug]"]))
+
+      assert has_element?(
+               view,
+               ~s(#editor-form[data-desk-undo-keys="doc[title] doc[excerpt] doc[slug] doc[kind]"])
+             )
+
+      # The field it leaves to the browser is on the form.
       assert has_element?(view, ~s(#editor-form [name="doc[site]"]))
     end
   end

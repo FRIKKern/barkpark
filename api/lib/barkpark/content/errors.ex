@@ -236,6 +236,11 @@ defmodule Barkpark.Content.Errors do
                          # Create-only Paper ingest refuses an occupied published
                          # slug or draft twin without replacing either row.
                          "paper_exists",
+                         # A push anchored on a rev for a Paper outside what the
+                         # token may write (409). Nothing is written; pull with a
+                         # token seated in the Paper's workspace, or start a new
+                         # Paper from rev 0.
+                         "paper_not_in_scope",
                          # Session-handoff (tasks 3-4) — the session legs of the
                          # SAME controller. `missing_slug` (422, an upsert body
                          # with no slug), `invalid_kind` (422, an event kind

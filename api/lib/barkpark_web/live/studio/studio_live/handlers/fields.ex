@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Content.Forms
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
@@ -429,7 +430,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   The params may carry, under the atom key `:bases`, the value each free-text
   field was computed from (the desk's undo, `Desk.DocUndo`): the save merges
   it onto what the store holds by then, as it does a typed post from the base
-  the page reports. A page's params never carry an atom key.
+  the page reports. A field whose base is `:whole` is written exactly as
+  posted (an undo of a value, `Desk.DocUndoValues.post/2`). A page's params
+  never carry an atom key.
   """
   def autosave_built(params, socket) when is_map(params) do
     {bases, params} = Map.pop(params, :bases, %{})
@@ -547,7 +550,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
             path ->
               acc
               |> seed_root(path, base_form)
-              |> StudioLive.put_value_at(path, coerce_leaf(socket, path, value))
+              |> write_leaf(socket, path, value)
           end
         end)
 
@@ -589,6 +592,91 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   defp seed_root(doc, _path, _base_form), do: doc
+
+  # ── An emptied language is removed (B06) ────────────────────────────────────
+  #
+  # A localizedText language the author emptied is unset, as the TanStack
+  # Studio unsets it: `{"nob" => "", "eng" => "…"}` is stored as
+  # `{"eng" => "…"}`, and a field left with no text is removed
+  # (`unset_language/3`). Only a
+  # TOUCHED empty value reaches here (`foldable?/3`), so a language the author
+  # never typed in is kept as stored. Only in the desk (the one host with a
+  # `:desk_base`): the old Studio stores the emptied language as "", as it
+  # always has.
+  defp write_leaf(doc, %{assigns: %{desk_base: base}} = socket, path, "") when is_binary(base) do
+    parent = Enum.drop(path, -1)
+
+    case Shared.find_field_by_path(socket, parent) do
+      %{"type" => "localizedText"} -> unset_language(doc, parent, List.last(path))
+      _ -> StudioLive.put_value_at(doc, path, coerce_leaf(socket, path, ""))
+    end
+  end
+
+  defp write_leaf(doc, socket, path, value),
+    do: StudioLive.put_value_at(doc, path, coerce_leaf(socket, path, value))
+
+  # The language's key goes. When nothing left in the field holds text (every
+  # other language "" or none), the field itself is unset, and so on outward:
+  # an object left with only blanks is unset in turn, as TanStack's `write()`
+  # (`edits.ts`) does, so no `{}` shell is stored that `defined()` reads as
+  # set. A top-level field is unset by writing "" (the save takes the key
+  # off). Inside an array row nothing is unset outward, as TanStack's: the
+  # language only loses its key, and an object left empty stays `{}`.
+  defp unset_language(doc, parent, lang) do
+    case value_at(doc, parent) do
+      %{} = map when not is_struct(map) ->
+        left = Map.delete(map, lang)
+
+        if blank_map?(left) and not in_row?(parent),
+          do: unset_at(doc, parent),
+          else: put_at(doc, parent, left)
+
+      _ ->
+        doc
+    end
+  end
+
+  defp unset_at(doc, [root]), do: Map.put(doc, root, "")
+
+  # A key in an object is written as `Forms.unset/0`, which the save reads
+  # as unset: a key left out would be kept as stored, and a nil is a stored
+  # null the form drew back.
+  defp unset_at(doc, path) do
+    {parent, [key]} = Enum.split(path, -1)
+
+    case value_at(doc, parent) do
+      %{} = map when not is_struct(map) ->
+        left = Map.put(map, key, Forms.unset())
+
+        if blank_map?(left) and not in_row?(parent),
+          do: unset_at(doc, parent),
+          else: put_at(doc, parent, left)
+
+      _ ->
+        doc
+    end
+  end
+
+  defp put_at(doc, [root], value), do: Map.put(doc, root, value)
+  defp put_at(doc, path, value), do: StudioLive.put_value_at(doc, path, value)
+
+  # Blank as TanStack's `write()` reads it: "" or none; `_type` alone does
+  # not make an object set.
+  defp blank_map?(map),
+    do: Enum.all?(map, fn {key, value} -> key == "_type" or value in [nil, "", Forms.unset()] end)
+
+  # The path is the document's top, or lies inside an array row (any step
+  # is an index): TanStack's `write()` unsets no parent there.
+  defp in_row?([]), do: true
+  defp in_row?(path), do: Enum.any?(path, &is_integer/1)
+
+  defp value_at(value, []), do: value
+  defp value_at(%{} = map, [key | rest]), do: value_at(Map.get(map, key), rest)
+
+  defp value_at(list, [index | rest]) when is_list(list) and is_integer(index),
+    do: value_at(Enum.at(list, index), rest)
+
+  defp value_at(_value, _path), do: nil
 
   defp base_form(socket), do: socket.assigns[:editor_form] || %{}
 

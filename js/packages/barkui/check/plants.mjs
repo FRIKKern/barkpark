@@ -1,13 +1,14 @@
 // The selftest's planting tools and its ladder (check/selftest.mjs runs the cases). Each plant edits a scratch
 // copy of a part; each check reads a run's proof and log for the reason a light is off.
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { capacitySentence, selftestSentence } from './capacity.mjs'
+import { edit } from './copy.mjs'
 
-export const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
+export { edit, copyAs } from './copy.mjs'
 // Runs `code` at the start of the part's demo, with `root` in scope.
 export const inDemo = (d, code) => edit(join(d, 'demo.mjs'), (s) => s.replace('export default function demo(root) {', `export default function demo(root) {\n${code}`))
 export const mark = (d, id) => edit(join(d, 'example.html'), (s) => s.replace(`id="${id}"`, `id="${id}" data-paint-free`))
@@ -15,14 +16,6 @@ export const mark = (d, id) => edit(join(d, 'example.html'), (s) => s.replace(`i
 export const wrap = (d) => edit(join(d, 'example.html'), (s) => s.replace('type="button">Duplicate</button>', 'type="button"><span>Duplicate</span></button>'))
 export const inCss = (rule) => (d) => appendFileSync(join(d, 'part.css'), `\n${rule}\n`)
 export const all = (...plants) => (d) => plants.forEach((p) => p(d))
-// A copy of the part beside it, under another name, its ids renamed to match.
-export const copyAs = (d, name) => {
-  const to = join(d, '..', name)
-  cpSync(d, to, { recursive: true })
-  for (const f of ['part.json', 'example.html', 'press.mjs', 'demo.mjs'])
-    edit(join(to, f), (t) => t.replace(/(["'#,])button-/g, `$1${name}-`).replace('"name": "button"', `"name": "${name}"`))
-  return to
-}
 export const lights = (p) => p?.parts?.button?.lights ?? {}
 export const reasons = (p, l) => lights(p)[l]?.fails ?? [lights(p)[l]?.detail ?? '']
 export const says = (l, re) => (p) => !lights(p)[l]?.pass && reasons(p, l).some((f) => re.test(f))
@@ -44,7 +37,7 @@ export const each = (checks) => async (...a) => {
   return !missed.length
 }
 
-// The ladder: a ten-letter label, cut and covered step by step. README.md says where it turns the lights off.
+// The ladder: a ten-letter label, cut and covered step by step. docs/PARTS.md says where it turns the lights off.
 export const STEPS = [1, 2, 3, 4, 5, 6, 7]
 export const LADDERS = {
   cut: (k) => `#button-ladder-cut-${k} { clip-path: inset(0 ${k}px 0 0); }`,
@@ -54,9 +47,9 @@ export const LADDERS = {
 // A square is a plain empty element in the label (not a graphic of its own), so only the label's reading sees it.
 export const ladderHtml = Object.keys(LADDERS).map((kind) => `<div data-demo-row>${STEPS.map((k) => `<ui-button><button data-slot="button" type="button"><span id="button-ladder-${kind}-${k}">Duplicates${kind === 'cut' ? '' : '<i></i>'}</span></button></ui-button>`).join('')}</div>`).join('\n')
 export const ladderCss = ['[id^="button-ladder-"] { position: relative; }', ...Object.values(LADDERS).flatMap((f) => STEPS.map(f))].join('\n')
-export const README = new URL('../README.md', import.meta.url)
-/** README.md's claim: the label's width on this machine and the first step of each ladder that turns the lights off. */
-export function ladderClaim(text = readFileSync(README, 'utf8')) {
+export const PARTS = new URL('../docs/PARTS.md', import.meta.url)
+/** docs/PARTS.md's claim: the label's width on this machine and the first step of each ladder that turns the lights off. */
+export function ladderClaim(text = readFileSync(PARTS, 'utf8')) {
   const m = text.replace(/\s+/g, ' ').match(/ten-letter label (\d+) px wide \(in CI, on Linux; (\d+) px on macOS\) turns the lights off when its last (\d+) px are cut away, when a (\d+) px square of its ground covers its end, or when a (\d+) px square of its ink is laid over its end; (\d+) px, (\d+) px and (\d+) px leave them on/)
   if (!m) return null
   const [linux, mac, cut, ground, ink, cutOn, groundOn, inkOn] = m.slice(1).map(Number)
@@ -64,7 +57,7 @@ export function ladderClaim(text = readFileSync(README, 'utf8')) {
 }
 export const ladderHolds = async (p, html, ok, logs, out) => {
   const claim = ladderClaim()
-  if (!claim) return console.log('    README.md has no ladder sentence'), false
+  if (!claim) return console.log('    docs/PARTS.md has no ladder sentence'), false
   const off = (l) => new Set(reasons(p, l).flatMap((f) => [...f.matchAll(/at span#button-ladder-(\w+)-(\d+)/g)].map((m) => `${m[1]} ${m[2]}`)))
   const [light, dark] = [off('skins'), off('schemes')]
   const seen = {}
@@ -85,7 +78,7 @@ export const ladderHolds = async (p, html, ok, logs, out) => {
   } finally {
     await browser.close()
   }
-  console.log(`    ladder: a ten-letter label ${width} px wide turns the lights off at a ${seen.cut} px cut, a ${seen.ground} px square of its ground, a ${seen.ink} px square of its ink (README.md: ${claim.width} px, ${claim.first.cut}, ${claim.first.ground}, ${claim.first.ink})`)
+  console.log(`    ladder: a ten-letter label ${width} px wide turns the lights off at a ${seen.cut} px cut, a ${seen.ground} px square of its ground, a ${seen.ink} px square of its ink (docs/PARTS.md: ${claim.width} px, ${claim.first.cut}, ${claim.first.ground}, ${claim.first.ink})`)
   return held && width === claim.width
 }
 

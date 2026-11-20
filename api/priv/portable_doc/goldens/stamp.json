@@ -99,8 +99,8 @@
     "from-markdown/soft-break-space.json": "7c722fc9923ed7b68b5ed38e4055aa9f0e76e07f03d5bbe89115b370f15dbe9f",
     "from-markdown/unsafe-image-keeps-text.json": "0a29bdfa880f241911693ff07bfadc255d02572393b88678ef6c8137e7f19358",
     "from-markdown/unsafe-link-keeps-text.json": "c94b74bf2fcb1fa6e7d23fa830528c1adcab61629f3fcff3a7640e41f1deb6c7",
-    "i18n/paper-canvas.en.json": "14e6f05fec88b05c545b3b490d6399f4b1ac319ff2ced1ba7c85672b90ebc4f7",
-    "i18n/paper-canvas.nb-NO.json": "5a3967d80fc7aea0a223facc6c931ecb940cf7a7664fdc22af793ce9507751d4",
+    "i18n/paper-canvas.en.json": "4c85c3428f84fa96ef2956087f34fbb313a908f2dac483d6826897189c21765c",
+    "i18n/paper-canvas.nb-NO.json": "f14c9e154634e49948970f0b4e2bd2843bb0d7ac193e6fa1b3eeddf882c0baf0",
     "limit-docs.json": "ee84d5c2edc8bfc634aa5a3d8f7f09bda566760c075d59255d7db3cb6b53d1c3",
     "limits/bar-chart-number-past-the-range.golden.json": "f5cf186a1dc6c0226a490735fa4ff2ea49e4d34477c310eff2122a529d67a671",
     "limits/bar-chart-value-with-many-digits.golden.json": "c0d6c24ad8a5e453d3a15bc0e2f6c79a9d67422a53fc53f3b55150b175e5547f",
@@ -174,7 +174,7 @@
     "pages/light-en.html": "4d95e3fe19ad911792fbc194db29d0134f981beaf09599561d7819a127742b11",
     "pages/light-nb-NO.html": "0562742bbef2f69bb4ac17ab8ca2c8333c477d0147aa8fa8a389017f1e3eefe0"
   },
-  "gettext_sha256": "ac1725d7a5c151e371d2596cc082732960238eb35a6e7396b1b9a00af78249c9",
+  "gettext_sha256": "e12563d384733261166526574982ec48faa98ba6e318cbb3752dbafe289fb82b",
   "inputs": [
     "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
     "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",

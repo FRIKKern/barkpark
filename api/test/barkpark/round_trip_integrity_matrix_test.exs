@@ -464,7 +464,7 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
         bpml = response(pulled, 200)
         [rev] = get_resp_header(pulled, "x-paper-rev")
         {:ok, parsed} = Bpml.parse_paper(bpml)
-        {:ok, _minted, ops} = Bpml.Diff.derive(stored, parsed["blocks"])
+        {:ok, _minted, ops} = Bpml.Diff.derive(stored, parsed["blocks"], stored)
 
         pushed =
           scoped_conn()
