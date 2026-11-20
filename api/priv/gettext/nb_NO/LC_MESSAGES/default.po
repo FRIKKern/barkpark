@@ -752,6 +752,11 @@ msgstr "De siste endringene i arket kunne ikke lagres, så det ble ikke publiser
 msgid "%{names} are editing"
 msgstr "%{names} redigerer"
 
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:242
+#, elixir-autogen, elixir-format
+msgid "%{count} others are editing: %{names}"
+msgstr "%{count} andre redigerer: %{names}"
+
 #: lib/barkpark_web/components/studio_components/editor.ex:939
 #, elixir-autogen, elixir-format
 msgid "%{name} is editing"
