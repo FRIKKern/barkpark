@@ -1401,10 +1401,12 @@ defmodule Barkpark.Content.Forms do
     # keeps both editors' words (task-35956a566dd2c862). Redone on every
     # attempt, so a writer that landed in between is merged in too.
     {bases, write_opts} = Keyword.pop(write_opts, :field_bases, %{})
+    {expect, write_opts} = Keyword.pop(write_opts, :field_expect, %{})
     params_now = TextRebase.rebase(params, bases, text_values(current))
     write_opts = Keyword.put(write_opts, :whole_fields, for({key, :whole} <- bases, do: key))
 
-    case upsert_draft_once(base_doc, current, type, schema, params_now, dataset, write_opts) do
+    case expected(expect, current) ||
+           upsert_draft_once(base_doc, current, type, schema, params_now, dataset, write_opts) do
       {:error, {:rev_mismatch, _}} when attempts > 1 ->
         upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
 
@@ -1464,6 +1466,22 @@ defmodule Barkpark.Content.Forms do
   rescue
     _ -> {Map.put(base_doc, :rev, nil), opts}
   end
+
+  # `:field_expect` (task-61c8a3663106486b): the value each named top-level
+  # field must still hold for the write to land. It is checked against the row
+  # read above, under the lock, on every attempt, so a writer that landed after
+  # the caller read the field is never written over. nil when every one holds;
+  # else the refusal, naming the fields that moved. Nothing is written.
+  defp expected(expect, current) when is_map(expect) and map_size(expect) > 0 do
+    now = text_values(current)
+
+    case for({key, value} <- expect, Map.get(now, key) != value, do: key) do
+      [] -> nil
+      moved -> {:error, {:field_changed, Enum.sort(moved)}}
+    end
+  end
+
+  defp expected(_expect, _current), do: nil
 
   # The top-level text values the store holds: the title column and content.
   defp text_values(%{title: title} = current) do

@@ -33,7 +33,10 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   now (`TextUndo` for free text, `ValueUndo` for the rest). A change someone else wrote into is left as it is and
   dropped, as the TanStack Studio's. What comes out is saved as a typed edit
   of the field is (`EditorHost.write_built/2`, with the desk's guards), and
-  merged by the save onto what the store holds by then. The page is told the
+  merged by the save onto what the store holds by then. A value is written
+  only while the store still holds the value the undo read (`:field_expect`,
+  checked by the save under its lock): another editor's save that lands
+  between the read and the write stays, and the change is dropped. The page is told the
   field, its new value and the value it showed (`desk:undone`): the script
   sets the field when it still shows that value, and puts the focus in it.
   A field on a group tab that is not shown switches the editor to a tab that
@@ -249,25 +252,47 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
     if next == now or FieldActions.target(socket.assigns, field) == nil do
       {:noreply, socket}
     else
-      {:noreply, saved} = EditorHost.write_built(written(change, field, next, now), socket)
+      {:noreply, saved} =
+        EditorHost.write_built(written(change, field, next, now), expecting(socket, change, now))
 
-      if landed?(saved, socket) do
-        # Undone or redone, it is a step of its own: typing next is not part of it.
-        change = %{change | at: nil}
+      saved = assign(saved, :editor_field_expect, nil)
 
-        {undo, redo} =
-          if redo?, do: {[change | onto], rest}, else: {rest, [change | onto]}
+      cond do
+        landed?(saved, socket) ->
+          # Undone or redone, it is a step of its own: typing next is not part of it.
+          change = %{change | at: nil}
 
-        {:noreply,
-         saved
-         |> put_state(mark, undo, redo)
-         |> show_field(field)
-         |> push_event(@event, told(change, saved, field, now))}
-      else
-        {:noreply, put_state(saved, mark, state.undo, state.redo)}
+          {undo, redo} =
+            if redo?, do: {[change | onto], rest}, else: {rest, [change | onto]}
+
+          {:noreply,
+           saved
+           |> put_state(mark, undo, redo)
+           |> show_field(field)
+           |> push_event(@event, told(change, saved, field, now))}
+
+        # Another editor saved the field after it was read: the save refused
+        # (`:field_expect`), nothing was written, theirs stays and the change
+        # is gone.
+        moved?(socket, change, now) ->
+          {:noreply, socket}
+
+        true ->
+          {:noreply, put_state(saved, mark, state.undo, state.redo)}
       end
     end
   end
+
+  # A value is written only over the value it was computed from.
+  defp expecting(socket, %{kind: :value, field: field}, now),
+    do: assign(socket, :editor_field_expect, %{field => now})
+
+  defp expecting(socket, _change, _now), do: socket
+
+  defp moved?(socket, %{kind: :value, field: field}, now),
+    do: DocUndoValues.stored_now(socket, field) != now
+
+  defp moved?(_socket, _change, _now), do: false
 
   # The value the store holds now, and that value with the steps taken back.
   defp reverted(socket, %{kind: :value} = change, steps) do

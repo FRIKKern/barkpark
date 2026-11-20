@@ -19,7 +19,7 @@ const put = (rel, text = "") => {
 };
 
 try {
-  for (const f of ["fx/lib/a.ex", "fx/lib/b.ex", "fx/lib/c.ex", "node_modules/dep/index.js"]) put(f);
+  for (const f of ["fx/lib/a.ex", "fx/lib/b.ex", "fx/lib/c.ex", ".seed/p/a.json", "node_modules/dep/index.js"]) put(f);
   put("fx/assets/ed/src/helper.mjs", 'readFileSync(new URL("../../../lib/b.ex", import.meta.url));');
 
   const { candidates, sinkOf } = scanner({ repo, pkg });
@@ -31,6 +31,7 @@ try {
   const shapes = [
     ["relative literal", 'readFileSync(new URL("../../../lib/a.ex", import.meta.url))', ["fx/lib/a.ex"]],
     ["bare repo path", 'execFileSync("git", ["ls-files", "fx/lib/a.ex"])', ["fx/lib/a.ex"]],
+    ["bare repo path under a dot folder", 'for (const dir of [".seed/p"]) readdirSync(join(REPO, dir))', [".seed/p/"]],
     ["${ROOT}/x template", "readFileSync(`${root}/fx/lib/a.ex`)", ["fx/lib/a.ex"]],
     ["ROOT + \"/x\" concat", 'readFileSync(root + "/fx/lib/a.ex")', ["fx/lib/a.ex"]],
     ["multi-part join", 'readFileSync(join(root, "fx", "lib", "a.ex"))', ["fx/lib/a.ex"]],
