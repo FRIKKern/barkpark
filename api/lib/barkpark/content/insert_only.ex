@@ -51,6 +51,7 @@ defmodule Barkpark.Content.InsertOnly do
     if requested?(opts) and is_binary(doc_id) do
       seam!(:insert_only_before_lock)
       published = DraftId.published_id(doc_id)
+
       Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
         "insert-only:#{dataset}:#{type}:#{published}"
       ])

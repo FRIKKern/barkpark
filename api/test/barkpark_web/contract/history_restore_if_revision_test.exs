@@ -89,6 +89,7 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert error["details"]["actual"] == current
     assert title_of("drafts.late") == "Words B"
     assert rev_of("drafts.late") == current
+
     assert length(Content.list_revisions("late", "post", "test")) == before,
            "no revision was written"
   end
@@ -125,6 +126,7 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     stale = restore(conn, revision.id, %{"ifRevisionID" => draft_rev})
     assert stale.status == 412
     assert Jason.decode!(stale.resp_body)["error"]["details"]["actual"] == published
+
     assert match?({:error, :not_found}, Content.get_document("drafts.pub", "post", "test")),
            "no draft was written"
 
@@ -137,7 +139,11 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   # is gone.
   defp deleted_draft(doc_id) do
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "drafts.#{doc_id}", "title" => "Words A"}, "test")
+      Content.create_document(
+        "post",
+        %{"doc_id" => "drafts.#{doc_id}", "title" => "Words A"},
+        "test"
+      )
 
     seen = rev_of("drafts.#{doc_id}")
     revision = revision_titled(doc_id, "Words A")
@@ -153,8 +159,10 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
 
     assert resp.status == 412
     assert Jason.decode!(resp.resp_body)["error"]["details"]["actual"] == nil
+
     assert match?({:error, :not_found}, Content.get_document("drafts.gone", "post", "test")),
            "no draft was born"
+
     assert match?({:error, :not_found}, Content.get_document("gone", "post", "test")),
            "no published row was written"
   end
@@ -199,10 +207,18 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   test "the late order in Studio's shape: a late restore after a restore and newer edits is refused and keeps them",
        %{conn: conn} do
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "drafts.studio", "title" => "Words A"}, "test")
+      Content.create_document(
+        "post",
+        %{"doc_id" => "drafts.studio", "title" => "Words A"},
+        "test"
+      )
 
     {:ok, _} =
-      Content.upsert_document("post", %{"doc_id" => "drafts.studio", "title" => "Words B"}, "test")
+      Content.upsert_document(
+        "post",
+        %{"doc_id" => "drafts.studio", "title" => "Words B"},
+        "test"
+      )
 
     first = revision_titled("studio", "Words A")
     second = revision_titled("studio", "Words B")
@@ -211,7 +227,11 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert restore(conn, second.id, %{"ifAbsent" => true}).status == 200
 
     {:ok, _} =
-      Content.upsert_document("post", %{"doc_id" => "drafts.studio", "title" => "Words C"}, "test")
+      Content.upsert_document(
+        "post",
+        %{"doc_id" => "drafts.studio", "title" => "Words C"},
+        "test"
+      )
 
     edited = rev_of("drafts.studio")
 
@@ -241,10 +261,18 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   # second is refused 412 and the first one's words stay.
   defp race_at(conn, doc_id, site) do
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "drafts.#{doc_id}", "title" => "Words A"}, "test")
+      Content.create_document(
+        "post",
+        %{"doc_id" => "drafts.#{doc_id}", "title" => "Words A"},
+        "test"
+      )
 
     {:ok, _} =
-      Content.upsert_document("post", %{"doc_id" => "drafts.#{doc_id}", "title" => "Words B"}, "test")
+      Content.upsert_document(
+        "post",
+        %{"doc_id" => "drafts.#{doc_id}", "title" => "Words B"},
+        "test"
+      )
 
     first = revision_titled(doc_id, "Words B")
     second = revision_titled(doc_id, "Words A")
@@ -252,10 +280,19 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
 
     on_exit(fn -> Application.delete_env(:barkpark, :writer_fault) end)
 
-    Application.put_env(:barkpark, :writer_fault, {site, fn ->
-      Application.delete_env(:barkpark, :writer_fault)
-      Process.put(:first_restore, Content.restore_revision(first.id, "post", "test", if_absent: true))
-    end})
+    Application.put_env(
+      :barkpark,
+      :writer_fault,
+      {site,
+       fn ->
+         Application.delete_env(:barkpark, :writer_fault)
+
+         Process.put(
+           :first_restore,
+           Content.restore_revision(first.id, "post", "test", if_absent: true)
+         )
+       end}
+    )
 
     resp = restore(conn, second.id, %{"ifAbsent" => true})
     assert {:ok, _} = Process.get(:first_restore)
