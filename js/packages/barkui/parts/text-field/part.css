@@ -6,7 +6,9 @@
    The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also turns the edge to
    --ui-ring-border on :focus-visible.
    The check does not read the colour of selected text or the browser's autofill fill; this part sets
-   neither and claims neither. */
+   neither and claims neither.
+   A value longer than its box, which the field scrolls sideways, is not judged yet: that waits for the
+   check to read whether a field's value draws as itself. Every value shown here fits its box. */
 [data-slot="field"] {
   --bark-field-width: calc(var(--ui-spacing) * 64);
   --bark-field-label-text: 0.8125rem;
