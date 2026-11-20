@@ -75,7 +75,13 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
                 "type" => "composite",
                 "fields" => [
                   Map.merge(tree, %{"name" => "icode", "title" => "Item code"}),
-                  %{"name" => "ilabel", "title" => "Item label", "type" => "string"}
+                  %{"name" => "ilabel", "title" => "Item label", "type" => "string"},
+                  %{
+                    "name" => "box",
+                    "title" => "Box",
+                    "type" => "composite",
+                    "fields" => [Map.merge(tree, %{"name" => "bcode", "title" => "Box code"})]
+                  }
                 ]
               }
             },
@@ -102,7 +108,10 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
       "subject" => 7,
       "meta" => %{"code" => 7, "label" => "x"},
       "solo" => %{"scode" => "FB2"},
-      "items" => [%{"_key" => "ka", "icode" => 7}, %{"_key" => "kb", "icode" => 7}],
+      "items" => [
+        %{"_key" => "ka", "icode" => 7},
+        %{"_key" => "kb", "icode" => 7, "box" => %{"bcode" => 7}}
+      ],
       "notes" => "0"
     }
 
@@ -226,9 +235,32 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
     EditorPost.press_on(view, element(view, row <> ~s( [data-test-id="tree-codelist-remove"])))
     render(view)
 
-    assert stored(c, id)["items"] == [%{"_key" => "ka", "icode" => 7}, %{"_key" => "kb"}]
+    assert stored(c, id)["items"] == [
+             %{"_key" => "ka", "icode" => 7},
+             %{"_key" => "kb", "box" => %{"bcode" => 7}}
+           ]
 
     edit_notes(view, form, "again")
-    assert stored(c, id)["items"] == [%{"_key" => "ka", "icode" => 7}, %{"_key" => "kb"}]
+
+    assert stored(c, id)["items"] == [
+             %{"_key" => "ka", "icode" => 7},
+             %{"_key" => "kb", "box" => %{"bcode" => 7}}
+           ]
+  end
+
+  # TanStack's `write()` unsets no parent inside an array item: an object
+  # in the row left empty stays `{}`.
+  test "desk: Remove of an object's only code inside an array item leaves the object {}", c do
+    id = doc!(c)
+    {view, form} = open(c, :desk, id)
+    box = ~s(#{form} li[data-item-path='items[_key=="kb"]'] [data-field-name="bcode"])
+
+    EditorPost.press_on(view, element(view, box <> ~s( [data-test-id="tree-codelist-remove"])))
+    render(view)
+
+    assert stored(c, id)["items"] == [
+             %{"_key" => "ka", "icode" => 7},
+             %{"_key" => "kb", "icode" => 7, "box" => %{}}
+           ]
   end
 end

@@ -1,14 +1,18 @@
 defmodule BarkparkWeb.Studio.StudioLive.UnsetPath do
   @moduledoc """
   Unset a value in the desk's form buffer as TanStack's `write()` (`edits.ts`)
-  does: the key goes, and an object left holding only blanks (`""` or none)
-  goes in turn, outward. An array row is never removed; the walk stops there.
+  does: the key goes, and an object left holding only blanks (`""` or none;
+  `_type` alone does not count) goes in turn, outward. Inside an array row
+  nothing is unset outward: the key goes and an object left empty stays
+  `{}`, as TanStack's.
 
   A top-level field is written `""`, which the save takes off the document. A
-  key inside an object is written `nil`, which the save's composite restore
-  (`Forms`) reads as unset; a key merely left out would be kept as stored.
+  key inside an object is written `Forms.unset/0`, which the save's
+  composite restore reads as unset; a key merely left out would be kept as
+  stored, and a nil is a stored null the form drew back.
   """
 
+  alias Barkpark.Content.Forms
   alias BarkparkWeb.Studio.StudioLive.Path
 
   @spec unset(map(), [String.t() | non_neg_integer()]) :: map()
@@ -19,9 +23,9 @@ defmodule BarkparkWeb.Studio.StudioLive.UnsetPath do
 
     case value_at(form, parent) do
       %{} = map when is_binary(key) ->
-        left = Map.put(map, key, nil)
+        left = Map.put(map, key, Forms.unset())
 
-        if blank?(left) and not row?(parent),
+        if blank?(left) and not in_row?(parent),
           do: unset(form, parent),
           else: Path.put_value_at(form, parent, left)
 
@@ -32,9 +36,12 @@ defmodule BarkparkWeb.Studio.StudioLive.UnsetPath do
 
   def unset(form, _path), do: form
 
-  defp blank?(map), do: Enum.all?(map, fn {_key, value} -> value in [nil, ""] end)
+  defp blank?(map),
+    do: Enum.all?(map, fn {key, value} -> key == "_type" or value in [nil, "", Forms.unset()] end)
 
-  defp row?(path), do: is_integer(List.last(path))
+  # The path lies inside an array row (any step is an index): TanStack's
+  # `write()` unsets no parent there.
+  defp in_row?(path), do: Enum.any?(path, &is_integer/1)
 
   defp value_at(value, []), do: value
 

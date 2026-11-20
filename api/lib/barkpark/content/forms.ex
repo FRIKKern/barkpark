@@ -19,6 +19,9 @@ defmodule Barkpark.Content.Forms do
   upsert_document}`.
   """
 
+  # The desk's unset marker (`unset/0`).
+  @unset :__bp_unset__
+
   alias Barkpark.Content
 
   alias Barkpark.Content.{
@@ -448,10 +451,10 @@ defmodule Barkpark.Content.Forms do
         _ -> []
       end
 
-    # A subfield posted as nil is unset: the desk writes that for a language
-    # field left with no text (`Handlers.Fields`), as TanStack's `write()`
-    # unsets it. A form never posts nil, so no other edit reaches this.
-    unset = for %{"name" => name} <- subs, Map.fetch(coerced, name) == {:ok, nil}, do: name
+    # A subfield posted as the unset marker (`unset/0`) is taken off: the
+    # desk writes it for a language field left with no text, as TanStack's
+    # `write()` unsets it. A stored null is not the marker and is kept.
+    unset = for %{"name" => name} <- subs, Map.fetch(coerced, name) == {:ok, @unset}, do: name
     coerced = Map.drop(coerced, unset)
 
     restored =
@@ -678,6 +681,8 @@ defmodule Barkpark.Content.Forms do
   # reach here (build_content/2 drops them — the existing field-clearing
   # semantics). Non-binary values (API callers already sending numbers)
   # pass through unchanged.
+  defp coerce_field_value(_field, @unset), do: @unset
+
   defp coerce_field_value(%{"type" => "number"}, val) when is_binary(val) do
     trimmed = String.trim(val)
 
@@ -1090,7 +1095,31 @@ defmodule Barkpark.Content.Forms do
     params
     |> preserve_datetime_values(snapshot, schema)
     |> preserve_untouched_fields(snapshot, schema)
+    |> drop_unset()
   end
+
+  @doc """
+  The marker the desk writes into a post for a key it unsets inside an
+  object (TanStack's `write()`): the save takes the key off. No stored or
+  posted data can hold it, so a stored null is never mistaken for it.
+  """
+  @spec unset() :: atom()
+  def unset, do: @unset
+
+  @doc "`value` with every unset marker in it made nil: the form buffer's view."
+  @spec unset_as_nil(term()) :: term()
+  def unset_as_nil(@unset), do: nil
+  def unset_as_nil(%{} = map), do: Map.new(map, fn {k, v} -> {k, unset_as_nil(v)} end)
+  def unset_as_nil(list) when is_list(list), do: Enum.map(list, &unset_as_nil/1)
+  def unset_as_nil(value), do: value
+
+  # A marker the composite restore did not take (the object was gone from
+  # storage) is taken off here, so it is never written.
+  defp drop_unset(%{} = map) when not is_struct(map),
+    do: for({k, v} <- map, v !== @unset, into: %{}, do: {k, drop_unset(v)})
+
+  defp drop_unset(list) when is_list(list), do: Enum.map(list, &drop_unset/1)
+  defp drop_unset(value), do: value
 
   @doc """
   The keys of `params` that a save from `base_doc` reads as edits: the ones

@@ -353,7 +353,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
           form = picked_form(socket, path, code)
-          socket = socket |> assign(editor_form: form) |> RefusedSave.target(Enum.take(path, 1))
+          buffer = Barkpark.Content.Forms.unset_as_nil(form)
+          socket = socket |> assign(editor_form: buffer) |> RefusedSave.target(Enum.take(path, 1))
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
           {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
