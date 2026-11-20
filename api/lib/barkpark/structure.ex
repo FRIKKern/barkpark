@@ -57,6 +57,7 @@ defmodule Barkpark.Structure do
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Content.Today
   alias Barkpark.Plugins.Enablement
 
   defmodule Node do
@@ -1251,7 +1252,8 @@ defmodule Barkpark.Structure do
         ctx = %{
           dataset: dataset,
           scope: scope,
-          defer_group_by: Keyword.get(opts, :defer_group_by, false)
+          defer_group_by: Keyword.get(opts, :defer_group_by, false),
+          now: Keyword.get(opts, :now)
         }
 
         nodes =
@@ -1293,7 +1295,7 @@ defmodule Barkpark.Structure do
   # place: same id and title, no children, and `error` naming the reason, which
   # `GET /v1/structure/:dataset` returns and Studio shows when the item opens.
   defp safe_item_to_node(item, idx, ctx) do
-    declared_item_to_node(item, idx, ctx)
+    item |> resolve_today(ctx) |> declared_item_to_node(idx, ctx)
   rescue
     e ->
       error_node(item, idx, Exception.message(e))
@@ -1316,6 +1318,38 @@ defmodule Barkpark.Structure do
       error: reason
     }
   end
+
+  # `"$today"` in a list's `filter`, a tree's `rootFilter` or a groupBy's
+  # `overFilter` (task-f78a513602faee55) becomes today's date in the
+  # workspace time zone here, so /v1/structure and every pane read the date
+  # itself. `Content.Today` owns the meaning. `initialValues` keep the token:
+  # the Studio resolves it when it starts a document.
+  defp resolve_today(%{} = item, ctx) do
+    item
+    |> today_in("filter", item["type"], ctx)
+    |> today_in("rootFilter", item["type"], ctx)
+    |> today_in("overFilter", item["over"], ctx)
+  end
+
+  defp resolve_today(item, _ctx), do: item
+
+  defp today_in(item, key, type, ctx) do
+    with %{} = filter <- item[key], true <- Today.token?(filter) do
+      clock = fn -> Today.clock(ctx.scope[:workspace_id], now: Map.get(ctx, :now)) end
+      Map.put(item, key, Today.resolve_filter(filter, type_fields(type, ctx), clock))
+    else
+      _ -> item
+    end
+  end
+
+  defp type_fields(type, ctx) when is_binary(type) do
+    case Content.resolve_schema(type, ctx.dataset, ctx.scope) do
+      {:ok, %{fields: fields}} -> fields
+      _ -> nil
+    end
+  end
+
+  defp type_fields(_type, _ctx), do: nil
 
   # A declared list's children go through the same per-item guard.
   defp declared_children(item, idx, ctx) do
@@ -1605,7 +1639,8 @@ defmodule Barkpark.Structure do
     ctx = %{
       dataset: dataset,
       scope: Keyword.take(opts, [:workspace_id, :memoize]),
-      defer_group_by: false
+      defer_group_by: false,
+      now: Keyword.get(opts, :now)
     }
 
     case safe_item_to_node(item, idx, ctx) do
