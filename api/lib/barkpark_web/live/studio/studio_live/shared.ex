@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
@@ -627,7 +628,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              schema,
              Barkpark.Content.Forms.with_posted_rich_text(params, raw_params, schema),
              socket.assigns.dataset,
-             [field_bases: socket.assigns[:editor_field_bases] || %{}] ++ hook_opts(socket)
+             RemoteValues.write_opts(socket) ++ hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
           ensure_sanity_image_assets(socket, schema, saved_doc)

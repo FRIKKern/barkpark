@@ -3,9 +3,11 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
   The look of the desk's Vision (`Desk.Vision`), after the TanStack Studio's
   `styles.css` (`.vision*`, `.json-tree`), which follows Sanity's:
 
-  - The perspective and the query URL on top; the query (left, 301 px at
-    most) and the result (the rest) below, each scrolled in its own column,
-    so the page itself never scrolls.
+  - The perspective and the query URL on top; the query over its Params
+    (left, 301 px at most, half each) and the result (the rest) below, each
+    scrolled in its own column, so the page itself never scrolls. Params
+    that are not a JSON object turn their pane the critical tone, with an
+    error icon in its top right.
   - The result is a folding JSON tree in the syntax colours; a refused
     query turns the result column the critical tone.
   - Under 600 px one column, scrolled inside Vision: the selects, then the
@@ -39,7 +41,13 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-url-row .icon-btn svg { width: 21px; height: 21px; }
       .dk .dk-vision-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(240px, 301px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
       .dk .dk-vision-query { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--dk-border); }
-      .dk .dk-vision-pane { position: relative; flex: 1 1 auto; display: flex; min-height: 0; }
+      .dk .dk-vision-pane { position: relative; flex: 1 1 0; display: flex; min-height: 0; }
+      .dk .dk-vision-params { border-top: 1px solid var(--dk-border); }
+      .dk .dk-vision-params[data-invalid] { background: color-mix(in srgb, var(--dk-critical-icon) 6%, var(--dk-bg)); }
+      .dk .dk-vision-params[data-invalid] > .dk-vision-label { color: var(--dk-menu-danger); }
+      .dk .dk-vision-params-error { position: absolute; z-index: 1; top: 8px; right: 5px; display: grid; place-items: center; width: 25px; height: 25px; color: var(--dk-critical-icon); }
+      .dk .dk-vision-params-error[hidden] { display: none; }
+      .dk .dk-vision-params-error svg { width: 25px; height: 25px; }
       .dk .dk-vision-pane > .dk-vision-label { position: absolute; z-index: 1; top: 14px; left: 33px; }
       .dk .dk-vision-code { font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dk-fg); }
       .dk textarea.dk-vision-code { box-sizing: border-box; flex: 1 1 auto; width: 100%; min-height: 0; margin: 0; padding: 32px 4px 4px 33px; resize: none; border: 0; outline: none; background: none; }
@@ -82,6 +90,7 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
         .dk .dk-vision-field, .dk .dk-vision-url { flex: none; }
         .dk .dk-vision-body { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
         .dk .dk-vision-query { height: 60vh; border-right: 0; border-bottom: 1px solid var(--dk-border); }
+        .dk .dk-vision-params { flex: 0 0 33%; }
         .dk .dk-vision-result { min-height: 40vh; }
       }
       @media (max-width: 768px) and (pointer: coarse) {

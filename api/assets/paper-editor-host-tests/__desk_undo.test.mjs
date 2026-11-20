@@ -28,13 +28,17 @@ doc.body.innerHTML =
   `<section id="list" data-pane-kind="list"><input id="search" type="search"></section>` +
   `<section id="pane" data-pane-index="1" data-pane-editing><header><span class="kind" id="kind">Post</span>` +
   `<button id="menu" type="button">…</button><input id="pane-input" type="text"></header>` +
-  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt]" phx-value-_bp_doc='${MARK}'>` +
+  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt] doc[choice] doc[cards] doc[address]" phx-value-_bp_doc='${MARK}'>` +
   `<input type="text" id="title" name="doc[title]" value="Fixture post 14">` +
   `<textarea id="excerpt" name="doc[excerpt]">Short.</textarea>` +
   `<input type="text" id="slug" name="doc[slug]" value="fixture-post-14">` +
   `<input type="url" id="site" name="doc[site]">` +
   `<input type="number" id="count" name="doc[count]">` +
   `<input type="text" id="alt" name="doc[image][alt]">` +
+  `<select id="choice" name="doc[choice]"><option value="a">Alpha</option><option value="b">Beta</option><option value="c" selected>Gamma</option></select>` +
+  `<div id="cards"><input type="text" id="card-label" name="doc[cards][0][label]" value="Two"></div>` +
+  `<input type="text" id="street" name="doc[address][street]" value="Main 12">` +
+  `<input type="number" id="floor" name="doc[address][floor]">` +
   `<button type="button" id="add">Add</button>` +
   `<fieldset id="set" data-collapsible><legend><button type="button" class="object-toggle" id="set-toggle" aria-expanded="false">More</button></legend>` +
   `<textarea id="folded" name="doc[folded]">Folded.</textarea></fieldset>` +
@@ -131,6 +135,17 @@ check("rich text, a dialog, another input and a taken key are left alone", () =>
   key($("title"), { key: "x", metaKey: true });
   key($("title"), { key: "z" });
   assert.deepEqual(pushes, []);
+});
+
+check("a select, a list item's text and an object's nested text of a kept field are the document's", () => {
+  for (const id of ["choice", "card-label", "street"]) {
+    const e = key($(id), { key: "z", metaKey: true });
+    assert.equal(e.defaultPrevented, true, `Mod+Z in #${id} is the document's`);
+  }
+  assert.equal(pushes.length, 3);
+  // A number nested in a kept object is still the browser's.
+  assert.equal(key($("floor"), { key: "z", metaKey: true }).defaultPrevented, false);
+  assert.equal(pushes.length, 3);
 });
 
 check("a field with no undo kept (slug, url, number, nested) keeps the browser's own undo", () => {
@@ -377,9 +392,267 @@ check("an open fold is left as it is", () => {
   assert.equal($("set-toggle").getAttribute("aria-expanded"), "true");
 });
 
+check("an undone select is set when it still shows the old option, and focused", () => {
+  $("choice").value = "c";
+  doc.body.focus();
+  undone({ field: "doc[choice]", value: "b", was: "c" });
+  assert.equal($("choice").value, "b");
+  assert.equal(doc.activeElement, $("choice"));
+  $("choice").value = "c";
+});
+
+check("an undone list (no input of its own) brings its first input into sight and focus", () => {
+  doc.body.focus();
+  undone({ field: "doc[cards]", value: null, was: null });
+  assert.equal(doc.activeElement, $("card-label"));
+  assert.equal($("card-label").value, "Two", "the server's render draws the list");
+});
+
+// A piece of form drawn for one check, taken away after it.
+const drawIn = (html) => {
+  const box = doc.createElement("div");
+  box.innerHTML = html;
+  $("editor-form").appendChild(box);
+  return box;
+};
+
+// bp-desk-array-menu.js opens an item's dialog on a click on its preview.
+doc.addEventListener("click", (e) => {
+  const p = e.target.closest && e.target.closest("[data-desk-item-open]");
+  if (p) doc.getElementById(p.getAttribute("data-desk-item-open")).setAttribute("open", "");
+});
+
+check("a list the undo emptied in a folded fieldset: its wrapper is found by path, unfolded and focused", () => {
+  const box = drawIn(
+    `<fieldset id="more" data-collapsible><legend><button type="button" class="object-toggle" id="more-toggle" aria-expanded="false">More</button></legend>` +
+      `<fieldset class="bp-field" data-field-name="bits"><legend>Bits</legend><button type="button" id="bits-add">Add item</button></fieldset></fieldset>`
+  );
+  try {
+    doc.body.focus();
+    undone({ field: "doc[bits]", value: null, was: null, path: "bits" });
+    assert.deepEqual(toggled, ["more-toggle"], "the fold is opened by its own button");
+    assert.equal(doc.activeElement, $("bits-add"));
+  } finally {
+    box.remove();
+  }
+});
+
+check("a field in a list item's closed dialog: the dialog opens as a click on the item does, then the field is set and focused", () => {
+  const box = drawIn(
+    `<ul><li><button type="button" id="prev1" data-desk-item-open="item-1-dialog">One</button>` +
+      `<dialog id="item-1-dialog" data-desk-item-dialog><input type="text" id="note" name="doc[cards][0].note" value="N1 X1"></dialog></li></ul>`
+  );
+  try {
+    $("prev1").focus();
+    undone({ field: "doc[cards][0].note", value: "N1", was: "N1 X1", path: "cards" });
+    assert.equal($("item-1-dialog").open, true, "the item's dialog is open");
+    assert.equal($("note").value, "N1");
+    assert.equal(doc.activeElement, $("note"));
+    assert.deepEqual(pushes, []);
+  } finally {
+    box.remove();
+  }
+});
+
+// task-c20e285ee18797c6: a redo here re-applied the change the press had just
+// undone, and its own answer named the same dialog, so the writes chained.
+check("a field in an item dialog that cannot be opened: one Mod+Z sends one undo and no redo; nothing is set or focused", () => {
+  const box = drawIn(
+    `<dialog id="lost-dialog" data-desk-item-dialog><input type="text" id="lost" name="doc[cards][1].note" value="N2 X2"></dialog>`
+  );
+  try {
+    $("lost-dialog").showModal = () => {
+      throw new Error("InvalidStateError");
+    };
+    $("title").focus();
+    key($("title"), { key: "z", metaKey: true });
+    undone({ field: "doc[cards][1].note", value: "N2", was: "N2 X2", path: "cards" });
+    assert.equal($("lost-dialog").open, false);
+    assert.equal($("lost").value, "N2 X2", "the field is not set");
+    assert.equal(doc.activeElement, $("title"), "the focus stays");
+    assert.deepEqual(pushes, [{ event: "desk-undo", payload: { redo: false, _bp_doc: MARK } }]);
+  } finally {
+    box.remove();
+  }
+});
+
 check("a field the form does not have is ignored", () => {
   undone({ field: "doc[nope]", value: "x", was: "y" });
   undone({});
+});
+
+// A popover as the desk's menus are (`popover`, `:popover-open`, `toggle`):
+// jsdom has none of it.
+const popover = (menu) => {
+  let open = false;
+  const matches = menu.matches.bind(menu);
+  menu.matches = (sel) => (sel === ":popover-open" ? open : matches(sel));
+  menu.showPopover = () => {
+    open = true;
+  };
+  menu.hidePopover = () => {
+    open = false;
+    const e = new window.Event("toggle");
+    e.newState = "closed";
+    menu.dispatchEvent(e);
+  };
+  return menu;
+};
+
+// task-a8e403cee723e5f6: the focus went into the field, the Doc menu stayed open.
+check("Mod+Z from an item of the open Doc menu: the answer closes the menu as the focus goes into the field", () => {
+  const box = doc.createElement("div");
+  box.innerHTML =
+    `<div class="dk-doc-menu-list dk-menu" id="doc-menu" popover role="menu">` +
+    `<button type="button" role="menuitem" id="doc-menu-history">History</button></div>`;
+  $("pane").querySelector("header").appendChild(box);
+  const menu = popover($("doc-menu"));
+  const closed = [];
+  menu.addEventListener("toggle", (e) => closed.push(e.newState));
+  try {
+    menu.showPopover();
+    $("doc-menu-history").focus();
+    key($("doc-menu-history"), { key: "z", metaKey: true });
+    assert.deepEqual(pushes, [{ event: "desk-undo", payload: { redo: false, _bp_doc: MARK } }]);
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14" });
+    assert.equal(menu.matches(":popover-open"), false, "the menu is closed");
+    assert.deepEqual(closed, ["closed"], "by its own toggle");
+    assert.equal(doc.activeElement, $("title"));
+  } finally {
+    box.remove();
+  }
+});
+
+// task-9acc3246edf8cf2e: focus mode on another pane entered while the undo was
+// on its way. The page draws none of the hidden panes, so the focus put in the
+// field fell to BODY. The way out is the focused pane's own button, a round
+// trip: the server takes the marks off.
+async function checkAsync(name, fn) {
+  reset();
+  try {
+    await fn();
+    console.log(`PASS  ${name}`);
+  } catch (error) {
+    failures += 1;
+    console.log(`FAIL  ${name}\n      ${error.message}`);
+  }
+}
+
+const desk = $("desk-panes");
+const later = (ms) => new Promise((done) => setTimeout(done, ms));
+
+await checkAsync("focus mode entered on the read-only side while an undo is on its way is left, then the field is set and focused", async () => {
+  const side = doc.createElement("section");
+  side.id = "side";
+  side.setAttribute("data-pane-index", "2");
+  side.innerHTML = `<header><button type="button" class="dk-focus" id="side-focus" aria-pressed="false">Focus</button></header>`;
+  desk.appendChild(side);
+  const exits = [];
+  $("side-focus").addEventListener("click", () => {
+    exits.push("side-focus");
+    setTimeout(() => {
+      desk.removeAttribute("data-focus-mode");
+      side.removeAttribute("data-desk-focused");
+      side.querySelector(".dk-focus").setAttribute("aria-pressed", "false");
+    }, 20);
+  });
+  const seen = [];
+  const onFocus = () => seen.push(desk.hasAttribute("data-focus-mode"));
+  $("title").addEventListener("focus", onFocus);
+  try {
+    $("title").value = "Fixture post 14 X";
+    $("title").focus();
+    key($("title"), { key: "z", metaKey: true });
+    seen.length = 0;
+    // The user enters focus mode on the other side before the answer.
+    desk.setAttribute("data-focus-mode", "true");
+    side.setAttribute("data-desk-focused", "true");
+    $("side-focus").setAttribute("aria-pressed", "true");
+    $("side-focus").focus();
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 X" });
+    await later(80);
+    assert.deepEqual(exits, ["side-focus"], "focus mode is left by its button");
+    assert.equal(desk.hasAttribute("data-focus-mode"), false);
+    assert.deepEqual(seen, [false], "the field takes the focus only once the panes are back");
+    assert.equal(doc.activeElement, $("title"));
+    assert.equal($("title").value, "Fixture post 14");
+  } finally {
+    $("title").removeEventListener("focus", onFocus);
+    desk.removeAttribute("data-focus-mode");
+    side.remove();
+    $("title").value = "Fixture post 14";
+  }
+});
+
+await checkAsync("a focus mode button pressed while the undo is on its way: its patch, after the answer, is waited for and left; then the field is set and focused", async () => {
+  const side = doc.createElement("section");
+  side.id = "side3";
+  side.setAttribute("data-pane-index", "2");
+  side.innerHTML = `<header><button type="button" class="dk-focus" id="side3-focus" aria-pressed="false">Focus</button></header>`;
+  desk.appendChild(side);
+  // The server's `desk-focus`: the patch toggles the marks, a round trip later.
+  const turns = [];
+  const button = $("side3-focus");
+  button.addEventListener("click", () => {
+    const on = !desk.hasAttribute("data-focus-mode");
+    turns.push(on ? "enter" : "leave");
+    setTimeout(() => {
+      if (on) {
+        desk.setAttribute("data-focus-mode", "true");
+        side.setAttribute("data-desk-focused", "true");
+      } else {
+        desk.removeAttribute("data-focus-mode");
+        side.removeAttribute("data-desk-focused");
+      }
+      button.setAttribute("aria-pressed", String(on));
+    }, 20);
+  });
+  const seen = [];
+  const onFocus = () => seen.push(desk.hasAttribute("data-focus-mode"));
+  try {
+    $("title").value = "Fixture post 14 X";
+    $("title").focus();
+    key($("title"), { key: "z", metaKey: true });
+    $("side3-focus").focus();
+    $("side3-focus").click();
+    $("title").addEventListener("focus", onFocus);
+    // The answer comes first, the focus mode patch after it.
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 X" });
+    assert.deepEqual(seen, [], "not focused while the patch is on its way");
+    await later(150);
+    assert.deepEqual(turns, ["enter", "leave"]);
+    assert.equal(desk.hasAttribute("data-focus-mode"), false);
+    assert.deepEqual(seen, [false], "focused once, with the panes back");
+    assert.equal(doc.activeElement, $("title"));
+    assert.equal($("title").value, "Fixture post 14");
+  } finally {
+    $("title").removeEventListener("focus", onFocus);
+    desk.removeAttribute("data-focus-mode");
+    side.remove();
+    $("title").value = "Fixture post 14";
+  }
+});
+
+await checkAsync("while focus mode stays on, the field is neither set nor focused", async () => {
+  const side = doc.createElement("section");
+  side.id = "side2";
+  side.setAttribute("data-pane-index", "2");
+  side.setAttribute("data-desk-focused", "true");
+  side.innerHTML = `<header><button type="button" class="dk-focus" id="side2-focus" aria-pressed="true">Focus</button></header>`;
+  desk.appendChild(side);
+  desk.setAttribute("data-focus-mode", "true");
+  try {
+    $("side2-focus").focus();
+    $("title").value = "Fixture post 14 X";
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 X" });
+    await later(30);
+    assert.equal($("title").value, "Fixture post 14 X", "not set out of sight");
+    assert.equal(doc.activeElement, $("side2-focus"), "the focus stays");
+  } finally {
+    desk.removeAttribute("data-focus-mode");
+    side.remove();
+    $("title").value = "Fixture post 14";
+  }
 });
 
 if (failures) {
