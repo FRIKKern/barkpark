@@ -19,6 +19,8 @@ describe('a pinned state may stand only on the element a rule styles', () => {
     expect(selectorFindings('a:target')[0]).toMatch(/:target is not a pseudo-class/)
     expect(selectorFindings('a::selection')[0]).toMatch(/::selection is not a pseudo-element/)
     expect(selectorFindings('a[title=":target"]::before')).toEqual([])
+    // The refusal is "not on the allowed list": a name on no list at all is refused by name the same way.
+    expect(selectorFindings('a:bark-made-up')).toEqual([expect.stringMatching(/^:bark-made-up is not a pseudo-class part\.css may use/)])
     // A sample, not the judge (the pinned list below is): what a person changes waits until the check drives it.
     for (const p of ['focus', 'focus-within', 'placeholder-shown', 'user-invalid', 'enabled', 'open', 'muted', 'target-current', 'state']) expect(selectorFindings(`a:${p}`).length, p).toBe(1)
   })
