@@ -6,6 +6,7 @@
 // Run: node src/canvas/__callout_body_readonly_mounted.test.mjs
 
 import assert from "node:assert/strict";
+import { NodeSelection } from "@tiptap/pm/state";
 import { mount, paragraph } from "./source-flush-mounted-harness.mjs";
 
 const callout = () => ({
@@ -68,6 +69,17 @@ try {
     canvas.toggleSourceMode();
     assert.deepEqual(batches, [], "source mode and back sends nothing");
     assert.deepEqual(server[1], callout(), "and keeps the callout");
+
+    // A key with the card selected goes where the editor's text input sends it, as
+    // for every carried block: the stored callout stays as it was.
+    let at = -1;
+    editor.state.doc.forEach((node, offset) => { if (node.attrs.bpId === "c1") at = offset; });
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, at)));
+    const typed = editor.view.someProp("handleTextInput", (f) => f(editor.view, at, at + 1, "x"));
+    if (!typed) editor.view.dispatch(editor.state.tr.insertText("x", at, at + 1));
+    canvas.flushPendingChanges();
+    assert.ok(!batches.flat().some((op) => op.id === "c1"), "no op names the callout");
+    assert.deepEqual(server.find((block) => block.id === "c1"), callout(), "the callout is stored as it was");
   }
 
   // 2) A callout with a body and no content is read-only too.
