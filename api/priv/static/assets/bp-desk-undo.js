@@ -32,8 +32,8 @@
 // wrapper, by `path`, its name), its new value and the value it showed (none
 // for a list: the server's render draws it). A field in an object item's
 // closed dialog has the dialog opened first, as a click on the item does; a
-// dialog that cannot be opened has the change put back (a redo), so nothing
-// is changed out of sight. The field takes the new value only while it still shows that one
+// dialog that cannot be opened leaves the page as it is (no write, no
+// focus). The field takes the new value only while it still shows that one
 // (a LiveView patch leaves the focused input alone), the caret goes to the
 // end of what changed, and the focus goes into the field, as TanStack's. A
 // field on a group tab that was not shown arrives drawn, on its tab, with the
@@ -288,9 +288,10 @@
     var el = f ? named(f, d) : null;
     if (!el || !el.tagName) return;
     unstrip(el);
-    // A field in an item dialog that cannot be opened is not changed out of
-    // sight: the change goes back in (a redo).
-    if (!openDialogs(f, el)) return run(true);
+    // A field in an item dialog that cannot be opened is left as it is: not
+    // set and not focused. A redo here would write again, and its own answer
+    // would name the same dialog.
+    if (!openDialogs(f, el)) return;
     var text = valued(el);
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
