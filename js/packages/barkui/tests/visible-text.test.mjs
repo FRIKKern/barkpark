@@ -37,7 +37,7 @@ describe('the built page', () => {
   }, 30000)
 
   it('reads an id in text as visible and one in an attribute as not', () => {
-    expect(visibleText('<p data-task="task-6617f9ae509c43d9">a (task-6617f9ae509c43d9)</p>')).toMatch(TASK_ID)
-    expect(visibleText('<p data-task="task-6617f9ae509c43d9">a</p>')).not.toMatch(TASK_ID)
+    expect(visibleText('<p data-task="task-0123456789abcdef">a (task-0123456789abcdef)</p>')).toMatch(TASK_ID)
+    expect(visibleText('<p data-task="task-0123456789abcdef">a</p>')).not.toMatch(TASK_ID)
   })
 })
