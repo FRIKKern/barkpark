@@ -133,22 +133,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   # A sheet's cells live in its session, which would overwrite a restored row
   # on its next persist. Session.restore/4 discards it around the write and
   # restarts it from the restored row (task-1eaa2c0dc6e60047).
+  #
+  # The discard drops the session's unflushed cells, so the restore's checks
+  # run first, writing nothing (`Content.check_restore/4`): a press refused
+  # there leaves the session and its cells alone (task-5b74471e6a2d6de8). The
+  # write makes the same checks again, so a write landing in between is still
+  # refused; the session then restarts from the stored row.
   defp restore_open_doc(socket, rev_id, "sheet", fence) do
     doc = socket.assigns.editor_doc
+    dataset = socket.assigns.dataset
+    opts = Shared.hook_opts(socket) ++ fence
 
-    Session.restore(
-      Content.published_id(doc.doc_id),
-      socket.assigns.dataset,
-      GridData.session_scope(%{doc: doc}),
-      fn ->
-        Content.restore_revision(
-          rev_id,
-          "sheet",
-          socket.assigns.dataset,
-          Shared.hook_opts(socket) ++ fence
-        )
-      end
-    )
+    with :ok <- Content.check_restore(rev_id, "sheet", dataset, opts) do
+      Session.restore(
+        Content.published_id(doc.doc_id),
+        dataset,
+        GridData.session_scope(%{doc: doc}),
+        fn -> Content.restore_revision(rev_id, "sheet", dataset, opts) end
+      )
+    end
   end
 
   defp restore_open_doc(socket, rev_id, type, fence),

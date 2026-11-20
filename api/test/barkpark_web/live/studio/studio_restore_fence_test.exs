@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
   alias Barkpark.Content
   alias Barkpark.Tenancy
   alias BarkparkWeb.EditorPost
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @dataset "production"
   @history ",changesInspectorTab=history,inspect=sanity%2Fstructure%2Fhistory"
@@ -138,6 +139,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
   defp press(view, params, marks \\ nil),
     do: EditorPost.press(view, "restore-revision", params, marks)
+
+  # The open document's mark, as the desk's revision view carries it.
+  defp own_mark(c), do: %{PostIdentity.key() => PostIdentity.value(@dataset, c.type, c.id)}
 
   # The frames a save sends reach this process and not the page (the page
   # leaves the document topics; this process joins them), as in
@@ -283,6 +287,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       send(view.pid, older)
       render(view)
 
+      assert socket_assigns(view).editor_form["title"] == "Words D",
+             "the form took the older frame after the newer one"
+
       assert seen_rev(view) == newer_doc.rev
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).title == "Words A"
@@ -334,7 +341,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       assert pressed["if_rev"] == current(c).rev
 
       after_write = write(c.type, c.id, "Words C")
-      press(view, pressed)
+      press(view, pressed, own_mark(c))
 
       assert current(c).rev == after_write.rev
       assert flash(view)["error"] =~ @moved
@@ -342,7 +349,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
     test "confirmed against the shown state: restores", c do
       view = open(c, c.desk <> @history <> ",rev=#{revision(c, "Words A")}")
-      press(view, confirm_values(view))
+      press(view, confirm_values(view), own_mark(c))
       assert current(c).title == "Words A"
     end
   end
@@ -414,7 +421,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceSheetTest do
     get_in(doc.content, ["tabs", Access.at(0), "cells"]) || %{}
   end
 
-  test "a sheet's Restore pressed after a newer edit was stored: refused, the cells stay",
+  test "a sheet's Restore pressed late, with a cell unflushed: refused, every cell stays",
        %{conn: conn} do
     slug = "rfence-sheet-#{System.unique_integer([:positive])}"
 
@@ -460,14 +467,21 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceSheetTest do
 
     assert is_binary(pressed["if_rev"]), "the sheet's Restore names no state"
 
-    # Someone's edit is stored before the press arrives.
+    # Someone's edit is stored before the press arrives, and another is still
+    # in the session's memory only.
     type_cell!(target, "B1", "later")
     assert :ok = Session.flush(slug, @dataset, nil)
+    type_cell!(target, "C1", "pending")
 
     BarkparkWeb.EditorPost.press(view, "restore-revision", pressed)
 
+    # The session persists (the debounce, forced): the unflushed cell was kept.
+    assert :ok = Session.flush(slug, @dataset, nil)
     stored = cells(slug)
     assert get_in(stored, ["A1", "v"]) == "new", "the late restore wrote the old cells back"
     assert get_in(stored, ["B1", "v"]) == "later"
+
+    assert get_in(stored, ["C1", "v"]) == "pending",
+           "the refused restore dropped the session's unflushed cell"
   end
 end

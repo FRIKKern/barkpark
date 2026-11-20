@@ -13,7 +13,8 @@ defmodule BarkparkWeb.Studio.StudioLive.SeenRev do
   - Only a frame the page put on screen is noted: `doc_updated/2` calls
     `applied/2` on the branch that replaces the form. A frame held behind the
     conflict banner, or kept from a field being edited, is not.
-  - A note never moves back: a frame older than the one noted is dropped.
+  - A note never moves back: a frame older than the one noted is dropped, and
+    the form does not take it either (`stale?/2`).
   - A frame of a delete or a discarded draft is not a state the form shows.
   - A note belongs to one document: another open document ignores it.
 
@@ -33,12 +34,32 @@ defmodule BarkparkWeb.Studio.StudioLive.SeenRev do
 
     cond do
       msg[:mutation] in @gone -> socket
-      newer?(socket.assigns[:seen_frame], seen) -> assign(socket, :seen_frame, seen)
+      newer?(noted(socket.assigns, seen.id), seen) -> assign(socket, :seen_frame, seen)
       true -> socket
     end
   end
 
   def applied(socket, _msg), do: socket
+
+  @doc """
+  Whether the frame `msg` is older than the last one the form took for its
+  document. Such a frame is dropped (`Handlers.Lifecycle.doc_updated/2`): it
+  would put older words in the form under a newer note.
+  """
+  # A delete's frame carries the removed row, stamped when it was last written,
+  # and is left to the handling it had before.
+  def stale?(%{doc_id: doc_id, doc: %{updated_at: %DateTime{} = at}} = msg, assigns)
+      when is_binary(doc_id) do
+    case noted(assigns, Content.published_id(doc_id)) do
+      %{updated_at: noted_at} ->
+        msg[:mutation] not in @gone and DateTime.compare(at, noted_at) == :lt
+
+      nil ->
+        false
+    end
+  end
+
+  def stale?(_msg, _assigns), do: false
 
   @doc "The rev the page shows for its open document, or nil when it shows none."
   def of(assigns) do
@@ -51,6 +72,14 @@ defmodule BarkparkWeb.Studio.StudioLive.SeenRev do
 
       _ ->
         nil
+    end
+  end
+
+  # The note for document `id`; a note of another document is none.
+  defp noted(assigns, id) do
+    case assigns[:seen_frame] do
+      %{id: ^id} = frame -> frame
+      _ -> nil
     end
   end
 

@@ -93,7 +93,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   #
   # A frame older than this tab's own last save is read as that save
   # (`fresher/2`): the save was written over it, so the store already holds
-  # what it carried.
+  # what it carried. A frame older than the last one the form took
+  # (`SeenRev.stale?/2`) is dropped: the form already shows a newer state, and
+  # a Restore names that one (task-5b74471e6a2d6de8).
   def doc_updated(%{sender: sender, doc: doc_data} = msg, socket) do
     doc_data = fresher(doc_data, socket.assigns[:editor_doc])
 
@@ -102,6 +104,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       other_project?(msg, socket) ->
+        {:noreply, socket}
+
+      SeenRev.stale?(msg, socket.assigns) ->
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
