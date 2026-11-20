@@ -1038,8 +1038,7 @@ defmodule Barkpark.Content.Writer do
   # initial list wholesale — recursive list merging is ambiguous and a
   # publisher who provides a list almost always means "use exactly this").
   #
-  # Dynamic tokens resolved at create time only, by `Content.Today`, in the
-  # workspace's time zone (none set: UTC; `opts[:now]` pins the clock in tests):
+  # Dynamic tokens resolved at create time only (`Content.Today`, workspace zone):
   #   * `"$today"`      → today's ISO-8601 date string (e.g. "2026-05-14")
   #   * `"$today.year"` → today's year as a 4-digit string (e.g. "2026")
 
@@ -1047,9 +1046,8 @@ defmodule Barkpark.Content.Writer do
        when is_binary(type) and is_binary(dataset) do
     initial =
       case schema_for_create(type, dataset, attrs) do
-        {:ok, %SchemaDefinition{initial_values: iv} = schema}
-        when is_map(iv) and map_size(iv) > 0 ->
-          Today.resolve(iv, today_clock(attrs, schema, opts))
+        {:ok, %SchemaDefinition{initial_values: iv} = s} when is_map(iv) and map_size(iv) > 0 ->
+          Today.resolve(iv, today(attrs, s, opts))
 
         _ ->
           nil
@@ -1067,12 +1065,9 @@ defmodule Barkpark.Content.Writer do
 
   defp apply_initial_values(attrs, _type, _dataset, _opts), do: attrs
 
-  # The workspace whose time zone "today" is read in: the write's stamped
-  # scope, else the schema's own workspace. Read only when a token is there.
-  defp today_clock(attrs, schema, opts) do
-    workspace_id = Keyword.get(stamped_scope(attrs), :workspace_id) || schema.workspace_id
-    fn -> Today.clock(workspace_id, opts) end
-  end
+  # Today in the write's stamped workspace, else the schema's.
+  defp today(attrs, schema, opts),
+    do: Today.later([Keyword.get(stamped_scope(attrs), :workspace_id), schema.workspace_id], opts)
 
   # ── Exp-P3.1 — Create-from-Expectation scaffold ──────────────────────────
   #
@@ -1212,7 +1207,7 @@ defmodule Barkpark.Content.Writer do
   # content["title"] by projection (mirroring synthesize_blocks/3).
   defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset, opts) do
     %{layout: layout, prefill: prefill} = Content.resolve_expectation(schema)
-    prefill = Today.resolve(prefill, today_clock(attrs, schema, opts))
+    prefill = Today.resolve(prefill, today(attrs, schema, opts))
     provided = Map.get(attrs, "content") || %{}
 
     values =
@@ -1308,18 +1303,7 @@ defmodule Barkpark.Content.Writer do
   def deep_merge(_a, b), do: b
 
   @doc false
-  def resolve_dynamics(term) when is_map(term) do
-    Map.new(term, fn {k, v} -> {k, resolve_dynamics(v)} end)
-  end
-
-  def resolve_dynamics(list) when is_list(list), do: Enum.map(list, &resolve_dynamics/1)
-
-  def resolve_dynamics("$today"), do: Date.utc_today() |> Date.to_iso8601()
-
-  def resolve_dynamics("$today.year"),
-    do: Date.utc_today().year |> Integer.to_string()
-
-  def resolve_dynamics(other), do: other
+  defdelegate resolve_dynamics(term), to: Today
 
   # ── Legacy upsert (for backward compat) ───────────────────────────────────
 

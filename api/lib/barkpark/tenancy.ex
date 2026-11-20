@@ -859,8 +859,7 @@ defmodule Barkpark.Tenancy do
   # `settings["time_zone"]`. A list preview's `|date` shows a date-time as the
   # day it is in this zone, as Sanity does for an editor in that zone. Unset,
   # each browser uses its own zone. The server checks the name's shape only;
-  # list previews convert in the browser, and `"$today"` reads the zone with the
-  # `tz` database (`Content.Today`).
+  # `"$today"` reads the zone with the `tz` database (`Content.Today`).
 
   @time_zone_shape ~r/\A(?:UTC|[A-Z][A-Za-z_-]*(?:\/[A-Za-z0-9_+-]+){1,2})\z/
 

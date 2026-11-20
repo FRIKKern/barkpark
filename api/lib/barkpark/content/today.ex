@@ -37,13 +37,42 @@ defmodule Barkpark.Content.Today do
   only when a value holds the token.
   """
   @spec clock(String.t() | nil, keyword()) :: clock()
-  def clock(workspace_id, opts \\ []) do
-    zone =
-      workspace_id
-      |> Tenancy.get_workspace_by_id()
-      |> Tenancy.workspace_time_zone()
+  def clock(workspace_id, opts \\ []),
+    do: %{now: Keyword.get(opts, :now) || DateTime.utc_now(), zone: zone(workspace_id)}
 
-    %{now: Keyword.get(opts, :now) || DateTime.utc_now(), zone: zone || "Etc/UTC"}
+  @doc "`clock/2` for the first id that is set, as a 0-arity function (read only if needed)."
+  @spec later([String.t() | nil], keyword()) :: (-> clock())
+  def later(workspace_ids, opts), do: fn -> clock(Enum.find(workspace_ids, & &1), opts) end
+
+  @doc "A query filter map with its tokens resolved in the caller's (`opts[:workspace_id]`) zone."
+  @spec in_filter(map(), keyword()) :: map()
+  def in_filter(filter_map, opts),
+    do: resolve(filter_map, later([Keyword.get(opts, :workspace_id)], opts))
+
+  @doc false
+  # The UTC-only resolver Content.Writer had before workspaces had a zone; kept
+  # for its callers (`Content.resolve_dynamics/1`).
+  def resolve_dynamics(term), do: resolve(term, %{now: DateTime.utc_now(), zone: "Etc/UTC"})
+
+  # One workspace read per request: a list read runs its page, count and facet
+  # queries one after another, each resolving the same filter. So the zone is
+  # kept in the calling process for a second; a changed zone shows after that.
+  @memo_ms 1_000
+  defp zone(nil), do: "Etc/UTC"
+
+  defp zone(workspace_id) do
+    key = {__MODULE__, workspace_id}
+    now = System.monotonic_time(:millisecond)
+
+    case Process.get(key) do
+      {zone, at} when now - at < @memo_ms ->
+        zone
+
+      _ ->
+        zone = Tenancy.workspace_time_zone(Tenancy.get_workspace_by_id(workspace_id)) || "Etc/UTC"
+        Process.put(key, {zone, now})
+        zone
+    end
   end
 
   @doc "True when `term` holds the exact `\"$today\"` or `\"$today.year\"` anywhere."

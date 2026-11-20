@@ -1497,8 +1497,6 @@ defmodule Barkpark.Content.Query do
   defp array_member_types(_field), do: []
 
   defp base_query(type, dataset, filter_map, opts) do
-    filter_map = today(filter_map, opts)
-
     Document
     |> where([d], d.type == ^type)
     |> scope_to_dataset(dataset, opts)
@@ -1964,13 +1962,7 @@ defmodule Barkpark.Content.Query do
   @spec apply_search_filters(Ecto.Queryable.t(), map(), String.t() | nil, String.t(), keyword()) ::
           Ecto.Query.t()
   def apply_search_filters(query, filter_map, type, dataset, opts) when is_map(filter_map),
-    do: apply_filter_map(query, today(filter_map, opts), type, dataset, opts)
-
-  # `"$today"` as a filter operand is this request's date in the caller's
-  # workspace time zone (`Content.Today`), so a stored desk filter such as
-  # `{"content.sluttdato": {"gte": "$today"}}` compares with today on every read.
-  defp today(filter_map, opts),
-    do: Today.resolve(filter_map, fn -> Today.clock(Keyword.get(opts, :workspace_id), opts) end)
+    do: apply_filter_map(query, filter_map, type, dataset, opts)
 
   defp apply_filter_map(query, map, _type, _dataset, _opts) when map_size(map) == 0, do: query
 
@@ -1984,7 +1976,7 @@ defmodule Barkpark.Content.Query do
     query = apply_or_groups(query, groups, type, dataset, opts)
 
     map =
-      map
+      Today.in_filter(map, opts)
       |> resolve_reference_count_ops(type, dataset, opts)
       |> resolve_references_eq(type, dataset, opts)
       |> resolve_reference_id_text_ops(type, dataset, opts)

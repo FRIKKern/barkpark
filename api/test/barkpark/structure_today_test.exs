@@ -109,6 +109,53 @@ defmodule Barkpark.StructureTodayTest do
     assert titles(@kommende, now: ~U[2026-11-21 10:00:00Z]) == []
   end
 
+  test "$today is a token in every filter form: operator, shorthand eq and in" do
+    events!([{"i-gar", "2026-11-19"}, {"i-dag", "2026-11-20"}])
+    now = [now: ~U[2026-11-20 10:00:00Z]]
+
+    assert titles(%{"content.sluttdato" => "$today"}, now) == ["i-dag"]
+    assert titles(%{"content.sluttdato" => %{"eq" => "$today"}}, now) == ["i-dag"]
+
+    assert titles(%{"content.sluttdato" => %{"in" => ["$today", "2026-11-19"]}}, now) == [
+             "i-dag",
+             "i-gar"
+           ]
+
+    # In a longer string it is text: nothing is dated "fra $today".
+    assert titles(%{"content.sluttdato" => "fra $today"}, now) == []
+  end
+
+  test "one workspace read per request, however many filters and queries hold $today" do
+    ws = create_workspace!("today-#{System.unique_integer([:positive])}")
+    {:ok, _} = Tenancy.set_workspace_time_zone(ws.id, "Europe/Oslo")
+    test_pid = self()
+    handler = "today-reads-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _e, _m, meta, _ ->
+        if self() == test_pid and meta[:source] == "workspaces",
+          do: send(test_pid, :workspace_read)
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    filter = %{
+      "content.sluttdato" => %{"gte" => "$today"},
+      "content.publisert" => %{"lt" => "$today"}
+    }
+
+    opts = [perspective: :drafts, filter_map: filter, workspace_id: ws.id]
+    Content.list_documents("arrangement", @dataset, opts)
+    Content.count_documents("arrangement", @dataset, opts)
+
+    assert_received :workspace_read
+    refute_received :workspace_read
+  end
+
   test "the query API resolves $today in a filter param, as today's Studio sends it", %{
     conn: conn
   } do
