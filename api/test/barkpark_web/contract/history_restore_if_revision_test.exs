@@ -13,6 +13,8 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   alias Barkpark.Auth
   alias Barkpark.Content
 
+  require Ecto.Query
+
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
 
@@ -336,5 +338,131 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     {:ok, row} = Content.get_document("drafts.race-unique", "post", "test")
     assert is_binary(row.dataset_id), "the unique index needs a dataset_id to fire"
     assert_second_refused(result, "race-unique")
+  end
+
+  # A restore whose scope resolves no project writes a row with no dataset_id: a
+  # workspace made without a project, or an instance with no seeded Default
+  # (`Content.WriteScope`). The unique index skips NULLs, so for that row the
+  # locked re-read in `Content.InsertOnly.insert/4` is the only guard.
+  test "two ifAbsent restores with no dataset_id: the first lands before the second's lock, and the re-read refuses",
+       %{conn: _conn} do
+    {:ok, ws} =
+      Barkpark.Tenancy.create_workspace(%{
+        slug: "restore-null-#{System.unique_integer([:positive])}",
+        name: "No project"
+      })
+
+    scope = [workspace_id: ws.id]
+    schema = %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}
+    Content.upsert_schema(schema, "test", scope)
+    doc = "drafts.race-null"
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => doc, "title" => "Words A"}, "test", scope)
+
+    {:ok, row} = Content.get_document(doc, "post", "test", scope)
+
+    assert is_nil(row.dataset_id),
+           "this row needs no dataset_id, so the unique index cannot refuse it"
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => doc, "title" => "Words B"}, "test", scope)
+
+    revisions = Content.list_revisions("race-null", "post", "test", scope)
+    first = Enum.find(revisions, &(&1.title == "Words B"))
+    second = Enum.find(revisions, &(&1.title == "Words A"))
+    {:ok, _} = Content.delete_document(doc, "post", "test", scope)
+
+    on_exit(fn -> Application.delete_env(:barkpark, :writer_fault) end)
+    opts = [if_absent: true] ++ scope
+
+    Application.put_env(
+      :barkpark,
+      :writer_fault,
+      {:insert_only_before_lock,
+       fn ->
+         Application.delete_env(:barkpark, :writer_fault)
+         Process.put(:first_restore, Content.restore_revision(first.id, "post", "test", opts))
+       end}
+    )
+
+    {:ok, result} =
+      Barkpark.Repo.transaction(fn ->
+        Content.restore_revision(second.id, "post", "test", opts)
+      end)
+
+    assert {:ok, _} = Process.get(:first_restore)
+    {:ok, landed} = Content.get_document(doc, "post", "test", scope)
+    assert {:error, {:rev_mismatch, %{expected: nil, actual: actual}}} = result
+    assert actual == landed.rev
+    assert landed.title == "Words B"
+
+    assert Barkpark.Repo.aggregate(
+             Ecto.Query.where(Barkpark.Content.Document, doc_id: ^doc, workspace_id: ^ws.id),
+             :count
+           ) == 1,
+           "one draft, not two"
+  end
+
+  # The insert-only refusal is the first pre-write fence: an insert-only write that
+  # read a row runs no plugin fence. A recording fence is published for these rows
+  # only; it reports each write of their documents that reached it with a row read.
+  defmodule Recorder do
+    def record(_type, attrs, _dataset, _doc_id, prev, opts) do
+      with pid when is_pid(pid) <- Application.get_env(:barkpark, :restore_fence_recorder),
+           id when id in ["drafts.fence-order", "drafts.fence-plain"] <- Map.get(attrs, "doc_id"),
+           true <- prev != nil do
+        send(pid, {:fence_ran, id, Keyword.get(opts, :insert_only) == true})
+      end
+
+      :ok
+    end
+  end
+
+  defp with_recorder do
+    alias Barkpark.Content.PreWriteFences
+    prior = :persistent_term.get({PreWriteFences, :declared}, [])
+    recorder = %{name: "restore-fence-recorder", module: Recorder, fences: [{Recorder, :record}]}
+    PreWriteFences.publish(prior ++ [recorder])
+    Application.put_env(:barkpark, :restore_fence_recorder, self())
+
+    on_exit(fn ->
+      Application.delete_env(:barkpark, :restore_fence_recorder)
+      PreWriteFences.publish(prior)
+    end)
+
+    assert {Recorder, :record} in PreWriteFences.list(), "the recorder runs as a plugin fence"
+  end
+
+  test "two ifAbsent restores: the second, refused by its writer's read, runs no plugin fence",
+       %{conn: conn} do
+    with_recorder()
+
+    race_at(conn, "fence-order", :restore_after_state_check)
+    |> assert_second_refused("fence-order")
+
+    refute_received {:fence_ran, "drafts.fence-order", true},
+                    "a plugin fence ran for the refused insert-only write"
+  end
+
+  test "a plain write onto an existing draft runs the plugin fences and still updates" do
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "drafts.fence-plain", "title" => "Words A"},
+        "test"
+      )
+
+    with_recorder()
+
+    assert {:ok, _} =
+             Content.upsert_document(
+               "post",
+               %{"doc_id" => "drafts.fence-plain", "title" => "Words B"},
+               "test"
+             )
+
+    assert title_of("drafts.fence-plain") == "Words B"
+    assert_received {:fence_ran, "drafts.fence-plain", false}
   end
 end
