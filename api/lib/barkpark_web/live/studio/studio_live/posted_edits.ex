@@ -91,8 +91,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
     )
   end
 
+  # An unset key (`Forms.unset/0`) is nil in the buffer, as the form draws it.
   defp merge(socket, params, kept),
-    do: Map.merge(socket.assigns[:editor_form] || %{}, Map.drop(params, kept))
+    do:
+      Map.merge(
+        socket.assigns[:editor_form] || %{},
+        params |> Map.drop(kept) |> Forms.unset_as_nil()
+      )
 
   # The waiting fields whose posted value the save does not read as an edit.
   defp old_values(_socket, _params, _raw_params, []), do: []

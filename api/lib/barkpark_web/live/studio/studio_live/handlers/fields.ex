@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Content.Forms
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
@@ -626,14 +627,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   defp unset_at(doc, [root]), do: Map.put(doc, root, "")
 
-  # A key in an object is written nil, which the save reads as unset
-  # (`Forms`' composite restore): a key left out would be kept as stored.
+  # A key in an object is written as `Forms.unset/0`, which the save reads
+  # as unset: a key left out would be kept as stored, and a nil is a stored
+  # null the form drew back.
   defp unset_at(doc, path) do
     {parent, [key]} = Enum.split(path, -1)
 
     case value_at(doc, parent) do
       %{} = map ->
-        left = Map.put(map, key, nil)
+        left = Map.put(map, key, Forms.unset())
 
         if blank_map?(left) and not row?(parent),
           do: unset_at(doc, parent),
@@ -647,7 +649,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp put_at(doc, [root], value), do: Map.put(doc, root, value)
   defp put_at(doc, path, value), do: StudioLive.put_value_at(doc, path, value)
 
-  defp blank_map?(map), do: Enum.all?(map, fn {_key, value} -> value in [nil, ""] end)
+  defp blank_map?(map),
+    do: Enum.all?(map, fn {_key, value} -> value in [nil, "", Forms.unset()] end)
 
   # The path names an array row (its last step is an index) or the top of
   # the document.
