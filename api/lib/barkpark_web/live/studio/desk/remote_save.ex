@@ -11,19 +11,28 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
   last post in each). Typing this tab still holds is the Studio's own
   clash (`doc_conflict`), named too.
 
-  - This tab's own change is kept per field as `{before, after}` in form
-    shape (`after_write/3`). Free text: the text the post was typed from
-    and the text it posted, this tab's words alone. Any other field: the
-    last stored value this tab knew (its own last write or the last frame
-    it took, `@seen`) and the stored value after the write, when that
-    moved. A field only another editor changed is in the last frame
-    already, so it is not counted as this tab's.
+  - This tab's own change is read from the write itself (`after_write/4`):
+    every user field whose stored value moved from the last stored value
+    this tab knew (its own last write or the last frame it took, `@seen`)
+    is this tab's, kept per field as `{before, after}` in form shape. A
+    field only another editor changed is in the last frame already, so it
+    is not counted as this tab's. That holds for any write that moves the
+    document's revision: a typed save, the form's submit (Enter, no
+    `_target`), a pick, a paste, an undo, a Restore from History.
+  - Free text typed into one field (`_target`) keeps the text the post was
+    typed from and the text it posted, this tab's words alone, not the
+    merged text that can hold another editor's words.
+  - Publish, Unpublish, Discard, Delete and "reload" move the revision but
+    write no value of this tab's: the last stored values are taken in, and
+    a discard or reload forgets this tab's changes.
   - Only the user's values: the title and the schema's fields. Never the
     document's status (a first edit opens the draft, a Publish elsewhere
     closes it: nothing of this tab's is lost) or any `_` key.
   - Every desk write records it (`EditorHost`): the form's events, the
     desk's own built writes (paste, undo, revert), and the writes the page
-    sends itself (a tree codelist's pick, a reference or image pick).
+    sends itself (a tree codelist's pick, a reference or image pick). It
+    does not rest on the save state: a Restore writes through `Content` and
+    leaves it as it was.
   - A frame keeps a change intact when the field still holds this tab's
     value, or, for text, when this tab's words still come back out of it
     (`TextUndo.revert/3`). The change is then kept on the new text. A change
@@ -59,53 +68,72 @@ defmodule BarkparkWeb.Studio.Desk.RemoteSave do
 
   # ── This tab's writes ───────────────────────────────────────────────────
 
+  # Events that move the revision but write none of this tab's values: the
+  # stored values are taken in. A discard or a reload also forgets this
+  # tab's changes, which are no longer in the document.
+  @takes_in ~w(publish paper-publish unpublish confirm-unpublish)
+  @forgets ~w(reload-remote-doc discard-draft confirm-discard delete-doc confirm-delete)
+
   @doc """
-  The result of an event answered from `before` (the socket before it), with
-  the event's `params`: a write that landed keeps its change, and the
-  document is no longer marked.
+  The result of `event` (nil: a write the desk built, or one the page sent
+  itself) answered from `before` (the socket before it), with its `params`:
+  a write that landed keeps what it changed, and the document is no longer
+  marked.
   """
-  def after_write({:noreply, socket}, before, params),
-    do: {:noreply, own(socket, before, params)}
+  def after_write(result, before, params, event \\ nil)
 
-  def after_write({:reply, reply, socket}, before, params),
-    do: {:reply, reply, own(socket, before, params)}
+  def after_write({:noreply, socket}, before, params, event),
+    do: {:noreply, own(socket, before, params, event)}
 
-  def after_write(other, _before, _params), do: other
+  def after_write({:reply, reply, socket}, before, params, event),
+    do: {:reply, reply, own(socket, before, params, event)}
 
-  defp own(socket, before, params) do
+  def after_write(other, _before, _params, _event), do: other
+
+  defp own(socket, before, params, event) do
     doc = socket.assigns[:editor_doc]
 
-    with "Saved" <- socket.assigns[:save_status],
-         %{doc_id: id, rev: rev} <- doc,
+    with %{doc_id: id, rev: rev} <- doc,
          %{doc_id: was, rev: was_rev} when was_rev != rev <- before.assigns[:editor_doc],
          pub = Content.published_id(id),
          true <- pub == Content.published_id(was) do
-      schema = socket.assigns[:editor_schema]
-      stored = Content.doc_to_form(doc, schema)
-      shown = before.assigns[:editor_form] || %{}
-      seen = seen(before.assigns, pub, schema)
-      user = user_keys(schema)
+      stored = Content.doc_to_form(doc, socket.assigns[:editor_schema])
 
-      # Any other field: the value the store kept, moved from the last
-      # stored value this tab knew (a field only another editor moved is in
-      # the last frame already). A pick the form showed before it was
-      # written (a reference, an image) counts too.
-      changes =
-        for {key, value} <- stored,
-            MapSet.member?(user, key),
-            not RemoteValues.free_text?(schema, key),
-            Map.get(seen, key) != value,
-            into: kept(socket.assigns, pub),
-            do: {key, {Map.get(seen, key), value}}
-
-      assign(socket, [
-        {@own, {pub, typed(changes, before, params, shown)}},
-        {@overwritten, nil},
-        {@seen, {pub, stored}}
-      ])
+      cond do
+        event in @takes_in -> assign(socket, @seen, {pub, stored})
+        event in @forgets -> assign(socket, [{@own, nil}, {@seen, {pub, stored}}])
+        true -> wrote(socket, before, params, pub, stored)
+      end
     else
       _ -> socket
     end
+  end
+
+  # What the write changed: every user field moved from the last stored
+  # value this tab knew. Free text typed into one field keeps this tab's
+  # own words (`typed/4`).
+  defp wrote(socket, before, params, pub, stored) do
+    schema = socket.assigns[:editor_schema]
+    seen = seen(before.assigns, pub, schema)
+    user = user_keys(schema)
+
+    moved =
+      for {key, value} <- stored,
+          MapSet.member?(user, key),
+          Map.get(seen, key) != value,
+          into: %{},
+          do: {key, {Map.get(seen, key), value}}
+
+    shown = before.assigns[:editor_form] || %{}
+    mine = typed(moved, before, params, shown)
+
+    socket =
+      assign(socket, [
+        {@own, {pub, Map.merge(kept(socket.assigns, pub), mine)}},
+        {@seen, {pub, stored}}
+      ])
+
+    if mine == %{}, do: socket, else: assign(socket, @overwritten, nil)
   end
 
   # Free text: the text the post was typed from (the base the save merged it

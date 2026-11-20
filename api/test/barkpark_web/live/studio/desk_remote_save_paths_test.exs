@@ -13,6 +13,9 @@ defmodule BarkparkWeb.Studio.DeskRemoteSavePathsTest do
     typed says "Last published", never nothing.
   - The record starts again when the document is opened again: a loss
     marked before is not named late.
+  - What this tab saved is read from the write, not from the post: a
+    Restore from History (no save state, no `_target`) and the form's
+    submit (Enter: `save` with no `_target`) count too.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -126,6 +129,27 @@ defmodule BarkparkWeb.Studio.DeskRemoteSavePathsTest do
     Map.put(doc.content || %{}, "title", doc.title)[key]
   end
 
+  # A draft over the created document, so its first revision is the
+  # created one.
+  defp draft(c, content, title \\ "Hello world") do
+    content =
+      Map.merge(%{"excerpt" => "First", "day" => "2026-01-01", "stage" => "draft"}, content)
+
+    {:ok, _} =
+      Content.upsert_document(
+        c.type,
+        %{"doc_id" => "drafts." <> c.doc_id, "title" => title, "content" => content},
+        @dataset
+      )
+  end
+
+  # The History dialog's Restore of the document's first revision.
+  defp restore_first(view, c) do
+    rev = Content.list_revisions(c.doc_id, c.type, @dataset, limit: 30) |> List.last()
+    EditorPost.press(view, "restore-revision", %{"id" => rev.id})
+    render(view)
+  end
+
   # The pick `TreeCodelistField.pick/3` sends the page.
   defp tree_pick(view, code) do
     send(
@@ -173,6 +197,76 @@ defmodule BarkparkWeb.Studio.DeskRemoteSavePathsTest do
       told(b)
       send_post(b, "cover", %{"cover" => "/media/files/b.png"})
       assert stored(c, "cover") == "/media/files/b.png"
+
+      assert settled(a) == "Updated by another user"
+    end
+  end
+
+  describe "a write is read from the write itself, not from the post" do
+    # A Restore writes through `Content`: the save state stays as it was, and
+    # the restored text has no `_target`.
+    test "a Restore of the day on a fresh open, then another editor's day", c do
+      draft(c, %{"day" => "2026-05-05"})
+      a = open(c)
+      b = open(c)
+      restore_first(a, c)
+      assert stored(c, "day") == "2026-01-01"
+
+      told(b)
+      send_post(b, "day", %{"day" => "2026-07-07"})
+      assert stored(c, "day") == "2026-07-07"
+
+      assert settled(a) == "Updated by another user"
+    end
+
+    test "a Restore of the title on a fresh open, then another editor's post with no base", c do
+      draft(c, %{}, "Hello there")
+      a = open(c)
+      b = open(c)
+      restore_first(a, c)
+      assert stored(c, "title") == "Hello world"
+
+      told(b)
+      send_post(b, "title", %{"title" => "Hello there B"})
+      assert stored(c, "title") == "Hello there B"
+
+      assert settled(a) == "Updated by another user"
+    end
+
+    test "typing, then a Restore of the title: the restore is what is kept", c do
+      a = open(c)
+      b = open(c)
+      send_post(a, "title", %{"title" => "Hello there"})
+      told(b)
+      restore_first(a, c)
+      assert stored(c, "title") == "Hello world"
+
+      told(b)
+      send_post(b, "title", %{"title" => "Hello there B"})
+      assert stored(c, "title") == "Hello there B"
+
+      assert settled(a) == "Updated by another user"
+    end
+
+    # Enter in a form whose only text input is the title submits it: the page
+    # sends `save` alone, with no `_target` (LiveView drops the debounced
+    # autosave).
+    test "the form's submit (Enter), then another editor's post with no base", c do
+      a = open(c)
+      b = open(c)
+
+      a
+      |> element("#editor-form")
+      |> render_submit(%{
+        "doc" => Map.merge(form_of(a), %{"title" => "Hello world A7"}),
+        "_bp_seen" => "{}"
+      })
+
+      assert stored(c, "title") == "Hello world A7"
+
+      told(b)
+      send_post(b, "title", %{"title" => "Hello world B3"})
+      assert stored(c, "title") == "Hello world B3"
 
       assert settled(a) == "Updated by another user"
     end

@@ -368,7 +368,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           |> ours()
           |> after_restore(event, before)
           |> JustSaved.after_write(before)
-          |> RemoteSave.after_write(socket, params)
+          |> RemoteSave.after_write(socket, params, event)
         else
           {:halt, socket} -> {:noreply, socket}
         end
