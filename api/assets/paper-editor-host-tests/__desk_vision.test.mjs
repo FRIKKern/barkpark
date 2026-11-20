@@ -44,7 +44,7 @@ const words = {
 };
 const attrs = Object.entries(words).map(([k, v]) => `data-t-${k}="${v}"`).join(" ");
 const TODAY = `v${new Date().toISOString().split("T")[0]}`;
-doc.body.innerHTML = `<div id="desk-panes"><div id="dk-vision" class="dk-vision" data-desk-vision data-scope="/w/a/p/b" data-dataset="production" ${attrs}>
+doc.body.innerHTML = `<div data-phx-main><div id="desk-panes"><div id="dk-vision" class="dk-vision" data-desk-vision data-scope="/w/a/p/b" data-dataset="production" ${attrs}>
   <select data-vision-dataset><option value="production" selected>production</option><option value="staging">Staging (staging)</option><option value="locked" disabled>locked</option></select>
   <select data-vision-version><option value="v1">v1</option><option value="vX">vX</option><option value="v2025-02-19">v2025-02-19</option><option value="${TODAY}" selected>${TODAY}</option><option value="other">Other</option></select>
   <label data-vision-custom hidden><span>Custom API version</span><input value="v" aria-invalid="true"></label>
@@ -60,7 +60,7 @@ doc.body.innerHTML = `<div id="desk-panes"><div id="dk-vision" class="dk-vision"
     <footer><span data-vision-ms>Execution: n/a</span><span data-vision-total>End-to-end: n/a</span>
     <span data-vision-save hidden><a href="#" download="vision-production.json" data-vision-json>JSON</a></span></footer></section>
   <div role="status" data-testid="announcer" data-vision-said></div>
-</div></div>`;
+</div></div></div>`;
 // The desk hook's push (bp-desk.js sets it on #desk-panes): every event the page sends the socket.
 const pushed = [];
 doc.getElementById("desk-panes").bpPush = (event, payload) => pushed.push([event, JSON.parse(JSON.stringify(payload))]);
@@ -471,6 +471,15 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   hear({ id: pushed.at(-1)[1].id, kind: "closed" });
   assert.equal(out.querySelector("[role=alert]").textContent, "The listener closed");
   ds.value = "production";
+
+  // The socket drops while listening: its Listen ended with the LiveView, so the listener closed.
+  $("[data-phx-main]").classList.add("phx-connected");
+  click(listen);
+  assert.equal(listen.getAttribute("aria-pressed"), "true");
+  $("[data-phx-main]").classList.replace("phx-connected", "phx-disconnected");
+  await settle();
+  assert.equal(out.querySelector("[role=alert]").textContent, "The listener closed", "a dropped socket closes the listener");
+  assert.equal(listen.getAttribute("aria-pressed"), "false");
 
   // Params that are not an object: Listen waits and sends nothing, as Fetch does.
   pushed.length = 0;

@@ -113,5 +113,23 @@
     });
   });
 
+  // The socket dropped: its Listen ended with the LiveView it ran in, so the listener
+  // closed, as TanStack says when its stream ends. Listen starts a new one.
+  var dropped = function () {
+    document.querySelectorAll("[data-desk-vision]").forEach(function (root) {
+      if (live(root)) heard(root, { id: root.__listen.id, kind: "closed" });
+    });
+  };
+  var watch = function () {
+    var main = document.querySelector("[data-phx-main]");
+    if (!main || main.__visionWatched || typeof MutationObserver !== "function") return;
+    main.__visionWatched = true;
+    new MutationObserver(function () {
+      if (main.classList.contains("phx-disconnected") || main.classList.contains("phx-error")) dropped();
+    }).observe(main, { attributes: true, attributeFilter: ["class"] });
+  };
+  watch();
+  document.addEventListener("phx:page-loading-stop", watch);
+
   window.BarkparkDeskVisionListen = { KEEP: KEEP, start: start, stop: stop, live: live, button: button, heard: heard };
 })();
