@@ -50,15 +50,15 @@ function editInSource(canvas, at) {
 
 const mounted = [];
 try {
-  // 1) A callout with a body: the editor writes an edit inside it over its own words
-  //    (case 4), so source mode opens read-only, names that callout, and a key typed in
+  // 1) A callout with a body: Markdown cannot carry the body, so source mode opens
+  //    read-only, shows the callout as its stored block, names it, and a key typed in
   //    another paragraph sends nothing; the stored callout keeps its text and its body.
   {
     const { canvas, batches, server } = await mount([paragraph("p1", "Elsewhere"), callout()]);
     mounted.push(canvas);
     const seen = editInSource(canvas, "Elsewhere".length);
     assert.equal(seen.readOnly, true, "source mode opens read-only on a callout with a body");
-    assert.match(seen.value, /^Elsewhere\n\n> \[!note\]/, "it shows the Markdown");
+    assert.match(seen.value, /^Elsewhere\n\n<!--bp:block \{"id":"c1","type":"callout"/, "it shows the Markdown, the callout as its stored block");
     assert.equal(seen.notice, "Read only: Markdown cannot carry the body of block 2, a callout, yet.",
       "one plain line says why and names the callout");
     assert.deepEqual(batches, [], "no op is sent");
@@ -93,9 +93,8 @@ try {
     assert.deepEqual(server[0], { ...title(), text: "Keyboard!" }, "the save keeps the role");
   }
 
-  // 4) One key typed inside the callout. On main the save wrote the body's text over
-  //    the callout's own "head words" (the rich editor does the same: task-6a8137419e0153e4).
-  //    Read-only, nothing is sent.
+  // 4) One key typed at the end of the source, after the callout. Read-only, nothing is
+  //    sent.
   {
     const { canvas, batches, server } = await mount([paragraph("p1", "Elsewhere"), callout()]);
     mounted.push(canvas);

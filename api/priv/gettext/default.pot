@@ -6332,6 +6332,11 @@ msgstr ""
 msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:831
+#, elixir-autogen, elixir-format
+msgid "Read only: this callout has a body, which the editor cannot edit yet."
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
 msgid "stack"

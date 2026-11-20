@@ -123,7 +123,7 @@ const CODEC_EXPORTS = [
 assert.deepEqual(Object.keys(codecs), CODEC_EXPORTS, "codec leaf namespace stays exact");
 
 const DECLARATIONS = [
-  "calloutBodyInline", "calloutBlockToNode", "calloutNodeToBlock", "calloutNodeToPatch",
+  "calloutHasBody", "calloutBlockToNode", "calloutNodeToBlock", "calloutNodeToPatch",
   "calloutNodeChanged", "stableCalloutKey", "noteScalarText", "noteNoRichShadow",
   "noteInlineTerminal", "noteFieldState", "noteState", "flattenInlineText",
   "flattenInlineNode", "noteNodeBodyText", "noteBlockToNode", "noteNodeToBlock",
