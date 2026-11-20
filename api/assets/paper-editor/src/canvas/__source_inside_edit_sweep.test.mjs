@@ -43,7 +43,7 @@ import { docToBlocks } from "./run-convert.js";
 import { sentinelRefusal, settledBlocks, sourceSaved, sourceStored, sourceWallLoss } from "./source-save.js";
 import { canonicalJSON } from "./projection-json.js";
 import { clampLockedPrefix, realignAcrossCommits } from "./source-realign.js";
-import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
+import { jsonDepth, MAX_VALUE_DEPTH, sharedFixtureWalk } from "../__source_wall_goldens.mjs";
 import { blocksToMarkdown, changedSentinel, firstLoss, markdownToBlockSpans, markdownToBlocks } from "../markdown.js";
 import { readerInline } from "../markdown/reader-inline.js";
 import { SENTINEL_CLOSE, SENTINEL_OPEN } from "../markdown/shared.js";
@@ -53,7 +53,11 @@ const TYPED = "Ж";
 
 function papers() {
   const out = [];
-  for (const [name, block] of sourceWallGoldens()) out.push([name, [block]]);
+  // Every document of the shared fixtures, read by the same walk the wall's fixture
+  // test pins, but those past the value-depth limit, which no Paper can hold.
+  for (const [name, blocks] of sharedFixtureWalk().docs) {
+    if (jsonDepth({ blocks }) <= MAX_VALUE_DEPTH) out.push([`goldens/${name}`, blocks]);
+  }
   for (const dir of [".demo-content/papers", ".demo-content/repo-papers", "api/test/support/fixtures/bpml",
     "api/test/support/fixtures/portable-doc-validate/valid"]) {
     for (const name of readdirSync(join(REPO, dir)).sort()) {

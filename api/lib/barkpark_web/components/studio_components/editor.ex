@@ -834,7 +834,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <.cross_violations_banner violations={@cross_violations} />
           <.doc_conflict_banner
             conflict={@doc_conflict}
-            disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.readonly?(@parent_assigns)}
+            disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
           />
           <.paper_halt_banner reason={@paper_halt} />
 

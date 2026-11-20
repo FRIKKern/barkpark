@@ -184,7 +184,7 @@
   "Pullquote": "Uthevet sitat",
   "Quote": "Sitat",
   "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.": "Bare lesing: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}) ennå.",
-  "Read only: this callout has a body, which the editor cannot edit yet.": "Bare lesing: denne merknadsboksen har en brødtekst som redigereren ikke kan redigere ennå.",
+  "Read only: this callout has a body, which the editor cannot edit yet.": "Bare lesing: denne merknadsboksen har en brødtekst som redigeringsverktøyet ikke kan endre ennå.",
   "Recommendation: ": "Anbefaling: ",
   "Reference": "Referanse",
   "Remove": "Fjern",

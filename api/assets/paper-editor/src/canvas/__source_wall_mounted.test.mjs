@@ -13,6 +13,7 @@
 // Run: node src/canvas/__source_wall_mounted.test.mjs
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mount, paragraph, watchValueWrites } from "./source-flush-mounted-harness.mjs";
 import { sourceSaved } from "./source-save.js";
 import { runToOps, runToTiptap } from "./run-convert.js";
@@ -196,7 +197,25 @@ try {
     assert.equal(lossy.batches.length, 1, "nothing more is sent");
   }
 
-  console.log("source wall mounted: 8 cases passed");
+  // 9) The shared carrier list (goldens/nested-list-carriers.json): an item with an id,
+  //    a text fallback and a key the editor does not know, and lists nested under items.
+  //    The save cannot give its items back, so source mode opens read-only with this
+  //    line, and a key typed there sends nothing (__source_wall_fixtures.test.mjs lists
+  //    the file as refused on items[0]).
+  {
+    const carriers = JSON.parse(readFileSync(new URL("../../../../priv/portable_doc/goldens/nested-list-carriers.json", import.meta.url), "utf8")).blocks;
+    const { canvas, batches, server } = await mount(carriers);
+    mounted.push(canvas);
+    const seen = editInSource(canvas, "end");
+    assert.equal(seen.readOnly, true, "source mode opens read-only on the carrier list");
+    assert.equal(seen.notice, "Read only: Markdown cannot carry the items of block 1, a list, yet.",
+      "a carrier list opens read-only with the notice naming its items");
+    assert.deepEqual(batches, [], "no op is sent");
+    assert.deepEqual(server, JSON.parse(readFileSync(new URL("../../../../priv/portable_doc/goldens/nested-list-carriers.json", import.meta.url), "utf8")).blocks,
+      "the stored list is unchanged");
+  }
+
+  console.log("source wall mounted: 9 cases passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
 }

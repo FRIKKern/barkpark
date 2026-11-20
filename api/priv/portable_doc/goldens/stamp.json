@@ -100,7 +100,7 @@
     "from-markdown/unsafe-image-keeps-text.json": "0a29bdfa880f241911693ff07bfadc255d02572393b88678ef6c8137e7f19358",
     "from-markdown/unsafe-link-keeps-text.json": "c94b74bf2fcb1fa6e7d23fa830528c1adcab61629f3fcff3a7640e41f1deb6c7",
     "i18n/paper-canvas.en.json": "b73b7b4a8896343796f8dec133b7792a48fd364cd6075ac916e21adc5f66d727",
-    "i18n/paper-canvas.nb-NO.json": "7c36b8891e41dff2d6051c1479b90b139841712a6adb029f87d63cfe393a3d73",
+    "i18n/paper-canvas.nb-NO.json": "ff135c6a205ed96dbae81a87e8c9fa5b31978212a877904f30f1f6f66f464923",
     "limit-docs.json": "ee84d5c2edc8bfc634aa5a3d8f7f09bda566760c075d59255d7db3cb6b53d1c3",
     "limits/bar-chart-number-past-the-range.golden.json": "f5cf186a1dc6c0226a490735fa4ff2ea49e4d34477c310eff2122a529d67a671",
     "limits/bar-chart-value-with-many-digits.golden.json": "c0d6c24ad8a5e453d3a15bc0e2f6c79a9d67422a53fc53f3b55150b175e5547f",
@@ -174,7 +174,7 @@
     "pages/light-en.html": "4d95e3fe19ad911792fbc194db29d0134f981beaf09599561d7819a127742b11",
     "pages/light-nb-NO.html": "0562742bbef2f69bb4ac17ab8ca2c8333c477d0147aa8fa8a389017f1e3eefe0"
   },
-  "gettext_sha256": "6122d347d1f0aaa09771b65c872647102ae4b3e21015cd0806ecfbca7bf05533",
+  "gettext_sha256": "891bac5ed945463e39db68e16aa8a09b671df330a17b752b9f87c63ffedaa2d3",
   "inputs": [
     "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
     "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",

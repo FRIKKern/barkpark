@@ -41,7 +41,13 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
   Sanity's): one avatar per other person in the document (several tabs are
   one person; you are not shown), their initials on their colour, up to
   three; past that a counter of the rest before the last two. Alone, there
-  is none.
+  is none. On a phone under 390 px (touch) the stack from three others on is
+  a counter and the last avatar, so the pills keep their 44 px beside the
+  header's buttons (at 360 px three avatars left them 37 px). The phone
+  counter comes first in the markup and is hidden elsewhere, so the avatar
+  after it is drawn as the stack's first (no overlap margin). A counter's
+  hover title names the people it stands for, as TanStack's, and the
+  stack's label gives the count and every name.
 
   The Studio's toolbar row used to say this with its badge and presence dots.
   The desk hides that row (`Desk.Style`), so they live here now.
@@ -76,6 +82,12 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
       @media (max-width: 480px) and (pointer: coarse) {
         .dk .dk-chips .dk-chip { box-sizing: border-box; flex: 0 1 auto; width: 44px; min-width: 0; padding-left: 6px; padding-right: 6px; gap: 6px; }
       }
+      .dk .dk-chips .p-avatar.more.p-avatar-phone { display: none; }
+      .dk .dk-chips .p-avatar-phone + .p-avatar { margin-left: 0; }
+      @media (max-width: 389px) and (pointer: coarse) {
+        .dk .dk-chips .p-avatars:has(> .p-avatar-phone) > .p-avatar:not(:last-child) { display: none; }
+        .dk .dk-chips .p-avatars > .p-avatar.more.p-avatar-phone { display: inline-grid; }
+      }
     </style>
     <span class="dk-chips" data-desk-status>
       <span
@@ -85,7 +97,20 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
         role="img"
         aria-label={presence_label(@presences)}
       >
-        <span :if={length(@presences) > 3} class="p-avatar more">{length(@presences) - 2}</span>
+        <span
+          :if={length(@presences) > 2}
+          class="p-avatar more p-avatar-phone"
+          title={names(Enum.drop(@presences, -1))}
+        >
+          {length(@presences) - 1}
+        </span>
+        <span
+          :if={length(@presences) > 3}
+          class="p-avatar more"
+          title={names(Enum.drop(@presences, -2))}
+        >
+          {length(@presences) - 2}
+        </span>
         <span
           :for={p <- if(length(@presences) > 3, do: Enum.take(@presences, -2), else: @presences)}
           class="p-avatar"
@@ -210,10 +235,17 @@ defmodule BarkparkWeb.Studio.Desk.DocStatus do
     end
   end
 
-  defp presence_label(presences) do
-    case Enum.map(presences, &Map.get(&1, :name, "User")) do
-      [one] -> gettext("%{name} is editing", name: one)
-      many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
-    end
-  end
+  defp presence_label([one]), do: gettext("%{name} is editing", name: name(one))
+
+  defp presence_label(presences),
+    do:
+      gettext("%{count} others are editing: %{names}",
+        count: length(presences),
+        names: names(presences)
+      )
+
+  # The people a counter stands for, by name: its hover title, as TanStack's.
+  defp names(presences), do: Enum.map_join(presences, ", ", &name/1)
+
+  defp name(presence), do: Map.get(presence, :name, "User")
 end
