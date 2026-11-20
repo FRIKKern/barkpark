@@ -15664,6 +15664,31 @@ msgstr "API-versjon"
 msgid "Custom API version"
 msgstr "Egendefinert API-versjon"
 
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params"
+msgstr "Parametre"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON"
+msgstr "Parametrene er ikke gyldig JSON"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON: %{detail}"
+msgstr "Parametrene er ikke gyldig JSON: %{detail}"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params must be a JSON object, like {\"title\": \"post\"}"
+msgstr "Parametrene må være et JSON-objekt, som {\"title\": \"post\"}"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Param $%{name} referenced, but not provided"
+msgstr "Parameteren $%{name} er brukt, men ikke gitt"
+
 #: lib/barkpark_web/components/fields/localized_tabs.ex
 #, elixir-autogen, elixir-format
 msgid ", has text"
