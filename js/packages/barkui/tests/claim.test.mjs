@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest'
 import { MATCH_MIN } from '../check/reading.mjs'
 import { ladderClaim } from '../check/plants.mjs'
 
-const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+const readme = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
 
-describe("README.md's claim about a label", () => {
+describe("docs/PARTS.md's claim about a label", () => {
   it('states the limit the check holds a label to', () => {
     expect(readme).toContain(`A label must match at ${MATCH_MIN} or more`)
     expect(readme).toContain(`Under ${MATCH_MIN} (\`MATCH_MIN\``)
@@ -20,7 +20,7 @@ describe("README.md's claim about a label", () => {
   })
 })
 
-describe("README.md's list of what part.css may condition on", () => {
+describe("docs/PARTS.md's list of what part.css may condition on", () => {
   it('names every @media condition the parsed-sheet check allows, and the shared keyframes', async () => {
     const { KEYFRAMES, MEDIA } = await import('../build/vocabulary.mjs')
     const table = readme.slice(readme.indexOf('## What part.css may condition on'), readme.indexOf('## What the check proves about a label'))
@@ -32,7 +32,7 @@ describe("README.md's list of what part.css may condition on", () => {
 })
 
 describe('how many parts the check holds', () => {
-  it("makes the ceilings from the readings, holds them under the steps' limits in barkui.yml, and README.md's passage word for word", async () => {
+  it("makes the ceilings from the readings, holds them under the steps' limits in barkui.yml, and docs/PARTS.md's passage word for word", async () => {
     const c = await import('../check/capacity.mjs')
     const p = c.plan()
     const workflow = readFileSync(new URL('../../../../.github/workflows/barkui.yml', import.meta.url), 'utf8')
@@ -51,7 +51,7 @@ describe('how many parts the check holds', () => {
     expect(p.ceilingFor(p.PER_JOB + 1)).toBeGreaterThanOrEqual(p.STEP_MINUTES * 60)
     expect(p.SELFTEST_CEILING).toBeLessThanOrEqual(p.SELFTEST_MOST * p.SELFTEST_STEP_MINUTES * 60)
     // The passage between the marks is exactly what the numbers make, and any other input makes another.
-    const raw = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+    const raw = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8')
     const [a, b] = c.MARKS.map((m) => raw.indexOf(m))
     const passage = raw.slice(a + c.MARKS[0].length, b).trim()
     expect(a >= 0 && b > a).toBe(true)

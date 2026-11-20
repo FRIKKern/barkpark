@@ -83,8 +83,8 @@ describe('every name barkui.yml can render has a row in .github/required-checks.
     expect(groupRows.sort()).toEqual(groupNames(MOST_GROUPS).sort())
   })
 
-  it("the readme's line on outgrowing the rows names MOST_GROUPS and MOST_PARTS as they are", () => {
-    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+  it("docs/PARTS.md's line on outgrowing the rows names MOST_GROUPS and MOST_PARTS as they are", () => {
+    const readme = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
     expect(readme).toContain(`The check runs at most ${MOST_GROUPS} groups (\`MOST_GROUPS\` in \`check/jobs.mjs\`), so at most ${MOST_PARTS} parts`)
     expect(readme).toContain(`one row for each of groups 1 to ${MOST_GROUPS};`)
     expect(readme).toContain(`Past ${MOST_PARTS} parts the plan job refuses`)

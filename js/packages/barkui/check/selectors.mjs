@@ -12,7 +12,7 @@ export const PINNED = ['hover', 'active', 'focus-visible']
 // A pseudo-class a person changes by clicking or typing (:checked, :placeholder-shown, :enabled and the like) is
 // not here: it comes back as a state, driven and read like :hover, when a part first needs it.
 export const STATIC = ['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type']
-// The pseudo-elements the check reads (README "Read").
+// The pseudo-elements the check reads (docs/PARTS.md "Read").
 export const PSEUDO_ELEMENTS = ['before', 'after', 'marker', 'placeholder']
 
 /** One selector list read into complex selectors, each a list of compounds: { nest, pseudos: [{ name, element, depth }] }. */
