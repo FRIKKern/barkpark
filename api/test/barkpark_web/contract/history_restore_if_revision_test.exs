@@ -3,8 +3,9 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   A history restore that names the state it was asked against is refused when
   the document has moved on, and writes nothing (task-e89ff0279fb83fc6). The
   state is `ifRevisionID` ("I saw this rev", the same fence a `/v1` mutate patch
-  takes) or `ifAbsent: true` ("I saw no document"); naming both is a 400. A
-  restore that names no state restores as before. Studio's row "a late restore after newer edits is
+  takes) or `ifAbsent: true` ("I saw no document"). Any other value of a sent
+  field, or both at once, is a 400 and writes nothing. A restore that names no
+  state restores as before. Studio's row "a late restore after newer edits is
   refused and keeps them" (barkpark-studio, test/a012-restore-stuck) holds the
   same order from the browser.
   """
@@ -256,6 +257,39 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
     assert rev_of("drafts.both") == current
   end
 
+  # Each wrong shape goes through the one refusal: a 400 `malformed`, nothing written.
+  @malformed [
+    {"ifRevisionID a number", %{"ifRevisionID" => 5}},
+    {"ifRevisionID a float", %{"ifRevisionID" => 5.5}},
+    {"ifRevisionID false", %{"ifRevisionID" => false}},
+    {"ifRevisionID a boolean", %{"ifRevisionID" => true}},
+    {"ifRevisionID a list", %{"ifRevisionID" => ["rev"]}},
+    {"ifRevisionID a map", %{"ifRevisionID" => %{"rev" => "x"}}},
+    {"ifRevisionID empty", %{"ifRevisionID" => ""}},
+    {"ifRevisionID null", %{"ifRevisionID" => nil}},
+    {"ifAbsent false", %{"ifAbsent" => false}},
+    {"ifAbsent null", %{"ifAbsent" => nil}},
+    {"ifAbsent a string", %{"ifAbsent" => "true"}},
+    {"ifAbsent a number", %{"ifAbsent" => 1}}
+  ]
+
+  for {{name, body}, n} <- Enum.with_index(@malformed) do
+    @body body
+    @doc_id "shape-#{n}"
+    test "#{name} is a 400 malformed, and nothing is written", %{conn: conn} do
+      %{current: current, revision: revision} = edited_draft(@doc_id)
+      before = length(Content.list_revisions(@doc_id, "post", "test"))
+
+      resp = restore(conn, revision.id, @body)
+
+      assert resp.status == 400
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "malformed"
+      assert title_of("drafts.#{@doc_id}") == "Words B"
+      assert rev_of("drafts.#{@doc_id}") == current
+      assert length(Content.list_revisions(@doc_id, "post", "test")) == before
+    end
+  end
+
   # Two ifAbsent restores of one deleted document, driven by order: the second
   # (over HTTP) has passed its compare when the first (`Content.restore_revision`
   # with `if_absent: true`) runs and lands, at the named seam of the second's
@@ -346,15 +380,8 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
   # locked re-read in `Content.InsertOnly.insert/4` is the only guard.
   test "two ifAbsent restores with no dataset_id: the first lands before the second's lock, and the re-read refuses",
        %{conn: _conn} do
-    {:ok, ws} =
-      Barkpark.Tenancy.create_workspace(%{
-        slug: "restore-null-#{System.unique_integer([:positive])}",
-        name: "No project"
-      })
-
+    ws = Barkpark.TenancyFixtures.create_workspace!()
     scope = [workspace_id: ws.id]
-    schema = %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []}
-    Content.upsert_schema(schema, "test", scope)
     doc = "drafts.race-null"
 
     {:ok, _} =

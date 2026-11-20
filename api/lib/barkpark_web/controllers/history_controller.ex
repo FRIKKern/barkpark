@@ -92,8 +92,10 @@ defmodule BarkparkWeb.HistoryController do
   # `ifRevisionID` ("I saw this rev", the same fence a `/v1` mutate patch takes)
   # or `ifAbsent: true` ("I saw no document"). A restore naming a state the
   # document has moved on from is refused 412 `precondition_failed` and writes
-  # nothing; `Content.restore_revision/4` holds the compare. Naming both, or an
-  # `ifAbsent` that is not a boolean, is a 400 `malformed`.
+  # nothing; `Content.restore_revision/4` holds the compare. `ifRevisionID` must
+  # be a non-empty string and `ifAbsent` exactly `true`; any other value of a sent
+  # field (null included), or both fields at once, is a 400 `malformed` and writes
+  # nothing. A field not sent is no guard.
   def restore(conn, %{"dataset" => dataset, "id" => id} = params) do
     case restore_fence(params) do
       {:ok, fence} -> restore_with(conn, dataset, id, params, fence)
@@ -147,15 +149,24 @@ defmodule BarkparkWeb.HistoryController do
   defp get_type(_conn, params), do: params["type"]
 
   defp restore_fence(params) do
-    if_rev = params["ifRevisionID"]
-    if_rev = if is_binary(if_rev) and if_rev != "", do: if_rev
+    case {Map.fetch(params, "ifRevisionID"), Map.fetch(params, "ifAbsent")} do
+      {:error, :error} ->
+        {:ok, []}
 
-    case {if_rev, Map.get(params, "ifAbsent")} do
-      {nil, absent} when absent in [nil, false] -> {:ok, []}
-      {nil, true} -> {:ok, [if_absent: true]}
-      {rev, absent} when absent in [nil, false] -> {:ok, [if_rev: rev]}
-      {_rev, true} -> {:error, "send ifRevisionID or ifAbsent, not both"}
-      {_, other} -> {:error, "ifAbsent must be true or false, got: #{inspect(other)}"}
+      {{:ok, _}, {:ok, _}} ->
+        {:error, "send ifRevisionID or ifAbsent, not both"}
+
+      {{:ok, rev}, :error} when is_binary(rev) and rev != "" ->
+        {:ok, [if_rev: rev]}
+
+      {{:ok, rev}, :error} ->
+        {:error, "ifRevisionID must be a non-empty string, got: #{inspect(rev)}"}
+
+      {:error, {:ok, true}} ->
+        {:ok, [if_absent: true]}
+
+      {:error, {:ok, other}} ->
+        {:error, "ifAbsent must be true, got: #{inspect(other)}"}
     end
   end
 
