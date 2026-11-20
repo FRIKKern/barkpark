@@ -76,6 +76,20 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
     if is_binary(key) and recorded?(assigns[:editor_schema], key), do: {key, nil}
   end
 
+  # A pick or a Remove in a tree codelist names its input (`doc[subject]`,
+  # `doc[pair].a`): the step is its top-level field's, a codelist of its own
+  # or the object or list it sits in.
+  def target("tree_codelist_pick", %{name: name}, assigns) when is_binary(name) do
+    schema = assigns[:editor_schema]
+
+    with [key | _] when is_binary(key) <- StudioLive.parse_path(name),
+         true <- recorded?(schema, key) or match?(%{"type" => "codelist"}, field(schema, key)) do
+      {key, nil}
+    else
+      _ -> nil
+    end
+  end
+
   def target(_event, _params, _assigns), do: nil
 
   @doc """

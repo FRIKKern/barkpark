@@ -66,7 +66,7 @@ neither base.css nor a part mixes a tint of its own.
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css lint.
 - `node check/shots.mjs <dir>` writes light and dark shots of the built page.
 
-In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`) holds that state for viewing (a
+In the showroom only, `data-pin="hover"` (or `active`, `focus-visible`, `checked`) holds that state for viewing (a
 pressed row pins `hover active`, as a real pointer press is both), and `data-paint-free` marks an
 element that carries no paint of its own. It excuses that element (never
 its children) from the "takes the skin's values" comparison only. It must truly carry none: transparent
@@ -84,10 +84,14 @@ matches; a rule or a pair nobody judges fails the part by name.
   (`element.matches` with the selector the page holds, inside the media conditions that hold in that
   page). After a full run, a rule that sets anything and applied at no judged moment fails the part as
   "a rule nothing read", naming its selector, and so does a state pair (below) that no reading saw.
-- States, per pair (`check/states.mjs`). For every rule that holds `:hover` or `:active`, and every live
+- States, per pair (`check/states.mjs`). For every rule that holds `:hover`, `:active` or `:checked`, and every live
   control (outside the inert rows, not a pinned row) that matches the rest of its selector, the check
   produces that state on that control with the real pointer, at its centre or held down there (a real
-  press is both), in the first skin, light, on base at 1440px. Every computed property of the control,
+  press is both), or for `:checked` a click there, in the first skin, light, on base at 1440px. Only a
+  checkbox or a radio is driven to `:checked`, and only one not checked at rest: one checked at rest is
+  read in every view as it stands, and the check puts every box and radio back as it was after a click. A
+  drive is judged, not kept: what it leaves changed in the stage beyond that (an attribute, `indeterminate`, a
+  value, a child or its text, as a demo's handler might) fails the part by name. Every computed property of the control,
   its `::before` and `::after` and everything inside it must then be what the same control shows with
   that state pinned, and nothing from the control up to the stage may change: so the control pinned is
   the control in that state. Its change must also be exactly the change of some pinned row with the same
@@ -159,11 +163,11 @@ matches; a rule or a pair nobody judges fails the part by name.
   Every rule the text writes must be one the browser read (`check/sheet-text.mjs`): a rule it drops,
   for a selector or condition it does not know, is refused by name, since nothing would judge it.
   Selectors are read as the browser writes them back: a pinned state (`:hover`, `:active`,
-  `:focus-visible`, in any case) may stand only on the element the rule styles, never on a host,
+  `:focus-visible`, `:checked`, in any case) may stand only on the element the rule styles, never on a host,
   ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
-  come from a short list of structure (`check/selectors.mjs`): one a person changes by clicking or
-  typing (`:checked`, `:placeholder-shown`, `:enabled` and the like) is refused until a part needs it,
-  when it comes back as a state, driven and read like `:hover`. Pseudo-elements are the four the check
+  come from a short list of structure (`check/selectors.mjs`): any other a person changes by clicking or
+  typing (`:placeholder-shown`, `:user-invalid`, `:focus-within`, `:enabled` and the like) is refused until a
+  part needs it, when it joins the pinned states with a way for the check to drive it, as `:checked` did. Pseudo-elements are the four the check
   reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
   the page loads it, in the same browser, and each part's section must hold, rule by rule and with its
   states pinned, what was read from that part alone; a difference refuses the run, naming the part.
@@ -229,7 +233,7 @@ refused on the sheet as the browser parses it (`check/cssom.mjs`) before any lig
 | Surface | base, raised, sunken, primary, inverse | those values, and `[data-surface]` selectors | every skin and scheme, at 1440px and at 390px |
 | Width | 1440px, 390px | `@media (max-width: 600px)`, inside which only layout and type may change: no paint, no decoration, no custom property | 390px with every skin, scheme and surface ("phone") |
 | Motion | reduced, allowed | `@media (prefers-reduced-motion: …)`, inside which only transition, animation and scroll-behavior may change; animation names from the shared keyframes, which only turn their element | every light reads with motion reduced; the drawn readings run again with motion allowed in one skin, light, on every surface at 1440px and on base at 390px, animations held finished and halfway |
-| State | as `example.html` shows it, and as the real pointer and the press steps make it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active` only on the element a rule styles | each pinned row (`data-pin`) and each state shown at rest (the pending row) with every skin, scheme, surface and width. Each real state, on every live control a state rule matches, held to equal that control pinned and read as drawn so in the first skin, light, on base at 1440px, and held to change exactly as a pinned row changes, which carries it to every other view ("every skin"). Each press step's result read as drawn in that same view ("pressed by real keys") |
+| State | as `example.html` shows it, and as the real pointer and the press steps make it | selectors on the part's own markup (`[data-disabled]` and the like); `:hover`, `:active`, `:checked` only on the element a rule styles | each pinned row (`data-pin`) and each state shown at rest (the pending row) with every skin, scheme, surface and width. Each real state, on every live control a state rule matches, held to equal that control pinned and read as drawn so in the first skin, light, on base at 1440px, and held to change exactly as a pinned row changes, which carries it to every other view ("every skin"). Each press step's result read as drawn in that same view ("pressed by real keys") |
 | Script | on, off | not at all (`@media (scripting)` is refused) | "printed with no script" reads the page as it opens with no script: base surface, 1440px |
 
 What this leaves unread, said plainly. Widths between 390px and 1440px are not rendered; paint cannot
