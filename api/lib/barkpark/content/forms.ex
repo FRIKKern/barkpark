@@ -20,7 +20,6 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.Forms.CodelistShape
   alias Barkpark.Content.Forms.Unset
 
   alias Barkpark.Content.{
@@ -1097,11 +1096,9 @@ defmodule Barkpark.Content.Forms do
   end
 
   # The posted content fields the save reads as edits: a field whose post is
-  # only what the form drew for `snapshot` is dropped, and so is a codelist
-  # field whose post is not a code (`CodelistShape`).
+  # only what the form drew for `snapshot` is dropped.
   defp edits(params, snapshot, schema) do
     params
-    |> CodelistShape.drop_misshapen(schema)
     |> preserve_datetime_values(snapshot, schema)
     |> preserve_untouched_fields(snapshot, schema)
     |> drop_unset()
