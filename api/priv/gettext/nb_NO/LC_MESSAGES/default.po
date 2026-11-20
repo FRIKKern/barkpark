@@ -15708,3 +15708,28 @@ msgstr "Parametrene må være et JSON-objekt, som {\"title\": \"post\"}"
 #, elixir-autogen, elixir-format
 msgid "Param $%{name} referenced, but not provided"
 msgstr "Parameteren $%{name} er brukt, men ikke gitt"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:36
+#, elixir-autogen, elixir-format
+msgid "Global presence"
+msgstr "Global tilstedeværelse"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:37
+#, elixir-autogen, elixir-format
+msgid "Who is here"
+msgstr "Hvem er her"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:53
+#, elixir-autogen, elixir-format
+msgid "No one else is here"
+msgstr "Ingen andre er her"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:54
+#, elixir-autogen, elixir-format
+msgid "Invite people to the project to see their online status."
+msgstr "Inviter folk til prosjektet for å se om de er pålogget."
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:66
+#, elixir-autogen, elixir-format
+msgid "Not in a document"
+msgstr "Ikke i et dokument"

@@ -180,6 +180,7 @@
             current_workspace={assigns[:current_workspace]}
             current_project={assigns[:current_project]}
             grant_scoped_read={assigns[:grant_scoped_read] == true}
+            desk={is_binary(assigns[:desk_base])}
           />
         <% end %>
         <BarkparkWeb.Studio.Desk.UserMenu.menu
