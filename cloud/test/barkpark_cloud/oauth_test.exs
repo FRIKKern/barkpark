@@ -5,13 +5,22 @@ defmodule BarkparkCloud.OAuthTest do
   SAFE identity-linking precedence in `Accounts.get_or_create_user_from_oauth/1`.
   Everything runs through `BarkparkCloud.OAuthStub` — ZERO network calls.
   """
-  # async: false — this module swaps node-global env (`:barkpark_cloud, OAuth`)
-  # to null github's client_secret. That is ONE value for the whole node, so
-  # while it is held `OAuth.enabled?(:github)` is false for EVERY concurrent
-  # test: forcing the interleave red router_oauth_test.exs's callback assertion
-  # AND made github vanish from GET /v1/auth/oauth/providers. Ratchet:
-  # scripts/async_env_seam_scan.exs.
-  use BarkparkCloud.DataCase, async: false
+  # async: TRUE again (hg-w1-async-seam-process-scope-followup). This module used
+  # to swap node-global env (`:barkpark_cloud, OAuth`) to null github's
+  # client_secret — ONE value for the whole node, so while it was held
+  # `OAuth.enabled?("github")` was false for EVERY concurrent test: forcing the
+  # interleave red router_oauth_test.exs's callback assertion AND made github
+  # vanish from GET /v1/auth/oauth/providers in a test that touched neither.
+  #
+  # hg-w1-async-seam-ban-and-scanner fixed that by pinning the module `async:
+  # false`. That is SERIALIZATION, not isolation. `OAuth.config/0` now consults a
+  # process-scoped override first, so the patch below is invisible to every other
+  # process and this module is isolated BY CONSTRUCTION — which is what lets it
+  # run concurrently again. Ratchet: scripts/async_env_seam_scan.exs, which is
+  # satisfied here because there is no `Application.put_env` left to ban.
+  use BarkparkCloud.DataCase, async: true
+
+  import BarkparkCloud.OAuthConfigSandbox
 
   alias BarkparkCloud.{Accounts, Billing, OAuth, OAuthStub}
   alias BarkparkCloud.Accounts.{ExternalIdentity, TeamMembership, User}
@@ -37,15 +46,51 @@ defmodule BarkparkCloud.OAuthTest do
     end
 
     test "a provider with blank creds is excluded" do
-      base = Application.get_env(:barkpark_cloud, OAuth)
-
-      patched =
-        put_in(base[:providers]["github"][:client_secret], nil)
-
-      Application.put_env(:barkpark_cloud, OAuth, patched)
-      on_exit(fn -> Application.put_env(:barkpark_cloud, OAuth, base) end)
+      # Process-scoped, so a concurrent test still sees github enabled. No
+      # on_exit restore is needed for isolation: the override lives in this
+      # process's dictionary and dies with it.
+      patch_oauth_config!(&put_in(&1[:providers]["github"][:client_secret], nil))
 
       assert OAuth.enabled_providers() == ["google"]
+      refute OAuth.enabled?("github")
+    end
+
+    # THE ISOLATION PROPERTY, PROVED DIRECTLY (hg-w1-async-seam-process-scope-followup).
+    #
+    # The old node-global `Application.put_env` made this exact patch visible to
+    # EVERY process — which is how github vanished from
+    # `GET /v1/auth/oauth/providers` in a test that never touched OAuth. This
+    # asserts the replacement does not: same patch, held, while another process
+    # reads the same function.
+    #
+    # No timing, no interleave forcing: the two views are read while the patch is
+    # live, so the assertion is deterministic rather than probabilistic.
+    test "a config patch is invisible to every other process" do
+      parent = self()
+
+      patch_oauth_config!(&put_in(&1[:providers]["github"][:client_secret], nil))
+
+      # THIS process sees the patch...
+      refute OAuth.enabled?("github")
+
+      # ...and a concurrent one does not, while the patch is still held here.
+      task =
+        Task.async(fn ->
+          send(parent, :reading)
+          {OAuth.enabled_providers(), OAuth.enabled?("github")}
+        end)
+
+      assert_receive :reading, 1_000
+      {other_providers, other_github?} = Task.await(task, 5_000)
+
+      assert "github" in other_providers,
+             "the override leaked out of this process — that is the node-global " <>
+               "bug this seam exists to remove, wearing a new name"
+
+      assert other_github?
+
+      # And the patch is STILL in force here afterwards: the other process's read
+      # did not clear it either.
       refute OAuth.enabled?("github")
     end
   end

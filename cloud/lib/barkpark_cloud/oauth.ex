@@ -356,7 +356,50 @@ defmodule BarkparkCloud.OAuth do
       """
   end
 
-  defp config, do: Application.get_env(:barkpark_cloud, __MODULE__, [])
+  # THE PROCESS-SCOPED CONFIG SEAM (hg-w1-async-seam-process-scope-followup).
+  #
+  # Every reader above funnels through here, so overriding this one function
+  # process-scopes `providers/0`, `enabled?/1`, `base_url/0`, `http_client/0` and
+  # `state_secret/0` together — there is no second door to keep in step.
+  #
+  # WHY IT EXISTS. A test that wants "github has no client_secret" used to reach
+  # for `Application.put_env(:barkpark_cloud, OAuth, patched)`, which is ONE value
+  # for the WHOLE NODE. While held, `enabled?("github")` was false for every
+  # concurrent test: forcing the interleave red router_oauth_test.exs's callback
+  # assertion AND made github vanish from `GET /v1/auth/oauth/providers` in a test
+  # that touched neither. The blunt fix was `async: false` on every such module —
+  # correct, but serialization rather than isolation, and it grows with every new
+  # config-seam test.
+  #
+  # A process-dictionary override is invisible to every other process, so the
+  # module can go back to `async: true` and stay isolated BY CONSTRUCTION. Same
+  # shape as `OAuthStub` (cloud/test/support/oauth_stub.ex:19/63) and
+  # `billing_reconcile_isolation_test.exs`'s FailingRegistry, deliberately: one
+  # pattern for process-scoped test seams in this tree, not three.
+  #
+  # PRODUCTION READS ARE UNCHANGED. Nothing in `cloud/lib` ever writes this key —
+  # `Process.get/2` on a never-written key is a bare ETS-free dictionary lookup
+  # returning the default, so the runtime path is `Application.get_env/3` exactly
+  # as before. The writer lives in test support
+  # (`BarkparkCloud.OAuthConfigSandbox`), and the override dies with the process
+  # that set it, so it cannot leak between tests the way node-global env does.
+  #
+  # SCOPE, HONESTLY: the override is seen by the process that set it, not by a
+  # Task it spawns. That is sufficient here — the OAuth readers run in the caller
+  # (the test process, or the request process the router runs in) — and matching
+  # the existing pattern is worth more than a `$callers` walk nothing needs yet.
+  @config_override_key {__MODULE__, :config_override}
+
+  @doc false
+  @spec __config_override_key__() :: {module(), atom()}
+  def __config_override_key__, do: @config_override_key
+
+  defp config do
+    case Process.get(@config_override_key) do
+      nil -> Application.get_env(:barkpark_cloud, __MODULE__, [])
+      override -> override
+    end
+  end
 
   ## Internals — HMAC + constant-time compare (mirrors StripeGateway)
 
