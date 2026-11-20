@@ -744,6 +744,8 @@
       deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
       // The document's undo and redo, Mod+Z and Shift+Mod+Z (bp-desk-undo.js).
       deskScript("data-desk-undo", window.BarkparkDeskUndo);
+      // The navbar Create new's type search (bp-desk-new-doc.js).
+      deskScript("data-desk-new-doc", window.BarkparkDeskNewDoc);
       // Vision's query, result tree and Save (bp-desk-vision.js), on its page only.
       if (root.querySelector("[data-desk-vision]")) deskScript("data-desk-vision-js", window.BarkparkDeskVision);
       hook._onFieldAction = function (e) {

@@ -15688,3 +15688,13 @@ msgstr "Parametrene må være et JSON-objekt, som {\"title\": \"post\"}"
 #, elixir-autogen, elixir-format
 msgid "Param $%{name} referenced, but not provided"
 msgstr "Parameteren $%{name} er brukt, men ikke gitt"
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Search document types"
+msgstr "Filtrér"
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No results for"
+msgstr "Ingen resultater for"

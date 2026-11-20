@@ -254,6 +254,17 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-new-doc-head { display: none; }
       .dk .dk-new-doc-list { display: flex; flex-direction: column; gap: 4px; padding: 4px; overflow: auto; }
       .dk .dk-new-doc .dk-menu-item { min-height: 33px; color: var(--dk-fg); font-weight: 400; }
+      .dk .dk-new-doc:popover-open { display: flex; flex-direction: column; }
+      .dk .dk-new-doc-find { position: relative; flex: none; padding: 8px 8px 8px 13px; border-bottom: 1px solid var(--dk-border); }
+      .dk .dk-new-doc-find .search-icon { position: absolute; left: 11px; top: 50%; translate: 0 -50%; color: var(--dk-muted); pointer-events: none; }
+      .dk .dk-new-doc-find .search-icon > svg { display: block; width: 21px; height: 21px; }
+      .dk .dk-new-doc-find input { box-sizing: border-box; width: 100%; margin: 0; padding: 3px 8px 3px 24px; border: 0; border-radius: 3px; outline: none; background: none; font: inherit; font-size: 13px; line-height: 19px; color: var(--dk-fg); }
+      .dk .dk-new-doc-find input::placeholder { color: var(--dk-placeholder); }
+      .dk .dk-new-doc-find input:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
+      .dk .dk-new-doc-list[hidden], .dk .dk-new-doc-list > [hidden], .dk .dk-new-doc-empty[hidden] { display: none; }
+      .dk .dk-new-doc .dk-new-doc-list > .dk-menu-item:is(:hover, :focus-visible, [aria-selected="true"]):not(:disabled) { background: var(--dk-card-hover); color: var(--dk-fg); }
+      .dk .dk-new-doc-empty { margin: 0; padding: 16px; text-align: center; color: var(--dk-muted); }
+      .dk .dk-new-doc-empty strong { color: var(--dk-fg); font-weight: 600; }
       @media (max-width: 599px) { .dk .dk-new-doc { inset: 12px 12px auto; margin: 0; width: auto; max-width: none; max-height: calc(100dvh - 24px); translate: none; padding: 0 20px 16px; border-radius: 9px; } .dk .dk-new-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0 8px; } .dk .dk-new-doc-head h2 { margin: 0; font-size: 15px; line-height: 21px; font-weight: 600; } }
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border); }
       .dk .dk-skeleton .pane-item { cursor: default; }
@@ -368,6 +379,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
         .dk .dk-split { justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-doc-menu-button { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
         .dk .dk-menu-item { min-height: 44px; }
+        .dk .dk-new-doc-find input { min-height: 44px; }
         .dk .dk-inspect-close, .dk .dk-inspect-tabs [role="tab"] { min-width: 44px; min-height: 44px; }
         .dk .dk-ref { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; min-height: 44px; }
       }
