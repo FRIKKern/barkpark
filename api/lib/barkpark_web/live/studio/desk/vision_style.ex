@@ -60,8 +60,10 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-fetch svg { width: 21px; height: 21px; }
       .dk .dk-vision-fetch > span { display: inline-flex; }
       .dk .dk-vision-fetch > span[hidden] { display: none; }
-      .dk .dk-vision-listen { background: none; color: var(--dk-fg); }
-      .dk .dk-vision-listen:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-vision-listen { background: var(--dk-bg-soft); box-shadow: inset 0 0 0 1px var(--dk-btn2-ring); color: var(--dk-btn2-fg); }
+      .dk .dk-vision-listen svg { color: var(--dk-btn2-icon); }
+      .dk .dk-vision-listen:hover:not([aria-disabled="true"]) { background: var(--dk-btn2-hover-bg); box-shadow: inset 0 0 0 1px var(--dk-btn2-hover-ring); color: var(--dk-btn2-hover-fg); }
+      .dk .dk-vision-listen:hover:not([aria-disabled="true"]) svg { color: var(--dk-btn2-hover-icon); }
       .dk .dk-vision-out > .dk-vision-hint { margin: 0; color: var(--dk-muted); font-size: 12px; line-height: 17px; }
       .dk .dk-vision-result { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 12px 0; }
       .dk .dk-vision-result > .dk-vision-label { padding: 2px 0 4px; }

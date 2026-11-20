@@ -76,6 +76,24 @@ defmodule BarkparkWeb.Studio.DeskVisionListenTest do
     refute root =~ ~r/data-token|bearer|dvl-token-/i
   end
 
+  test "Listen is TanStack's secondary button: a soft fill and a 1 px ring, a step on under the pointer",
+       c do
+    {:ok, _view, html} = live(signed_in(c), c.vision)
+
+    assert html =~
+             ".dk .dk-vision-listen { background: var(--dk-bg-soft); box-shadow: inset 0 0 0 1px var(--dk-btn2-ring); color: var(--dk-btn2-fg); }"
+
+    assert html =~
+             ~S|.dk .dk-vision-listen:hover:not([aria-disabled="true"]) { background: var(--dk-btn2-hover-bg); box-shadow: inset 0 0 0 1px var(--dk-btn2-hover-ring); color: var(--dk-btn2-hover-fg); }|
+
+    # Defined for the whole desk, not the editing pane only: Vision is no pane.
+    assert html =~
+             ".dk { --dk-bg-soft: rgb(246 246 248); --dk-btn2-fg: rgb(78 85 109); --dk-btn2-ring: rgb(230 230 234);"
+
+    assert html =~
+             ~S|html[data-theme="dark"] .dk { --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);|
+  end
+
   test "a change in this workspace and project comes back as the listen stream's mutation", c do
     {:ok, view, _html} = live(signed_in(c), c.vision)
     listen(view, %{"type" => "post", "qs" => "filter%5Btitle%5D=Listen+probe&perspective=drafts"})
