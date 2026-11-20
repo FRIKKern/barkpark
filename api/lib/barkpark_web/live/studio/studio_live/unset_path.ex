@@ -22,7 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.UnsetPath do
     {parent, [key]} = Enum.split(path, -1)
 
     case value_at(form, parent) do
-      %{} = map when is_binary(key) ->
+      %{} = map when is_binary(key) and not is_struct(map) ->
         left = Map.put(map, key, Forms.unset())
 
         if blank?(left) and not in_row?(parent),

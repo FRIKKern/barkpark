@@ -1,3 +1,12 @@
+defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest.Halt do
+  @moduledoc false
+  # Refuses every write while the flag is on ("Save cancelled").
+  def lifecycle_hooks, do: %{before_save: [&__MODULE__.halt/1]}
+
+  def halt(_doc),
+    do: if(:persistent_term.get(__MODULE__, false), do: {:halt, "held"}, else: :ok)
+end
+
 defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
   @moduledoc """
   task-9ae4a10efeab3bc9: a tree codelist over a stored value that is no code
@@ -16,6 +25,7 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
   alias Barkpark.Content.Codelists
   alias Barkpark.Tenancy
   alias BarkparkWeb.EditorPost
+  alias BarkparkWeb.Studio.TreeCodelistKeptRemoveTest.Halt
 
   @dataset "production"
 
@@ -262,5 +272,43 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
              %{"_key" => "ka", "icode" => 7},
              %{"_key" => "kb", "icode" => 7, "box" => %{}}
            ]
+  end
+
+  # Review r4 of #27533, B6: a refused save puts the post into the form
+  # buffer; the unset marker is nil there, so no input draws it and the next
+  # post cannot store it.
+  test "desk: a refused nested Remove leaves no marker in the form, the page or the store", c do
+    prior = Barkpark.PluginEnv.capture()
+    Barkpark.PluginEnv.put!([Halt])
+
+    on_exit(fn ->
+      Barkpark.PluginEnv.restore(prior)
+      :persistent_term.put(Halt, false)
+    end)
+
+    id = doc!(c)
+    {view, form} = open(c, :desk, id)
+    before = stored(c, id)
+
+    :persistent_term.put(Halt, true)
+    EditorPost.press_on(view, element(view, remove(form, :nested)))
+    html = render(view)
+    assert stored(c, id) == before
+
+    buffer = :sys.get_state(view.pid).socket.assigns[:editor_form]
+    assert Map.fetch(buffer["meta"], "code") == {:ok, nil}
+    refute html =~ "__bp_unset__"
+
+    :persistent_term.put(Halt, false)
+    edit_notes(view, form, "after")
+
+    %{rows: [[text]]} =
+      Barkpark.Repo.query!(
+        "select content::text from documents where type = $1 and doc_id = $2 and dataset = $3",
+        [c.type, "drafts." <> id, @dataset]
+      )
+
+    refute text =~ "__bp_unset__"
+    assert stored(c, id)["notes"] == "after"
   end
 end

@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
+  alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -353,8 +354,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
           form = picked_form(socket, path, code)
-          buffer = Barkpark.Content.Forms.unset_as_nil(form)
-          socket = socket |> assign(editor_form: buffer) |> RefusedSave.target(Enum.take(path, 1))
+          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1))
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
           {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
@@ -880,7 +880,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         |> Barkpark.Content.Forms.coerce_params(socket.assigns[:editor_schema])
         |> Map.take(keys)
 
-      assign(socket, editor_form: Map.merge(socket.assigns[:editor_form] || %{}, posted))
+      PostedEdits.put(socket, posted)
     else
       socket
     end
