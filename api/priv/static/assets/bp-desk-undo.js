@@ -40,7 +40,13 @@
 // new value (the server switched the tab first). A field in a folded fieldset
 // or object (folded by the schema, or by the user) has its folds opened first.
 // A field whose pane was folded to a strip while the undo was on its way has
-// the strip opened first, as a click on it does.
+// the strip opened first, as a click on it does. Focus mode on another pane
+// (task-9acc3246edf8cf2e) hides the editor: a focus mode button pressed while
+// the undo was on its way has its patch come after the answer, so the answer
+// waits for it. Focus mode that hides the editor, then or already, is left
+// by the focused pane's own button, and the answer is taken once the panes
+// are back. An open desk menu (the "…" Doc menu, Share, List options) closes
+// as the focus goes into the field (task-a8e403cee723e5f6).
 //
 // A document-level listener, no phx-hook: bp-desk.js loads it when the desk
 // mounts (the address is on the desk's root, `data-desk-undo`).
@@ -122,9 +128,16 @@
     return !!pane && pane.contains(f);
   }
 
+  // The order of the last undo key and the last press of a focus mode button
+  // (`FocusMode.button`, `.dk-focus`).
+  var clock = 0;
+  var pressedAt = 0;
+  var focusAt = 0;
+
   function run(redo) {
     var desk = document.getElementById("desk-panes");
     if (!desk || typeof desk.bpPush !== "function") return;
+    pressedAt = ++clock;
     if (typeof window.BarkparkFormLeave === "function") window.BarkparkFormLeave();
     var mark = typeof window.BarkparkDocMark === "function" ? window.BarkparkDocMark() : "";
     desk.bpPush("desk-undo", { redo: redo, _bp_doc: mark });
@@ -282,11 +295,101 @@
     });
   }
 
-  function onUndone(e) {
+  // The desk's popover menus (bp-desk.js `MENU`). Hidden, each fires its own
+  // `toggle`, so its button says it is collapsed again.
+  var MENU = ".dk-doc-menu-list[popover], .dk-list-menu[popover]";
+
+  function closeMenus() {
+    var all = document.querySelectorAll(MENU);
+    for (var i = 0; i < all.length; i++) {
+      var m = all[i];
+      var open = false;
+      try {
+        open = m.matches(":popover-open");
+      } catch (_) {
+        // No popover support: nothing is open.
+      }
+      if (open && typeof m.hidePopover === "function") m.hidePopover();
+    }
+  }
+
+  // Whether focus mode shows a pane other than the editor's (FocusMode: the
+  // desk marked, and the shown pane marked focused).
+  function focusedAway(f) {
+    var desk = document.getElementById("desk-panes");
+    var pane = f.closest("#desk-panes > [data-pane-index]");
+    return !!desk && !!pane && desk.hasAttribute("data-focus-mode") && !pane.hasAttribute("data-desk-focused");
+  }
+
+  // How long a focus mode round trip (`desk-focus`) is waited for.
+  var FOCUS_MS = 2000;
+
+  // Runs `then` (the frame after bp-desk.js lays the panes out) once the
+  // desk's focus mode is what `done` wants, or with `late` after `FOCUS_MS`.
+  function whenFocus(done, then, late) {
+    var desk = document.getElementById("desk-panes");
+    var timer = 0;
+    var watch = new window.MutationObserver(function () {
+      if (!done(desk)) return;
+      stop();
+      (window.requestAnimationFrame || window.setTimeout)(then);
+    });
+    function stop() {
+      watch.disconnect();
+      window.clearTimeout(timer);
+    }
+    watch.observe(desk, { attributes: true, subtree: true, attributeFilter: ["data-focus-mode", "data-desk-focused"] });
+    timer = window.setTimeout(function () {
+      stop();
+      if (late) late();
+    }, FOCUS_MS);
+  }
+
+  // Leaves focus mode by the focused pane's own button and runs `then` once
+  // the desk is out of it; never, with no button or no way out in time.
+  function leaveFocus(then) {
+    var desk = document.getElementById("desk-panes");
+    var exit = desk.querySelector('#desk-panes > [data-desk-focused] .dk-focus[aria-pressed="true"]');
+    if (!exit) return;
+    whenFocus(function (d) {
+      return !d.hasAttribute("data-focus-mode");
+    }, then);
+    exit.click();
+  }
+
+  // A focus mode button pressed after the undo key: its patch is on its way
+  // behind the answer. Once it lands (or not, in time), focus mode that hides
+  // the editor is left, and `then` runs.
+  function afterFocus(then) {
+    var settle = function () {
+      var f = form();
+      if (f && focusedAway(f)) leaveFocus(then);
+      else then();
+    };
+    whenFocus(function () {
+      return true;
+    }, settle, settle);
+  }
+
+  function onUndone(e, left) {
     var d = (e && e.detail) || {};
     var f = form();
     var el = f ? named(f, d) : null;
     if (!el || !el.tagName) return;
+    if (!left && focusAt > pressedAt) {
+      focusAt = 0;
+      return afterFocus(function () {
+        onUndone(e, true);
+      });
+    }
+    if (focusedAway(f)) {
+      if (!left) {
+        leaveFocus(function () {
+          onUndone(e, true);
+        });
+      }
+      return;
+    }
     unstrip(el);
     // A field in an item dialog that cannot be opened is left as it is: not
     // set and not focused. A redo here would write again, and its own answer
@@ -296,6 +399,7 @@
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
     unfold(el);
+    closeMenus();
     var to = focusable(el);
     if (document.activeElement !== to && typeof to.focus === "function") to.focus();
     // Drawn with the new value already (the undo switched to its tab): the
@@ -312,6 +416,13 @@
     }
   }
 
+  document.addEventListener(
+    "click",
+    function (e) {
+      if (e.target && e.target.closest && e.target.closest("#desk-panes .dk-focus")) focusAt = ++clock;
+    },
+    true
+  );
   document.addEventListener("keydown", onKey);
   document.addEventListener("beforeinput", onBeforeInput, true);
   window.addEventListener("phx:desk:undone", onUndone);

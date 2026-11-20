@@ -40,18 +40,22 @@ neither base.css nor a part mixes a tint of its own.
   last run passed and proved it for the same part folder, tokens, base styles, UI SDK version and check
   code. It exits non-zero on an incomplete folder, a failed step, an unlit light, any page error or
   network request, a step (5s) or part (120s for each part running at the same time) past its time
-  limit, or more parts than CI's check step holds (see "How many parts the check holds").
+  limit, or more parts than one CI job holds (see "How many parts the check holds"). `node check/run.mjs
+  --group k --parts …` is one CI job: it checks only that group's parts, on the page built from all of them.
 - `pnpm run check:selftest` plants breaks in a scratch copy of a part and fails unless the check fails
   for the right reason, naming the planted control. One plant per reading; plants on different controls
   share a run. Breaks in paint go in through a sheet only the selftest can add
   (`runCheck({ plantCss })`); other cases prove demo.mjs cannot be that route. To keep within CI's
   limit, a case reads the four other surfaces, the reading with motion allowed, and real states against
   their pins, only when its plant is there; the check itself always reads all three.
-- In CI (`js-tests.yml`) the showroom check and the selftest run only when a change touches
-  `js/packages/barkui/**` (either side of a move), the sheet (`api/priv/barkui/**`), `js-tests.yml`
-  itself or `js/package.json`, or changes lines of `js/pnpm-lock.yaml` that name one of BarkUI's own
-  dependencies (a Playwright bump brings a new Chromium), and whenever the changed files cannot be
-  worked out. The fast tests run with the rest of the js suite.
+- In CI (`.github/workflows/barkui.yml`, which runs on every change) the showroom check and the
+  selftest run only when a change touches `js/packages/barkui/**` (either side of a move), the sheet
+  (`api/priv/barkui/**`), `barkui.yml` itself or `js/package.json`, or changes lines of
+  `js/pnpm-lock.yaml` that name one of BarkUI's own dependencies (a Playwright bump brings a new
+  Chromium), and whenever the changed files cannot be worked out. The check runs as one job per group
+  of parts, the selftest as its own job, and one closing check reads them all (see "How many parts the
+  check holds"); on any other change only the plan and the closing check run. The fast tests run with
+  the rest of the js suite (`js-tests.yml`).
 - `build/sheet-waits.mjs` lists the contrast the tokens sheet does not deliver yet, each wait bound to one
   skin, scheme, surface and pair of tokens, with the ratio measured there (see "Surfaces" below).
 - `pnpm test` runs the fast tests: discovery, refusals, and the part.css lint.
@@ -241,10 +245,18 @@ alone, the second branch fails as "a rule nothing read".
 ## How many parts the check holds
 
 <!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->
-On CI's hosted runner the check took 135 s for 1 part; a run may take at most 1.5 times its reading, scaled linearly past the most parts read (203 s a part), and stops, failing, once it passes that, so the 15-minute check step in CI holds 4 parts, whose ceiling of 810 s is 90% of it. The ceilings are made from readings (`check/capacity.mjs`): each is a whole run on CI's hosted runner, and each ceiling is 1.5 times its reading. The readings: the check, 1 part in 135 s (run 44623848758 at ddb4ba55b6); the selftest, 308 s (run 44623848758 at ddb4ba55b6). The check runs 3 parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (`check/ceiling.mjs`, one timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can lower a ceiling, down to 0 s, for a test, never raise it). With more than 4 parts the check refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into `check/capacity.mjs` and the numbers move by measurement; a test holds the steps' minutes to `js-tests.yml`, the ceiling of 4 parts under the check step and of one more over it, and this passage word for word.
+On CI's hosted runner one job of the check took 570 s for 5 parts, with 14 parts in the folder; a job may take at most 1.5 times its reading, scaled linearly past the most parts read (171 s a part), and stops, failing, once it passes that, so one job's 15-minute check step in CI holds 5 parts, whose ceiling of 855 s is 95% of it. The ceilings are made from readings (`check/capacity.mjs`): each is one job's whole run on CI's hosted runner, and each ceiling is 1.5 times the slowest reading for its number of parts. The readings: the check, 1 part of 1 in 135 s (run 44623848758 at ddb4ba55b6); 4 parts of 14 in 430 s (run 44642580444 at fa14e54128); 4 parts of 14 in 432 s (run 44642580444 at fa14e54128); 3 parts of 14 in 252 s (run 44642580444 at fa14e54128); 3 parts of 14 in 211 s (run 44642580444 at fa14e54128); 5 parts of 14 in 570 s (run 44662694458 at d9d277ad73); 5 parts of 14 in 567 s (run 44662694458 at d9d277ad73); the selftest, 308 s (run 44623848758 at ddb4ba55b6). A job checks 3 parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (`check/ceiling.mjs`, one timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can lower a ceiling, down to 0 s, for a test, never raise it). Given more than 5 parts, a job refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into `check/capacity.mjs` and the numbers move by measurement; a test holds the steps' minutes to `barkui.yml`, the ceiling of 5 parts under the check step and of one more over it, and this passage word for word.
+
+In CI the check runs as jobs side by side. `check/jobs.mjs` splits the sorted part folders into the fewest groups of at most 5 parts, their sizes within one of each other, and the job matrix in `barkui.yml` reads that list; no list is written by hand. The plan, each job and the closing check compute the split again from the same checkout and must agree. Every job builds and loads the whole page, and the readings above were taken with at most 14 parts in the folder: with more, a job's ceiling stays where it is, so a page that makes it slower fails the job instead of stretching it. One closing check (its name is `AGGREGATE` in `check/jobs.mjs`) always runs and is red when the plan, any group or the selftest is red, cancelled, missing, or skipped while the plan said BarkUI was touched.
 
 The selftest copies one part, so its time does not grow with the parts folder. On CI's hosted runner the selftest took 308 s; it may take at most 1.5 times that, 462 s, 77% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of its step; a selftest that outgrows that is split across jobs, never given a longer step.
 <!-- /capacity -->
+
+The check runs at most 8 groups (`MOST_GROUPS` in `check/jobs.mjs`), so at most 40 parts, and
+`.github/required-checks.json` has one row for each of groups 1 to 8; the proof knob stops there too. Past
+40 parts the plan job refuses, red, and names the fix: raise `MOST_GROUPS`, add a row for each new group to
+`.github/required-checks.json` and its acknowledgement line to `scripts/required-checks.test.sh` (from
+`scripts/required-checks-ack-derive.sh`), in one change. A test holds the rows to `MOST_GROUPS`.
 
 ## What the check proves about a label, and no more
 
