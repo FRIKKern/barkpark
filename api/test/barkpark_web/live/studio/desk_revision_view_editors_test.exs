@@ -205,7 +205,13 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewEditorsTest do
 
     render_patch(view, "#{c.base}/#{type};#{id}" <> @history <> ",rev=#{rev.id}")
     render_async(view, 5_000)
-    assert has_element?(view, holder <> "[disabled][data-desk-revision-form] #editor-form")
+
+    assert has_element?(
+             view,
+             holder <>
+               "[data-desk-revision-form] fieldset[data-desk-readonly-fields][disabled] #editor-form"
+           )
+
     assert order.(view) == live_order
   end
 end
