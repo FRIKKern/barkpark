@@ -4624,6 +4624,21 @@ msgstr "Ingen oppgaver passer."
 msgid "None"
 msgstr "Ingen"
 
+#: lib/barkpark_web/studio_locale.ex:781
+#, elixir-autogen, elixir-format
+msgid "Not saved: block %{number} is shown as JSON, and source mode does not edit it."
+msgstr "Ikke lagret: blokk %{number} vises som JSON, og kildemodus redigerer den ikke."
+
+#: lib/barkpark_web/studio_locale.ex:786
+#, elixir-autogen, elixir-format
+msgid "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes."
+msgstr "Ikke lagret: blokk %{number} vises som JSON. Slett den og lagre først, og gjør så de andre endringene."
+
+#: lib/barkpark_web/studio_locale.ex:791
+#, elixir-autogen, elixir-format
+msgid "Not saved: source mode could not read this change. Your text is kept."
+msgstr "Ikke lagret: kildemodus kunne ikke lese denne endringen. Teksten din er beholdt."
+
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4631
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
@@ -6314,6 +6329,11 @@ msgstr "verdi på én linje"
 #, elixir-autogen, elixir-format
 msgid "source"
 msgstr "kilde"
+
+#: lib/barkpark_web/studio_locale.ex:834
+#, elixir-autogen, elixir-format
+msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
+msgstr "Bare lesing: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}) ennå."
 
 #: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
@@ -15688,3 +15708,23 @@ msgstr "Parametrene må være et JSON-objekt, som {\"title\": \"post\"}"
 #, elixir-autogen, elixir-format
 msgid "Param $%{name} referenced, but not provided"
 msgstr "Parameteren $%{name} er brukt, men ikke gitt"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has text"
+msgstr ", har tekst"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "%{lang} (primary)"
+msgstr "%{lang} (primær)"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "No %{primary} text: readers get the %{fallback} text instead."
+msgstr "Ingen %{primary}-tekst: leserne får %{fallback}-teksten i stedet."
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has an error"
+msgstr ", har en feil"

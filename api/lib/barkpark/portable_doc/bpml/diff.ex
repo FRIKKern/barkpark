@@ -20,19 +20,34 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   alias Barkpark.PortableDoc.BlockIds
   alias Barkpark.PortableDoc.Patch
 
+  # The key a pushed block is matched to its stored block by, at every depth
+  # `BlockIds.ensure_block_ids/1` mints it.
+  @match_key "id"
+
+  @doc """
+  The keys a push needs to match a pushed block to its stored one. A reader's
+  view that hides one of them cannot be pushed (`Papers.BpmlView` refuses it).
+  """
+  def match_keys, do: [@match_key]
+
   @doc """
   `{:ok, minted_new_blocks, ops}` — ops transform `old` into `minted_new_blocks`
   (the caller persists ops and treats `minted_new_blocks` as the result truth) —
   or `{:error, :diff_verification_failed}` if the replay proof fails.
   `{:ok, new, []}` means the documents are already equal.
+
+  `shown` is the blocks the pull printed for `old`, read back from its text
+  (`Papers.BpmlView`); a pushed block that spells the same as its shown block
+  was not edited. There is no default: a caller that has no view refuses the
+  push rather than diff against `old`.
   """
-  @spec derive([map()], [map()]) ::
+  @spec derive([map()], [map()], [map()]) ::
           {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
-  def derive(old, new) when is_list(old) and is_list(new) do
+  def derive(old, new, shown) when is_list(old) and is_list(new) and is_list(shown) do
     new =
       new
       |> BlockIds.ensure_block_ids()
-      |> keep_unedited(old)
+      |> keep_unedited(old, shown)
 
     if old == new do
       {:ok, new, []}
@@ -51,17 +66,20 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   # equality, every such block derived a `replace-block` on a push nobody
   # edited — rewriting stored data (and, for a locked block, a refused batch).
   #
-  # A pushed block whose BPML spelling equals the stored block's spelling was
-  # not edited: the author can only change what BPML spells. So it is replaced
-  # by the stored block before the diff, and derives no op. A block the printer
-  # cannot spell is compared by map equality as before.
-  defp keep_unedited(new, old) do
-    old_by_id = Map.new(old, &{&1["id"], &1})
+  # A pushed block whose BPML spelling equals the spelling of the block the
+  # pull SHOWED was not edited: the author can only change what the pull
+  # printed. So it is replaced by the stored block before the diff, and derives
+  # no op. A block the printer cannot spell is compared by map equality.
+  defp keep_unedited(new, old, shown) do
+    old_by_id = Map.new(old, &{&1[@match_key], &1})
+    shown_by_id = Map.new(shown, &{&1[@match_key], &1})
 
     Enum.map(new, fn block ->
-      case Map.fetch(old_by_id, block["id"]) do
+      case Map.fetch(old_by_id, block[@match_key]) do
         {:ok, stored} when stored != block ->
-          if same_spelling?(stored, block), do: stored, else: block
+          if same_spelling?(Map.get(shown_by_id, block[@match_key], stored), block),
+            do: stored,
+            else: block
 
         _ ->
           block
@@ -76,24 +94,28 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   end
 
   defp removes(old, new) do
-    keep = MapSet.new(new, & &1["id"])
+    keep = MapSet.new(new, & &1[@match_key])
 
     old
-    |> Enum.reject(&MapSet.member?(keep, &1["id"]))
-    |> Enum.map(&%{"op" => "remove-block", "id" => &1["id"]})
+    |> Enum.reject(&MapSet.member?(keep, &1[@match_key]))
+    |> Enum.map(&%{"op" => "remove-block", "id" => &1[@match_key]})
   end
 
   # One pass over the DESIRED list, simulating the working order as ops land:
   # every desired block must sit directly after `prev` (nil = head) with the
   # desired content.
   defp walk(old, new) do
-    keep = MapSet.new(new, & &1["id"])
-    old_by_id = Map.new(old, &{&1["id"], &1})
-    sim = old |> Enum.filter(&MapSet.member?(keep, &1["id"])) |> Enum.map(& &1["id"])
+    keep = MapSet.new(new, & &1[@match_key])
+    old_by_id = Map.new(old, &{&1[@match_key], &1})
+
+    sim =
+      old
+      |> Enum.filter(&MapSet.member?(keep, &1[@match_key]))
+      |> Enum.map(& &1[@match_key])
 
     {ops, _sim, _prev} =
       Enum.reduce(new, {[], sim, nil}, fn block, {ops, sim, prev} ->
-        id = block["id"]
+        id = block[@match_key]
         expected = if prev == nil, do: 0, else: Enum.find_index(sim, &(&1 == prev)) + 1
 
         cond do

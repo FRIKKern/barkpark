@@ -8,7 +8,7 @@
 // One plant per reading, and plants on different controls share a run: a light
 // carries every reason it is off (`fails`), and each plant asserts that one of
 // them names its own control. The ladder measures what the label reading's
-// limit costs and holds README.md's sentence to it.
+// limit costs and holds docs/PARTS.md's sentence to it.
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -25,7 +25,7 @@ import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, sk
 const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
-    name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds README.md to its numbers',
+    name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
     only: ['skins', 'schemes'],
     plant: (d) => appendFileSync(join(d, 'example.html'), `\n${ladderHtml}\n`),
     css: [

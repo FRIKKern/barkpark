@@ -437,6 +437,15 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 		return exitOK
 	}
 
+	// The push landed but the answer carries no text (the reader's view does
+	// not print): keep the copy and its anchor, so the next push asks for a
+	// pull instead of writing from a copy that no longer matches.
+	if result.Bpml == "" {
+		out.userErr("paper push %s: applied @ rev %s, but the server sent no BPML text for it; your working copy is unchanged — run `bp paper pull %s` before editing again",
+			slug, result.Rev, slug)
+		return exitGeneric
+	}
+
 	// Converge on the server's canonical spelling — the post-normalization
 	// truth — and advance the anchor to the new rev.
 	if err := writePaperWCCopy(dir, slug, result.Bpml); err != nil {

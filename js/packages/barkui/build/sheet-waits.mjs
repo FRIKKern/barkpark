@@ -8,8 +8,10 @@
 // no worse than `measured`. Any other text under 4.5:1, any control boundary
 // under 3:1, and any label gone, cut or not drawn as itself, on any surface,
 // turns the lights off. The showroom prints each wait as "waiting on the sheet"
-// while it measures under `needs`; `task` is the sheet's work that ends it.
-const MUTED_ON_PRIMARY = { surface: 'primary', text: '--ui-muted-foreground', ground: '--ui-background', needs: 4.5, task: 'task-6617f9ae509c43d9' }
+// while it measures under `needs`, saying in `until` what ends it; `task` is the
+// sheet's work that ends it. The id stays in the data and on the line's element,
+// never in its text: a page or a picture that prints it goes false when the task closes.
+const MUTED_ON_PRIMARY = { surface: 'primary', text: '--ui-muted-foreground', ground: '--ui-background', needs: 4.5, until: 'the sheet makes muted text on the primary surface readable in every skin', task: 'task-6617f9ae509c43d9' }
 
 export const SHEET_WAITS = [
   { skin: 'evergreen', scheme: 'light', measured: 3.78 },
@@ -27,4 +29,4 @@ export const waitsFor = (skin, scheme, surface) => SHEET_WAITS.filter((w) => w.s
 
 /** The line the showroom prints for a wait, with what the last run measured there. */
 export const waitLine = (w, now) =>
-  `waiting on the sheet: ${w.text} on ${w.ground}, ${w.skin} ${w.scheme} on ${w.surface}, ${now.toFixed(2)}:1, needs ${w.needs}:1 (${w.task})`
+  `waiting on the sheet: ${w.text} on ${w.ground}, ${w.skin} ${w.scheme} on ${w.surface}, ${now.toFixed(2)}:1, needs ${w.needs}:1, until ${w.until}`

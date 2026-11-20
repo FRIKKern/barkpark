@@ -23,6 +23,9 @@ type fakePaperServer struct {
 	syncCalls int
 	lastBase  string
 	lastBpml  string
+	// noText plays a server whose applied answer carries no BPML (the
+	// reader's view of the paper does not print).
+	noText bool
 }
 
 func (f *fakePaperServer) handler() http.Handler {
@@ -72,7 +75,12 @@ func (f *fakePaperServer) handler() http.Handler {
 			// from the client's edit so convergence is observable)
 			f.rev = f.rev + "0"
 			f.bpml = strings.ReplaceAll(body.Bpml, "edited", "edited-canonical")
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "slug": "p1", "rev": f.rev, "op_count": 1, "bpml": f.bpml})
+			answer := map[string]any{"ok": true, "slug": "p1", "rev": f.rev, "op_count": 1, "bpml": f.bpml}
+			if f.noText {
+				answer["bpml"] = nil
+				answer["bpml_unprintable"] = "kind: block"
+			}
+			_ = json.NewEncoder(w).Encode(answer)
 		}
 	})
 

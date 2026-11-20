@@ -144,7 +144,7 @@ defmodule BarkparkWeb.Studio.DeskDocUndoGroupsTest do
   # folded (`options.collapsed`). The fold's state lives in the page, on its
   # title button (`Desk.Fieldsets`), so the server draws it folded; the page
   # opens it when told the field (`desk:undone`, bp-desk-undo.js, host test
-  # __desk_undo "a field drawn in a fieldset that starts folded ...").
+  # __desk_undo_answer "a field drawn in a fieldset that starts folded ...").
   test "a field in a fieldset that starts folded, undone from another tab: its tab, and the page told",
        c do
     {:ok, view, _} = live(c.conn, c.desk)

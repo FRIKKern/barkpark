@@ -351,11 +351,11 @@ defmodule Barkpark.Content.Papers do
   # with `==` ONLY: a content hash has no total order, so "older/newer" is not a
   # question it can answer. Anything that is not that digest — an old digest,
   # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
-  defp cache_provenance(_paper, _blocks, html, _dataset)
-       when not is_binary(html) or html == "",
-       do: {:coherent, nil}
+  def cache_provenance(_paper, _blocks, html, _dataset)
+      when not is_binary(html) or html == "",
+      do: {:coherent, nil}
 
-  defp cache_provenance(paper, blocks, html, dataset) do
+  def cache_provenance(paper, blocks, html, dataset) do
     content = paper.content || %{}
     style = get_in(content, ["style"])
     scope = provenance_scope(paper)
@@ -626,8 +626,8 @@ defmodule Barkpark.Content.Papers do
   The paper map `Bpml.print_paper/1` is handed — the ONE builder for it.
 
   Two call sites print a paper as BPML: the source route (`bp paper pull`) and
-  the ingest route's post-write canonical echo (`bp paper push`). They MUST
-  agree — `bp paper push` compares the echo against the next pull, so any drift
+  the ingest route's answer to a write (`bp paper push`). They MUST agree —
+  `bp paper push` compares that answer against the next pull, so any drift
   between them shows up as a working copy that changes under an author who
   edited nothing.
 
@@ -658,7 +658,7 @@ defmodule Barkpark.Content.Papers do
       when is_list(blocks) and is_map(fields) do
     %{
       "slug" => paper.doc_id,
-      "title" => paper.title,
+      "title" => Content.Papers.BpmlView.title(paper, blocks, fields),
       "description" => Map.get(fields, "description"),
       "tags" => Map.get(fields, "tags", []),
       "blocks" => blocks
