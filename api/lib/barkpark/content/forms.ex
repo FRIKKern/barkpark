@@ -1354,6 +1354,7 @@ defmodule Barkpark.Content.Forms do
     # attempt, so a writer that landed in between is merged in too.
     {bases, write_opts} = Keyword.pop(write_opts, :field_bases, %{})
     {expect, write_opts} = Keyword.pop(write_opts, :field_expect, %{})
+    {over, write_opts} = Keyword.pop(write_opts, :saved_over, [])
     params_now = TextRebase.rebase(params, bases, text_values(current))
 
     case expected(expect, current) ||
@@ -1377,9 +1378,21 @@ defmodule Barkpark.Content.Forms do
           {:error, changeset}
         end
 
+      {:ok, %Document{} = doc, errs} ->
+        {:ok, saved_over(doc, current, over), errs}
+
       other ->
         other
     end
+  end
+
+  # `:saved_over` (task-2f3af2d2f7f56811): the named top-level fields as the
+  # row this attempt merged onto, and so the write landed over, held them.
+  defp saved_over(doc, _current, []), do: doc
+
+  defp saved_over(doc, current, keys) do
+    now = text_values(current)
+    %{doc | saved_over: Map.new(keys, &{&1, Map.get(now, &1)})}
   end
 
   # Whether a changeset's error is the `(doc_id, type, dataset_id)`
