@@ -33,6 +33,24 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   reload, another document, a new value) counts for nothing.
 
   With no field to name, `status/1` adds the reason to "Save failed".
+
+  ## A refused clear is not held
+
+  In the desk, a change that takes text away from the stored value is a
+  clear: the field or a key in it unset (`Forms.unset/0`, or "" over a
+  value), a language or a key left out, or emptied, also inside an array
+  row. A refused clear is not held (task-48b10c6eb7ec20c5,
+  task-8513709a4e52f781). Held, it was in the buffer, so the next post of
+  another field wrote it, and undo then took back only that other field.
+
+  The buffer keeps the stored value instead (a pick puts its form in the
+  buffer before the write; that is set back), and `editor_refused_clears`
+  keeps the field with the reason. While the buffer still holds that value:
+  the field reads "Not saved: <reason>" and is named in the save region, as
+  a held field is, and a later post of another field, the explicit Save
+  too, leaves it out, as the page can still show it empty (the input had
+  the focus when the refusal came back). A change of the field itself is a
+  new try. A reload, or another document, drops it.
   """
   use Gettext, backend: BarkparkWeb.Gettext
 
@@ -100,6 +118,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   """
   def write(socket, params, trigger, writer) when is_map(params) and is_function(writer, 3) do
     keys = target_keys(socket, params)
+    {socket, params} = drop_refused_clears(socket, params, keys)
 
     socket =
       assign(socket,
@@ -173,8 +192,15 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
   defp hold(socket, params, keys) do
     named = socket.assigns[:editor_save_error_fields]
-    keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
     reason = fn key -> (is_map(named) && named[key]) || socket.assigns[:editor_save_error] end
+    stored = stored_form(socket.assigns)
+
+    # A clear is never held, whichever field the refusal names.
+    {clears, keys} =
+      Enum.split_with(keys, &clear?(socket.assigns, Map.get(stored, &1), Map.get(params, &1)))
+
+    socket = refuse_clears(socket, clears, stored, reason)
+    keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
 
     values =
       params
@@ -197,6 +223,89 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     |> PostedEdits.put(values)
   end
 
+  # The open document as the form draws it from the store.
+  defp stored_form(assigns),
+    do: Forms.doc_to_form(assigns[:editor_doc], assigns[:editor_schema])
+
+  # A clear: the posted value takes text away from the stored one. Only in
+  # the desk, the one host that unsets.
+  defp clear?(%{desk_base: base}, stored, value) when is_binary(base),
+    do: takes_away?(stored, value)
+
+  defp clear?(_assigns, _stored, _value), do: false
+
+  # `new` leaves blank, or leaves out, something `old` holds. An array is
+  # compared row by row only while it keeps its length; a row's `_key` and
+  # `_type` are not text.
+  defp takes_away?(old, new) do
+    cond do
+      blank?(old) -> false
+      blank?(new) -> true
+      plain_map?(old) and plain_map?(new) -> Enum.any?(old, &key_taken?(&1, new))
+      is_list(old) and is_list(new) and length(old) == length(new) -> zip_taken?(old, new)
+      true -> false
+    end
+  end
+
+  defp key_taken?({key, _old}, _new) when key in ["_key", "_type"], do: false
+  defp key_taken?({key, old}, new), do: takes_away?(old, Map.get(new, key))
+
+  defp zip_taken?(old, new),
+    do: old |> Enum.zip(new) |> Enum.any?(fn {o, n} -> takes_away?(o, n) end)
+
+  defp blank?(value) when value in [nil, "", []], do: true
+  defp blank?(%Forms.Unset{}), do: true
+
+  defp blank?(%{} = map) when not is_struct(map),
+    do: Enum.all?(map, fn {key, value} -> key in ["_key", "_type"] or blank?(value) end)
+
+  defp blank?(_value), do: false
+
+  defp plain_map?(value), do: is_map(value) and not is_struct(value)
+
+  defp refuse_clears(socket, [], _stored, _reason), do: socket
+
+  defp refuse_clears(socket, keys, stored, reason) do
+    form = socket.assigns[:editor_form] || %{}
+
+    back =
+      for key <- keys, takes_away?(Map.get(stored, key), Map.get(form, key)), into: %{} do
+        {key, Map.get(stored, key)}
+      end
+
+    socket = PostedEdits.put(socket, back)
+    form = socket.assigns[:editor_form] || %{}
+    refused = Map.new(keys, &{&1, {Map.get(form, &1), reason.(&1)}})
+
+    assign(
+      socket,
+      :editor_refused_clears,
+      {doc_key(socket.assigns), Map.merge(live_clears(socket.assigns), refused)}
+    )
+  end
+
+  @doc "The top-level fields of the open document whose clear was refused."
+  def clears(%{assigns: assigns}), do: assigns |> live_clears() |> Map.keys()
+
+  # A post of another field leaves a refused clear out; a change of the field
+  # itself is a new try, so it is posted and no longer left out.
+  defp drop_refused_clears(socket, params, keys) do
+    case live_clears(socket.assigns) do
+      refused when refused == %{} ->
+        {socket, params}
+
+      refused ->
+        socket =
+          assign(
+            socket,
+            :editor_refused_clears,
+            {doc_key(socket.assigns), Map.drop(refused, keys)}
+          )
+
+        {socket, Map.drop(params, Map.keys(refused) -- keys)}
+    end
+  end
+
   @doc "The held top-level fields of the open document."
   def keys(%{assigns: assigns}), do: keys(assigns)
   def keys(assigns), do: assigns |> live() |> Map.keys()
@@ -206,7 +315,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   desk asks before the tab closes over it. Else the socket's own token.
   """
   def token(assigns) do
-    if live(assigns) == %{}, do: assigns[:save_status] || "", else: "Save failed"
+    if not_saved(assigns) == %{}, do: assigns[:save_status] || "", else: "Save failed"
   end
 
   @doc """
@@ -215,7 +324,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   """
   def status(assigns) do
     token = assigns[:save_status] || ""
-    held = live(assigns)
+    held = not_saved(assigns)
     reason = assigns[:editor_save_error]
 
     cond do
@@ -235,7 +344,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   def marks(errors, assigns) do
     errors = if is_map(errors), do: errors, else: %{}
 
-    Enum.reduce(live(assigns), errors, fn {key, {_value, reason}}, acc ->
+    Enum.reduce(not_saved(assigns), errors, fn {key, {_value, reason}}, acc ->
       mark =
         if is_binary(reason),
           do: gettext("Not saved") <> ": " <> reason,
@@ -249,11 +358,20 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     end)
   end
 
+  # Every field the page must call not saved: held, or a refused clear.
+  defp not_saved(assigns), do: Map.merge(live_clears(assigns), live(assigns))
+
   # Held for the open document, and the form still holds the refused value.
-  defp live(assigns) do
+  defp live(assigns), do: live(assigns, :editor_refused)
+
+  # A refused clear of the open document, while the form still holds the
+  # value it was refused over.
+  defp live_clears(assigns), do: live(assigns, :editor_refused_clears)
+
+  defp live(assigns, name) do
     form = assigns[:editor_form] || %{}
 
-    with {key, held} when is_map(held) <- assigns[:editor_refused],
+    with {key, held} when is_map(held) <- assigns[name],
          true <- key == doc_key(assigns) do
       Map.filter(held, fn {k, {value, _reason}} -> Map.fetch(form, k) == {:ok, value} end)
     else
