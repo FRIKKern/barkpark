@@ -328,8 +328,11 @@ defmodule Barkpark.Content.Forms do
       # An array of select values is a checkbox list: it draws the stored
       # values as text, in option order, and a post says only which are
       # ticked. A post that ticks the stored values is untouched, so the
-      # store keeps their order and types (task-1f922079ee439e18).
-      select_list?(field) and is_list(stored) and same_ticks?(posted, stored) ->
+      # store keeps their order and types (task-1f922079ee439e18). A stored
+      # string the list draws as one tick (an old bug wrote such strings,
+      # task-9c069dfef8b99cb3) is kept the same way until it is edited.
+      select_list?(field) and (is_list(stored) or is_binary(stored)) and
+          same_ticks?(posted, List.wrap(stored)) ->
         stored
 
       # Plain rich text stored as HTML becomes Portable Text blocks on its
