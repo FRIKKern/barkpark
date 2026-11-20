@@ -367,10 +367,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def tree_codelist_pick(_msg, socket), do: {:noreply, socket}
 
-  # In the desk a Remove unsets the code, nested too, as TanStack does; the
-  # old Studio stores "" at a nested path, as it did.
+  # In the desk a Remove unsets the code, nested too, as TanStack does, by
+  # the same rule as a cleared language (`unset_at/2`); the old Studio stores
+  # "" at a nested path, as it did.
   defp picked_form(%{assigns: %{desk_base: base}} = socket, path, "") when is_binary(base),
-    do: StudioLive.UnsetPath.unset(base_form(socket), path)
+    do: unset_at(base_form(socket), path)
 
   defp picked_form(socket, path, code),
     do: StudioLive.Path.put_value_at(base_form(socket), path, code)
@@ -636,6 +637,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
+  # Also a desk Remove in a tree codelist (`picked_form/3`).
   defp unset_at(doc, [root]), do: Map.put(doc, root, "")
 
   # A key in an object is written as `Forms.unset/0`, which the save reads
