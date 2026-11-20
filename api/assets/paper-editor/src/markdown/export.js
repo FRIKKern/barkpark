@@ -20,6 +20,7 @@
 // highlight, sub, sup) keep their text; a document link keeps its words.
 // The inline writer, the escaping and the fence picker are serialize.js's own.
 
+import { calloutBodyBlocks } from "./callout-words.js";
 import { clampLevel } from "./shared.js";
 import { escapeInlineText, inlineToMarkdown, pickFence } from "./serialize.js";
 
@@ -157,11 +158,12 @@ function blockMd(block, ctx) {
       const cite = oneLine(block.cite ?? block.attribution);
       return quote(joined([inline(block.content ?? block.text, ctx), cite ? "— " + escapeInlineText(cite) : ""]));
     }
+    // A callout's words, as callout-words.js answers them: its content, then its body.
     case "callout": {
       const tone = TONES[str(block.tone).toLowerCase()] || humanize(block.tone || "note");
       const title = oneLine(block.title);
       const head = title ? "**" + tone + ":** " + escapeInlineText(title) : "**" + tone + "**";
-      return quote(joined([head, inline(block.content, ctx), ...chunks(calloutBody(block), ctx), ...inside(block, ctx)]));
+      return quote(joined([head, inline(block.content, ctx), ...chunks(calloutBodyBlocks(block), ctx), ...inside(block, ctx)]));
     }
     case "note": return quote(noteLine(block, ctx));
     case "notes": return quote(joined((Array.isArray(block.items) ? block.items : []).map((item) => noteLine(item, ctx)))) || placeholder(block, ctx);
@@ -212,11 +214,6 @@ function blockMd(block, ctx) {
       if (/^field-/.test(type) || ["composite", "arrayOf", "codelist", "localizedText"].includes(type)) return fieldMd(block);
       return fallback(block, ctx);
   }
-}
-
-// A callout's body slot: every block of it, in order, after the callout's own words.
-function calloutBody(block) {
-  return isMap(block.slots) && Array.isArray(block.slots.body) ? block.slots.body : [];
 }
 
 function noteLine(note, ctx) {

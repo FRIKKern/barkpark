@@ -113,11 +113,17 @@ check("quotes, callouts and notes are quotes with a label; a divider and an imag
   );
 });
 
-check("a callout keeps every word of its body after its own words (task-6a8137419e0153e4)", () => {
+// A callout's words: markdown/callout-words.js.
+check("a callout holding content and a different body exports both, content first, then every body block", () => {
   const p = (text) => ({ type: "paragraph", content: [t(text)] });
   assert.equal(
     md([{ type: "callout", tone: "note", content: [t("head words")], slots: { body: [p("body words"), { type: "list", items: [[t("body item")]] }] } }]),
     "> **Note**\n>\n> head words\n>\n> body words\n>\n> - body item",
+  );
+  // Two fields holding the same words are both exported: nothing is skipped as equal.
+  assert.equal(
+    md([{ type: "callout", tone: "note", content: [t("same words")], slots: { body: [p("same words")] } }]),
+    "> **Note**\n>\n> same words\n>\n> same words",
   );
   assert.equal(md([{ type: "callout", tone: "note", slots: { body: [p("only the body")] } }]), "> **Note**\n>\n> only the body");
 });
