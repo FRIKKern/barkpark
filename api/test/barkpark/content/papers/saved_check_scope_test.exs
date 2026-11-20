@@ -7,6 +7,8 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
       (`scope_unowned`), with or without a token;
     * a row in a workspace the writing token may not write in is refused
       (`write_forbidden`), on the upsert path and the block-op batch path;
+    * the write's `may_write:` predicate is asked, inside the transaction,
+      about the saved row's own workspace; a no refuses;
     * a refusal leaves no row, history, change event or job, and an existing
       row is unchanged;
     * the view check refuses a row whose own workspace and project resolve no
@@ -56,7 +58,9 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
     })
   end
 
-  defp checked(writer), do: [before_commit: BpmlView.saved_check(make_ref()), writer: writer]
+  defp checked(token), do: checked_by(Tenancy.Auth.write_check(token))
+  defp checked_by(may_write),
+    do: [before_commit: BpmlView.saved_check(make_ref()), may_write: may_write]
 
   defp trace(slug) do
     %{
@@ -117,6 +121,33 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
 
     assert code(result) == "write_forbidden"
     assert trace(slug) == before
+  end
+
+  test "a predicate saying no for the saved row's workspace refuses, leaving nothing", c do
+    test = self()
+
+    deny = fn ws_id ->
+      send(test, {:asked, ws_id, Repo.in_transaction?()})
+      false
+    end
+
+    slug = slug()
+    before = trace(slug)
+    result = Content.upsert_paper(attrs(slug, c.a.ws.id, c.a.project.id), checked_by(deny))
+    assert code(result) == "write_forbidden"
+    assert trace(slug) == before
+    assert_received {:asked, ws_id, true}
+    assert ws_id == c.a.ws.id
+
+    {:ok, _} = Content.upsert_paper(attrs(slug, c.a.ws.id, c.a.project.id))
+    before = trace(slug)
+    block = %{"id" => "p3", "type" => "paragraph", "content" => []}
+    op = %{"op" => "insert-after", "afterId" => "p", "block" => block}
+    scope = [workspace_id: c.a.ws.id, project_id: c.a.project.id]
+    result = Content.apply_paper_block_ops(slug, [op], @ds, scope ++ checked_by(deny))
+    assert code(result) == "write_forbidden"
+    assert trace(slug) == before
+    assert_received {:asked, ^ws_id, true}
   end
 
   test "the view check refuses a row whose workspace and project resolve no reader schema", c do

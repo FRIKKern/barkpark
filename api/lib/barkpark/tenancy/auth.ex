@@ -435,6 +435,22 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   @doc """
+  The write check a Paper write runs on the row it saved, inside its
+  transaction (`Content.Papers.SavedCheck`'s `may_write:`). `nil` for no token
+  (the shared-secret producer). Else a predicate on the saved row's workspace
+  id: true in the token's own workspace or where `authorize/3` allows `:write`.
+  """
+  @spec write_check(ApiToken.t() | nil) :: (binary() | nil -> boolean()) | nil
+  def write_check(nil), do: nil
+
+  def write_check(%ApiToken{workspace_id: home} = token) do
+    fn
+      ws_id when is_binary(ws_id) -> ws_id == home or authorize(token, ws_id, :write) == :ok
+      _ws_id -> false
+    end
+  end
+
+  @doc """
   The SAME decision as `authorize/3`, but it names WHICH arm of the conjunction
   refused.
 

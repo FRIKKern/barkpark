@@ -11,13 +11,13 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   without the option is unchanged.
 
   Before the caller's check, the saved row's scope is checked, failing closed:
-  its project must belong to its workspace (`scope_unowned`), and the token
-  the write names as `writer:` must be allowed to write in that workspace
-  (`write_forbidden`). A write with no `writer:` (the shared-secret producer)
-  has only the first check.
+  its project must belong to its workspace (`scope_unowned`), and the write's
+  `may_write:` predicate, given the saved row's workspace id, must answer
+  `true` (`write_forbidden`). The caller builds it (a token's, from
+  `Tenancy.Auth.write_check/1`); a write with none (the shared-secret
+  producer) has only the first check.
   """
 
-  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.{Broadcast, Document}
   alias Barkpark.Repo
   alias Barkpark.Tenancy
@@ -42,7 +42,7 @@ defmodule Barkpark.Content.Papers.SavedCheck do
           Repo.transaction(fn ->
             with {:ok, receipt, effects} <- persist.(),
                  saved = saved_row(effects, doc),
-                 :ok <- scope_check(saved, Keyword.get(opts, :writer)),
+                 :ok <- scope_check(saved, Keyword.get(opts, :may_write)),
                  :ok <- check.(saved) do
               {receipt, effects}
             else
@@ -63,13 +63,14 @@ defmodule Barkpark.Content.Papers.SavedCheck do
     case Keyword.get(opts, :before_commit) do
       nil -> :ok
       check when is_function(check, 1) ->
-        with :ok <- scope_check(doc, Keyword.get(opts, :writer)), do: check.(doc)
+        with :ok <- scope_check(doc, Keyword.get(opts, :may_write)), do: check.(doc)
     end
   end
 
   @doc "The saved row's scope check alone (see the moduledoc)."
-  @spec scope_check(Document.t(), ApiToken.t() | nil) :: :ok | {:error, {:view_refused, map()}}
-  def scope_check(%Document{} = row, writer) do
+  @spec scope_check(Document.t(), (binary() | nil -> boolean()) | nil) ::
+          :ok | {:error, {:view_refused, map()}}
+  def scope_check(%Document{} = row, may_write) do
     cond do
       not owned_pair?(row) ->
         refuse(
@@ -77,7 +78,7 @@ defmodule Barkpark.Content.Papers.SavedCheck do
           "the Paper would be stored under a project that is not one of its workspace's"
         )
 
-      not may_write?(writer, row.workspace_id) ->
+      not may_write?(may_write, row.workspace_id) ->
         refuse(
           "write_forbidden",
           "the Paper would be stored in a workspace this token may not write in"
@@ -95,12 +96,8 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   end
 
   defp may_write?(nil, _ws_id), do: true
-  defp may_write?(%ApiToken{workspace_id: ws_id}, ws_id) when is_binary(ws_id), do: true
-
-  defp may_write?(%ApiToken{} = token, ws_id) when is_binary(ws_id),
-    do: Tenancy.Auth.authorize(token, ws_id, :write) == :ok
-
-  defp may_write?(_writer, _ws_id), do: false
+  defp may_write?(check, ws_id) when is_function(check, 1), do: check.(ws_id) == true
+  defp may_write?(_check, _ws_id), do: false
 
   defp refuse(code, message) do
     body = %{

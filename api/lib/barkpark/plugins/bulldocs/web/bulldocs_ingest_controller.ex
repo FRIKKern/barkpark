@@ -433,7 +433,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            # Diffed against the reader's view; refused, writing nothing, when there is none.
             case Content.Papers.BpmlView.push(paper, parsed["blocks"] || [], dataset) do
               {:refused, body} ->
                 ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
@@ -458,10 +457,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
+  defp write_check(conn), do: Tenancy.Auth.write_check(conn.assigns[:api_token])
+
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
-    opts = scope ++ [if_rev: base_rev, before_commit: check, writer: conn.assigns[:api_token]]
+    opts = scope ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
 
     case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
       {:ok, result} ->
@@ -637,10 +638,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
     # Advisory channel (D36/D42): the wall's advise band rides the receipt.
     Warnings.reset()
     ref = make_ref()
-
     check = Content.Papers.BpmlView.saved_check(ref)
 
-    case Content.upsert_paper(attrs, before_commit: check, writer: conn.assigns[:api_token]) do
+    case Content.upsert_paper(attrs, before_commit: check, may_write: write_check(conn)) do
       {:ok, paper} ->
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 
