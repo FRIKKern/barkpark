@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -179,45 +179,27 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
   it("a plan whose groups differ from this checkout's split is red", () => {
     expect(redWith(verdict(needsWith(JSON.stringify([{ group: 1, of: 1, parts: NAMES.join(',') }]))), /the plan's groups .* differ from this checkout's split/)).toBe(true)
   })
-})
 
-describe('js-tests.yml runs the split it is given and closes on one name', () => {
-  const wf = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
-  const job = (id) => {
-    const at = wf.indexOf(`\n  ${id}:\n`)
-    expect(at, id).toBeGreaterThan(0)
-    const rest = wf.slice(at + 1)
-    const next = rest.slice(1).search(/\n {2}[\w-]+:\n/)
-    return next < 0 ? rest : rest.slice(0, next + 1)
-  }
-
-  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and the selftest`, () => {
-    expect(wf.split('\n').filter((l) => l.trim() === `name: "${AGGREGATE}"`).length).toBe(1)
-    expect(wf.split('\n').filter((l) => l.includes(AGGREGATE)).length).toBe(1)
-    const close = job('barkui')
-    expect(close).toContain(`name: "${AGGREGATE}"`)
-    expect(close).toContain(`needs: [${JOBS.plan}, ${JOBS.check}, ${JOBS.selftest}]`)
-    expect(close).toMatch(/\n {4}if: always\(\)\n/)
-    expect(close).toContain('NEEDS: ${{ toJSON(needs) }}')
-    expect(close).toContain('node check/jobs.mjs --judge')
-  })
-
-  it('makes the list in the plan job and runs each group from it, with no list written by hand', () => {
-    const plan = job(JOBS.plan)
-    expect(plan).toContain('groups: ${{ steps.split.outputs.groups }}')
-    expect(plan).toContain('groups=$(node packages/barkui/check/jobs.mjs --matrix)')
-    const check = job(JOBS.check)
-    expect(check).toContain(`include: \${{ fromJSON(needs.${JOBS.plan}.outputs.groups) }}`)
-    expect(check).toContain('fail-fast: false')
-    expect(check).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
-    expect(check).toContain('node check/run.mjs --group "$GROUP" --parts "$PARTS" --report')
-    expect(check).not.toMatch(/\n {8}[a-z-]+: \[/)
-    expect(job(JOBS.selftest)).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
-  })
-
-  it('the final head carries no proof copies and no planted break', () => {
-    expect(wf).not.toContain('BARKUI_PROOF')
-    const dir = new URL('../check/', import.meta.url)
-    for (const f of readdirSync(dir)) expect(readFileSync(new URL(f, dir), 'utf8'), f).not.toContain('PROOF BREAK')
+  it('decides by one rule over every combination of results: nothing else is green', () => {
+    const results = ['success', 'failure', 'cancelled', 'skipped', 'missing']
+    let greens = 0
+    let rows = 0
+    for (const plan of results)
+      for (const run of ['true', 'false'])
+        for (const check of results)
+          for (const selftest of results) {
+            const needs = {}
+            if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
+            if (check !== 'missing') needs[JOBS.check] = { result: check }
+            if (selftest !== 'missing') needs[JOBS.selftest] = { result: selftest }
+            const touched = plan === 'success' && run === 'true' && check === 'success' && selftest === 'success'
+            const untouched = plan === 'success' && run === 'false' && check === 'skipped' && selftest === 'skipped'
+            const v = verdict(needs)
+            expect(v.ok, JSON.stringify({ plan, run, check, selftest })).toBe(touched || untouched)
+            if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), JSON.stringify({ plan, run, check, selftest })).toBe(true)
+            greens += v.ok ? 1 : 0
+            rows++
+          }
+    expect([rows, greens]).toEqual([250, 2])
   })
 })

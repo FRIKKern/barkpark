@@ -32,10 +32,10 @@ describe("README.md's list of what part.css may condition on", () => {
 })
 
 describe('how many parts the check holds', () => {
-  it("makes the ceilings from the readings, holds them under the steps' limits in js-tests.yml, and README.md's passage word for word", async () => {
+  it("makes the ceilings from the readings, holds them under the steps' limits in barkui.yml, and README.md's passage word for word", async () => {
     const c = await import('../check/capacity.mjs')
     const p = c.plan()
-    const workflow = readFileSync(new URL('../../../../.github/workflows/js-tests.yml', import.meta.url), 'utf8')
+    const workflow = readFileSync(new URL('../../../../.github/workflows/barkui.yml', import.meta.url), 'utf8')
     const minutes = (name) => workflow.slice(workflow.indexOf(name)).match(/timeout-minutes: (\d+)/)[1]
     expect(minutes('name: "Check this group\'s parts (real keys in Chromium)"')).toBe(String(p.STEP_MINUTES))
     expect(minutes('name: "Each planted break turns its light off"')).toBe(String(p.SELFTEST_STEP_MINUTES))

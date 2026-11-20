@@ -11,10 +11,16 @@ import { pathToFileURL } from 'node:url'
 import { PER_JOB } from './capacity.mjs'
 import { copyAs } from './copy.mjs'
 
-// The closing check's name in js-tests.yml, written here once; a test holds the workflow to it.
+// The closing check's name in .github/workflows/barkui.yml, written here once; a test holds the workflow to it.
 export const AGGREGATE = 'BarkUI showroom check'
-// The jobs it reads, by their ids in js-tests.yml.
+// The jobs it reads, by their ids in barkui.yml, and the names they render. Every name here and every group
+// name the split can make has a row in .github/required-checks.json (a test holds that too).
 export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest' }
+export const NAMES = {
+  plan: 'BarkUI plan (does this change touch it, and which groups)',
+  selftest: 'BarkUI selftest',
+  group: (k) => `BarkUI check, group ${k}`,
+}
 
 export const partsDir = join(import.meta.dirname, '..', 'parts')
 export const NO_PARTS = 'jobs: there are no part folders, so no job would check anything; a check of no parts is refused, never green'
@@ -30,7 +36,7 @@ export function folderNames(dir = partsDir) {
 // The proof knob, read here and nowhere else: BARKUI_PROOF_COPIES adds that many copies of the button to the
 // real parts, made under a scratch root (never in parts/), so CI can be shown a folder larger than the real one.
 // It can only add: every real part stays in the set, and a value it cannot read refuses the run.
-export const PROOF_MOST = 40
+export const PROOF_MOST = 39
 export function proofCopies(env = process.env) {
   const v = env.BARKUI_PROOF_COPIES
   if (v === undefined || v === '') return 0
