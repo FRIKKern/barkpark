@@ -9,6 +9,11 @@ defmodule BarkparkWeb.BulldocsIngestQuotaOnceTest do
   A write by a pinned token, and by a token with no home seated in one
   workspace, is judged once, on the workspace it lands in. An action the ingest
   controller gains later, named in no list, is judged by the gate before it runs.
+
+  The gate's three sets are pinned to their members: the actions where a seat
+  in the default workspace wins, the actions the gate judges (the router's
+  writing actions, counted a second way from the plugin's route declarations),
+  and the routes that can add a Paper.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -16,8 +21,10 @@ defmodule BarkparkWeb.BulldocsIngestQuotaOnceTest do
 
   alias Barkpark.{Auth, Repo, Tenancy}
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Plugins.Bulldocs.Web.WriteGate
   alias Barkpark.Tenancy.Quota
   alias BarkparkWeb.BulldocsIngestController
+  alias BarkparkWeb.Plugs.RequireWithinQuota
 
   @ds "production"
 
@@ -90,6 +97,41 @@ defmodule BarkparkWeb.BulldocsIngestQuotaOnceTest do
         %{pipe_through: pipes} <- [Phoenix.Router.route_info(BarkparkWeb.Router, verb, path, "")],
         :ingest in pipes,
         do: %{route | path: path}
+  end
+
+  # Changing a member is a decision; update this row on purpose.
+  test "the gate's sets hold exactly their members" do
+    seat_default =
+      ~w(sync apply_op propose apply_session_op append_session_event touch_session_conversation)a
+
+    judged =
+      ~w(ingest create sync apply_op propose ingest_session apply_session_op
+         append_session_event touch_session_conversation)a
+
+    creates = ~w(ingest create sync ingest_session)a
+    assert {length(seat_default), length(judged), length(creates)} == {6, 9, 4}
+
+    assert WriteGate.seat_default_actions() == seat_default
+    assert Enum.sort(judged_actions(BarkparkWeb.Router.__routes__())) == Enum.sort(judged)
+
+    assert RequireWithinQuota.ingest_creates() ==
+             for(a <- creates, do: {BulldocsIngestController, a})
+
+    declared =
+      for {_verb, _path, plug, action, opts} <-
+            Barkpark.Plugins.Registry.collect_routes(%{scope: :ingest}),
+          plug == BulldocsIngestController and opts[:auth] == :ingest,
+          do: %{plug: plug, plug_opts: action}
+
+    assert length(judged_actions(declared)) == 9
+  end
+
+  # The actions of ingest controller `routes` that the gate judges.
+  defp judged_actions(routes) do
+    for %{plug: BulldocsIngestController, plug_opts: action} <- routes,
+        BulldocsIngestController.judges_own_quota?(action),
+        uniq: true,
+        do: action
   end
 
   test "every route on the :ingest pipeline is judged once when it writes, never on a read", c do

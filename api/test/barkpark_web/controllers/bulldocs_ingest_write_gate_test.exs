@@ -258,12 +258,15 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
     for {mode, body} <- [create: create, update: update], body, do: mode
   end
 
+  # The body `action` sends in `mode`; an update's names the workspace it updates.
+  defp body(action, :create, slug, _ws_id), do: elem(write(action), 2).(slug)
+  defp body(action, :update, slug, ws_id), do: elem(write(action), 3).(slug, ws_id)
+
   # Sends `action` in `mode` for a fresh slug; seeds the updated row in `seat`.
   defp attempt(action, mode, token, seat, named \\ %{}) do
-    {_path, _kind, create, update} = write(action)
     slug = "write-gate-#{action}-#{mode}-#{System.unique_integer([:positive])}"
     if mode == :update, do: seed!(action, slug, seat)
-    body = if mode == :create, do: create.(slug), else: update.(slug, seat.ws.id)
+    body = body(action, mode, slug, seat.ws.id)
     before = trace(slug)
     {slug, before, send_as(:post, route_path(action, slug), token, Map.merge(body, named))}
   end
@@ -401,8 +404,7 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
         slug = "write-gate-#{@action}-isolated-#{System.unique_integer([:positive])}"
         seed!(@action, slug, c.home)
         in_default = rows(slug, c.home.ws.id)
-        {_path, _kind, create, update} = write(@action)
-        body = if update, do: update.(slug, c.home.ws.id), else: create.(slug)
+        body = body(@action, modes(@action) |> List.last(), slug, c.home.ws.id)
 
         resp = send_as(:post, route_path(@action, slug), homeless!([c.a.ws]), body)
 
@@ -417,15 +419,8 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
           seed!(@action, slug, c.home)
           seed!(@action, slug, c.a)
           {in_default, in_a} = {rows(slug, c.home.ws.id), rows(slug, c.a.ws.id)}
-          {_path, _kind, _create, update} = write(@action)
-
-          resp =
-            send_as(
-              :post,
-              route_path(@action, slug),
-              homeless!([c.a.ws]),
-              update.(slug, c.a.ws.id)
-            )
+          body = body(@action, :update, slug, c.a.ws.id)
+          resp = send_as(:post, route_path(@action, slug), homeless!([c.a.ws]), body)
 
           assert resp.status in 200..201, resp.resp_body
           assert rows(slug, c.home.ws.id) == in_default
@@ -439,11 +434,10 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
         states = [suspended: "workspace_suspended", archived: "workspace_archived", full: full]
 
         for mode <- modes(@action), {state, code} <- states do
-          {_path, _kind, create, update} = write(@action)
           t = tenant!()
           slug = "write-gate-#{@action}-#{state}-#{System.unique_integer([:positive])}"
           if mode == :update, do: seed!(@action, slug, %{t | token: pinned!(t.ws)})
-          body = if mode == :create, do: create.(slug), else: update.(slug, t.ws.id)
+          body = body(@action, mode, slug, t.ws.id)
           restrict!(t, state)
           before = trace(slug)
 
