@@ -967,17 +967,18 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         </div>
         <%!-- The Studio's own delete and unpublish modals are kept out of the
               desk: the desk draws its dialogs below, from the same assigns. --%>
-        <%!-- An old revision (`rev`) is the Studio's form over its values, in a
-              disabled fieldset (`RevisionView`); one that is not shown says so.
-              So is the published version in the published perspective
-              (`PublishedView`). The live form sits in the same fieldset,
-              enabled: the holders after it keep their place when a History
-              row is picked, so the row keeps the focus. Inside it, the form's
-              box is keyed by what it draws (`form_key/1`). --%>
+        <%!-- An old revision (`rev`) is the Studio's form over its values
+              (`RevisionView`); one that is not shown says so. So is the
+              published version in the published perspective
+              (`PublishedView`). Their fields sit in a disabled fieldset inside
+              the shell (`ReadonlyFields`), under group tabs that still switch.
+              The live form sits in the same holder: the holders after it keep
+              their place when a History row is picked, so the row keeps the
+              focus. Inside it, the form's box is keyed by what it draws
+              (`form_key/1`). --%>
         <fieldset
           id={"#{@view.id}-form-holder"}
           class="dk-revision-form"
-          disabled={RevisionView.shown?(assigns) or PublishedView.shown?(assigns)}
           data-desk-revision-form={RevisionView.shown?(assigns)}
           data-desk-published-form={PublishedView.shown?(assigns)}
         >
