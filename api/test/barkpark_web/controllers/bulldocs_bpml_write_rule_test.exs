@@ -9,8 +9,9 @@ defmodule BarkparkWeb.BulldocsBpmlWriteRuleTest do
       The same rule inside the write's transaction is in
       `saved_check_scope_test.exs`;
     * the reader's view: a Paper in a dataset with no `paper` schema (the
-      seeded ones are `production`'s) refuses the pull and the push alike
-      (`scope_unresolved`), and the push writes nothing.
+      seeded ones are `production`'s) refuses the BPML pull and the push alike
+      (`scope_unresolved`), and the push writes nothing; the JSON source read,
+      which is not pushed back, answers its blocks.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -134,6 +135,17 @@ defmodule BarkparkWeb.BulldocsBpmlWriteRuleTest do
 
     pulled = json_response(pull, 422)["error"]
     assert pulled["code"] == "scope_unresolved"
+
+    # The JSON source read is a read, not the working copy: it answers.
+    read =
+      build_conn()
+      |> put_req_header("authorization", "Bearer #{raw}")
+      |> get("/w/#{a.ws.slug}/p/#{a.project.slug}/d/#{ds}/papers/#{slug}/source")
+      |> json_response(200)
+
+    assert read["source"]["kind"] == "blocks"
+    assert Enum.map(read["source"]["blocks"], & &1["id"]) == ["h", "p"]
+    assert inspect(read["source"]["blocks"]) =~ "Body DS."
 
     before = rows(slug)
     {:ok, rev} = Content.Papers.op_rev(paper)

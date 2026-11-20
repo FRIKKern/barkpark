@@ -228,6 +228,38 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
     assert Content.get_paper(slug) == nil
   end
 
+  # The JSON source read is what a reader renders, never pushed back, so the
+  # working copy's refusals do not reach it. Its answer keeps main's keys: a
+  # success is {id, title, _rev, source}; a refusal's error carries main's
+  # `code`, with a message and hint added.
+  defp json_read(slug), do: get(build_conn(), "/papers/#{slug}/source")
+
+  test "the JSON read of a Paper hiding a match key answers its blocks; the BPML pull refuses" do
+    schema!(text: true, id: true)
+    slug = slug("json-match-key")
+    paper!(slug, blocks())
+
+    assert json_response(pull(slug), 422)["error"]["code"] == "hidden_block_id"
+    read = json_response(json_read(slug), 200)
+    assert Enum.sort(Map.keys(read)) == ~w(_rev id source title)
+    assert Enum.sort(Map.keys(read["source"])) == ~w(blocks kind)
+    shown = read["source"]["blocks"]
+    assert Enum.map(shown, & &1["type"]) == ~w(heading paragraph heading)
+    refute Enum.any?(shown, &Map.has_key?(&1, "id"))
+    refute inspect(read) =~ @hidden
+  end
+
+  test "the JSON read refuses what the reader source refuses, with main's code" do
+    schema!(text: true, blocks: true)
+    slug = slug("json-redacted")
+    paper!(slug, blocks())
+
+    read = json_response(json_read(slug), 422)
+    assert Map.keys(read) == ["error"]
+    assert read["error"]["code"] == "redacted_source"
+    assert Enum.sort(Map.keys(read["error"])) == ~w(code hint message)
+  end
+
   # Each way the view can fail, set on the row after a pull (the op rev does
   # not move): the pull and an unedited push of that pull refuse with the same
   # error, the push writes nothing, and neither error quotes a stored block.

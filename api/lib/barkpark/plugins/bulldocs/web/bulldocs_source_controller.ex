@@ -40,50 +40,60 @@ defmodule BarkparkWeb.BulldocsSourceController do
       nil ->
         send_resp(conn, 404, "not found")
 
+      paper when format == "bpml" ->
+        # The working copy: the reader's view (`Papers.BpmlView`), which the
+        # push and create answers print and refuse alike.
+        bpml_source(conn, paper, Content.Papers.BpmlView.of(paper, dataset, scope, perspective))
+
       paper ->
-        # The reader's view of the row (`Papers.BpmlView`): the pull, push and
-        # create answers print it and refuse alike.
-        view = Content.Papers.BpmlView.of(paper, dataset, scope, perspective)
-
-        source =
-          case view do
-            {:blocks, blocks, _fields} -> %{"kind" => "blocks", "blocks" => blocks}
-            {:html, html} -> %{"kind" => "html", "html" => html}
-            {:error, reason} -> {:error, reason}
-          end
-
-        case {source, format} do
-          {{:error, reason}, _} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{"error" => Content.Papers.BpmlView.refusal({:error, reason})})
-
-          # BPML is a VIEW of blocks only — an html-source paper has no block
-          # truth to print, so the isomorphic format honestly refuses.
-          {%{"kind" => "blocks", "blocks" => blocks}, "bpml"} ->
-            {:blocks, _blocks, fields} = view
-            send_bpml(conn, paper, blocks, fields)
-
-          {%{"kind" => "html"}, "bpml"} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{"error" => Content.Papers.BpmlView.refusal(view)})
-
-          {source, _json} ->
-            title =
-              case view do
-                {:blocks, blocks, fields} -> Content.Papers.BpmlView.title(paper, blocks, fields)
-                _html -> paper.title
-              end
-
-            json(conn, %{
-              "id" => paper.doc_id,
-              "title" => title,
-              "_rev" => paper.rev,
-              "source" => source
-            })
-        end
+        json_source(conn, paper, dataset, scope, perspective)
     end
+  end
+
+  # BPML is a VIEW of blocks only: an html-source paper has no block truth to
+  # print, so the isomorphic format refuses it.
+  defp bpml_source(conn, paper, {:blocks, blocks, fields}),
+    do: send_bpml(conn, paper, blocks, fields)
+
+  defp bpml_source(conn, _paper, view), do: refuse(conn, Content.Papers.BpmlView.refusal(view))
+
+  # The JSON read is what a reader renders (`bp paper view`, `bp paper export`,
+  # the mirrors), never pushed back through sync, so the working copy's own
+  # refusals do not reach it: the blocks and refusals are the reader source's.
+  defp json_source(conn, paper, dataset, scope, perspective) do
+    case Content.Papers.reader_source_with_schema(paper, dataset, scope) do
+      {{:blocks, blocks}, schema} ->
+        resolved =
+          Content.Papers.resolve_tasks_in_blocks(blocks, task_scope(paper, perspective), dataset)
+
+        fields = Content.Papers.anonymous_content(paper, schema)
+        title = Content.Papers.BpmlView.title(paper, resolved, fields)
+        source_json(conn, paper, title, %{"kind" => "blocks", "blocks" => resolved})
+
+      {{:html, html}, _schema} ->
+        source_json(conn, paper, paper.title, %{"kind" => "html", "html" => html})
+
+      {{:error, reason}, _schema} ->
+        refuse(conn, Content.Papers.BpmlView.refusal({:error, reason}))
+    end
+  end
+
+  defp source_json(conn, paper, title, source) do
+    json(conn, %{"id" => paper.doc_id, "title" => title, "_rev" => paper.rev, "source" => source})
+  end
+
+  defp refuse(conn, body),
+    do: conn |> put_status(:unprocessable_entity) |> json(%{"error" => body})
+
+  defp task_scope(paper, perspective) do
+    ws_id =
+      paper.workspace_id ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    [workspace_id: ws_id, project_id: paper.project_id, published_only: perspective == :published]
   end
 
   # The readable isomorphic view: a complete, self-describing <paper> document
