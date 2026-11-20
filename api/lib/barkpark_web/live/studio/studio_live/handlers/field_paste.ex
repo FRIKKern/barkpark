@@ -16,8 +16,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
       itself, a subfield of an object, a row of a list of objects;
     * a codelist takes one code, as a typed one is saved: a code its list
       does not have is stored, and Validation warns under the field
-      (task-400a66c6ebd31026); a list, a map or a string over #{64}
-      characters is not a code and is refused (#27955);
+      (task-400a66c6ebd31026); a list, a map or a string over
+      #{Barkpark.Content.Forms.CodelistShape.max_length()} characters is not a
+      code and is refused, by the rule a typed value is read by
+      (`CodelistShape.code?/1`);
     * a reference must name a document of the field's type that exists
       (`ref?`, the caller's scoped read);
     * an object keeps only the subfields its schema declares, each read the
@@ -45,6 +47,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content.DraftId
+  alias Barkpark.Content.Forms.CodelistShape
   alias Barkpark.Content.SelectOptions
   alias Barkpark.Content.SlugValue
   alias BarkparkWeb.Studio.Desk.FieldClip
@@ -58,8 +61,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   # MAX_SAFE_INTEGER): past it the site and the Studio read another number.
   @max_integer 9_007_199_254_740_991
   @row_types ~w(string text url email number boolean composite)
-  # The longest code a codelist field takes, the typed limit (#27955).
-  @code_max 64
 
   @typedoc """
   `{:save, params}`: the `autosave` params that write the paste.
@@ -230,7 +231,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   defp fit(%{"type" => "select"}, _value, _ref?, _depth), do: incompatible()
 
   defp fit(%{"type" => "codelist"}, value, _ref?, _depth) do
-    if code?(value), do: {:ok, value}, else: {:error, gettext("Not a code (kept as stored)")}
+    if CodelistShape.code?(value),
+      do: {:ok, value},
+      else: {:error, gettext("Not a code (kept as stored)")}
   end
 
   defp fit(%{"type" => "number"}, value, _ref?, _depth) do
@@ -317,11 +320,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
        do: unsupported(field)
 
   defp fit(_field, _value, _ref?, _depth), do: incompatible()
-
-  defp code?(code) when is_binary(code),
-    do: byte_size(code) <= 4 * @code_max and String.length(code) <= @code_max
-
-  defp code?(_value), do: false
 
   defp ref_id(%{"_ref" => id}) when is_binary(id), do: id
   defp ref_id(id) when is_binary(id), do: id
