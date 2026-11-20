@@ -21,7 +21,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Auth, Content, LabelFixtures, Repo, Tenancy, TenancyFixtures}
-  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Content.{Broadcast, MutationEvent}
   alias Barkpark.Content.Papers.BpmlView
 
   @ds "production"
@@ -143,33 +143,51 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     }
   end
 
-  # A listener on the Paper's topic that hands each frame on as
-  # `{:heard, frame}`, so the test's own mailbox (which also gets the conn
-  # test's replies) is not what is counted.
-  defp listen!(slug, workspace_id) do
-    test = self()
-    topic = Content.paper_topic(slug, workspace_id, @ds)
-
-    spawn_link(fn ->
-      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
-      send(test, :listening)
-      forward(test)
-    end)
-
-    assert_receive :listening, 1_000
+  # Every PubSub topic the write's effects send on: the Paper's own topic
+  # (`broadcast_paper_update/1`, `broadcast_paper_block/4`, and the doc frame
+  # of `ChangeEvents.announce/3`, which share it), the dataset's and the
+  # workspace's list topics (the list frames), and the relations topic the
+  # edge projection sends on.
+  defp effect_topics(slug, ws_id) do
+    [
+      Broadcast.paper_topic(slug, ws_id, @ds),
+      Broadcast.global_list_topic(@ds),
+      Broadcast.workspace_list_topic(@ds, ws_id),
+      Broadcast.paper_relations_topic(ws_id, @ds)
+    ]
   end
 
-  defp forward(test) do
-    receive do
-      frame -> send(test, {:heard, frame})
+  # One listener per effect topic, each handing on the frames that name
+  # `slug` as `{:heard, topic, frame}`, so the test's own mailbox (which also
+  # gets the conn test's replies) is not what is counted. Answers the topics.
+  defp listen!(slug, ws_id) do
+    test = self()
+    topics = effect_topics(slug, ws_id)
+    assert length(Enum.uniq(topics)) == 4
+
+    for topic <- topics do
+      spawn_link(fn ->
+        :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+        send(test, {:listening, topic})
+        forward(test, topic, slug)
+      end)
     end
 
-    forward(test)
+    for topic <- topics, do: assert_receive({:listening, ^topic}, 1_000)
+    topics
+  end
+
+  defp forward(test, topic, slug) do
+    receive do
+      frame -> if inspect(frame) =~ slug, do: send(test, {:heard, topic, frame})
+    end
+
+    forward(test, topic, slug)
   end
 
   defp flush_heard do
     receive do
-      {:heard, _} -> flush_heard()
+      {:heard, _topic, _frame} -> flush_heard()
     after
       100 -> :ok
     end
@@ -196,13 +214,14 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     slug = slug("rollback")
     paper = paper!(slug, [heading(), para(), heading("h2", @second)])
     {bpml, rev} = pull!(slug)
-    listen!(slug, paper.workspace_id)
+    topics = listen!(slug, paper.workspace_id)
 
     # Control: a push that keeps a visible block lands and is heard.
     edited = String.replace(bpml, "Visible.", "Edited.")
     refute edited == bpml
     answer = sync(slug, edited, rev) |> json_response(200)
-    assert_receive {:heard, {:paper_block, _frame}}, 1_000
+    paper_topic = hd(topics)
+    assert_receive {:heard, ^paper_topic, {:paper_block, _frame}}, 1_000
     flush_heard()
     {pulled, next_rev} = pull!(slug)
     assert answer["bpml"] == pulled
@@ -215,7 +234,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     resp = sync(slug, emptied, next_rev)
     assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
     assert trace(slug) == before
-    refute_receive {:heard, _}, 200
+    refute_receive {:heard, _topic, _frame}, 200
   end
 
   test "a create whose saved Paper has no view is rolled back with every effect" do
@@ -228,7 +247,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     resp = sync(slug, String.replace(bpml, source, slug), "0")
     assert json_response(resp, 422)["error"]["code"] == "semantic_empty"
     assert trace(slug) == %{row: nil, history: 0, events: 0, jobs: jobs}
-    refute_receive {:heard, _}, 200
+    refute_receive {:heard, _topic, _frame}, 200
   end
 
   # The flat route, no workspace given: the row lands in the default

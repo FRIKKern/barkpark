@@ -461,7 +461,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
-    opts = scope ++ [if_rev: base_rev, before_commit: check]
+    opts = scope ++ [if_rev: base_rev, before_commit: check, writer: conn.assigns[:api_token]]
 
     case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
       {:ok, result} ->
@@ -634,13 +634,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
       |> maybe_put("workspace_id", scope[:workspace_id])
       |> maybe_put("project_id", scope[:project_id])
 
-    # Advisory channel — same reset+drain pair as the ingest legs (D36/D42),
-    # so the wall's advise band (soft-dup near-miss, off-norm tag count) rides
-    # the created receipt instead of being silently dropped.
+    # Advisory channel (D36/D42): the wall's advise band rides the receipt.
     Warnings.reset()
     ref = make_ref()
 
-    case Content.upsert_paper(attrs, before_commit: Content.Papers.BpmlView.saved_check(ref)) do
+    check = Content.Papers.BpmlView.saved_check(ref)
+
+    case Content.upsert_paper(attrs, before_commit: check, writer: conn.assigns[:api_token]) do
       {:ok, paper} ->
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 

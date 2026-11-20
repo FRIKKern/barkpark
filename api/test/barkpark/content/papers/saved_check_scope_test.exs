@@ -1,0 +1,138 @@
+defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
+  @moduledoc """
+  A checked write's saved row is checked for its scope inside the write's
+  transaction, before the caller's own check, and fails closed:
+
+    * a row whose project is not one of its workspace's is refused
+      (`scope_unowned`), with or without a token;
+    * a row in a workspace the writing token may not write in is refused
+      (`write_forbidden`), on the upsert path and the block-op batch path;
+    * a refusal leaves no row, history, change event or job, and an existing
+      row is unchanged;
+    * the view check refuses a row whose own workspace and project resolve no
+      reader schema (`scope_unresolved`).
+
+  A row in the token's own workspace and project is written and answered.
+  The rows are written through `Content`, not through an HTTP door.
+  """
+  use Barkpark.DataCase, async: false
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.{Auth, Content, LabelFixtures, Repo, Tenancy, TenancyFixtures}
+  alias Barkpark.Content.{Document, MutationEvent}
+  alias Barkpark.Content.Papers.BpmlView
+
+  @ds "production"
+
+  setup do
+    LabelFixtures.register_tags!(@ds)
+    %{a: tenant!(), b: tenant!()}
+  end
+
+  defp tenant! do
+    ws = TenancyFixtures.create_workspace!()
+    {:ok, project} = Tenancy.create_project_with_dataset(ws, %{name: "saved scope #{ws.slug}"})
+    raw = "saved-scope-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "saved scope", @ds, ["admin"], ws.id)
+    %{ws: ws, project: project, token: token}
+  end
+
+  defp slug, do: "saved-scope-#{System.unique_integer([:positive])}"
+
+  defp blocks(text) do
+    [
+      %{"id" => "h", "type" => "heading", "level" => 2, "text" => "Saved scope"},
+      %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+    ]
+  end
+
+  defp attrs(slug, ws_id, project_id) do
+    LabelFixtures.paper_attrs(%{
+      "slug" => slug,
+      "blocks" => blocks("Visible."),
+      "workspace_id" => ws_id,
+      "project_id" => project_id
+    })
+  end
+
+  defp checked(writer), do: [before_commit: BpmlView.saved_check(make_ref()), writer: writer]
+
+  defp trace(slug) do
+    %{
+      rows:
+        Repo.all(
+          from d in Document,
+            where: d.doc_id in ^[slug, "drafts." <> slug],
+            select: {d.workspace_id, d.project_id, d.content, d.updated_at}
+        ),
+      history: length(Content.list_revisions(slug, "paper", @ds, [])),
+      events: Repo.aggregate(from(e in MutationEvent, where: e.doc_id == ^slug), :count),
+      jobs: Repo.aggregate(Oban.Job, :count)
+    }
+  end
+
+  defp code({:error, {:view_refused, %{code: code}}}), do: code
+  defp code(other), do: other
+
+  test "a row in the token's own workspace and project is written", c do
+    slug = slug()
+    result = Content.upsert_paper(attrs(slug, c.b.ws.id, c.b.project.id), checked(c.b.token))
+    assert {:ok, %Document{workspace_id: ws, project_id: proj}} = result
+    assert {ws, proj} == {c.b.ws.id, c.b.project.id}
+  end
+
+  test "a row under another workspace's project is refused and leaves nothing", c do
+    for writer <- [c.b.token, nil] do
+      slug = slug()
+      before = trace(slug)
+      result = Content.upsert_paper(attrs(slug, c.b.ws.id, c.a.project.id), checked(writer))
+      assert code(result) == "scope_unowned"
+      assert trace(slug) == before
+    end
+  end
+
+  test "a row in a workspace the token may not write in is refused and leaves nothing", c do
+    slug = slug()
+    before = trace(slug)
+    result = Content.upsert_paper(attrs(slug, c.a.ws.id, c.a.project.id), checked(c.b.token))
+    assert code(result) == "write_forbidden"
+    assert trace(slug) == before
+  end
+
+  test "a block-op batch on a row the token may not write in is refused, the row unchanged",
+       c do
+    slug = slug()
+    {:ok, _} = Content.upsert_paper(attrs(slug, c.a.ws.id, c.a.project.id))
+    before = trace(slug)
+
+    op = %{
+      "op" => "insert-after",
+      "afterId" => "p",
+      "block" => %{"id" => "p2", "type" => "paragraph", "content" => []}
+    }
+
+    scope = [workspace_id: c.a.ws.id, project_id: c.a.project.id]
+    result = Content.apply_paper_block_ops(slug, [op], @ds, scope ++ checked(c.b.token))
+
+    assert code(result) == "write_forbidden"
+    assert trace(slug) == before
+  end
+
+  test "the view check refuses a row whose workspace and project resolve no reader schema", c do
+    row =
+      Repo.insert!(%Document{
+        doc_id: slug(),
+        type: "paper",
+        dataset: @ds,
+        title: "Saved scope",
+        status: "published",
+        rev: Content.Writer.generate_rev(),
+        content: %{"blocks" => blocks("Visible.")},
+        workspace_id: c.b.ws.id,
+        project_id: c.a.project.id
+      })
+
+    assert code(BpmlView.saved_check(make_ref()).(row)) == "scope_unresolved"
+  end
+end

@@ -9,10 +9,18 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   its history row stay as they were, and the effects a write runs after its
   commit (broadcasts, the edge projection, change events) never run. A write
   without the option is unchanged.
+
+  Before the caller's check, the saved row's scope is checked, failing closed:
+  its project must belong to its workspace (`scope_unowned`), and the token
+  the write names as `writer:` must be allowed to write in that workspace
+  (`write_forbidden`). A write with no `writer:` (the shared-secret producer)
+  has only the first check.
   """
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.{Broadcast, Document}
   alias Barkpark.Repo
+  alias Barkpark.Tenancy
 
   @doc """
   A block-op batch's persist (`{:ok, receipt, effects}` or `{:error, _}`) of
@@ -33,7 +41,9 @@ defmodule Barkpark.Content.Papers.SavedCheck do
         Broadcast.with_deferred_queue(fn ->
           Repo.transaction(fn ->
             with {:ok, receipt, effects} <- persist.(),
-                 :ok <- check.(saved_row(effects, doc)) do
+                 saved = saved_row(effects, doc),
+                 :ok <- scope_check(saved, Keyword.get(opts, :writer)),
+                 :ok <- check.(saved) do
               {receipt, effects}
             else
               {:error, reason} -> Repo.rollback(reason)
@@ -52,8 +62,50 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   def run(opts, %Document{} = doc) do
     case Keyword.get(opts, :before_commit) do
       nil -> :ok
-      check when is_function(check, 1) -> check.(doc)
+      check when is_function(check, 1) ->
+        with :ok <- scope_check(doc, Keyword.get(opts, :writer)), do: check.(doc)
     end
+  end
+
+  @doc "The saved row's scope check alone (see the moduledoc)."
+  @spec scope_check(Document.t(), ApiToken.t() | nil) :: :ok | {:error, {:view_refused, map()}}
+  def scope_check(%Document{} = row, writer) do
+    cond do
+      not owned_pair?(row) ->
+        refuse(
+          "scope_unowned",
+          "the Paper would be stored under a project that is not one of its workspace's"
+        )
+
+      not may_write?(writer, row.workspace_id) ->
+        refuse(
+          "write_forbidden",
+          "the Paper would be stored in a workspace this token may not write in"
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  defp owned_pair?(%Document{project_id: nil}), do: true
+
+  defp owned_pair?(%Document{workspace_id: ws_id, project_id: project_id}) do
+    match?(%{workspace_id: ^ws_id}, Tenancy.get_project_by_id(project_id)) and is_binary(ws_id)
+  end
+
+  defp may_write?(nil, _ws_id), do: true
+  defp may_write?(%ApiToken{workspace_id: ws_id}, ws_id) when is_binary(ws_id), do: true
+
+  defp may_write?(%ApiToken{} = token, ws_id) when is_binary(ws_id),
+    do: Tenancy.Auth.authorize(token, ws_id, :write) == :ok
+
+  defp may_write?(_writer, _ws_id), do: false
+
+  defp refuse(code, message) do
+    {:error,
+     {:view_refused,
+      %{code: code, message: message <> ", so nothing was written", hint: "name a scope this token may write in"}}}
   end
 
   # A batch's effects carry the row it saved; a batch that wrote nothing has none.

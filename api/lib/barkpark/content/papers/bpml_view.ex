@@ -30,6 +30,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
     semantic_empty: "the reader's view of this Paper is empty",
     hidden_block_id: "the reader may not see the ids this Paper's blocks are matched by",
+    scope_unresolved: "no reader schema resolves for the workspace and project this Paper is in",
     unreadable_print: "the reader's view of this Paper does not read back as BPML",
     redacted_source: "the reader may see none of this Paper's blocks",
     invalid_blocks: "a block of this Paper has no type"
@@ -182,9 +183,18 @@ defmodule Barkpark.Content.Papers.BpmlView do
         )
 
       case Content.get_paper(row.doc_id, row.dataset, scope) do
-        %Document{} = saved -> answer(ref, print(saved, saved.dataset))
+        %Document{} = saved -> answer(ref, schema_resolved(saved))
         nil -> {:error, {:view_refused, refusal({:error, :not_found})}}
       end
+    end
+  end
+
+  # A saved row whose own workspace and project resolve no reader schema has
+  # no view to answer with, so the write is refused (fail closed).
+  defp schema_resolved(%Document{} = saved) do
+    case Content.Papers.reader_schema(saved, "paper", saved.dataset, []) do
+      nil -> {:refused, refusal({:error, :scope_unresolved})}
+      _schema -> print(saved, saved.dataset)
     end
   end
 
