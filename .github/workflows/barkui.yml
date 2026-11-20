@@ -23,6 +23,11 @@ concurrency:
   group: barkui-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# TEMPORARY proof (b), reverted before merge: 13 copies of the button beside the real parts, and a planted break
+# in the last copy (check/jobs.mjs, PROOF BREAK), so the last group goes red.
+env:
+  BARKUI_PROOF_COPIES: "13"
+
 jobs:
   barkui-plan:
     name: "BarkUI plan (does this change touch it, and which groups)"
