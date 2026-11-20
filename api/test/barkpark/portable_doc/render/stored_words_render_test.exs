@@ -18,44 +18,38 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
   @pack Path.expand("../../../../priv/portable_doc/goldens/blocks", __DIR__)
   @fixtures Path.expand("../../../support/fixtures", __DIR__)
 
-  # Keys skipped in every block, with why.
+  # Keys skipped in every block, with why. A skip names only a field that carries
+  # no words a reader reads: an id, a key, a style, an address, a code or a number.
+  # A field whose words a reader sees is never skipped; if it fails, that is a
+  # finding, not a skip.
   @skip %{
-    "type" => "the kind of a block or a run, not its words",
-    "id" => "a block's, a note's or a question's identity",
-    "tone" => "chrome: drawn as a color or an icon, not as the word",
-    "kind" => "chrome: picks how the block is drawn",
-    "mode" => "layout: picks how a section lays out its blocks",
-    "gap" => "layout: the space between a section's blocks",
-    "priority" => "chrome: drawn as an order or a style, not as the word",
-    "status" => "a state code, drawn as its label or its column, not as the stored word",
-    "syncKey" => "the key that ties code tabs together across a page",
-    "lang" => "a language code, set as an attribute",
-    "href" => "a link target, set as an attribute",
-    "src" => "a media address, set as an attribute",
-    "poster" => "a media still or start time, set as an attribute",
-    "alt" => "an image's text alternative, set as an attribute",
-    "anchor" => "a link target inside the page, set as an attribute",
-    "slug" => "a Paper's address, the link target of its title",
-    "ref" => "the address of the sheet the block embeds",
-    "source" => "where a value or a node comes from, set as a link or an attribute",
-    "sourceDefault" => "where a duel's values come from, set as a link or an attribute",
-    "polyline" => "an encoded route, drawn as a line, not words",
-    "tex" => "TeX source, drawn as math, so its words are not the page's",
-    "file_path" => "a tool call's file, shown as the diff's header path in parts",
-    "old_string" => "a tool call's replaced text, shown as diff lines",
-    "new_string" => "a tool call's new text, shown as diff lines"
+    "type" => "a key: the kind of a block or a run",
+    "id" => "an id: a block's, a note's or a question's identity",
+    "tone" => "a style: drawn as a color or an icon",
+    "kind" => "a style: picks how the block is drawn",
+    "mode" => "a style: picks how a section lays out its blocks",
+    "gap" => "a style: the space between a section's blocks",
+    "priority" => "a style or a number: an action's emphasis, a task's rank",
+    "status" => "a code: a task's or a todo's state, drawn as its label or column",
+    "syncKey" => "a key: ties code tabs together across a page",
+    "lang" => "a code: a language tag, set as an attribute",
+    "href" => "an address: a link target",
+    "src" => "an address: a media file",
+    "poster" => "an address or a time: a media still or start point",
+    "anchor" => "a key: a link target inside the page",
+    "slug" => "a key: a Paper's address, the target of its title link",
+    "ref" => "a key: the sheet the block embeds",
+    "source" => "an address or a key: where a value or a node comes from",
+    "sourceDefault" => "an address or a key: where a duel's values come from",
+    "polyline" => "a code: an encoded route, drawn as a line"
   }
 
   # Paths skipped in one block kind only (the top-level block's type, then the keys
-  # down to the string, list indexes left out), with why.
+  # down to the string, list indexes left out), with why. Same rule as above.
   @skip_in %{
-    {"diff", "diff"} => "unified diff source, drawn as lines with their markers taken off",
-    {"chart", "axes.xLabels"} => "axis labels, drawn as the chart's first and last ticks",
-    {"field-select", "options.label"} => "an option's label, shown only for the chosen option",
-    {"field-select", "options.value"} => "an option's stored value, not its label",
-    {"field-datetime", "value"} => "a timestamp, drawn formatted",
-    {"field-image", "value"} => "an image address, set as an attribute",
-    {"pre-gate-badge", "title"} => "the badge's hover title, set as an attribute"
+    {"field-select", "options.value"} => "a key: an option's stored value, not its label",
+    {"field-datetime", "value"} => "a number: a timestamp, drawn formatted",
+    {"field-image", "value"} => "an address: the image file"
   }
 
   # Fixture files that hold no Portable Doc document, by pattern, with why.
@@ -144,9 +138,17 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
   end
 
   # The page's words two ways: with each tag as a space, and the text run together
-  # (a word split by inline markup, <strong>care</strong>ful, reads as one).
+  # (a word split by inline markup, <strong>care</strong>ful, reads as one). The words
+  # a reader gets from an attribute (an image's alt, a hover title, an aria-label)
+  # count as shown.
   defp shown(html) do
-    spaced = html |> String.replace(~r/<[^>]*>/, " ") |> decode()
+    attrs =
+      ~r/\s(?:alt|title|aria-label)="([^"]*)"/
+      |> Regex.scan(html, capture: :all_but_first)
+      |> Enum.map_join(" ", &hd/1)
+
+    spaced = (html |> String.replace(~r/<[^>]*>/, " ")) <> " " <> attrs
+    spaced = decode(spaced)
     joined = html |> String.replace(~r/<[^>]*>/, "") |> decode() |> String.downcase()
     {MapSet.new(words(spaced)), joined}
   end
