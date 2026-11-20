@@ -84,6 +84,7 @@ const TOO_DEEP = JSON.parse(readFileSync(new URL("../../../test/support/fixtures
 const walked = sharedFixtureWalk();
 assert.deepEqual(walked.unread, [], "every file under the goldens root is read as documents or named on the skip list");
 assert.deepEqual(walked.unusedSkips, [], "every skip entry still names a file");
+assert.deepEqual(walked.skippedDocuments, [], "no skipped file holds a document");
 const refused = [];
 const tooDeep = [];
 for (const [name, blocks] of walked.docs) {

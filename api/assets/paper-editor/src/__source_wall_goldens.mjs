@@ -1,16 +1,14 @@
 // The shared Portable Doc fixtures the source-mode wall is measured on, read in one
-// place, from api/priv/portable_doc/goldens:
+// place, from api/priv/portable_doc/goldens. sharedFixtureWalk() reads EVERY file under
+// that root by its shape, not by a list of folders: each document it holds becomes a
+// Paper, and a file that holds no document is named on SKIPPED with its reason. A file
+// counts as read only when every key in it belongs to its shape; a file neither read
+// nor skipped comes back in `unread`, and a skipped JSON file that holds a document
+// comes back in `skippedDocuments`. __source_wall_fixtures.test.mjs fails on both. A
+// hand-kept folder list is how two refused fixtures were missed.
 //
-//   sourceWallGoldens()  every block and limit golden (`*.golden.json`), each as a
-//                        one-block Paper. canvas/__source_inside_edit_sweep.test.mjs
-//                        types on every line of these, and
-//                        markdown/__reader_inline_rows.test.mjs reads their types.
-//   sharedFixtureWalk()  EVERY file under that root, read by its shape, not by a list
-//                        of folders: each document it holds becomes a Paper, and a file
-//                        that holds no document is named on SKIPPED with its reason.
-//                        A file that is neither read nor skipped comes back in
-//                        `unread`, and __source_wall_fixtures.test.mjs fails on it. A
-//                        hand-kept folder list is how two refused fixtures were missed.
+// canvas/__source_inside_edit_sweep.test.mjs types on every document of the walk, and
+// markdown/__reader_inline_rows.test.mjs reads their block types.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -21,19 +19,6 @@ import { canonicalJSON } from "./canvas/projection-json.js";
 const GOLDENS = fileURLToPath(new URL("../../../priv/portable_doc/goldens/", import.meta.url));
 
 const json = (...path) => JSON.parse(readFileSync(join(GOLDENS, ...path), "utf8"));
-const files = (dir, ending) => readdirSync(join(GOLDENS, dir)).filter((name) => name.endsWith(ending)).sort();
-
-// [[name, block]], name as "blocks/paragraph", sorted by folder then file.
-export function sourceWallGoldens() {
-  const out = [];
-  for (const dir of ["blocks", "limits"]) {
-    for (const file of files(dir, ".golden.json")) {
-      const { input } = json(dir, file);
-      out.push([`${dir}/${file.replace(/\.golden\.json$/, "")}`, { id: "fixture", ...input }]);
-    }
-  }
-  return out;
-}
 
 // The files under the root that hold no Portable Doc document. A pattern is a path from
 // the root, where `*` stands for one file name; each says why the file is not swept.
@@ -54,30 +39,89 @@ const matches = (pattern, path) =>
 // gets one by its place.
 const withIds = (blocks) => blocks.map((block, index) => (block && block.id ? block : { id: `fixture-${index}`, ...block }));
 const isBlocks = (value) => Array.isArray(value) && value.every((block) => block && typeof block === "object" && typeof block.type === "string");
-const docBlocks = (doc) => (doc && isBlocks(doc.blocks) ? doc.blocks : null);
 
-// The documents one parsed file holds, as [[label, blocks]], by the file's shape; null
-// when it has none of these shapes.
-function documentsIn(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  // A block golden or a limit edge golden: one block under `input`.
-  if (value.input && typeof value.input === "object" && typeof value.input.type === "string") return [["", [value.input]]];
-  // A from-markdown golden or a carrier fixture: the blocks of one document.
-  if (isBlocks(value.blocks)) return [["", value.blocks]];
-  // An op golden: the document before the op and after it.
-  if (docBlocks(value.before) && docBlocks(value.after)) return [[" before", value.before.blocks], [" after", value.after.blocks]];
-  // A locale golden: the blocks it renders in that locale.
-  if (isBlocks(value.inputs)) return [["", value.inputs]];
-  // limit-docs.json: worst-case and edge docs, each one block written with the pack's
-  // macros, expanded by the conformance kit's own expander.
-  if (Array.isArray(value.docs) && value.docs.every((entry) => entry && entry.name && entry.doc)) {
-    return ["docs", "edges"].flatMap((key) => (value[key] || []).map(({ name, doc }) => [` ${key}/${name}`, [expandLimitDoc(doc)]]));
+const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const onlyKeys = (value, keys) => isObject(value) && Object.keys(value).every((key) => keys.includes(key));
+const docOf = (doc, keys) => (onlyKeys(doc, keys) && isBlocks(doc.blocks) ? doc.blocks : null);
+
+// Each shape a fixture file can have: what marks it, the full set of keys a file of that
+// shape may carry, and the documents it holds as [[label, blocks]]. A file with a key
+// outside its shape's set is not read, so a document added under a new key cannot hide.
+const SHAPES = [
+  {
+    name: "block or limit golden: one block under `input`",
+    marks: (value) => isObject(value.input) && typeof value.input.type === "string",
+    keys: ["_comment", "expectedHtml", "input", "name", "shape", "type"],
+    documents: (value) => [["", [value.input]]],
+  },
+  {
+    name: "from-markdown golden or carrier fixture: the blocks of one document",
+    marks: (value) => isBlocks(value.blocks),
+    keys: ["blocks", "markdown"],
+    documents: (value) => [["", value.blocks]],
+  },
+  {
+    name: "op golden: the document before the op and after it",
+    marks: (value) => isObject(value.before) && isObject(value.after),
+    keys: ["after", "before", "op", "tableProjections"],
+    documents: (value) => {
+      const docKeys = ["blocks", "preview", "title", "version"];
+      const before = docOf(value.before, docKeys);
+      const after = docOf(value.after, docKeys);
+      return before && after ? [[" before", before], [" after", after]] : null;
+    },
+  },
+  {
+    name: "locale golden: the blocks it renders in that locale",
+    marks: (value) => isBlocks(value.inputs),
+    keys: ["_comment", "expectedHtml", "inputs", "locale", "shape", "strings"],
+    documents: (value) => [["", value.inputs]],
+  },
+  {
+    // Worst-case and edge docs, each one block written with the pack's macros, expanded
+    // by the conformance kit's own expander.
+    name: "limit-docs.json: named docs and edges",
+    marks: (value) => Array.isArray(value.docs),
+    keys: ["_comment", "docs", "edges"],
+    documents: (value) => {
+      const lists = ["docs", "edges"].map((key) => [key, value[key] || []]);
+      const entries = lists.flatMap(([, list]) => list);
+      if (!entries.every((entry) => onlyKeys(entry, ["doc", "name"]) && entry.name && entry.doc)) return null;
+      return lists.flatMap(([key, list]) => list.map(({ name, doc }) => [` ${key}/${name}`, [expandLimitDoc(doc)]]));
+    },
+  },
+  {
+    name: "value-too-deep.json: cases, each a whole document",
+    marks: (value) => Array.isArray(value.cases),
+    keys: ["cases", "maxValueDepth"],
+    documents: (value) => {
+      if (!value.cases.every((entry) => onlyKeys(entry, ["doc", "expect", "name"]) && docOf(entry.doc, ["blocks"]))) return null;
+      return value.cases.map((entry, index) => [` ${entry.name || index}`, entry.doc.blocks]);
+    },
+  },
+];
+
+// The documents one parsed file holds, as [[label, blocks]]; null when it has none of
+// the shapes, or a key its shape does not carry.
+export function documentsIn(value) {
+  if (!isObject(value)) return null;
+  const shape = SHAPES.find((candidate) => candidate.marks(value));
+  if (!shape || !onlyKeys(value, shape.keys)) return null;
+  const found = shape.documents(value);
+  return found && found.length ? found : null;
+}
+
+// Whether a value holds a document anywhere inside it: an object any shape marks, at any
+// depth. A skipped file must hold none.
+export function holdsDocument(value) {
+  const stack = [value];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object") continue;
+    if (isObject(node) && SHAPES.some((shape) => shape.marks(node))) return true;
+    stack.push(...Object.values(node));
   }
-  // value-too-deep.json: cases, each a whole document.
-  if (Array.isArray(value.cases) && value.cases.every((entry) => docBlocks(entry && entry.doc))) {
-    return value.cases.map((entry, index) => [` ${entry.name || index}`, entry.doc.blocks]);
-  }
-  return null;
+  return false;
 }
 
 function walk(dir) {
@@ -91,12 +135,13 @@ function walk(dir) {
 // once: under the file that holds only it, else under the first name read.
 const content = (blocks) => canonicalJSON(blocks.map(({ id: _id, ...rest }) => rest));
 
-// { docs: [[name, blocks]], skipped: [[path, reason]], unread: [path], unusedSkips: [pattern],
-//   duplicates: [[name, kept name]] }
+// { docs: [[name, blocks]], skipped: [[path, reason]], skippedDocuments: [path],
+//   unread: [path], unusedSkips: [pattern], duplicates: [[name, kept name]] }
 export function sharedFixtureWalk(root = GOLDENS) {
   const read = [];
   const skipped = [];
   const unread = [];
+  const skippedDocuments = [];
   const used = new Set();
   for (const file of walk(root)) {
     const path = relative(root, file).split("\\").join("/");
@@ -104,6 +149,7 @@ export function sharedFixtureWalk(root = GOLDENS) {
     if (skip) {
       used.add(skip[0]);
       skipped.push([path, skip[1]]);
+      if (path.endsWith(".json") && holdsDocument(JSON.parse(readFileSync(file, "utf8")))) skippedDocuments.push(path);
       continue;
     }
     let found = null;
@@ -114,7 +160,7 @@ export function sharedFixtureWalk(root = GOLDENS) {
         found = null;
       }
     }
-    if (!found || found.length === 0) {
+    if (!found) {
       unread.push(path);
       continue;
     }
@@ -133,7 +179,7 @@ export function sharedFixtureWalk(root = GOLDENS) {
   const docs = read.filter((entry) => kept.get(entry.key) === entry).map(({ name, blocks }) => [name, blocks]);
   const duplicates = read.filter((entry) => kept.get(entry.key) !== entry).map((entry) => [entry.name, kept.get(entry.key).name]);
   const unusedSkips = SKIPPED.map(([pattern]) => pattern).filter((pattern) => !used.has(pattern));
-  return { docs, skipped, unread, unusedSkips, duplicates };
+  return { docs, skipped, skippedDocuments, unread, unusedSkips, duplicates };
 }
 
 // Portable Doc's value-depth limit: a document nesting deeper is refused by the

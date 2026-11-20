@@ -209,7 +209,8 @@ try {
     mounted.push(canvas);
     const seen = editInSource(canvas, "end");
     assert.equal(seen.readOnly, true, "source mode opens read-only on the carrier list");
-    assert.equal(seen.notice, "Read only: Markdown cannot carry the items of block 1, a list, yet.");
+    assert.equal(seen.notice, "Read only: Markdown cannot carry the items of block 1, a list, yet.",
+      "a carrier list opens read-only with the notice naming its items");
     assert.deepEqual(batches, [], "no op is sent");
     assert.deepEqual(server, JSON.parse(readFileSync(new URL("../../../../priv/portable_doc/goldens/nested-list-carriers.json", import.meta.url), "utf8")).blocks,
       "the stored list is unchanged");
