@@ -11,8 +11,7 @@
 // breakpoint only PHONE_ONLY (layout and type); selectors to the pseudo-classes
 // and pseudo-elements in check/selectors.mjs, a pinned state only on the element
 // a rule styles. Any other rule type, condition, property or selector is refused, and a rule the browser drops
-// for a selector or condition it does not know is refused by name too (check/sheet-text.mjs), so none escapes
-// these walls by never being read.
+// whole, for a selector or condition it does not know, is refused by name too (check/sheet-text.mjs).
 //
 // The page loads every part in one barkui.css, so part.css must also end where
 // its rules end: a rule placed after it (SENTINEL) must come back as a rule of

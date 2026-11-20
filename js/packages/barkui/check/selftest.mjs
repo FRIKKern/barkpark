@@ -389,6 +389,12 @@ const CASES = [
     expect: (...a) => refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/)(...a) && refused(/&:bark-made-up-too: the browser drops this rule/)(...a),
   },
   {
+    name: 'a dropped rule is refused by name when a string broken by a newline would even out the count',
+    only: ['pressed'],
+    plant: inCss('[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-y: "a\n; }\n[data-slot="button"].k { gap: 0px; }'),
+    expect: refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/),
+  },
+  {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
     only: ['skins', 'schemes'],
     plant: all(

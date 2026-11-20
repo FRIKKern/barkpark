@@ -14,4 +14,8 @@ describe("a part sheet's rules as its text writes them", () => {
   it('opens nothing on a brace inside a string, an escape or a comment', () => {
     expect(textBlocks('[title="{"] { content: "}"; } a\\{b { gap: 0 } /* } */ c { }').map((b) => b.prelude)).toEqual(['[title="{"]', 'a\\{b', 'c'])
   })
+
+  it('ends a string at an unescaped newline, as the browser does, and runs on past an escaped one', () => {
+    expect(textBlocks('a { --x: "b\n; } c { --y: "d\\\n}"; } e { }').map((b) => b.prelude)).toEqual(['a', 'c', 'e'])
+  })
 })
