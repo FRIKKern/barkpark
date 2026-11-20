@@ -524,6 +524,15 @@ defmodule BarkparkWeb.Studio.DeskLive do
     {:noreply, assign(socket, list_sorts: sorts, warm: warm)}
   end
 
+  # A pick or a Remove in a tree codelist (`TreeCodelistField`) comes as a
+  # message, and is a step of the document's undo when it landed, as a typed
+  # edit is (`DocUndo`, task-a895a60bcc1302d9).
+  def handle_info({:tree_codelist_pick, %{} = msg} = message, socket),
+    do:
+      DocUndo.around("tree_codelist_pick", msg, socket, fn socket ->
+        EditorHost.handle_info(message, socket)
+      end)
+
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
   @impl true
