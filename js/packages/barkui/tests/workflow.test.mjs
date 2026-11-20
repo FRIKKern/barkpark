@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PER_JOB } from '../check/capacity.mjs'
-import { AGGREGATE, folderNames, JOBS, NAMES, partNames, partsDir, PROOF_MOST, split } from '../check/jobs.mjs'
+import { AGGREGATE, folderNames, JOBS, NAMES, partNames, partsDir, MOST_GROUPS, MOST_PARTS, split } from '../check/jobs.mjs'
 
 const repo = (p) => new URL(`../../../../${p}`, import.meta.url)
 const wf = readFileSync(repo('.github/workflows/barkui.yml'), 'utf8')
@@ -68,14 +68,26 @@ describe('every name barkui.yml can render has a row in .github/required-checks.
   const required = new Set((spec.protection?.required_status_checks?.checks ?? []).map((c) => c.context))
   const rows = new Set([...required, ...spec.exclusions.map((e) => e.context)])
   // The most groups the split can make: every real part plus the most proof copies the knob takes.
-  const most = split(partNames(partsDir, { BARKUI_PROOF_COPIES: String(PROOF_MOST) })).length
+  const most = split(partNames(partsDir, { BARKUI_PROOF_COPIES: String(MOST_PARTS - folderNames().length) })).length
+  const groupRows = [...rows].filter((r) => /^BarkUI check, group \d+$/.test(r))
   const groupNames = (n) => Array.from({ length: n }, (_, i) => NAMES.group(i + 1))
   const missing = (names) => names.filter((n) => !rows.has(n))
 
   it('the group names the split can make, counted another way, each have a row', () => {
     expect(most).toBeGreaterThan(0)
-    expect(most).toBe(Math.ceil((folderNames().length + PROOF_MOST) / PER_JOB))
+    expect(most).toBe(MOST_GROUPS)
     expect(missing(groupNames(most))).toEqual([])
+  })
+
+  it('the group rows are exactly groups 1 to MOST_GROUPS: a row more or a row less than that number is red', () => {
+    expect(groupRows.sort()).toEqual(groupNames(MOST_GROUPS).sort())
+  })
+
+  it("the readme's line on outgrowing the rows names MOST_GROUPS and MOST_PARTS as they are", () => {
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+    expect(readme).toContain(`The check runs at most ${MOST_GROUPS} groups (\`MOST_GROUPS\` in \`check/jobs.mjs\`), so at most ${MOST_PARTS} parts`)
+    expect(readme).toContain(`one row for each of groups 1 to ${MOST_GROUPS};`)
+    expect(readme).toContain(`Past ${MOST_PARTS} parts the plan job refuses`)
   })
 
   it('the plan, the selftest, the closing check and the skipped-matrix template each have a row', () => {
@@ -87,7 +99,7 @@ describe('every name barkui.yml can render has a row in .github/required-checks.
   })
 
   it('one group more than the rows cover is found: the check is red the day the knob or the folder would make it', () => {
-    const rowsFor = [...rows].filter((r) => /^BarkUI check, group \d+$/.test(r)).length
+    const rowsFor = groupRows.length
     const more = split(Array.from({ length: rowsFor * PER_JOB + 1 }, (_, i) => `p${i}`)).length
     expect(more).toBe(rowsFor + 1)
     expect(missing(groupNames(more))).toEqual([NAMES.group(rowsFor + 1)])
