@@ -15709,6 +15709,26 @@ msgstr "Parametrene må være et JSON-objekt, som {\"title\": \"post\"}"
 msgid "Param $%{name} referenced, but not provided"
 msgstr "Parameteren $%{name} er brukt, men ikke gitt"
 
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has text"
+msgstr ", har tekst"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "%{lang} (primary)"
+msgstr "%{lang} (primær)"
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "No %{primary} text: readers get the %{fallback} text instead."
+msgstr "Ingen %{primary}-tekst: leserne får %{fallback}-teksten i stedet."
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has an error"
+msgstr ", har en feil"
+
 #: lib/barkpark_web/live/studio/desk/vision.ex
 #, elixir-autogen, elixir-format
 msgid "Listen"

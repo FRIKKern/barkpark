@@ -1131,15 +1131,15 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
-  # table). Used by the Bulldocs paper-ingest API and any plugin that ships an
-  # `auth: :ingest` route via the plugin highway.
+  # Ingest endpoints: JSON in, the shared-secret bearer or an admin api token. Used by the
+  # Bulldocs paper-ingest API and any plugin `auth: :ingest` route via the plugin highway.
   pipeline :ingest do
     # nosniff + referrer-policy, FIRST so a halted refusal carries them too
     # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireIngestToken)
+    plug(BarkparkWeb.Plugs.AssignWriteCaller)
     # Resolve ONE tenant for the whole bucket (task-ef3eb91bf7f87d4c). This
     # pipeline mounted no workspace producer at all, so every `auth: :ingest`
     # controller ran with `:current_workspace` nil — the sheets export read
