@@ -11,8 +11,10 @@ defmodule Barkpark.Content.Forms.CodelistShape do
   the page can say it was not saved (`RefusedSave.not_codes/2`).
 
   Only posts from the page are read here. A write the server built from a
-  stored value (Review changes' Revert, a paste, an undo) is written as it
-  is: a stored list put back is not a typed one.
+  stored value (Review changes' Revert, an undo) is written as it is: a
+  stored list put back is not a typed one. A paste is read by the same rule
+  (`code?/1`, `FieldPaste`), so a value typed and a value pasted are a code
+  alike (task-141a4243ed18f4c5).
 
   A code is at most 64 characters: the longest bundled code is 19
   (`all-rights-reserved`), Thema's 14.
@@ -44,11 +46,18 @@ defmodule Barkpark.Content.Forms.CodelistShape do
 
   def split(params, _schema), do: {params, []}
 
-  defp code?(nil), do: true
-  defp code?(%Unset{}), do: true
+  @doc """
+  Whether `value` is what a codelist field holds: one code of at most
+  `max_length/0` characters (and four bytes each), or nothing. Nothing, nil
+  or the unset marker, clears the field, as TanStack's paste of a null does.
+  A list, a map or a number is not a code.
+  """
+  @spec code?(term()) :: boolean()
+  def code?(nil), do: true
+  def code?(%Unset{}), do: true
 
-  defp code?(code) when is_binary(code),
+  def code?(code) when is_binary(code),
     do: byte_size(code) <= 4 * @max_length and String.length(code) <= @max_length
 
-  defp code?(_posted), do: false
+  def code?(_value), do: false
 end
