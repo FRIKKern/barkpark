@@ -257,7 +257,7 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
   test "a workspace member who is not an admin gets no desk, so no Tasks", c do
     raw = "desk-tasks-member-" <> Ecto.UUID.generate()
     {:ok, _} = Auth.create_token(raw, "desk-tasks-member", @dataset, ~w(read write), c.ws_id)
-    conn = Plug.Test.init_test_session(build_conn(), %{"api_token" => raw})
+    conn = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => raw})
 
     assert {:error, {:live_redirect, %{to: to}}} = live(conn, c.base)
     refute to =~ "_desk"
