@@ -322,8 +322,9 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   @doc """
   Presence-nav overlay (top-right), formerly inline in StudioLive, now
   rendered from `layouts/studio.html.heex`.
-  Renders one avatar+tooltip per other user plus the self pill. The
-  outer wrapper preserves the LV hook contract:
+  Renders one avatar+tooltip per other user plus the self pill; in the
+  desk (`desk`), the others are one button and its menu instead
+  (`Desk.WhoMenu`). The outer wrapper preserves the LV hook contract:
 
       <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
 
@@ -354,12 +355,20 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   # un-narrowed — the exact narrowing the hand-rolled copy dropped.
   attr :grant_scoped_read, :boolean, default: false
 
+  attr :desk, :boolean,
+    default: false,
+    doc: "the desk's bar: the others are TanStack's one button and menu (`Desk.WhoMenu`)"
+
   def presence_nav(assigns) do
     ~H"""
     <div class="presence-nav" id="presence-hook" phx-hook="PresenceIdentity">
       <% scope_opts = ScopeHelpers.scope_opts_from_assigns(assigns) %>
       <% others = Enum.reject(@presences, & &1.user_id == @user_id) %>
-      <%= for p <- others do %>
+      <BarkparkWeb.Studio.Desk.WhoMenu.menu
+        :if={@desk}
+        people={for p <- others, do: Map.put(p, :doc_title, p.doc_id && p.type && resolve_presence_doc_title(p, @dataset, scope_opts))}
+      />
+      <%= for p <- others, !@desk do %>
         <% p_doc_title = resolve_presence_doc_title(p, @dataset, scope_opts) %>
         <%= if p.doc_id && p.type do %>
           <button type="button" class="presence-user-wrap"
