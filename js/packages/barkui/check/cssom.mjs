@@ -22,6 +22,7 @@ import { pinStates } from '../build/showroom.mjs'
 import { EXTRA, KEYFRAMES, LEFT_OUT_INITIAL, MEDIA, MOTION_ONLY, PHONE, PHONE_ONLY, VOCABULARY } from '../build/vocabulary.mjs'
 import { readFileSync } from 'node:fs'
 import { resolve, selectorFindings, statesOnSubject, strip, unpinned } from './selectors.mjs'
+import { textBlocks, unreadRules } from './sheet-text.mjs'
 
 const SENTINEL = '[data-barkui-sentinel] { gap: 0px; }'
 
@@ -50,7 +51,7 @@ export async function readPartCss(browser, css) {
   try {
     const page = await context.newPage()
     const { found, selectors, rules, pinnedSelectors } = await page.evaluate(
-      ([texts, sentinel, rulesSrc, vocabulary, motionOnly, extra, leftOut, keyframes, media, phone, phoneOnly]) => {
+      ([texts, sentinel, rulesSrc, vocabulary, motionOnly, extra, leftOut, keyframes, media, phone, phoneOnly, written, unreadSrc]) => {
         const found = []
         const selectors = []
         // Every longhand a vocabulary property sets, as this browser expands it.
@@ -144,6 +145,8 @@ export async function readPartCss(browser, css) {
         }
         const asWritten = layer(texts.asWritten, true)
         if (asWritten) walk(asWritten, { inMotion: false, inPhone: false, media: [] }, -1)
+        // Every rule the text writes is one the browser read, or nothing would judge it (check/sheet-text.mjs).
+        if (asWritten) found.push(...(0, eval)(`(${unreadSrc})`)([written, asWritten]))
         const pinned = asWritten && layer(texts.pinned, true)
         const pinnedSelectors = []
         if (pinned) {
@@ -157,7 +160,7 @@ export async function readPartCss(browser, css) {
         }
         return { found, selectors, rules: pinned ? ruleList(pinned) : null, pinnedSelectors }
       },
-      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY]],
+      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY], textBlocks(css), unreadRules.toString()],
     )
     const has = []
     selectors.forEach((s, i) => {

@@ -380,6 +380,15 @@ const CASES = [
     expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
   },
   {
+    name: 'a rule the browser drops is refused by name, at the top of part.css and nested',
+    only: ['pressed'],
+    plant: all(
+      inCss('[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }'),
+      inCss('[data-slot="button"] { &:bark-made-up-too { color: var(--ui-foreground); } }'),
+    ),
+    expect: (...a) => refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/)(...a) && refused(/&:bark-made-up-too: the browser drops this rule/)(...a),
+  },
+  {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
     only: ['skins', 'schemes'],
     plant: all(
