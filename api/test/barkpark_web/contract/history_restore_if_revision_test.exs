@@ -294,9 +294,21 @@ defmodule BarkparkWeb.Contract.HistoryRestoreIfRevisionTest do
        end}
     )
 
-    resp = restore(conn, second.id, %{"ifAbsent" => true})
+    resp = in_own_transaction(site, fn -> restore(conn, second.id, %{"ifAbsent" => true}) end)
     assert {:ok, _} = Process.get(:first_restore)
     {resp, rev_of("drafts.#{doc_id}")}
+  end
+
+  # In production the two restores are two connections and two transactions. The
+  # sandbox runs both on one, so a first restore that lands inside the second's write
+  # transaction would be undone by that transaction's rollback on the refusal. For
+  # those sites the test opens the transaction itself, so the second write joins it,
+  # and a refusal returns without rolling the first back.
+  defp in_own_transaction(:restore_after_state_check, fun), do: fun.()
+
+  defp in_own_transaction(_inside_the_write, fun) do
+    {:ok, resp} = Barkpark.Repo.transaction(fun)
+    resp
   end
 
   defp assert_second_refused({resp, landed}, doc_id) do
