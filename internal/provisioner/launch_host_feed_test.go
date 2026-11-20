@@ -70,7 +70,7 @@ func TestProvisionWith_NarratesWarmOrCold(t *testing.T) {
 		{"pool off (WARM_POOL_SIZE=0)", func(t *testing.T, _ context.Context) setup {
 			seams, _, _, _ := fakeSeams(t)
 			return setup{seams: seams, job: acmeJob(),
-				want: "No warm server: warm pool is off on this worker (WARM_POOL_SIZE=0) — creating a new server"}
+				want: "No warm server: warm pool is off on the worker (WARM_POOL_SIZE=0) — creating a new server"}
 		}},
 		{"pool on but empty", func(t *testing.T, _ context.Context) setup {
 			seams, _, _, _ := fakeSeams(t)
@@ -111,17 +111,17 @@ func TestProvisionWith_NarratesWarmOrCold(t *testing.T) {
 			seams.WarmClient = wc
 			seams.WarmRefill = func(context.Context) {}
 			return setup{seams: seams, job: acmeJob(),
-				earlier:    "Warm server " + box.Name + " assigned",
+				earlier:    "Warm server " + box.Name + " claimed",
 				wantPrefix: "No warm server: warm server " + box.Name + " failed to assign: "}
 		}},
-		{"warm server assigned", func(t *testing.T, ctx context.Context) setup {
+		{"warm server claimed", func(t *testing.T, ctx context.Context) setup {
 			seams, prov, _, _ := fakeSeams(t)
 			wc := &fakeWarmClient{}
 			box := seedWarmBox(t, ctx, prov, wc)
 			seams.WarmPoolSize = 1
 			seams.WarmClient = wc
 			seams.WarmRefill = func(context.Context) {}
-			return setup{seams: seams, job: acmeJob(), want: "Warm server " + box.Name + " assigned"}
+			return setup{seams: seams, job: acmeJob(), want: "Warm server " + box.Name + " claimed"}
 		}},
 	}
 	for _, tc := range cases {

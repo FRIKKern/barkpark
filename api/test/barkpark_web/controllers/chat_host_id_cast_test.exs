@@ -69,7 +69,7 @@ defmodule BarkparkWeb.ChatHostIdCastTest do
 
     html = render_click(view, "revoke", %{"id" => "not-a-uuid"})
 
-    assert html =~ "That machine is not enrolled in this workspace"
+    assert html =~ "That machine is not registered in this workspace"
     assert Process.alive?(view.pid)
     assert [%{id: host_id}] = ChatHosts.list_hosts(ctx.ws.id)
     assert host_id == ctx.host_id
