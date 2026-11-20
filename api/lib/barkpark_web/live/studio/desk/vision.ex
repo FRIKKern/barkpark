@@ -21,9 +21,10 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
   `…/studio/_desk/_tools/vision`, so it keeps the desk's navbar, drawer and
   dialogs. `bp-desk-vision.js` runs it (named here for the first load, and
   loaded by the desk's hook after a live patch), with its parts
-  `bp-desk-vision-query.js` (what a query reads) and `bp-desk-vision-tree.js`
-  (the result tree): named here before it, and on a live patch loaded by it
-  from the root's `data-vision-query-js` and `data-vision-tree-js`. This draws
+  `bp-desk-vision-query.js` (what a query reads), `bp-desk-vision-tree.js`
+  (the result tree) and `bp-desk-vision-listen.js` (Listen): named here
+  before it, and on a live patch loaded by it from the root's
+  `data-vision-query-js`, `data-vision-tree-js` and `data-vision-listen-js`. This draws
   the form and hands the script its words. The form is `phx-update="ignore"`: what the script
   draws stays through the page's patches.
 
@@ -42,7 +43,12 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
   the path or the dataset. Params that are not a JSON object tint their
   pane and send nothing.
 
-  Not yet here, as TanStack has them: Listen, saved queries and Save as CSV.
+  Listen, beside Fetch, shows the query's changes as they happen, newest
+  first, the last 50, until Stop (`BarkparkWeb.Studio.Desk.VisionListen`). It
+  runs over the desk's own LiveView socket, scoped as the socket is, so no
+  token is ever in the page (`bp-desk-vision-listen.js`).
+
+  Not yet here, as TanStack has them: saved queries and Save as CSV.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -79,6 +85,7 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
       data-scope={@scope_prefix}
       data-vision-query-js={BarkparkWeb.StaticAssets.path("bp-desk-vision-query.js")}
       data-vision-tree-js={BarkparkWeb.StaticAssets.path("bp-desk-vision-tree.js")}
+      data-vision-listen-js={BarkparkWeb.StaticAssets.path("bp-desk-vision-listen.js")}
       data-dataset={@dataset}
       {@words}
     >
@@ -184,6 +191,18 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
             >
               <Icons.desk_icon name="play" size={21} />{gettext("Fetch")}
             </button>
+            <%!-- Listen, then Stop while listening, as TanStack's: over the desk's
+                  socket (`VisionListen`), so no token is in the page. --%>
+            <button
+              type="button"
+              class="dk-vision-fetch dk-vision-listen"
+              aria-pressed="false"
+              data-vision-listen
+            >
+              <span data-vision-listen-play><Icons.desk_icon name="play" size={21} /></span>
+              <span data-vision-listen-stop hidden><Icons.desk_icon name="stop" size={21} /></span>
+              <span data-vision-listen-word>{gettext("Listen")}</span>
+            </button>
           </div>
         </section>
         <section class="dk-vision-result" aria-label={gettext("Result")} aria-busy="false">
@@ -208,6 +227,7 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
             patch here, where these tags do not run. Its parts first. --%>
       <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision-query.js")}></script>
       <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision-tree.js")}></script>
+      <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision-listen.js")}></script>
       <script src={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}></script>
     </div>
     """
@@ -273,7 +293,17 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
       "data-t-many" => gettext("%{count} results in %{ms} ms", count: "%{count}", ms: "%{ms}"),
       "data-t-done" => gettext("Query done in %{ms} ms", ms: "%{ms}"),
       "data-t-copied" => gettext("The URL is copied to the clipboard"),
-      "data-t-not-copied" => gettext("The URL could not be copied")
+      "data-t-not-copied" => gettext("The URL could not be copied"),
+      "data-t-listen" => gettext("Listen"),
+      "data-t-stop" => gettext("Stop"),
+      "data-t-connecting" => gettext("Connecting…"),
+      "data-t-listening" => gettext("Listening for changes…"),
+      "data-t-listen-closed" => gettext("The listener closed"),
+      "data-t-listen-skipped" =>
+        gettext("%{count} changes not shown: more than %{max} a second",
+          count: "%{count}",
+          max: BarkparkWeb.Studio.Desk.VisionListenStream.per_second()
+        )
     }
   end
 end

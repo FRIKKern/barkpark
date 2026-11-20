@@ -58,6 +58,11 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-fetch:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; }
       .dk .dk-vision-fetch[aria-disabled="true"] { opacity: .5; cursor: default; }
       .dk .dk-vision-fetch svg { width: 21px; height: 21px; }
+      .dk .dk-vision-fetch > span { display: inline-flex; }
+      .dk .dk-vision-fetch > span[hidden] { display: none; }
+      .dk .dk-vision-listen { background: none; color: var(--dk-fg); }
+      .dk .dk-vision-listen:hover { background: var(--dk-icon-btn-hover); }
+      .dk .dk-vision-out > .dk-vision-hint { margin: 0; color: var(--dk-muted); font-size: 12px; line-height: 17px; }
       .dk .dk-vision-result { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 12px 0; }
       .dk .dk-vision-result > .dk-vision-label { padding: 2px 0 4px; }
       .dk .dk-vision-out { flex: 1 1 auto; min-height: 0; overflow: auto; font-size: 16px; line-height: 23px; white-space: pre-wrap; word-break: break-word; }

@@ -41,14 +41,14 @@
     return Array.isArray(v) ? v.map(String).join(",") : v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
   };
 
-  /** What a query reads, under the project's `scope` path: {error} or {path, groq, shown}; `shown`, the Query URL, keeps a query string's brackets as typed. Pure, so the host tests load it. */
+  /** What a query reads, under the project's `scope` path: {error} or {path, groq, shown, listen}; `shown`, the Query URL, keeps a query string's brackets as typed; `listen`, what its Listen asks the desk's socket for. Pure, so the host tests load it. */
   var target = function (scope, dataset, text, perspective, version, given) {
     var values = given || {};
     var raw = String(text || "").trim();
     if (!raw) return { error: "empty" };
     var p = PERSPECTIVES.indexOf(perspective) >= 0 ? perspective : "drafts";
     var ds = encodeURIComponent(dataset);
-    var path, groq, shown;
+    var path, groq, shown, listen;
     if (QUERY_STRING.test(raw)) {
       var at = raw.indexOf("?");
       var type = at < 0 ? raw : raw.slice(0, at);
@@ -64,6 +64,7 @@
       // Only the brackets read as typed: a value's own & or # stays encoded, so the copied URL is this request.
       shown = scope + "/v1/data/query/" + ds + "/" + type + "?" + params.toString().replace(/%5B/gi, "[").replace(/%5D/gi, "]");
       groq = false;
+      listen = { type: type, qs: params.toString() };
     } else {
       var v = VERSION.test(version) ? version : today();
       var sent = new URLSearchParams({ query: raw });
@@ -71,9 +72,10 @@
       sent.set("perspective", p);
       path = scope + "/" + v + "/data/query/" + ds + "?" + sent.toString();
       groq = true;
+      listen = { query: raw, params: values, perspective: p };
     }
     if (path.length > MAX_URL) return { error: "long" };
-    return { path: path, groq: groq, shown: shown || path };
+    return { path: path, groq: groq, shown: shown || path, listen: listen };
   };
 
   // Where a GROQ parse error is: its line, with carets under start..end, as Sanity's.

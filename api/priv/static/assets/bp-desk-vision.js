@@ -9,15 +9,16 @@
 // (Sanity's address): so nothing typed ever becomes a path. Reads only. The
 // dataset and API version are picked beside the perspective, as TanStack's, and
 // Params is a JSON object whose keys the query names as $key: each goes as
-// $key=<JSON>, as Sanity's client sends them, so a value is never a path. It runs once a page, from the
+// $key=<JSON>, as Sanity's client sends them, so a value is never a path. Listen, beside Fetch, is
+// bp-desk-vision-listen.js, over the desk's socket. It runs once a page, from the
 // desk hook's loader; everything is delegated from the document, so a page
 // drawn after it loaded works the same. Its queries are bp-desk-vision-query.js and
-// its result tree bp-desk-vision-tree.js: Desk.Vision's script tags load them first;
+// its result tree bp-desk-vision-tree.js, its Listen bp-desk-vision-listen.js: Desk.Vision's script tags load them first;
 // on a live patch, where bp-desk.js loads this file alone, this loads them, then starts.
 (function () {
   if (window.BarkparkDeskVision || window.__bpDeskVisionLoading) return;
   // The parts this needs, and the attribute on Vision's root naming each one's path.
-  var parts = [["BarkparkDeskVisionQuery", "data-vision-query-js"], ["BarkparkDeskVisionTree", "data-vision-tree-js"]];
+  var parts = [["BarkparkDeskVisionQuery", "data-vision-query-js"], ["BarkparkDeskVisionTree", "data-vision-tree-js"], ["BarkparkDeskVisionListen", "data-vision-listen-js"]];
   var missing = parts.filter(function (p) { return !window[p[0]]; });
   if (!missing.length) return start();
   var root = document.querySelector("[data-desk-vision]");
@@ -56,6 +57,7 @@
     var PERSPECTIVES = Q.PERSPECTIVES, today = Q.today, customApiVersion = Q.customApiVersion;
     var parseParams = Q.parseParams, target = Q.target, frame = Q.frame;
     var word = T.word, el = T.el, tree = T.tree, setOpen = T.setOpen, more = T.more;
+    var L = window.BarkparkDeskVisionListen;
 
     /** The version a run sends: the picked one, or under "Other" the last typed that read as one. */
     var version = function (root) {
@@ -85,10 +87,12 @@
       return why ? { error: why } : read;
     };
 
-    // Fetch is aria-disabled while a run is out or Params are not an object.
+    // Fetch is aria-disabled while a run is out or Params are not an object; Listen too while
+    // Params are not, unless it is listening (its Stop).
     var fetchState = function (root) {
       var button = part(root, "[data-vision-fetch]");
       root.__busy || root.__badParams ? button.setAttribute("aria-disabled", "true") : button.removeAttribute("aria-disabled");
+      L.button(root);
     };
 
     var remember = function (root) {
@@ -127,6 +131,8 @@
         if (el.value === "other") other(root, "v");
         else (other(root, null), (root.__version = el.value));
       } else if (el.hasAttribute("data-vision-dataset")) {
+        // Another dataset is another stream: a Listen stops.
+        L.stop(root);
         pickDataset(root);
       } else if (el.hasAttribute("data-vision-params")) {
         checkParams(root);
@@ -225,6 +231,8 @@
       // which Playwright's toBeEnabled() also reads as not enabled.
       if (root.__busy) return;
       init(root);
+      // A Fetch ends a Listen, as TanStack's: the Result is the Fetch's.
+      L.stop(root);
       remember(root);
       var query = part(root, "#dk-vision-query").value;
       // Params that are not an object send nothing: the result says why.
@@ -274,6 +282,18 @@
         });
     };
 
+    // Listen, as TanStack's: the query's changes until Stop. Params that are not an object send nothing.
+    var listenIt = function (root) {
+      init(root);
+      if (L.live(root)) return L.stop(root);
+      if (root.__badParams) return;
+      remember(root);
+      var dataset = part(root, "[data-vision-dataset]").value;
+      var query = part(root, "#dk-vision-query").value;
+      var to = target(root.getAttribute("data-scope"), dataset, query, part(root, "[data-vision-perspective]").value, version(root), checkParams(root).params);
+      L.start(root, to.error ? { error: word(root, to.error, { name: to.name }) } : Object.assign({ dataset: dataset }, to.listen));
+    };
+
     var copy = function (root) {
       var input = part(root, "#vision-url");
       var said = part(root, "[data-vision-copied]");
@@ -306,6 +326,7 @@
       var hit = e.target.closest("button, a");
       if (!hit) return;
       if (hit.hasAttribute("data-vision-fetch")) return fetchIt(root);
+      if (hit.hasAttribute("data-vision-listen")) return listenIt(root);
       if (hit.hasAttribute("data-vision-copy")) return copy(root);
       if (hit.__more) return more(root, hit);
       if (hit.classList.contains("json-toggle")) {
@@ -348,6 +369,6 @@
 
     document.querySelectorAll("[data-desk-vision]").forEach(init);
 
-    window.BarkparkDeskVision = { target: target, parseParams: parseParams, customApiVersion: customApiVersion, frame: frame, fetchIt: fetchIt, init: init };
+    window.BarkparkDeskVision = { target: target, parseParams: parseParams, customApiVersion: customApiVersion, frame: frame, fetchIt: fetchIt, listenIt: listenIt, init: init };
   }
 })();

@@ -15688,3 +15688,58 @@ msgstr "Parametrene må være et JSON-objekt, som {\"title\": \"post\"}"
 #, elixir-autogen, elixir-format
 msgid "Param $%{name} referenced, but not provided"
 msgstr "Parameteren $%{name} er brukt, men ikke gitt"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Listen"
+msgstr "Lytt"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Stop"
+msgstr "Stopp"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Listening for changes…"
+msgstr "Lytter etter endringer …"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The listener closed"
+msgstr "Lytteren ble lukket"
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} changes not shown: more than %{max} a second"
+msgstr "%{count} endringer vises ikke: flere enn %{max} i sekundet"
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Listen can only follow a dataset this page lists for you"
+msgstr "Lytt kan bare følge et datasett denne siden viser for deg"
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Listen follows the document types a query names: add a _type filter, like _type == \"post\""
+msgstr "Lytt følger dokumenttypene en spørring nevner: legg til et _type-filter, som _type == \"post\""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Write a query to listen to"
+msgstr "Skriv en spørring å lytte til"
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "The query cannot be listened to"
+msgstr "Det går ikke å lytte til spørringen"
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "The query string could not be read"
+msgstr "Spørrestrengen kunne ikke leses"
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown perspective: %{value}"
+msgstr "Ukjent perspektiv: %{value}"

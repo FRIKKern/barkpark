@@ -15683,3 +15683,58 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Param $%{name} referenced, but not provided"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Listen"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Stop"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Listening for changes…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The listener closed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} changes not shown: more than %{max} a second"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Listen can only follow a dataset this page lists for you"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Listen follows the document types a query names: add a _type filter, like _type == \"post\""
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Write a query to listen to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "The query cannot be listened to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "The query string could not be read"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown perspective: %{value}"
+msgstr ""
