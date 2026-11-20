@@ -57,14 +57,14 @@ defmodule BarkparkWeb.BulldocsBpmlWriteRuleTest do
         LabelFixtures.paper_attrs(%{"slug" => source, "blocks" => blocks(word)})
       )
 
-    resp = get(build_conn(), "/papers/#{source}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{source}/source", %{"format" => "bpml"})
     assert resp.status == 200, resp.resp_body
     Repo.delete!(Content.get_paper(source))
     String.replace(resp.resp_body, source, slug)
   end
 
   defp sync(raw, slug, bpml, rev, extra) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> put_req_header("content-type", "application/json")
     |> post(
@@ -127,7 +127,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteRuleTest do
     assert Content.Papers.reader_schema(paper, "paper", ds, []) == nil
 
     pull =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{raw}")
       |> get("/w/#{a.ws.slug}/p/#{a.project.slug}/d/#{ds}/papers/#{slug}/source", %{
         "format" => "bpml"
@@ -138,7 +138,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteRuleTest do
 
     # The JSON source read is a read, not the working copy: it answers.
     read =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{raw}")
       |> get("/w/#{a.ws.slug}/p/#{a.project.slug}/d/#{ds}/papers/#{slug}/source")
       |> json_response(200)
