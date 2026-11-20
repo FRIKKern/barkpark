@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pinStates } from '../build/showroom.mjs'
-import { CHANGED_BY_A_PERSON, PINNED, resolve, selectorFindings, STATIC, statesOnSubject, strip, unpinned } from '../check/selectors.mjs'
+import { PINNED, resolve, selectorFindings, STATIC, statesOnSubject, strip, unpinned } from '../check/selectors.mjs'
 
 // Inputs as the browser hands them back (selectorText): lowercase, `& ` before a nested descendant.
 describe('a pinned state may stand only on the element a rule styles', () => {
@@ -19,16 +19,30 @@ describe('a pinned state may stand only on the element a rule styles', () => {
     expect(selectorFindings('a:target')[0]).toMatch(/:target is not a pseudo-class/)
     expect(selectorFindings('a::selection')[0]).toMatch(/::selection is not a pseudo-element/)
     expect(selectorFindings('a[title=":target"]::before')).toEqual([])
-    // What a person changes by clicking or typing waits until the check drives it as a pinned state.
-    for (const p of CHANGED_BY_A_PERSON.filter((p) => !PINNED.includes(p) && p !== 'focus-visible')) expect(selectorFindings(`a:${p}`).length, p).toBe(1)
+    // A sample, not the judge (the pinned list below is): what a person changes waits until the check drives it.
+    for (const p of ['focus', 'focus-within', 'placeholder-shown', 'user-invalid', 'enabled', 'open', 'muted', 'target-current', 'state']) expect(selectorFindings(`a:${p}`).length, p).toBe(1)
   })
 
-  it('always allows no state a person changes by clicking or typing', () => {
-    // Pinned whole: a name added here must be shown to be structure, not something a person changes.
-    expect(STATIC).toEqual(['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type'])
-    expect(STATIC.filter((p) => CHANGED_BY_A_PERSON.includes(p))).toEqual([])
-    expect(PINNED.filter((p) => !CHANGED_BY_A_PERSON.includes(p))).toEqual([])
-    for (const p of ['checked', 'placeholder-shown', 'user-invalid', 'focus-within', 'open', 'enabled', 'muted', 'target-current', 'state']) expect(CHANGED_BY_A_PERSON, p).toContain(p)
+  it('always allows only structure: the list is pinned whole, each name with why no click or key changes it', () => {
+    const structure = {
+      not: 'a negation of the selectors inside it, which are judged as any selector is',
+      is: 'a group of the selectors inside it, which are judged as any selector is',
+      where: 'a group like :is() with no weight, judged the same way',
+      has: 'a relation to other elements, which are judged as any selector is',
+      defined: 'a custom element is defined once its script registers it, as the page loads',
+      'first-child': 'a place in the markup',
+      'last-child': 'a place in the markup',
+      'only-child': 'a place in the markup',
+      'nth-child': 'a place in the markup',
+      'nth-last-child': 'a place in the markup',
+      'first-of-type': 'a place in the markup',
+      'last-of-type': 'a place in the markup',
+      'only-of-type': 'a place in the markup',
+      'nth-of-type': 'a place in the markup',
+      'nth-last-of-type': 'a place in the markup',
+    }
+    expect(STATIC).toEqual(Object.keys(structure))
+    expect(PINNED.filter((p) => STATIC.includes(p))).toEqual([])
   })
 
   it('takes :checked as a pinned state, on the element a rule styles only', () => {

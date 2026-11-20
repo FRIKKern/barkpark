@@ -418,7 +418,7 @@ const CASES = [
   // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
   // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
   {
-    name: 'a checked box drawn blank, and a checked change no pinned row shows, each fail by name',
+    name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
     only: ['skins'],
     states: true,
     secs: 120,
@@ -429,11 +429,14 @@ const CASES = [
       inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
       // A change only the real click shows: no pinned row carries it.
       inCss('#button-tick:checked { border-width: 3px; }'),
+      // The demo's change handler marks another element; the check puts back only what is checked.
+      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
     ),
     expect: each({
       'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
       'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
       'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
+      'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
     }),
   },
   ...CEILING_CASES,

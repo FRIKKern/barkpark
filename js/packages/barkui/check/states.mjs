@@ -86,6 +86,31 @@ function snap([n, i, pin]) {
   }
 }
 
+/** Runs in the check's world: the stage as data, one line per element (its attributes, checked, indeterminate,
+    value, its children and its own text), so the check can tell that a drive left it as it found it. */
+function stage([n]) {
+  const root = document.querySelector(`[data-part="${n}"]`)
+  return [root, ...root.querySelectorAll('*')].map((el) => ({
+    at: window.__barkCheck.describe(el),
+    is: JSON.stringify([
+      [...el.attributes].map((a) => `${a.name}=${a.value}`).sort(),
+      el.checked ?? null, el.indeterminate ?? null, el.localName === 'input' || el.localName === 'textarea' || el.localName === 'select' ? el.value : null,
+      [...el.childNodes].map((c) => (c.nodeType === 3 ? `#${c.data}` : c.nodeName)),
+    ]),
+  }))
+}
+
+/** What a drive left changed: the first element whose line differs, in plain words, or null. */
+function leftChanged(before, after) {
+  if (before.length !== after.length) return `the stage holds ${after.length} elements after it where it held ${before.length}`
+  const k = before.findIndex((b, i) => b.is !== after[i].is)
+  if (k < 0) return null
+  const [was, now] = [JSON.parse(before[k].is), JSON.parse(after[k].is)]
+  const names = ['attributes', 'checked', 'indeterminate', 'value', 'children and text']
+  const what = names.filter((_, i) => JSON.stringify(was[i]) !== JSON.stringify(now[i]))
+  return `${after[k].at} is left with other ${what.join(', ')} (${what.map((w) => JSON.stringify(now[names.indexOf(w)])).join('; ')}, was ${what.map((w) => JSON.stringify(was[names.indexOf(w)])).join('; ')})`
+}
+
 /** Runs in the check's world: which checkboxes and radios of the stage are checked; given that list, puts them back
     so and settles their transitions. The check's own housekeeping after a real click, not a state it reads. */
 function checks([n, put]) {
@@ -140,6 +165,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
     }
     await rest()
     const ticks = mode === 'checked' ? await page.barkCheck(checks, [part.name]) : null
+    const found = await page.barkCheck(stage, [part.name])
     const before = await page.barkCheck(snap, [part.name, el])
     let down = false
     try {
@@ -203,6 +229,10 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
       await page.mouse.move(0, 0)
       if (down) await page.mouse.up()
       if (ticks) await page.barkCheck(checks, [part.name, ticks])
+      // A drive is judged, not kept: what the check put back (what is checked) and nothing else may differ.
+      await rest()
+      const left = leftChanged(found, await page.barkCheck(stage, [part.name]))
+      if (left) fails.push(`${said}: ${left}; a judged ${mode.replace(' ', ' and ')} must leave the stage as it found it, and the check puts back only what is checked`)
     }
   }
   // Each state once, with every control it was proven on pinned. Text-only is a fact about a control at rest

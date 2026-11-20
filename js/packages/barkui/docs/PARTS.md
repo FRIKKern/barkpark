@@ -89,7 +89,9 @@ matches; a rule or a pair nobody judges fails the part by name.
   produces that state on that control with the real pointer, at its centre or held down there (a real
   press is both), or for `:checked` a click there, in the first skin, light, on base at 1440px. Only a
   checkbox or a radio is driven to `:checked`, and only one not checked at rest: one checked at rest is
-  read in every view as it stands, and the check puts every box and radio back as it was after a click. Every computed property of the control,
+  read in every view as it stands, and the check puts every box and radio back as it was after a click. A
+  drive is judged, not kept: what it leaves changed in the stage beyond that (an attribute, `indeterminate`, a
+  value, a child or its text, as a demo's handler might) fails the part by name. Every computed property of the control,
   its `::before` and `::after` and everything inside it must then be what the same control shows with
   that state pinned, and nothing from the control up to the stage may change: so the control pinned is
   the control in that state. Its change must also be exactly the change of some pinned row with the same
