@@ -103,9 +103,13 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   defp may_write?(_writer, _ws_id), do: false
 
   defp refuse(code, message) do
-    {:error,
-     {:view_refused,
-      %{code: code, message: message <> ", so nothing was written", hint: "name a scope this token may write in"}}}
+    body = %{
+      code: code,
+      message: message <> ", so nothing was written",
+      hint: "write with a token seated in the Paper's workspace, under one of its projects"
+    }
+
+    {:error, {:view_refused, body}}
   end
 
   # A batch's effects carry the row it saved; a batch that wrote nothing has none.
