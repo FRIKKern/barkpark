@@ -157,19 +157,23 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     ]
   end
 
-  # One listener per effect topic, each handing on the frames that name
-  # `slug` as `{:heard, topic, frame}`, so the test's own mailbox (which also
-  # gets the conn test's replies) is not what is counted. Answers the topics.
+  # One listener per effect topic, handing frames on as `{:heard, topic,
+  # frame}`, so the test's own mailbox (which also gets the conn test's
+  # replies) is not what is counted. The Paper's own topic is this Paper's
+  # alone and its block frames do not name the slug, so every frame on it is
+  # handed on; the shared topics hand on only frames naming `slug`.
   defp listen!(slug, ws_id) do
     test = self()
-    topics = effect_topics(slug, ws_id)
+    [own | _] = topics = effect_topics(slug, ws_id)
     assert length(Enum.uniq(topics)) == 4
 
     for topic <- topics do
+      only = if topic == own, do: nil, else: slug
+
       spawn_link(fn ->
         :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
         send(test, {:listening, topic})
-        forward(test, topic, slug)
+        forward(test, topic, only)
       end)
     end
 
@@ -177,12 +181,13 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
     topics
   end
 
-  defp forward(test, topic, slug) do
+  defp forward(test, topic, only) do
     receive do
-      frame -> if inspect(frame) =~ slug, do: send(test, {:heard, topic, frame})
+      frame ->
+        if only == nil or inspect(frame) =~ only, do: send(test, {:heard, topic, frame})
     end
 
-    forward(test, topic, slug)
+    forward(test, topic, only)
   end
 
   defp flush_heard do

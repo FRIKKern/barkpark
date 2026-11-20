@@ -152,6 +152,13 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
   end
 
   test "the view check refuses a row whose workspace and project resolve no reader schema", c do
+    # The migrations seed a global `paper` schema, which any scope falls back
+    # to; drop it in this test's transaction so nothing resolves.
+    Repo.delete_all(
+      from s in Barkpark.Content.SchemaDefinition,
+        where: s.name == "paper" and is_nil(s.workspace_id)
+    )
+
     row =
       Repo.insert!(%Document{
         doc_id: slug(),
@@ -165,6 +172,7 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
         project_id: c.a.project.id
       })
 
+    assert Content.Papers.reader_schema(row, "paper", @ds, []) == nil
     assert code(BpmlView.saved_check(make_ref()).(row)) == "scope_unresolved"
   end
 end
