@@ -153,7 +153,51 @@ try {
     assert.deepEqual(server[1], list(), "the list keeps its start");
   }
 
-  console.log("source wall mounted: 7 cases passed");
+  // 8) Typing queued behind a batch in flight, or behind one whose save failed and waits
+  //    for a retry. The wall judges what is stored as it will be once that batch lands
+  //    and the queued typing follows, so source mode opens for typing and the key saves
+  //    after the batch. It opened read-only, naming the typed paragraph's text
+  //    (task-0c39ad547f8bab23). A real loss in the queued typing is still refused.
+  for (const state of ["in flight", "failed"]) {
+    const { canvas, batches, server, inSync } = await mount([paragraph("p1", "Original")]);
+    mounted.push(canvas);
+    const held = [];
+    canvas.acknowledgeOps = (seq) => { held.push(seq); return false; };
+    const ack = (seq, saved) => Object.getPrototypeOf(canvas).acknowledgeOps.call(canvas, seq, saved);
+    const type = (text) => {
+      canvas._editor.view.dispatch(canvas._editor.state.tr.insertText(text, canvas._editor.state.doc.content.size - 1));
+      canvas.flushPendingChanges();
+    };
+    type(" one");
+    assert.equal(held.length, 1, `one batch ${state}`);
+    if (state === "failed") ack(held[0], false);
+    type(" two");
+    assert.equal(batches.length, 1, `the typing waits behind the batch ${state}`);
+    const seen = editInSource(canvas, "end");
+    assert.equal(seen.readOnly, false, `source mode opens for typing behind a batch ${state}`);
+    assert.equal(seen.notice, undefined, "with no notice");
+    assert.equal(batches.length, 1, "the source edit waits too");
+    delete canvas.acknowledgeOps;
+    ack(held[0], true);
+    assert.equal(server[0].content[0].value, "Original one two!", `the queued typing and the key save after the batch ${state}`);
+    inSync(`behind a batch ${state}`);
+
+    const lossy = await mount([paragraph("p1", "Original")]);
+    mounted.push(lossy.canvas);
+    lossy.canvas.acknowledgeOps = (seq) => { held.push(seq); return false; };
+    lossy.canvas._editor.view.dispatch(lossy.canvas._editor.state.tr.insertText(" one", lossy.canvas._editor.state.doc.content.size - 1));
+    lossy.canvas.flushPendingChanges();
+    if (state === "failed") Object.getPrototypeOf(lossy.canvas).acknowledgeOps.call(lossy.canvas, held.at(-1), false);
+    const marked = runToTiptap([{ ...bold(), id: null }]).content[0];
+    lossy.canvas._editor.commands.insertContentAt(lossy.canvas._editor.state.doc.content.size, marked);
+    lossy.canvas.flushPendingChanges();
+    const refused = editInSource(lossy.canvas, "end");
+    assert.equal(refused.readOnly, true, `a lost mark in typing queued behind a batch ${state} is still refused`);
+    assert.equal(refused.notice, "Read only: Markdown cannot carry the marks of block 2, a paragraph, yet.");
+    assert.equal(lossy.batches.length, 1, "nothing more is sent");
+  }
+
+  console.log("source wall mounted: 8 cases passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
 }

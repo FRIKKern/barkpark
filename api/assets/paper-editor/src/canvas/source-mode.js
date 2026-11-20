@@ -74,8 +74,16 @@ export function sourceModeEnter() {
     // stored, and its stored blocks' own Markdown does too; anything else opens
     // READ-ONLY: it shows the Markdown, takes no typing, writes nothing back, and one
     // plain line says why and names the block (sourceWallLoss in source-save.js).
-    // Typing made while a batch is in flight can open read-only until its echo lands.
-    const inflight = this._inflightOps && this._inflightOps.ops;
+    // What is stored is judged as it will be once the batch in flight, or waiting to be
+    // sent again, lands and the typing queued behind it follows: the ops the editor
+    // will send for that typing (the same diff its next emit makes, from the batch's
+    // after-state) are folded on after the batch's own.
+    const pending = this._inflightOps;
+    let inflight = pending && pending.ops;
+    if (pending && this._dirtyWhileInflight) {
+      const queued = this._ro(pending.afterBlocks, this._normalizedDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+      inflight = [...(inflight || []), ...queued];
+    }
     const loss = sourceWallLoss(this._blocks || [], L0, sourceView.call(this), { inflight });
 
     // Close any open popup — in source mode the textarea owns input, so a lingering
