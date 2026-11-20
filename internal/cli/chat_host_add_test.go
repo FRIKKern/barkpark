@@ -169,7 +169,7 @@ func TestChatHostAddSSHFailureSaysWhatToDo(t *testing.T) {
 		// ssh can exit 255 after the remote enroll worked: no false "did not".
 		"may not have enrolled", "bp chat-host list",
 		// A way on that works as printed: only the code goes down the pipe.
-		"bp chat-host new-code vm2 -o json | jq -r .enrollment_token | ssh -T bot@vm2 'barkpark-chat-host enroll --url ",
+		"bp chat-host new-code vm2 -o json | jq -er '.enrollment_token // empty' | ssh -T -- bot@vm2 'barkpark-chat-host enroll --url ",
 		"bp chat-host revoke vm2 && bp chat-host add --ssh bot@vm2 --name vm2 --root /srv/bot",
 	} {
 		if !strings.Contains(stderr.String(), want) {

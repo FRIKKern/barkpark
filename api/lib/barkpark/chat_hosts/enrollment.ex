@@ -185,4 +185,24 @@ defmodule Barkpark.ChatHosts.Enrollment do
     do:
       "A machine named #{name} is already enrolled. " <>
         "Pick another name, or revoke that machine first."
+
+  @doc """
+  The machines this workspace revoked after they had enrolled, newest first,
+  for the Chat hosts page's "Recently revoked" line. A waiting row that was
+  replaced or removed is left out: it never ran anything. One row per name,
+  the newest revocation.
+  """
+  @spec recently_revoked(String.t(), pos_integer()) :: [map()]
+  def recently_revoked(workspace_id, limit \\ 5) when is_binary(workspace_id) do
+    newest_per_name =
+      RegisteredHost
+      |> where([h], h.workspace_id == ^workspace_id)
+      |> where([h], not is_nil(h.revoked_at) and not is_nil(h.enrolled_at))
+      |> distinct([h], h.name)
+      |> order_by([h], asc: h.name, desc: h.revoked_at)
+      |> select([h], %{id: h.id, name: h.name, revoked_at: h.revoked_at})
+
+    from(r in subquery(newest_per_name), order_by: [desc: r.revoked_at], limit: ^limit)
+    |> Repo.all()
+  end
 end

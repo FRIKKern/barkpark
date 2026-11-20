@@ -1094,7 +1094,7 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	parts := make([]string, 0, 8)
 	// restartMarker rides on any row with a restart in the window, so a box
 	// under the restarting threshold still says it restarted, and why.
-	for _, s := range []string{darkMarker(b, status), reason, pausedMarker(b), queuedDeployAgeMarker(b), restartMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	for _, s := range []string{darkMarker(b, status), reason, serverMarker(b, status), pausedMarker(b), queuedDeployAgeMarker(b), restartMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}

@@ -19,13 +19,10 @@ import (
 // line has no in-flight step entry to caption, so the control plane keeps it in
 // the job's console (`provision_console`), not in `provision_steps`.
 
-// The caption wording. Warm: "Warm server warm-52d0bbcf assigned". Cold:
-// "No warm server: <why> — creating a new server".
-const (
-	launchHostWarmPrefix = "Warm server "
-	launchHostColdPrefix = "No warm server: "
-	launchHostColdSuffix = " — creating a new server"
-)
+// The caption wording lives in internal/cli/cloud/launch_host_line.go, beside
+// the parser `bp cloud status` reads it back with. Warm: "Warm server
+// warm-52d0bbcf claimed" (sent right after the claim, before the assign runs).
+// Cold: "No warm server: <why> — creating a new server".
 
 // hostReason is why a launch got the server it got. The values are stable so a
 // test (or a later reader of the console) can tell the cases apart without
@@ -60,16 +57,16 @@ type hostDecision struct {
 // caption is the line the step feed and console show.
 func (d hostDecision) caption() string {
 	if d.reason == hostWarm {
-		return launchHostWarmPrefix + d.detail + " assigned"
+		return cloud.WarmHostCaption(d.detail)
 	}
-	return launchHostColdPrefix + d.detail + launchHostColdSuffix
+	return cloud.ColdHostCaption(d.detail)
 }
 
 func poolOffDecision(seams Seams) hostDecision {
 	if seams.WarmPoolSize <= 0 {
-		return hostDecision{hostPoolOff, "warm pool is off on this worker (WARM_POOL_SIZE=0)"}
+		return hostDecision{hostPoolOff, "warm pool is off on the worker (WARM_POOL_SIZE=0)"}
 	}
-	return hostDecision{hostPoolOff, "warm pool has no claim client on this worker"}
+	return hostDecision{hostPoolOff, "warm pool has no claim client on the worker"}
 }
 
 func pinMismatchDecision(req, base cloud.ServerSpec) hostDecision {

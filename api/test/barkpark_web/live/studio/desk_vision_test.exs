@@ -80,10 +80,10 @@ defmodule BarkparkWeb.Studio.DeskVisionTest do
     refute has_element?(view, "#desk-panes .dk-pane")
     assert has_element?(view, "#dk-search-dialog")
 
-    # It reads the dataset through the scoped /v1/data reads, as the page's own editor.
+    # It reads the dataset through the project's scoped reads, as the page's own editor.
     assert has_element?(
              view,
-             ~s(#dk-vision[data-api="#{c.prefix}/v1/data"][data-dataset="#{@dataset}"])
+             ~s(#dk-vision[data-scope="#{c.prefix}"][data-dataset="#{@dataset}"])
            )
 
     # The query, Fetch (and Ctrl/Cmd+Enter), the perspective, the result.
@@ -113,7 +113,7 @@ defmodule BarkparkWeb.Studio.DeskVisionTest do
              "JSON"
            )
 
-    assert has_element?(view, "[data-vision-url][hidden] input#dk-vision-url[readonly]")
+    assert has_element?(view, "[data-vision-url][hidden] input#vision-url[readonly]")
 
     # How a run went is said (WCAG 4.1.3).
     assert has_element?(view, ~s(#dk-vision [role="status"][data-testid="announcer"]))

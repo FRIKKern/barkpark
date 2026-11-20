@@ -24,7 +24,7 @@ defmodule BarkparkWeb.Studio.DeskPublishedViewTest do
 
   @dataset "production"
   @pane "[data-pane-editing]"
-  @form ~s(#{@pane} fieldset[data-desk-published-form][disabled])
+  @form ~s(#{@pane} fieldset[data-desk-published-form] fieldset[data-desk-readonly-fields][disabled])
   @footer ~s(#{@pane} .doc-footer)
   @unpublish ~s(#{@footer} button.dk-publish.danger[data-desk-unpublish])
   @dialog ~s(#{@pane} [role="dialog"][aria-modal="true"][data-desk-dialog="unpublish"])
@@ -346,7 +346,12 @@ defmodule BarkparkWeb.Studio.DeskPublishedViewTest do
     assert has_element?(view, ~s|#{holder}:not([disabled]) > [id$="-form-box"] #editor-form|)
     view |> element(published, "Published") |> render_click()
     render_async(view, 5_000)
-    assert has_element?(view, ~s(#{holder}[disabled] > [id$="-form-box-published"] #editor-form))
+
+    assert has_element?(
+             view,
+             ~s(#{holder} > [id$="-form-box-published"] fieldset[data-desk-readonly-fields][disabled] #editor-form)
+           )
+
     refute has_element?(view, ~s(#{holder} > [id$="-form-box"]))
 
     # Never published: the Published pill is a greyed-out span, no button.
