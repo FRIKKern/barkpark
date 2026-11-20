@@ -8,7 +8,7 @@
 // One plant per reading, and plants on different controls share a run: a light
 // carries every reason it is off (`fails`), and each plant asserts that one of
 // them names its own control. The ladder measures what the label reading's
-// limit costs and holds README.md's sentence to it.
+// limit costs and holds docs/PARTS.md's sentence to it.
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,12 +20,12 @@ import { enforceCeiling } from './ceiling.mjs'
 import { runCheck } from './check.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
-import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
+import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
 const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
-    name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds README.md to its numbers',
+    name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
     only: ['skins', 'schemes'],
     plant: (d) => appendFileSync(join(d, 'example.html'), `\n${ladderHtml}\n`),
     css: [
@@ -132,19 +132,30 @@ const CASES = [
   },
   // Waits on the sheet are bound to their view and pair; everything else is proved on every surface.
   {
-    name: 'with every surface read, a label gone on raised, a second skin short on primary, and a waited pair measuring worse all turn the lights off',
+    name: 'with every surface read, a label gone on raised, a second skin short on primary, and a waited pair measuring worse all turn the lights off; a placeholder is matched to a wait by its own colour',
     only: ['skins', 'schemes'],
     surfaces: true,
     secs: 150,
+    // Fields in UI SDK's own look: a placeholder in the waited pair (muted text on the field's background) in an
+    // input and in a textarea, elements that draw no children, and one on another ground. fjord light's primary is
+    // planted worse above, so the waited ones are red there by design.
+    plant: (d) =>
+      edit(join(d, 'example.html'), (s) =>
+        `${s}\n<div data-demo-row>\n  <span data-demo-label>Fields</span>\n  <input id="button-ph-waited" data-slot="input" placeholder="Waited">\n  <input id="button-ph-other" data-slot="input" placeholder="Other ground">\n  <textarea id="button-ph-area" data-slot="textarea" placeholder="Waited, in a textarea"></textarea>\n</div>\n`),
     css: [
       '.sr-stage[data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }',
       'html[data-skin="evergreen"][data-color-scheme="dark"] .sr-stage[data-surface="primary"] [data-demo-label] { color: var(--ui-border); }',
       'html[data-skin="fjord"][data-color-scheme="light"] .sr-stage[data-surface="primary"] { --ui-muted-foreground: var(--ui-border); }',
+      '#button-ph-other { background: var(--ui-muted); }',
     ].join('\n'),
     expect: each({
       'a label gone on raised': both(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)),
       'a second skin short on primary': says('schemes', /evergreen dark on primary: drawn text [\d.]+:1 at span/),
       'the waited pair worse than recorded': says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/),
+      'a placeholder on another ground stays red': says('skins', /on primary: drawn text [\d.]+:1 at input#button-ph-other ""::placeholder/),
+      'a placeholder in the waited pair is let through by its wait, in an input and in a textarea': (p) =>
+        !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /at (input#button-ph-waited|textarea#button-ph-area) ""::placeholder/.test(f) && !/fjord light/.test(f))),
+      'no reader puts a child into an element it measures': (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /a reader put a child into/.test(f))),
     }),
   },
   // Phone width: read in full in every skin, scheme and surface. part.css may not change paint at phone width
@@ -413,6 +424,30 @@ const CASES = [
       'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
+    }),
+  },
+  // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
+  // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
+  {
+    name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
+    only: ['skins'],
+    states: true,
+    secs: 120,
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
+      inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
+      // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
+      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
+      // A change only the real click shows: no pinned row carries it.
+      inCss('#button-tick:checked { border-width: 3px; }'),
+      // The demo's change handler marks another element; the check puts back only what is checked.
+      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
+    ),
+    expect: each({
+      'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
+      'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
+      'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
+      'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
     }),
   },
   ...CEILING_CASES,

@@ -1,7 +1,8 @@
-// Real states, per pair. For every rule of the part that holds a state (:hover, :active) and every live control
-// that matches the rest of its selector (the state taken out, as element.matches says; outside the inert rows,
-// not a pinned row), the check produces that state on that control with the browser's own input: the pointer at
-// its centre for hover, held down there for active (a real press is both). While it holds:
+// Real states, per pair. For every rule of the part that holds a state (:hover, :active, :checked) and every live
+// control that matches the rest of its selector (the state taken out, as element.matches says; outside the inert
+// rows, not a pinned row), the check produces that state on that control with the browser's own input: the pointer
+// at its centre for hover, held down there for active (a real press is both), a click there for checked (only on
+// a checkbox or radio not checked at rest; one checked at rest is read in every view as it stands). While it holds:
 // - every computed property of the control, its ::before and ::after and everything inside it must be what the
 //   same control shows with that state pinned (data-pin), and nothing from the control up to the stage may change
 //   (no pin shows a host or an ancestor): so the control pinned is the control in that state;
@@ -18,7 +19,7 @@ import { readView, verdict } from './reading.mjs'
 // Values resolved against the box's own size: a state may change them, but a longer label changes them too, so
 // only whether they change is compared.
 const SIZED = ['width', 'height', 'inline-size', 'block-size', 'transform-origin', 'perspective-origin']
-const MODES = { hover: 'hover', active: 'hover active' }
+const MODES = { hover: 'hover', active: 'hover active', checked: 'checked' }
 
 /** Runs in the check's world: the pinned rows, and the (rule, live control) pairs a state must be driven for. */
 function plan([n, entries]) {
@@ -30,7 +31,10 @@ function plan([n, entries]) {
   entries.forEach((e, rule) => {
     if (!e.states.length) return
     els.forEach((el, i) => {
-      if (i && !el.closest('[inert]') && !el.hasAttribute('data-pin') && el.matches(e.rest)) pairs.push({ rule, el: i, at: h.describe(el), states: e.states })
+      if (!i || el.closest('[inert]') || el.hasAttribute('data-pin') || !el.matches(e.rest)) return
+      // A control already checked at rest is read in every view as it is; only the others are driven to it.
+      const states = e.states.filter((s) => s !== 'checked' || !el.matches(':checked'))
+      pairs.push({ rule, el: i, at: h.describe(el), states, kind: el.localName === 'input' ? el.type : el.localName })
     })
   })
   return { pins, pairs }
@@ -82,6 +86,43 @@ function snap([n, i, pin]) {
   }
 }
 
+/** Runs in the check's world: the stage as data, one line per element (its attributes, checked, indeterminate,
+    value, its children and its own text), so the check can tell that a drive left it as it found it. */
+function stage([n]) {
+  const root = document.querySelector(`[data-part="${n}"]`)
+  return [root, ...root.querySelectorAll('*')].map((el) => ({
+    at: window.__barkCheck.describe(el),
+    is: JSON.stringify([
+      [...el.attributes].map((a) => `${a.name}=${a.value}`).sort(),
+      el.checked ?? null, el.indeterminate ?? null, el.localName === 'input' || el.localName === 'textarea' || el.localName === 'select' ? el.value : null,
+      [...el.childNodes].map((c) => (c.nodeType === 3 ? `#${c.data}` : c.nodeName)),
+    ]),
+  }))
+}
+
+/** What a drive left changed: the first element whose line differs, in plain words, or null. */
+function leftChanged(before, after) {
+  if (before.length !== after.length) return `the stage holds ${after.length} elements after it where it held ${before.length}`
+  const k = before.findIndex((b, i) => b.is !== after[i].is)
+  if (k < 0) return null
+  const [was, now] = [JSON.parse(before[k].is), JSON.parse(after[k].is)]
+  const names = ['attributes', 'checked', 'indeterminate', 'value', 'children and text']
+  const what = names.filter((_, i) => JSON.stringify(was[i]) !== JSON.stringify(now[i]))
+  return `${after[k].at} is left with other ${what.join(', ')} (${what.map((w) => JSON.stringify(now[names.indexOf(w)])).join('; ')}, was ${what.map((w) => JSON.stringify(was[names.indexOf(w)])).join('; ')})`
+}
+
+/** Runs in the check's world: which checkboxes and radios of the stage are checked; given that list, puts them back
+    so and settles their transitions. The check's own housekeeping after a real click, not a state it reads. */
+function checks([n, put]) {
+  const root = document.querySelector(`[data-part="${n}"]`)
+  const boxes = [...root.querySelectorAll('input[type="checkbox"], input[type="radio"]')]
+  if (put) {
+    boxes.forEach((b, i) => (b.checked = put[i]))
+    for (const b of boxes) for (const a of b.getAnimations({ subtree: true })) if (a instanceof CSSTransition) a.finish()
+  }
+  return boxes.map((b) => b.checked)
+}
+
 const change = (from, to) => Object.fromEntries(Object.keys(to).filter((p) => from[p] !== to[p]).map((p) => [p, to[p]]))
 const PARTS = ['self', 'before', 'after']
 const changes = (from, to) => Object.fromEntries(PARTS.map((k) => [k, change(from[k], to[k])]))
@@ -114,11 +155,17 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
   for (const p of pins) p.change = changes(await page.barkCheck(snap, [part.name, p.el, null]), await page.barkCheck(snap, [part.name, p.el]))
   // Each control once per mode its rules give it.
   const drives = new Map()
-  for (const p of todo) for (const s of p.states) drives.set(`${p.el} ${MODES[s]}`, { el: p.el, at: p.at, mode: MODES[s] })
+  for (const p of todo) for (const s of p.states) drives.set(`${p.el} ${MODES[s]}`, { el: p.el, at: p.at, mode: MODES[s], kind: p.kind })
   const held = new Map()
-  for (const { el, at, mode } of drives.values()) {
+  for (const { el, at, mode, kind } of drives.values()) {
     const said = `real ${mode.replace(' ', ' and ')} on ${at}`
+    if (mode === 'checked' && kind !== 'checkbox' && kind !== 'radio') {
+      fails.push(`${said}: the check drives :checked only on a checkbox or a radio, by a click; this is a ${kind}`)
+      continue
+    }
     await rest()
+    const ticks = mode === 'checked' ? await page.barkCheck(checks, [part.name]) : null
+    const found = await page.barkCheck(stage, [part.name])
     const before = await page.barkCheck(snap, [part.name, el])
     let down = false
     try {
@@ -135,16 +182,28 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
         fails.push(`${said}: the pointer cannot reach it: ${to.miss}`)
         continue
       }
-      await page.mouse.move(to.x, to.y)
-      if (mode.includes('active')) {
-        await page.mouse.down()
-        down = true
+      if (mode === 'checked') {
+        // A real click, then the pointer away, so what is read is checked and nothing else.
+        await page.mouse.click(to.x, to.y)
+        await page.mouse.move(0, 0)
+      } else {
+        await page.mouse.move(to.x, to.y)
+        if (mode.includes('active')) {
+          await page.mouse.down()
+          down = true
+        }
       }
       await settle(page)
+      if (mode === 'checked' && !(await page.barkCheck(([n, k]) => { const r = document.querySelector(`[data-part="${n}"]`); return [r, ...r.querySelectorAll('*')][k].matches(':checked') }, [part.name, el]))) {
+        fails.push(`${said}: a click at its centre does not check it`)
+        continue
+      }
       const now = await page.barkCheck(snap, [part.name, el])
       await page.mouse.move(0, 0)
       if (down) await page.mouse.up()
       down = false
+      // A click changed what is checked; put every box and radio of the stage back as it was at rest.
+      if (ticks) await page.barkCheck(checks, [part.name, ticks])
       await rest()
       const pinned = await page.barkCheck(snap, [part.name, el, mode])
       const unlike = differ(changes(before, now), changes(before, pinned)).map((d) => d.replace('where the pin', 'where the control pinned'))
@@ -169,10 +228,15 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
     } finally {
       await page.mouse.move(0, 0)
       if (down) await page.mouse.up()
+      if (ticks) await page.barkCheck(checks, [part.name, ticks])
+      // A drive is judged, not kept: what the check put back (what is checked) and nothing else may differ.
+      await rest()
+      const left = leftChanged(found, await page.barkCheck(stage, [part.name]))
+      if (left) fails.push(`${said}: ${left}; a judged ${mode.replace(' ', ' and ')} must leave the stage as it found it, and the check puts back only what is checked`)
     }
   }
   // Each state once, with every control it was proven on pinned. Text-only is a fact about a control at rest
-  // (README), read in every view with its pin let go; here the controls are not at rest, so that one reading is
+  // (docs/PARTS.md), read in every view with its pin let go; here the controls are not at rest, so that one reading is
   // left to the views.
   for (const [mode, list] of held) {
     await rest()

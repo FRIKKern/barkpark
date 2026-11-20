@@ -7542,13 +7542,13 @@
       dom: {
         onBeforeElUpdated: (fromEl, toEl) => {
           if (toEl.matches?.("time[data-preview-day]")) window.BarkparkPreviewDay.day(toEl);
+          window.BarkparkDeskLockedValue?.(fromEl, toEl);
           return window.BarkparkPaperEditorBeforeElUpdated?.(fromEl, toEl);
         },
         onNodeAdded: (node) => window.BarkparkPreviewDay.within(node)
       }
     });
     liveSocket.connect();
-
     // Flush a pending debounced edit before the page goes away
     // (task-63aed3de024fc151). Classic inputs post `phx-change` behind a
     // 300–500 ms `phx-debounce`, which LiveView flushes on blur. A click

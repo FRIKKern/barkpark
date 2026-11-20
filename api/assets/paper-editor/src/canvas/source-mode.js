@@ -1,4 +1,4 @@
-import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
+import { blocksToMarkdown, changedSentinel, markdownToBlocks } from "../markdown.js";
 import { t } from "../i18n.js";
 import { docToBlocks } from "./run-convert.js";
 import {
@@ -7,6 +7,7 @@ import {
   deepCloneBlocks,
   mergeSourceText,
 } from "./source-realign.js";
+import { sentinelRefusal, settledBlocks, sourceStored, sourceWallLoss } from "./source-save.js";
 import { isFigureSingletonCanvas } from "./figure-context.js";
 
   // ── P5 MARKDOWN SOURCE-MODE (Mod-Shift-m / palette "Toggle Markdown source") ──
@@ -51,14 +52,6 @@ export function sourceModeEnter() {
     // Otherwise an immediate source toggle serializes stale code/caption attrs.
     this.flushPendingChanges();
 
-    // Close any open popup — in source mode the textarea owns input, so a lingering
-    // [[ / # / slash / palette popup would float over a now-hidden editor.
-    this._closeWikilink();
-    this._closeTag();
-    this._closeEmoji();
-    this._closeSlash();
-    this._closePalette();
-
     // THE BASELINE — derived from the LIVE doc (L0), NOT this._blocks (C).
     //
     //   C  = this._blocks — the displayed run's save baseline. It advances after
@@ -72,8 +65,35 @@ export function sourceModeEnter() {
     // on an edited exit, a setContent built from C would DELETE those edits. So the
     // baseline + textarea MUST come from L0. We deep-clone L0 so a later parse +
     // realign never mutates it.
-    const liveDoc = this._normalizedDoc(this._editor.getJSON());
-    const L0 = docToBlocks(liveDoc);
+    const L0 = docToBlocks(this._normalizedDoc(this._editor.getJSON()));
+
+    // THE WALL. An edit in source mode saves markdownToBlocks(text) in place of the
+    // document. A Paper opens writable only when an unedited save of the text it shows
+    // (the live doc's Markdown, saved as sourceModeCommit saves it), folded onto what is
+    // stored (this._blocks with the ops in flight), gives back every key that was
+    // stored, and its stored blocks' own Markdown does too; anything else opens
+    // READ-ONLY: it shows the Markdown, takes no typing, writes nothing back, and one
+    // plain line says why and names the block (sourceWallLoss in source-save.js).
+    // What is stored is judged as it will be once the batch in flight, or waiting to be
+    // sent again, lands and the typing queued behind it follows: the ops the editor
+    // will send for that typing (the same diff its next emit makes, from the batch's
+    // after-state) are folded on after the batch's own.
+    const pending = this._inflightOps;
+    let inflight = pending && pending.ops;
+    if (pending && this._dirtyWhileInflight) {
+      const queued = this._ro(pending.afterBlocks, this._normalizedDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+      inflight = [...(inflight || []), ...queued];
+    }
+    const loss = sourceWallLoss(this._blocks || [], L0, sourceView.call(this), { inflight });
+
+    // Close any open popup — in source mode the textarea owns input, so a lingering
+    // [[ / # / slash / palette popup would float over a now-hidden editor.
+    this._closeWikilink();
+    this._closeTag();
+    this._closeEmoji();
+    this._closeSlash();
+    this._closePalette();
+
     this._sourceBaselineBlocks = deepCloneBlocks(L0);
     this._sourceCommitBlocks = this._sourceBaselineBlocks;
     const md0 = blocksToMarkdown(this._sourceBaselineBlocks);
@@ -90,6 +110,7 @@ export function sourceModeEnter() {
     ta.autocapitalize = "off";
     ta.autocomplete = "off";
     ta.setAttribute("autocorrect", "off");
+    ta.readOnly = this._sourceReadOnly = Boolean(loss);
     // The textarea owns its own toggle-back (Mod-Shift-m) + Escape, since the rich
     // editor's handleKeyDown does NOT fire while source mode is up.
     this._onSourceKeyDown = (e) => {
@@ -132,6 +153,15 @@ export function sourceModeEnter() {
     // hide path (update() hides when !view.hasFocus()) so no stale bubble lingers
     // over the now-hidden editor.
     if (this._bubble) this._bubble.update();
+    if (loss) {
+      this._showFigureConstraint(
+        t("Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.", {
+          part: loss.part,
+          number: loss.index + 1,
+          type: loss.type,
+        }),
+      );
+    }
   }
 
   // EXIT source mode → back to the rich editor.
@@ -144,7 +174,9 @@ export function sourceModeExit() {
     let emitted = false;
     if (this._mode === "source" && this._sourceEl) {
       const md = this._sourceEl.value;
-      const edited = md !== this._sourceOriginalMd;
+      const edited = !this._sourceReadOnly && md !== this._sourceOriginalMd;
+      // An edit to a block shown as JSON is never saved: source mode stays open.
+      if (edited && refuseSentinelEdit.call(this, md)) return false;
 
       // Tear down the textarea + listener and reveal the rich editor FIRST so the
       // setContent (edited path) and the refocus land on the visible editor.
@@ -159,6 +191,9 @@ export function sourceModeExit() {
       this._sourceBaselineBlocks = null;
       this._sourceCommitBlocks = null;
       this._sourceOriginalMd = "";
+      if (this._sourceReadOnly || this._sourceRefusing) this._clearFigureConstraint();
+      this._sourceReadOnly = false;
+      this._sourceRefusing = false;
       try {
         this._editor.commands.focus();
       } catch (_e) {
@@ -195,6 +230,7 @@ export function sourceModeExit() {
   // _sourceOriginalMd then holds this markdown, so an unchanged textarea is a no-op
   // for the next flush and for exit.
 export function sourceModeCommit(md) {
+    if (this._sourceReadOnly || refuseSentinelEdit.call(this, md)) return false;
     const L0 = this._sourceBaselineBlocks;
     const L1 = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
     this._editor
@@ -209,6 +245,52 @@ export function sourceModeCommit(md) {
     this._sourceCommitBlocks = L1;
     return this._emitOps();
   }
+
+  // A block source mode cannot write as Markdown shows as its JSON sentinel, which
+  // source mode does not edit. Such Markdown is refused, with one line naming the
+  // block, until the line is put back; moving or deleting the line is saved as usual.
+  // Two checks, the second the wall: changedSentinel (a sentinel line that is not one
+  // the textarea already held, whole), then sentinelRefusal on the blocks the save would
+  // store (no block gains the marker or a shown sentinel's JSON in its words; a block
+  // shown as a sentinel is stored unchanged, or deleted by a save that only deletes,
+  // which has a notice of its own; a batch the fold refuses is refused, with a notice
+  // that names no block).
+function refuseSentinelEdit(md) {
+    const edited = changedSentinel(md, this._sourceOriginalMd);
+    const refusal = edited !== -1 ? { index: edited, kind: "edit" } : storedSentinelHarm.call(this, md);
+    if (!refusal) {
+      if (this._sourceRefusing) this._clearFigureConstraint();
+      this._sourceRefusing = false;
+      return false;
+    }
+    this._sourceRefusing = true;
+    const number = refusal.index + 1;
+    this._showFigureConstraint(refusal.kind === "unread"
+      ? t("Not saved: source mode could not read this change. Your text is kept.")
+      : refusal.kind === "removal"
+        ? t("Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.", { number })
+        : t("Not saved: block %{number} is shown as JSON, and source mode does not edit it.", { number }));
+    return true;
+  }
+
+// The editor's projection and runToOps, for the source-save checks.
+function sourceView() {
+    return {
+      toDoc: (blocks) => this._editor.schema.nodeFromJSON(this._rt(blocks)).toJSON(),
+      toOps: (...args) => this._ro(...args),
+    };
+}
+
+// sentinelRefusal over what sourceModeCommit(md) would store: the parse laid out as the
+// commit lays it, saved over the run its ops are diffed from.
+function storedSentinelHarm(md) {
+    const L0 = this._sourceBaselineBlocks || [];
+    const laid = clampLockedPrefix(L0, realignAcrossCommits(L0, this._sourceCommitBlocks, markdownToBlocks(md)));
+    const base = this._inflightOps ? this._inflightOps.afterBlocks : (this._debounceBaselineBlocks || this._blocks || []);
+    const view = sourceView.call(this);
+    const { saved } = sourceStored(base, laid, view);
+    return sentinelRefusal(base, L0, this._sourceOriginalMd, saved, (blocks) => settledBlocks(blocks, view));
+}
 
   // An external apply (applyServerBlocks, a queued release, a reseed) landed in the
   // hidden rich editor while source mode is open: show it in the textarea and make it

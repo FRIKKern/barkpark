@@ -224,6 +224,73 @@ defmodule BarkparkWeb.Studio.DeskDocUndoValuesTest do
     refute_push_event(view, "desk:undone", %{field: "doc[choice]"})
   end
 
+  # task-61c8a3663106486b: the undo reads the field, then writes it. A save by
+  # another editor that lands in between, put there by a handler on the read's
+  # own query in the LiveView, stays theirs; the undo is refused.
+  test "another editor's save between the undo's read and its write stays theirs", c do
+    view = open(c)
+    post(view, c, ["choice"], %{"choice" => "c"})
+    render(view)
+
+    id = "undo-fence-#{c.doc_id}"
+    write = fn -> theirs(c, %{"choice" => "a"}) end
+
+    :ok =
+      :telemetry.attach(id, [:barkpark, :repo, :query], &__MODULE__.between/4, %{
+        pid: view.pid,
+        id: id,
+        write: write
+      })
+
+    try do
+      undo(view, c)
+    after
+      :telemetry.detach(id)
+    end
+
+    assert stored(c)["choice"] == "a"
+    refute_push_event(view, "desk:undone", %{field: "doc[choice]"})
+  end
+
+  # task-2f3af2d2f7f56811: the step a select's save keeps starts from the value
+  # that save wrote over. Another editor's save that lands after the post
+  # arrives and before it is written, put there by a handler on the first
+  # query on documents in the LiveView, is that value: the undo puts theirs
+  # back, never the value from before it.
+  test "another editor's save landed just ahead of this editor's: the undo puts theirs back", c do
+    view = open(c)
+    id = "undo-before-#{c.doc_id}"
+    write = fn -> theirs(c, %{"choice" => "a"}) end
+
+    :ok =
+      :telemetry.attach(id, [:barkpark, :repo, :query], &__MODULE__.between/4, %{
+        pid: view.pid,
+        id: id,
+        write: write
+      })
+
+    try do
+      post(view, c, ["choice"], %{"choice" => "c"})
+    after
+      :telemetry.detach(id)
+    end
+
+    assert stored(c)["choice"] == "c"
+
+    undo(view, c)
+    assert stored(c)["choice"] == "a"
+  end
+
+  @doc false
+  # The first query on documents in the LiveView once armed: the undo's read,
+  # or the read ahead of a post's save.
+  def between(_event, _measurements, %{source: "documents"}, %{pid: pid, id: id, write: write})
+      when pid == self() do
+    if :telemetry.detach(id) == :ok, do: write.()
+  end
+
+  def between(_event, _measurements, _meta, _config), do: :ok
+
   test "a slug: this editor's typing comes back out byte for byte; another editor's words stay",
        c do
     view = open(c)

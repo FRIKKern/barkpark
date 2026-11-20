@@ -7,7 +7,8 @@
 // folding JSON tree (a folded branch's contents leave the page), with the query
 // URL to copy, the timings, Save result as JSON, and a word for screen readers.
 //
-// Runs the TRACKED static asset api/priv/static/assets/bp-desk-vision.js under
+// Runs the TRACKED static assets api/priv/static/assets/bp-desk-vision-query.js,
+// bp-desk-vision-tree.js and bp-desk-vision.js (in Desk.Vision's order) under
 // jsdom on a form shaped like Desk.Vision's render, with fetch stubbed.
 //
 // Run: node ../paper-editor-host-tests/__desk_vision.test.mjs
@@ -18,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "./jsdom.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = join(here, "../../priv/static/assets/bp-desk-vision.js");
+const SCRIPTS = ["bp-desk-vision-query.js", "bp-desk-vision-tree.js", "bp-desk-vision.js"].map((f) => join(here, "../../priv/static/assets", f));
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   url: "http://localhost:4000/w/a/p/b/d/production/studio/_desk/_tools/vision",
@@ -64,7 +65,7 @@ window.fetch = (url) => {
   return Promise.resolve({ ok: status < 400, status, text: () => Promise.resolve(JSON.stringify(body)) });
 };
 window.localStorage.clear();
-window.eval(readFileSync(SCRIPT, "utf8"));
+for (const script of SCRIPTS) window.eval(readFileSync(script, "utf8"));
 const Vision = window.BarkparkDeskVision;
 assert.ok(Vision, "bp-desk-vision.js sets window.BarkparkDeskVision");
 

@@ -52,7 +52,7 @@ export async function readView(page, part, waits = []) {
 }
 
 /** The least a label's picture may match its reference (match.mjs). An honest label reads 1.00 on macOS and
-    Linux; the selftest's ladder pins what a step below this costs (README "What the check proves"). */
+    Linux; the selftest's ladder pins what a step below this costs (docs/PARTS.md "What the check proves"). */
 export const MATCH_MIN = 0.975
 const NEEDS = { text: 4.5, graphic: 3 }
 
@@ -84,6 +84,7 @@ export function verdict(view, where = '', waits = []) {
       }
     }
   }
+  for (const at of view.grown ?? []) fails.push(`${where}a reader put a child into ${at}, an element it measures`)
   for (const at of view.empty) fails.push(`${where}control has nothing to show at ${at}`)
   for (const at of view.unlabelled) fails.push(`${where}text-only ${at} has no text label`)
   for (const m of view.bounds.misnamed) if (m.ratio < 3) fails.push(`${where}text-only ${m.at} draws its ${m.by} at ${fmt(m.ratio)}:1; drop it or meet 3:1`)

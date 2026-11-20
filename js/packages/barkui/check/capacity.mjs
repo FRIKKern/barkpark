@@ -4,7 +4,7 @@
 // number of parts; a number of parts no one has read there is scaled linearly from the largest number that has
 // been (never from a guess or from a run on a loaded machine). The check (run.mjs) and the selftest stop, failing
 // with their sentences, the moment a run passes its ceiling (ceiling.mjs). A job given more parts than PER_JOB
-// refuses to run at all; check/jobs.mjs splits the folder into groups of at most PER_JOB. README.md's passage on this is made here (capacityPassage), between
+// refuses to run at all; check/jobs.mjs splits the folder into groups of at most PER_JOB. docs/PARTS.md's passage on this is made here (capacityPassage), between
 // two markers, and a test holds it word for word; `node check/capacity.mjs` writes it. When another part lands,
 // its hosted reading goes in READINGS and every number moves by measurement.
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -62,7 +62,7 @@ export const selftestSentence = (p = plan()) =>
 
 export const MARKS = ['<!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->', '<!-- /capacity -->']
 
-/** README.md's whole passage on capacity (and the PR's), every number from `p`. */
+/** docs/PARTS.md's whole passage on capacity (and the PR's), every number from `p`. */
 export function capacityPassage(p = plan()) {
   const read = (r) => `run ${r.run} at ${r.commit}`
   return [
@@ -77,12 +77,12 @@ export function capacityPassage(p = plan()) {
 const P = plan()
 export const { AT_ONCE, STEP_MINUTES, SELFTEST_STEP_MINUTES, SELFTEST_MOST, HEADROOM, READINGS, ceilingFor, PER_JOB, FOLDER_READ, SELFTEST_CEILING } = P
 
-// node check/capacity.mjs: writes the passage into README.md between its marks, and prints it.
+// node check/capacity.mjs: writes the passage into docs/PARTS.md between its marks, and prints it.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const file = new URL('../README.md', import.meta.url)
+  const file = new URL('../docs/PARTS.md', import.meta.url)
   const s = readFileSync(file, 'utf8')
   const [a, b] = [s.indexOf(MARKS[0]), s.indexOf(MARKS[1])]
-  if (a < 0 || b < a) throw new Error('README.md lacks the capacity marks')
+  if (a < 0 || b < a) throw new Error('docs/PARTS.md lacks the capacity marks')
   writeFileSync(file, `${s.slice(0, a + MARKS[0].length)}\n${capacityPassage()}\n${s.slice(b)}`)
   console.log(capacityPassage())
 }
