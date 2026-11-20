@@ -585,7 +585,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   #
   # A localizedText language the author emptied is unset, as the TanStack
   # Studio unsets it: `{"nob" => "", "eng" => "…"}` is stored as
-  # `{"eng" => "…"}`, and a field left with no language is removed. Only a
+  # `{"eng" => "…"}`, and a field left with no text is removed
+  # (`unset_language/3`). Only a
   # TOUCHED empty value reaches here (`foldable?/3`), so a language the author
   # never typed in is kept as stored. Only in the desk (the one host with a
   # `:desk_base`): the old Studio stores the emptied language as "", as it
@@ -602,23 +603,56 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp write_leaf(doc, socket, path, value),
     do: StudioLive.put_value_at(doc, path, coerce_leaf(socket, path, value))
 
-  defp unset_language(doc, [root] = parent, lang) do
+  # The language's key goes. When nothing left in the field holds text (every
+  # other language "" or none), the field itself is unset, and so on outward:
+  # an object left with only blanks is unset in turn, as TanStack's `write()`
+  # (`edits.ts`) does, so no `{}` shell is stored that `defined()` reads as
+  # set. A top-level field is unset by writing "" (the save takes the key
+  # off). An array row is never unset, and a language map that is itself an
+  # array row only loses the key.
+  defp unset_language(doc, parent, lang) do
     case value_at(doc, parent) do
       %{} = map ->
         left = Map.delete(map, lang)
-        Map.put(doc, root, if(left == %{}, do: "", else: left))
+
+        if blank_map?(left) and not row?(parent),
+          do: unset_at(doc, parent),
+          else: put_at(doc, parent, left)
 
       _ ->
         doc
     end
   end
 
-  defp unset_language(doc, parent, lang) do
+  defp unset_at(doc, [root]), do: Map.put(doc, root, "")
+
+  # A key in an object is written nil, which the save reads as unset
+  # (`Forms`' composite restore): a key left out would be kept as stored.
+  defp unset_at(doc, path) do
+    {parent, [key]} = Enum.split(path, -1)
+
     case value_at(doc, parent) do
-      %{} = map -> StudioLive.put_value_at(doc, parent, Map.delete(map, lang))
-      _ -> doc
+      %{} = map ->
+        left = Map.put(map, key, nil)
+
+        if blank_map?(left) and not row?(parent),
+          do: unset_at(doc, parent),
+          else: put_at(doc, parent, left)
+
+      _ ->
+        doc
     end
   end
+
+  defp put_at(doc, [root], value), do: Map.put(doc, root, value)
+  defp put_at(doc, path, value), do: StudioLive.put_value_at(doc, path, value)
+
+  defp blank_map?(map), do: Enum.all?(map, fn {_key, value} -> value in [nil, ""] end)
+
+  # The path names an array row (its last step is an index) or the top of
+  # the document.
+  defp row?([]), do: true
+  defp row?(path), do: is_integer(List.last(path))
 
   defp value_at(value, []), do: value
   defp value_at(%{} = map, [key | rest]), do: value_at(Map.get(map, key), rest)

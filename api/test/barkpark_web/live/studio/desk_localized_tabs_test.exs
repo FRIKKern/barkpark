@@ -47,6 +47,21 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
               "fallbackChain" => ["nob", "eng"],
               "validation" => %{"max" => 5}
             },
+            %{
+              "name" => "comp",
+              "title" => "Comp",
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "cap",
+                  "title" => "Caption",
+                  "type" => "localizedText",
+                  "languages" => ["nob", "eng"],
+                  "fallbackChain" => ["nob", "eng"]
+                },
+                %{"name" => "note", "title" => "Note", "type" => "string"}
+              ]
+            },
             %{"name" => "notes", "type" => "string"}
           ]
         },
@@ -70,6 +85,19 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
       Content.create_document(
         c.type,
         %{"doc_id" => id, "title" => "Book", "content" => %{"blurb" => blurb, "notes" => "0"}},
+        @dataset
+      )
+
+    id
+  end
+
+  defp doc_with!(c, content) do
+    id = "lt-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.create_document(
+        c.type,
+        %{"doc_id" => id, "title" => "Book", "content" => Map.put(content, "notes", "0")},
         @dataset
       )
 
@@ -183,6 +211,36 @@ defmodule BarkparkWeb.Studio.DeskLocalizedTabsTest do
     change(view, "doc[blurb].eng", "")
     refute Map.has_key?(stored(c, id), "blurb")
     assert stored(c, id)["notes"] == "0"
+  end
+
+  # TanStack's `write()`: a field left with no text is unset, and an object
+  # left with only blanks in turn; no `{}` shell is stored.
+  test "a field whose other languages are all blank is removed when its last text is emptied",
+       c do
+    id = doc_with!(c, %{"blurb" => %{"nob" => "", "eng" => "E only"}})
+    view = desk(c, id)
+
+    change(view, "doc[blurb].eng", "")
+    refute Map.has_key?(stored(c, id), "blurb")
+    assert stored(c, id)["notes"] == "0"
+  end
+
+  test "an object's language field emptied in every language is taken off the object", c do
+    id = doc_with!(c, %{"comp" => %{"cap" => %{"nob" => "cn", "eng" => "ce"}, "note" => "nn"}})
+    view = desk(c, id)
+
+    change(view, "doc[comp].cap.nob", "")
+    assert stored(c, id)["comp"] == %{"cap" => %{"eng" => "ce"}, "note" => "nn"}
+
+    change(view, "doc[comp].cap.eng", "")
+    assert stored(c, id)["comp"] == %{"note" => "nn"}
+
+    view
+    |> form(@form, %{"doc" => %{"notes" => "typed"}})
+    |> render_change(%{"_target" => ["doc", "notes"]})
+
+    assert stored(c, id)["comp"] == %{"note" => "nn"}
+    assert stored(c, id)["notes"] == "typed"
   end
 
   test "an edit sent while the published version is shown is refused", c do
