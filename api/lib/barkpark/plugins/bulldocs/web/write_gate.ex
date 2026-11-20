@@ -19,7 +19,6 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   transaction about the saved row's workspace.
   """
 
-  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.{CallerContext, WriteScope}
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Workspace
@@ -75,11 +74,11 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   @doc """
   May `token` write in workspace `ws_id`: its home workspace, a seat that
   allows `:write` (`Tenancy.Auth.authorize/3`), or an instance operator on an
-  ARMED allowlist. False for anything but a workspace id.
+  ARMED allowlist. False for anything but a token and a workspace id.
   """
-  @spec may_write?(ApiToken.t(), term()) :: boolean()
-  def may_write?(%ApiToken{} = token, ws_id) when is_binary(ws_id) do
-    ws_id == token.workspace_id or Tenancy.Auth.authorize(token, ws_id, :write) == :ok or
+  @spec may_write?(term(), term()) :: boolean()
+  def may_write?(%{workspace_id: home} = token, ws_id) when is_binary(ws_id) do
+    ws_id == home or Tenancy.Auth.authorize(token, ws_id, :write) == :ok or
       armed_operator?(token)
   end
 
@@ -90,9 +89,9 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   saved row's workspace (`Content.Papers.SavedCheck`): `may_write?/2` for
   `token`, or nil for no token (the shared-secret producer).
   """
-  @spec write_check(ApiToken.t() | nil) :: (term() -> boolean()) | nil
-  def write_check(%ApiToken{} = token), do: &may_write?(token, &1)
-  def write_check(_no_token), do: nil
+  @spec write_check(term()) :: (term() -> boolean()) | nil
+  def write_check(nil), do: nil
+  def write_check(token), do: &may_write?(token, &1)
 
   # The instance operator, only when the allowlist is ARMED: an unset allowlist
   # admits every admin token, which is exactly the population this closes.
