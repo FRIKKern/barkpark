@@ -22,9 +22,8 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
 
   Every other field the form writes (a slug, a select, a list, an object's
   nested fields) is kept as whole-value steps (`DocUndoValues`): the value
-  the store held at the press and the value the write left, taken back
-  with `ValueUndo`. A rich-text body, a reference or an asset is not undone
-  here.
+  the write landed over and the value it left, taken back with `ValueUndo`.
+  A rich-text body, a reference or an asset is not undone here.
 
   ## Undo
 
@@ -99,34 +98,42 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   end
 
   @doc """
-  `event` of the form, handled by `fun`, with the step it made kept when it
-  landed: a free-text field's typed edit (`record/3`), or a write of any
-  other field kept (`DocUndoValues`), from the value the store held at the
-  press.
+  `event` of the form, handled by `fun` (given the socket), with the step it
+  made kept when it landed: a free-text field's typed edit (`record/3`), or
+  a write of any other field kept (`DocUndoValues`), from the value the
+  write landed over. The save reports that value (`:saved_over`), read
+  under its lock: a read ahead of the save would miss another editor's save
+  landed in between, and the undo would put back a value older than theirs
+  (task-2f3af2d2f7f56811).
   """
   def around(event, params, socket, fun) do
     case DocUndoValues.target(event, params, socket.assigns) do
       nil ->
-        if event == "autosave", do: record(fun.(), params, socket), else: fun.()
+        if event == "autosave", do: record(fun.(socket), params, socket), else: fun.(socket)
 
       {key, input} ->
-        was = DocUndoValues.stored_now(socket, key)
-        record_value(fun.(), socket, key, input, was)
+        socket
+        |> assign(:editor_saved_over, [key])
+        |> fun.()
+        |> record_value(socket, key, input)
     end
   end
 
-  defp record_value({:noreply, saved}, before, key, input, was),
-    do: {:noreply, value_step(saved, before, key, input, was)}
+  defp record_value({:noreply, saved}, before, key, input),
+    do: {:noreply, value_step(reported(saved), before, key, input)}
 
-  defp record_value({:reply, reply, saved}, before, key, input, was),
-    do: {:reply, reply, value_step(saved, before, key, input, was)}
+  defp record_value({:reply, reply, saved}, before, key, input),
+    do: {:reply, reply, value_step(reported(saved), before, key, input)}
 
-  defp record_value(other, _before, _key, _input, _was), do: other
+  defp record_value(other, _before, _key, _input), do: other
 
-  defp value_step(saved, before, key, input, was) do
+  defp reported(saved), do: assign(saved, :editor_saved_over, nil)
+
+  defp value_step(saved, before, key, input) do
     with mark when is_binary(mark) <- PostIdentity.of(saved),
          ^mark <- PostIdentity.of(before),
          true <- landed?(saved, before),
+         %{saved_over: %{^key => was}} <- saved.assigns[:editor_doc],
          left = DocUndoValues.stored(saved, key),
          true <- left != was,
          true <- size(was) + size(left) <= @max_bytes do

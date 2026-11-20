@@ -154,13 +154,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
 
   @doc """
   The save's options from the socket: each free-text field's base
-  (`:field_bases`), and the value a field must still hold for the write to
-  land (`:field_expect`, set by `Desk.DocUndo` from the value it read).
+  (`:field_bases`), the value a field must still hold for the write to
+  land (`:field_expect`, set by `Desk.DocUndo` from the value it read), and
+  the fields whose value the write lands over the saved document reports
+  (`:saved_over`, set by `Desk.DocUndo` for the step it keeps).
   """
   def write_opts(socket) do
     [
       field_bases: socket.assigns[:editor_field_bases] || %{},
-      field_expect: socket.assigns[:editor_field_expect] || %{}
+      field_expect: socket.assigns[:editor_field_expect] || %{},
+      saved_over: socket.assigns[:editor_saved_over] || []
     ]
   end
 

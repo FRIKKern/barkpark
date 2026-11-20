@@ -356,7 +356,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # undo when it landed (`DocUndo`).
   def handle_event("autosave" = event, params, socket),
     do:
-      DocUndo.around(event, params, socket, fn ->
+      DocUndo.around(event, params, socket, fn socket ->
         EditorHost.handle_event(event, params, socket)
       end)
 
@@ -388,7 +388,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # document's undo when they landed (`DocUndo`).
   def handle_event(event, params, socket),
     do:
-      DocUndo.around(event, params, socket, fn ->
+      DocUndo.around(event, params, socket, fn socket ->
         EditorHost.handle_event(event, params, socket)
       end)
 
