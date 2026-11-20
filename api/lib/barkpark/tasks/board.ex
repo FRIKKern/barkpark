@@ -272,7 +272,7 @@ defmodule Barkpark.Tasks.Board do
     docs = Enum.map(collapsed, fn {doc, _pair?} -> doc end)
     status_by_pk = Map.new(docs, fn d -> {d.id, lifecycle_of(d)} end)
     blockers_by_pk = load_blocker_targets(Map.keys(status_by_pk))
-    readable? = field_visibility_gate(dataset)
+    readable? = field_visibility_gate(dataset, workspace_id: Keyword.get(opts, :workspace_id))
 
     collapsed
     |> Enum.map(fn {doc, pair?} ->
@@ -286,24 +286,34 @@ defmodule Barkpark.Tasks.Board do
   dataset (NOT per card) and return a fail-closed visibility predicate
   `(field :: String.t()) -> boolean()`.
 
-  This mirrors board_live's peek seal (load_peek/peek_schema/peek_field_readable?,
-  merged #5470) and `tasks/query.ex` measure_field_readable?/2: an ANONYMOUS
+  board_live's peek seal (load_peek, merged #5470) reads this gate; it mirrors
+  `tasks/query.ex` measure_field_readable?/2: an ANONYMOUS
   caller, so any content field the schema declares private / owner_only /
   readable_by is redacted from the card projection — and therefore from every
   derived copy (`family_walk/4` rows, `gantt_data/1`, `focus_of/1`) which read
   the gated card fields, never the raw doc. A nil schema (miss) leaves every
-  field undeclared ⇒ public (legacy parity), never a crash. One indexed
-  `Content.get_schema/3` bounds the cost.
+  field undeclared ⇒ public (legacy parity), never a crash. One schema read
+  bounds the cost.
 
   PUBLIC (felix W19): the realtime path (`board_live` mount + `:refresh`)
   computes the predicate ONCE per mount/reconcile and threads it into
   `card_from_broadcast/3`, so a broadcast card is gated by the same decisions as
   a fetched `to_card/5` one — WITHOUT resolving the schema per broadcast.
+
+  `scope` names the workspace (and optionally the project) whose `task` schema
+  decides, read through `Content.Schema.get_schema_for_redaction/3` as
+  `/v1/tasks` reads it: that workspace's own schema, else the shared global
+  one, never another workspace's. A nil key is dropped. With no workspace the
+  read is unscoped, which resolves the dataset to the Default workspace's: the
+  operator's flat mount, which shows every workspace's tasks under one gate
+  (task-c626f2be5264f61a).
   """
-  @spec field_visibility_gate(String.t()) :: (String.t() -> boolean())
-  def field_visibility_gate(dataset) do
+  @spec field_visibility_gate(String.t(), keyword()) :: (String.t() -> boolean())
+  def field_visibility_gate(dataset, scope \\ []) do
+    scope = Enum.reject(scope, fn {_key, value} -> is_nil(value) end)
+
     schema =
-      case Content.get_schema("task", dataset, []) do
+      case Content.Schema.get_schema_for_redaction("task", dataset, scope) do
         {:ok, schema} -> schema
         _ -> nil
       end
@@ -408,7 +418,7 @@ defmodule Barkpark.Tasks.Board do
   end
 
   # Project one fetched task doc into a normalized card. `readable?` is the
-  # snapshot-wide fail-closed field-visibility predicate (`field_visibility_gate/1`):
+  # snapshot-wide fail-closed field-visibility predicate (`field_visibility_gate/2`):
   # THE single seal point (charter W18). Every private-capable content field is
   # gated here so the deck card AND every derived copy — `family_walk/4`'s tree
   # rows, `gantt_data/1`'s root row, `focus_of/1`'s focus line — inherit the
@@ -693,7 +703,7 @@ defmodule Barkpark.Tasks.Board do
   takes the visibility predicate `readable?` INJECTED by the caller instead of
   resolving the schema itself.
 
-  FIELD-VISIBILITY SEAL (felix W19). `readable?` is `field_visibility_gate/1`'s
+  FIELD-VISIBILITY SEAL (felix W19). `readable?` is `field_visibility_gate/2`'s
   fail-closed predicate, computed ONCE per mount/`:refresh` by `board_live` and
   threaded in — NEVER resolved per broadcast (no DB on the hot event path). It
   gates EXACTLY the 7 text/PII fields `to_card/5` gates — priority, parent_id,

@@ -482,7 +482,7 @@ defmodule Barkpark.Tasks.Query do
     end)
   end
 
-  # Inline fail-closed field-visibility twin of `Board.field_visibility_gate/1`
+  # Inline fail-closed field-visibility twin of `Board.field_visibility_gate/2`
   # (board.ex:190-202). Resolve the `task` schema ONCE per `rows_for_query` call
   # (never per doc — no N+1) and return an ANONYMOUS-caller readability predicate
   # `(field :: String.t()) -> boolean()`. A schema miss degrades to allow-all (a
