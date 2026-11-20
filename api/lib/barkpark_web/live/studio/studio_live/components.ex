@@ -1406,11 +1406,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           from the WidthBucket hook on this container (root.html.heex) and
           stays "wide" until the client connects, so the static first render is
           byte-identical to pre-spd-s4 main. --%>
-    <%!-- The phone drill trail — a SIBLING BEFORE the pane row (D27), and at
-          the phone bucket the ONLY route back out of a drilled pane or an open
-          document. See `desk_crumbs/1` above. Not in the desk (`desk_base`), which
-          has its own panes: there it drew a bare "/" and, arriving at narrow, moved
-          the pane row, so a focused group tab fell to BODY (task-2dd6262184d64bb4). --%>
+    <%!-- The phone drill trail, a SIBLING BEFORE the pane row (D27, `desk_crumbs/1`). Not in the desk,
+          which has its own panes: arriving at narrow it moved the row, and a focused tab fell to BODY. --%>
     <.desk_crumbs
       :if={not is_binary(Map.get(assigns, :desk_base))}
       panes={@panes}
