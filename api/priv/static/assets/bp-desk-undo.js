@@ -40,7 +40,11 @@
 // new value (the server switched the tab first). A field in a folded fieldset
 // or object (folded by the schema, or by the user) has its folds opened first.
 // A field whose pane was folded to a strip while the undo was on its way has
-// the strip opened first, as a click on it does.
+// the strip opened first, as a click on it does. Focus mode entered on
+// another pane while the undo was on its way (task-9acc3246edf8cf2e) is left
+// first, as that pane's button does, and the answer is taken once the panes
+// are back. An open desk menu (the "…" Doc menu, Share, List options) closes
+// as the focus goes into the field (task-a8e403cee723e5f6).
 //
 // A document-level listener, no phx-hook: bp-desk.js loads it when the desk
 // mounts (the address is on the desk's root, `data-desk-undo`).
@@ -282,11 +286,70 @@
     });
   }
 
-  function onUndone(e) {
+  // The desk's popover menus (bp-desk.js `MENU`). Hidden, each fires its own
+  // `toggle`, so its button says it is collapsed again.
+  var MENU = ".dk-doc-menu-list[popover], .dk-list-menu[popover]";
+
+  function closeMenus() {
+    var all = document.querySelectorAll(MENU);
+    for (var i = 0; i < all.length; i++) {
+      var m = all[i];
+      var open = false;
+      try {
+        open = m.matches(":popover-open");
+      } catch (_) {
+        // No popover support: nothing is open.
+      }
+      if (open && typeof m.hidePopover === "function") m.hidePopover();
+    }
+  }
+
+  // Whether focus mode shows a pane other than the editor's (FocusMode: the
+  // desk marked, and the shown pane marked focused).
+  function focusedAway(f) {
+    var desk = document.getElementById("desk-panes");
+    var pane = f.closest("#desk-panes > [data-pane-index]");
+    return !!desk && !!pane && desk.hasAttribute("data-focus-mode") && !pane.hasAttribute("data-desk-focused");
+  }
+
+  // Leaves focus mode by the focused pane's own button (`desk-focus`, a round
+  // trip) and runs `then` once the desk is no longer in it; never, when there
+  // is no button or it does not end within `LEAVE_MS`.
+  var LEAVE_MS = 4000;
+
+  function leaveFocus(then) {
+    var desk = document.getElementById("desk-panes");
+    var exit = desk.querySelector('#desk-panes > [data-desk-focused] .dk-focus[aria-pressed="true"]');
+    if (!exit) return;
+    var timer = 0;
+    var watch = new window.MutationObserver(function () {
+      if (desk.hasAttribute("data-focus-mode")) return;
+      stop();
+      // bp-desk.js lays the panes out on the same change; the frame after it.
+      (window.requestAnimationFrame || window.setTimeout)(then);
+    });
+    function stop() {
+      watch.disconnect();
+      window.clearTimeout(timer);
+    }
+    watch.observe(desk, { attributes: true, attributeFilter: ["data-focus-mode"] });
+    timer = window.setTimeout(stop, LEAVE_MS);
+    exit.click();
+  }
+
+  function onUndone(e, left) {
     var d = (e && e.detail) || {};
     var f = form();
     var el = f ? named(f, d) : null;
     if (!el || !el.tagName) return;
+    if (focusedAway(f)) {
+      if (!left) {
+        leaveFocus(function () {
+          onUndone(e, true);
+        });
+      }
+      return;
+    }
     unstrip(el);
     // A field in an item dialog that cannot be opened is left as it is: not
     // set and not focused. A redo here would write again, and its own answer
@@ -296,6 +359,7 @@
     var set = text && typeof d.value === "string" && typeof d.was === "string" && lf(el.value) === lf(d.was);
     if (set) el.value = d.value;
     unfold(el);
+    closeMenus();
     var to = focusable(el);
     if (document.activeElement !== to && typeof to.focus === "function") to.focus();
     // Drawn with the new value already (the undo switched to its tab): the

@@ -481,6 +481,131 @@ check("a field the form does not have is ignored", () => {
   undone({});
 });
 
+// A popover as the desk's menus are (`popover`, `:popover-open`, `toggle`):
+// jsdom has none of it.
+const popover = (menu) => {
+  let open = false;
+  const matches = menu.matches.bind(menu);
+  menu.matches = (sel) => (sel === ":popover-open" ? open : matches(sel));
+  menu.showPopover = () => {
+    open = true;
+  };
+  menu.hidePopover = () => {
+    open = false;
+    const e = new window.Event("toggle");
+    e.newState = "closed";
+    menu.dispatchEvent(e);
+  };
+  return menu;
+};
+
+// task-a8e403cee723e5f6: the focus went into the field, the Doc menu stayed open.
+check("Mod+Z from an item of the open Doc menu: the answer closes the menu as the focus goes into the field", () => {
+  const box = doc.createElement("div");
+  box.innerHTML =
+    `<div class="dk-doc-menu-list dk-menu" id="doc-menu" popover role="menu">` +
+    `<button type="button" role="menuitem" id="doc-menu-history">History</button></div>`;
+  $("pane").querySelector("header").appendChild(box);
+  const menu = popover($("doc-menu"));
+  const closed = [];
+  menu.addEventListener("toggle", (e) => closed.push(e.newState));
+  try {
+    menu.showPopover();
+    $("doc-menu-history").focus();
+    key($("doc-menu-history"), { key: "z", metaKey: true });
+    assert.deepEqual(pushes, [{ event: "desk-undo", payload: { redo: false, _bp_doc: MARK } }]);
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14" });
+    assert.equal(menu.matches(":popover-open"), false, "the menu is closed");
+    assert.deepEqual(closed, ["closed"], "by its own toggle");
+    assert.equal(doc.activeElement, $("title"));
+  } finally {
+    box.remove();
+  }
+});
+
+// task-9acc3246edf8cf2e: focus mode on another pane entered while the undo was
+// on its way. The page draws none of the hidden panes, so the focus put in the
+// field fell to BODY. The way out is the focused pane's own button, a round
+// trip: the server takes the marks off.
+async function checkAsync(name, fn) {
+  reset();
+  try {
+    await fn();
+    console.log(`PASS  ${name}`);
+  } catch (error) {
+    failures += 1;
+    console.log(`FAIL  ${name}\n      ${error.message}`);
+  }
+}
+
+const desk = $("desk-panes");
+const later = (ms) => new Promise((done) => setTimeout(done, ms));
+
+await checkAsync("focus mode entered on the read-only side while an undo is on its way is left, then the field is set and focused", async () => {
+  const side = doc.createElement("section");
+  side.id = "side";
+  side.setAttribute("data-pane-index", "2");
+  side.innerHTML = `<header><button type="button" class="dk-focus" id="side-focus" aria-pressed="false">Focus</button></header>`;
+  desk.appendChild(side);
+  const exits = [];
+  $("side-focus").addEventListener("click", () => {
+    exits.push("side-focus");
+    setTimeout(() => {
+      desk.removeAttribute("data-focus-mode");
+      side.removeAttribute("data-desk-focused");
+      $("side-focus").setAttribute("aria-pressed", "false");
+    }, 20);
+  });
+  const seen = [];
+  const onFocus = () => seen.push(desk.hasAttribute("data-focus-mode"));
+  $("title").addEventListener("focus", onFocus);
+  try {
+    $("title").value = "Fixture post 14 X";
+    $("title").focus();
+    key($("title"), { key: "z", metaKey: true });
+    seen.length = 0;
+    // The user enters focus mode on the other side before the answer.
+    desk.setAttribute("data-focus-mode", "true");
+    side.setAttribute("data-desk-focused", "true");
+    $("side-focus").setAttribute("aria-pressed", "true");
+    $("side-focus").focus();
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 X" });
+    await later(80);
+    assert.deepEqual(exits, ["side-focus"], "focus mode is left by its button");
+    assert.equal(desk.hasAttribute("data-focus-mode"), false);
+    assert.deepEqual(seen, [false], "the field takes the focus only once the panes are back");
+    assert.equal(doc.activeElement, $("title"));
+    assert.equal($("title").value, "Fixture post 14");
+  } finally {
+    $("title").removeEventListener("focus", onFocus);
+    desk.removeAttribute("data-focus-mode");
+    side.remove();
+    $("title").value = "Fixture post 14";
+  }
+});
+
+await checkAsync("while focus mode stays on, the field is neither set nor focused", async () => {
+  const side = doc.createElement("section");
+  side.id = "side2";
+  side.setAttribute("data-pane-index", "2");
+  side.setAttribute("data-desk-focused", "true");
+  side.innerHTML = `<header><button type="button" class="dk-focus" id="side2-focus" aria-pressed="true">Focus</button></header>`;
+  desk.appendChild(side);
+  desk.setAttribute("data-focus-mode", "true");
+  try {
+    $("side2-focus").focus();
+    $("title").value = "Fixture post 14 X";
+    undone({ field: "doc[title]", value: "Fixture post 14", was: "Fixture post 14 X" });
+    await later(30);
+    assert.equal($("title").value, "Fixture post 14 X", "not set out of sight");
+    assert.equal(doc.activeElement, $("side2-focus"), "the focus stays");
+  } finally {
+    desk.removeAttribute("data-focus-mode");
+    side.remove();
+    $("title").value = "Fixture post 14";
+  }
+});
+
 if (failures) {
   console.log(`\n${failures} failing`);
   process.exit(1);
