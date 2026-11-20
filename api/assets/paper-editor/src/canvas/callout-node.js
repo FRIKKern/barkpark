@@ -213,6 +213,13 @@ export const Callout = Node.create({
         renderHTML: (attrs) =>
           attrs.collapsed ? { "data-collapsed": "true" } : {},
       },
+      // bpSlots / bpHead — a callout stored with a body slot: the stored `slots` and
+      // its own `content`. The node shows the first body block's words, as the reader
+      // does, and an edit is saved back into that block (calloutNodeToPatch), so the
+      // callout's own words and the rest of the body are kept (task-6a8137419e0153e4).
+      // Not rendered: a copy pasted elsewhere is a plain callout of the words it shows.
+      bpSlots: { default: null, rendered: false, keepOnSplit: false },
+      bpHead: { default: null, rendered: false, keepOnSplit: false },
     };
   },
 

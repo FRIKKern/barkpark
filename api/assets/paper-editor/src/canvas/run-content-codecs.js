@@ -54,6 +54,12 @@ function calloutBlockToNode(block, bpId, bpType) {
   if (block && block.title != null) attrs.title = block.title;
   if (block && block.collapsible === true) attrs.collapsible = true;
   if (block && block.collapsed === true) attrs.collapsed = true;
+  // A body slot: the node shows its first block's words, so it keeps the stored
+  // slots and the callout's own words to save an edit back where it came from.
+  if (hasBodySlot(block)) {
+    attrs.bpSlots = deepClone(block.slots);
+    attrs.bpHead = Array.isArray(block.content) ? deepClone(block.content) : null;
+  }
 
   const node = { type: bpType || "callout", attrs };
   const inline = inlineArrayToTiptap(calloutBodyInline(block));
@@ -69,18 +75,46 @@ function calloutBlockToNode(block, bpId, bpType) {
 // Chrome fields read off node.attrs, threaded ONLY when present/true so the
 // reconstructed block is byte-identical to one that round-tripped through
 // compose.ex (no stray title:"" / collapsible:false).
-function calloutNodeToBlock(node, id) {
+function calloutNodeToBlock(node, id, prevNode = null) {
   const attrs = (node && node.attrs) || {};
-  const block = {
-    id,
-    type: "callout",
-    tone: attrs.tone || "info",
-    content: tiptapInlineToPd((node && node.content) || []),
-  };
+  const words = tiptapInlineToPd((node && node.content) || []);
+  const block = { id, type: "callout", tone: attrs.tone || "info", ...calloutWords(words, bodyModel(node, prevNode)) };
   if (attrs.title != null) block.title = attrs.title;
   if (attrs.collapsible === true) block.collapsible = true;
   if (attrs.collapsed === true) block.collapsed = true;
   return block;
+}
+
+function hasBodySlot(block) {
+  const body = block && block.slots && block.slots.body;
+  return Array.isArray(body) && body.length > 0;
+}
+
+// The stored body a callout node saves into: its own, or, for a node built from
+// source mode's text (which holds no slots), the one of the node it replaces.
+function bodyModel(node, prevNode) {
+  const own = node && node.attrs;
+  if (own && own.bpSlots) return own;
+  const prev = prevNode && prevNode.attrs;
+  return prev && prev.bpSlots ? prev : null;
+}
+
+// The keys a callout's shown words are stored under. Without a body slot that is
+// `content`. With one, the words go into the first body block, where the reader takes
+// them from (Slots.callout_body_inline/1); the callout's own `content` is kept, and
+// written too only when it held those same words, so the two stay one.
+function calloutWords(words, model) {
+  if (!model) return { content: words };
+  const slots = deepClone(model.bpSlots);
+  const [first, ...rest] = slots.body;
+  const head = model.bpHead;
+  const same = Array.isArray(head) && isPlainObject(first) && canonicalJSON(head) === canonicalJSON(first.content || []);
+  slots.body = [{ ...(isPlainObject(first) ? first : { type: "paragraph" }), content: words }, ...rest];
+  const out = {};
+  if (same) out.content = words;
+  else if (Array.isArray(head)) out.content = head;
+  out.slots = slots;
+  return out;
 }
 
 // The mutable-fields PATCH for a callout (the analogue of buildPatchBlockOp's
@@ -103,7 +137,7 @@ function calloutNodeToBlock(node, id) {
 // A changed field is still explicit, so an expand, a title clear or a collapsible-off
 // still lands. Without prevNode every field rides, as before.
 function calloutNodeToPatch(node, prevNode = null) {
-  const block = calloutNodeToBlock(node, null);
+  const block = calloutNodeToBlock(node, null, prevNode);
   const attrs = (node && node.attrs) || {};
   const full = {
     tone: block.tone,
@@ -112,6 +146,13 @@ function calloutNodeToPatch(node, prevNode = null) {
     collapsible: attrs.collapsible === true,
     collapsed: attrs.collapsed === true,
   };
+  // A body slot: the words ride `slots`, and `content` only when it held them too
+  // (calloutWords keeps the stored array itself otherwise).
+  const model = bodyModel(node, prevNode);
+  if (model) {
+    full.slots = block.slots;
+    if (block.content === undefined || block.content === model.bpHead) delete full.content;
+  }
   if (!prevNode) return full;
   const prevAttrs = prevNode.attrs || {};
   const before = {
@@ -130,8 +171,10 @@ function calloutNodeToPatch(node, prevNode = null) {
   };
   const patch = {};
   for (const key of Object.keys(full)) {
-    if (before[key] !== after[key]) patch[key] = full[key];
+    if (key !== "slots" && before[key] !== after[key]) patch[key] = full[key];
   }
+  // The shown words changed: with a body slot they are saved by `slots`.
+  if (model && before.content !== after.content) patch.slots = full.slots;
   return patch;
 }
 
