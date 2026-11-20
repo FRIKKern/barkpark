@@ -1,0 +1,47 @@
+<div data-demo-row>
+  <span data-demo-label>Empty, filled, long</span>
+  <ui-field id="text-field-title-field" data-slot="field">
+    <ui-field-label id="text-field-title-field-label" data-slot="field-label">Title</ui-field-label>
+    <ui-input><input id="text-field-title" data-slot="input" placeholder="A short, plain title"></ui-input>
+    <ui-field-description id="text-field-title-field-description" data-slot="field-description">Shown on the page and in search.</ui-field-description>
+  </ui-field>
+  <ui-field id="text-field-slug-field" data-slot="field" data-required="">
+    <ui-field-label id="text-field-slug-field-label" data-slot="field-label">Slug</ui-field-label>
+    <ui-input required><input id="text-field-slug" data-slot="input" data-filled="" data-required="" value="spring-reading-list" required></ui-input>
+  </ui-field>
+  <ui-field id="text-field-summary-field" data-slot="field">
+    <ui-field-label id="text-field-summary-field-label" data-slot="field-label">Summary</ui-field-label>
+    <ui-input><input id="text-field-summary" data-slot="input" data-filled="" value="Twelve new books for the spring term, from first readers to the long novels"></ui-input>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Read-only, disabled</span>
+  <ui-field id="text-field-id-field" data-slot="field">
+    <ui-field-label id="text-field-id-field-label" data-slot="field-label">Document id</ui-field-label>
+    <ui-input readonly><input id="text-field-id" data-slot="input" data-filled="" data-readonly="" value="post-1042" readonly></ui-input>
+  </ui-field>
+  <ui-field id="text-field-owner-field" data-slot="field" data-disabled="" disabled>
+    <ui-field-label id="text-field-owner-field-label" data-slot="field-label">Owner</ui-field-label>
+    <ui-input disabled><input id="text-field-owner" data-slot="input" data-filled="" data-disabled="" value="Editorial" disabled></ui-input>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Invalid</span>
+  <ui-field id="text-field-email-field" data-slot="field" data-invalid="" invalid>
+    <ui-field-label id="text-field-email-field-label" data-slot="field-label">Email</ui-field-label>
+    <ui-input><input id="text-field-email" data-slot="input" data-filled="" data-invalid="" aria-invalid="true" value="pat@" type="email"></ui-input>
+    <ui-field-error id="text-field-email-field-error" data-slot="field-error" data-invalid="">Write the whole address, such as pat@example.com.</ui-field-error>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Field: rest, hover, focus</span>
+  <input data-slot="input" value="Rest">
+  <input data-slot="input" data-pin="hover" value="Hover">
+  <input data-slot="input" data-pin="focus-visible" value="Focus">
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid: rest, hover, focus</span>
+  <input data-slot="input" data-invalid="" aria-invalid="true" value="Rest">
+  <input data-slot="input" data-invalid="" aria-invalid="true" data-pin="hover" value="Hover">
+  <input data-slot="input" data-invalid="" aria-invalid="true" data-pin="focus-visible" value="Focus">
+</div>
