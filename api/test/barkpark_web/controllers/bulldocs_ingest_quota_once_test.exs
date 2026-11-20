@@ -6,14 +6,16 @@ defmodule BarkparkWeb.BulldocsIngestQuotaOnceTest do
   from the router and counted a second way, from the plugins' `:ingest` routes
   plus the `/v1/paperflow` alias.
 
-  An action the ingest controller gains later, named in no list, is judged by
-  the gate before it runs.
+  A write by a pinned token, and by a token with no home seated in one
+  workspace, is judged once, on the workspace it lands in. An action the ingest
+  controller gains later, named in no list, is judged by the gate before it runs.
   """
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Auth, Repo}
+  alias Barkpark.{Auth, Repo, Tenancy}
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy.Quota
   alias BarkparkWeb.BulldocsIngestController
 
@@ -45,6 +47,25 @@ defmodule BarkparkWeb.BulldocsIngestQuotaOnceTest do
   end
 
   defp unique, do: System.unique_integer([:positive])
+
+  # A token with no home workspace, seated as a member in `ws` only.
+  defp homeless!(ws) do
+    raw = "quota-once-homeless-#{unique()}"
+
+    {:ok, token} =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        token_hash: ApiToken.hash_token(raw),
+        label: "quota once homeless",
+        dataset: @ds,
+        permissions: ["read", "write", "admin"],
+        workspace_id: nil
+      })
+      |> Repo.insert()
+
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, token.id, "member", "api_token")
+    raw
+  end
 
   defp judged(acc \\ []) do
     receive do
@@ -93,6 +114,18 @@ defmodule BarkparkWeb.BulldocsIngestQuotaOnceTest do
           do: {route.verb, route.path, route.plug, route.plug_opts, got}
 
     assert wrong == [], "judged other than once per write: #{inspect(wrong, pretty: true)}"
+  end
+
+  test "each write is judged once, on the workspace it lands in", c do
+    seat = create_workspace!()
+    create_project!(seat, "default")
+
+    for {raw, ws} <- [{c.raw, c.ws}, {homeless!(seat), seat}] do
+      slug = "quota-once-#{unique()}"
+      body = %{"slug" => slug, "title" => "Once", "blocks" => []}
+      resp = dispatch(authed(raw), @endpoint, :post, "/v1/plugins/bulldocs/papers", body)
+      assert judged() == [ws.id], resp.resp_body
+    end
   end
 
   test "an ingest controller action named in no list is judged by the gate before it runs", c do

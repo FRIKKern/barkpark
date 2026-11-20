@@ -24,8 +24,9 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
     * a token seated only in A never changes the default workspace's row at
       the same slug, and a sync of a copy pulled from there is refused with a
       reason, never answered as an update;
-    * the workspace a write lands in is the one judged, once: suspended or
-      archived refuses every write, and full refuses the ones that add a row.
+    * the workspace a write lands in is the one judged: suspended or archived
+      refuses every write, and full refuses the ones that add a row
+      (`bulldocs_ingest_quota_once_test.exs` holds that it is judged once).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -310,6 +311,25 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
     assert WriteGate.seat_default_actions() -- writing_actions() == []
   end
 
+  # The strict rule is DERIVED, never listed. sync is in both lists by design: in
+  # ingest_creates/0 because it can add a Paper (from rev 0), and in
+  # seat_default_actions/0 so `bp paper push` from a default seat keeps working.
+  test "the strict seat rule is the writing actions less the seat-default ones; sync is in both",
+       c do
+    strict = writing_actions() -- WriteGate.seat_default_actions()
+    token = homeless!([c.a.ws, c.home.ws])
+
+    applied =
+      for action <- writing_actions(),
+          {_slug, _before, resp} = attempt(action, hd(modes(action)), token, c.home),
+          error(resp)["code"] == "workspace_scope_required",
+          do: action
+
+    assert strict != [] and Enum.sort(applied) == Enum.sort(strict)
+    assert {BulldocsIngestController, :sync} in RequireWithinQuota.ingest_creates()
+    assert :sync in WriteGate.seat_default_actions()
+  end
+
   # ── per writing action ─────────────────────────────────────────────────
 
   for action <- @actions do
@@ -437,27 +457,6 @@ defmodule BarkparkWeb.BulldocsIngestWriteGateTest do
           end
         end
       end
-    end
-  end
-
-  test "each write is judged once, on the workspace it lands in", c do
-    test = self()
-    id = "write-gate-judged-#{System.unique_integer([:positive])}"
-
-    handler = fn _event, _measure, meta, _config ->
-      if self() == test, do: send(test, {:judged, meta.workspace_id})
-    end
-
-    :telemetry.attach(id, [:barkpark, :quota, :judged], handler, nil)
-    on_exit(fn -> :telemetry.detach(id) end)
-
-    for {token, ws} <- [{c.a.token, c.a.ws}, {homeless!([c.other.ws]), c.other.ws}] do
-      slug = "write-gate-judged-#{System.unique_integer([:positive])}"
-      resp = send_as(:post, route_path(:ingest, slug), token, paper_body(slug))
-      assert resp.status == 200, resp.resp_body
-      assert_received {:judged, ws_id}
-      assert ws_id == ws.id
-      refute_received {:judged, _}
     end
   end
 
