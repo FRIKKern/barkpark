@@ -214,15 +214,9 @@ function blockMd(block, ctx) {
   }
 }
 
-// A callout's body slot, after its own words. The reader shows the first body
-// block's words in place of `content` (Slots.callout_body_inline/1); when that block
-// is a paragraph holding the callout's own words, they are said once.
+// A callout's body slot: every block of it, in order, after the callout's own words.
 function calloutBody(block) {
-  const body = isMap(block.slots) && Array.isArray(block.slots.body) ? block.slots.body : [];
-  const [first, ...rest] = body;
-  const same = isMap(first) && first.type === "paragraph" && Array.isArray(block.content) && block.content.length > 0 &&
-    JSON.stringify(first.content) === JSON.stringify(block.content);
-  return same ? rest : body;
+  return isMap(block.slots) && Array.isArray(block.slots.body) ? block.slots.body : [];
 }
 
 function noteLine(note, ctx) {
