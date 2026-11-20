@@ -17,16 +17,12 @@
 // insert rebuilds. A batch the fold refuses saves nothing whole, so it reads as the
 // loss of every block.
 //
-// One rule sits next to the fold: a callout holding a body (slots.body) is counted as
-// losing it. The fold keeps the body on an edit elsewhere, but the editor shows a
-// callout's text from slots.body[0] and writes an edit inside it into `content`, over
-// the callout's own words, and no check before opening can see that edit. So such a
-// Paper opens read-only naming the callout until task-6a8137419e0153e4 fixes the
-// callout projection and lifts this rule. `{ calloutBody: "lifted" }` lifts it, for
-// the inside-edit sweep (__source_inside_edit_sweep.test.mjs) that proves the rule is
-// the whole class.
+// A callout holding a body (slots.body) shows its first body block's words, and the
+// editor saves an edit there, keeping the callout's own `content` and the rest of the
+// body (calloutNodeToPatch, task-6a8137419e0153e4). The fold sees that like any other
+// save, so no rule of its own names a body callout any more.
 //
-// A second rule is derived, not named: after the save, a prose block must show in the
+// One rule is derived, not named: after the save, a prose block must show in the
 // reader the words the editor showed for it (markdown/reader-inline.js mirrors the
 // reader's fallbacks). Where the editor's projection drops the key the reader reads
 // (a quote or callout holding only `text`), the save keeps that key and the reader
@@ -41,16 +37,14 @@ import { applyOps } from "./patch-fold.js";
 import { docToBlocks } from "./run-convert.js";
 import { clampLockedPrefix, deepCloneBlocks, realignAcrossCommits } from "./source-realign.js";
 
-export function sourceSaved(base, parsed, view, { calloutBody = "named", realignTo = null } = {}) {
+export function sourceSaved(base, parsed, view, { realignTo = null } = {}) {
   const stored = deepCloneBlocks(base);
   const shownBefore = realignTo ? deepCloneBlocks(realignTo) : stored;
   const laid = clampLockedPrefix(shownBefore, realignAcrossCommits(shownBefore, shownBefore, parsed));
   const { shown, saved: folded } = sourceStored(stored, laid, view);
   if (!folded) return [];
-  let saved = folded;
   const shownById = new Map(shown.filter((block) => block && block.id).map((block) => [block.id, block]));
-  saved = saved.map((block) => withoutUnshownWords(block, shownById.get(block && block.id)));
-  return calloutBody === "lifted" ? saved : saved.map(withoutCalloutBody);
+  return folded.map((block) => withoutUnshownWords(block, shownById.get(block && block.id)));
 }
 
 // What a source commit of `laid` (the parse, realigned and clamped) stores over `base`:
@@ -114,10 +108,3 @@ function withoutUnshownWords(block, shown) {
   return rest;
 }
 
-function withoutCalloutBody(block) {
-  if (!block || block.type !== "callout" || !block.slots || !Array.isArray(block.slots.body) || block.slots.body.length === 0) {
-    return block;
-  }
-  const { body: _body, ...slots } = block.slots;
-  return { ...block, slots };
-}

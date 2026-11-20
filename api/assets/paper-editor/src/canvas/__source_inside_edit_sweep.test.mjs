@@ -27,9 +27,8 @@
 // was stored, and the reader must show the same words (reader-inline.js). A line with
 // no words must keep every block the key did not change. Before any typing, each prose
 // block's line must show the words the reader shows.
-//   - With the callout rule on, nothing is lost: a callout with a body never opens.
-//   - With the rule lifted (here only), the sweep finds the callout body and nothing
-//     else, so the one named rule covers the class.
+// Nothing is lost. A callout with a body opens with the rest of its Paper; its line is
+// the JSON sentinel, as the reader shows the body's words (task-6a8137419e0153e4).
 // Run: node src/canvas/__source_inside_edit_sweep.test.mjs
 
 import assert from "node:assert/strict";
@@ -61,8 +60,8 @@ function papers() {
       out.push([`${dir}/${name}`, Array.isArray(json) ? json : json.blocks || []]);
     }
   }
-  // No shared fixture or seed Paper holds a callout with a body, so the one shape the
-  // named rule covers is added here, as the wall's own test builds it.
+  // No shared fixture or seed Paper holds a callout with a body, so that shape is added
+  // here, as the wall's own test builds it.
   const text = (value) => [{ type: "text", value }];
   out.push(["built/callout-with-a-body", [
     { id: "p1", type: "paragraph", content: text("Elsewhere") },
@@ -81,7 +80,6 @@ const view = {
   toDoc: (blocks) => ({ content: [], ...canvas._editor.schema.nodeFromJSON(canvas._rt(blocks)).toJSON() }),
   toOps: (...args) => canvas._ro(...args),
 };
-const lifted = { calloutBody: "lifted" };
 const settle = (blocks) => settledBlocks(blocks, view);
 
 function withoutTyped(value) {
@@ -174,14 +172,13 @@ const strings = (value) => typeof value === "string" ? [value]
 
 const sameBlock = (a, b) => JSON.stringify({ ...a, id: null }) === JSON.stringify({ ...b, id: null });
 
-function sweep(rule) {
+function sweep() {
   const counts = { rows: [], papers: 0, writable: 0, blocks: 0, shown: 0, lines: 0, words: 0, noWords: 0, refused: 0, lost: 0, edits: 0, guardKept: 0, guardDeleted: 0, guardRefused: 0, removalRefused: 0, removalTyped: 0, fenceRefused: 0, skipped: 0, losers: [], typedTypes: new Set(), writableTypes: new Set(), corpusTypes: new Set(), readOnly: new Map() };
-  const opts = rule === "on" ? {} : lifted;
   for (const [name, stored] of papers()) {
     counts.papers += 1;
     for (const block of stored) counts.corpusTypes.add(block.type);
     const live = docToBlocks(normalizeCanvasDoc(view.toDoc(stored), stored));
-    const wall = sourceWallLoss(stored, live, view, opts);
+    const wall = sourceWallLoss(stored, live, view);
     if (wall) {
       counts.rows.push([name, `read-only: ${wall.type} ${wall.path}`]);
       for (const block of stored) {
@@ -276,7 +273,7 @@ function sweep(rule) {
         if (whole(typedMd) < whole(md)) return "fenceRefused";
         return lose(where, "the stored-result guard refused a key typed outside any sentinel");
       }
-      const after = sourceSaved(stored, markdownToBlocks(typedMd), view, { ...lifted, realignTo: live });
+      const after = sourceSaved(stored, markdownToBlocks(typedMd), view, { realignTo: live });
       if (!JSON.stringify(after).includes(TYPED)) return lose(where, "the typed character was not saved");
       const clean = withoutTyped(after);
       const byId = new Map(clean.map((block) => [block.id, block]));
@@ -309,25 +306,24 @@ function sweep(rule) {
 
 // The same count made apart from the sweep: the lines of every Paper's Markdown that
 // opens writable, and the block types in all of them, read from the files again.
-function census(rule) {
-  const opts = rule === "on" ? {} : lifted;
+function census() {
   let lines = 0;
   const types = new Set();
   for (const [, stored] of papers()) {
     for (const block of stored) types.add(block.type);
     const live = docToBlocks(normalizeCanvasDoc(view.toDoc(stored), stored));
-    if (!sourceWallLoss(stored, live, view, opts)) lines += blocksToMarkdown(live).split("\n").length;
+    if (!sourceWallLoss(stored, live, view)) lines += blocksToMarkdown(live).split("\n").length;
   }
   return { lines, types: [...types].sort() };
 }
 
 // Every line the census counts reached exactly one outcome, none was skipped.
-function tally(rule, c) {
-  const { lines, types } = census(rule);
+function tally(c) {
+  const { lines, types } = census();
   const outcomes = c.words + c.noWords + c.refused + c.fenceRefused + c.lost + c.skipped;
-  assert.equal(c.lines, lines, `${rule}: the sweep typed on every line the census counts`);
-  assert.equal(outcomes, lines, `${rule}: kept + refused + fence-refused + lost + skipped is the census's line count`);
-  assert.equal(c.skipped, 0, `${rule}: no line is skipped`);
+  assert.equal(c.lines, lines, `the sweep typed on every line the census counts`);
+  assert.equal(outcomes, lines, `kept + refused + fence-refused + lost + skipped is the census's line count`);
+  assert.equal(c.skipped, 0, "no line is skipped");
   return types;
 }
 
@@ -346,12 +342,12 @@ function report(label, c) {
 }
 
 try {
-  const on = sweep("on");
-  report("rule on", on);
+  const on = sweep();
+  report("all Papers", on);
   for (const loser of on.losers.slice(0, 20)) console.log(`  ${loser}`);
-  const censusTypes = tally("on", on);
+  const censusTypes = tally(on);
   for (const [name, says] of on.rows.filter(([name]) => name.includes("portable-doc-validate"))) console.log(`  ${name}: ${says}`);
-  assert.deepEqual(on.losers, [], "with the callout rule on, no key typed in a writable Paper loses anything");
+  assert.deepEqual(on.losers, [], "no key typed in a writable Paper loses anything");
   const typed = [...on.typedTypes].sort();
   const corpus = [...on.corpusTypes].sort();
   console.log(`  block types typed in (${typed.length}): ${typed.join(", ")}`);
@@ -364,12 +360,6 @@ try {
   assert.deepEqual(censusTypes.filter((type) => !on.typedTypes.has(type)), [...on.readOnly.keys()].filter((type) => !on.writableTypes.has(type)).sort(),
     "every block type not typed in is held only by Papers that open read-only, and is named above");
 
-  const off = sweep("lifted");
-  report("rule lifted", off);
-  tally("lifted", off);
-  const kinds = [...new Set(off.losers.map((loser) => loser.replace(/^.* \((\w+)\) line \d+: (\w+) (\S+).*$/, "$1 $3").replace(/\[\d+\]/g, "")))];
-  for (const loser of off.losers.slice(0, 20)) console.log(`  ${loser}`);
-  assert.deepEqual(kinds, ["callout content.value"], "lifted, the sweep finds the callout body and nothing else");
   console.log("source inside-edit sweep: passed");
 } finally {
   canvas.remove();
