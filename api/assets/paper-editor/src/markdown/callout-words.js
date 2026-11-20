@@ -5,11 +5,8 @@
 //   that.
 //
 // This is the one place the answer is written; code and tests that follow it name
-// this file instead of saying it again. The Markdown export follows it (export.js).
-// Not yet, for a callout holding both content and a body:
-//   reader: shows the body's first block in place of content (Slots.callout_body_inline/1).
-//   rich editor: shows the body's first block in place of content, and saves an edit over content (calloutBlockToNode).
-//   source mode: shows the body's first block in place of content, and opens the Paper read-only (sourceSaved).
+// this file instead of saying it again. Follows it:
+//   export.js (the Markdown export)
 
 const isMap = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
