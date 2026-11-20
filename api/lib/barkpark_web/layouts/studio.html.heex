@@ -155,9 +155,6 @@
         <%!-- The desk's perspective picker (`Desk.PerspectivePicker`):
               Drafts or Published, the page's `?perspective=`. --%>
         <BarkparkWeb.Studio.Desk.PerspectivePicker.picker :if={is_binary(assigns[:desk_base])} uri={assigns[:desk_uri]} />
-        <%!-- The desk's Help and resources (`Desk.HelpMenu`), as the
-              TanStack navbar's. --%>
-        <BarkparkWeb.Studio.Desk.HelpMenu.menu :if={is_binary(assigns[:desk_base])} />
         <.studio_theme_toggle :if={!is_binary(assigns[:desk_base])} />
         <%!-- A token session (`:api_token`) OR an account session
               (`:current_user`) can sign out; an anonymous public-demo socket
@@ -183,6 +180,10 @@
             desk={is_binary(assigns[:desk_base])}
           />
         <% end %>
+        <%!-- The desk's Help and resources (`Desk.HelpMenu`), after who is
+              here, in the TanStack navbar's order (Tasks, presence, help,
+              the user). --%>
+        <BarkparkWeb.Studio.Desk.HelpMenu.menu :if={is_binary(assigns[:desk_base])} />
         <BarkparkWeb.Studio.Desk.UserMenu.menu
           :if={is_binary(assigns[:desk_base])}
           current_user={assigns[:current_user]}

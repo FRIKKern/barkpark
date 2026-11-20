@@ -101,6 +101,14 @@ defmodule BarkparkWeb.Studio.DeskNavbarWhoMenuTest do
   test "alone, the button has no dot and the menu says no one else is here", c do
     view = open(person(c.conn, "a"), c.url)
 
+    # TanStack's order: who is here, then Help, then the user.
+    html = render(view)
+
+    [who, help, user] =
+      Enum.map(["id=\"dk-who\"", "id=\"help-menu\"", "id=\"dk-user\""], &:binary.match(html, &1))
+
+    assert elem(who, 0) < elem(help, 0) and elem(help, 0) < elem(user, 0)
+
     assert has_element?(view, @button)
     refute has_element?(view, "#{@button} .who-dot")
     assert has_element?(view, "#dk-who-menu .who-empty", "No one else is here")
