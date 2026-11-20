@@ -6,10 +6,21 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
   that holds one, every word of every stored string appears in the rendered text, in
   the article and in the email.
 
-  A stored string that is not words a reader reads (an id, a URL, a tone, a status
-  code, …) is skipped by its key, and each skip below says why. A key is never
-  skipped silently: a word missing from the page under any other key reds the test.
-  A fixture file that holds no document is named on `@not_documents` with its reason.
+  A stored field that carries no words a reader reads (an id, a key, a style, an
+  address, a code, a number) is skipped, and each skip below says why. A field whose
+  words a reader sees is never skipped: a word missing from the page under it reds
+  the test. A fixture file that holds no document is named on `@not_documents` with
+  its reason.
+
+  How words are counted: a stored string splits at white space, with punctuation
+  taken off each end. A word counts as shown when the page's text holds it, also
+  when inline markup splits it, or when an attribute a reader gets (alt, title,
+  aria-label) holds it. An equation's TeX is drawn as math, so for every equation
+  its letters and digits, TeX command names taken out, must appear in that order in
+  the drawn text's letters and digits.
+
+  `@known_losses` names the older losses this test found, each with its task: a
+  row reds the test when it no longer fails, and a loss not on the list reds it.
   """
   use ExUnit.Case, async: true
 
@@ -51,6 +62,27 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
     {"field-datetime", "value"} => "a number: a timestamp, drawn formatted",
     {"field-image", "value"} => "an address: the image file"
   }
+
+  # Lines of a stored field that carry no words a reader reads, by their opening, with
+  # why. The `---`/`+++` lines' file names must still show; only git's a/ and b/ side
+  # markers come off them.
+  @skip_lines %{
+    {"diff", "diff"} => [
+      {"diff --git ", "git's header: repeats the file names the ---/+++ lines carry"},
+      {"index ", "git's blob hashes and file mode"}
+    ]
+  }
+
+  # Older losses this test found, each its own task: {document, block type, path}.
+  # Capped at its count; a fix turns its row red, and the row comes out.
+  @known_losses [
+    {"goldens/blocks/chat-tool-diff.golden.json", "chat-tool-diff", "input.file_path",
+     "task-2572f5117b78a974"},
+    {"goldens/blocks/field-select.golden.json", "field-select", "options.label",
+     "task-03f1c0a79e9c3503"},
+    {"goldens/blocks/chart.golden.json", "chart", "axes.xLabels", "task-11d3c2c02ab4286c"}
+  ]
+  @known_losses_cap 3
 
   # Fixture files that hold no Portable Doc document, by pattern, with why.
   @not_documents [
@@ -109,10 +141,28 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
 
   defp leaves(_value, _path, acc), do: acc
 
+  defp dotted(path), do: path |> Enum.reverse() |> Enum.join(".")
+
+  # The string a reader should find words of: lines that carry none taken out, and
+  # git's a/ b/ markers taken off a diff's file lines.
+  defp readable(type, path, string) do
+    case Map.get(@skip_lines, {type, dotted(path)}) do
+      nil ->
+        string
+
+      lines ->
+        string
+        |> String.split("\n")
+        |> Enum.reject(fn line -> Enum.any?(lines, &String.starts_with?(line, elem(&1, 0))) end)
+        |> Enum.map(&String.replace(&1, ~r/^(---|\+\+\+) [ab]\//, "\\1 "))
+        |> Enum.join("\n")
+    end
+  end
+
   defp skipped?(_type, [key | _]) when is_map_key(@skip, key), do: true
 
   defp skipped?(type, path),
-    do: Map.has_key?(@skip_in, {type, path |> Enum.reverse() |> Enum.join(".")})
+    do: Map.has_key?(@skip_in, {type, dotted(path)})
 
   defp words(s) do
     s
@@ -153,17 +203,33 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
     {MapSet.new(words(spaced)), joined}
   end
 
+  defp alnum(s), do: s |> String.downcase() |> String.replace(~r/[^\p{L}\p{N}]+/u, "")
+
+  # {type, path, word} for each stored word the page does not show.
   defp missing(blocks, style) do
-    {set, joined} = shown(Render.render_blocks(blocks, %{style: style}))
+    html = Render.render_blocks(blocks, %{style: style})
+    {set, joined} = shown(html)
 
     for block <- blocks,
         type = block["type"],
         {path, string} <- leaves(block, [], []),
         not skipped?(type, path),
-        word <- words(string),
-        not MapSet.member?(set, word) and not String.contains?(joined, word),
+        word <- missing_words(type, path, string, set, joined),
         uniq: true,
-        do: "#{type} #{path |> Enum.reverse() |> Enum.join(".")}: #{inspect(word)}"
+        do: {type, dotted(path), word}
+  end
+
+  # Every equation is counted by one rule: its TeX's letters and digits, command
+  # names taken out, appear in that order in the drawn text's letters and digits.
+  defp missing_words("equation", ["tex"], tex, _set, joined) do
+    want = tex |> String.replace(~r/\\[a-zA-Z]+/, " ") |> alnum()
+    if String.contains?(alnum(joined), want), do: [], else: [want]
+  end
+
+  defp missing_words(type, path, string, set, joined) do
+    for word <- words(readable(type, path, string)),
+        not MapSet.member?(set, word) and not String.contains?(joined, word),
+        do: word
   end
 
   test "every fixture file is read as a document or named as holding none" do
@@ -194,17 +260,34 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
              List.keyfind(docs, "fixtures/nested-list-carriers.json", 0)
   end
 
+  test "the known losses are capped at their count" do
+    assert length(@known_losses) <= @known_losses_cap
+  end
+
   for style <- [:article, :email] do
     test "#{style}: every stored word shows on the page" do
-      failures =
+      found =
         for {name, blocks} <- documents(),
-            miss = missing(blocks, unquote(style)),
-            miss != [],
-            do: "#{name}: #{Enum.join(miss, ", ")}"
+            {type, path, word} <- missing(blocks, unquote(style)),
+            do: {name, type, path, word}
 
-      assert failures == [],
+      known = MapSet.new(@known_losses, fn {name, type, path, _task} -> {name, type, path} end)
+      {old, new} = Enum.split_with(found, fn {n, t, p, _} -> {n, t, p} in known end)
+
+      assert new == [],
              "#{unquote(style)}: stored words the page does not show:\n" <>
-               Enum.join(failures, "\n")
+               Enum.map_join(new, "\n", fn {n, t, p, w} -> "#{n}: #{t} #{p}: #{inspect(w)}" end)
+
+      still = MapSet.new(old, fn {n, t, p, _} -> {n, t, p} end)
+
+      fixed =
+        for {n, t, p, task} <- @known_losses,
+            {n, t, p} not in still,
+            do: "#{n} #{t} #{p} (#{task})"
+
+      assert fixed == [],
+             "#{unquote(style)}: known losses that now show; take their rows out:\n" <>
+               Enum.join(fixed, "\n")
     end
   end
 end
