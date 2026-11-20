@@ -30,8 +30,15 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
   others are greyed. The API versions are Sanity's list, today's last and the
   default, and "Other", a version typed beside it.
 
-  Not yet here, as TanStack has them: Params, Listen, saved queries and Save
-  as CSV.
+  Params, under the query as TanStack's, is a JSON object whose keys the
+  query names as `$key`. GROQ sends each as `$key=<JSON>` in the query
+  string, as Sanity's client does (`docs/contracts/groq-query.md`); the
+  query-string form takes each `$key` in its query string as the value,
+  encoded. Either way a value is one parameter's value, so it never changes
+  the path or the dataset. Params that are not a JSON object tint their
+  pane and send nothing.
+
+  Not yet here, as TanStack has them: Listen, saved queries and Save as CSV.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -41,6 +48,8 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
   alias BarkparkWeb.Icons
 
   @example ~s(*[_type == "post"] | order(_updatedAt desc\)[0...5]{_id, title})
+  # TanStack's empty Params: an object to type into.
+  @no_params "{\n  \n}"
 
   attr :dataset, :string, required: true
   attr :scope_prefix, :string, default: ""
@@ -51,6 +60,7 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
     assigns =
       assign(assigns,
         example: @example,
+        no_params: @no_params,
         words: words(),
         versions: api_versions(Date.utc_today()),
         datasets:
@@ -141,6 +151,25 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
               aria-keyshortcuts="Control+Enter Meta+Enter"
             >{@example}</textarea>
           </div>
+          <div class="dk-vision-pane dk-vision-params" data-vision-params-pane>
+            <label for="vision-params" class="dk-vision-label">{gettext("Params")}</label>
+            <span
+              class="dk-vision-params-error"
+              role="img"
+              aria-label={gettext("Parameters are not valid JSON")}
+              data-vision-params-error
+              hidden
+            >
+              <Icons.desk_icon name="error-outline" size={25} />
+            </span>
+            <textarea
+              id="vision-params"
+              class="dk-vision-code"
+              spellcheck="false"
+              aria-keyshortcuts="Control+Enter Meta+Enter"
+              data-vision-params
+            >{@no_params}</textarea>
+          </div>
           <div class="dk-vision-actions">
             <button
               type="button"
@@ -217,6 +246,11 @@ defmodule BarkparkWeb.Studio.Desk.Vision do
       "data-t-properties" => pgettext("json tree", "%{count} properties", count: "%{count}"),
       "data-t-more" => gettext("Show %{count} more", count: "%{count}"),
       "data-t-empty" => gettext(~s(Write a GROQ query, like *[_type == "post"][0...10])),
+      "data-t-params-json" =>
+        gettext("Parameters are not valid JSON: %{detail}", detail: "%{detail}"),
+      "data-t-params-object" => gettext(~s(Params must be a JSON object, like {"title": "post"})),
+      "data-t-params-missing" =>
+        gettext("Param $%{name} referenced, but not provided", name: "%{name}"),
       "data-t-long" => gettext("The query is too long to send: its URL is over 32,753 bytes"),
       "data-t-failed" => gettext("Query failed: %{error}", error: "%{error}"),
       "data-t-error" => gettext("Query error: %{error}", error: "%{error}"),
