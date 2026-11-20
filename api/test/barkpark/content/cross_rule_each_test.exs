@@ -210,4 +210,29 @@ defmodule Barkpark.Content.CrossRuleEachTest do
 
     assert List.last(w).path == "/meny/under" and length(w) == 51
   end
+
+  test "the walk keeps nothing per item past the cap: a million broken items in a capped heap" do
+    # The heap may reach twice the document it holds (a full GC copies it) plus 4M
+    # words (32 MB); a walk that kept a pair or a path per item needs over 10M words
+    # more here, and is killed.
+    task =
+      Task.async(fn ->
+        doc = %{"meny" => List.duplicate(%{}, 1_000_000)}
+        :erlang.garbage_collect()
+        {:total_heap_size, base} = Process.info(self(), :total_heap_size)
+
+        Process.flag(:max_heap_size, %{
+          size: 2 * base + 4_000_000,
+          kill: true,
+          error_logger: false
+        })
+
+        :timer.tc(fn -> CrossValidator.findings(schema(side_or_omrade("meny")), doc) end)
+      end)
+
+    {us, %{errors: errors}} = Task.await(task, 60_000)
+    assert length(errors) == CrossValidator.item_cap() + 1
+    assert List.last(errors).message == "Velg en side eller et område (999950 more items)"
+    assert us < 20_000_000, "1M items took #{us} µs"
+  end
 end

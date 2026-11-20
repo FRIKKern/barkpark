@@ -94,20 +94,18 @@ defmodule Barkpark.Content.CrossValidator do
 
   # Where a rule breaks: [:document] or [] for a plain rule; for an item rule
   # the first @item_cap violated items' paths, then {:more, list_path, n} for
-  # the rest (one pass, no list of the rest is kept).
+  # the rest: one pass, counting past the cap without a path or a list.
   defp broken_at(%{"each" => each} = rule, doc) when is_binary(each) do
     type = rule["type"]
     body = item_scoped(rule["rule"] || %{})
     segs = String.split(each, ".")
 
     {kept, count} =
-      doc
-      |> items(segs, "")
-      |> Enum.reduce({[], 0}, fn {item, path}, {kept, count} = acc ->
+      fold_items(doc, segs, [], {[], 0}, fn item, idxs, {kept, count} = acc ->
         cond do
           type != nil and item["_type"] != type -> acc
           evaluate(body, doc, item) -> acc
-          count < @item_cap -> {[path | kept], count + 1}
+          count < @item_cap -> {[pointer(segs, idxs) | kept], count + 1}
           true -> {kept, count + 1}
         end
       end)
@@ -120,28 +118,44 @@ defmodule Barkpark.Content.CrossValidator do
   defp broken_at(rule, doc),
     do: if(evaluate(rule["rule"] || %{}, doc, nil), do: [], else: [:document])
 
-  # The objects in the list `segs` ends at, each with its JSON-pointer path.
-  defp items(node, [seg | rest], path) when is_map(node) do
-    here = path <> "/" <> seg
-
+  # Folds `fun.(item, idxs, acc)` over the objects in the list `segs` ends at,
+  # in order, without building a list of them: `idxs` holds (reversed) each
+  # list step's index, nil for an object step, so a path is only made for an
+  # item that needs one (`pointer/2`). Memory stays flat however long the list.
+  defp fold_items(node, [seg | rest], idxs, acc, fun) when is_map(node) do
     case {Map.get(node, seg), rest} do
       {list, []} when is_list(list) ->
-        for {item, i} <- Enum.with_index(list), is_map(item), do: {item, "#{here}/#{i}"}
+        fold_list(list, 0, acc, fn item, i, acc ->
+          if is_map(item), do: fun.(item, [i | idxs], acc), else: acc
+        end)
 
       {list, _} when is_list(list) ->
-        list
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {item, i} -> items(item, rest, "#{here}/#{i}") end)
+        fold_list(list, 0, acc, fn item, i, acc ->
+          fold_items(item, rest, [i | idxs], acc, fun)
+        end)
 
       {%{} = obj, [_ | _]} ->
-        items(obj, rest, here)
+        fold_items(obj, rest, [nil | idxs], acc, fun)
 
       _ ->
-        []
+        acc
     end
   end
 
-  defp items(_, _, _), do: []
+  defp fold_items(_, _, _, acc, _), do: acc
+
+  defp fold_list([], _i, acc, _fun), do: acc
+  defp fold_list([h | t], i, acc, fun), do: fold_list(t, i + 1, fun.(h, i, acc), fun)
+
+  # The item's JSON pointer: "/meny/1", "/meny/0/under/2", "/innstillinger/meny/1".
+  defp pointer(segs, idxs) do
+    segs
+    |> Enum.zip(Enum.reverse(idxs))
+    |> Enum.map_join(fn
+      {seg, nil} -> "/" <> seg
+      {seg, i} -> "/#{seg}/#{i}"
+    end)
+  end
 
   # Inside an item rule a leaf reads the item unless it says "document".
   defp item_scoped(%{} = pred) do
