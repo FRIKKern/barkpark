@@ -59,6 +59,7 @@ defmodule Barkpark.Content.Papers.SavedCheckScopeTest do
   end
 
   defp checked(token), do: checked_by(Tenancy.Auth.write_check(token))
+
   defp checked_by(may_write),
     do: [before_commit: BpmlView.saved_check(make_ref()), may_write: may_write]
 

@@ -61,7 +61,9 @@ defmodule Barkpark.Content.Papers.SavedCheck do
   @spec run(keyword(), Document.t()) :: :ok | {:error, term()}
   def run(opts, %Document{} = doc) do
     case Keyword.get(opts, :before_commit) do
-      nil -> :ok
+      nil ->
+        :ok
+
       check when is_function(check, 1) ->
         with :ok <- scope_check(doc, Keyword.get(opts, :may_write)), do: check.(doc)
     end

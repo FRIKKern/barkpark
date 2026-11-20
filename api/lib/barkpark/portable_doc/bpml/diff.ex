@@ -107,6 +107,7 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   defp walk(old, new) do
     keep = MapSet.new(new, & &1[@match_key])
     old_by_id = Map.new(old, &{&1[@match_key], &1})
+
     sim =
       old
       |> Enum.filter(&MapSet.member?(keep, &1[@match_key]))
