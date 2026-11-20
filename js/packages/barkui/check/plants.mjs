@@ -1,13 +1,14 @@
 // The selftest's planting tools and its ladder (check/selftest.mjs runs the cases). Each plant edits a scratch
 // copy of a part; each check reads a run's proof and log for the reason a light is off.
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { capacitySentence, selftestSentence } from './capacity.mjs'
+import { edit } from './copy.mjs'
 
-export const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, 'utf8')))
+export { edit, copyAs } from './copy.mjs'
 // Runs `code` at the start of the part's demo, with `root` in scope.
 export const inDemo = (d, code) => edit(join(d, 'demo.mjs'), (s) => s.replace('export default function demo(root) {', `export default function demo(root) {\n${code}`))
 export const mark = (d, id) => edit(join(d, 'example.html'), (s) => s.replace(`id="${id}"`, `id="${id}" data-paint-free`))
@@ -15,14 +16,6 @@ export const mark = (d, id) => edit(join(d, 'example.html'), (s) => s.replace(`i
 export const wrap = (d) => edit(join(d, 'example.html'), (s) => s.replace('type="button">Duplicate</button>', 'type="button"><span>Duplicate</span></button>'))
 export const inCss = (rule) => (d) => appendFileSync(join(d, 'part.css'), `\n${rule}\n`)
 export const all = (...plants) => (d) => plants.forEach((p) => p(d))
-// A copy of the part beside it, under another name, its ids renamed to match.
-export const copyAs = (d, name) => {
-  const to = join(d, '..', name)
-  cpSync(d, to, { recursive: true })
-  for (const f of ['part.json', 'example.html', 'press.mjs', 'demo.mjs'])
-    edit(join(to, f), (t) => t.replace(/(["'#,])button-/g, `$1${name}-`).replace('"name": "button"', `"name": "${name}"`))
-  return to
-}
 export const lights = (p) => p?.parts?.button?.lights ?? {}
 export const reasons = (p, l) => lights(p)[l]?.fails ?? [lights(p)[l]?.detail ?? '']
 export const says = (l, re) => (p) => !lights(p)[l]?.pass && reasons(p, l).some((f) => re.test(f))

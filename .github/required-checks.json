@@ -939,6 +939,54 @@
     {
       "context": "tooling/grip full node --test suite",
       "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: grip-suite.yml job `grip-suite` has no `pull_request:` arm. It runs on push to main (paths-filtered to tooling/grip/**), a nightly cron and workflow_dispatch only, so this name never renders on a normal PR head, and a required context that never renders reports 'expected' forever (D18). It runs tooling/grip's node --test suite and is advisory: a red files an issue through scripts/file-ci-failure-issue.sh. It renders on a PR head only when someone dispatches the workflow on that branch by hand, as on 906dc5b3 (#25504, run 42769422661), which left the name unaccounted on #25505 (job 129692111806). ADDED BY HAND 2026-11-10 (task-ef9409a3123f1bc2); acknowledged with `--expect-unrendered` in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
+      "context": "BarkUI showroom check",
+      "reason": "S7 EXCLUDED BY DECISION, HELD FOR THE OWNER: barkui.yml job `barkui`, `if: always()`, needs = [barkui-plan, barkui-check, barkui-selftest]. It renders on EVERY pull request and main head (barkui.yml has no `on: … paths:` filter and must never gain one), and its verdict is one pure function (js/packages/barkui/check/jobs.mjs, judge): green only when the plan succeeded and either said BarkUI was touched and every group and the selftest succeeded with matching reports, or said it was not touched and the groups and the selftest were skipped; everything else, a missing result included, is red. This is THE name to require from barkui.yml, never one of its leaves. Registering it grows the required set, which is a branch-protection change and an owner decision; it is deliberately NOT taken here, so the name is advisory: it publishes its verdict on every head and blocks nothing. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI plan (does this change touch it, and which groups)",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-plan`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The dispatcher: it renders on every head, decides whether a change touches BarkUI and prints the groups of parts (check/jobs.mjs --matrix); it installs nothing. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI selftest",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The showroom check's own proof that it can still lose; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group ${{ matrix.group }}",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The SKIPPED-SHAPE twin of the matrixed group job: when the plan says BarkUI was not touched the job is skipped and publishes its bare, uninterpolated `name:`. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 1",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 1 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 1 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 2",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 2 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 2 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 3",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 3 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 3 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 4",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 4 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 4 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 5",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 5 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 5 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 6",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 6 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 6 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 7",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 7 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 7 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
+    },
+    {
+      "context": "BarkUI check, group 8",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). Group 8 of the showroom check's job matrix, one group of parts per job, made from the part folders by check/jobs.mjs; it renders only when the split has 8 or more groups. Rows exist for groups 1 to 8, the most the split can make with the proof knob at its ceiling; a test in js/packages/barkui/tests/workflow.test.mjs reds when it could make more. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
     }
   ]
 }
