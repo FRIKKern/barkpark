@@ -22,8 +22,9 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawer do
   what the script set. What it draws does not change on the desk's own
   patches (the tools, the principal).
 
-  TanStack's drawer also has Tasks, its Tasks sidebar's button; the desk
-  has no such sidebar, so the drawer has no Tasks.
+  While the Tasks plugin is on, the drawer's foot starts with Tasks, the
+  button that opens the desk's Tasks sidebar (`Desk.TasksPanel`), as
+  TanStack's: a phone's bar has no room for it.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -40,6 +41,10 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawer do
   attr :shares?, :boolean,
     default: false,
     doc: "the bar's Network shares, which gives way on a phone"
+
+  attr :tasks?, :boolean,
+    default: false,
+    doc: "the Tasks sidebar's button, while the Tasks plugin is on"
 
   attr :current_user, :any, default: nil
   attr :api_token, :any, default: nil
@@ -99,6 +104,7 @@ defmodule BarkparkWeb.Studio.Desk.NavDrawer do
           <% end %>
         </nav>
         <div class="drawer-foot">
+          <BarkparkWeb.Studio.Desk.TasksPanel.drawer_item :if={@tasks?} />
           <button :if={@shares?} type="button" class="drawer-item" phx-click="shares-open" data-desk-drawer-pick>
             <span class="menu-icon-text">
               <BarkparkWeb.Icons.desk_icon name="share-2" size={21} />{gettext("Network shares")}
