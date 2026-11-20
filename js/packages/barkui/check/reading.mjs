@@ -84,6 +84,7 @@ export function verdict(view, where = '', waits = []) {
       }
     }
   }
+  for (const at of view.grown ?? []) fails.push(`${where}a reader put a child into ${at}, an element it measures`)
   for (const at of view.empty) fails.push(`${where}control has nothing to show at ${at}`)
   for (const at of view.unlabelled) fails.push(`${where}text-only ${at} has no text label`)
   for (const m of view.bounds.misnamed) if (m.ratio < 3) fails.push(`${where}text-only ${m.at} draws its ${m.by} at ${fmt(m.ratio)}:1; drop it or meet 3:1`)

@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Path
 
   # The field types whose writes are kept as whole-value steps.
   @types ~w(string select slug arrayOf array composite object)
@@ -42,9 +43,14 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   typed in (nil for a list's button): nil when it is not kept here.
   """
   @spec target(String.t(), map(), map()) :: {String.t(), String.t() | nil} | nil
+  # A checkbox list in an object or a row names its whole path dotted in
+  # one bracket (`doc[obj.tags][]`): the step is its top-level field's.
   def target("autosave", %{"_target" => ["doc", key | rest]}, assigns) when is_binary(key) do
-    if recorded?(assigns[:editor_schema], key),
-      do: {key, "doc[" <> Enum.join([key | rest], "][") <> "]"}
+    schema = assigns[:editor_schema]
+    field = Path.target_field(key, Path.field_names(schema))
+
+    if recorded?(schema, field),
+      do: {field, "doc[" <> Enum.join([key | rest], "][") <> "]"}
   end
 
   # A nested input's name is dotted (`doc[address].street`,
