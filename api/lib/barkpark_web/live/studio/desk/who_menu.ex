@@ -13,7 +13,10 @@ defmodule BarkparkWeb.Studio.Desk.WhoMenu do
   The rows keep `presence-user-wrap`, the old bar's class, so a page's
   "who's online" count reads the same in both Studios. The menu is the
   browser's own popover (`Desk.Menu`'s look): the button opens it, Escape
-  and a click outside close it. `NavbarStyle` draws it.
+  and a click outside close it. `NavbarStyle` draws it and keeps it inside
+  the window. `bp-desk-navbar.js` does what a popover cannot, as TanStack's
+  menu: opened, the first person has the focus; the arrows, Home and End
+  move; Tab and a pick close it.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
@@ -47,7 +50,7 @@ defmodule BarkparkWeb.Studio.Desk.WhoMenu do
         role="menu"
         aria-labelledby="dk-who"
         class="dk-menu who-menu"
-        style="position-anchor: --dk-who-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0"
+        style="position-anchor: --dk-who-menu; inset: auto; top: anchor(bottom); right: anchor(right); margin: 4px 0 0 4px"
       >
         <div :if={@people == []} class="who-empty">
           <p>{gettext("No one else is here")}</p>

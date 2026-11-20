@@ -149,6 +149,28 @@ defmodule BarkparkWeb.Studio.DeskNavbarWhoMenuTest do
     assert studio |> LazyHTML.query("#dk-who") |> Enum.count() == 0
   end
 
+  # Hung from its button's right edge, the menu grew with a long name to
+  # 335 px and ran 23 px past a 360 px window's left edge (review of #27884).
+  # TanStack keeps it 4 px inside (`centre()`). Chrome measured the rest.
+  test "the menu stays 4 px inside the window and no wider than it less 8 px" do
+    css = render_component(&NavbarStyle.sheet/1, %{})
+    [rule] = Regex.run(~r/\.navbar \.who-menu \{[^}]*\}/, css)
+    assert rule =~ "max-width: calc(100vw - 8px);"
+    assert rule =~ "position-try-fallbacks: --dk-who-inside;"
+    assert css =~ "@position-try --dk-who-inside { right: 4px; left: auto; }"
+    assert css =~ ~r/\.navbar \.who-name \{[^}]*text-overflow: ellipsis;/
+
+    # The 4 px on the left is what makes the fallback take over before the edge.
+    menu =
+      render_component(&BarkparkWeb.Studio.Desk.WhoMenu.menu/1, people: [])
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#dk-who-menu")
+
+    assert [style] = LazyHTML.attribute(menu, "style")
+    assert style =~ "right: anchor(right);"
+    assert style =~ "margin: 4px 0 0 4px"
+  end
+
   test "under 600 px your own presence pill gives way in the desk's bar" do
     css = render_component(&NavbarStyle.sheet/1, %{})
     [_, phone] = String.split(css, "@media (max-width: 599px) {", parts: 2)

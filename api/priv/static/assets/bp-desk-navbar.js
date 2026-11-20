@@ -1,7 +1,7 @@
 // The desk navbar's menus (Desk.UserMenu, Desk.HelpMenu, Desk.ScopeSwitch,
-// Desk.PerspectivePicker, Desk.NavDrawer), as the TanStack Studio's Navbar.tsx:
+// Desk.PerspectivePicker, Desk.WhoMenu, Desk.NavDrawer), as the TanStack Studio's Navbar.tsx:
 // the appearance radios, the help menu's two dialogs and its "New version
-// available", the perspective menu and the phone drawer. The menus open and close as popovers by
+// available", the perspective menu, who is here and the phone drawer. The menus open and close as popovers by
 // themselves; this script does what a popover cannot. It runs once a page,
 // from the help menu's script tag or from the desk hook's loader.
 (function () {
@@ -9,6 +9,8 @@
 
   var KEY = "barkpark_theme";
   var EVERY_MS = 60000;
+  // A person in who is here one can go to (someone in no document is disabled).
+  var WHO_ROW = ".who-row:not([disabled])";
 
   // The appearance: one stored in localStorage ("light" or "dark"), else
   // the system's (none stored), as the head's pre-paint script reads it.
@@ -179,6 +181,15 @@
       return;
     }
 
+    // A person picked in who is here (Desk.WhoMenu): their document opens and
+    // the menu closes at once, as TanStack's row (onDone).
+    var person = target.closest("#dk-who-menu .who-row");
+    if (person) {
+      var people = person.closest("[popover]");
+      if (people && people.matches(":popover-open")) people.hidePopover();
+      return;
+    }
+
     var radio = target.closest("[data-desk-appearance]");
     if (radio) {
       // The drawer's stay open, as TanStack's: the change shows at once.
@@ -250,6 +261,11 @@
         var on = e.target.querySelector('[aria-checked="true"]');
         if (on) on.focus();
       }
+      // Who is here opens on its first person, as TanStack's menus.
+      if (e.target && e.target.id === "dk-who-menu" && e.newState === "open") {
+        var first = e.target.querySelector(WHO_ROW);
+        if (first) first.focus();
+      }
     }, true);
     doc.addEventListener("keydown", function (e) { trapDrawer(doc, e); }, true);
     // In the perspective menu the arrows move between the two.
@@ -261,6 +277,21 @@
       e.preventDefault();
       var at = items.indexOf(doc.activeElement);
       items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+    });
+    // In who is here the arrows, Home and End move between the people, and
+    // Tab leaves it closed (the focus goes back to its button).
+    doc.addEventListener("keydown", function (e) {
+      var menu = e.target && e.target.closest ? e.target.closest("#dk-who-menu") : null;
+      if (!menu || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Tab") return menu.hidePopover();
+      var step = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+      if (step === undefined) return;
+      var items = Array.prototype.slice.call(menu.querySelectorAll(WHO_ROW));
+      if (!items.length) return;
+      e.preventDefault();
+      var at = items.indexOf(doc.activeElement);
+      var to = Math.abs(step) === Infinity ? (step < 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
+      items[to].focus();
     });
     doc.addEventListener("click", onClick);
     // The drawer shut (Escape, Close menu, a tool, the backdrop): its button says so.
