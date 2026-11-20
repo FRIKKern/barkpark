@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Studio.Desk.NewDoc do
   # stored shape (a reference by id is stored as `{_ref, _type}`).
   defp content(schema, choice) do
     initial =
-      Today.resolve_initial(schema.initial_values || %{}, Map.get(schema, :fields), fn ->
+      Today.resolve(schema.initial_values || %{}, fn ->
         Today.clock(Map.get(schema, :workspace_id))
       end)
 

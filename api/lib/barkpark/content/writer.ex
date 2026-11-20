@@ -1038,9 +1038,8 @@ defmodule Barkpark.Content.Writer do
   # initial list wholesale — recursive list merging is ambiguous and a
   # publisher who provides a list almost always means "use exactly this").
   #
-  # Dynamic tokens resolved at create time only, by `Content.Today` (the
-  # workspace's date for a date field, the instant for a datetime field;
-  # `opts[:now]` pins the clock in tests):
+  # Dynamic tokens resolved at create time only, by `Content.Today`, in the
+  # workspace's time zone (none set: UTC; `opts[:now]` pins the clock in tests):
   #   * `"$today"`      → today's ISO-8601 date string (e.g. "2026-05-14")
   #   * `"$today.year"` → today's year as a 4-digit string (e.g. "2026")
 
@@ -1050,7 +1049,7 @@ defmodule Barkpark.Content.Writer do
       case schema_for_create(type, dataset, attrs) do
         {:ok, %SchemaDefinition{initial_values: iv} = schema}
         when is_map(iv) and map_size(iv) > 0 ->
-          Today.resolve_initial(iv, schema.fields, today_clock(attrs, schema, opts))
+          Today.resolve(iv, today_clock(attrs, schema, opts))
 
         _ ->
           nil
@@ -1213,7 +1212,7 @@ defmodule Barkpark.Content.Writer do
   # content["title"] by projection (mirroring synthesize_blocks/3).
   defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset, opts) do
     %{layout: layout, prefill: prefill} = Content.resolve_expectation(schema)
-    prefill = Today.resolve_initial(prefill, schema.fields, today_clock(attrs, schema, opts))
+    prefill = Today.resolve(prefill, today_clock(attrs, schema, opts))
     provided = Map.get(attrs, "content") || %{}
 
     values =

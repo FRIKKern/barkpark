@@ -1,74 +1,64 @@
 defmodule Barkpark.Content.TodayTest do
   @moduledoc """
-  The `"$today"` token's meaning (task-f78a513602faee55), on a pinned clock:
-  the workspace's date for a date field, the instant for a datetime field,
-  a declared string keeps the literal, and only the exact string is a token.
+  The `"$today"` token's meaning (task-f78a513602faee55), on a pinned clock.
+  barkpark-studio's `fixtures/today-cases.json` holds these same cases with
+  this module's answers (its `scripts/today-cases.exs`), and the Studio's
+  `app/src/lib/today.ts` is tested against them, so both give one date.
   """
   use ExUnit.Case, async: true
 
   alias Barkpark.Content.Today
 
-  # 23:30 UTC on 20 November: Oslo (UTC+1) is already on the 21st.
-  @late %{now: ~U[2026-11-20 23:30:00.123456Z], zone: "Europe/Oslo"}
-
-  @fields [
-    %{"name" => "publisert", "type" => "date"},
-    %{"name" => "tid", "type" => "datetime"},
-    %{"name" => "tittel", "type" => "string"},
-    %{"name" => "meta", "type" => "object", "fields" => [%{"name" => "dag", "type" => "date"}]}
+  # {name, now (UTC), zone, value, answer}. Oslo is UTC+1, and UTC+2 from
+  # 2026-03-29 01:00Z to 2026-10-25 01:00Z.
+  @cases [
+    {"23:30 UTC, Oslo is already tomorrow", "2026-11-20T23:30:00Z", "Europe/Oslo", "$today",
+     "2026-11-21"},
+    {"23:30 UTC, no zone reads UTC", "2026-11-20T23:30:00Z", "Etc/UTC", "$today", "2026-11-20"},
+    {"an unknown zone reads UTC", "2026-11-20T23:30:00Z", "Not/AZone", "$today", "2026-11-20"},
+    {"the night summer time starts, before the change", "2026-03-28T23:30:00Z", "Europe/Oslo",
+     "$today", "2026-03-29"},
+    {"summer time, 23:59:59 in Oslo", "2026-03-29T21:59:59Z", "Europe/Oslo", "$today",
+     "2026-03-29"},
+    {"summer time, 00:00 in Oslo", "2026-03-29T22:00:00Z", "Europe/Oslo", "$today", "2026-03-30"},
+    {"the night summer time ends, 00:30 in Oslo", "2026-10-24T22:30:00Z", "Europe/Oslo", "$today",
+     "2026-10-25"},
+    {"winter time again, 23:30 in Oslo", "2026-10-25T22:30:00Z", "Europe/Oslo", "$today",
+     "2026-10-25"},
+    {"winter time again, 00:00 in Oslo", "2026-10-25T23:00:00Z", "Europe/Oslo", "$today",
+     "2026-10-26"},
+    {"the year, New Year's Eve 23:30 UTC in Oslo", "2026-12-31T23:30:00Z", "Europe/Oslo",
+     "$today.year", "2027"},
+    {"the year, the same instant in UTC", "2026-12-31T23:30:00Z", "Etc/UTC", "$today.year",
+     "2026"},
+    {"nested and in a list", "2026-11-20T23:30:00Z", "Europe/Oslo",
+     %{"a" => %{"b" => "$today"}, "c" => ["$today", 1]},
+     %{"a" => %{"b" => "2026-11-21"}, "c" => ["2026-11-21", 1]}},
+    {"only the exact string is a token", "2026-11-20T23:30:00Z", "Europe/Oslo",
+     ["$todayx", " $today", "fra $today", "$tomorrow", "$TODAY", "today"],
+     ["$todayx", " $today", "fra $today", "$tomorrow", "$TODAY", "today"]},
+    {"a fixed initial value starts as written", "2026-11-20T23:30:00Z", "Europe/Oslo",
+     %{"publisert" => "2026-01-01", "tittel" => "Ny sak"},
+     %{"publisert" => "2026-01-01", "tittel" => "Ny sak"}}
   ]
 
-  test "at 23:30 UTC a date field gets Oslo's date, already tomorrow" do
-    assert Today.date(@late) == "2026-11-21"
-    assert Today.date(%{@late | zone: "Etc/UTC"}) == "2026-11-20"
-    assert Today.date(%{@late | zone: "Not/AZone"}) == "2026-11-20"
+  for {name, now, zone, value, answer} <- @cases do
+    test "case: #{name}" do
+      {:ok, now, 0} = DateTime.from_iso8601(unquote(now))
+      clock = %{now: now, zone: unquote(zone)}
+      assert Today.resolve(unquote(Macro.escape(value)), clock) == unquote(Macro.escape(answer))
+    end
   end
 
-  test "initial values resolve by field type; only the exact string is a token" do
-    values = %{
-      "publisert" => "$today",
-      "tid" => "$today",
-      "tittel" => "$today",
-      "meta" => %{"dag" => "$today"},
-      "undeclared" => "$today",
-      "year" => "$today.year",
-      "a" => "$todayx",
-      "b" => " $today",
-      "c" => "fra $today",
-      "d" => "$tomorrow"
-    }
+  test "a filter's operands resolve; no token leaves the term as it was, with no clock read" do
+    clock = %{now: ~U[2026-11-20 23:30:00Z], zone: "Europe/Oslo"}
 
-    assert Today.resolve_initial(values, @fields, @late) == %{
-             "publisert" => "2026-11-21",
-             "tid" => "2026-11-20T23:30:00.123Z",
-             "tittel" => "$today",
-             "meta" => %{"dag" => "2026-11-21"},
-             "undeclared" => "2026-11-21",
-             "year" => "2026",
-             "a" => "$todayx",
-             "b" => " $today",
-             "c" => "fra $today",
-             "d" => "$tomorrow"
-           }
-  end
-
-  test "a filter resolves per field; no token or an odd shape comes back as it was" do
-    filter = %{
-      "content.publisert" => %{"gte" => "$today"},
-      "content.tid" => %{"lt" => "$today"},
-      "$or" => [%{"content.publisert" => %{"is" => "null"}}, "odd"]
-    }
-
-    assert Today.resolve_filter(filter, @fields, @late) == %{
-             "content.publisert" => %{"gte" => "2026-11-21"},
-             "content.tid" => %{"lt" => "2026-11-20T23:00:00.000Z"},
-             "$or" => [%{"content.publisert" => %{"is" => "null"}}, "odd"]
-           }
+    assert Today.resolve(%{"content.sluttdato" => %{"lt" => "$today"}}, clock) ==
+             %{"content.sluttdato" => %{"lt" => "2026-11-21"}}
 
     never = fn -> flunk("no token, so no clock is read") end
-    plain = %{"content.publisert" => %{"gte" => "2026-01-01"}, "x" => ["$today?"], 1 => nil}
-    assert Today.resolve_filter(plain, @fields, never) == plain
-    assert Today.resolve_initial(%{"k" => "v"}, nil, never) == %{"k" => "v"}
-    assert Today.resolve_filter(nil, @fields, never) == nil
+    plain = %{"content.sluttdato" => %{"gte" => "2026-01-01"}, "x" => ["$today?"], 1 => nil}
+    assert Today.resolve(plain, never) == plain
+    assert Today.resolve(nil, never) == nil
   end
 end

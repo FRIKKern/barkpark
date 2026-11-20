@@ -3,8 +3,10 @@
 
 A schema's `initial_values` fill a new document on create; values the caller sends win, and maps merge deeply. A desk list's `initialValues` preset its "+". `GET /v1/schemas` and `/v1/structure` serve both as written; the Studio resolves tokens when it starts a document.
 
-`"$today"` is a token only as that exact string; `"$todayx"`, `" $today"` or a longer string stay text, as does any other `$name`. On create the field's type decides: `date` gets today's date (`2026-11-21`) in the workspace time zone, `datetime` the current instant in UTC (`2026-11-20T23:30:00.123Z`, Sanity's `new Date()`), any other declared type keeps the text `$today`, and a key the schema does not declare gets the date. `"$today.year"` is the year as a string.
+`"$today"` is today's date (`2026-11-21`) and `"$today.year"` its year (`"2026"`), on any field, at any depth. Only that exact string is a token; `"$todayx"`, `" $today"`, a longer string or another `$name` stay text.
 
-In a `deskStructure` list's `filter`, a tree's `rootFilter` or a groupBy's `overFilter`, `{"content.sluttdato": {"gte": "$today"}}` compares with today's date; on a `datetime` field, with the instant today began. `/v1/structure` serves the resolved date. A document with no value matches neither `gte` nor `lt`.
+Today is the date in the workspace's `time_zone` (`bp workspace set-time-zone`). A workspace with no zone, or a name the zone database lacks, reads UTC, as before zones existed. With a zone set, the date between local midnight and UTC midnight is the zone's.
 
-The zone is the workspace's `time_zone` (`bp workspace set-time-zone`); none set, or a name the zone database lacks, is UTC. Code: `api/lib/barkpark/content/today.ex`.
+In a query filter (`{"content.sluttdato": {"gte": "$today"}}`, `?filter[content.sluttdato][gte]=$today`) the token resolves on every read, in the caller's workspace zone. A `deskStructure` list's filter is stored and served as written, so «Kommende» moves at midnight with no reload. A document with no value matches neither `gte` nor `lt`.
+
+Code: `api/lib/barkpark/content/today.ex` (zone database: the `tz` package). barkpark-studio's `fixtures/today-cases.json` pins the same answers for its Studio.
