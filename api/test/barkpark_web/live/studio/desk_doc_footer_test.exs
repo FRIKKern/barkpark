@@ -102,16 +102,17 @@ defmodule BarkparkWeb.Studio.DeskDocFooterTest do
     view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
     render_async(view, 5_000)
 
-    assert eventually(fn -> view |> element(words) |> render() |> strip() =~ ~r/^Edited/ end)
+    # Its own save just landed: "Saved", as TanStack's J04 (`JustSaved`).
+    assert eventually(fn -> view |> element(words) |> render() |> strip() == "Saved" end)
   end
 
-  test "an edit: Edited on the left, and Publish publishes it", c do
+  test "an edit: Saved on the left, and Publish publishes it", c do
     view = open(c)
 
     view |> element("#editor-form") |> render_change(%{"doc" => %{"title" => "Typed"}})
     render_async(view, 5_000)
 
-    assert eventually(fn -> status(view) == "Edited just now" end), status(view)
+    assert eventually(fn -> status(view) == "Saved" end), status(view)
     refute has_element?(view, ~s(#{@publish}[disabled]))
 
     BarkparkWeb.EditorPost.press_on(view, element(view, @publish))
@@ -133,7 +134,7 @@ defmodule BarkparkWeb.Studio.DeskDocFooterTest do
     assert DocFooter.status(%{editor_doc: doc}, now) == "Last published 2h ago"
     assert DocFooter.status(%{editor_doc: doc, editor_is_draft: true}, now) == "Edited 2h ago"
     assert DocFooter.status(%{editor_doc: doc, save_status: "Save failed"}, now) == "Save failed"
-    assert DocFooter.status(%{editor_doc: %{doc | status: "draft"}}, now) == ""
+    assert DocFooter.status(%{editor_doc: %{doc | status: "draft"}}, now) == "Edited 2h ago"
   end
 
   # Control: the old Studio has no such footer.

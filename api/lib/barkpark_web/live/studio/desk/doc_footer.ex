@@ -8,9 +8,15 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     (`.save-state`, `.save-state-text`). As Sanity's, it opens the History
     inspector on Review changes (`review`, a patch); with no words it is
     disabled.
-  - The left says "Edited 5m ago" while there are edits not yet published,
+  - The left says "Saved" for about 3 s after this editor's own save lands
+    (`JustSaved`, TanStack's J04), then "Edited 5m ago" while there are edits
+    not yet published,
     "Last published 2h ago" when there are none, and the save's own words
-    when a save went wrong ("Save failed", "Updated by another user"). A
+    when a save went wrong ("Save failed", "Updated by another user" while
+    another editor's save clashes with typing here or replaced a value this
+    tab saved; one that kept them is no problem, `RemoteSave`). Another
+    editor's save of the draft is the draft's state here too: "Edited N
+    ago", Publish offered. A
     refused save names its field or its reason (`RefusedSave.status/1`).
   - Publish sends the Studio's own `publish` event. It is greyed out when
     there is nothing to publish (the Studio offers no Publish then), as
@@ -30,11 +36,13 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     `role="status"`, not a button, and a singleton has no Unpublish.
 
   The words are drawn when the pane renders, so "5m ago" moves on with the
-  next change, not with the clock.
+  next change (or the end of "Saved"), not with the clock.
   """
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
+  alias BarkparkWeb.Studio.Desk.JustSaved
+  alias BarkparkWeb.Studio.Desk.RemoteSave
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias Phoenix.LiveView.JS
 
@@ -148,26 +156,41 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
   @doc "The footer's words for the open document."
   @spec status(map(), DateTime.t()) :: String.t()
   def status(assigns, now \\ DateTime.utc_now()) do
-    doc = assigns[:editor_doc] || %{}
-    at = Map.get(doc, :updated_at)
+    {at, state} = RemoteSave.latest(assigns)
+
+    problem = RefusedSave.token(assigns)
 
     cond do
-      RefusedSave.token(assigns) in @problems ->
+      problem in @problems and not merged?(problem, assigns) ->
         BarkparkWeb.Studio.SaveStatus.label(RefusedSave.status(assigns))
 
       not match?(%DateTime{}, at) ->
         ""
 
+      assigns[:editor_is_draft] == true and JustSaved.on?(assigns) ->
+        gettext("Saved")
+
       assigns[:editor_is_draft] == true ->
         gettext("Edited %{ago}", ago: ago(at, now))
 
-      Map.get(doc, :status) == "published" ->
-        gettext("Last published %{ago}", ago: ago(at, now))
+      state == "draft" ->
+        gettext("Edited %{ago}", ago: ago(at, now))
 
+      # Not a draft: what the document has is its published version.
       true ->
-        ""
+        gettext("Last published %{ago}", ago: ago(at, now))
     end
   end
+
+  # Another editor's save that kept every value this tab saved (no clash with
+  # typing here, `doc_conflict` unset, and nothing this tab saved replaced or
+  # dropped, `RemoteSave`): the Studio still names it "Updated by another
+  # user", but nothing went wrong, so the footer says what it says otherwise,
+  # as TanStack's (which names no remote save).
+  defp merged?("Updated by another user", assigns),
+    do: assigns[:doc_conflict] != true and not RemoteSave.overwritten?(assigns)
+
+  defp merged?(_problem, _assigns), do: false
 
   @doc "How long ago `at` was, in the words the footer and the list rows use (\"5m ago\")."
   def ago(%DateTime{} = at, now) do

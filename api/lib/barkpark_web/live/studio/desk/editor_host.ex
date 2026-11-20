@@ -39,6 +39,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
+  alias BarkparkWeb.Studio.Desk.JustSaved
+  alias BarkparkWeb.Studio.Desk.RemoteSave
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -178,6 +180,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
       {:noreply,
        loaded
+       |> RemoteSave.reset()
        |> assign(
          active: length(panes) - 1,
          editing: target,
@@ -364,6 +367,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           |> StudioLive.handle_event(params, written(socket, event))
           |> ours()
           |> after_restore(event, before)
+          |> JustSaved.after_write(before)
+          |> RemoteSave.after_write(socket, params, event)
         else
           {:halt, socket} -> {:noreply, socket}
         end
@@ -391,6 +396,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             |> Fields.autosave_built(written(socket, "autosave"))
             |> Scope.settle_group()
             |> ours()
+            |> JustSaved.after_write(socket.assigns[:editor_doc])
+            |> RemoteSave.after_write(socket, params)
 
           {:halt, socket} ->
             {:noreply, socket}
@@ -422,8 +429,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # which the Studio would put in the form (`Discarded`).
   def handle_info({:doc_updated, msg} = message, socket) do
     if Discarded.frame?(msg, socket.assigns),
-      do: ours({:noreply, Discarded.reload(socket)}),
-      else: message |> StudioLive.handle_info(socket) |> ours()
+      do: ours({:noreply, socket |> Discarded.reload() |> RemoteSave.reset()}),
+      else: message |> StudioLive.handle_info(socket) |> RemoteSave.frame(msg) |> ours()
   end
 
   # A tree codelist's pick: the press went to its component
@@ -431,15 +438,49 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # message. It meets the same ones: nothing is written while an old revision
   # or the published version is shown, into a document deleted elsewhere, or
   # from the form of a draft discarded elsewhere.
-  def handle_info({:tree_codelist_pick, _msg} = message, socket) do
-    cond do
-      shut?(socket.assigns) -> {:noreply, socket}
-      Discarded.drop?(socket.assigns) -> {:noreply, Discarded.drop(socket)}
-      true -> message |> StudioLive.handle_info(socket) |> ours()
-    end
-  end
+  def handle_info({:tree_codelist_pick, _msg} = message, socket),
+    do: written_by_page(message, socket)
+
+  # A pick of a reference or an image (`select-ref`, `clear-ref`,
+  # `select-media`, `clear-image`, `upload-image`) shows in the form at once
+  # and is written here, from the form the page sent itself. So is a block
+  # op of the beta editor. They meet the tree pick's guards. A refused block
+  # op that waits for its answer (`request_id`) is told it was not saved.
+  def handle_info({tag, _} = message, socket) when tag in [:autosave_form, :paper_op],
+    do: written_by_page(message, socket)
+
+  def handle_info({:paper_op, _op, request_id} = message, socket),
+    do:
+      written_by_page(
+        message,
+        socket,
+        &Phoenix.LiveView.push_event(&1, "bp:paper-field-save-result", %{
+          saved: false,
+          request_id: request_id
+        })
+      )
 
   def handle_info(message, socket), do: message |> StudioLive.handle_info(socket) |> ours()
+
+  # A write the page sent itself is this tab's save, as an event's is: it
+  # says "Saved" (`JustSaved`), and another editor's save that replaces it is
+  # named (`RemoteSave`).
+  defp written_by_page(message, socket, refused \\ & &1) do
+    cond do
+      shut?(socket.assigns) ->
+        {:noreply, refused.(socket)}
+
+      Discarded.drop?(socket.assigns) ->
+        {:noreply, socket |> Discarded.drop() |> refused.()}
+
+      true ->
+        message
+        |> StudioLive.handle_info(socket)
+        |> ours()
+        |> JustSaved.after_write(socket.assigns[:editor_doc])
+        |> RemoteSave.after_write(socket, %{})
+    end
+  end
 
   # The Studio's panes are not drawn here; its editor is.
   defp ours(result, how \\ :reload)

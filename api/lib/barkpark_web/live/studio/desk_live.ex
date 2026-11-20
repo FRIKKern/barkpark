@@ -41,6 +41,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
+  alias BarkparkWeb.Studio.Desk.JustSaved
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
@@ -504,6 +505,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     {:noreply, assign(socket, list_sorts: sorts, warm: warm)}
   end
+
+  # The footer's "Saved" is over (`JustSaved`): it says "Edited" again.
+  def handle_info({:desk_saved_over, ref}, socket), do: {:noreply, JustSaved.over(socket, ref)}
 
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
