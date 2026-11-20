@@ -75,6 +75,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   end
 
   defp pull(slug), do: get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+  defp json_read(slug), do: get(build_conn(), "/papers/#{slug}/source")
 
   defp pull!(slug) do
     resp = pull(slug)
@@ -120,8 +121,11 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
       assert bpml =~ ~s(<h2 id="h"></h2>)
       refute bpml =~ @hidden
 
-      json = get(build_conn(), "/papers/#{slug}/source") |> json_response(200)
-      refute json["title"] == @hidden
+      # The JSON read is main's reader source, which refuses this Paper: its
+      # cache holds the hidden text (task-6c7b44bee33f8333). It quotes nothing.
+      read = json_read(slug)
+      assert json_response(read, 422)["error"]["code"] == "ambiguous_source"
+      refute read.resp_body =~ @hidden
     end
 
     test "pulls after a write, and the push answer is that pull" do
@@ -232,10 +236,9 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
   # working copy's refusals do not reach it. Its answer keeps main's keys: a
   # success is {id, title, _rev, source}; a refusal's error carries main's
   # `code`, with a message and hint added.
-  defp json_read(slug), do: get(build_conn(), "/papers/#{slug}/source")
 
   test "the JSON read of a Paper hiding a match key answers its blocks; the BPML pull refuses" do
-    schema!(text: true, id: true)
+    schema!(id: true)
     slug = slug("json-match-key")
     paper!(slug, blocks())
 
@@ -246,7 +249,7 @@ defmodule BarkparkWeb.BulldocsBpmlReaderViewTest do
     shown = read["source"]["blocks"]
     assert Enum.map(shown, & &1["type"]) == ~w(heading paragraph heading)
     refute Enum.any?(shown, &Map.has_key?(&1, "id"))
-    refute inspect(read) =~ @hidden
+    assert inspect(shown) =~ "Visible."
   end
 
   test "the JSON read refuses what the reader source refuses, with main's code" do

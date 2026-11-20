@@ -145,13 +145,14 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
 
   # Every PubSub topic the write's effects send on: the Paper's own topic
   # (`broadcast_paper_update/1`, `broadcast_paper_block/4`, and the doc frame
-  # of `ChangeEvents.announce/3`, which share it), the dataset's and the
-  # workspace's list topics (the list frames), and the relations topic the
-  # edge projection sends on.
+  # of `ChangeEvents.announce/3`, which share it), the workspace's list topic
+  # (the list frame), and the relations topic the edge projection sends on.
+  # A workspace-owned document's list frame goes to its workspace's topic
+  # only; the dataset-wide one carries documents with no workspace
+  # (`Broadcast.broadcast_document_mutation/3`), so it is not listened to.
   defp effect_topics(slug, ws_id) do
     [
       Broadcast.paper_topic(slug, ws_id, @ds),
-      Broadcast.global_list_topic(@ds),
       Broadcast.workspace_list_topic(@ds, ws_id),
       Broadcast.paper_relations_topic(ws_id, @ds)
     ]
@@ -165,7 +166,7 @@ defmodule BarkparkWeb.BulldocsBpmlSavedWriteTest do
   defp listen!(slug, ws_id) do
     test = self()
     [own | _] = topics = effect_topics(slug, ws_id)
-    assert length(Enum.uniq(topics)) == 4
+    assert length(Enum.uniq(topics)) == 3
 
     for topic <- topics do
       only = if topic == own, do: nil, else: slug
