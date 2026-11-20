@@ -139,6 +139,10 @@ concurrency:
   # superseded PR runs.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# TEMPORARY proof (a), reverted before merge: 13 copies of the button beside the real parts.
+env:
+  BARKUI_PROOF_COPIES: "13"
+
 jobs:
   test:
     name: Build + test + gates
