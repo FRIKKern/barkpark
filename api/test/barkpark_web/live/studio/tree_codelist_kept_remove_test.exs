@@ -274,10 +274,11 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
            ]
   end
 
-  # Review r4 of #27533, B6: a refused save puts the post into the form
-  # buffer; the unset marker is nil there, so no input draws it and the next
-  # post cannot store it.
-  test "desk: a refused nested Remove leaves no marker in the form, the page or the store", c do
+  # Review r4 of #27533, B6: no unset marker reaches the form, the page or
+  # the store. #27936 review: a refused Remove is a refused clear; the page
+  # draws the code as stored, says "Not saved", and the next post leaves it.
+  test "desk: a refused nested Remove shows the stored code, says not saved, and leaves no marker",
+       c do
     prior = Barkpark.PluginEnv.capture()
     Barkpark.PluginEnv.put!([Halt])
 
@@ -296,11 +297,16 @@ defmodule BarkparkWeb.Studio.TreeCodelistKeptRemoveTest do
     assert stored(c, id) == before
 
     buffer = :sys.get_state(view.pid).socket.assigns[:editor_form]
-    assert Map.fetch(buffer["meta"], "code") == {:ok, nil}
+    assert buffer["meta"] == before["meta"]
     refute html =~ "__bp_unset__"
+    assert html =~ "Not saved: held"
+    assert has_element?(view, remove(form, :nested))
 
     :persistent_term.put(Halt, false)
-    edit_notes(view, form, "after")
+    html = edit_notes(view, form, "after")
+    assert stored(c, id)["meta"] == before["meta"]
+    assert html =~ "Not saved"
+    assert has_element?(view, remove(form, :nested))
 
     %{rows: [[text]]} =
       Barkpark.Repo.query!(
