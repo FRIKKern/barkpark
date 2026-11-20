@@ -2829,9 +2829,12 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # PR head only after a hand dispatch; the row lands after the frozen
         # fixture pair. DERIVED by scripts/required-checks-ack-derive.sh.
         --expect-unrendered "tooling/grip full node --test suite"
-        # barkui.yml (task-3a8552dc2063494a): a new workflow, so none of its names renders
-        # on the frozen fixture pair; groups 2 to 8 render only when the split makes that
-        # many groups. DERIVED by scripts/required-checks-ack-derive.sh.
+        # barkui.yml (task-3a8552dc2063494a): added after the frozen fixture pair, so none
+        # of its names renders ON THAT PAIR (the third cause of absence above). This is
+        # not "may be missing on a live head": the plan and the closing check render on
+        # every live head by design; the groups and the selftest are skipped or absent
+        # there when BarkUI is not touched, and groups 2 to 8 render only when the split
+        # makes that many. DERIVED by scripts/required-checks-ack-derive.sh.
         --expect-unrendered 'BarkUI check, group ${{ matrix.group }}'
         --expect-unrendered "BarkUI check, group 1"
         --expect-unrendered "BarkUI check, group 2"
