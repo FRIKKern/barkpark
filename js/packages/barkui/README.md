@@ -101,7 +101,7 @@ node build/board.mjs <goal-task-id>   # refresh the roadmap's block from the boa
 node ../../../design/emit.mjs --write   # rewrite the sheet after a skin changes
 ```
 
-What a part folder needs, what each light reads and how the check runs in CI: [docs/PARTS.md](docs/PARTS.md).
+Up to 40 parts, a new part is its folder and a changeset. What a part folder needs, what each light reads and how the check runs in CI: [docs/PARTS.md](docs/PARTS.md).
 
 ## When BarkUI leaves home
 

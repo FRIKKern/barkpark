@@ -23,8 +23,12 @@ parts/<name>/
   demo.mjs      optional: `export default function (root)`, called with this part's own root
 ```
 
-Adding a part is adding a folder. The build, the check and the tests find parts by reading `parts/`;
-no other file changes.
+Adding a part is adding a folder, up to 40 parts (`MOST_PARTS` in `check/jobs.mjs`). The build, the
+check and the tests find parts by reading `parts/`, and no script writes a tracked file when one lands.
+By hand, outside its folder, a part adds only a changeset (`js/.changeset/`, which every change to a
+package carries). Once a job holding it has been timed on CI's hosted runner, that reading may go into
+`check/capacity.mjs` and `node check/capacity.mjs` rewrites the passage on capacity below; no test asks
+for it. Past that, the line after that passage says what else changes.
 
 `css/base.css` holds what every part shares: the page ground and type, and the one focus ring (a 2px
 gap in `--ui-background`, a 2px `--ui-ring-border` edge, the `--ui-ring` halo). Hover and pressed fills
