@@ -40,8 +40,16 @@ defmodule Barkpark.Content.CrossValidator do
   item's fields. Each violated item is its own violation (carrying `"item"`,
   its path) and its own finding, at `/meny/1` (+ `/<first field>`), the same
   JSON-pointer form as every other finding. A list that is missing or not a
-  list has no items, so the rule holds.
+  list has no items, so the rule holds. Only the first #{50} broken items of a
+  rule are named (`item_cap/0`); the rest are ONE violation at the list's path
+  (`/meny`, `/meny/under`) saying how many more break it, at the rule's level,
+  so a write with many broken items stays cheap to check and to refuse.
   """
+
+  @item_cap 50
+
+  @doc "How many broken items one item rule names; the rest are one summary violation."
+  def item_cap, do: @item_cap
 
   alias Barkpark.Content.FieldVisibility
 
@@ -78,21 +86,35 @@ defmodule Barkpark.Content.CrossValidator do
 
       Enum.map(broken_at(rule_str, doc), fn
         :document -> rule_str
+        {:more, list_path, n} -> rule_str |> Map.put("item", list_path) |> Map.put("more", n)
         item_path -> Map.put(rule_str, "item", item_path)
       end)
     end)
   end
 
-  # Where a rule breaks: [:document] or [] for a plain rule, the violated
-  # items' paths for an item rule.
+  # Where a rule breaks: [:document] or [] for a plain rule; for an item rule
+  # the first @item_cap violated items' paths, then {:more, list_path, n} for
+  # the rest (one pass, no list of the rest is kept).
   defp broken_at(%{"each" => each} = rule, doc) when is_binary(each) do
     type = rule["type"]
     body = item_scoped(rule["rule"] || %{})
+    segs = String.split(each, ".")
 
-    for {item, path} <- items(doc, String.split(each, "."), ""),
-        type == nil or item["_type"] == type,
-        not evaluate(body, doc, item),
-        do: path
+    {kept, count} =
+      doc
+      |> items(segs, "")
+      |> Enum.reduce({[], 0}, fn {item, path}, {kept, count} = acc ->
+        cond do
+          type != nil and item["_type"] != type -> acc
+          evaluate(body, doc, item) -> acc
+          count < @item_cap -> {[path | kept], count + 1}
+          true -> {kept, count + 1}
+        end
+      end)
+
+    more = count - @item_cap
+
+    Enum.reverse(kept) ++ if(more > 0, do: [{:more, "/" <> Enum.join(segs, "/"), more}], else: [])
   end
 
   defp broken_at(rule, doc),
@@ -190,15 +212,23 @@ defmodule Barkpark.Content.CrossValidator do
     fields = if is_list(v["fields"]), do: Enum.filter(v["fields"], &is_binary/1), else: []
     first = List.first(fields)
 
-    path =
-      case v["item"] do
-        nil -> "/" <> (first || "_document")
-        item -> if first, do: item <> "/" <> first, else: item
+    title = v["title"] || v["name"] || "cross-field rule"
+
+    {path, message} =
+      case v do
+        %{"more" => n} ->
+          {v["item"], "#{title} (#{n} more #{if n == 1, do: "item", else: "items"})"}
+
+        %{"item" => item} when is_binary(item) ->
+          {if(first, do: item <> "/" <> first, else: item), title}
+
+        _ ->
+          {"/" <> (first || "_document"), title}
       end
 
     %{
       path: path,
-      message: v["title"] || v["name"] || "cross-field rule",
+      message: message,
       code: :cross_validation,
       params: %{name: v["name"], fields: fields, level: v["level"] || "error"}
     }
@@ -209,8 +239,10 @@ defmodule Barkpark.Content.CrossValidator do
     type = Map.get(rule, "type", Map.get(rule, :type))
 
     cond do
-      each != nil and (not is_binary(each) or each == "") ->
-        "each is not a field name"
+      each != nil and
+          (not is_binary(each) or
+             Enum.any?(String.split(each, "."), &(&1 == "" or &1 =~ ~r/^\d+$/))) ->
+        "each is not a field path"
 
       is_list(names) and is_binary(each) and hd(String.split(each, ".")) not in names ->
         "no field #{inspect(each)} (each)"

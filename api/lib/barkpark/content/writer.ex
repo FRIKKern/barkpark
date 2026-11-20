@@ -156,9 +156,21 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
+  # The cross findings onto the legacy field-keyed errors map, in finding
+  # order. Grouped first, then each field's list appended once: linear in the
+  # findings (one `++` per finding made it quadratic for many broken items of
+  # one item rule). A finding below its field (an item rule's `/meny/1/side`)
+  # carries its path in the message, as array validation messages do.
   defp errors_by_field(errors, findings) do
-    Enum.reduce(findings, errors, fn f, acc ->
-      Map.update(acc, top_level_field(f.path), [f.message], &(List.wrap(&1) ++ [f.message]))
+    findings
+    |> Enum.reduce(%{}, fn f, by ->
+      key = top_level_field(f.path)
+      msg = if f.path == "/" <> (key || ""), do: f.message, else: "#{f.path}: #{f.message}"
+      Map.update(by, key, [msg], &[msg | &1])
+    end)
+    |> Enum.reduce(errors, fn {key, rev}, acc ->
+      msgs = Enum.reverse(rev)
+      Map.update(acc, key, msgs, &(List.wrap(&1) ++ msgs))
     end)
   end
 

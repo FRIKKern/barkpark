@@ -137,6 +137,10 @@ defmodule Barkpark.Content.CrossRuleEachTest do
   test "malformed item rules are unevaluable, never a finding" do
     assert skipped?(side_or_omrade("nope"))
     assert skipped?(side_or_omrade(""))
+    assert skipped?(side_or_omrade("meny."))
+    assert skipped?(side_or_omrade("meny.0"))
+    assert skipped?(side_or_omrade("meny..under"))
+    assert skipped?(side_or_omrade(".meny"))
     assert skipped?(side_or_omrade(3))
     assert skipped?(side_or_omrade("meny", %{"type" => ""}))
     assert skipped?(side_or_omrade("meny", %{"type" => 7}))
@@ -178,5 +182,32 @@ defmodule Barkpark.Content.CrossRuleEachTest do
 
     assert [%{"satisfied" => false}] =
              CrossValidator.validate(schema(side_or_omrade("meny")), %{"meny" => [%{}]})
+  end
+
+  test "thousands of broken items: the first 50 are named, the rest is one finding at the list" do
+    doc = %{"meny" => List.duplicate(%{}, 5000)}
+
+    {us, %{errors: errors}} =
+      :timer.tc(fn -> CrossValidator.findings(schema(side_or_omrade("meny")), doc) end)
+
+    assert length(errors) == CrossValidator.item_cap() + 1
+    assert Enum.at(errors, 49).path == "/meny/49/side"
+
+    assert %{path: "/meny", message: "Velg en side eller et område (4950 more items)"} =
+             List.last(errors)
+
+    assert us < 2_000_000, "5000 items took #{us} µs"
+
+    assert [%{message: "Velg en side eller et område (1 more item)"}] =
+             Enum.drop(errors(side_or_omrade("meny"), %{"meny" => List.duplicate(%{}, 51)}), 50)
+
+    assert length(errors(side_or_omrade("meny"), %{"meny" => List.duplicate(%{}, 50)})) == 50
+
+    warn = Map.put(side_or_omrade("meny.under"), "level", "warning")
+
+    %{errors: [], warnings: w} =
+      CrossValidator.findings(schema(warn), %{"meny" => [%{"under" => List.duplicate(%{}, 60)}]})
+
+    assert List.last(w).path == "/meny/under" and length(w) == 51
   end
 end
