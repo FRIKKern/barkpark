@@ -731,6 +731,8 @@
       deskScript("data-desk-tags", window.BarkparkDeskTags);
       // A tree codelist's keys (bp-desk-codelist.js).
       deskScript("data-desk-codelist", window.BarkparkDeskCodelist);
+      // A localized text's language tabs (bp-desk-lang-tabs.js).
+      deskScript("data-desk-lang-tabs", window.BarkparkDeskLangTabs);
       root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);

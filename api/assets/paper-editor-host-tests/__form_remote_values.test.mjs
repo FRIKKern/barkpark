@@ -2,8 +2,8 @@
 // the field this tab has focused. A LiveView patch never touches the focused
 // input, so it kept the old text and the next keystroke posted it back over the
 // other's words. The page now hears `bp:form-remote-values` (each changed text
-// field: new value, value shown before) and sets the focused input when it
-// still shows exactly the old value.
+// field: new value, value shown before) and sets the focused input, a select
+// too, when it still shows exactly the old value.
 //
 // Runs the TRACKED static asset api/priv/static/assets/bp-array-focus.js under
 // jsdom and dispatches the window event LiveView dispatches for a push_event.
@@ -99,6 +99,40 @@ check("only the editor form: a focused input of the same name elsewhere is not t
   other.focus();
   push({ "doc[title]": { value: "New", was: "Old" } });
   assert.equal(other.value, "Old");
+});
+
+// task-165052f4fad43c1e: the desk's undo of a select leaves the focus in it,
+// and a patch never sets a focused select either: another editor's later pick
+// stayed out of sight until the person's next action.
+const choice = (value) => {
+  const box = document.createElement("div");
+  box.innerHTML =
+    `<select name="doc[choice]"><option value="a">Alpha</option><option value="b">Beta</option>` +
+    `<option value="c">Gamma</option></select>`;
+  const select = box.firstChild;
+  document.getElementById("editor-form").appendChild(select);
+  select.value = value;
+  return select;
+};
+
+check("a focused select that shows the old option takes the other's pick, and keeps focus", () => {
+  mount("T", "First");
+  const select = choice("b");
+  select.focus();
+  push({ "doc[choice]": { value: "a", was: "b" } });
+  assert.equal(select.value, "a");
+  assert.equal(document.activeElement, select, "focus stays");
+});
+
+check("a focused select showing another option, or offered one it does not have, is left", () => {
+  mount("T", "First");
+  const select = choice("c");
+  select.focus();
+  push({ "doc[choice]": { value: "a", was: "b" } });
+  assert.equal(select.value, "c", "the person's pick not yet sent stays");
+  select.value = "b";
+  push({ "doc[choice]": { value: "z", was: "b" } });
+  assert.equal(select.value, "b", "no blank pick");
 });
 
 // task-35956a566dd2c862: the page reports, per free-text field, the number of

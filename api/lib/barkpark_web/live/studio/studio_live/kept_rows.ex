@@ -44,8 +44,9 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptRows do
     end
   end
 
-  defp walk(posted, stored, _siblings) when is_map(posted) or is_list(posted),
-    do: rows(posted, stored)
+  defp walk(posted, stored, _siblings)
+       when (is_map(posted) and not is_struct(posted)) or is_list(posted),
+       do: rows(posted, stored)
 
   defp walk(posted, _stored, _siblings), do: posted
 
