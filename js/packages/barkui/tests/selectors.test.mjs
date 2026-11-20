@@ -24,9 +24,11 @@ describe('a pinned state may stand only on the element a rule styles', () => {
   })
 
   it('always allows no state a person changes by clicking or typing', () => {
+    // Pinned whole: a name added here must be shown to be structure, not something a person changes.
+    expect(STATIC).toEqual(['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type'])
     expect(STATIC.filter((p) => CHANGED_BY_A_PERSON.includes(p))).toEqual([])
     expect(PINNED.filter((p) => !CHANGED_BY_A_PERSON.includes(p))).toEqual([])
-    for (const p of ['checked', 'placeholder-shown', 'user-invalid', 'focus-within', 'open', 'enabled']) expect(CHANGED_BY_A_PERSON, p).toContain(p)
+    for (const p of ['checked', 'placeholder-shown', 'user-invalid', 'focus-within', 'open', 'enabled', 'muted', 'target-current', 'state']) expect(CHANGED_BY_A_PERSON, p).toContain(p)
   })
 
   it('takes :checked as a pinned state, on the element a rule styles only', () => {
