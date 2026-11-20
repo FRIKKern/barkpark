@@ -34,6 +34,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
   import Ecto.Query, only: [from: 2, dynamic: 2]
 
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias Barkpark.Content.DraftId
   alias Barkpark.Repo
   alias Barkpark.Tasks
@@ -122,7 +123,12 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
   One page of rows plus the match count.
 
   `opts`: `:dataset` (required), `:workspace_id` (nil reads every workspace),
-  `:readable?` (required, the field-visibility predicate).
+  `:readable?` (required, the field-visibility predicate), and `:project_id`
+  (opt-in). With `:project_id` the rows are held to the workspace AND that
+  project by `Scope.scope_to_workspace/3`, the clamp `/v1/tasks` reads with,
+  so a row with no project is left out as it is there; a nil `:project_id`
+  (or workspace) reads nothing. Without the key the read is the workspace's,
+  as the plugin's own list page reads.
   Returns `%{rows, total, page, pages}`; a page past the end is clamped to the
   last one.
   """
@@ -136,10 +142,11 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
     dataset = Keyword.fetch!(opts, :dataset)
     readable? = Keyword.fetch!(opts, :readable?)
     ws_id = Keyword.get(opts, :workspace_id)
+    tenant = {ws_id, Keyword.get(opts, :project_id, :any)}
 
     matched =
       dataset
-      |> scope(ws_id)
+      |> scope(tenant)
       |> apply_filters(filters)
       |> filter_target(Map.get(filters, :target), readable?)
 
@@ -156,23 +163,30 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
       |> Repo.all()
 
     parent_ids = if readable?.("parent_id"), do: parent_ids(docs), else: []
-    titles = parent_titles(parent_ids, dataset, ws_id)
+    titles = parent_titles(parent_ids, dataset, tenant)
 
     %{rows: Enum.map(docs, &row(&1, titles, readable?)), total: total, page: page, pages: pages}
   end
 
   # ── scope ───────────────────────────────────────────────────────────────────
 
-  defp scope(dataset, ws_id) do
+  defp scope(dataset, tenant) do
     from(d in Document, where: d.type == "task" and d.dataset == ^dataset)
-    |> clamp_workspace(ws_id)
+    |> clamp(tenant)
     |> Query.collapse_twins()
   end
 
-  defp clamp_workspace(query, nil), do: query
+  # No `:project_id`: the workspace's rows, and every workspace's on nil (the
+  # operator's flat mount). With one: `/v1/tasks`'s clamp, fail-closed on nil.
+  defp clamp(query, {nil, :any}), do: query
 
-  defp clamp_workspace(query, ws_id) when is_binary(ws_id),
+  defp clamp(query, {ws_id, :any}) when is_binary(ws_id),
     do: from(d in query, where: d.workspace_id == ^ws_id)
+
+  defp clamp(query, {ws_id, project_id}) when is_binary(project_id),
+    do: Scope.scope_to_workspace(query, ws_id, project_id)
+
+  defp clamp(query, {_ws_id, _no_project}), do: from(d in query, where: false)
 
   # ── filters ─────────────────────────────────────────────────────────────────
 
@@ -318,18 +332,18 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
     end
   end
 
-  # One query for every parent title on the page, held to the same dataset and
-  # workspace as the rows. A published row's title wins over its draft twin's.
-  defp parent_titles([], _dataset, _ws_id), do: %{}
+  # One query for every parent title on the page, held to the same dataset,
+  # workspace and project as the rows. A published row's title wins over its draft twin's.
+  defp parent_titles([], _dataset, _tenant), do: %{}
 
-  defp parent_titles(ids, dataset, ws_id) do
+  defp parent_titles(ids, dataset, tenant) do
     from(d in Document,
       where:
         d.type == "task" and d.dataset == ^dataset and
           fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) in ^ids,
       select: {d.doc_id, d.title}
     )
-    |> clamp_workspace(ws_id)
+    |> clamp(tenant)
     |> Repo.all()
     |> Enum.sort_by(fn {doc_id, _title} -> if DraftId.draft?(doc_id), do: 0, else: 1 end)
     |> Map.new(fn {doc_id, title} -> {DraftId.published_id(doc_id), title} end)

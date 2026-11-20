@@ -78,7 +78,10 @@ defmodule BarkparkWeb.Studio.Desk.TasksPanel do
     target_moved? = Map.get(socket.assigns, :target, :unset) != assigns[:target]
 
     socket =
-      assign(socket, Map.take(assigns, [:id, :dataset, :workspace_id, :target, :base, :root]))
+      assign(
+        socket,
+        Map.take(assigns, [:id, :dataset, :workspace_id, :project_id, :target, :base, :root])
+      )
 
     socket =
       cond do
@@ -139,6 +142,7 @@ defmodule BarkparkWeb.Studio.Desk.TasksPanel do
     [
       dataset: socket.assigns.dataset,
       workspace_id: socket.assigns.workspace_id,
+      project_id: socket.assigns[:project_id],
       target: socket.assigns.target
     ]
   end

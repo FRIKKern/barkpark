@@ -4,10 +4,12 @@ defmodule BarkparkWeb.Studio.Desk.TasksStyle do
   after the TanStack Studio's `styles.css` (`.tasks-panel`, `.tasks-head`,
   `.tasks-tabs`, `.tasks-group`, `.task-row`, `.drawer-tasks`):
 
-  - The sidebar is 360 px at the right under the navbar. From 900 px the
-    panes make room for it; under 900 px it lies over them, and under 600 px
-    it takes the whole width.
-  - The bar's Tasks button gives way under 900 px, where the drawer has one.
+  - The sidebar is 360 px at the right under the navbar. Wider than 900 px
+    the panes make room for it; up to 900 px it lies over them, and up to
+    600 px it takes the whole width (TanStack's `max-width: 900px` and
+    `600px`).
+  - The bar's Tasks button gives way under 900 px (`max-width: 899px`, as
+    TanStack's), where the drawer has one.
   - On a touch screen (`pointer: coarse`) every target in the sidebar is
     44 px.
 
@@ -76,11 +78,11 @@ defmodule BarkparkWeb.Studio.Desk.TasksStyle do
       .dk .task-facts dt { color: var(--dk-muted); }
       .dk .task-facts dd { margin: 0; overflow-wrap: anywhere; color: var(--dk-fg); }
       .dk .task-open { display: inline-flex; align-items: center; margin-top: 20px; border-radius: 3px; color: var(--dk-selected); }
-      @media (max-width: 899px) {
+      @media (max-width: 900px) {
         .dk.dk-tasks-host[data-tasks-open] > .panes { margin-right: 0; }
         .dk .tasks-panel { box-shadow: var(--dk-popover-shadow); }
       }
-      @media (max-width: 599px) {
+      @media (max-width: 600px) {
         .dk .tasks-panel { left: 0; width: auto; border-left: 0; }
       }
       @media (pointer: coarse) {

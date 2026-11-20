@@ -14,9 +14,10 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
   ## What it reads
 
   The rows the plugin's own Tasks list reads (`ListQuery.page/2`): task
-  documents in the desk's dataset, held to the desk's workspace, draft twins
-  collapsed. Every read needs a workspace id; there is no read across
-  workspaces. Fields go through the board's fail-closed predicate
+  documents in the desk's dataset, held to the desk's workspace and project
+  as `/v1/tasks` holds them (`Scope.scope_to_workspace/3`, so a row with no
+  project is not listed), draft twins collapsed. Every read needs a workspace
+  id and a project id; there is no read across workspaces or projects. Fields go through the board's fail-closed predicate
   (`Board.field_visibility_gate/1`), so a field the task schema keeps private
   is left out here as it is on the board.
 
@@ -34,6 +35,7 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
 
   alias Barkpark.Content.Document
   alias Barkpark.Content.DraftId
+  alias Barkpark.Content.Scope
   alias Barkpark.Plugins.Tasks.Web.ListQuery
   alias Barkpark.Repo
   alias Barkpark.Tasks
@@ -56,7 +58,7 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
   rows past that page. `tab` is `"all"` or `"document"`; the document tab
   with no `:target` is empty.
 
-  `opts`: `:dataset` and `:workspace_id` (both required), `:target`.
+  `opts`: `:dataset`, `:workspace_id` and `:project_id` (all required), `:target`.
   """
   @spec list(String.t(), keyword()) :: %{todo: [map()], done: [map()], more: non_neg_integer()}
   def list("document", opts) do
@@ -72,7 +74,14 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
     dataset = Keyword.fetch!(opts, :dataset)
     ws_id = workspace!(opts)
     readable? = Board.field_visibility_gate(dataset)
-    page_opts = [dataset: dataset, workspace_id: ws_id, readable?: readable?]
+
+    page_opts = [
+      dataset: dataset,
+      workspace_id: ws_id,
+      project_id: project!(opts),
+      readable?: readable?
+    ]
+
     todo = ListQuery.page(filters(ListQuery.statuses() -- (@done ++ @hidden), target), page_opts)
     done = ListQuery.page(filters(@done, target), page_opts)
 
@@ -99,19 +108,21 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
   dataset. The fields the sidebar's task view shows, each gated as on the
   board.
 
-  `opts`: `:dataset` and `:workspace_id` (both required).
+  `opts`: `:dataset`, `:workspace_id` and `:project_id` (all required).
   """
   @spec get(term(), keyword()) :: map() | nil
   def get(id, opts) when is_binary(id) and id != "" do
     dataset = Keyword.fetch!(opts, :dataset)
     ws_id = workspace!(opts)
+    project_id = project!(opts)
     published = DraftId.published_id(id)
 
     from(d in Document,
       where:
-        d.type == "task" and d.dataset == ^dataset and d.workspace_id == ^ws_id and
+        d.type == "task" and d.dataset == ^dataset and
           d.doc_id in ^[published, "drafts." <> published]
     )
+    |> Scope.scope_to_workspace(ws_id, project_id)
     |> Query.collapse_twins()
     |> Repo.all()
     |> Enum.sort_by(&DraftId.draft?(&1.doc_id))
@@ -147,6 +158,18 @@ defmodule BarkparkWeb.Studio.Desk.TasksRead do
   defp present(value) when is_binary(value) and value != "", do: value
   defp present(value) when is_integer(value), do: value
   defp present(_), do: nil
+
+  # The desk's project: `/v1/tasks` holds its rows to it (and leaves out a row
+  # with none), so the sidebar does too. A read without one reads nothing.
+  defp project!(opts) do
+    case Keyword.fetch!(opts, :project_id) do
+      p_id when is_binary(p_id) and p_id != "" ->
+        p_id
+
+      other ->
+        raise ArgumentError, "a desk task read needs a project id, got: #{inspect(other)}"
+    end
+  end
 
   # A read without a workspace would read every workspace (`ListQuery`'s nil).
   defp workspace!(opts) do

@@ -541,6 +541,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       id="dk-tasks"
       dataset={@dataset}
       workspace_id={@current_workspace.id}
+      project_id={assigns[:current_project] && assigns[:current_project].id}
       target={active_doc_id(@active, assigns[:editor_doc])}
       base={@base}
       root={@desk.root}

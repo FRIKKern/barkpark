@@ -5,8 +5,9 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
   :127): a Tasks button in the navbar and in the phone drawer opens a
   sidebar of the workspace's tasks, with a read-only view of each.
 
-  Admins only, with the desk; nothing while the Tasks plugin is off; and
-  never a task from another workspace.
+  Admins only, with the desk; nothing while the Tasks plugin is off; never
+  a task from another workspace; and, as `/v1/tasks`, only the desk's
+  project's tasks (none with no project).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -37,11 +38,15 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
     {:ok,
      conn: Plug.Test.init_test_session(conn, %{"api_token" => raw}),
      base: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/_desk",
+     raw: raw,
      ws_id: ws_id,
+     scope: {ws_id, proj.id},
+     ws: ws,
      n: System.unique_integer([:positive])}
   end
 
-  defp task(doc_id, title, ws_id, content) do
+  # `scope` is `{workspace_id, project_id}`; a nil project is a row with none.
+  defp task(doc_id, title, {ws_id, project_id}, content) do
     Repo.insert!(%Document{
       doc_id: doc_id,
       type: "task",
@@ -50,14 +55,16 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
       title: title,
       rev: "rev-#{doc_id}",
       workspace_id: ws_id,
+      project_id: project_id,
       content: content
     })
   end
 
   defp other_workspace_task(c) do
     other = Barkpark.TenancyFixtures.create_workspace!()
-    task("dts-other-#{c.n}", "Other workspace's task", other.id, %{"lifecycle_status" => "open"})
-    other
+    scope = {other.id, Barkpark.TenancyFixtures.create_project!(other).id}
+    task("dts-other-#{c.n}", "Other workspace's task", scope, %{"lifecycle_status" => "open"})
+    scope
   end
 
   defp open_sidebar(view) do
@@ -66,14 +73,14 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
   end
 
   test "the bar and the drawer carry Tasks; it opens the sidebar on All, To Do and Done", c do
-    task("dts-open-#{c.n}", "Write the brief", c.ws_id, %{
+    task("dts-open-#{c.n}", "Write the brief", c.scope, %{
       "lifecycle_status" => "in_progress",
       "assignee" => "tasks-builder",
       "due_at" => "2026-12-01T09:00:00Z"
     })
 
-    task("dts-done-#{c.n}", "Ship the brief", c.ws_id, %{"lifecycle_status" => "done"})
-    task("dts-gone-#{c.n}", "Dropped idea", c.ws_id, %{"lifecycle_status" => "cancelled"})
+    task("dts-done-#{c.n}", "Ship the brief", c.scope, %{"lifecycle_status" => "done"})
+    task("dts-gone-#{c.n}", "Dropped idea", c.scope, %{"lifecycle_status" => "cancelled"})
     other_workspace_task(c)
 
     {:ok, view, _html} = live(c.conn, c.base)
@@ -121,7 +128,7 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
   end
 
   test "a task's view reads its fields, walks the list, and goes back to its row", c do
-    task("dts-a-#{c.n}", "First task", c.ws_id, %{
+    task("dts-a-#{c.n}", "First task", c.scope, %{
       "lifecycle_status" => "blocked",
       "description" => "Why it waits",
       "priority" => 1,
@@ -135,13 +142,13 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
       set: [updated_at: ~U[2026-01-02 00:00:00Z]]
     )
 
-    task("dts-b-#{c.n}", "Second task", c.ws_id, %{"lifecycle_status" => "open"})
+    task("dts-b-#{c.n}", "Second task", c.scope, %{"lifecycle_status" => "open"})
 
     Repo.update_all(from(d in Document, where: d.doc_id == ^"dts-b-#{c.n}"),
       set: [updated_at: ~U[2026-01-01 00:00:00Z]]
     )
 
-    task("dts-c-#{c.n}", "Done task", c.ws_id, %{"lifecycle_status" => "done"})
+    task("dts-c-#{c.n}", "Done task", c.scope, %{"lifecycle_status" => "done"})
 
     {:ok, view, _html} = live(c.conn, c.base)
     open_sidebar(view)
@@ -202,21 +209,22 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
 
     {:ok, _} = Content.publish_document(id, type, @dataset)
 
-    task("dts-paper-#{c.n}", "Linked by papers", c.ws_id, %{
+    task("dts-paper-#{c.n}", "Linked by papers", c.scope, %{
       "lifecycle_status" => "open",
       "papers" => [id]
     })
 
-    task("dts-child-#{c.n}", "Linked by parent", c.ws_id, %{
+    task("dts-child-#{c.n}", "Linked by parent", c.scope, %{
       "lifecycle_status" => "open",
       "parent_id" => "drafts." <> id
     })
 
-    task("dts-loose-#{c.n}", "Not linked", c.ws_id, %{"lifecycle_status" => "open"})
+    task("dts-loose-#{c.n}", "Not linked", c.scope, %{"lifecycle_status" => "open"})
 
     other = Barkpark.TenancyFixtures.create_workspace!()
+    far = {other.id, Barkpark.TenancyFixtures.create_project!(other).id}
 
-    task("dts-far-#{c.n}", "Linked elsewhere", other.id, %{
+    task("dts-far-#{c.n}", "Linked elsewhere", far, %{
       "lifecycle_status" => "open",
       "papers" => [id]
     })
@@ -242,7 +250,7 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
 
   test "with the Tasks plugin off there is no button, no drawer item and no sidebar", c do
     {:ok, _} = Tenancy.set_workspace_plugin_settings(c.ws_id, %{"tasks" => %{"enabled" => false}})
-    task("dts-off-#{c.n}", "Hidden while off", c.ws_id, %{"lifecycle_status" => "open"})
+    task("dts-off-#{c.n}", "Hidden while off", c.scope, %{"lifecycle_status" => "open"})
 
     {:ok, view, html} = live(c.conn, c.base)
     refute has_element?(view, "#dk-tasks-btn")
@@ -266,26 +274,143 @@ defmodule BarkparkWeb.Studio.DeskTasksSidebarTest do
     refute has_element?(studio, "[data-desk-drawer-tasks]")
   end
 
-  test "the reads are held to one workspace, and refuse a read without one", c do
-    other = other_workspace_task(c)
-    task("dts-mine-#{c.n}", "Mine", c.ws_id, %{"lifecycle_status" => "open"})
+  test "the reads are held to one workspace and project, and refuse a read without one", c do
+    {other_ws, other_proj} = other_workspace_task(c)
+    task("dts-mine-#{c.n}", "Mine", c.scope, %{"lifecycle_status" => "open"})
+    {ws_id, proj_id} = c.scope
 
-    opts = [dataset: @dataset, workspace_id: c.ws_id]
+    opts = [dataset: @dataset, workspace_id: ws_id, project_id: proj_id]
     assert TasksRead.get("dts-other-#{c.n}", opts) == nil
     assert %{title: "Mine"} = TasksRead.get("dts-mine-#{c.n}", opts)
 
     assert %{title: "Other workspace's task"} =
-             TasksRead.get("dts-other-#{c.n}", workspace_id: other.id, dataset: @dataset)
+             TasksRead.get("dts-other-#{c.n}",
+               workspace_id: other_ws,
+               project_id: other_proj,
+               dataset: @dataset
+             )
 
     %{todo: todo} = TasksRead.list("all", opts)
     assert Enum.map(todo, & &1.doc_id) == ["dts-mine-#{c.n}"]
 
-    assert_raise ArgumentError, fn ->
-      TasksRead.list("all", dataset: @dataset, workspace_id: nil)
+    for bad <- [[workspace_id: nil, project_id: proj_id], [workspace_id: ws_id, project_id: nil]] do
+      assert_raise ArgumentError, fn -> TasksRead.list("all", [dataset: @dataset] ++ bad) end
+
+      assert_raise ArgumentError, fn ->
+        TasksRead.get("dts-mine-#{c.n}", [dataset: @dataset] ++ bad)
+      end
+    end
+  end
+
+  # Review of #27767 (B1): every project has its own "production" dataset, so
+  # the slug alone read every project's tasks. The desk reads one project, as
+  # `/v1/tasks` does, and a row with no project is not listed there either.
+  describe "held to the desk's project, as /v1/tasks" do
+    setup c do
+      {ws_id, proj_id} = c.scope
+      p2 = Barkpark.TenancyFixtures.create_project!(c.ws)
+      task("dts-p1-#{c.n}", "Project one task", c.scope, %{"lifecycle_status" => "open"})
+      task("dts-p1b-#{c.n}", "Project one later", c.scope, %{"lifecycle_status" => "open"})
+      task("dts-p1d-#{c.n}", "Project one done", c.scope, %{"lifecycle_status" => "done"})
+      task("dts-p2-#{c.n}", "Project two task", {ws_id, p2.id}, %{"lifecycle_status" => "open"})
+      task("dts-p2d-#{c.n}", "Project two done", {ws_id, p2.id}, %{"lifecycle_status" => "done"})
+      task("dts-np-#{c.n}", "No project task", {ws_id, nil}, %{"lifecycle_status" => "open"})
+
+      {:ok,
+       p2: p2,
+       p1_base: c.base,
+       p2_base: "/w/#{c.ws.slug}/p/#{p2.slug}/d/#{@dataset}/studio/_desk",
+       proj_id: proj_id}
     end
 
-    assert_raise ArgumentError, fn ->
-      TasksRead.get("dts-mine-#{c.n}", dataset: @dataset, workspace_id: nil)
+    defp listed(view) do
+      ~r/id="dk-task-([^"]+)"/
+      |> Regex.scan(view |> element(@panel) |> render(), capture: :all_but_first)
+      |> List.flatten()
+      |> MapSet.new()
     end
+
+    test "each project's desk lists only its own tasks, and none with no project", c do
+      {:ok, p1, _html} = live(c.conn, c.p1_base)
+      open_sidebar(p1)
+
+      assert listed(p1) ==
+               MapSet.new(["dts-p1-#{c.n}", "dts-p1b-#{c.n}", "dts-p1d-#{c.n}"])
+
+      html = p1 |> element(@panel) |> render()
+      refute html =~ "Project two"
+      refute html =~ "No project task"
+
+      {:ok, p2, _html} = live(c.conn, c.p2_base)
+      open_sidebar(p2)
+      assert listed(p2) == MapSet.new(["dts-p2-#{c.n}", "dts-p2d-#{c.n}"])
+    end
+
+    test "a project-two task id forged into open, walk or tab is refused", c do
+      {:ok, view, _html} = live(c.conn, c.p1_base)
+      open_sidebar(view)
+      panel = with_target(view, "#dk-tasks")
+
+      for id <- ["dts-p2-#{c.n}", "drafts.dts-p2-#{c.n}", "dts-np-#{c.n}"] do
+        render_click(panel, "open", %{"id" => id})
+        html = view |> element(@panel) |> render()
+        refute html =~ "Project two task", "open #{id}"
+        refute html =~ "No project task", "open #{id}"
+        refute has_element?(view, "#{@panel} .tasks-crumbs")
+      end
+
+      # Walk from project one's first task never lands on project two's.
+      view |> element("#dk-task-dts-p1-#{c.n}") |> render_click()
+
+      for dir <- ~w(next prev next next next) do
+        render_click(panel, "walk", %{"to" => dir})
+        html = view |> element(@panel) |> render()
+        refute html =~ "Project two"
+        refute html =~ "No project task"
+      end
+
+      for tab <- ~w(all document assigned subscribed) do
+        render_click(panel, "back", %{})
+        render_click(panel, "tab", %{"tab" => tab})
+        refute view |> element(@panel) |> render() =~ "Project two"
+      end
+    end
+
+    test "the sidebar lists the ids /v1/tasks gives the same admin", c do
+      api =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> c.raw)
+        |> get("/v1/tasks?dataset=#{@dataset}&limit=1000")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> MapSet.new(&String.replace_prefix(&1["doc_id"], "drafts.", ""))
+
+      {:ok, view, _html} = live(c.conn, c.p1_base)
+      open_sidebar(view)
+      assert listed(view) == api
+      assert MapSet.member?(api, "dts-p1-#{c.n}")
+      refute MapSet.member?(api, "dts-p2-#{c.n}")
+      refute MapSet.member?(api, "dts-np-#{c.n}")
+    end
+  end
+
+  # Review of #27767 (B2): TanStack's panel lies over the panes from 900 px
+  # down and takes the whole width from 600 px down (`max-width: 900px` and
+  # `600px`, styles.css); its button gives way under 900 (`899px`).
+  test "the sidebar's breakpoints are TanStack's" do
+    css = rendered_to_string(BarkparkWeb.Studio.Desk.TasksStyle.sheet(%{}))
+
+    over =
+      ~r/@media \(max-width: 900px\) \{\s*\.dk\.dk-tasks-host\[data-tasks-open\] > \.panes \{ margin-right: 0; \}/
+
+    full = ~r/@media \(max-width: 600px\) \{\s*\.dk \.tasks-panel \{ left: 0; width: auto;/
+
+    button =
+      ~r/@media \(max-width: 899px\) \{\s*\.studio-shell:has\(\.dk\) \.navbar \.studio-bar-right > \.tasks-btn \{ display: none; \}/
+
+    assert css =~ over
+    assert css =~ full
+    assert css =~ button
+    refute css =~ "max-width: 599px"
   end
 end
