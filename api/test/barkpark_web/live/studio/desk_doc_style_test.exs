@@ -170,15 +170,23 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
     {:ok, view, _html} = live(c.conn, c.desk)
     html = render(view)
 
+    # task-0ab0e8ca066765f0: so do a refused read-only write and another
+    # user's save over edits not saved here, as TanStack's caution toast and
+    # its `refused` state.
     assert html =~
-             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }|
+             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-save="Read-only"], [data-desk-conflict]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }|
 
     # TanStack's --warn-fg, light and dark, at the desk level.
     assert html =~ ~r/\.dk \{ [^}]*--dk-warn-fg: #6b5300;/
     assert html =~ ~r/html\[data-theme="dark"\] \.dk \{ [^}]*--dk-warn-fg: #f2d36b;/
 
-    # Only the failed tokens: "Saved" and the rest keep the Studio's colour.
+    # Only the refusals: "Saved", and "Updated by another user" taken in by a
+    # form with nothing unsaved, keep the Studio's colour.
     refute html =~ ~r/data-desk-save="Saved"[^{]*\{/
+    # "Updated by another user" is keyed by the conflict mark, never by its
+    # words: a remote save taken in by a form with nothing unsaved stays as it
+    # was, and the words are not in the page's CSS.
+    refute html =~ ~s([data-desk-save="Updated by another user"])
     assert length(Regex.scan(~r/\.save-status[^{<"]*\{/, html)) == 1
   end
 
