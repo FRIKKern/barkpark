@@ -469,7 +469,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
                 |> json(Content.Papers.BpmlView.with_notes(payload, notes))
 
               {:ok, ops, notes} ->
-                sync_persist(conn, slug, ops, base_rev, dataset, scope, notes)
+                sync_persist(assign(conn, :notes, notes), slug, ops, base_rev, dataset, scope)
             end
         end
     end
@@ -477,7 +477,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp write_check(conn), do: WriteGate.write_check(conn.assigns)
 
-  defp sync_persist(conn, slug, ops, base_rev, dataset, scope, notes) do
+  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
     opts = scope ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
@@ -496,7 +496,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         conn
         |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(Content.Papers.BpmlView.with_notes(payload, notes))
+        |> json(Content.Papers.BpmlView.with_notes(payload, conn.assigns.notes))
 
       {:error, {:view_refused, body}} ->
         ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
