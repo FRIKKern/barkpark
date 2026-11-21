@@ -1202,10 +1202,10 @@ c8_report "$C8/reports/high.txt" HIGH
 c8_report "$C8/reports/medium.txt" MEDIUM
 c8_report "$C8/reports/unknown.txt" ""
 
-# run_c8 <workflow> <api report|-> <event> [mix.exs list id] [baseline record] [main jobs fixture]
+# run_c8 <workflow> <api report|-> <event> [mix.exs list id] [baseline record] [main jobs fixture] [main log fixture]
 # Sets C8_ORC (the oracle's exit), C8_RC (the breaker's exit) and C8_OUT.
 run_c8() {
-  local wf="$1" rep="$2" ev="$3" exs="${4:-}" brec="${5:-}" mainjobs="${6:-}" r="$C8/root"
+  local wf="$1" rep="$2" ev="$3" exs="${4:-}" brec="${5:-}" mainjobs="${6:-}" mainlog="${7:-}" r="$C8/root"
   rm -rf "$r" "$C8/rep"; mkdir -p "$r/scripts" "$r/api" "$r/cloud" "$r/.github" "$C8/rep"
   cp "$REAL_ROOT/scripts/hex-audit-oracle.sh" "$r/scripts/"
   : >"$r/api/mix.lock"; : >"$r/cloud/mix.lock"
@@ -1233,6 +1233,7 @@ PY
       JOB_NAME="$(c8f "$C8/facts.json" job_name)" WORKFLOW_FILE=security.yml GITHUB_EVENT_NAME="$ev" \
       GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$C8/summary.md"
     [ -z "$mainjobs" ] || export MAIN_RED_BREAKER_FIXTURE="$mainjobs"
+    [ -z "$mainlog" ] || export MAIN_RED_BREAKER_LOG_FIXTURE="$mainlog"
     bash "$REAL_ROOT/scripts/main-red-breaker.sh" 2>&1) )" || C8_RC=$?
 }
 
@@ -1254,13 +1255,17 @@ else
   no "8a: an unrecorded HIGH did not red '$C8_JOB' by name (oracle exit $C8_ORC, Decide exit $C8_RC): ${C8_OUT##*$'\n'}"
 fi
 # 8b — the same HIGH on a lock pull request, main green on that step: this PR's own.
+# Main's green is proven the way the breaker requires: its jobs listing has the
+# step, and its Decide line says no gate step failed (a continue-on-error step
+# reads 'success' in the jobs API whatever it did).
 printf '{"jobs":[{"name":"%s","conclusion":"success","steps":[{"name":"%s","conclusion":"success"}]}]}' \
   "$C8_JOB" "$C8_STEP" >"$C8/main-green.json"
-run_c8 "$WF" "$C8/reports/high.txt" pull_request "" "" "$C8/main-green.json"
-if [ "$C8_ORC" = 1 ] && [ "$C8_RC" = 1 ] && has "$C8_OUT" "$C8_STEP"; then
+printf "2026-11-21T04:45:00.0000000Z main-red-breaker: no gate step failed in '%s' — nothing to decide\n" "$C8_JOB" >"$C8/main-green.log"
+run_c8 "$WF" "$C8/reports/high.txt" pull_request "" "" "$C8/main-green.json" "$C8/main-green.log"
+if [ "$C8_ORC" = 1 ] && [ "$C8_RC" = 1 ] && has "$C8_OUT" "the red is this PR's own" && has "$C8_OUT" "$C8_STEP"; then
   ok "8b: on a lock PR with main green on the step, the HIGH is the PR's own red (Decide exit 1)"
 else
-  no "8b: on a lock PR with main green on the step, Decide exit $C8_RC (oracle $C8_ORC), wanted 1 naming the step"
+  no "8b: on a lock PR with main green on the step, Decide exit $C8_RC (oracle $C8_ORC), wanted 1 and 'the red is this PR's own': ${C8_OUT##*$'\n'}"
 fi
 # 8c/8d — the controls: the same HIGH excepted in mix.exs, or recorded in the baseline.
 run_c8 "$WF" "$C8/reports/high.txt" push "EEF-CVE-2099-80001"
