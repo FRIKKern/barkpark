@@ -68,9 +68,8 @@ defmodule Barkpark.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      # Floored to 1.8.6: 1.8.5 carries GHSA-628h-q48j-jr6q (long-poll NDJSON
-      # body-splitting DoS); 1.8.6 is the first patched 1.8.x.
-      {:phoenix, "~> 1.8.6"},
+      # Floored to 1.8.17: the first 1.8.x fixing the Presence-key and serializer DoS advisories.
+      {:phoenix, "~> 1.8.17"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
