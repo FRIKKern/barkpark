@@ -73,7 +73,7 @@ defmodule Barkpark.PortableDoc.Render do
                             ~w(
                               callout.ex cards_email.ex chrome.ex components.ex compose.ex data_viz.ex
                               figures.ex
-                              fleet_email.ex forms.ex inline.ex math.ex palettes.ex
+                              fleet_email.ex forms.ex inline.ex inline_depth.ex math.ex palettes.ex
                               panels_email.ex section_layout.ex status_vocab.ex stylesheet.ex tokens_gen.ex
                               util.ex walk.ex
                             ),

@@ -409,11 +409,22 @@ func TestDecodeKeepsABlockWithANumberPastFloat64(t *testing.T) {
 	}
 }
 
-func TestDecodeClipsJSONPastTheParserDepth(t *testing.T) {
+// Past the value depth (1000 JSON levels) a nested inline still keeps its word,
+// then the notice; past maxJSONDepth Decode cuts the JSON, and the notice still
+// shows, without a crash (task-11bbe4b4ae8c85f4).
+func TestDecodeKeepsTheWordPastTheValueDepthAndCutsPastItsBound(t *testing.T) {
+	nest := func(n int) string {
+		return `{"type":"paragraph","content":[` + strings.Repeat(`{"type":"em","children":[`, n) +
+			`{"type":"text","value":"leaf"}` + strings.Repeat(`]}`, n) + `]}`
+	}
+	past := renderBlockText(t, nest(500), 100)
+	if diffWords(past, conformanceWords("leaf "+nestedTooDeep)) != nil {
+		t.Errorf("500 em, past the value depth: want the word, then the notice: %.200q", past)
+	}
 	deep := strings.Repeat(`{"type":"strong","children":[`, 6000) + `"leaf"` + strings.Repeat(`]}`, 6000)
-	text := renderBlockText(t, `{"type":"paragraph","content":[`+deep+`]}`, 100)
-	if diffWords(text, conformanceWords(nestedTooDeep)) != nil {
-		t.Errorf("a doc past the JSON depth: %.200q", text)
+	cut := renderBlockText(t, `{"type":"paragraph","content":[`+deep+`]}`, 100)
+	if diffWords(cut, conformanceWords(nestedTooDeep)) != nil || strings.Contains(cut, "leaf") {
+		t.Errorf("a doc past maxJSONDepth (%d): want the notice only: %.200q", maxJSONDepth, cut)
 	}
 	if got := string(clipJSONDepth([]byte(`{"a":[[1],"[{"],"b":{"c":{}}}`), 2)); got != `{"a":[null,"[{"],"b":{"c":null}}` {
 		t.Errorf("clip: %s", got)
@@ -500,7 +511,9 @@ func TestCapDepthWalksEverySlotAndStopsAtOneHundred(t *testing.T) {
 	}
 }
 
-func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
+// A wrapper is drawn under depth 100 and a text's marks while depth + marks <= 100;
+// past that the word is kept and the notice follows it (task-11bbe4b4ae8c85f4).
+func TestInlineDepthKeepsTheWordAndWritesTheNoticeAfterIt(t *testing.T) {
 	ir := InlineRenderer{theme: LightTheme()}
 	nest := func(levels int, wrap func(any) any) any {
 		var n any = "leaf"
@@ -509,15 +522,22 @@ func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
 		}
 		return n
 	}
+	draw := func(n any) string { return ansi.Strip(ir.Inline([]any{n}, RenderCtx{})) }
+	after := "leaf " + nestedTooDeep
 	strong := func(n any) any { return map[string]any{"type": "strong", "children": []any{n}} }
 	list := func(n any) any { return []any{n} }
 	unknown := func(n any) any { return map[string]any{"type": "highlight", "children": []any{n}} }
 	for name, wrap := range map[string]func(any) any{"strong": strong, "bare list": list, "unknown": unknown} {
-		if got := ansi.Strip(ir.Inline([]any{nest(maxNestDepth-1, wrap)}, RenderCtx{})); got != "leaf" {
-			t.Errorf("%s at 99: %q", name, got)
+		for _, at := range []int{maxNestDepth - 1, maxNestDepth} {
+			if got := draw(nest(at, wrap)); got != "leaf" {
+				t.Errorf("%s at %d: %q", name, at, got)
+			}
 		}
-		if got := ansi.Strip(ir.Inline([]any{nest(maxNestDepth, wrap)}, RenderCtx{})); got != nestedTooDeep {
-			t.Errorf("%s at 100: %q", name, got)
+		if got := draw(nest(maxNestDepth+1, wrap)); got != after {
+			t.Errorf("%s at %d: %q", name, maxNestDepth+1, got)
+		}
+		if got := draw(nest(maxWordDepth+5, wrap)); got != nestedTooDeep {
+			t.Errorf("%s past maxWordDepth: %q", name, got)
 		}
 	}
 	marks := func(n int) []any {
@@ -527,15 +547,20 @@ func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
 		}
 		return m
 	}
-	text := func(n int) map[string]any { return map[string]any{"type": "text", "value": "x", "marks": marks(n)} }
-	if got := ansi.Strip(ir.Inline([]any{text(maxNestDepth - 1)}, RenderCtx{})); got != "x" {
-		t.Errorf("99 marks: %q", got)
+	text := func(n int) map[string]any { return map[string]any{"type": "text", "value": "leaf", "marks": marks(n)} }
+	for _, k := range []int{maxNestDepth - 1, maxNestDepth} {
+		if got := draw(text(k)); got != "leaf" {
+			t.Errorf("%d marks: %q", k, got)
+		}
 	}
-	if got := ansi.Strip(ir.Inline([]any{text(maxNestDepth)}, RenderCtx{})); got != nestedTooDeep {
-		t.Errorf("100 marks: %q", got)
+	if got := draw(text(maxNestDepth + 1)); got != after {
+		t.Errorf("%d marks: %q", maxNestDepth+1, got)
 	}
-	if got := ansi.Strip(ir.Inline([]any{strong(text(maxNestDepth - 1))}, RenderCtx{})); got != nestedTooDeep {
+	if got := draw(strong(text(maxNestDepth - 1))); got != "leaf" {
 		t.Errorf("99 marks under a strong: %q", got)
+	}
+	if got := draw(strong(text(maxNestDepth))); got != after {
+		t.Errorf("100 marks under a strong: %q", got)
 	}
 }
 

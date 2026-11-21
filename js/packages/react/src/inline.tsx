@@ -192,6 +192,7 @@ import {
 } from './status-vocab.gen'
 import type { RenderCtx } from './blocks/chrome'
 import { inlineObjectText } from './inline-object'
+import { cutInline, isInlineWrapper } from './inline-depth'
 export { inlineObjectText } from './inline-object'
 
 /** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
@@ -518,7 +519,9 @@ function isBlockWrapper(n: unknown): n is Record<string, unknown> {
 
 /** Render one inline node to an HTML string. */
 export function renderInline(node: Inline, depth = 0, insideLink = false): string {
-  if (depth >= MAX_DEPTH) return escapeHtml(tooDeepNotice)
+  // A wrapper at the depth limit or past it keeps its words, then the notice
+  // (inline-depth.ts); a leaf there is drawn as usual.
+  if (depth >= MAX_DEPTH && isInlineWrapper(node)) return escapeHtml(cutInline(node, depth, tooDeepNotice))
   if (typeof node === 'string') return escapeHtml(node)
   if (typeof node === 'number') return escapeHtml(String(node))
   // A bare ARRAY where an inline node was expected (`content: [[{text…}]]` —
@@ -538,8 +541,11 @@ export function renderInline(node: Inline, depth = 0, insideLink = false): strin
       // as structure with zero prose. Twins: inline.ex compose_inline,
       // pdrender inline.go attrStrFirst(n, "value", "text").
       const marks = asList(node.marks)
-      if (depth + marks.length >= MAX_DEPTH) return escapeHtml(tooDeepNotice)
       const value = escapeHtml(textLeafValue(node))
+      // The marks that fit under the depth limit are drawn; past them the word is
+      // kept and the notice follows (inline-depth.ts).
+      const fit = Math.max(MAX_DEPTH - depth, 0)
+      if (marks.length > fit) return `<span>${applyMarks(value, marks.slice(0, fit))} ${escapeHtml(tooDeepNotice)}</span>`
       return marks.length ? applyMarks(value, marks) : value
     }
     case 'strong':
@@ -691,8 +697,9 @@ export function renderCell(cell: unknown): string {
       if (!isMap(n)) return ''
       if (str(n.type) === 'text') {
         const marks = asList(n.marks)
-        if (marks.length >= MAX_DEPTH) return `<span>${escapeHtml(tooDeepNotice)}</span>`
         const value = escapeHtml(textLeafValue(n))
+        if (marks.length > MAX_DEPTH)
+          return `<span>${applyMarks(value, marks.slice(0, MAX_DEPTH))} ${escapeHtml(tooDeepNotice)}</span>`
         const inner = marks.length ? applyMarks(value, marks) : value
         // A mark that produced a wrapper element (bold/italic/code/link/…) is the
         // PdText span itself; only genuinely-bare text needs the base `<span>`.

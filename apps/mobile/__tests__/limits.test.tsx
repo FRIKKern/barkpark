@@ -199,10 +199,18 @@ describe('inline nesting', () => {
     ['unknown', (inner: unknown) => ({ type: 'mystery', children: [inner] })],
     ['typeless', (inner: unknown) => ({ children: [inner] })],
     ['underline', (inner: unknown) => ({ type: 'underline', children: [inner] })],
-  ])('%s at depth 99 shows the leaf, at 100 the notice', (_name, node) => {
-    expect(paragraph(nest(99, node))).toContain('leaf')
-    expect(paragraph(nest(100, node))).toContain(NOTICE)
-    expect(paragraph(nest(100, node))).not.toContain('leaf')
+  ])('%s keeps the leaf at depth 100 and writes the notice after it past 100', (_name, node) => {
+    // task-11bbe4b4ae8c85f4: the word stays; the notice follows it.
+    expect(paragraph(nest(100, node))).toContain('leaf')
+    expect(paragraph(nest(100, node))).not.toContain(NOTICE)
+    expect(paragraph(nest(101, node))).toContain('leaf ' + NOTICE)
+    expect(paragraph(nest(500, node))).toContain('leaf ' + NOTICE)
+  })
+
+  it('reads words no deeper than the word bound, and still shows the notice', () => {
+    const text = paragraph(nest(5000, (inner) => ({ type: 'em', children: [inner] })))
+    expect(text).toContain(NOTICE)
+    expect(text).not.toContain('leaf')
   })
 
   it('counts marks into the depth', () => {
@@ -212,13 +220,14 @@ describe('inline nesting', () => {
       for (let i = 0; i < 50; i++) inline = { type: 'em', children: [inline] }
       return inline
     }
-    expect(paragraph(deep(49))).toContain('leaf')
-    expect(paragraph(deep(50))).toContain(NOTICE)
+    expect(paragraph(deep(50))).toContain('leaf')
+    expect(paragraph(deep(50))).not.toContain(NOTICE)
+    expect(paragraph(deep(51)).replace(/\s+/g, ' ')).toContain('leaf ' + NOTICE)
   })
 
   it('says it in the workspace language', () => {
-    expect(paragraph(nest(100, (inner) => ({ type: 'em', children: [inner] })), 'nb-NO')).toContain(
-      'For dypt nestet til å vises',
+    expect(paragraph(nest(101, (inner) => ({ type: 'em', children: [inner] })), 'nb-NO')).toContain(
+      'leaf For dypt nestet til å vises',
     )
   })
 })

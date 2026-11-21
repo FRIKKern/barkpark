@@ -1,7 +1,7 @@
 {
   "contract": "1.23.0",
   "editor": "0.1.0-alpha.2",
-  "build": "8576740dce6c",
+  "build": "26b0ea6643fe",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -1085,6 +1085,7 @@
       "bp-canvas-image-pick",
       "bp-canvas-image-src",
       "bp-canvas-image-width",
+      "bp-canvas-inline-depth-readonly",
       "bp-canvas-island",
       "bp-canvas-island__empty",
       "bp-canvas-island__field",
@@ -1360,6 +1361,8 @@
       "data-bp-figure-constraint",
       "data-bp-fleet",
       "data-bp-fragment",
+      "data-bp-inline-depth-readonly",
+      "data-bp-inline-depth-words",
       "data-bp-inline-opaque",
       "data-bp-inline-type",
       "data-bp-locked",
