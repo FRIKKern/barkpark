@@ -53,6 +53,11 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       5 px apart), shown under the pointer or the focus and while its menu is open;
       always drawn where nothing hovers, 44 px on a touch phone. Its menu
       opens to its right, above it where the pane leaves no room.
+    * A save that did not land (`data-desk-save` "Save failed" or "Save
+      cancelled", so "Not saved: <field>" or "Save failed: <reason>") draws
+      the form's save status in TanStack's caution words (`.save-state`
+      `[data-state=refused]`: `--warn-fg`, 500), at full strength. "Saved"
+      keeps the Studio's success colour, and the old Studio is not touched.
     * `.dk-field-toast` is the one rule outside the edit pane: the words
       `bp-desk-field-actions.js` shows for a copy or a paste, bottom right
       as TanStack's toasts, over the pane's footer. It is on the page's body, so no patch of the
@@ -165,6 +170,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .field > button.change-bar::before { content: ""; position: absolute; top: 0; bottom: 0; left: -7px; width: 15px; }
       .dk .dk-edit .field-actions > .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
       .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-anchor: --dk-field-actions; position-area: right center; position-try-fallbacks: top; }
+      .dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }
       @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.TagsStyle.css()) %>

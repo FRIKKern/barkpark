@@ -383,6 +383,22 @@ jobs:
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
 
+      # BarkUI's fast tests hold for every number of parts the showroom allows, 1 to MOST_PARTS
+      # (js/packages/barkui/check/jobs.mjs): the walk runs them once per count, about a minute, so it is
+      # not one of the fast tests. On a pull request the walk decides from the files changed since the base
+      # (walkNeeded in js/packages/barkui/tests/counts.mjs): it is skipped only when every changed file is
+      # in another package; on main it always walks. Its bound is inside the walk (WALK_SECONDS); the
+      # step's timeout is the backstop. This comment and the step are pinned whole, byte for byte, by STEP in
+      # js/packages/barkui/tests/counts.test.mjs: an edit here is red until STEP is changed in the same change.
+      - name: "BarkUI: the fast tests hold at every part count"
+        timeout-minutes: 15
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm --filter @barkpark/barkui run test:counts --since "origin/${{ github.base_ref }}"
+          else
+            pnpm --filter @barkpark/barkui run test:counts
+          fi
+
       # REGISTRATION for js/scripts/check-vitest-projects.mjs, added by the PR
       # that creates it. Execution floor for every project js/vitest.config.mts
       # declares: it asks vitest for the declared set, runs them, and reds if

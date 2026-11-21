@@ -1029,7 +1029,7 @@ defmodule Barkpark.Content.Writer do
   #
   # When a schema declares an `initial_values` map, those keys pre-fill the
   # content of a newly created document. Provided values always win — the
-  # initial_values map is a FLOOR, never a ceiling.
+  # initial_values map is a FLOOR, never a ceiling (an explicit null: InitialValues).
   #
   # Maps merge deeply. Lists do NOT merge (a provided list replaces the
   # initial list wholesale — recursive list merging is ambiguous and a
@@ -1056,7 +1056,7 @@ defmodule Barkpark.Content.Writer do
 
       iv ->
         provided = Map.get(attrs, "content") || %{}
-        Map.put(attrs, "content", deep_merge(iv, provided))
+        Map.put(attrs, "content", Barkpark.Content.InitialValues.merge(iv, provided))
     end
   end
 
@@ -1204,8 +1204,8 @@ defmodule Barkpark.Content.Writer do
   # content["title"] by projection (mirroring synthesize_blocks/3).
   defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset, opts) do
     %{layout: layout, prefill: prefill} = Content.resolve_expectation(schema)
-    prefill = Today.resolve(prefill, today(attrs, schema, opts))
-    provided = Map.get(attrs, "content") || %{}
+    resolved = Today.resolve(prefill, today(attrs, schema, opts))
+    {prefill, provided} = Content.InitialValues.cancel(resolved, attrs["content"])
 
     values =
       provided
