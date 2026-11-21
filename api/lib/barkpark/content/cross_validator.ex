@@ -63,7 +63,9 @@ defmodule Barkpark.Content.CrossValidator do
   """
   @spec validate(any(), map()) :: [map()]
   def validate(schema_or_rules, doc) when is_map(doc) do
-    rules = extract_rules(schema_or_rules)
+    # The rules violations/2 reads, no more: an unevaluable rule is skipped
+    # here too, so the two never give a second reading.
+    {rules, _unevaluable} = partition(schema_or_rules)
 
     Enum.map(rules, fn rule ->
       rule_str = stringify_top(rule)
@@ -295,22 +297,16 @@ defmodule Barkpark.Content.CrossValidator do
   # schema's top-level names cannot check; one with "scope": "document" names
   # the document's and is checked.
   #
-  # A combinator key that is present must hold a non-empty list: a leaf with
-  # `"all": null` beside its field and operator is unevaluable, never run
-  # (evaluating it looped forever, task-3886eb786fc98923).
+  # A combinator whose value is null reads as absent (a serializer writes null
+  # for an unused key): `{"all": [..], "any": null}` is the all-rule it was,
+  # and `{"all": null, "field": .., "operator": ..}` is a plain leaf. A
+  # leaf-shaped body with `false` there has no list to run and is unevaluable
+  # (evaluating either looped forever, task-3886eb786fc98923). Every other
+  # shape reads as it always did.
   defp body_reason(body, names, item?) do
-    # Present keys only, null included (a `for` filter would drop a nil value).
-    combinators =
-      for k <- [:all, :any, :one],
-          key <- [Atom.to_string(k), k],
-          Map.has_key?(body, key),
-          do: Map.get(body, key)
-
-    case if(Enum.all?(combinators, &(is_list(&1) and &1 != [])),
-           do: List.first(combinators),
-           else: :bad
-         ) do
-      preds when is_list(preds) ->
+    case Map.get(body, "all", Map.get(body, :all)) || Map.get(body, "any", Map.get(body, :any)) ||
+           Map.get(body, "one", Map.get(body, :one)) do
+      preds when is_list(preds) and preds != [] ->
         Enum.find_value(preds, fn
           p when is_map(p) -> body_reason(p, names, item?)
           _ -> "a predicate is not a map"
@@ -319,10 +315,13 @@ defmodule Barkpark.Content.CrossValidator do
       nil ->
         scope = Map.get(body, "scope", Map.get(body, :scope))
 
-        leaf_reason(
-          body,
-          if(item? and scope not in ["document", :document], do: nil, else: names)
-        )
+        if Enum.any?(["all", "any", "one", :all, :any, :one], &(Map.get(body, &1) == false)),
+          do: "an all/any/one is not a list",
+          else:
+            leaf_reason(
+              body,
+              if(item? and scope not in ["document", :document], do: nil, else: names)
+            )
 
       _ ->
         "an all/any/one list is empty or not a list"

@@ -1,10 +1,12 @@
 defmodule BarkparkWeb.MutateCrossLeafLoopTest do
   @moduledoc """
   task-3886eb786fc98923: a cross rule leaf carrying an `all`, `any` or `one`
-  that is not a list (`{"all": null, "field": "a", "operator": "empty"}`, as a
-  JSON generator can emit) passed `partition/1` as evaluable, and evaluating
-  it looped forever: every save of that type spun a process. Such a rule is
-  now unevaluable (no finding, a log line), and evaluation never loops.
+  with no list to run (`{"all": null, "field": "a", "operator": "empty"}`, as
+  a JSON generator can emit) looped forever when evaluated: every save of
+  that type spun a process. A null combinator now reads as absent, so that
+  rule is the plain leaf it looks like; `false` there is unevaluable. A rule
+  that answered before answers the same (`{"all": [..], "any": null}` still
+  refuses).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -13,15 +15,17 @@ defmodule BarkparkWeb.MutateCrossLeafLoopTest do
   alias Barkpark.Content.CrossValidator
 
   @leaf %{"field" => "a", "operator" => "empty"}
-  @shapes [
-    {"all: null beside a leaf", %{"rule" => Map.put(@leaf, "all", nil)}, %{}},
-    {"any: false beside a leaf", %{"rule" => Map.put(@leaf, "any", false)}, %{}},
-    {"one: null beside a leaf", %{"rule" => Map.put(@leaf, "one", nil)}, %{}},
+  @good %{"field" => "a", "operator" => "non_empty"}
+
+  # {name, rule, a doc it holds for, a doc it breaks}
+  @null_leaves [
+    {"all: null beside a leaf", %{"rule" => Map.put(@leaf, "all", nil)}, %{}, %{"a" => "x"}},
+    {"one: null beside a leaf", %{"rule" => Map.put(@leaf, "one", nil)}, %{}, %{"a" => "x"}},
     {"the same, nested in an all list", %{"rule" => %{"all" => [Map.put(@leaf, "all", nil)]}},
-     %{}},
+     %{}, %{"a" => "x"}},
     {"an item rule's leaf",
      %{"each" => "meny", "rule" => %{"all" => nil, "field" => "side", "operator" => "empty"}},
-     %{"meny" => [%{"_key" => "k"}]}}
+     %{"meny" => [%{"_key" => "k"}]}, %{"meny" => [%{"_key" => "k", "side" => "x"}]}}
   ]
 
   defp schema(rule),
@@ -36,23 +40,40 @@ defmodule BarkparkWeb.MutateCrossLeafLoopTest do
     Task.yield(task, 1000) || Task.shutdown(task, :brutal_kill)
   end
 
-  test "a leaf with a non-list all/any/one is unevaluable and findings returns" do
-    for {name, rule, doc} <- @shapes do
-      found = within_a_second(fn -> CrossValidator.findings(schema(rule), doc) end)
-
-      assert found == {:ok, %{errors: [], warnings: []}},
-             "#{name}: findings did not return in 1 s"
-
-      reasons = for {_rule, reason} <- elem(CrossValidator.partition(schema(rule)), 1), do: reason
-      assert reasons == ["an all/any/one list is empty or not a list"], name
+  defp error_count(rule, doc) do
+    case within_a_second(fn -> CrossValidator.findings(schema(rule), doc) end) do
+      {:ok, %{errors: errors}} -> length(errors)
+      other -> {:no_answer, other}
     end
   end
 
-  test "validate/2, which does not partition, returns too" do
-    for {name, rule, doc} <- @shapes do
-      returned = within_a_second(fn -> CrossValidator.validate(schema(rule), doc) end)
-      assert match?({:ok, [_]}, returned), "#{name}: validate did not return"
+  test "a null all/any/one beside a leaf reads as absent: the leaf is evaluated, in 1 s" do
+    for {name, rule, holds, breaks} <- @null_leaves do
+      assert error_count(rule, holds) == 0, "#{name}: holds"
+      assert error_count(rule, breaks) == 1, "#{name}: breaks"
+      assert elem(CrossValidator.partition(schema(rule)), 1) == [], name
     end
+  end
+
+  test "a null combinator beside a list keeps the rule it was: it still refuses" do
+    for {name, body} <- [
+          {"all: [good] + any: null", %{"all" => [@good], "any" => nil}},
+          {"any: [good] + all: null + one: null", %{"any" => [@good], "all" => nil, "one" => nil}}
+        ] do
+      assert error_count(%{"rule" => body}, %{}) == 1, "#{name}: refuses"
+      assert error_count(%{"rule" => body}, %{"a" => "x"}) == 0, "#{name}: holds"
+    end
+  end
+
+  test "false beside a leaf is unevaluable, and validate/2 skips it as violations/2 does" do
+    rule = %{"rule" => Map.put(@leaf, "any", false)}
+    assert error_count(rule, %{"a" => "x"}) == 0
+
+    reasons = for {_rule, reason} <- elem(CrossValidator.partition(schema(rule)), 1), do: reason
+    assert reasons == ["an all/any/one is not a list"]
+
+    returned = within_a_second(fn -> CrossValidator.validate(schema(rule), %{"a" => "x"}) end)
+    assert returned == {:ok, []}
   end
 
   test "the banner's text is never blank and never a map" do
