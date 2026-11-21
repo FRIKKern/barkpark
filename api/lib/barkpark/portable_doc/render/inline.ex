@@ -150,7 +150,8 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       marks when is_list(marks) and depth + length(marks) > @max_inline_depth ->
         fit = max(@max_inline_depth - depth, 0)
         kept = apply_marks(value, marks |> Enum.take(fit) |> Enum.map(&mark_map/1), inside_link)
-        %{"kind" => "PdText", "children" => [kept, " " <> InlineDepth.notice()]}
+        _ = kept
+        InlineDepth.notice()
 
       marks when is_list(marks) ->
         apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
