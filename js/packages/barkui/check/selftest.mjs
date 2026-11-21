@@ -54,8 +54,13 @@ const CASES = [
     name: 'each drawn reading turns both wide lights off at its own control',
     only: ['skins', 'schemes'],
     motion: true,
-    plant: all(wrap, inCss('#button-after > span { color: var(--ui-background); }')),
+    plant: all(wrap, inCss('#button-after > span { color: var(--ui-background); }'), (d) =>
+      appendFileSync(join(d, 'example.html'), `\n<div data-demo-row>\n${['ok', 'low', 'cut', 'clear'].map((v) => `  <input id="button-val-${v}" value="Typed ${v}">`).join('\n')}\n</div>\n`)),
     css: [
+      '[id^="button-val-"] { font: inherit; padding: 4px 8px; border: 1px solid var(--ui-foreground); background: var(--ui-background); color: var(--ui-foreground); }',
+      '#button-val-low { color: var(--ui-border); }',
+      '#button-val-cut { box-sizing: border-box; height: 8px; padding: 0 8px; }',
+      '#button-val-clear { color: transparent; }',
       '[data-slot="button"][data-size="sm"] { font-size: 0; }',
       'ui-button:has(> #button-secondary) { display: inline-flex; opacity: 0.15; }',
       'button:not(#button-more) > svg { opacity: 0.1; }',
@@ -69,6 +74,10 @@ const CASES = [
       '@media (prefers-reduced-motion: no-preference) { #button-primary { animation: x 1ms forwards; } }',
     ].join('\n'),
     expect: each({
+      'a typed value under 4.5:1 on its ground': both(/drawn text [\d.]+:1 at input#button-val-low "" value/),
+      'a typed value cut by a box too low for it': both(/label is cut: \d+% of it draws at input#button-val-cut "" value/),
+      'a typed value painted transparent': both(/text does not draw at input#button-val-clear "" value/),
+      'a typed value that draws in full stays on': (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /at input#button-val-ok "" value/.test(f))),
       'a size with no font': drawnOff('button "Small"'),
       'opacity on an ancestor': drawnOff('button#button-secondary "Save draft"'),
       'an icon faded out': drawnOff('button "New page" svg'),
