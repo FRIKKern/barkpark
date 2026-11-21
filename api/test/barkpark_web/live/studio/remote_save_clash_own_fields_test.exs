@@ -31,7 +31,13 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
           "visibility" => "public",
           "fields" => [
             %{"name" => "title", "title" => "Title", "type" => "string"},
-            %{"name" => "excerpt", "title" => "Excerpt", "type" => "text"}
+            %{"name" => "excerpt", "title" => "Excerpt", "type" => "text"},
+            %{
+              "name" => "tags",
+              "title" => "Tags",
+              "type" => "arrayOf",
+              "of" => %{"type" => "string"}
+            }
           ]
         },
         @dataset
@@ -42,7 +48,11 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
     {:ok, _} =
       Content.create_document(
         type,
-        %{"doc_id" => id, "title" => "Fixture", "content" => %{"excerpt" => "First words"}},
+        %{
+          "doc_id" => id,
+          "title" => "Fixture",
+          "content" => %{"excerpt" => "First words", "tags" => ["a"]}
+        },
         @dataset
       )
 
@@ -90,6 +100,42 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
     |> render_change(%{"_target" => ["doc", key], "doc" => doc})
   end
 
+  # A post as the page sends it: `seen` is its `_bp_seen`, the number of the
+  # value each field was typed from (bp-array-focus.js).
+  defp posts(view, key, doc, seen) do
+    view
+    |> element("#editor-form")
+    |> render_change(%{
+      "_target" => ["doc", key],
+      "doc" => doc,
+      "_bp_seen" => Jason.encode!(Map.put(seen, "v", 2))
+    })
+  end
+
+  defp stored(c) do
+    [_, type, id] = Regex.run(~r{/([^/;]+);([^/]+)$}, c.paths.desk)
+    {doc, _, _} = Content.fetch_doc_with_draft(type, id, @dataset)
+    doc
+  end
+
+  @long "Fixture " <> String.duplicate("x", 300)
+
+  # A's title is held (over 255 characters: the save is refused and the
+  # field kept), then B saves "Lead " in front of the stored title. Returns
+  # the numbers of the push A was sent: [the value it showed, the merge].
+  defp held_title_under_remote_save(a, b) do
+    saves(a, "title", %{"title" => @long, "excerpt" => "First words"})
+
+    assert eventually(fn ->
+             MapSet.member?(assigns(a).editor_unsaved_keys || MapSet.new(), "title")
+           end)
+
+    saves(b, "title", %{"title" => "Lead Fixture", "excerpt" => "First words"})
+    render(a)
+    assert_push_event(a, "bp:form-remote-values", %{seqs: %{"doc[title]" => [was, merged]}})
+    [was, merged]
+  end
+
   for surface <- [:desk, :studio] do
     @surface surface
 
@@ -130,6 +176,44 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
       assert eventually(fn -> assigns(a).editor_form["excerpt"] == "Lead: First words, mine" end)
       assert assigns(a).doc_conflict == false
       refute has_element?(a, @banner)
+    end
+
+    test "#{surface}: A kept typing through the merge: its next save keeps B's words", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      [was, _merged] = held_title_under_remote_save(a, b)
+
+      # The page did not take the merge (the person was typing): it reports
+      # the number of the value it showed, and trims its own text.
+      posts(a, "title", %{"title" => "Fixture xx", "excerpt" => "First words"}, %{
+        "doc[title]" => was
+      })
+
+      assert eventually(fn -> stored(c).title == "Lead Fixture xx" end)
+    end
+
+    test "#{surface}: A took the merge: its next save keeps B's words", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      [_was, merged] = held_title_under_remote_save(a, b)
+
+      posts(a, "title", %{"title" => "Lead Fixture xx", "excerpt" => "First words"}, %{
+        "doc[title]" => merged
+      })
+
+      assert eventually(fn -> stored(c).title == "Lead Fixture xx" end)
+    end
+
+    test "#{surface}: a list both changed is a conflict, never ours kept unseen", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      unsaved!(a, %{"tags" => ["a", "mine"]})
+
+      saves(b, "tags", %{"title" => "Fixture", "excerpt" => "First words", "tags" => ["a", "B"]})
+
+      assert eventually(fn -> assigns(a).doc_conflict == true end)
+      assert assigns(a).editor_form["tags"] == ["a", "mine"]
+      assert has_element?(a, @banner)
     end
   end
 end

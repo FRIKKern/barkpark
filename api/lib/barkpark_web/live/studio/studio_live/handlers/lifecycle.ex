@@ -182,10 +182,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
       form = Map.merge(theirs, Map.filter(mine, fn {key, _} -> Map.has_key?(local, key) end))
       changed? = Shared.widget_values_changed?(schema, local, form)
+      # The page's next post of an unsaved field is made on the stored value
+      # its words were typed on (it kept typing) or on theirs (it took the
+      # merge), never on its own unsaved words.
+      bases = Map.new(keys, fn key -> {key, {Map.get(base, key), Map.get(theirs, key)}} end)
 
       socket =
         socket
-        |> RemoteValues.push(local, form)
+        |> RemoteValues.push(local, form, bases)
         |> PostedEdits.remote(local, form)
         |> assign(editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
 
@@ -198,8 +202,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # (or is theirs), theirs stands. A string both changed: free text merges
   # (`TextRebase.merge3_both/3`, the splice merge a post gets), and a merge
   # that cannot keep both is a clash; any other string (a choice, a date)
-  # cannot keep both, so it clashes. Any other value stays ours ("else ours
-  # wins").
+  # cannot keep both, so it clashes. A list or an object both changed
+  # clashes too: TanStack's `mergeList3` keeps theirs only where it can place
+  # mine, and an unplaced one kept ours unseen. Any other value (a number, a
+  # switch) stays ours ("else ours wins").
   defp clash(base, mine, theirs, schema, key) do
     strings? = is_binary(base) and is_binary(mine) and is_binary(theirs)
 
@@ -217,6 +223,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         end
 
       strings? ->
+        :clash
+
+      is_list(mine) or is_map(mine) or is_list(theirs) or is_map(theirs) ->
         :clash
 
       true ->
