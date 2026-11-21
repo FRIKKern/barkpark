@@ -10,6 +10,9 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
     error icon in its top right.
   - The result is a folding JSON tree in the syntax colours; a refused
     query turns the result column the critical tone.
+  - Fetch's icon is TanStack's tint of the blue (`.btn-primary.vision-fetch
+    svg`: `--primary-btn-icon`, here `--dk-primary-btn-icon`), not its
+    white words.
   - Params that are not a JSON object hold Fetch and Listen back
     (`aria-disabled`), as TanStack's `.vision-actions` disabled buttons:
     Fetch greys as a disabled Publish (`--dk-publish-off-bg`/`-fg`), Listen
@@ -64,6 +67,8 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-fetch[aria-disabled="true"] { cursor: default; }
       .dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] { background: var(--dk-publish-off-bg); color: var(--dk-publish-off-fg); }
       .dk .dk-vision-fetch svg { width: 21px; height: 21px; }
+      .dk .dk-vision-fetch:not(.dk-vision-listen) svg { color: var(--dk-primary-btn-icon); }
+      .dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] svg { color: inherit; }
       .dk .dk-vision-fetch > span { display: inline-flex; }
       .dk .dk-vision-fetch > span[hidden] { display: none; }
       .dk .dk-vision-listen { background: var(--dk-bg-soft); box-shadow: inset 0 0 0 1px var(--dk-btn2-ring); color: var(--dk-btn2-fg); }
