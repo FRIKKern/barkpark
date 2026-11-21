@@ -141,7 +141,10 @@ Elixir security gates, path-triggered on `api/**`:
     Protective proof: `mix deps.audit` exits 1 on the pre-bump lock and on any
     new CVE; drop the esaml id the moment upstream ships a patch. To suppress
     additional accepted advisories, mix_audit also takes `--ignore-file <path>`
-    (advisory IDs, one per line).
+    (advisory IDs, one per line). Its second oracle, `mix hex.audit` over both
+    locks, counts too: an unexcepted, unbaselined HIGH, CRITICAL or unrated
+    advisory reds the job, and a daily run re-reads the feed. No merge waits on
+    it (owner-queue item 47).
 
 Both deps are `only: [:dev, :test], runtime: false` in `api/mix.exs` — analysis
 tooling that never ships in the release.

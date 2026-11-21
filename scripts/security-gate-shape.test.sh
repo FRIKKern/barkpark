@@ -1320,6 +1320,82 @@ if has "$(c8f "$C8/real.json" crons)" '"41 4 \* \* \*"'; then
 else
   no "8h: security.yml has no daily schedule (crons: $(c8f "$C8/real.json" crons))"
 fi
+
+# 8i-8l — WHY A RED HERE STOPS NO OTHER PR'S MERGE. The job's light is its own;
+# these four facts keep a red security run from holding anyone else's merge.
+# Each takes its files as arguments, so a planted copy proves it can fire.
+c8_row_a() {  # <workflow>: no step opens or lifts a main-red hold from a CI run
+  c8_facts "$1" "$C8/row.json"; local w; w="$(c8f "$C8/row.json" hold_writers)"
+  [ "$w" = "[]" ] || { echo "a step runs main-red-hold.sh open/lift: $w"; return 1; }
+}
+c8_row_b() {  # <required-checks.json> <workflow>: Security gate and the CVE job are excluded, never required
+  c8_facts "$2" "$C8/row.json"
+  python3 - "$1" "$(c8f "$C8/row.json" job_name)" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); job = sys.argv[2]
+excl = [e.get("context", "") for e in d.get("exclusions") or []]
+req = [c.get("context", "") for c in ((d.get("protection") or {}).get("required_status_checks") or {}).get("checks") or []]
+ours = lambda c: c == "Security gate" or c == job or c.startswith(job + " (") or c.startswith("Dependency CVE audit (")
+bad = [c for c in req if ours(c)]
+if "Security gate" not in excl: bad.append("'Security gate' missing from exclusions")
+if not any(c == job or c.startswith(job + " (") for c in excl): bad.append(f"'{job}' missing from exclusions")
+if bad: print("; ".join(bad)); sys.exit(1)
+PY
+}
+c8_row_c() {  # <bp-merge.sh> <workflow>: the merge helper names no security.yml check
+  c8_facts "$2" "$C8/row.json"
+  local n hit=""
+  while IFS= read -r n; do
+    [ -n "$n" ] && grep -qF -- "$n" "$1" && hit="$hit'$n' "
+  done < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["job_names"]))' "$C8/row.json")
+  [ -z "$hit" ] || { echo "bp-merge.sh names $hit"; return 1; }
+}
+c8_row_d() {  # <workflow>: the report job still fires on a scheduled red on main
+  c8_facts "$1" "$C8/row.json"
+  python3 - "$C8/row.json" <<'PY'
+import json, re, sys
+ifs = json.load(open(sys.argv[1]))["report_ifs"]
+if len(ifs) != 1: print(f"{len(ifs)} jobs call file-ci-failure-issue.sh, wanted 1"); sys.exit(1)
+c = ifs[0]
+if "github.ref == 'refs/heads/main'" not in c: print("its if: no longer matches main"); sys.exit(1)
+if re.search(r"github\.event_name\s*[!=]=", c): print("its if: is narrowed by event: " + " ".join(c.split())); sys.exit(1)
+PY
+}
+c8_row() {  # <label> <want: pass|fire> <function> <args…>
+  local label="$1" want="$2" f="$3" why rc=0; shift 3
+  why="$("$f" "$@" 2>&1)" || rc=$?
+  if [ "$want" = pass ] && [ "$rc" = 0 ]; then ok "$label"
+  elif [ "$want" = fire ] && [ "$rc" != 0 ]; then ok "$label (fired: $why)"
+  else no "$label (exit $rc${why:+: $why})"; fi
+}
+c8_row "8i: no step in security.yml opens or lifts a main-red hold" pass c8_row_a "$WF"
+c8_row "8j: Security gate and the CVE job are excluded and not required" pass c8_row_b "$C8_REQ" "$WF"
+c8_row "8k: scripts/bp-merge.sh names no security.yml check" pass c8_row_c "$C8_BPM" "$WF"
+c8_row "8l: the report job's if: still covers a scheduled red on main" pass c8_row_d "$WF"
+# Their mutants, on copies.
+python3 - "$WF" "$C8/hold.yml" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+o = "      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)\n        if: always()\n        env:\n          STEP_OUTCOMES"
+assert s.count(o) == 1
+open(sys.argv[2], "w").write(s.replace(o, "      - name: planted hold\n        run: bash scripts/main-red-hold.sh open --tree api\n\n" + o))
+PY
+c8_row "8i MUTANT: a planted 'main-red-hold.sh open' step" fire c8_row_a "$C8/hold.yml"
+python3 - "$C8_REQ" "$C8/req.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["protection"]["required_status_checks"]["checks"].append({"context": "Security gate", "app_id": 15368})
+json.dump(d, open(sys.argv[2], "w"))
+PY
+c8_row "8j MUTANT: Security gate moved into the required set" fire c8_row_b "$C8/req.json" "$WF"
+{ cat "$C8_BPM"; echo "CVE_CHECK_NAME=\"$C8_JOB\""; } >"$C8/bp-merge.sh"
+c8_row "8k MUTANT: bp-merge.sh names the CVE job" fire c8_row_c "$C8/bp-merge.sh" "$WF"
+sed "s/      failure()\$/      failure() \&\& github.event_name == 'push'/" "$WF" >"$C8/narrow.yml"
+if cmp -s "$WF" "$C8/narrow.yml"; then
+  no "8l MUTANT: the plant did not change the report job's if:"
+else
+  c8_row "8l MUTANT: the report job's if: narrowed to push" fire c8_row_d "$C8/narrow.yml"
+fi
 echo
 
 echo "----"
