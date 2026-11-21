@@ -39,7 +39,7 @@ export const MAX_WORD_DEPTH = 1000;
 // block is at most 1000 JSON levels (Validate.max_value_depth), so 2216 already copies it
 // exact. api/test/support/fixtures/portable-doc-slot-depth.json holds both sums, and
 // __inline_depth_notice.test.mjs fails if this stops equalling its row.
-export const MAX_CARRY_DEPTH = 2 * MAX_WORD_DEPTH + 2 * MAX_INLINE_DEPTH + 16;
+export const MAX_CARRY_DEPTH = 2 * MAX_WORD_DEPTH + 4 * MAX_INLINE_DEPTH + 16;
 
 const NOTICE = "Nested too deep to show";
 
