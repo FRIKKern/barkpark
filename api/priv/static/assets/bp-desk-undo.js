@@ -4,13 +4,17 @@
 // back, across fields, and another editor's words stay. The server keeps
 // the changes and writes the undo (`BarkparkWeb.Studio.Desk.DocUndo`).
 //
-// THE KEY. Mod+Z in a field the server keeps an undo for (the form's
-// `data-desk-undo-keys`: free text, a slug, a select, a list, an object,
-// and the text inputs and selects nested in them), anywhere else in the
-// editing pane that is not an input (its header, a label, a button), or with
-// nothing focused, is the document's. Every other input (a url, a number, a
-// widget's own box) keeps the browser's own undo: taking the key there
-// would undo another field and leave this one's typing with no undo at all.
+// THE KEY. Mod+Z anywhere in the editing pane, or with nothing focused, is
+// the document's, as the TanStack Studio's (its pane's onKeyDown): a field
+// the server keeps an undo for (the form's `data-desk-undo-keys`: free text,
+// a select, a list, an object, and the text inputs and selects nested in
+// them), its header, a label, a button, a checkbox or a radio, and a
+// widget's own box (a tree codelist's search: not the document's text).
+// One kind of box keeps the browser's own undo: a document field typed in
+// (a slug, a url, a number) whose undo the server does not keep. Taking the
+// key there would undo another field and leave this one's typing with no
+// undo at all. A read-only or disabled field is the browser's too (a locked
+// view: TanStack's undo is off there).
 // Rich text and a canvas keep their own undo: a key one of them took
 // (defaultPrevented) or one pressed in a contenteditable is left alone, and
 // so is a key in a dialog. The browser's own undo of a kept field (the Edit
@@ -86,6 +90,18 @@
     return el.tagName === "TEXTAREA" || el.tagName === "SELECT" || (el.tagName === "INPUT" && TEXT.test(el.type));
   }
 
+  var TYPED = /^(text|search|url|tel|password|email|number)$/;
+
+  // The one box whose Mod+Z stays the browser's: the document's own text
+  // (a `doc[...]` field, or an image's part, which is named for its image)
+  // typed in a box the server keeps no undo for. A checkbox, a radio or a
+  // select has no undo of the browser's to keep, and a widget's own box (a
+  // search) holds no document text.
+  function ownTyping(el) {
+    var typed = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TYPED.test(el.type));
+    return typed && (/^doc\[/.test(el.name || "") || el.hasAttribute("data-desk-image-part"));
+  }
+
   // Whether `el` is drawn where the user can see it: not in a pane folded to
   // a strip (`data-pane-collapsed`), not under a hidden pane or panel, not in
   // a shut fold, and not under anything else display:none.
@@ -144,7 +160,14 @@
     if (!el || el === document.body || el === document.documentElement) return true;
     if (!el.closest || el.isContentEditable) return false;
     if (el.closest("[contenteditable], bp-paper-canvas, dialog")) return false;
-    if (FIELD.test(el.tagName)) return f.contains(el) && kept(f, el);
+    if (FIELD.test(el.tagName)) {
+      if (!inPane(f, el) || el.readOnly || el.disabled) return false;
+      return kept(f, el) || !ownTyping(el);
+    }
+    return inPane(f, el);
+  }
+
+  function inPane(f, el) {
     if (f.contains(el)) return true;
     var pane = el.closest("[data-pane-editing]");
     return !!pane && pane.contains(f);

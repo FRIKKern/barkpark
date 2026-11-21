@@ -173,6 +173,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "validation_failed", 422, [:details]},
       {"invalid_publish_flag", {:error, {:invalid_publish_flag, "yes"}}, "malformed", 400,
        [:details]},
+      # A type with fixed documents (task-f4c80d82cc25b19b).
+      {"fixed_document", {:error, {:fixed_document, :create, "side", "ny"}}, "fixed_document",
+       409, [:details]},
       # The mutate door's `visibility` was not sync, async or deferred.
       {"invalid_visibility", {:error, {:invalid_visibility, "later"}}, "malformed", 400,
        [:details]},

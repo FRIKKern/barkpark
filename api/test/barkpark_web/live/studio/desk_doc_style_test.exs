@@ -107,6 +107,36 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
     refute html =~ "dk-doc-column"
   end
 
+  # task-713c3242ac61c939: the footer's "Not saved: <field>" was the footer's
+  # neutral grey. TanStack's footer draws a refused save in its caution words
+  # (styles.css `.save-state:is(..., [data-state=refused])`: `--warn-fg`, 500).
+  test "the footer draws a save that did not land in TanStack's caution words", c do
+    {:ok, view, _html} = live(c.conn, c.desk)
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "#{@pane} #editor-form") end)
+    html = render(view)
+
+    assert html =~
+             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"]) .dk-edit-footer button.dk-footer-status .save-state { color: var(--dk-warn-fg); font-weight: 500; }|
+
+    # Only the failed tokens: "Edited" and "Last published" keep the footer's colour.
+    assert length(Regex.scan(~r/\.save-state[^{<"]*\{/, html)) == 1
+
+    # A title over the column's 255 characters is refused: the footer names it,
+    # where the rule reaches it.
+    view
+    |> element("#editor-form")
+    |> render_change(%{
+      "_target" => ["doc", "title"],
+      "doc" => %{"title" => String.duplicate("x", 300)}
+    })
+
+    status =
+      ~s(#{@pane}[data-desk-save="Save failed"] .dk-edit-footer button.dk-footer-status .save-state)
+
+    assert eventually(fn -> has_element?(view, status, "Not saved: Title") end)
+  end
+
   # TanStack `.input` (:672-675, :692-693) and `.btn-create.btn-generate` (:793-795).
   test "inputs are ringed, not bordered; Generate is TanStack's secondary button", c do
     {:ok, view, _html} = live(c.conn, c.desk)
@@ -131,6 +161,25 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
 
     assert html =~
              ".dk .dk-edit :where(button, a, [role=tab], [tabindex]):focus-visible { outline: 1px solid var(--dk-focus-ring);"
+  end
+
+  # task-19a22bca8affd5fd: a refusal drew "Not saved: <field>" in the success
+  # green. TanStack draws a save that did not land in its caution words
+  # (styles.css `.save-state:is(..., [data-state=refused])`: `--warn-fg`, 500).
+  test "a save that did not land draws the form's save status in TanStack's caution words", c do
+    {:ok, view, _html} = live(c.conn, c.desk)
+    html = render(view)
+
+    assert html =~
+             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }|
+
+    # TanStack's --warn-fg, light and dark, at the desk level.
+    assert html =~ ~r/\.dk \{ [^}]*--dk-warn-fg: #6b5300;/
+    assert html =~ ~r/html\[data-theme="dark"\] \.dk \{ [^}]*--dk-warn-fg: #f2d36b;/
+
+    # Only the failed tokens: "Saved" and the rest keep the Studio's colour.
+    refute html =~ ~r/data-desk-save="Saved"[^{]*\{/
+    assert length(Regex.scan(~r/\.save-status[^{<"]*\{/, html)) == 1
   end
 
   test "control: the old Studio's editor keeps its type line and field count", c do

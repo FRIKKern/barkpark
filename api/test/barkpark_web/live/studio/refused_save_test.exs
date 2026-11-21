@@ -249,6 +249,11 @@ defmodule BarkparkWeb.Studio.RefusedSaveTest do
            end)
 
     assert has_element?(view, ~s([data-pane-editing][data-desk-save="Save failed"]))
+
+    # The form's own save status sits where `Desk.DocStyle`'s caution rule
+    # reaches it (task-19a22bca8affd5fd).
+    status = ~s([data-pane-editing][data-desk-save="Save failed"] .editor-actions .save-status)
+    assert view |> element(status) |> render() |> strip() == "Not saved: Title"
     assert mark(view, "title") =~ "should be at most 255 character(s)"
   end
 
