@@ -301,6 +301,54 @@ await check("Revert blurred by the person, then Back: nothing takes the focus ba
   assert.equal(active(), "BODY");
 });
 
+// Review of #28106 (B1): a person's click on blank pane space blurs the
+// focused control under the parent it stays in. A patch that runs before
+// the blur's own turn ends gave the focus back. It is the person's.
+await check("a person's blur, then a patch in the same task: nothing takes the focus back", () => {
+  const { window, document, excerpt, active } = page();
+  excerpt().focus();
+  excerpt().blur();
+  document.dispatchEvent(new window.CustomEvent("phx:update", { bubbles: true }));
+  assert.equal(active(), "BODY", "Excerpt was left by the person");
+  const tab = document.getElementById("bp-group-tab-all-fields");
+  tab.focus();
+  tab.blur();
+  document.dispatchEvent(new window.CustomEvent("phx:update", { bubbles: true }));
+  assert.equal(active(), "BODY", "All fields too");
+});
+
+await check("a person's blur, then a patch that redraws the form in the same task: nothing takes the focus back", () => {
+  const { excerpt, patch, active } = page();
+  excerpt().focus();
+  excerpt().blur();
+  patch({ revision: false });
+  assert.equal(active(), "BODY");
+});
+
+// N1: a LiveView rejoin redraws the form; the same document's control under
+// the same id takes the focus back, not the form's start.
+await check("Excerpt redrawn under its id (a rejoin): Excerpt has the focus again", () => {
+  const { window, document, excerpt, active } = page();
+  const old = excerpt();
+  old.focus();
+  const fresh = old.cloneNode(true);
+  old.replaceWith(fresh);
+  assert.notEqual(excerpt(), old);
+  document.dispatchEvent(new window.CustomEvent("phx:update", { bubbles: true }));
+  assert.equal(active(), "excerpt");
+  assert.equal(document.activeElement, fresh);
+});
+
+await check("Revert redrawn under its id on the same revision (a rejoin): Revert again", () => {
+  const { window, document, patch, active } = page({ history: false });
+  patch({ revision: true });
+  const old = document.getElementById("revert");
+  old.focus();
+  old.replaceWith(old.cloneNode(true));
+  document.dispatchEvent(new window.CustomEvent("phx:update", { bubbles: true }));
+  assert.equal(active(), "revert");
+});
+
 await check("the desk loads it, as it loads its other scripts", () => {
   const desk = read(API, "lib/barkpark_web/live/studio/desk_live.ex");
   const deskJs = read(ASSETS, "bp-desk.js");

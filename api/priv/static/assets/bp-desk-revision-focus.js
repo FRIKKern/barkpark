@@ -33,7 +33,10 @@
 // (task-8fe9bc3aa4437be6).
 //
 // A control the patch only moved (morphdom blurs a node it moves to a new
-// parent) gets the focus back, as LiveView gives it back to an input.
+// parent) gets the focus back, as LiveView gives it back to an input; one
+// blurred under the parent it is still in was blurred by the person. A
+// control redrawn under the same id in the same document's pane (a LiveView
+// rejoin) takes the focus back before the form's start does.
 //
 // A focus the person moved away (a click on empty space) is forgotten, so
 // nothing takes it back. The patch's own move blurs the field too, while it
@@ -50,6 +53,7 @@
   var lastPane = null;
   var lastAt = { key: null, index: null };
   var blurred = null;
+  var blurredFrom = null;
 
   // Drawn and seen: the shell's own header controls are kept in the desk's
   // form but hidden.
@@ -108,6 +112,18 @@
     return same("data-pane", lastAt.key) || same("data-pane-index", lastAt.index) || null;
   }
 
+  function live(el) {
+    return !el.matches(":disabled") && shown(el);
+  }
+
+  // The same document's pane drew the control again under its id (a
+  // LiveView rejoin redraws the form): that one takes the focus back.
+  function again(pane, was) {
+    if (!was.id || pane.getAttribute("data-pane") !== lastAt.key) return null;
+    var el = document.getElementById(was.id);
+    return el && pane.contains(el) && live(el) ? el : null;
+  }
+
   function rescue() {
     var was = last;
     if (!was) return;
@@ -121,12 +137,13 @@
     } else if (!was.isConnected) {
       if (!free) return;
       pane = paneNow();
-      el = pane && opening(pane);
-    } else if (blurred === was && free) {
+      el = pane && (again(pane, was) || opening(pane));
+    } else if (blurred === was && blurredFrom !== was.parentNode && free) {
       // Moved by the patch (morphdom blurs a node it moves to a new parent,
-      // as a revision's group tabs on Back): it keeps the focus.
+      // as a revision's group tabs on Back): it keeps the focus. A node still
+      // under the parent it was blurred in was blurred by the person.
       pane = was.closest(PANE);
-      el = !was.matches(":disabled") && shown(was) ? was : pane && opening(pane);
+      el = live(was) ? was : pane && opening(pane);
     } else return;
     if (!el) return;
     last = null;
@@ -146,8 +163,9 @@
     var el = e.target;
     if (el !== last || e.relatedTarget) return;
     blurred = el;
+    blurredFrom = el.parentNode;
     setTimeout(function () {
-      if (blurred === el) blurred = null;
+      if (blurred === el) blurred = blurredFrom = null;
       if (last === el && el.isConnected && !el.matches(":disabled") && document.activeElement !== el) last = null;
     }, 0);
   });
