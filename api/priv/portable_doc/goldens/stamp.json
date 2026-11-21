@@ -174,7 +174,7 @@
     "pages/light-en.html": "4d95e3fe19ad911792fbc194db29d0134f981beaf09599561d7819a127742b11",
     "pages/light-nb-NO.html": "0562742bbef2f69bb4ac17ab8ca2c8333c477d0147aa8fa8a389017f1e3eefe0"
   },
-  "gettext_sha256": "a54bd58490895573a157bfeed2277eb4cafc4080dd57562f6466cfffe01929c4",
+  "gettext_sha256": "2704769aa13c5761fa5409c05ec4255b600bee80624bf51d6acd94cff75aa05f",
   "inputs": [
     "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
     "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
@@ -185,6 +185,6 @@
     "test/support/fixtures/portable-doc-limits.json"
   ],
   "inputs_sha256": "d6820b3e2bf7218cf231f6a34fb06800fbf56d4940cf4fbe4f0907e1e9de9832",
-  "render_version": "ca52a983c9e98fec3a3a817db99b3bec338de42761ebd81a3b56b5749a9b299f",
+  "render_version": "12b0733e0a9eaa0932fa9b8075edabda515366f14eb5baf0da5e5beef56141ef",
   "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
 }

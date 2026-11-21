@@ -24,12 +24,13 @@ defmodule Barkpark.PortableDoc.ReaderInlineRowsTest do
   @external_resource @path
   @external_resource @printer
   @fixture @path |> File.read!() |> Jason.decode!()
-  @inline_keys ~w(content text slots)
+  @inline_keys ~w(content text)
 
   defp render(block), do: Render.render_block(block, %{style: :article})
 
-  # The block a row says the reader shows: its own keys, with the words put in
-  # `content` as the row's runs.
+  # The block a row says the reader shows: its own keys, with the first-line words
+  # put in `content` as the row's runs. A callout's body slot stays: it is drawn as
+  # blocks after the first line, not as its words.
   defp shown(block, inline), do: block |> Map.drop(@inline_keys) |> Map.put("content", inline)
 
   defp words?(shape) do

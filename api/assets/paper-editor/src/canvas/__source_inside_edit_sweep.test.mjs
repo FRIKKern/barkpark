@@ -374,7 +374,11 @@ try {
   tally("lifted", off);
   const kinds = [...new Set(off.losers.map((loser) => loser.replace(/^.* \((\w+)\) line \d+: (\w+) (\S+).*$/, "$1 $3").replace(/\[\d+\]/g, "")))];
   for (const loser of off.losers.slice(0, 20)) console.log(`  ${loser}`);
+  const built = off.rows.filter(([name]) => name.startsWith("built/"));
+  for (const [name, says] of built) console.log(`  ${name}: ${says}`);
   assert.deepEqual(kinds, [], "lifted, the sweep finds nothing: a callout with a body shows as its stored block");
+  assert.deepEqual(built, [["built/callout-with-a-body", "writable: 3 lines typed, kept 2, refused 1, losers 0"]],
+    "lifted, the built callout with a body opens writable, shown as its stored block, and loses nothing");
   console.log("source inside-edit sweep: passed");
 } finally {
   canvas.remove();

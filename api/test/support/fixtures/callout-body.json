@@ -1,0 +1,38 @@
+{
+  "blocks": [
+    {
+      "id": "callout-body",
+      "type": "callout",
+      "tone": "info",
+      "title": "Bodytitle",
+      "content": [{"type": "text", "value": "Headline sentence"}],
+      "slots": {
+        "body": [
+          {"type": "paragraph", "content": [{"type": "text", "value": "Bodyparagraph prose"}]},
+          {
+            "type": "list",
+            "ordered": false,
+            "items": [
+              {"content": [{"type": "text", "value": "Firstbullet"}]},
+              {"content": [{"type": "text", "value": "Secondbullet"}]}
+            ]
+          },
+          {
+            "type": "table",
+            "head": [[{"type": "text", "value": "Headercell"}], [{"type": "text", "value": "Rightheader"}]],
+            "rows": [[[{"type": "text", "value": "Bodycell"}], [{"type": "text", "value": "Rightcell"}]]]
+          },
+          {
+            "type": "callout",
+            "tone": "warning",
+            "title": "Innertitle",
+            "content": [{"type": "text", "value": "Innerhead"}],
+            "slots": {
+              "body": [{"type": "paragraph", "content": [{"type": "text", "value": "Innerbody"}]}]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
