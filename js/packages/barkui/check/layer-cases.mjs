@@ -141,8 +141,9 @@ export const LAYER_CASES = [
       return each({
         'a named popover, opened by a click, read open': both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/),
         'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
-        'a box open from the start, named by no layer': both(new RegExp(UNNAMED_AT('div#button-open "Always open"'))),
-        'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`Tab to button#button-tip-open "Info": ${UNNAMED_AT('div#button-tip "Shown on focus"')}`)),
+        // In the reading's own form ("<skin> <scheme> on base: …"), so only the reading holds it, not the looks.
+        'a box open from the start, named by no layer, in the reading': both(new RegExp(`^\\w+ (light|dark) on base: ${esc(UNNAMED_AT('div#button-open "Always open"'))}$`)),
+        'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`^\\w+ (light|dark): Tab to button#button-tip-open "Info": ${esc(UNNAMED_AT('div#button-tip "Shown on focus"'))}$`)),
         'a tooltip shown 400 ms after focus or hover, named by no layer': can('div#button-late "Shown late"'),
         'a tooltip on hover over a plain span, named by no layer': can('div#button-span-tip "Shown on the span"'),
         'a dialog never opened, named by no layer': can('dialog#button-dlg "Never opened"'),
