@@ -11,8 +11,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mount, paragraph } from "./source-flush-mounted-harness.mjs";
 import { expandLimitDoc } from "../../../../priv/portable_doc/conformance/conformance.mjs";
+import { MAX_CARRY_DEPTH, MAX_INLINE_DEPTH, MAX_WORD_DEPTH } from "./inline-depth.js";
 
 const NOTICE = "Nested too deep to show";
+
+// The editor's bounds equal the rows Go and Elixir read too
+// (api/test/support/fixtures/portable-doc-slot-depth.json), and MAX_CARRY_DEPTH equals
+// its own sum from the shared depth limits, so neither can drift on its own.
+{
+  const { bounds } = JSON.parse(readFileSync(new URL("../../../../test/support/fixtures/portable-doc-slot-depth.json", import.meta.url), "utf8"));
+  assert.equal(MAX_INLINE_DEPTH, bounds.max_nest_depth, "MAX_INLINE_DEPTH is the shared depth limit");
+  assert.equal(MAX_WORD_DEPTH, bounds.max_word_depth, "MAX_WORD_DEPTH is the shared word depth");
+  assert.equal(MAX_CARRY_DEPTH, bounds.editor_max_carry_depth, "MAX_CARRY_DEPTH is the fixture's row");
+  assert.equal(MAX_CARRY_DEPTH, 2 * bounds.max_word_depth + 2 * bounds.max_nest_depth + 16, "MAX_CARRY_DEPTH is its sum");
+}
 const pack = JSON.parse(readFileSync(new URL("../../../../test/support/fixtures/portable-doc-limits.json", import.meta.url), "utf8"));
 const edge = (name) => {
   const found = pack.edges.find((e) => e.name === name);

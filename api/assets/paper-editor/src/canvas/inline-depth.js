@@ -29,6 +29,16 @@ import { t } from "../i18n.js";
 
 export const MAX_INLINE_DEPTH = 100;
 export const MAX_WORD_DEPTH = 1000;
+// MAX_CARRY_DEPTH, written as its sum:
+//   2 x MAX_WORD_DEPTH (1000)     2000  inline levels, an object and its children list each
+// + 2 x MAX_INLINE_DEPTH (100)     200  levels for the block's own lists and items
+// + 16                              16  room
+// = 2216
+// It is not Go's maxJSONDepth (2416, which counts four JSON levels per block level for
+// nested tabs, steps and list items): the carry copies one stored block, and a stored
+// block is at most 1000 JSON levels (Validate.max_value_depth), so 2216 already copies it
+// exact. api/test/support/fixtures/portable-doc-slot-depth.json holds both sums, and
+// __inline_depth_notice.test.mjs fails if this stops equalling its row.
 export const MAX_CARRY_DEPTH = 2 * MAX_WORD_DEPTH + 2 * MAX_INLINE_DEPTH + 16;
 
 const NOTICE = "Nested too deep to show";
