@@ -1,0 +1,7 @@
+{
+  "name": "text-field",
+  "family": "form",
+  "element": "ui-field",
+  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/input"],
+  "summary": "One line of text, an input inside its field: label, hint and error, with placeholder, read-only, disabled, required and invalid."
+}
