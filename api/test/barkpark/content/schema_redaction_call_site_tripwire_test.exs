@@ -178,7 +178,7 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/federated_search_controller.ex:schema_resolver",
                               "barkpark_web/channels/search_channel.ex:schema_resolver",
                               "barkpark_web/controllers/history_controller.ex:show",
-                              "barkpark_web/controllers/history_controller.ex:restore",
+                              "barkpark_web/controllers/history_controller.ex:restore_with",
                               "barkpark_web/controllers/listen_controller.ex:fetch_schema",
                               "barkpark_web/controllers/tasks_controller.ex:seal_ctx",
                               "barkpark/content/export.ex:fetch_schema",
