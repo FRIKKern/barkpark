@@ -108,6 +108,8 @@ const CASES = [
       '#button-more svg { fill: #ff0000; }',
       '[data-slot="button"][data-size="lg"]::before { content: "\\25CF  "; color: #ff0000; }',
       '#button-disabled { background-color: #ffffff; color: #eeeeee; }',
+      // The trace reads caret-color from style, never while the readings hide the caret with a sheet of their own.
+      '#button-save { caret-color: #ff0000; }',
     ].join('\n'),
     expect: each({
       'a frozen colour': skinsSay(/button#button-after .* is not one skin variable/),
@@ -117,6 +119,7 @@ const CASES = [
       'a right border colour': skinsSay(/button#button-destructive .*border-right-color is not one skin variable/),
       'an icon in its own fill': skinsSay(/svg .* fill is not one skin variable/),
       'a red ::before': skinsSay(/button "Large"::before color is not one skin variable/),
+      'a caret colour': skinsSay(/button#button-save .*caret-color is not one skin variable/),
       'a paint-free element with its own fill': skinsSay(/paint-free button#button-disabled .* carries its own background/),
       'text-only on controls that draw an edge': skinsSay(/text-only button.* draws its (edge|fill) at [\d.]+:1/),
     }),
@@ -221,6 +224,8 @@ const CASES = [
   {
     name: 'a reading is the same whether or not the caret is drawn',
     only: ['pressed'],
+    states: true,
+    green: true,
     plant: (d) => {
       appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" placeholder="Caret">\n</div>\n')
       appendFileSync(join(d, 'press.mjs'), "\nsteps.push({ name: 'a focused empty field', expect: (root) => (root.querySelector('#button-caret').focus(), true) })\n")
