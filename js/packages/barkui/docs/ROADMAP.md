@@ -42,7 +42,7 @@ Every part BarkUI must draw sits in one of three piles. Each is built differentl
 
 ## The order of families
 
-The first six parts set the look: button, text field, select, dialog, menu and tabs ([0004](decisions/0004-ready-before-any-switch.md) has the step that confirms it). Then ready-made parts land in batches by family:
+The first six parts set the look: button, text field, select, dialog, menu and tabs ([0004](decisions/0004-ready-before-any-switch.md) has the step that confirms it). Parts 4 to 6 cost more to check: the dialog and the menu open in the top layer, and the check reads each open box in every view, 1.33 s a reading on CI's hosted runner, so about 80 s per open box per part (60 readings, PARTS.md "The top layer"). Then ready-made parts land in batches by family:
 
 1. Forms
 2. Overlays
