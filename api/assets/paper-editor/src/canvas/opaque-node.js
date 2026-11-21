@@ -25,6 +25,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { readerPaintClass, selectAtomNode } from "./embed-node.js";
 import { canEditObjectBlock, editObjectBlockAt, objectBlockFor, objectBlockValue } from "./inline-object.js";
 import { cardMoreButton, wireCardMenu } from "./card-menu.js";
+import { calloutReadonlyView } from "./callout-readonly-view.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -101,6 +102,11 @@ export const Opaque = Node.create({
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || block.type || "block";
       if (bpType === "note") return readonlyNoteView(node, editor);
+      // A built-in callout carried because it holds a body (a declared callout
+      // object keeps its card below).
+      if (bpType === "callout" && !declaredObjectKind(view && view.dom, bpType)) {
+        return calloutReadonlyView(node, BP_OPAQUE_NODE_NAME);
+      }
 
       const dom = document.createElement("div");
       dom.className = "bp-canvas-readonly bp-canvas-opaque";
@@ -172,10 +178,14 @@ export const Opaque = Node.create({
 // Sanity's DocumentIcon, a block object's media when its preview has none.
 const DOCUMENT_ICON = '<svg class="bp-canvas-object-doc" width="25" height="25" viewBox="0 0 25 25" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M11.5 4.5V9.5H6.5"/><path d="M18.5 20.5H6.5V9.5L11.5 4.5H18.5V20.5Z"/></svg>';
 
-function paintChip(dom, chip, bpType, block, el) {
+function declaredObjectKind(el, bpType) {
   const host = el && typeof el.closest === "function" ? el.closest("bp-paper-canvas") : null;
   const vocab = host && typeof host._inlineObjectVocabulary === "function" ? host._inlineObjectVocabulary() : null;
-  const kind = objectBlockFor(vocab, bpType);
+  return objectBlockFor(vocab, bpType);
+}
+
+function paintChip(dom, chip, bpType, block, el) {
+  const kind = declaredObjectKind(el, bpType);
   const row = !!(kind && Array.isArray(kind.fields) && kind.fields.length);
   dom.classList.toggle("bp-canvas-object-row", row);
   if (!row) {
