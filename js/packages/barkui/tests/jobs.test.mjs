@@ -66,14 +66,18 @@ describe('the job split covers every part folder exactly once', () => {
   })
 })
 
-describe('thirteen parts and more, made as copies under a test-only root', () => {
-  it('13 copies of the button beside the real parts are real parts, each its own bytes, split into jobs that each hold under the step', () => {
-    const env = { BARKUI_PROOF_COPIES: '13' }
+describe('more parts than the folder holds, made as copies under a test-only root', () => {
+  // Every count of proof copies here comes from the one limit, MOST_PARTS in check/jobs.mjs, less the real parts,
+  // so the tests hold for every number of real parts the limit allows (tests/part-counts.test.mjs walks them).
+  const top = MOST_PARTS - folderNames(partsDir).length
+
+  it(`the most copies of the button the knob takes beside the real parts (${top}) are real parts, each its own bytes, split into jobs that each hold under the step`, () => {
+    const env = { BARKUI_PROOF_COPIES: String(top) }
     const root = materialize(partsDir, env, scratch)
-    expect(root.startsWith(scratch)).toBe(true)
+    expect(root.startsWith(scratch)).toBe(top > 0)
     const real = folderNames(partsDir)
     const names = partNames(partsDir, env)
-    expect(names.length).toBe(real.length + 13)
+    expect(names.length).toBe(real.length + top)
     expect(folderNames(root)).toEqual(names)
     const parts = discoverParts(root)
     expect(parts.map((p) => p.name)).toEqual(names)
@@ -90,8 +94,7 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
   it('the proof knob can only add parts: every real part stays in a group for every value it takes, and other values refuse', () => {
     const real = folderNames(partsDir)
     const alone = split(real).length
-    const top = MOST_PARTS - real.length
-    for (const v of [undefined, '', '0', '1', '13', String(top)]) {
+    for (const v of [undefined, '', '0', String(Math.floor(top / 2)), String(top)]) {
       const env = v === undefined ? {} : { BARKUI_PROOF_COPIES: v }
       const names = partNames(partsDir, env)
       for (const r of real) expect(names, `value ${v}`).toContain(r)
@@ -104,7 +107,6 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
   })
 
   it(`the knob at its top makes exactly MOST_GROUPS (${MOST_GROUPS}) groups, and a folder past MOST_PARTS refuses with the way out the file it names holds`, () => {
-    const top = MOST_PARTS - folderNames(partsDir).length
     expect(split(partNames(partsDir, { BARKUI_PROOF_COPIES: String(top) })).length).toBe(MOST_GROUPS)
     expect(split(partNames(folderOf(MOST_PARTS, 'at-most'), {})).length).toBe(MOST_GROUPS)
     expect(() => partNames(folderOf(MOST_PARTS + 1, 'past-most'), {})).toThrow(/raise MOST_GROUPS in check\/jobs.mjs .*docs\/PARTS\.md/)
