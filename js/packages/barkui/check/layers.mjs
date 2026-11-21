@@ -31,6 +31,7 @@
 // it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
 // closed shadow root, is not seen.
 import { limit } from './limit.mjs'
+import { placementSource } from './placement.mjs'
 import { source } from './probes.mjs'
 
 const STEP_MS = 5000
@@ -155,8 +156,10 @@ const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'call' ?
     in each open shadow root, as it arrives or gains popover, and watches each open root from the moment
     attachShadow makes it (told by tellRoots). It also notes every frame (another window), and each call tellRoots
     refuses. __barkCensus(part, boxes) tells, once per page, each one seen for that part or outside every stage that
-    none of the part's layers selects. */
-function census() {
+    none of the part's layers selects. `placement` (placement.mjs placementSource) logs every value each style
+    attribute in a stage holds, watching each document and open root the census watches; __barkPlacement(part) is
+    its fails for the part. `script` is false on a page with no script. */
+function census(placement, script) {
   const CAN = 'dialog, [popover]'
   const FRAMES = 'iframe, frame, object, embed, fencedframe'
   const seen = new Map()
@@ -168,11 +171,17 @@ function census() {
     return null
   }
   const note = (el, from, kind) => seen.has(el) || seen.set(el, { of: owner(el.isConnected ? el : from), kind })
-  const mo = new MutationObserver((list) => {
+  const records = (list) => {
     for (const m of list) if (m.type === 'attributes') take(m.target)
     else for (const n of m.addedNodes) take(n, m.target)
-  })
-  const watch = (r) => mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['popover'] })
+  }
+  const mo = new MutationObserver(records)
+  const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
+  const placed = placement(script, owner, (part) => [...seen].filter(([el, v]) => v.kind === 'can' && v.of === part).map(([el]) => el), describe)
+  const watch = (r) => {
+    mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['popover'] })
+    placed.watch(r)
+  }
   function take(n, from = n) {
     if (n.nodeType !== 1) return
     for (const e of [n, ...n.querySelectorAll('*')]) {
@@ -191,7 +200,12 @@ function census() {
   addEventListener('barkui-census-root', (e) => take(e.composedPath()[0]), true)
   for (const at of ['window.open', 'document.write', 'document.writeln', 'document.open'])
     addEventListener(`barkui-census-${at}`, () => seen.has(at) || seen.set(at, { of: null, kind: 'call' }), true)
-  const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
+  globalThis.__barkPlacement = (part) => {
+    // Every box seen so far, even one given popover and gone again since the last delivery.
+    records(mo.takeRecords())
+    if (document.documentElement) take(document.documentElement)
+    return placed.look(part)
+  }
   globalThis.__barkCensus = (part, boxes) => {
     if (document.documentElement) take(document.documentElement)
     const stage = document.querySelector(`[data-part="${CSS.escape(part)}"]`)
@@ -211,9 +225,14 @@ function census() {
     attachShadow tells the census each host the moment its root exists, by an event the census hears first. What
     would put a window or a document out of the census's sight is refused and told by name instead: window.open, and
     document.open, write and writeln once the document is parsed (while it is parsing, written markup is parsed like
-    the rest). The page cannot remove or replace any of these, and they call nothing it can change afterwards. */
+    the rest). removeAttribute and removeAttributeNS bring a style attribute up to date before they run: Chromium
+    writes a style set through el.style or attributeStyleMap into the attribute only when it is next read, and
+    removeAttribute does not read it first, so the record the placement log gets would hold the value before that
+    write, not the one the element held (placement.mjs). The page cannot remove or replace any of these, and they
+    call nothing it can change afterwards. */
 function tellRoots() {
   const [apply, define, send, Ev, doc] = [Reflect.apply, Object.defineProperty, EventTarget.prototype.dispatchEvent, Event, document]
+  const [getAttr, removeAttr, removeAttrNS] = [Element.prototype.getAttribute, Element.prototype.removeAttribute, Element.prototype.removeAttributeNS]
   const [attach, write, writeln, ready] = [Element.prototype.attachShadow, Document.prototype.write, Document.prototype.writeln, Object.getOwnPropertyDescriptor(Document.prototype, 'readyState').get]
   const tell = (target, type) => apply(send, target, [new Ev(type, { bubbles: true, composed: true })])
   const fix = (o, k, value) => define(o, k, { value, writable: false, enumerable: true, configurable: false })
@@ -221,6 +240,14 @@ function tellRoots() {
     const root = apply(attach, this, [init])
     tell(this, 'barkui-census-root')
     return root
+  })
+  fix(Element.prototype, 'removeAttribute', function removeAttribute(...a) {
+    apply(getAttr, this, ['style'])
+    return apply(removeAttr, this, a)
+  })
+  fix(Element.prototype, 'removeAttributeNS', function removeAttributeNS(...a) {
+    apply(getAttr, this, ['style'])
+    return apply(removeAttrNS, this, a)
   })
   fix(window, 'open', function open() {
     tell(window, 'barkui-census-window.open')
@@ -238,9 +265,10 @@ function tellRoots() {
 }
 
 /** The census world on `page`, set before the page opens its URL, so it watches from the first frame. Returns
-    look(part) → what census() names for the part. A page that runs no script of its own gets the census when first
-    asked: nothing on it can add a box later. */
-export async function installCensus(page) {
+    look(part) → what census() names for the part, and look.placement(name) → the placement fails for the part
+    (placement.mjs). A page that runs no script of its own (`script` false) gets the census when first asked:
+    nothing on it can add a box or write a style attribute later. */
+export async function installCensus(page, { script = true } = {}) {
   const cdp = await page.context().newCDPSession(page)
   const { frameTree } = await cdp.send('Page.getFrameTree')
   const frameId = frameTree.frame.id
@@ -251,8 +279,8 @@ export async function installCensus(page) {
   await cdp.send('Runtime.enable')
   // A script to evaluate on a new document runs only for a session with the Page domain on.
   await cdp.send('Page.enable')
-  const code = `(${source(census)})()`
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code, worldName: 'barkui-census' })
+  const code = (on) => `(${source(census)})(${placementSource(source)}, ${on})`
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code(script), worldName: 'barkui-census' })
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${source(tellRoots)})()` })
   const run = async (expression) => {
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: id, returnByValue: true })
@@ -267,16 +295,24 @@ export async function installCensus(page) {
     w.close().catch(() => {})
   })
   let ready = false
-  return async (part) => {
+  const ensure = async () => {
     if (!ready && (id === null || !(await run('typeof __barkCensus === "function"').catch(() => false)))) {
       id = (await cdp.send('Page.createIsolatedWorld', { frameId, worldName: 'barkui-census-late' })).executionContextId
-      await run(code)
+      await run(code(script))
     }
     ready = true
+  }
+  const look = async (part) => {
+    await ensure()
     const opened = Array.from({ length: windows }, () => REFUSED.window)
     windows = 0
     return [...opened, ...(await run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)).map(said)]
   }
+  look.placement = async (name) => {
+    await ensure()
+    return run(`__barkPlacement(${JSON.stringify(name)})`)
+  }
+  return look
 }
 
 /** After real input (a Tab stop, a driven state, a press step, a layer's input), the fails for what no layer

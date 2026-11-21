@@ -39,7 +39,9 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
   if (clock) await page.clock.install()
   // What can enter the top layer is watched from the first frame (layers.mjs census).
-  page.barkCensus = await installCensus(page)
+  page.barkCensus = await installCensus(page, { script: js })
+  // What a style attribute in the stage has held that is not placement (placement.mjs), from the first frame.
+  page.barkPlacement = () => page.barkCensus.placement(ctx.part)
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })
   if (js && ctx.styles) {
@@ -464,6 +466,9 @@ export async function phone(ctx, part, skins) {
 export async function noscript(ctx, part) {
   const page = await open(ctx, { js: false, scale: 2, height: 1600 })
   try {
+    // Nothing on a stage with no script can write a style attribute: any one there fails by name (placement.mjs).
+    const placed = await page.barkPlacement()
+    if (placed.length) return light(false, placed[0], { fails: placed })
     const shown = await inCheck(page, (root, h) => {
       // Every element in the stage that carries text or an icon must be seen (an idle spinner carries neither).
       const carrying = [...root.querySelectorAll('*')].filter((el) => h.carries(el) || (el.matches('[data-slot]') && (el.textContent.trim() || el.querySelector('svg'))))

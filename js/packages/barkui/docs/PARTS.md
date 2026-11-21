@@ -214,9 +214,10 @@ matches; a rule or a pair nobody judges fails the part by name.
   not declare, naming the line. (Patching the page's globals is not refused: the check never reads
   through them.) At run time a guard, reading from
   an isolated world the page cannot touch, compares the page with the same build run without any demo:
-  after the demo has run, after every press step and at the end of each light's run, no element in a
-  stage may carry a `style` attribute, the stylesheets, their rules and the adopted sheets must be the
-  build's own, and no animation may run from script. A failure names what changed.
+  after the demo has run, after every press step and at the end of each light's run, every value a
+  `style` attribute in a stage has held holds placement only (see "Placement"), the stylesheets, their
+  rules and the adopted sheets must be the build's own, and no animation may run from script. A failure
+  names what changed.
 
 ## Surfaces
 
@@ -272,6 +273,37 @@ a Tab stop or a driven state opens it as well, it is not read again there. A par
 focus or hover names that input as the layer's `open` (`focus`, or `hover` with the pointer at the control's
 centre), and as its `close` the input that moves away (`keys: ["Tab"]`, or `leave: true`, the pointer taken
 off the page).
+
+## Placement
+
+UI SDK places a popup by writing where it sits into the box's own `style` attribute, and names the control it
+hangs from in that control's. That is all a `style` attribute in a stage may hold: placement is where a box sits,
+never how it looks. A box is an element the check has seen can open in the top layer in the part's stage (a
+`dialog`, or an element that carries `popover`; see "The top layer"). The list, in `check/placement.mjs`, with
+where each may stand and what writes it:
+
+- `anchor-name`: only on an element whose anchor name a box's `position-anchor` names. UI SDK select and menu, on
+  the trigger.
+- `position-anchor`, `position`, `top`, `right`, `bottom`, `left`, `margin-top`, `margin-right`, `margin-bottom`,
+  `margin-left`, `position-try-fallbacks`, `position-visibility`, `--available-height`, `--available-width`,
+  `--anchor-width`, `--anchor-height`, `--transform-origin`, `--arrow-offset`: only on a box. UI SDK select and
+  menu, on the box.
+- `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
+- `transition`, as `none` only: only on a box. UI SDK select and menu, for the one task in which it first places
+  the box.
+
+Any other property, a box's property on an element that is not a box, and an anchor name no box hangs from fail by
+name ("… was given opacity in a style attribute, which is not placement: the look belongs in part.css"). What is
+read is each declaration the browser applies, by its name: a shorthand by its longhands (`inset` is `top`,
+`right`, `bottom` and `left`), and `all` by its own name. Text the browser drops is not a declaration. Every value
+a `style` attribute in a stage holds is read, from the page's first frame, however it is written (the attribute,
+`el.style`, `attributeStyleMap`), so a property written while a box is open and taken away as it closes fails by
+name; a hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first,
+since the browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
+The rule reads stages only: what UI SDK writes on the root while a dialog is open (it stops the page scrolling) is
+outside every stage and not judged, since it is behaviour, not look. The one limit: a value only inside a closed
+shadow root, or one an element held only between arriving in a stage and leaving it within one task, changed
+after it left, is not seen.
 
 ## What part.css may condition on
 
