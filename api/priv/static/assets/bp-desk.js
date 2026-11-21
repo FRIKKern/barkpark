@@ -750,6 +750,8 @@
       deskScript("data-desk-locked-value", window.BarkparkDeskLockedValue);
       // A field moved into a revision's disabled fields hands the focus on (bp-desk-revision-focus.js).
       deskScript("data-desk-revision-focus", window.BarkparkDeskRevisionFocus);
+      // The navbar Create new's type search (bp-desk-new-doc.js).
+      deskScript("data-desk-new-doc", window.BarkparkDeskNewDoc);
       // Vision's query, result tree and Save (bp-desk-vision.js), on its page only.
       if (root.querySelector("[data-desk-vision]")) deskScript("data-desk-vision-js", window.BarkparkDeskVision);
       hook._onFieldAction = function (e) {

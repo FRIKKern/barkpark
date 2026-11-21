@@ -1,0 +1,82 @@
+/* Text field: UI SDK's <ui-field> around its label, a <ui-input> holding a native
+   <input data-slot="input">, and its description or error text.
+   The look keys only on markup the field and input write: data-readonly, data-disabled and
+   data-invalid, and on :hover. A look for what typing or focus flips (data-filled, data-focused,
+   :placeholder-shown, :user-invalid) waits for the check to read states a person changes by typing.
+   The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also turns the edge to
+   --ui-ring-border on :focus-visible.
+   The check does not read the colour of selected text or the browser's autofill fill; this part sets
+   neither and claims neither.
+   A value longer than its box, which the field scrolls sideways, is not judged yet: that waits for the
+   check to read whether a field's value draws as itself. Every value shown here fits its box. */
+[data-slot="field"] {
+  --bark-field-width: calc(var(--ui-spacing) * 64);
+  --bark-field-label-text: 0.8125rem;
+
+  width: var(--bark-field-width);
+  max-width: 100%;
+  gap: calc(var(--ui-spacing) * 1.5);
+}
+
+[data-slot="field-label"] {
+  color: var(--ui-foreground);
+  font-size: var(--bark-field-label-text);
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+[data-slot="field-description"] {
+  color: var(--ui-muted-foreground);
+  font-size: var(--bark-field-label-text);
+  line-height: 1.25;
+}
+
+[data-slot="field-error"] {
+  color: var(--bark-danger-text);
+  font-size: var(--bark-field-label-text);
+  line-height: 1.25;
+}
+
+[data-slot="input"] {
+  --bark-input-height: calc(var(--ui-spacing) * 9);
+  --bark-input-text: 0.875rem;
+  --bark-input-bg: var(--ui-background);
+  --bark-input-fg: var(--ui-foreground);
+  --bark-input-edge: var(--ui-input);
+  --bark-input-hover-edge: var(--ui-muted-foreground);
+
+  box-sizing: border-box;
+  height: var(--bark-input-height);
+  padding-inline: calc(var(--ui-spacing) * 3);
+  border: 1px solid var(--bark-input-edge);
+  border-radius: var(--ui-radius);
+  background: var(--bark-input-bg);
+  color: var(--bark-input-fg);
+  caret-color: var(--ui-foreground);
+  font-size: var(--bark-input-text);
+  line-height: 1.25;
+  transition: border-color 120ms ease-out;
+
+  &::placeholder {
+    color: var(--ui-muted-foreground);
+  }
+
+  &[data-readonly] {
+    --bark-input-bg: var(--ui-muted);
+  }
+
+  &[data-invalid] {
+    --bark-input-edge: var(--bark-danger-text);
+    --bark-input-hover-edge: var(--bark-danger-text);
+  }
+
+  &[data-disabled] {
+    --bark-input-bg: var(--ui-muted);
+    --bark-input-fg: var(--ui-muted-foreground);
+    opacity: 1;
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    border-color: var(--bark-input-hover-edge);
+  }
+}
