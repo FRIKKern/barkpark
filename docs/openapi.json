@@ -136,6 +136,7 @@
                   "export_already_running",
                   "export_build_failed",
                   "export_transport_failed",
+                  "fixed_document",
                   "forbidden",
                   "forbidden_field",
                   "halted",

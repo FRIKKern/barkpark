@@ -949,6 +949,7 @@ defmodule Barkpark.Content.Schema do
       prefill: schema.prefill || %{}
     }
     |> put_reader_writes(schema.reader_writes)
+    |> put_fixed_documents(schema.fixed_documents)
   end
 
   # sha256 over canonical JSON: object keys sorted, list order kept. Unlike
@@ -980,6 +981,10 @@ defmodule Barkpark.Content.Schema do
   # Echoed only when set, so every schema without it serializes as before.
   defp put_reader_writes(map, rw) when is_map(rw), do: Map.put(map, :readerWrites, rw)
   defp put_reader_writes(map, _rw), do: map
+
+  # Echoed only when set, as readerWrites: a schema without it keeps its schemaHash.
+  defp put_fixed_documents(map, ids) when is_list(ids), do: Map.put(map, :fixedDocuments, ids)
+  defp put_fixed_documents(map, _ids), do: map
 
   @doc """
   List every schema in a dataset in SDK envelope shape, plus a
