@@ -8,8 +8,9 @@
 //   accident; ArrowDown and ArrowUp light the next or previous shown way
 //   (aria-selected, aria-activedescendant), and Enter opens the lit one.
 // - The pointer lights the way under it, as Sanity's.
-// - Focus that leaves the open list for nothing (a press on no control) or
-//   for outside it (Tab) closes the list and goes back to "+", as TanStack's.
+// - Focus that leaves the open list for nothing (a press on no control, the
+//   window losing the focus) or for outside it by Tab closes the list and goes
+//   back to "+", as TanStack's; Shift+Tab onto "+" keeps it open.
 // - Each time the list opens it starts over: the box empty, every way shown,
 //   nothing lit, the focus in the box (the popover's autofocus).
 //
@@ -94,39 +95,51 @@
     if (box && !option.hidden) light(parts(box), option);
   };
 
-  // TanStack's picker closes when the focus leaves it and hands the focus back
-  // to "+". Here a press on no control in the open list (the padding round the
-  // box, the "No results" note, the gaps between ways, outside the list) sends
-  // the focus to the page body, and Tab can carry it past the list, while the
-  // list stays open. Both close it and focus "+". A press on the list's scroll
-  // bar moves no focus, so a drag there keeps the list. The check waits a turn:
-  // a LiveView patch that moves the box blurs it and then puts the focus back,
-  // and a window that lost the focus (another app or tab) keeps the list.
+  // TanStack's picker closes when the focus leaves for outside its wrapper,
+  // which holds "+" and the list, and hands the focus back to "+". Here a
+  // press on no control in the open list (the padding round the box, the "No
+  // results" note, the gaps between ways), the window losing the focus, and a
+  // Tab past the list all left it open. Each now closes it and focuses "+"
+  // within the blur, so the focus never rests on the page body. Shift+Tab onto
+  // "+" keeps it open, as TanStack's. A press on the list's scroll bar moves no
+  // focus. A press on a control outside is the browser's light dismiss. A
+  // LiveView patch that moves the box blurs it and puts the focus back before
+  // its script ends: the check for a blur to nothing waits for that (a
+  // microtask), and a box holding the focus again is left open.
   var invoker = function () {
     return document.querySelector('[popovertarget="' + PICKER + '"]:not([popovertargetaction])');
   };
-  var closeIfLeft = function (box, leftFor) {
+  var close = function (box, tabbedTo) {
+    if (!box.isConnected || !box.matches(":popover-open")) return;
+    box.hidePopover();
+    var plus = invoker();
+    if (!plus) return;
+    plus.focus();
+    // Where the browser lets Tab's move land after the blur, "+" takes it back.
+    if (tabbedTo)
+      queueMicrotask(function () {
+        if (document.activeElement === tabbedTo) plus.focus();
+      });
+  };
+  var tabbing = null;
+  var onTab = function (e) {
+    if (e.key !== "Tab") return;
+    tabbing = picker(e.target);
     setTimeout(function () {
-      if (!box.isConnected || !box.matches(":popover-open") || !document.hasFocus()) return;
-      var now = document.activeElement;
-      if (box.contains(now) || !leftFor(now)) return;
-      box.hidePopover();
-      var plus = invoker();
-      if (plus) plus.focus();
+      tabbing = null;
     }, 0);
   };
   var onLeave = function (e) {
     var box = picker(e.target);
-    if (!box || e.relatedTarget) return;
-    closeIfLeft(box, function (now) {
-      return !now || now === document.body;
-    });
-  };
-  var onTab = function (e) {
-    var box = e.key === "Tab" ? picker(e.target) : null;
-    if (!box) return;
-    closeIfLeft(box, function () {
-      return true;
+    if (!box || !box.matches(":popover-open")) return;
+    var to = e.relatedTarget;
+    if (to) {
+      if (tabbing === box && !box.contains(to) && to !== invoker()) close(box, to);
+      return;
+    }
+    if (!document.hasFocus()) return close(box);
+    queueMicrotask(function () {
+      if (!box.contains(document.activeElement)) close(box);
     });
   };
 
