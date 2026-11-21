@@ -32,10 +32,12 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
   alias BarkparkWeb.Components.Fields.CompositeField
 
   @doc "Whether `array_field/1` draws these assigns as tags."
-  def tags?(%{id_base: base, field: field}) when is_binary(base),
-    do: layout(field) == "tags" and string_items?(field)
+  def tags?(%{id_base: base, field: field}) when is_binary(base), do: tags_field?(field)
 
   def tags?(_assigns), do: false
+
+  @doc "Whether a schema field is a tags field: strings, `options.layout: \"tags\"`."
+  def tags_field?(field), do: layout(field) == "tags" and string_items?(field)
 
   @doc """
   The list after a tags press, or `current` unchanged when it changes
@@ -166,9 +168,10 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
   defp display(v) when is_number(v) or is_boolean(v) or is_atom(v), do: to_string(v)
   defp display(v), do: Jason.encode!(v)
 
-  # Sanity's `options.layout` on the array.
+  # Sanity's `options.layout` on the array: on the parsed field's `raw`
+  # definition, or on the schema's own field map (`Shared.find_field/2`).
   defp layout(field) do
-    case field_attr(field, :raw) do
+    case field_attr(field, :raw) || field do
       %{"options" => %{"layout" => layout}} -> layout
       %{"layout" => layout} -> layout
       _ -> nil
