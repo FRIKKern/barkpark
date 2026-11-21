@@ -25,7 +25,7 @@ const (
 	//
 	// api/test/support/fixtures/portable-doc-slot-depth.json holds the same sum;
 	// TestSlotDepthFixture fails if this stops equalling it. task-11bbe4b4ae8c85f4.
-	maxJSONDepth  = 2*maxWordDepth + maxSlotPath*maxNestDepth + 16
+	maxJSONDepth  = 2*maxWordDepth + 2*maxNestDepth + 16
 	nestedTooDeep = "Nested too deep to show"
 	slotEach      = "*"
 )
