@@ -128,6 +128,25 @@ defmodule BarkparkWeb.MutateCrossRuleTitleTest do
     assert json_response(resp, 422)["error"]["details"] == %{"navn" => ["navn_paakrevd"]}
   end
 
+  test "an empty title reads as absent too; with no name either, the default", _ctx do
+    rule = %{
+      "level" => "error",
+      "fields" => ["navn"],
+      "rule" => %{"field" => "navn", "operator" => "non_empty"}
+    }
+
+    messages =
+      for r <- [
+            Map.merge(rule, %{"name" => "r", "title" => ""}),
+            rule,
+            Map.merge(rule, %{"name" => %{"nb" => "r"}, "title" => %{"nb" => "t"}}),
+            Map.merge(rule, %{"name" => "", "title" => 7})
+          ],
+          do: hd(Barkpark.Content.CrossValidator.findings([r], %{"navn" => ""}).errors).message
+
+    assert messages == ["r", "cross-field rule", "cross-field rule", "cross-field rule"]
+  end
+
   test "advising: the write lands with the item rule's advisory", ctx do
     resp = create(ctx, ctx.advised, 1)
     assert resp.status == 200, resp.resp_body

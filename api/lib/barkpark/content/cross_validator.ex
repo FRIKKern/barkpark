@@ -226,8 +226,8 @@ defmodule Barkpark.Content.CrossValidator do
     fields = if is_list(v["fields"]), do: Enum.filter(v["fields"], &is_binary/1), else: []
     first = List.first(fields)
 
-    # A title that is not text (a per-language map) reads as absent, as does such a name.
-    title = v["title"] || if(is_binary(v["name"]), do: v["name"]) || "cross-field rule"
+    # A title that is not text (a per-language map) or is empty reads as absent, as does such a name.
+    title = v["title"] || if(text?(v["name"]), do: v["name"]) || "cross-field rule"
 
     {path, message} =
       case v do
@@ -401,15 +401,18 @@ defmodule Barkpark.Content.CrossValidator do
   # of whether the rule came from JSON (string-keyed) or was hand-built in
   # Elixir (atom-keyed).
   #
-  # A `title` that is not text (a per-language map, a number) is dropped: the
-  # rule still applies and reads as having no title, so every reader (findings,
-  # the summary line, the banner) falls back to its name (task-57d0947d4a29a073).
+  # A `title` that is not text (a per-language map, a number) or is empty is
+  # dropped: the rule still applies and reads as having no title, so every
+  # reader (findings, the summary line, the banner) falls back to its name
+  # (task-57d0947d4a29a073). The Studio reads a title the same way.
   defp stringify_top(map) when is_map(map) do
     map
     |> Map.new(fn
       {k, v} when is_atom(k) -> {Atom.to_string(k), v}
       {k, v} -> {k, v}
     end)
-    |> then(fn rule -> if is_binary(rule["title"]), do: rule, else: Map.delete(rule, "title") end)
+    |> then(fn rule -> if text?(rule["title"]), do: rule, else: Map.delete(rule, "title") end)
   end
+
+  defp text?(s), do: is_binary(s) and s != ""
 end
