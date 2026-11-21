@@ -8,8 +8,13 @@ import (
 )
 
 const (
-	maxNestDepth  = 100
-	maxJSONDepth  = 1000
+	maxNestDepth = 100
+	// maxJSONDepth is how deep a document's JSON is read before Decode cuts it
+	// (encoding/json refuses past 10000). It is past the deepest inline whose
+	// words a reader still draws (maxWordDepth inline levels, two JSON levels
+	// each, inside maxNestDepth block levels), so the cut never takes a word that
+	// the inline walk would have read. task-11bbe4b4ae8c85f4.
+	maxJSONDepth  = 2*maxWordDepth + 2*maxNestDepth + 16
 	nestedTooDeep = "Nested too deep to show"
 	slotEach      = "*"
 )
