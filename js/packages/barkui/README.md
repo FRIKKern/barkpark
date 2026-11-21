@@ -32,6 +32,10 @@ No app moves before the step written in [0004](docs/decisions/0004-ready-before-
 The daily news run fills this block from merged work that touches BarkUI. Nothing here is written by hand.
 
 <!-- news:start -->
+**Friday 20 November.** BarkUI, meant to give every Barkpark app one look, got its showroom: one page with every part live in five skins, light and dark, and lights a browser check turns on only for what its last run proved. The first part is the button. BarkUI also has its own README, roadmap and decision records. [The full day](../../../docs/news/2026-11-20.md)
+- **Showroom:** every part live in every skin and surface; the check drives it with real keys and a real pointer; the button first ([#27193](https://github.com/FRIKKern/barkpark/pull/27193))
+- **Check:** one CI job per group of up to five parts; up to 40 parts need no new check row; a field's placeholder matches its wait on the sheet ([#27718](https://github.com/FRIKKern/barkpark/pull/27718), [#27777](https://github.com/FRIKKern/barkpark/pull/27777), [#27914](https://github.com/FRIKKern/barkpark/pull/27914))
+- **Front door:** a README with pictures, a roadmap and eight decision records ([#27779](https://github.com/FRIKKern/barkpark/pull/27779))
 <!-- news:end -->
 
 ## Where things stand
