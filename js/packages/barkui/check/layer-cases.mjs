@@ -20,6 +20,14 @@ const POPOVER = `
   <div id="button-pop" popover>Saved two minutes ago</div>
 </div>
 `
+// A tooltip shown while the "Info" button has focus, and hidden as focus moves on: open only between readings.
+const TOOLTIP = `
+<div data-demo-row>
+  <span data-demo-label>Tooltip</span>
+  <ui-button><button id="button-tip-open" data-slot="button" type="button">Info</button></ui-button>
+  <div id="button-tip" popover="manual">Saved two minutes ago</div>
+</div>
+`
 const withPopover = (d) => appendFileSync(join(d, 'example.html'), POPOVER)
 const LAYER = { box: '#button-pop', open: { click: '#button-pop-open' }, close: { keys: ['Escape'] } }
 const named = (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers: [LAYER] }, null, 2))
@@ -92,6 +100,16 @@ export const LAYER_CASES = [
     plant: all(withPopover, (d) => inDemo(d, "root.querySelector('#button-pop').showPopover()")),
     css: FAINT,
     expect: both(/div#button-pop "Saved two minutes ago" is open in the top layer during the reading, and no layer in part.json names it/),
+  },
+  {
+    name: 'a tooltip no layer names, open only while its button has focus, fails by name at that Tab stop',
+    only: ['skins'],
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), TOOLTIP),
+      (d) => inDemo(d, "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }"),
+    ),
+    css: FAINT.replace('#button-pop', '#button-tip'),
+    expect: both(/Tab to button#button-tip-open "Info": div#button-tip "Saved two minutes ago" is open in the top layer during the reading, and no layer in part.json names it/),
   },
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',

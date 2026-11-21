@@ -15,6 +15,7 @@
 // The states are driven in one skin, light, base surface, 1440px.
 import { waitsFor } from '../build/sheet-waits.mjs'
 import { readView, verdict } from './reading.mjs'
+import { UNNAMED, unnamedOpen } from './layers.mjs'
 
 // Values resolved against the box's own size: a state may change them, but a longer label changes them too, so
 // only whether they change is compared.
@@ -194,6 +195,8 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
         }
       }
       await settle(page)
+      // The pointer can open a box in the top layer (a tooltip on hover) that closes again before any reading.
+      for (const box of await unnamedOpen(page, part)) fails.push(`${said}: ${UNNAMED(box)}`)
       if (mode === 'checked' && !(await page.barkCheck(([n, k]) => { const r = document.querySelector(`[data-part="${n}"]`); return [r, ...r.querySelectorAll('*')][k].matches(':checked') }, [part.name, el]))) {
         fails.push(`${said}: a click at its centre does not check it`)
         continue

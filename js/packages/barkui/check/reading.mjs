@@ -1,6 +1,7 @@
 // One full reading of a part's stage in the view the page is in: every control's
 // boundary, and every text run and graphic read from pixels (see drawn.mjs and
 // boundary.mjs). All of it goes through the check's own isolated world and CDP.
+import { UNNAMED } from './layers.mjs'
 const fmt = (n) => n.toFixed(2)
 
 /** `waits`: this view's waits on the sheet (verdict); the reading marks each text drawn in one of their pairs. */
@@ -118,7 +119,7 @@ export function verdict(view, where = '', waits = []) {
       }
     }
   }
-  for (const at of view.unnamed ?? []) fails.push(`${where}${at} is open in the top layer during the reading, and no layer in part.json names it`)
+  for (const at of view.unnamed ?? []) fails.push(`${where}${UNNAMED(at)}`)
   for (const at of view.grown ?? []) fails.push(`${where}a reader put a child into ${at}, an element it measures`)
   for (const at of view.empty) fails.push(`${where}control has nothing to show at ${at}`)
   for (const at of view.unlabelled) fails.push(`${where}text-only ${at} has no text label`)

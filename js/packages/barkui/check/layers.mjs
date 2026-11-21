@@ -26,6 +26,11 @@ export function installLayers() {
     h.state.open = open.filter((b) => named.has(b))
     return { boxes: h.state.open.map((b) => page(b.getBoundingClientRect())), unnamed: open.filter((b) => !named.has(b)).map((b) => h.describe(b)) }
   }
+  /** The boxes open in the top layer now that no layer names, without touching what a reading keeps. */
+  const unnamed = (root, boxes) => {
+    const named = new Set(boxes.map((s) => root.querySelector(s)).filter(Boolean))
+    return [...document.querySelectorAll(h.TOP)].filter((b) => !named.has(b)).map((b) => h.describe(b))
+  }
   /** Whether an element is not read while a named box is open: a modal box blocks all outside it, and any open box
       covers what is outside it under its own box. */
   const behind = (el) => {
@@ -71,7 +76,7 @@ export function installLayers() {
       return [mid(0), mid(1), mid(2), 1]
     }
   }
-  Object.assign(h, { layers, behind, hideLayers, under })
+  Object.assign(h, { layers, unnamed, behind, hideLayers, under })
 }
 
 /** Real input on the page: a click at a control's centre (only once it is what is on top there), then keys. */
@@ -94,6 +99,14 @@ async function drive(page, part, step, what) {
   await page.barkCheck(() => window.__barkCheck.settle())
 }
 
+/** The fail for a box open in the top layer that no layer names, the same at every judged moment. */
+export const UNNAMED = (at) => `${at} is open in the top layer during the reading, and no layer in part.json names it`
+
+/** After real input (a Tab stop, a driven state, a press step, a layer's input): the boxes open in the top layer
+    that no layer names. A box that real input opens and closes again between readings is named here. */
+export const unnamedOpen = (page, part) =>
+  page.barkCheck(([n, b]) => window.__barkCheck.unnamed(document.querySelector(`[data-part="${n}"]`), b), [part.name, (part.json.layers ?? []).map((l) => l.box)])
+
 const isOpen = (page, part, box) => page.barkCheck(([n, s, top]) => !!document.querySelector(`[data-part="${n}"] ${s}`)?.matches(top), [part.name, box, ':popover-open, :modal'])
 
 /** Each of the part's layers opened by its own input, read by `read` while open, then closed by its input. The
@@ -104,6 +117,7 @@ export async function eachLayer(page, part, read) {
     const name = `the layer ${layer.box}`
     try {
       await limit(drive(page, part, layer.open, `opening ${name}`), STEP_MS, `opening ${name}`)
+      for (const at of await unnamedOpen(page, part)) fails.push(`after opening ${name}: ${UNNAMED(at)}`)
       if (!(await isOpen(page, part, layer.box))) {
         fails.push(`${name} is not open in the top layer after its "open" input`)
         continue
@@ -115,6 +129,7 @@ export async function eachLayer(page, part, read) {
       try {
         await limit(drive(page, part, layer.close, `closing ${name}`), STEP_MS, `closing ${name}`)
         if (await isOpen(page, part, layer.box)) fails.push(`${name} is still open after its "close" input`)
+        for (const at of await unnamedOpen(page, part)) fails.push(`after closing ${name}: ${UNNAMED(at)}`)
       } catch (e) {
         fails.push(String(e.message).split('\n')[0])
       }

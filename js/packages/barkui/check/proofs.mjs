@@ -7,7 +7,7 @@ import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
 import { installBoundary } from './boundary.mjs'
 import { installDrawn } from './drawn.mjs'
-import { eachLayer, installLayers } from './layers.mjs'
+import { eachLayer, installLayers, UNNAMED, unnamedOpen } from './layers.mjs'
 import { installMatch } from './match.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
@@ -152,6 +152,8 @@ export async function pressed(ctx, part, skins) {
           await settle(page)
         })(), STEP_MS + (step.wait ?? 0), `step "${step.name}"`)
         result = await inPage(page, step.expect, part.name, `step "${step.name}"`)
+        const unnamed = await unnamedOpen(page, part)
+        if (result === true && unnamed.length) result = UNNAMED(unnamed[0])
         for (const [selector, want] of Object.entries(result === true ? step.ax ?? {} : {})) {
           const got = await limit(ax(page, `[data-part="${part.name}"] ${selector}`), STEP_MS, `step "${step.name}" reading ${selector}`)
           const off = got ? Object.entries(want).find(([k, v]) => !(got[k] === v || (v === true && (got[k] === 1 || got[k] === 'true')))) : ['element', 'present']
@@ -284,6 +286,8 @@ export async function skinsAndSchemes(ctx, part, skins) {
             if (!el || !document.querySelector(`[data-part="${n}"]`).contains(el)) return { done: true }
             return el.matches(':focus-visible') ? { at: h.describe(el), ...h.ring(el) } : { at: h.describe(el), fail: 'focused but not :focus-visible' }
           }, part.name)
+          // Real keys can open a box in the top layer (a tooltip on focus) and close it before any reading.
+          for (const box of await unnamedOpen(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${UNNAMED(box)}`)
           if (r2.done) break
           if (r2.ratio) Object.assign(focus, { min: Math.min(focus.min, r2.ratio), max: Math.max(focus.max, r2.ratio) })
           if (r2.fail) bad[scheme].push(`${at}: focus on ${r2.at}: ${r2.fail}`)
