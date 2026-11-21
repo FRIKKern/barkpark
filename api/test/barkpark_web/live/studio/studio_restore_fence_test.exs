@@ -9,8 +9,14 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
   after someone else had written the document (the page not yet redrawn, a
   slow link) wrote the old revision over the newer words. Now each button
   carries the state it was drawn against: the history dialog and the
-  revision view's Revert carry `if_rev` (`SeenRev.of/1`), the deleted
-  document's "Restore most recent revision" carries `if_absent`.
+  revision view's Revert carry `if_rev`, the open document's rev
+  (`editor_doc`), the deleted document's "Restore most recent revision"
+  carries `if_absent`.
+
+  `editor_doc` follows someone else's save while the form is clean: the
+  save's document-list frame rebuilds the form and `editor_doc` from the
+  store (`Lifecycle.document_changed/2`). While a field is dirty it stays
+  put, so a restore is refused.
 
   A late press is played as the browser sends it: the button's values are
   read from the page, someone else writes, then the event goes with the
@@ -99,7 +105,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
   defp flash(view), do: :sys.get_state(view.pid).socket.assigns.flash
 
-  defp seen_rev(view), do: BarkparkWeb.Studio.StudioLive.SeenRev.of(socket_assigns(view))
+  defp shown_rev(view), do: socket_assigns(view).editor_doc.rev
   defp socket_assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
   # The `phx-value-*` a button carries, as the browser sends them.
@@ -143,8 +149,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
   # The open document's mark, as the desk's revision view carries it.
   defp own_mark(c), do: %{PostIdentity.key() => PostIdentity.value(@dataset, c.type, c.id)}
 
-  # The frames a save sends reach this process and not the page (the page
-  # leaves the document topics; this process joins them), as in
+  # The frames a save sends reach this process and not the page: the page
+  # leaves the document topics and the document-list topics (whose frame
+  # rebuilds its form from the store); this process joins them, as in
   # `StaleDocFrameTest`.
   defp hold_frames(view) do
     render(view)
@@ -152,9 +159,10 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
     topics =
       Barkpark.PubSub
       |> Registry.keys(view.pid)
-      |> Enum.filter(&String.starts_with?(&1, "doc:"))
+      |> Enum.filter(&String.starts_with?(&1, "doc"))
 
-    assert topics != [], "fixture: the page joined no document topic"
+    assert Enum.any?(topics, &String.starts_with?(&1, "doc:")),
+           "fixture: the page joined no document topic"
 
     :sys.replace_state(view.pid, fn state ->
       Enum.each(topics, &Phoenix.PubSub.unsubscribe(Barkpark.PubSub, &1))
@@ -268,7 +276,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       assert socket_assigns(view).editor_form["title"] == "Words C",
              "fixture: the page put the other save in the form"
 
-      assert seen_rev(view) == after_write.rev
+      assert shown_rev(view) == after_write.rev
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).title == "Words A", "a restore against the words on screen was refused"
     end
@@ -293,32 +301,11 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
       after_write = write(c.type, c.id, "Words C")
       render(view)
-      assert seen_rev(view) == shown, "a frame the page did not show moved the seen rev"
+      assert shown_rev(view) == shown, "a save the page did not show moved the rev it names"
 
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).rev == after_write.rev
       assert flash(view)["error"] =~ @moved
-    end
-
-    test "an older frame arriving after a newer one does not move the seen rev back", c do
-      view = open(c, c.studio)
-      hold_frames(view)
-
-      write(c.type, c.id, "Words C")
-      older = held_frame()
-      newer_doc = write(c.type, c.id, "Words D")
-      newer = held_frame()
-
-      send(view.pid, newer)
-      send(view.pid, older)
-      render(view)
-
-      assert socket_assigns(view).editor_form["title"] == "Words D",
-             "the form took the older frame after the newer one"
-
-      assert seen_rev(view) == newer_doc.rev
-      press(view, dialog_values(view, c, "Words A"))
-      assert current(c).title == "Words A"
     end
 
     test "a write the page was never told of: refused (the safe side)", c do

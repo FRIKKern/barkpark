@@ -769,7 +769,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
   attr :seen_rev, :string,
     default: nil,
-    doc: "the rev of the document the page shows; each Restore sends it as `if_rev`"
+    doc: "the open document's rev (`editor_doc`); each Restore sends it as `if_rev`"
 
   def history_modal(assigns) do
     ~H"""
@@ -1170,7 +1170,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :account_label, :string, default: nil
   attr :profile_error, :string, default: nil
   attr :doc_mark, :string, default: nil, doc: "`PostIdentity.of/1` of the page"
-  attr :seen_rev, :string, default: nil, doc: "`SeenRev.of/1` of the page"
 
   def studio_modals(assigns) do
     ~H"""
@@ -1197,7 +1196,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     <.history_modal
       show_history={@show_history}
       revisions={@revisions}
-      seen_rev={@seen_rev}
+      seen_rev={@editor_doc && Map.get(@editor_doc, :rev)}
     />
     <.delete_modal
       show_delete={@show_delete}
