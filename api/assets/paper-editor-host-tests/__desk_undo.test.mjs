@@ -3,9 +3,11 @@
 // on the editing pane's header) pushes `desk-undo` named for the document,
 // after the typing still in a field's delay is sent; Shift+Mod+Z and Mod+Y
 // push a redo. Only in a field the server keeps an undo for (the form's
-// `data-desk-undo-keys`): a slug, a url, a number or a nested string keeps
-// the browser's own undo. Rich text, a dialog, another input and a key
-// someone already took are left alone. The browser's own undo of a field is
+// `data-desk-undo-keys`), a slug, a url, a number or a nested string typed
+// in keeps the browser's own undo; a checkbox, a radio and a widget's own
+// box (task-1a516c900a0996cb, task-1fd9b4ae6ec0069c) are the document's.
+// Rich text, a dialog, the list pane's search and a key someone already took
+// are left alone. The browser's own undo of a field is
 // the document's too. The answer is __desk_undo_answer.test.mjs's, and a
 // focus moved while it is on its way __desk_undo_focus.test.mjs's.
 //
@@ -44,12 +46,11 @@ await check("with nothing focused, or on the pane's header, it is the document's
   assert.equal(pushes.length, 3);
 });
 
-await check("rich text, a dialog, another input and a taken key are left alone", () => {
+await check("rich text, a dialog, the list pane's search and a taken key are left alone", () => {
   const rich = key($("rich"), { key: "z", metaKey: true });
   assert.equal(rich.defaultPrevented, false);
   key($("dialog-input"), { key: "z", metaKey: true });
   key($("search"), { key: "z", metaKey: true });
-  key($("pane-input"), { key: "z", metaKey: true });
   const taken = new window.KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true });
   taken.preventDefault();
   $("title").dispatchEvent(taken);
@@ -81,6 +82,62 @@ await check("a field with no undo kept (slug, url, number, nested) keeps the bro
     assert.equal(h.defaultPrevented, false, `historyUndo in #${id} is the browser's`);
   }
   assert.deepEqual(pushes, []);
+});
+
+// task-1a516c900a0996cb: a ticked checkbox keeps the focus, and the
+// browser has no undo of a tick: Mod+Z there is the document's, as
+// TanStack's pane takes it anywhere.
+await check("a focused checkbox or radio: Mod+Z is the document's", () => {
+  for (const id of ["tag-a", "tag-b", "tone"]) {
+    const e = key($(id), { key: "z", metaKey: true });
+    assert.equal(e.defaultPrevented, true, `Mod+Z on #${id} is the document's`);
+  }
+  key($("tag-a"), { key: "z", metaKey: true, shiftKey: true });
+  assert.deepEqual(
+    pushes.map((p) => p.payload.redo),
+    [false, false, false, true],
+  );
+});
+
+// task-1fd9b4ae6ec0069c: a tree codelist's Remove puts the focus in its own
+// search box. That box holds no document text: Mod+Z there is the
+// document's, empty or typed in, as TanStack's.
+await check("a widget's own box (a tree codelist's search), empty or typed in: Mod+Z is the document's", () => {
+  const box = $("topic-search");
+  assert.equal(key(box, { key: "z", metaKey: true }).defaultPrevented, true, "empty");
+  box.value = "eur";
+  try {
+    assert.equal(key(box, { key: "z", ctrlKey: true }).defaultPrevented, true, "typed in");
+    const h = new window.InputEvent("beforeinput", { inputType: "historyUndo", bubbles: true, cancelable: true });
+    box.dispatchEvent(h);
+    assert.equal(h.defaultPrevented, true, "the Edit menu's undo there is the document's too");
+  } finally {
+    box.value = "";
+  }
+  assert.equal(pushes.length, 3);
+});
+
+await check("another box in the pane's header is the document's, as TanStack's", () => {
+  assert.equal(key($("pane-input"), { key: "z", metaKey: true }).defaultPrevented, true);
+  assert.equal(pushes.length, 1);
+});
+
+await check("an image's part typed in, its undo not kept, keeps the browser's own undo", () => {
+  assert.equal(key($("cover-alt"), { key: "z", metaKey: true }).defaultPrevented, false);
+  assert.deepEqual(pushes, []);
+});
+
+await check("a disabled checkbox or a read-only search box (a locked view) is the browser's", () => {
+  $("tag-a").disabled = true;
+  $("topic-search").readOnly = true;
+  try {
+    assert.equal(key($("tag-a"), { key: "z", metaKey: true }).defaultPrevented, false);
+    assert.equal(key($("topic-search"), { key: "z", metaKey: true }).defaultPrevented, false);
+    assert.deepEqual(pushes, []);
+  } finally {
+    $("tag-a").disabled = false;
+    $("topic-search").readOnly = false;
+  }
 });
 
 await check("a kept field that is read-only now is the browser's", () => {

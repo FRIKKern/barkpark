@@ -99,6 +99,31 @@ defmodule BarkparkWeb.Studio.DeskVisionListenTest do
              ~S|html[data-theme="dark"] .dk { --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);|
   end
 
+  # task-114282a27782b443: TanStack's Listen waiting on bad Params keeps
+  # full opacity and greys its word and icon to chip-off-fg (styles.css
+  # .vision-actions .btn:not(.btn-primary):disabled).
+  test "a disabled Listen greys its word and icon to TanStack's chip-off tokens, at full opacity",
+       c do
+    {:ok, _view, html} = live(signed_in(c), c.vision)
+
+    assert html =~
+             ~S|.dk .dk-vision-listen[aria-disabled="true"], .dk .dk-vision-listen[aria-disabled="true"] svg { color: var(--dk-chip-off-fg); }|
+
+    # The dim is Fetch's alone.
+    assert html =~
+             ~S|.dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] { opacity: .5; }|
+
+    refute html =~ ~S|.dk .dk-vision-fetch[aria-disabled="true"] { opacity|
+    refute html =~ ~r/\.dk-vision-listen\[aria-disabled="true"\][^{]*\{[^}]*opacity/
+
+    # TanStack's --chip-off-fg, its light and dark values, for the whole
+    # desk: Vision is no document pane.
+    assert html =~ ~r/\.dk \{ --dk-bg-soft: [^}]*--dk-chip-off-fg: rgb\(143 148 168\); \}/
+
+    assert html =~
+             ~r/html\[data-theme="dark"\] \.dk \{ --dk-bg-soft: [^}]*--dk-chip-off-fg: rgb\(90 96 123\); \}/
+  end
+
   test "a change in this workspace and project comes back as the listen stream's mutation", c do
     {:ok, view, _html} = live(signed_in(c), c.vision)
     listen(view, %{"type" => "post", "qs" => "filter%5Btitle%5D=Listen+probe&perspective=drafts"})
