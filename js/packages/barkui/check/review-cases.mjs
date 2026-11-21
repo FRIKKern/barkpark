@@ -73,6 +73,15 @@ async function straddle(share) {
 const TIP = '<div data-demo-row><span data-demo-label>Tip</span><ui-button><button id="button-tip-open" data-slot="button" type="button">Info</button></ui-button><div id="button-tip" popover="manual">Saved two minutes ago</div></div>'
 const TIP_JS = "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); const on = () => { if (!t.matches(':popover-open')) t.showPopover() }; const off = () => { if (t.matches(':popover-open')) t.hidePopover() }; b.addEventListener('focus', on); b.addEventListener('blur', off); b.addEventListener('mouseenter', on); b.addEventListener('mouseleave', off) }"
 
+const POP = '<div data-demo-row><span data-demo-label>Popover</span><ui-button><button id="button-pop-open" data-slot="button" type="button" popovertarget="button-pop">Details</button></ui-button><div id="button-pop" popover>Saved two minutes ago</div></div>'
+const layer = (open, close) => (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers: [{ box: '#button-pop', open, close }] }, null, 2))
+const says_any = (re) => (p, html, ok, logs) => {
+  const said = Object.entries(lights(p)).flatMap(([l, x]) => (x.fails ?? [x.detail ?? '']).filter((f) => f.includes('#button-pop')).map((f) => `${l}: ${f}`))
+  console.log(`    #button-pop: ${said.length} fails name it${said.length ? `; first: ${said.slice(0, 3).join(' | ').slice(0, 900)}` : ''}`)
+  if (!p) console.log(`    no proof; last logs: ${logs.slice(-6).join(' | ').slice(0, 900)}`)
+  return said.some((f) => re.test(f))
+}
+
 export const REVIEW_CASES = [
   {
     name: 'review plant K1: an unnamed tooltip open only while its button has focus or the pointer is named',
@@ -97,6 +106,22 @@ export const REVIEW_CASES = [
     secs: 900,
     plant: (d) => inDemo(d, "{ const p = document.createElement('div'); p.id = 'button-out'; p.setAttribute('popover', 'manual'); p.textContent = 'Saved two minutes ago'; p.style.cssText = 'position: absolute; inset: auto; left: 8px; top: 8px; margin: 0; padding: 8px 12px; border: 0; background: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif;'; document.body.append(p); p.showPopover() }"),
     expect: named('div#button-out'),
+  },
+  {
+    name: 'review plant K5: a layer whose open input does not open it fails by name',
+    only: ['skins'],
+    secs: 900,
+    plant: all(row(POP), layer({ focus: '#button-pop-open' }, { keys: ['Escape'] })),
+    css: `#button-pop { ${BOX} }`,
+    expect: says_any(/the layer #button-pop is not open in the top layer after its "open" input/),
+  },
+  {
+    name: 'review plant K6: a layer whose close input does not close it fails by name',
+    only: ['skins'],
+    secs: 900,
+    plant: all(row(POP), layer({ click: '#button-pop-open' }, { keys: ['Shift'] })),
+    css: `#button-pop { ${BOX} }`,
+    expect: says_any(/the layer #button-pop is still open after its "close" input/),
   },
   { name: 'review plant K4a: a box 40% over white and 60% over black, light grey text, is red', direct: () => straddle(0.4) },
   { name: 'review plant K4b: a box 20% over white and 80% over black, light grey text, is red', direct: () => straddle(0.2) },
