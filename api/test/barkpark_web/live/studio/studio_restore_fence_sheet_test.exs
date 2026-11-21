@@ -89,7 +89,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceSheetTest do
 
     old =
       Content.list_revisions(slug, "sheet", @dataset, limit: 30)
-      |> Enum.find(&(get_in(&1.content || %{}, ["tabs", Access.at(0), "cells", "A1", "v"]) == "old"))
+      |> Enum.find(
+        &(get_in(&1.content || %{}, ["tabs", Access.at(0), "cells", "A1", "v"]) == "old")
+      )
 
     assert old, "fixture: a revision holding A1 = old exists"
 

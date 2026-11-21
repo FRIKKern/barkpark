@@ -110,7 +110,8 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
   # The `phx-value-*` a button carries, as the browser sends them.
   defp values(view, selector) do
-    [el] = view |> render() |> LazyHTML.from_document() |> LazyHTML.query(selector) |> Enum.to_list()
+    [el] =
+      view |> render() |> LazyHTML.from_document() |> LazyHTML.query(selector) |> Enum.to_list()
 
     for key <- ~w(id if_rev if_absent),
         [value] <- [LazyHTML.attribute(el, "phx-value-#{key}")],
