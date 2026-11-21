@@ -60,8 +60,10 @@ neither base.css nor a part mixes a tint of its own.
   Chromium), and whenever the changed files cannot be worked out. The check runs as one job per group
   of parts, the selftest as two jobs of its own ("BarkUI selftest, views" runs `--job views`, and
   "BarkUI selftest, presses, states and refusals" runs `--job rest`), and one closing check
-  reads them all (see "How many parts the check holds"); on any other change only the plan and the
-  closing check run. The fast tests run with
+  reads them all (see "How many parts the check holds"). Each selftest job reports, by name, every case
+  it ran and every case that held, and the closing check is red, naming the case, unless the two jobs
+  together ran every case of the list once and each held (`check/selftest-report.mjs`). On any other
+  change only the plan and the closing check run. The fast tests run with
   the rest of the js suite (`js-tests.yml`).
 - `build/sheet-waits.mjs` lists the contrast the tokens sheet does not deliver yet, each wait bound to one
   skin, scheme, surface and pair of tokens, with the ratio measured there (see "Surfaces" below).

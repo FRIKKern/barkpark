@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
+import { reportFile, selftestReport } from '../check/selftest-report.mjs'
 import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
 
 const scratch = mkdtempSync(join(tmpdir(), 'barkui-jobs-test-'))
@@ -15,6 +16,13 @@ const folderOf = (n, tag = `n${n}`) => {
   return d
 }
 const flat = (groups) => groups.flatMap((g) => (typeof g.parts === 'string' ? g.parts.split(',') : g.parts))
+
+// Both selftest jobs' reports, as they are when the jobs ran every case once and each held (check/selftest-report.mjs).
+const selftestOk = (sha) =>
+  SELFTEST_JOBS.map((j, i) => {
+    const ran = i === 0 ? ['c1', 'c2'] : ['c3']
+    return { file: reportFile(j.key), data: selftestReport({ key: j.key, sha, all: ['c1', 'c2', 'c3'], ran, held: ran, count: { held: ran.length, of: ran.length } }) }
+  })
 
 describe('the job split covers every part folder exactly once', () => {
   it('every real part folder is in exactly one group, and the set is the folder counted another way', () => {
@@ -60,7 +68,7 @@ describe('the job split covers every part folder exactly once', () => {
       for (const g of m) expect(legGroup(g.group, g.parts, dir, {}).parts.join(','), `n=${n} group ${g.group}`).toBe(g.parts)
       expect(() => legGroup(1, `${m[0].parts},extra`, dir, {})).toThrow(/the plan gave group 1/)
       expect(() => legGroup(m.length + 1, '', dir, {})).toThrow(/is not in this checkout's split/)
-      const reports = m.map((g) => ({ file: `${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts.split(','), sha: 's', ok: true } }))
+      const reports = [...m.map((g) => ({ file: `${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts.split(','), sha: 's', ok: true } })), ...selftestOk('s')]
       expect(judge({ needs: needsWith(JSON.stringify(m)), reports, names: partNames(dir, {}), sha: 's' }).ok, `n=${n}`).toBe(true)
     }
   })
@@ -132,10 +140,11 @@ function needsWith(groups, over = {}) {
     ...over,
   }
 }
-const goodReports = () => GROUPS.map((g) => ({ file: `group-${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts, sha: 'abc', ok: true } }))
+const groupReports = () => GROUPS.map((g) => ({ file: `group-${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts, sha: 'abc', ok: true } }))
+const goodReports = () => [...groupReports(), ...selftestOk('abc')]
 const verdict = (needs, reports = goodReports()) => judge({ needs, reports, names: NAMES, sha: 'abc', perJob: 4 })
 const redWith = (v, re) => v.ok === false && v.rows.some((r) => r.startsWith('RED ') && re.test(r))
-const withLast = (fn) => goodReports().map((r, i, all) => (i === all.length - 1 ? fn(r) : r))
+const withLast = (fn) => [...groupReports().map((r, i, all) => (i === all.length - 1 ? fn(r) : r)), ...selftestOk('abc')]
 
 describe(`the closing check, "${AGGREGATE}"`, () => {
   it('refuses an empty or missing commit id, even when every job and report would be green against it', () => {
@@ -148,7 +157,7 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
 
   it('is green when the plan, every group and both selftest jobs passed, and names them', () => {
     const v = verdict(needsWith(MATRIX))
-    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and both selftest jobs passed'] })
+    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and both selftest jobs passed, running each of 3 cases once'] })
   })
 
   it('is red for a red, cancelled, skipped-by-mistake or missing group job, even when every report says ok', () => {
@@ -197,7 +206,7 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
   })
 
   it('a group with no report, a report from another commit or naming other parts, or two reports, is missing or red', () => {
-    expect(redWith(verdict(needsWith(MATRIX), goodReports().slice(0, -1)), /group 3 of 3 \(x6, x7, x8\) is missing: no report/)).toBe(true)
+    expect(redWith(verdict(needsWith(MATRIX), [...groupReports().slice(0, -1), ...selftestOk('abc')]), /group 3 of 3 \(x6, x7, x8\) is missing: no report/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), withLast((r) => ({ ...r, data: { ...r.data, sha: 'old' } }))), /group 3 of 3 .* is missing: its report is from commit old, not abc/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), withLast((r) => ({ ...r, data: { ...r.data, parts: ['x7'] } }))), /group 3 of 3 .* is missing: its report names \["x7"\]/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), [...goodReports(), goodReports()[2]]), /group 3 of 3 .* reported 2 times/)).toBe(true)

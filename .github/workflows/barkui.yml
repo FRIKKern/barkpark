@@ -217,10 +217,22 @@ jobs:
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
       # them equal); the selftest stops, failing with its sentence, once it passes
       # its ceiling, under this limit. This job runs the cases that read the views.
+      # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
         timeout-minutes: 10
         working-directory: js/packages/barkui
-        run: node check/selftest.mjs --job views
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-views
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
 
   barkui-selftest-rest:
     name: "BarkUI selftest, presses, states and refusals"
@@ -269,10 +281,22 @@ jobs:
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
       # them equal); the selftest stops, failing with its sentence, once it passes
       # its ceiling, under this limit. This job runs every case the views job does not.
+      # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
         timeout-minutes: 10
         working-directory: js/packages/barkui
-        run: node check/selftest.mjs --job rest
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-rest
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
 
   barkui:
     name: "BarkUI showroom check"
@@ -288,8 +312,8 @@ jobs:
         with:
           node-version: "22"
 
-      # No report at all is not an error here: the closing check reads it as every group missing.
-      - name: Download the groups' reports
+      # No report at all is not an error here: the closing check reads it as every group and both selftest jobs missing.
+      - name: Download the groups' and the selftest jobs' reports
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -298,7 +322,8 @@ jobs:
           path: ${{ runner.temp }}/barkui-reports
 
       # The jobs' results first, their reports second: a report cannot turn a red or cancelled job green, and
-      # one from another group, part list or commit counts as missing (check/jobs.mjs, judge).
+      # one from another group, part list or commit counts as missing (check/jobs.mjs, judge); the selftest jobs'
+      # reports must together name every case once, each held (check/selftest-report.mjs).
       - name: "The plan, every group and both selftest jobs passed"
         working-directory: js/packages/barkui
         env:

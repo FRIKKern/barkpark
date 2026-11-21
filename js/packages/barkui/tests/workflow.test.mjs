@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PER_JOB } from '../check/capacity.mjs'
+import { reportFile } from '../check/selftest-report.mjs'
 import { AGGREGATE, folderNames, JOBS, NAMES, partNames, partsDir, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
 
 const repo = (p) => new URL(`../../../../${p}`, import.meta.url)
@@ -13,6 +14,8 @@ const job = (id) => {
   return next < 0 ? rest : rest.slice(0, next + 1)
 }
 const LEG_TEMPLATE = NAMES.group('${{ matrix.group }}')
+
+const run = (j) => `node check/selftest.mjs --job ${j.key} --report "$RUNNER_TEMP/barkui-report/${reportFile(j.key)}"`
 
 describe('barkui.yml runs the split it is given and closes on one name', () => {
   it('has no paths filter on its triggers, so the closing name renders on every head', () => {
@@ -51,9 +54,12 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
       const self = job(j.id)
       expect(self).toContain(`name: "${j.name}"`)
       expect(self).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
-      expect(self.match(/node check\/selftest\.mjs.*/g)).toEqual([`node check/selftest.mjs --job ${j.key}`])
+      expect(self.match(/node check\/selftest\.mjs.*/g)).toEqual([run(j)])
+      // Its report reaches the closing check, which reads it by its file name, whatever the run's result.
+      expect(self).toContain(`name: barkui-report-selftest-${j.key}`)
+      expect(self).toMatch(/Upload this selftest job's report\n\s+if: always\(\)/)
     }
-    expect(wf.match(/node check\/selftest\.mjs.*/g)).toEqual(SELFTEST_JOBS.map((j) => `node check/selftest.mjs --job ${j.key}`))
+    expect(wf.match(/node check\/selftest\.mjs.*/g)).toEqual(SELFTEST_JOBS.map(run))
   })
 
   it('js-tests.yml no longer runs BarkUI', () => {

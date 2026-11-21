@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PER_JOB } from './capacity.mjs'
 import { copyAs } from './copy.mjs'
+import { readSelftestReports } from './selftest-report.mjs'
 
 // The closing check's name in .github/workflows/barkui.yml, written here once; a test holds the workflow to it.
 export const AGGREGATE = 'BarkUI showroom check'
@@ -37,6 +38,9 @@ const VIEWS = ['skins', 'schemes', 'phone']
 export const selftestJob = (c) => (!c.direct && !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
 /** The cases the job `key` runs, in their order. */
 export const casesOf = (cases, key) => cases.filter((c) => selftestJob(c) === key)
+/** The cases one selftest run runs: job `key`'s (every case when `key` is null), narrowed to those whose name holds
+    `words`. The runner (check/selftest.mjs) and the fast tests both call this; there is no second copy. */
+export const selftestPick = (cases, key, words = '') => (key === null ? cases : casesOf(cases, key)).filter((c) => c.name.includes(words))
 /** What is wrong with the jobs' case lists ({ key: cases }) against every case, in plain words; empty when every
     case runs in exactly one job, no job runs anything else, and the jobs run as many cases as there are. */
 export function coverCases(lists, cases) {
@@ -196,7 +200,7 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   for (const w of cover(expected, names, perJob)) rows.push(`this checkout's split: ${w}`)
   if (planned !== JSON.stringify(toMatrix(expected))) rows.push(`the plan's groups ${planned} differ from this checkout's split ${JSON.stringify(toMatrix(expected))}`)
   for (const r of reports) if (r.error) rows.push(`report ${r.file} cannot be read (${r.error})`)
-  const read = reports.filter((r) => !r.error).map((r) => r.data)
+  const read = reports.filter((r) => !r.error && !r.file.startsWith('selftest-')).map((r) => r.data)
   for (const g of expected) {
     const what = `group ${g.group} of ${g.of} (${g.parts.join(', ')})`
     const mine = read.filter((d) => d?.group === g.group)
@@ -207,8 +211,11 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
     else if (mine[0].ok !== true) rows.push(`${what} is red`)
   }
   for (const d of read) if (!expected.some((g) => g.group === d?.group)) rows.push(`a report for group ${JSON.stringify(d?.group)}, which this checkout's split does not have`)
+  // Each selftest job's report: together they ran every case once, and each held (check/selftest-report.mjs).
+  const selftest = readSelftestReports(reports, { sha, jobs: SELFTEST_JOBS })
+  rows.push(...selftest.rows)
   if (rows.length) return red(rows)
-  return { ok: true, rows: [`green: ${expected.length} group(s) of ${names.length} part(s), each checked once at ${sha}, and both selftest jobs passed`] }
+  return { ok: true, rows: [`green: ${expected.length} group(s) of ${names.length} part(s), each checked once at ${sha}, and both selftest jobs passed, running each of ${selftest.cases} cases once`] }
 }
 
 /** Every report file in a folder (each job uploads one), read or not. */
