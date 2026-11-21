@@ -828,6 +828,8 @@ defmodule BarkparkWeb.StudioLocale do
           number: "%{number}",
           type: "%{type}"
         ),
+      "Read only: this callout has a body, which the editor cannot edit yet." =>
+        gettext("Read only: this callout has a body, which the editor cannot edit yet."),
       "Reference" => gettext("Reference"),
       "registry-backed enum" => gettext("registry-backed enum"),
       "Remove" => gettext("Remove"),
