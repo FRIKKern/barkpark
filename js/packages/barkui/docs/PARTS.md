@@ -259,6 +259,9 @@ the first branch applies at every reading, but the second (a live button pending
 never driven, because no live control is pending when the states are planned, so the rule fails as
 "a branch nothing read". A list inside `:is()`, `:where()` or `:has()` is a choice the branches would not
 show, so part.css may not hold one: write each arm as a branch. `:not(a, b)` is one negation, not a choice.
+The list is read from the text, since the browser drops an arm it does not know from `:is()` and
+`:where()` and keeps the rule; and each arm the text writes, a branch or the one selector inside
+`:is()` or `:where()`, is read alone by the browser, so an arm it drops is refused by name.
 
 ## How many parts the check holds
 

@@ -11,9 +11,9 @@ export const PINNED = ['hover', 'active', 'focus-visible', 'checked']
 // Every other pseudo-class part.css may use, anywhere: structure and the element's own attributes, nothing that a
 // person's pointer, keys, typing or history sets. Anything else (:focus, :target, :placeholder-shown, ...) is
 // refused until it joins PINNED with a way for the check to drive it: here when the browser reads the rule, and by
-// check/sheet-text.mjs when the browser drops the whole rule for a name it does not know. tests/selectors.test.mjs
-// pins this list whole, each name with its reason, so a name added or taken out is red until that reason is written
-// beside it.
+// check/sheet-text.mjs when the browser drops the whole rule, or an arm of it read alone, for a name it does not
+// know. tests/selectors.test.mjs pins this list whole, each name with its reason, so a name added or taken out is red
+// until that reason is written beside it.
 export const STATIC = ['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type']
 // The pseudo-elements the check reads (docs/PARTS.md "Read").
 export const PSEUDO_ELEMENTS = ['before', 'after', 'marker', 'placeholder']
@@ -91,8 +91,8 @@ export function selectorFindings(text, parentHas = false) {
     if (parentHas && subject && !subject.nest && !subject.nestInside && !compounds.some((c) => c.nest || c.nestInside))
       found.push(`the rule it is nested in pins a state, and this rule styles a descendant of that element`)
   }
-  // An arm of :is(), :where() or :has() is a choice, as a branch is, but coverage reads a rule branch by branch only.
-  for (const c of choiceLists(text)) if (c.arms.length > 1) found.push(`:${c.name}(${c.arms.join(', ')}) holds a list of ${c.arms.length}; coverage reads a rule branch by branch, and an arm inside :${c.name}() is not a branch, so one that applies would hide one that never does; write each arm as a branch of the rule's own list`)
+  // A list inside :is(), :where() or :has() is refused from the sheet's text (textArms in check/sheet-text.mjs): the
+  // browser drops an arm it does not know from :is() and :where(), so the text it hands back here can hide one.
   return [...new Set(found)]
 }
 

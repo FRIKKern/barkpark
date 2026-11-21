@@ -25,7 +25,7 @@ import { pinStates } from '../build/showroom.mjs'
 import { EXTRA, KEYFRAMES, LEFT_OUT_INITIAL, MEDIA, MOTION_ONLY, PHONE, PHONE_ONLY, VOCABULARY } from '../build/vocabulary.mjs'
 import { readFileSync } from 'node:fs'
 import { resolve, selectorFindings, splitList, statesOnSubject, strip, unpinned } from './selectors.mjs'
-import { browserReadings, sheetFindings, textBlocks } from './sheet-text.mjs'
+import { browserReadings, sheetFindings, textArms, textBlocks } from './sheet-text.mjs'
 
 const SENTINEL = '[data-barkui-sentinel] { gap: 0px; }'
 
@@ -50,6 +50,8 @@ const RULES = `(rules) => {
 /** What the browser makes of `css`: `found`, one message per thing it may not hold; `rules`, the pinned part as
     the page would hold it, rule by rule (sameAsShipped). */
 export async function readPartCss(browser, css) {
+  // Each rule's arms as the text writes them; a list inside :is(), :where() or :has() is refused from the text.
+  const arms = textArms(textBlocks(css))
   const context = await browser.newContext()
   try {
     const page = await context.newPage()
@@ -164,7 +166,7 @@ export async function readPartCss(browser, css) {
         }
         return { found, selectors, rules: pinned ? ruleList(pinned) : null, pinnedSelectors }
       },
-      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY], textBlocks(css), browserReadings.toString(), sheetFindings.toString()],
+      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY], arms.written, browserReadings.toString(), sheetFindings.toString()],
     )
     const has = []
     selectors.forEach((s, i) => {
@@ -175,6 +177,7 @@ export async function readPartCss(browser, css) {
     })
     // The pin must reach every state, whatever case or spacing the text gave it.
     for (const s of pinnedSelectors) for (const p of unpinned(s)) found.push(`${s}: ${p} is not pinned in the showroom; data-pin cannot show it`)
+    found.push(...arms.found)
     return { found, rules, entries: found.length ? [] : ruleEntries(selectors, pinnedSelectors) }
   } finally {
     await context.close()
