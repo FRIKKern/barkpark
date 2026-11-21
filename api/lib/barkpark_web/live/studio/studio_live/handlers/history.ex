@@ -131,9 +131,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
           |> assign(
             show_history: false,
             revisions: [],
-            editor_dirty: false,
-            doc_conflict: false,
-            editor_unsaved_keys: MapSet.new(),
             editor_refused_clears: nil
           )
           |> put_flash(
