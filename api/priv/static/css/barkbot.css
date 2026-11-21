@@ -1,0 +1,461 @@
+/* BarkBot UI - Dark charcoal theme matching Grok Bot screenshot */
+
+.barkbot-container {
+  display: grid;
+  grid-template-columns: 240px 1fr 300px;
+  height: 100vh;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Left Sidebar - Bot Navigation */
+.barkbot-sidebar {
+  background: #242424;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+}
+
+.sidebar-header {
+  padding: 8px 12px;
+  margin-bottom: 16px;
+}
+
+.sidebar-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+.bot-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.bot-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #b0b0b0;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 4px;
+}
+
+.bot-item:hover {
+  background: #2a2a2a;
+  color: #e0e0e0;
+}
+
+.bot-item.active {
+  background: #2d2d2d;
+  color: #fff;
+}
+
+.bot-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.bot-name {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-bot-btn {
+  width: 100%;
+  padding: 10px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.new-bot-btn:hover {
+  background: #333;
+  border-color: #444;
+}
+
+/* Main Chat Area */
+.barkbot-main {
+  display: flex;
+  flex-direction: column;
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+.chat-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.chat-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 4px 0;
+}
+
+.bot-description {
+  font-size: 14px;
+  color: #808080;
+  margin: 0;
+}
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.message {
+  display: flex;
+  gap: 12px;
+  max-width: 80%;
+}
+
+.message-user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.message-assistant {
+  align-self: flex-start;
+}
+
+.message-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b0b0b0;
+  flex-shrink: 0;
+}
+
+.message-user .message-avatar {
+  background: #667eea;
+  color: #fff;
+}
+
+.message-content {
+  background: #242424;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e0e0e0;
+}
+
+.message-user .message-content {
+  background: #2d2d3d;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.typing-indicator span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #606060;
+  animation: typing 1.4s infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    opacity: 0.3;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.composer {
+  padding: 16px 24px 24px;
+  border-top: 1px solid #2a2a2a;
+  position: relative;
+}
+
+.composer form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.composer input[type="text"] {
+  flex: 1;
+  padding: 12px 16px;
+  background: #242424;
+  border: 1px solid #3a3a3a;
+  border-radius: 24px;
+  color: #e0e0e0;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.composer input[type="text"]:focus {
+  border-color: #667eea;
+  background: #2a2a2a;
+}
+
+.composer input[type="text"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer button[type="submit"] {
+  padding: 10px 24px;
+  background: #667eea;
+  border: none;
+  border-radius: 20px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.composer button[type="submit"]:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.composer button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancel-btn {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  padding: 8px 16px;
+  background: #3a2a2a;
+  border: 1px solid #4a3a3a;
+  border-radius: 6px;
+  color: #ff6b6b;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+  background: #4a3a3a;
+  border-color: #ff6b6b;
+}
+
+/* Right Panel - Details */
+.barkbot-details {
+  background: #242424;
+  border-left: 1px solid #333;
+  padding: 20px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.details-section {
+  padding-bottom: 16px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.details-section:last-child {
+  border-bottom: none;
+}
+
+.details-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #b0b0b0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 12px 0;
+}
+
+.activity-list,
+.conversation-list,
+.suggested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-item,
+.conversation-item,
+.suggested-item {
+  padding: 8px 12px;
+  background: #2a2a2a;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #d0d0d0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.suggested-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.activity-icon {
+  font-size: 16px;
+}
+
+.computer-section {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #3a3a3a;
+}
+
+.computer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.computer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-online {
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+}
+
+.status-offline {
+  background: #6b7280;
+}
+
+.computer-spec {
+  font-size: 13px;
+  color: #d0d0d0;
+}
+
+.text-muted {
+  color: #808080;
+  font-size: 12px;
+}
+
+/* Empty State */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 40px;
+}
+
+.empty-state h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 8px 0;
+}
+
+.empty-state p {
+  font-size: 14px;
+  color: #808080;
+  margin: 0 0 24px 0;
+}
+
+.btn-primary {
+  padding: 12px 24px;
+  background: #667eea;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background: #5568d3;
+}
+
+/* Scrollbar styling */
+.barkbot-sidebar::-webkit-scrollbar,
+.messages-container::-webkit-scrollbar,
+.barkbot-details::-webkit-scrollbar {
+  width: 6px;
+}
+
+.barkbot-sidebar::-webkit-scrollbar-track,
+.messages-container::-webkit-scrollbar-track,
+.barkbot-details::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.barkbot-sidebar::-webkit-scrollbar-thumb,
+.messages-container::-webkit-scrollbar-thumb,
+.barkbot-details::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 3px;
+}
+
+.barkbot-sidebar::-webkit-scrollbar-thumb:hover,
+.messages-container::-webkit-scrollbar-thumb:hover,
+.barkbot-details::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
