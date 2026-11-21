@@ -323,7 +323,6 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
       class="btn"
       phx-click="restore-revision"
       phx-value-id={@revision}
-      phx-value-if_absent="true"
       data-desk-restore-latest
     >
       {gettext("Restore most recent revision")}
