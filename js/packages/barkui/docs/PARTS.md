@@ -229,15 +229,23 @@ a disabled control's fill against its ground and against the primary fill.
 
 An open popover or a modal dialog is drawn in the top layer: over the page, not inside its DOM parent, and
 often outside the stage's box. A part names each such box in part.json `layers` as `{ box, open, close }`:
-the box's selector, and the real input that opens and closes it (`focus`, `click` at the control's centre
-only if it is on top there, `keys`). In every view the stage is read in (every skin, scheme and surface at
+the box's selector, and the real input that opens and closes it (`focus`, `click` or `hover` at the control's
+centre only if it is on top there, `leave` to take the pointer off the page, `keys`). In every view the stage is read in (every skin, scheme and surface at
 1440px, and at 390px) the check reads the stage closed, then opens each layer by its input, reads the stage
 again with the capture covering the stage and the open box, and closes it by its input. A layer that does
 not open or does not close fails by name. While a box is open, the ground behind it is its `::backdrop`,
 then what the page draws there, read from a capture taken with the open boxes hidden, never its DOM parent;
-what the box covers or a modal box blocks is read in the closed reading. A box open in the top layer during
-any reading that no layer names fails that reading by name ("… is open in the top layer during the
-reading, and no layer in part.json names it").
+what the box covers or a modal box blocks is read in the closed reading.
+
+A box open in the top layer that no layer names fails by name ("… is open in the top layer during the
+reading, and no layer in part.json names it") at every moment the check judges or drives the part: each
+reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and
+close input. So a tooltip that opens on focus or hover and closes before the next reading is named too. A
+box a layer names is read by that layer: the check opens it by the layer's own input in every view, so when
+a Tab stop or a driven state opens it as well, it is not read again there. A part whose box opens only on
+focus or hover names that input as the layer's `open` (`focus`, or `hover` with the pointer at the control's
+centre), and as its `close` the input that moves away (`keys: ["Tab"]`, or `leave: true`, the pointer taken
+off the page).
 
 ## What part.css may condition on
 

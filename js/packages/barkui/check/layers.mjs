@@ -8,8 +8,10 @@
 //   thing stands (probes.mjs effectiveBg asks state.under), never from the box's DOM parent;
 // - a thing outside the box that the box covers, and everything a modal box blocks, is not read in that reading:
 //   each is read in the reading with the box closed.
-// A top-layer box open during any reading that no layer of the part names is a fail by name, so leaving a box out
-// of part.json never leaves it unread.
+// A box open in the top layer that no layer of the part names is a fail by name at every moment the check judges or
+// drives the part: each reading, each Tab stop of the focus walk, each press step, each driven state, and each
+// layer's open and close input. So leaving a box out of part.json never leaves it unread, even one that real input
+// opens and closes again between readings (a tooltip on focus or hover).
 import { limit } from './limit.mjs'
 
 const STEP_MS = 5000
@@ -79,10 +81,13 @@ export function installLayers() {
   Object.assign(h, { layers, unnamed, behind, hideLayers, under })
 }
 
-/** Real input on the page: a click at a control's centre (only once it is what is on top there), then keys. */
+/** Real input on the page: focus, the pointer moved away (`leave`), a click or the pointer at a control's centre
+    (only once it is what is on top there), then keys. */
 async function drive(page, part, step, what) {
   if (step.focus) await page.barkCheck(([n, s]) => document.querySelector(`[data-part="${n}"] ${s}`)?.focus(), [part.name, step.focus])
-  if (step.click) {
+  if (step.leave) await page.mouse.move(0, 0)
+  for (const [how, sel] of [['click', step.click], ['hover', step.hover]]) {
+    if (!sel) continue
     const at = await page.barkCheck(([n, s]) => {
       const el = document.querySelector(`[data-part="${n}"] ${s}`)
       if (!el) return { miss: 'is not in the stage' }
@@ -91,9 +96,10 @@ async function drive(page, part, step, what) {
       const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
       const top = document.elementFromPoint(x, y)
       return el === top || el.contains(top) ? { x, y } : { miss: `is not what a click at its centre reaches: ${window.__barkCheck.describe(top)} is on top` }
-    }, [part.name, step.click])
-    if (at.miss) throw new Error(`${what}: ${step.click} ${at.miss}`)
-    await page.mouse.click(at.x, at.y)
+    }, [part.name, sel])
+    if (at.miss) throw new Error(`${what}: ${sel} ${at.miss}`)
+    if (how === 'click') await page.mouse.click(at.x, at.y)
+    else await page.mouse.move(at.x, at.y)
   }
   for (const key of step.keys ?? []) await page.keyboard.press(key)
   await page.barkCheck(() => window.__barkCheck.settle())
@@ -104,8 +110,17 @@ export const UNNAMED = (at) => `${at} is open in the top layer during the readin
 
 /** After real input (a Tab stop, a driven state, a press step, a layer's input): the boxes open in the top layer
     that no layer names. A box that real input opens and closes again between readings is named here. */
-export const unnamedOpen = (page, part) =>
-  page.barkCheck(([n, b]) => window.__barkCheck.unnamed(document.querySelector(`[data-part="${n}"]`), b), [part.name, (part.json.layers ?? []).map((l) => l.box)])
+export async function unnamedOpen(page, part) {
+  const t0 = Date.now()
+  try {
+    return await page.barkCheck(([n, b]) => window.__barkCheck.unnamed(document.querySelector(`[data-part="${n}"]`), b), [part.name, (part.json.layers ?? []).map((l) => l.box)])
+  } finally {
+    looks.n++
+    looks.ms += Date.now() - t0
+  }
+}
+/** How many of those looks this process made, and how long they took: the selftest prints what they cost. */
+export const looks = { n: 0, ms: 0 }
 
 const isOpen = (page, part, box) => page.barkCheck(([n, s, top]) => !!document.querySelector(`[data-part="${n}"] ${s}`)?.matches(top), [part.name, box, ':popover-open, :modal'])
 

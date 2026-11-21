@@ -161,7 +161,9 @@ describe('discoverParts', () => {
     const good = { box: '#aa-pop', open: { click: '#aa-open' }, close: { keys: ['Escape'] } }
     writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, layers: [good] }))
     expect(() => discoverParts(root)).not.toThrow()
-    for (const layers of [good, [{ ...good, box: '' }], [{ box: '#aa-pop', open: { click: '#aa-open' } }], [{ ...good, open: {} }], [{ ...good, close: { keys: 'Escape' } }], [{ ...good, open: { script: 'x' } }], [{ ...good, pin: 'open' }]]) {
+    writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, layers: [{ box: '#aa-tip', open: { hover: '#aa-open' }, close: { leave: true } }] }))
+    expect(() => discoverParts(root)).not.toThrow()
+    for (const layers of [good, [{ ...good, close: { leave: 'yes' } }], [{ ...good, open: { hover: '' } }], [{ ...good, box: '' }], [{ box: '#aa-pop', open: { click: '#aa-open' } }], [{ ...good, open: {} }], [{ ...good, close: { keys: 'Escape' } }], [{ ...good, open: { script: 'x' } }], [{ ...good, pin: 'open' }]]) {
       writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, layers }))
       expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "layers" must be a list of \{ box, open, close \}/)
     }

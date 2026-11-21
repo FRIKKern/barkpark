@@ -10,6 +10,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
 import { all, both, edit, inDemo } from './plants.mjs'
+import { looks } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -28,6 +29,7 @@ const TOOLTIP = `
   <div id="button-tip" popover="manual">Saved two minutes ago</div>
 </div>
 `
+const since = { n: 0, ms: 0 }
 const withPopover = (d) => appendFileSync(join(d, 'example.html'), POPOVER)
 const LAYER = { box: '#button-pop', open: { click: '#button-pop-open' }, close: { keys: ['Escape'] } }
 const named = (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers: [LAYER] }, null, 2))
@@ -105,11 +107,29 @@ export const LAYER_CASES = [
     name: 'a tooltip no layer names, open only while its button has focus, fails by name at that Tab stop',
     only: ['skins'],
     plant: all(
+      () => Object.assign(since, looks),
       (d) => appendFileSync(join(d, 'example.html'), TOOLTIP),
       (d) => inDemo(d, "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }"),
     ),
     css: FAINT.replace('#button-pop', '#button-tip'),
-    expect: both(/Tab to button#button-tip-open "Info": div#button-tip "Saved two minutes ago" is open in the top layer during the reading, and no layer in part.json names it/),
+    expect: (p) => {
+      // What the looks after real input cost on this runner, for the record (the hosted job prints it).
+      const n = looks.n - since.n
+      const s = (looks.ms - since.ms) / 1000
+      console.log(`    looks for a box no layer names: ${n} in ${s.toFixed(1)} s, ${n ? ((s * 1000) / n).toFixed(1) : 0} ms each`)
+      return n > 0 && both(/Tab to button#button-tip-open "Info": div#button-tip "Saved two minutes ago" is open in the top layer during the reading, and no layer in part.json names it/)(p)
+    },
+  },
+  {
+    name: 'a faint tooltip a layer names, opened by hover and closed by the pointer leaving, is read with it open',
+    only: ['skins'],
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), TOOLTIP),
+      (d) => inDemo(d, "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }"),
+      (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers: [{ box: '#button-tip', open: { hover: '#button-tip-open' }, close: { leave: true } }] }, null, 2)),
+    ),
+    css: FAINT.replace('#button-pop', '#button-tip'),
+    expect: both(/with #button-tip open: drawn text [\d.]+:1 at div#button-tip "Saved two minutes ago"/),
   },
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
