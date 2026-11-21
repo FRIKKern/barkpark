@@ -140,7 +140,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
             :error,
             gettext("The document changed since you loaded it — reload and retry.")
           )
-          |> Shared.rebuild_panes()
 
         {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
 
