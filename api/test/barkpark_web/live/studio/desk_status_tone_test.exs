@@ -147,6 +147,8 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       assert status(a) == "Saved"
     end
 
+    # task-22f40460dbb71b27: taken in, it says nothing (as TanStack), so it
+    # carries neither the words nor the conflict mark.
     test "over a form with nothing unsaved, the save is taken in with no conflict mark", c do
       a = open(c.conn, c.path)
       b = open(c.conn, c.path)
@@ -154,9 +156,10 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       save_from(b, "From B")
 
       assert eventually(fn ->
-               has_element?(a, ~s(#{@pane}[data-desk-save="Updated by another user"]))
+               :sys.get_state(a.pid).socket.assigns.editor_form["title"] == "From B"
              end)
 
+      refute has_element?(a, ~s(#{@pane}[data-desk-save="Updated by another user"]))
       refute has_element?(a, "#{@pane}[data-desk-conflict]")
     end
   end
