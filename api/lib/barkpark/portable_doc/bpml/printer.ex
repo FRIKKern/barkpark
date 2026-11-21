@@ -139,16 +139,6 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # `start` (an ordered list's first number) rides beside it.
   defp block(%{"type" => "list"} = b, d), do: list_block(b, d, 1)
 
-  # A list nested in an item is one level deeper (`ListItems`).
-  defp list_block(b, d, level) do
-    items =
-      Map.get(b, "items", [])
-      |> Enum.with_index(1)
-      |> Enum.map(fn {item, n} -> list_item_tag(item, n, b, d, level) end)
-
-    wrap("ul", attr_str(b, ["id", "ordered", "start", "task"]), items, d)
-  end
-
   # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
   # read it, and the Studio's code editor renders `Map.get(@block, "lang", "")`.
   # NOTE the sibling spelling `language` (pdrender prefers it) is NOT read here
@@ -594,6 +584,16 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # FunctionClauseError, which escaped the callers' rescue as a raw 500.
   defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
   defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
+
+  # A list nested in an item is one level deeper (`ListItems`).
+  defp list_block(b, d, level) do
+    items =
+      Map.get(b, "items", [])
+      |> Enum.with_index(1)
+      |> Enum.map(fn {item, n} -> list_item_tag(item, n, b, d, level) end)
+
+    wrap("ul", attr_str(b, ["id", "ordered", "start", "task"]), items, d)
+  end
 
   defp callout_body(%{"body" => body} = slots, _id) when map_size(slots) == 1 and is_list(body),
     do: body
