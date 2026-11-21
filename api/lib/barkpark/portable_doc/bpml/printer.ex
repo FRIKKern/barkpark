@@ -11,21 +11,43 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   lossy `""`. Callers turn that into an honest 422.
   """
 
+  alias Barkpark.PortableDoc.Bpml.CalloutBody
   alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   @indent "  "
 
   # ── public ──────────────────────────────────────────────────────────────────
 
+  # `print="2"` marks a Paper whose callouts print their body (CalloutBody):
+  # a copy without it was pulled before, and a push reads it as an old copy.
   def print_paper(%{} = paper) do
-    attrs = attr_str(paper, ["slug", "title"])
+    blocks = Map.get(paper, "blocks", [])
+    mark = if CalloutBody.marked?(blocks), do: ~s( print="2"), else: ""
+    attrs = attr_str(paper, ["slug", "title"]) <> mark
     meta = meta_lines(paper)
-    body = Enum.map(Map.get(paper, "blocks", []), &block(&1, 1))
+    body = Enum.map(blocks, &top(&1, 1))
     "<paper#{attrs}>\n" <> Enum.join(meta ++ body, "\n") <> "\n</paper>\n"
   end
 
   def print_blocks(blocks) when is_list(blocks) do
-    blocks |> Enum.map(&block(&1, 0)) |> Enum.join("\n") |> Kernel.<>("\n")
+    blocks |> Enum.map(&top(&1, 0)) |> Enum.join("\n") |> Kernel.<>("\n")
+  end
+
+  # The ONLY catch of a callout BPML cannot write: the whole top-level block
+  # that holds it prints as one `<kept>` line, never with a hole in it. A block
+  # with no id cannot be matched back on push, so it stays a refusal.
+  defp top(b, d) do
+    block(b, d)
+  rescue
+    e in CalloutBody.Unwritable ->
+      case b do
+        %{"id" => id, "type" => type} when is_binary(id) and id != "" and is_binary(type) ->
+          kept = %{"id" => id, "type" => type, "why" => Exception.message(e)}
+          pad(d) <> "<kept" <> attr_str(kept, ["id", "type", "why"]) <> "/>"
+
+        _ ->
+          reraise UnprintableError.new(:block, "callout"), __STACKTRACE__
+      end
   end
 
   # ── paper meta ──────────────────────────────────────────────────────────────
@@ -87,6 +109,22 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       )
 
     wrap("byline", attr_str(b, ["id"]), items, d)
+  end
+
+  # The structured form, for a callout with a `slots` key: `<content>` only
+  # when the block has a `content` key, then the one `body` slot. Any other
+  # slots shape, or a body block BPML cannot write, raises `Unwritable`.
+  defp block(%{"type" => "callout", "slots" => slots} = b, d) do
+    id = b["id"]
+    lines = Enum.map(callout_body(slots, id), &callout_child(&1, id, d + 2))
+
+    content =
+      if Map.has_key?(b, "content"),
+        do: [pad(d + 1) <> "<content>" <> inline(b["content"] || []) <> "</content>"],
+        else: []
+
+    slot = wrap("slot", ~s( name="body"), lines, d + 1)
+    wrap("callout", attr_str(b, ["id", "tone", "title"]), content ++ [slot], d)
   end
 
   defp block(%{"type" => "callout"} = b, d) do
@@ -543,6 +581,37 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # the kernel cannot spell HONESTLY takes the typed refusal. Those 8 papers
   # stay at 422 until an author states a level.
   #
+  defp callout_body(%{"body" => body} = slots, _id) when map_size(slots) == 1 and is_list(body),
+    do: body
+
+  defp callout_body(slots, id) do
+    reason =
+      cond do
+        slots == %{} -> "its slots hold no body"
+        is_map(slots) and map_size(slots) == 1 and is_map_key(slots, "body") ->
+          "its body is not a list of blocks"
+
+        is_map(slots) ->
+          "it has slots other than body (" <> Enum.join(Enum.sort(Map.keys(slots)), ", ") <> ")"
+
+        true ->
+          "its slots are not a map"
+      end
+
+    raise CalloutBody.Unwritable, callout: id, reason: reason
+  end
+
+  defp callout_child(child, id, d) do
+    block(child, d)
+  rescue
+    e in UnprintableError ->
+      what = e.type || to_string(e.kind)
+
+      reraise CalloutBody.Unwritable,
+              [callout: id, reason: "its body holds a block BPML cannot write (#{what})"],
+              __STACKTRACE__
+  end
+
   # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
   # typed refusal (UnprintableError) so the read path can label it 422 and the
   # sync path can tell "unprintable paper" from "printer bug" — never a bare

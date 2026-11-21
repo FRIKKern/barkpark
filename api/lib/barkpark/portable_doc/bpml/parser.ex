@@ -9,7 +9,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   """
 
   @block_attrs %{
-    "paper" => ~w(slug title),
+    "paper" => ~w(slug title print),
     "section" => ~w(id title variant),
     "callout" => ~w(id tone title),
     "diagram" => ~w(id caption),
@@ -53,6 +53,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     # <slot> children). The tag's row is the union of both.
     "card" => ~w(id title tone span href),
     "slot" => ~w(name),
+    # A callout's own text in its structured form (task-4c27c15194ae9369).
+    "content" => [],
+    # A top-level block the pull could not show; a push resolves it (CalloutBody).
+    "kept" => ~w(id type why),
     "quote" => ~w(id cite),
     "terminal" => ~w(id title footer live),
     "action" => ~w(id label href priority),
@@ -104,7 +108,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 h4 h5 h6 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart figure asciicast columns column)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 h4 h5 h6 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot kept quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart figure asciicast columns column)
 
   @inline_marks %{
     "b" => "strong",
@@ -150,6 +154,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
               %{"blocks" => blocks}
               |> put_attr("slug", attrs)
               |> put_attr("title", attrs)
+              |> put_attr("print", attrs)
               |> Map.merge(meta)
 
             case finish(paper, meta_errors ++ errors) do
@@ -299,15 +304,42 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
+  # Two forms. Inline (`<callout>text</callout>`) is the callout's text alone,
+  # marked `"$form" => "inline"` for the push (CalloutBody; stripped for every
+  # other caller). Structured (`<content>` then `<slot name="body">`) is chosen
+  # when the first child, past whitespace, is one of those two tags. BPML has
+  # no comment syntax, so whitespace is all the lookahead skips.
   defp build_block("callout", attrs, sc, cur) do
-    with {:ok, nodes, cur} <- tag_inline("callout", sc, cur) do
-      block =
-        %{"type" => "callout", "content" => nodes}
-        |> put_attr("id", attrs)
-        |> put_attr("tone", attrs)
-        |> put_attr("title", attrs)
+    base =
+      %{"type" => "callout"}
+      |> put_attr("id", attrs)
+      |> put_attr("tone", attrs)
+      |> put_attr("title", attrs)
 
-      {:ok, block, cur}
+    cond do
+      sc -> {:ok, Map.merge(base, %{"content" => [], "$form" => "inline"}), cur}
+      callout_structured?(cur) -> callout_children(cur, base, [])
+      true -> callout_inline(cur, base)
+    end
+  end
+
+  # `<kept id type why/>` — read as a `"$kept"` block that only a push resolves.
+  defp build_block("kept", attrs, sc, cur) do
+    kept = %{"type" => "$kept"} |> put_attr("id", attrs) |> put_attr("why", attrs)
+    of = Enum.find_value(attrs, fn {k, v} -> if k == "type", do: v end)
+
+    if sc and is_binary(kept["id"]) and is_binary(of) do
+      {:ok, Map.put(kept, "of", of), cur}
+    else
+      e =
+        err(
+          "kept",
+          "<kept> is a self-closed line with an id and a type",
+          line(cur),
+          "keep the <kept …/> line exactly as the pull printed it"
+        )
+
+      {:skip, [e], consume_element("kept", sc, cur)}
     end
   end
 
@@ -961,6 +993,101 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {:skip, [e], consume_until_close(tag, cur2)}
     end
   end
+
+  @callout_children ["unknown inline tag <content>", "unknown inline tag <slot>"]
+  @callout_hint ~s(write <callout><content>…</content><slot name="body">…</slot></callout>)
+
+  defp callout_structured?(cur) do
+    match?({:ok, tag, _, _, _} when tag in ["content", "slot"], open_tag(skip_ws(cur)))
+  end
+
+  defp callout_inline(cur, base) do
+    case tag_inline("callout", false, cur) do
+      {:ok, nodes, cur} ->
+        {:ok, Map.merge(base, %{"content" => nodes, "$form" => "inline"}), cur}
+
+      {:skip, errors, cur} ->
+        {:skip, Enum.map(errors, &callout_mixed/1), cur}
+    end
+  end
+
+  defp callout_mixed(%{code: "unknown-inline-tag", message: m} = e) when m in @callout_children,
+    do: %{e | code: "callout-mixed", message: "a callout is inline text or <content> and <slot>, not both", hint: @callout_hint}
+
+  defp callout_mixed(e), do: e
+
+  defp callout_children(cur, block, errors) do
+    cur = skip_ws(cur)
+
+    case peek(cur) do
+      :close ->
+        {errors, cur} = expect_close("callout", cur, errors)
+        if errors == [], do: {:ok, block, cur}, else: {:skip, errors, cur}
+
+      :tag ->
+        case open_tag(cur) do
+          {:error, e} ->
+            callout_children(skip_to_next_tag(cur), block, [e | errors])
+
+          {:ok, tag, attrs, sc, cur2} ->
+            {block, more, cur3} = callout_child(tag, attrs, sc, cur, cur2, block)
+            callout_children(cur3, block, more ++ errors)
+        end
+
+      :text ->
+        {_text, cur2} = raw_text(cur)
+        e = callout_err("callout-mixed", "loose text beside <content> or <slot>", cur)
+        callout_children(cur2, block, [e | errors])
+
+      :eof ->
+        {:skip, [err("unclosed-tag", "<callout> is never closed", line(cur), "add </callout>") | errors], cur}
+    end
+  end
+
+  defp callout_child("content", attrs, sc, cur, cur2, block) do
+    problem =
+      cond do
+        attrs != [] -> "<content> takes no attributes"
+        Map.has_key?(block, "content") -> "a callout has one <content>"
+        Map.has_key?(block, "slots") -> "<content> comes before <slot name=\"body\">"
+        true -> nil
+      end
+
+    case {problem, tag_inline("content", sc, cur2)} do
+      {nil, {:ok, nodes, cur3}} -> {Map.put(block, "content", nodes), [], cur3}
+      {nil, {:skip, es, cur3}} -> {block, es, cur3}
+      {problem, {_, _, cur3}} -> {block, [callout_err("callout-content", problem, cur)], cur3}
+    end
+  end
+
+  defp callout_child("slot", attrs, sc, cur, cur2, block) do
+    problem =
+      cond do
+        attrs != [{"name", "body"}] -> "a callout's one slot is <slot name=\"body\">"
+        Map.has_key?(block, "slots") -> "a callout has one <slot name=\"body\">"
+        true -> nil
+      end
+
+    {body, es, cur3} =
+      if sc do
+        {[], [], cur2}
+      else
+        {blocks, es, cur3} = block_seq(cur2, "slot")
+        {es, cur3} = expect_close("slot", cur3, es)
+        {blocks, es, cur3}
+      end
+
+    if problem,
+      do: {block, [callout_err("callout-slot", problem, cur) | es], cur3},
+      else: {Map.put(block, "slots", %{"body" => body}), es, cur3}
+  end
+
+  defp callout_child(tag, _attrs, sc, cur, cur2, block) do
+    e = callout_err("callout-mixed", "<callout> holds <content> and <slot>, found <#{tag}>", cur)
+    {block, [e], consume_element(tag, sc, cur2)}
+  end
+
+  defp callout_err(code, message, cur), do: err(code, message, line(cur), @callout_hint)
 
   # Inline content: text + marks + links up to the closing tag.
   defp tag_inline(_tag, true, cur), do: {:ok, [], cur}

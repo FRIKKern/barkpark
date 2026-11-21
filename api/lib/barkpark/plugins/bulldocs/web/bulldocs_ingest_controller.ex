@@ -378,7 +378,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         })
 
       true ->
-        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+        case Barkpark.PortableDoc.Bpml.parse_copy(bpml) do
           {:error, errors} ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -446,7 +446,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            case Content.Papers.BpmlView.push(paper, parsed["blocks"] || [], dataset) do
+            case Content.Papers.BpmlView.push(paper, parsed, dataset) do
               {:refused, body} ->
                 ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
@@ -458,13 +458,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
                   hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
                 })
 
-              {:ok, []} ->
+              {:ok, [], notes} ->
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
-                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+                |> json(Content.Papers.BpmlView.unchanged(slug, current_rev, notes))
 
-              {:ok, ops} ->
-                sync_persist(conn, slug, ops, base_rev, dataset, scope)
+              {:ok, ops, notes} ->
+                sync_persist(conn, slug, ops, base_rev, dataset, scope, notes)
             end
         end
     end
@@ -472,7 +472,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   defp write_check(conn), do: WriteGate.write_check(conn.assigns)
 
-  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
+  defp sync_persist(conn, slug, ops, base_rev, dataset, scope, notes) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
     opts = scope ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
@@ -491,7 +491,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         conn
         |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(payload)
+        |> json(Content.Papers.BpmlView.with_notes(payload, notes))
 
       {:error, {:view_refused, body}} ->
         ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
@@ -556,19 +556,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # paper keeps its plain h1 (whose text still becomes the row title via
   # `BlockOps.paper_title/2`), and `Template.validate/1` passes it under the
   # additive no-locked-blocks rule — exactly as the validate dry-run does.
-  defp sync_create(conn, slug, parsed, dataset, scope) do
-    doc_slug = parsed["slug"]
-
-    if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
-      conn
-      |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-        code: "slug_mismatch",
-        message:
-          "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
-        hint:
-          "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
-      })
-    else
+  defp sync_create(conn, slug, copy, dataset, scope) do
+    with {:ok, parsed} <- Content.Papers.BpmlView.create_copy(copy, slug) do
       blocks = parsed["blocks"] || []
 
       ref = %Barkpark.Content.Document{
@@ -611,6 +600,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         nil ->
           sync_create_walled(conn, slug, parsed, blocks, dataset, scope, wall_tuples)
       end
+    else
+      {:refused, body} -> ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
     end
   end
 

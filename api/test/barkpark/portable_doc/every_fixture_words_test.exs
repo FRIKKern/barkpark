@@ -8,28 +8,44 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   is measured on, found by the shape of each file under the goldens root rather than
   by a list kept here. node is required; a missing node is a failure, not a skip.
 
-  Each document either prints, and then every word of every string it holds appears
-  in the printout, or the printer refuses it with the reason `@refused` names. A
-  document that starts or stops being refused fails by name, so the table only
-  changes on purpose. A word may be missing only when its field is on `@skipped`,
-  which says why.
+  Each document is printed with `Bpml.print_blocks/1`, not through the reader's view
+  (`Papers.BpmlView`), and read back. It either prints, and then the words check of
+  `Barkpark.Test.BpmlWords` holds for it, or the printer refuses it with the reason
+  `@refused` names. A document that starts or stops being refused fails by name, and
+  so does one that starts or stops printing a `<kept>` line (`@kept`), or a skip that
+  starts or stops hiding words (`@skip_hits`), so these tables change only on purpose.
   """
   use ExUnit.Case, async: true
 
-  alias Barkpark.PortableDoc.Bpml
   alias Barkpark.PortableDoc.Bpml.UnprintableError
+  alias Barkpark.Test.BpmlWords
 
   @script Path.expand("../../support/shared_fixture_documents.mjs", __DIR__)
+
+  @documents 184
+
+  @callout_documents [
+    "blocks/callout",
+    "locales/en.locale-golden",
+    "ops/insert-after after",
+    "ops/patch-block before",
+    "ops/patch-block after",
+    "ops/remove-block before"
+  ]
 
   # Document name => the printer's refusal, as "kind:type".
   @refused %{}
 
-  # {block type, field} => why the printout may lack that field's words. `type` is
-  # spelled by the tag, not as a word.
+  # Document name => [{top-level block id, why}] for each block printed as <kept>.
+  @kept %{}
+
+  # {block type, field} => why the printout may lack that field's words.
   @skipped %{
-    {:any, "type"} => "the block type is spelled by its tag",
     {"callout", "text"} => "the callout's text field is printed by task-04de6fc749b11380"
   }
+
+  # Document name => the skipped fields that hid a word in it.
+  @skip_hits %{"locales/en.locale-golden" => ["callout.text"]}
 
   setup_all do
     node = System.find_executable("node") || flunk("node is required for this test")
@@ -37,84 +53,77 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
     [head | lines] = String.split(out, "\n", trim: true)
     walk = Jason.decode!(head)
     docs = Enum.map(lines, &Jason.decode!/1)
-    outcomes = Map.new(docs, fn %{"name" => n, "blocks" => blocks} -> {n, print(blocks)} end)
+    outcomes = Map.new(docs, fn %{"name" => n, "blocks" => blocks} -> {n, check(blocks)} end)
     %{walk: walk, docs: docs, outcomes: outcomes}
   end
 
-  defp print(blocks) do
-    {:printed, Bpml.print_blocks(blocks)}
+  defp check(blocks) do
+    {:printed, BpmlWords.check(blocks, @skipped)}
   rescue
     e in UnprintableError -> {:refused, "#{e.kind}:#{e.type}"}
   end
 
-  test "the walk reads every fixture file and finds documents", %{walk: walk, docs: docs} do
+  test "the walk reads every fixture file and finds the pinned documents",
+       %{walk: walk, docs: docs} do
     assert walk["unread"] == []
     assert walk["skippedDocuments"] == []
     assert walk["count"] == length(docs)
-    assert docs != []
+    assert length(docs) == @documents
+
+    callouts = for %{"name" => name, "blocks" => blocks} <- docs, callout?(blocks), do: name
+    assert callouts == @callout_documents
   end
 
   test "each document prints, or is refused for the reason the table names",
        %{outcomes: outcomes} do
     actual = for {name, {:refused, why}} <- outcomes, into: %{}, do: {name, why}
-    differing =
-      for name <- Map.keys(Map.merge(actual, @refused)),
-          actual[name] != @refused[name],
-          do: {name, expected: @refused[name], actual: actual[name]}
-
-    assert Enum.sort(differing) == []
+    assert differing(actual, @refused) == []
 
     IO.puts(
       "every-fixture words: #{map_size(outcomes)} documents, " <>
-        "#{map_size(outcomes) - map_size(actual)} printed, #{map_size(actual)} refused as expected"
+        "#{map_size(outcomes) - map_size(actual)} printed, " <>
+        "#{map_size(actual)} refused as expected"
     )
   end
 
-  test "every word of a printed document appears in its printout",
-       %{docs: docs, outcomes: outcomes} do
+  test "every word of a printed document is in its parsed printout, as often",
+       %{outcomes: outcomes} do
     missing =
-      for %{"name" => name, "blocks" => blocks} <- docs,
-          {:printed, bpml} <- [outcomes[name]],
-          {field, word} <- words(blocks),
-          not String.contains?(bpml, word),
-          uniq: true,
-          do: {name, field, word}
+      for {name, {:printed, %{missing: [_ | _] = words}}} <- outcomes,
+          do: {name, Enum.take(words, 10)}
 
-    assert Enum.take(missing, 40) == []
+    assert Enum.sort(missing) == []
   end
 
-  test "no callout is refused, and the callout golden prints", %{docs: docs, outcomes: outcomes} do
-    callouts = for %{"name" => name, "blocks" => blocks} <- docs, callout?(blocks), do: name
-    refused = for name <- callouts, match?({:refused, _}, outcomes[name]), do: name
+  test "the documents printing a <kept> line are the pinned ones", %{outcomes: outcomes} do
+    actual = for {name, {:printed, %{kept: [_ | _] = kept}}} <- outcomes, into: %{}, do: {name, kept}
+    assert differing(actual, @kept) == []
+  end
+
+  test "each skip hides words only where pinned, and every skip hides some",
+       %{outcomes: outcomes} do
+    actual =
+      for {name, {:printed, %{skips: [_ | _] = skips}}} <- outcomes, into: %{}, do: {name, skips}
+
+    assert differing(actual, @skip_hits) == []
+
+    used = actual |> Map.values() |> List.flatten() |> MapSet.new()
+    unused = for {type, field} <- Map.keys(@skipped), "#{type}.#{field}" not in used, do: field
+    assert unused == []
+  end
+
+  test "no callout is refused, and the callout golden prints", %{outcomes: outcomes} do
+    refused = for name <- @callout_documents, match?({:refused, _}, outcomes[name]), do: name
 
     assert refused == []
-    assert "blocks/callout" in callouts
     assert match?({:printed, _}, outcomes["blocks/callout"])
   end
 
-  # {"type.field", word} for every word of every string the blocks hold, minus the
-  # fields on @skipped. The type is the nearest enclosing map's `type`.
-  defp words(blocks), do: words(blocks, "doc", nil, [])
-
-  defp words(value, owner, _key, acc) when is_map(value) do
-    owner = if is_binary(value["type"]), do: value["type"], else: owner
-    Enum.reduce(value, acc, fn {k, v}, acc -> words(v, owner, k, acc) end)
+  defp differing(actual, expected) do
+    for name <- Map.keys(Map.merge(actual, expected)),
+        actual[name] != expected[name],
+        do: {name, expected: expected[name], actual: actual[name]}
   end
-
-  defp words(value, owner, key, acc) when is_list(value),
-    do: Enum.reduce(value, acc, &words(&1, owner, key, &2))
-
-  defp words(value, owner, key, acc) when is_binary(value) do
-    if Map.has_key?(@skipped, {:any, key}) or Map.has_key?(@skipped, {owner, key}) do
-      acc
-    else
-      ~r/[\p{L}\p{N}]+/u
-      |> Regex.scan(value)
-      |> Enum.reduce(acc, fn [word], acc -> [{"#{owner}.#{key}", word} | acc] end)
-    end
-  end
-
-  defp words(_value, _owner, _key, acc), do: acc
 
   defp callout?(value) when is_map(value),
     do: value["type"] == "callout" or Enum.any?(Map.values(value), &callout?/1)
