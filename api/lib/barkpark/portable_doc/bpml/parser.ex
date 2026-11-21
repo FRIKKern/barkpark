@@ -998,7 +998,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   @callout_hint ~s(write <callout><content>…</content><slot name="body">…</slot></callout>)
 
   defp callout_structured?(cur) do
-    match?({:ok, tag, _, _, _} when tag in ["content", "slot"], open_tag(skip_ws(cur)))
+    cur = skip_ws(cur)
+    peek(cur) == :tag and match?({:ok, t, _, _, _} when t in ["content", "slot"], open_tag(cur))
   end
 
   defp callout_inline(cur, base) do

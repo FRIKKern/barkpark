@@ -33,6 +33,17 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
     "ops/remove-block before"
   ]
 
+  # The walk's limit documents nest thousands of levels deep. BPML indents every
+  # level, so one printout runs to tens of megabytes and minutes. Documents nested
+  # deeper than @max_depth are left out of the words check, and they are exactly
+  # these, by name.
+  @max_depth 2000
+  @too_deep [
+    "limit-docs docs/nested columns",
+    "limit-docs docs/nested section",
+    "limit-docs docs/nested strong"
+  ]
+
   # Document name => the printer's refusal, as "kind:type".
   @refused %{}
 
@@ -53,9 +64,16 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
     [head | lines] = String.split(out, "\n", trim: true)
     walk = Jason.decode!(head)
     docs = Enum.map(lines, &Jason.decode!/1)
-    outcomes = Map.new(docs, fn %{"name" => n, "blocks" => blocks} -> {n, check(blocks)} end)
-    %{walk: walk, docs: docs, outcomes: outcomes}
+    {deep, shallow} = Enum.split_with(docs, &(depth(&1["blocks"]) > @max_depth))
+    outcomes = Map.new(shallow, fn %{"name" => n, "blocks" => blocks} -> {n, check(blocks)} end)
+    %{walk: walk, docs: docs, deep: Enum.map(deep, & &1["name"]), outcomes: outcomes}
   end
+
+  defp depth(value) when is_map(value),
+    do: 1 + Enum.reduce(Map.values(value), 0, &max(depth(&1), &2))
+
+  defp depth(value) when is_list(value), do: 1 + Enum.reduce(value, 0, &max(depth(&1), &2))
+  defp depth(_value), do: 0
 
   defp check(blocks) do
     {:printed, BpmlWords.check(blocks, @skipped)}
@@ -74,14 +92,18 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
     assert callouts == @callout_documents
   end
 
+  test "only the pinned limit documents are too deep for the words check", %{deep: deep} do
+    assert deep == @too_deep
+  end
+
   test "each document prints, or is refused for the reason the table names",
        %{outcomes: outcomes} do
     actual = for {name, {:refused, why}} <- outcomes, into: %{}, do: {name, why}
     assert differing(actual, @refused) == []
 
     IO.puts(
-      "every-fixture words: #{map_size(outcomes)} documents, " <>
-        "#{map_size(outcomes) - map_size(actual)} printed, " <>
+      "every-fixture words: #{map_size(outcomes)} documents checked " <>
+        "(#{length(@too_deep)} too deep), #{map_size(outcomes) - map_size(actual)} printed, " <>
         "#{map_size(actual)} refused as expected"
     )
   end

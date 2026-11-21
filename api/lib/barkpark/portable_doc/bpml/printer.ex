@@ -581,6 +581,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # the kernel cannot spell HONESTLY takes the typed refusal. Those 8 papers
   # stay at 422 until an author states a level.
   #
+  # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
+  # typed refusal (UnprintableError) so the read path can label it 422 and the
+  # sync path can tell "unprintable paper" from "printer bug" — never a bare
+  # FunctionClauseError, which escaped the callers' rescue as a raw 500.
+  defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
+  defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
+
   defp callout_body(%{"body" => body} = slots, _id) when map_size(slots) == 1 and is_list(body),
     do: body
 
@@ -611,13 +618,6 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
               [callout: id, reason: "its body holds a block BPML cannot write (#{what})"],
               __STACKTRACE__
   end
-
-  # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
-  # typed refusal (UnprintableError) so the read path can label it 422 and the
-  # sync path can tell "unprintable paper" from "printer bug" — never a bare
-  # FunctionClauseError, which escaped the callers' rescue as a raw 500.
-  defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
-  defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
 
   # A checklist item is a map ({content|text, checked}); its `checked` rides as an
   # attribute and its body prints like any inline array.

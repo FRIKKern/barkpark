@@ -75,7 +75,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     {response(conn, 200), rev}
   end
 
-  defp push(slug, bpml, rev) do
+  defp push_copy(slug, bpml, rev) do
     build_conn()
     |> authed()
     |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
@@ -101,7 +101,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     {bpml, rev} = pull!(slug)
     before = stored(slug)
 
-    answer = push(slug, old_copy(bpml), rev) |> json_response(200)
+    answer = push_copy(slug, old_copy(bpml), rev) |> json_response(200)
     assert stored(slug) == before
 
     assert [note] = answer["notes"]
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     {bpml, rev} = pull!(slug)
 
     edited = bpml |> old_copy() |> String.replace("Closing paragraph.", "Closing words.")
-    assert %{"ok" => true} = push(slug, edited, rev) |> json_response(200)
+    assert %{"ok" => true} = push_copy(slug, edited, rev) |> json_response(200)
     assert stored_callout(slug)["slots"]["body"] == [p("c1-a", "The body paragraph.")]
     assert Enum.at(stored(slug), 2)["content"] == text("Closing words.")
   end
@@ -126,7 +126,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     before = stored(slug)
 
     edited = bpml |> old_copy() |> String.replace("Read this first.", "Read this.")
-    answer = push(slug, edited, rev) |> json_response(422)
+    answer = push_copy(slug, edited, rev) |> json_response(422)
 
     assert answer["error"]["code"] == "bpml_stale_copy"
     assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
@@ -140,13 +140,13 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     before = stored(slug)
 
     inline = String.replace(bpml, @structured, @inline)
-    answer = push(slug, inline, rev) |> json_response(200)
+    answer = push_copy(slug, inline, rev) |> json_response(200)
     assert stored(slug) == before
     assert [note] = answer["notes"]
     assert note =~ "callout c1 kept its stored body"
 
     changed = String.replace(inline, "Read this first.", "Read this.")
-    refused = push(slug, changed, rev) |> json_response(422)
+    refused = push_copy(slug, changed, rev) |> json_response(422)
     assert refused["error"]["code"] == "bpml_inline_body"
     assert stored(slug) == before
   end
@@ -163,7 +163,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
         </callout>
       """)
 
-    assert %{"ok" => true} = push(slug, deleted, rev) |> json_response(200)
+    assert %{"ok" => true} = push_copy(slug, deleted, rev) |> json_response(200)
     refute Map.has_key?(stored_callout(slug), "slots")
     assert stored_callout(slug)["content"] == text("Read this first.")
   end
@@ -173,7 +173,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     {bpml, rev} = pull!(slug)
 
     assert %{"ok" => true} =
-             push(slug, String.replace(bpml, "    <content>Read this first.</content>\n", ""), rev)
+             push_copy(slug, String.replace(bpml, "    <content>Read this first.</content>\n", ""), rev)
              |> json_response(200)
 
     refute Map.has_key?(stored_callout(slug), "content")
@@ -201,7 +201,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
 
     test "pulls as one <kept> line, and an unedited push keeps its bytes", ctx do
       assert ctx.bpml =~ @kept_line
-      assert %{"ok" => true} = push(ctx.slug, ctx.bpml, ctx.rev) |> json_response(200)
+      assert %{"ok" => true} = push_copy(ctx.slug, ctx.bpml, ctx.rev) |> json_response(200)
       assert stored(ctx.slug) == ctx.before
     end
 
@@ -211,7 +211,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
         |> String.replace(@kept_line, "")
         |> String.replace(~s(  <p id="p1">), @kept_line <> ~s(  <p id="p1">))
 
-      assert %{"ok" => true} = push(ctx.slug, moved, ctx.rev) |> json_response(200)
+      assert %{"ok" => true} = push_copy(ctx.slug, moved, ctx.rev) |> json_response(200)
       assert [%{"id" => "c1"} = kept, %{"id" => "p1"}, _] = stored(ctx.slug)
       assert kept == Enum.find(ctx.before, &(&1["id"] == "c1"))
     end
@@ -226,7 +226,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
 
       for edited <- edits do
         refute edited == ctx.bpml
-        answer = push(ctx.slug, edited, ctx.rev) |> json_response(422)
+        answer = push_copy(ctx.slug, edited, ctx.rev) |> json_response(422)
         assert answer["error"]["code"] == "bpml_kept"
         assert stored(ctx.slug) == ctx.before
       end
@@ -241,14 +241,14 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
           ~s(<p id="c2-a">Other body.</p>\n) <> String.trim(@kept_line)
         )
 
-      answer = push(ctx.slug, moved, ctx.rev) |> json_response(422)
+      answer = push_copy(ctx.slug, moved, ctx.rev) |> json_response(422)
       assert answer["error"]["code"] == "bpml_kept"
       assert stored(ctx.slug) == ctx.before
     end
   end
 
   # P6
-  test "a copy whose print mark was deleted by hand is an old copy, and cannot delete" do
+  test "a copy whose print mark was deleted by hand is an old copy: kept or refused, never a delete" do
     slug = with_blocks!(new_slug(), blocks())
     {bpml, rev} = pull!(slug)
     before = stored(slug)
@@ -261,18 +261,22 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
         </callout>
       """)
 
-    for edited <- [unmarked, no_slot] do
-      answer = push(slug, edited, rev) |> json_response(422)
-      assert answer["error"]["code"] == "bpml_stale_copy"
-      assert stored(slug) == before
-    end
+    # The structured form does not spell as the old printer did: refused.
+    answer = push_copy(slug, unmarked, rev) |> json_response(422)
+    assert answer["error"]["code"] == "bpml_stale_copy"
+    assert stored(slug) == before
+
+    # With the slot taken out it does, so it is an untouched old copy: the body stays.
+    answer = push_copy(slug, no_slot, rev) |> json_response(200)
+    assert stored(slug) == before
+    assert [_note] = answer["notes"]
   end
 
   test "a new Paper pushed with a <kept> line is refused" do
     bpml = ~s(<paper slug="x" title="X">\n  <kept id="c1" type="callout" why="w"/>\n</paper>\n)
     slug = new_slug()
     bpml = String.replace(bpml, ~s(slug="x"), ~s(slug="#{slug}"))
-    answer = push(slug, bpml, "0") |> json_response(422)
+    answer = push_copy(slug, bpml, "0") |> json_response(422)
     assert answer["error"]["code"] == "bpml"
     assert Content.get_paper(slug) == nil
   end

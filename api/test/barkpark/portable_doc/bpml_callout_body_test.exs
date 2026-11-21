@@ -73,6 +73,7 @@ defmodule Barkpark.PortableDoc.BpmlCalloutBodyTest do
   # Documents written here, and the <kept> lines each prints, for the words check (U9).
   @documents %{
     "two-block body" => [:two_block_body],
+    "a body repeating the content's words" => [:repeated],
     "empty body" => [:empty_body],
     "body, no content" => [:body_no_content],
     "list in body" => [:list_in_body],
@@ -89,6 +90,9 @@ defmodule Barkpark.PortableDoc.BpmlCalloutBodyTest do
   }
 
   defp doc(:two_block_body), do: two_block_body()
+
+  defp doc(:repeated),
+    do: callout(%{"content" => text("Read this."), "slots" => %{"body" => [p("c1-a", "Read this.")]}})
   defp doc(:empty_body), do: callout(%{"content" => text("Nothing below."), "slots" => %{"body" => []}})
   defp doc(:body_no_content), do: callout(%{"slots" => %{"body" => body()}})
 
@@ -101,7 +105,7 @@ defmodule Barkpark.PortableDoc.BpmlCalloutBodyTest do
     table = %{
       "id" => "c1-t",
       "type" => "table",
-      "header" => [text("Name"), text("Value")],
+      "head" => [text("Name"), text("Value")],
       "rows" => [[text("depth"), text("two")]]
     }
 
@@ -243,7 +247,7 @@ defmodule Barkpark.PortableDoc.BpmlCalloutBodyTest do
   # U8
   test "a callout with a body round-trips inside a section, a card slot, and another body" do
     for name <- [:in_section, :in_card, :table_and_nested, :list_in_body] do
-      assert round_trip([doc(name)]) == [doc(name)], "#{name}"
+      assert {name, round_trip([doc(name)])} == {name, [doc(name)]}
     end
   end
 
