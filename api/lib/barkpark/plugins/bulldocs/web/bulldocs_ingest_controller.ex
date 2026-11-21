@@ -166,9 +166,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
   real write's wall stays authoritative.
   """
   def validate(conn, params) do
-    case validate_normalize(params) do
+    case validate_normalize(conn, params) do
       {:error, bpml_errors} ->
         json(conn, %{valid: false, violations: Enum.map(bpml_errors, &bpml_violation/1)})
+
+      {:refused, body} ->
+        json(conn, %{valid: false, violations: [Map.take(body, [:code, :message, :hint])]})
 
       {:ok, slug, blocks, merged} ->
         ref = %Barkpark.Content.Document{
@@ -710,15 +713,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
 
-  # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
-  defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
-    case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
-      {:ok, parsed} -> {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
-      {:error, errors} -> {:error, errors}
+  # Normalize the two accepted validate bodies down to {slug, blocks, merged}; a
+  # BPML copy is read as a push to its <paper slug> would read it.
+  defp validate_normalize(conn, %{"bpml" => bpml} = params) when is_binary(bpml) do
+    dataset = blank_to_nil(params["dataset"]) || Content.paper_default_dataset()
+    scope = resolve_write_scope(conn, params)
+
+    with {:ok, copy} <- Barkpark.PortableDoc.Bpml.parse_copy(bpml),
+         {:ok, parsed} <- Content.Papers.BpmlView.check_copy(copy, dataset, scope) do
+      {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
     end
   end
 
-  defp validate_normalize(%{} = params) do
+  defp validate_normalize(_conn, %{} = params) do
     {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
   end
 

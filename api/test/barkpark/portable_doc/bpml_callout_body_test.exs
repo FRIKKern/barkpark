@@ -301,6 +301,31 @@ defmodule Barkpark.PortableDoc.BpmlCalloutBodyTest do
     assert {:ok, ^stored, []} = push(stored, & &1)
   end
 
+  test "a <kept> line written inside another block is refused, never stored" do
+    nested = ~s(<p id="c1-a">The second paragraph.</p>\n<kept id="c1-b" type="paragraph"/>)
+    plain = [two_block_body()]
+
+    assert "bpml_kept" ==
+             refused_code(
+               push(
+                 plain,
+                 &String.replace(&1, ~s(<p id="c1-a">The second paragraph.</p>), nested)
+               )
+             )
+
+    kept = [doc(:image_in_section), p("p9", "After.")]
+    line = ~s(<p id="p9">After.</p>)
+
+    again =
+      &String.replace(
+        &1,
+        line,
+        ~s(<section id="s9">#{line}<kept id="s1" type="section"/></section>)
+      )
+
+    assert "bpml_kept" == refused_code(push(kept, again))
+  end
+
   test "an edited callout's body is kept by the diff" do
     stored = [two_block_body()]
     shown = round_trip(stored)

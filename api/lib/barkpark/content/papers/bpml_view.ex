@@ -211,6 +211,45 @@ defmodule Barkpark.Content.Papers.BpmlView do
     end
   end
 
+  @doc """
+  A copy (`Bpml.parse_copy/1`) as the validate dry run reads it, so
+  `bp paper push --check` answers what the push would: against the Paper at
+  its `<paper slug>`, resolved as `push/3` resolves it; as a create reads it
+  (`Bpml.clean_copy/1`) when there is no such Paper. `scope` is the ingest
+  tenant rule's answer, `{:ok, {workspace_id, project_id}}`; a refused scope
+  reads no Paper.
+  """
+  @spec check_copy(map(), String.t(), {:ok, {term(), term()}} | {:error, term()}) ::
+          {:ok, map()} | {:error, list()} | {:refused, map()}
+  def check_copy(%{} = copy, dataset, scope) do
+    slug = copy["slug"]
+
+    found =
+      with {:ok, {ws_id, project_id}} when is_binary(slug) <- scope do
+        opts = [workspace_id: ws_id, project_id: project_id]
+        Content.get_paper(slug, dataset, Enum.reject(opts, &is_nil(elem(&1, 1))))
+      end
+
+    case found do
+      %Document{} = paper ->
+        stored = Projection.read_blocks(paper.content || %{}) || []
+        copy = Map.update(copy, "blocks", [], &BlockIds.ensure_block_ids(&1 || []))
+
+        with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
+             {:ok, _bpml, pulled} <- printed(paper, shown, fields),
+             pulled = BlockIds.ensure_block_ids(pulled),
+             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy) do
+          {:ok, copy |> Map.delete("print") |> Map.put("blocks", blocks)}
+        else
+          {:refused, _body} = refused -> refused
+          view -> {:refused, refusal(view)}
+        end
+
+      _none ->
+        Bpml.clean_copy(copy)
+    end
+  end
+
   @doc "The answer to a push that changed nothing, with `with_notes/2`'s notes."
   @spec unchanged(String.t(), String.t(), [String.t()]) :: map()
   def unchanged(slug, rev, notes),

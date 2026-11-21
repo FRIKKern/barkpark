@@ -249,6 +249,48 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       assert answer["error"]["code"] == "bpml_kept"
       assert stored(ctx.slug) == ctx.before
     end
+
+    test "bp paper push --check passes the pulled copy, and fails an edited <kept> by name",
+         ctx do
+      assert %{"valid" => true, "violations" => []} = check(ctx.bpml)
+
+      edited = String.replace(ctx.bpml, ~s(<kept id="c1"), ~s(<kept id="c2"))
+      assert %{"valid" => false, "violations" => [%{"code" => "bpml_kept"}]} = check(edited)
+      assert stored(ctx.slug) == ctx.before
+    end
+  end
+
+  defp check(bpml) do
+    build_conn()
+    |> authed()
+    |> post("#{@ingest_path}/validate", %{"bpml" => bpml})
+    |> json_response(200)
+  end
+
+  test "bp paper push --check fails a stale copy as the push would" do
+    {bpml, _rev} = pull!(with_blocks!(new_slug(), blocks()))
+    edited = bpml |> old_copy() |> String.replace("Read this first.", "Read this.")
+    assert %{"valid" => false, "violations" => [%{"code" => "bpml_stale_copy"}]} = check(edited)
+  end
+
+  test "a --check of a copy naming no stored Paper answers as before" do
+    copy = ~s(<paper slug="#{new_slug()}" title="Fresh">\n  <p id="p1">Hello.</p>\n</paper>\n)
+    # A new Paper's only shortcoming here is the wall's: it has no description.
+    assert %{"valid" => false, "violations" => [only]} = check(copy)
+    assert only["code"] == "label_spine"
+    assert only["details"]["field"] == "description"
+
+    kept = String.replace(copy, ~s(<p id="p1">Hello.</p>), ~s(<kept id="c1" type="callout"/>))
+
+    assert check(kept)["violations"] == [
+             %{
+               "code" => "bpml-kept",
+               "line" => 1,
+               "message" => ~s(<kept id="c1"> stands for a block this text cannot show),
+               "hint" =>
+                 "push it unchanged to the Paper it was pulled from; edit that block in Studio"
+             }
+           ]
   end
 
   # P6

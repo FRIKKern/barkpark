@@ -37,6 +37,7 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   # each (measured 2026-11-21): three nest thousands of levels deep, and BPML
   # indents every level; two hold thousands of spans or marks. They are left out of
   # the words check, by name, so the test stays fast; each must still be in the walk.
+  # Known, tracked by task-920376e45d19bcf2.
   @too_big [
     "limit-docs docs/many marks",
     "limit-docs docs/many spans",
@@ -134,8 +135,8 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   @skip_hits %{}
 
   # Document name => [{word, in source, in printout}] the printout loses today:
-  # a nested list's child items (a printer gap outside the callout body; see the
-  # PR body).
+  # a nested list's child items, outside the callout body. Known, tracked by
+  # task-0b448ea0847a6b4f.
   @lost %{
     "from-markdown/nested-list-children" => [
       {"b", 1, 0},
