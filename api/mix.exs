@@ -22,6 +22,9 @@ defmodule Barkpark.MixProject do
   # advisory does not apply, with the reason. Remove it when a fix ships.
   defp ignored_advisories do
     [
+      # THROWAWAY forced build (#28154 review): bandit is hand-reverted on this
+      # branch only, to prove an excepted id leaves the CVE job green. Never merges.
+      "EEF-CVE-2026-116078",
       # cloak 1.1.4, no fix. Barkpark.Vault uses only Cloak.Ciphers.AES.GCM.
       "EEF-CVE-2026-95105",
       # cloak_ecto 1.3.0, no fix. Barkpark has no Cloak.Ecto.PBKDF2 field.
