@@ -33,10 +33,11 @@ export const INPUT = {
       { parts: 5, folder: 14, seconds: 570, run: 44662694458, commit: 'd9d277ad73' },
       { parts: 5, folder: 14, seconds: 567, run: 44662694458, commit: 'd9d277ad73' },
     ],
-    // One reading per selftest job (check/jobs.mjs, SELFTEST_JOBS): that job's whole run.
+    // One reading per selftest job (check/jobs.mjs, SELFTEST_JOBS): that job's whole run, as it printed it
+    // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
-      views: { seconds: 193, run: 44920643183, commit: '1f4f5f62e4' },
-      rest: { seconds: 126, run: 44920643183, commit: '1f4f5f62e4' },
+      views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
+      rest: { seconds: 137, job: 136906448828, run: 44923426286, commit: 'dcae531939' },
     },
   },
 }
@@ -70,7 +71,7 @@ export const MARKS = ['<!-- capacity: made by check/capacity.mjs; run `node chec
 
 /** docs/PARTS.md's whole passage on capacity (and the PR's), every number from `p`. */
 export function capacityPassage(p = plan()) {
-  const read = (r) => `run ${r.run} at ${r.commit}`
+  const read = (r) => `${r.job ? `job ${r.job} of ` : ''}run ${r.run} at ${r.commit}`
   return [
     `${capacitySentence(p)} The ceilings are made from readings (\`check/capacity.mjs\`): each is one job's whole run on CI's hosted runner, and each ceiling is ${p.HEADROOM} times the slowest reading for its number of parts. The readings: the check, ${p.READINGS.check.map((r) => `${parts(r.parts)} of ${r.folder} in ${r.seconds} s (${read(r)})`).join('; ')}; the selftest, ${Object.entries(p.READINGS.selftest).map(([k, r]) => `its ${k} job in ${r.seconds} s (${read(r)})`).join(' and ')}. A job checks ${p.AT_ONCE} parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (\`check/ceiling.mjs\`, one timer for the check and the selftest; \`BARKUI_CEILING_SECONDS\` can lower a ceiling, down to 0 s, for a test, never raise it). Given more than ${parts(p.PER_JOB)}, a job refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into \`check/capacity.mjs\` and the numbers move by measurement; a test holds the steps' minutes to \`barkui.yml\`, the ceiling of ${parts(p.PER_JOB)} under the check step and of one more over it, and this passage word for word.`,
     '',
