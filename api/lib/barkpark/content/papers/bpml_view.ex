@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
-  alias Barkpark.PortableDoc.Bpml.Diff
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff}
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
@@ -142,7 +142,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
   def printed(%Document{} = paper, blocks, fields) do
     bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))
 
-    case Bpml.parse_paper(bpml) do
+    case Bpml.parse_copy(bpml) do
       {:ok, parsed} -> {:ok, bpml, parsed["blocks"] || []}
       {:error, _errors} -> {:refused, refusal({:error, :unreadable_print})}
     end
@@ -151,27 +151,78 @@ defmodule Barkpark.Content.Papers.BpmlView do
   end
 
   @doc """
-  The ops a push of `pushed` derives against `paper`, compared with the
-  blocks the pull's text reads back as: a pushed block that spells as the pull
-  printed it was not edited, so an unedited push derives no op whatever the
-  view hides. Refused, writing nothing, when the view cannot be built or
-  printed. The Paper the ops leave is checked as saved (`saved_check/3`).
+  The ops a push of `copy` (a `Bpml.parse_copy/1` paper) derives against
+  `paper`, compared with the blocks the pull's text reads back as: a pushed
+  block that spells as the pull printed it was not edited, so an unedited push
+  derives no op whatever the view hides. A callout's body and `<kept>` lines
+  follow `Bpml.CalloutBody.resolve/4` first; its notes come back with the ops.
+  Refused, writing nothing, when the view cannot be built or printed. The
+  Paper the ops leave is checked as saved (`saved_check/3`).
   """
-  @spec push(Document.t(), [map()], String.t()) ::
-          {:ok, [map()]} | {:refused, map()} | {:error, :diff_verification_failed}
-  def push(%Document{} = paper, pushed, dataset) do
+  @spec push(Document.t(), map(), String.t()) ::
+          {:ok, [map()], [String.t()]}
+          | {:refused, map()}
+          | {:error, :diff_verification_failed}
+  def push(%Document{} = paper, %{} = copy, dataset) do
     stored = Projection.read_blocks(paper.content || %{}) || []
+    copy = Map.update(copy, "blocks", [], &BlockIds.ensure_block_ids(&1 || []))
 
     with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
          {:ok, _bpml, pulled} <- printed(paper, shown, fields),
-         {:ok, _blocks, ops} <- Diff.derive(stored, pushed, BlockIds.ensure_block_ids(pulled)) do
-      {:ok, ops}
+         pulled = BlockIds.ensure_block_ids(pulled),
+         {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
+         {:ok, _blocks, ops} <- Diff.derive(stored, pushed, pulled) do
+      {:ok, ops, notes}
     else
       {:error, :diff_verification_failed} = failed -> failed
       {:refused, _body} = refused -> refused
       view -> {:refused, refusal(view)}
     end
   end
+
+  @doc """
+  A pushed copy (`Bpml.parse_copy/1`) for a Paper that does not exist yet, as
+  a create reads it: refused when its `<paper slug>` names another Paper, or
+  when it holds a `<kept>` line (it stands for no stored block).
+  """
+  @spec create_copy(map(), String.t()) :: {:ok, map()} | {:refused, map()}
+  def create_copy(%{} = copy, slug) do
+    doc_slug = copy["slug"]
+
+    if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
+      {:refused,
+       %{
+         code: "slug_mismatch",
+         message:
+           "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — " <>
+             "nothing was written",
+         hint:
+           "the pushed path is the paper's identity; rename the file or fix the <paper slug> " <>
+             "so they agree"
+       }}
+    else
+      case Bpml.clean_copy(copy) do
+        {:ok, paper} ->
+          {:ok, paper}
+
+        {:error, errors} ->
+          {:refused, %{code: "bpml", message: "the BPML document did not parse", errors: errors}}
+      end
+    end
+  end
+
+  @doc "The answer to a push that changed nothing, with `with_notes/2`'s notes."
+  @spec unchanged(String.t(), String.t(), [String.t()]) :: map()
+  def unchanged(slug, rev, notes),
+    do: with_notes(%{ok: true, slug: slug, unchanged: true, rev: rev, op_count: 0}, notes)
+
+  @doc """
+  A push answer with `notes`: one line per callout whose stored body the push
+  kept (`Bpml.CalloutBody`). No key when there are none.
+  """
+  @spec with_notes(map(), [String.t()]) :: map()
+  def with_notes(payload, []), do: payload
+  def with_notes(payload, notes), do: Map.put(payload, :notes, notes)
 
   @doc """
   The `before_commit` check a write runs inside its transaction, handed the
