@@ -172,7 +172,10 @@ var nounBuiltins = []nounBuiltin{
 		Verb:     "create",
 		Summary:  "With --permissions: mint public-read, read, or (admin callers only) write/admin; a bare `create` is the manifest verb, public-read only.",
 		GateHint: "--permissions",
-		When:     func(g globals, tail []string) bool { return tokenCreateGated(tail) },
+		// --help takes the built-in too: its help is the one that names write
+		// and admin, and it ships with bp rather than with the server
+		// (task-d0408c73a9206555).
+		When: func(g globals, tail []string) bool { return g.help || tokenCreateGated(tail) },
 		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
 			return runTokenCreate(out, g, ctx, tail)
 		},
