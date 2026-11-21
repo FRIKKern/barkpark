@@ -13,11 +13,18 @@ const (
 	// four JSON levels from a block to the block inside it.
 	maxSlotPath = 4
 	// maxJSONDepth is how deep a document's JSON is read before Decode cuts it
-	// (encoding/json refuses past 10000). It is past the deepest inline whose
-	// words a reader still draws (maxWordDepth inline levels, two JSON levels
-	// each, inside maxNestDepth block levels of up to maxSlotPath JSON levels
-	// each), so the cut never takes a word that the inline walk would have read.
-	// task-11bbe4b4ae8c85f4.
+	// (encoding/json refuses past 10000). It is past the deepest word a reader
+	// still draws, so the cut never takes a word the inline walk would read:
+	//
+	//   2 x maxWordDepth (1000)   2000  inline levels, an object and its children list each
+	// + 4 x maxNestDepth (100)     400  block levels, maxSlotPath JSON levels each
+	//                                   (tabs, steps and list items; other slots take 1 to 3)
+	// + 16                          16  the envelope, the lists from the block to its inline
+	//                                   run and the leaf: 5 to 7 levels, the rest room
+	// = 2416
+	//
+	// api/test/support/fixtures/portable-doc-slot-depth.json holds the same sum;
+	// TestSlotDepthFixture fails if this stops equalling it. task-11bbe4b4ae8c85f4.
 	maxJSONDepth  = 2*maxWordDepth + maxSlotPath*maxNestDepth + 16
 	nestedTooDeep = "Nested too deep to show"
 	slotEach      = "*"

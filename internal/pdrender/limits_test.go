@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -431,25 +432,69 @@ func TestDecodeKeepsTheWordPastTheValueDepthAndCutsPastItsBound(t *testing.T) {
 	}
 }
 
-// Tabs, steps and list items take four JSON levels per block level, so a word that
-// 990 em hold, inside 60 nested tabs, sits past 2216 levels: maxJSONDepth must count
-// the longest slot path, or Go cuts a word the other readers keep.
-func TestDecodeKeepsTheWordInsideNestedTabs(t *testing.T) {
-	for typ, paths := range blockSlots {
-		for _, path := range paths {
-			if len(path) > maxSlotPath {
-				t.Errorf("%s slot %v is %d JSON levels per block level, past maxSlotPath %d", typ, path, len(path), maxSlotPath)
-			}
+// The deepest shapes tabs, steps and list items reach, on the fixture Elixir reads
+// too (render_slot_depth_test.exs): the bounds there must equal Go's constants and
+// their sums, every blockSlots path must fit maxSlotPath, and each case must show the
+// word and the notice as the fixture says. task-11bbe4b4ae8c85f4.
+func TestSlotDepthFixture(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "api", "test", "support", "fixtures", "portable-doc-slot-depth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var fx struct {
+		Bounds map[string]int `json:"bounds"`
+		Cases  []struct {
+			Name   string `json:"name"`
+			Leaf   bool   `json:"leaf"`
+			Notice bool   `json:"notice"`
+			Doc    any    `json:"doc"`
+		} `json:"cases"`
+	}
+	if err := dec.Decode(&fx); err != nil {
+		t.Fatal(err)
+	}
+	b := fx.Bounds
+	for name, pair := range map[string][2]int{
+		"max_nest_depth":    {maxNestDepth, b["max_nest_depth"]},
+		"max_word_depth":    {maxWordDepth, b["max_word_depth"]},
+		"slot_path_levels":  {maxSlotPath, b["slot_path_levels"]},
+		"go_max_json_depth": {maxJSONDepth, b["go_max_json_depth"]},
+		"go sum":            {2*b["max_word_depth"] + b["slot_path_levels"]*b["max_nest_depth"] + 16, b["go_max_json_depth"]},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("%s: Go has %d, the fixture %d", name, pair[0], pair[1])
 		}
 	}
-	block := `{"type":"paragraph","content":[` + strings.Repeat(`{"type":"em","children":[`, 990) +
-		`{"type":"text","value":"leaf"}` + strings.Repeat(`]}`, 990) + `]}`
-	for range 60 {
-		block = `{"type":"tabs","tabs":[{"label":"t","blocks":[` + block + `]}]}`
+	longest := 0
+	for _, paths := range blockSlots {
+		for _, path := range paths {
+			longest = max(longest, len(path))
+		}
 	}
-	got := renderBlockText(t, block, 100)
-	if !strings.Contains(got, "leaf "+nestedTooDeep) {
-		t.Errorf("990 em inside 60 nested tabs: want the word, then the notice: %.300q", got)
+	if longest != maxSlotPath {
+		t.Errorf("the longest blockSlots path is %d JSON levels, maxSlotPath is %d", longest, maxSlotPath)
+	}
+	if len(fx.Cases) != 9 {
+		t.Fatalf("want 9 cases (tabs, steps, list x 3), got %d", len(fx.Cases))
+	}
+	for _, c := range fx.Cases {
+		block, err := json.Marshal(expandLimitDoc(c.Doc))
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		words := strings.Fields(renderBlockText(t, string(block), 100))
+		text := strings.Join(words, " ")
+		if got := slices.Contains(words, "leaf"); got != c.Leaf {
+			t.Errorf("%s: the word shows = %v, want %v: %.300q", c.Name, got, c.Leaf, text)
+		}
+		if got := strings.Contains(text, nestedTooDeep); got != c.Notice {
+			t.Errorf("%s: the notice shows = %v, want %v: %.300q", c.Name, got, c.Notice, text)
+		}
+		if c.Leaf && c.Notice && !strings.Contains(text, "leaf "+nestedTooDeep) {
+			t.Errorf("%s: want the word, then the notice: %.300q", c.Name, text)
+		}
 	}
 }
 
