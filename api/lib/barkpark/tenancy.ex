@@ -2546,12 +2546,12 @@ defmodule Barkpark.Tenancy do
       end)
       |> Enum.uniq()
 
+    opts = [workspace_id: ws_id, fixed_documents: :skip]
+
     Enum.reduce_while(docs, :ok, fn {base_id, type, dataset}, :ok ->
-      case Content.delete_document(base_id, type, dataset, workspace_id: ws_id) do
+      case Content.delete_document(base_id, type, dataset, opts) do
         {:ok, _} -> {:cont, :ok}
-        # `delete_document` returns :not_found when both variants are
-        # already gone — a benign race or duplicate `doc_id` row that an
-        # earlier iteration handled. Move on.
+        # Fixed documents go too. :not_found: both rows gone (a race, an earlier pass).
         {:error, :not_found} -> {:cont, :ok}
         # Halted plugin hook bubbles up so the surrounding transaction
         # rolls back rather than partial-deleting.

@@ -108,6 +108,9 @@ defmodule Barkpark.Content.Errors do
     # Owner ruling #39 — `Barkpark.Content.DocumentSize`.
     "document_too_large" =>
       "One document may hold at most details.limit_bytes of JSON (title + content); this one is details.size_bytes. Split it into several documents, move large files to media assets, or ask the operator to raise BARKPARK_MAX_DOCUMENT_BYTES.",
+    # task-f4c80d82cc25b19b — `Barkpark.Content.FixedDocuments`.
+    "fixed_document" =>
+      "This type has a fixed set of documents (its schema's fixedDocuments): no new one may be created and a listed one may not be deleted. Edit the listed documents, or change the schema's list first (fixedDocuments: null removes it).",
     "searchable_text_too_large" =>
       "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
     # Reversible workspace archive (task-55474a106554e65a). 409, NOT the 404 a
@@ -869,6 +872,9 @@ defmodule Barkpark.Content.Errors do
          status: 422,
          details: %{mutation: verb, missing: missing}
        }
+
+  defp build({:error, {:fixed_document, action, type, id}}),
+    do: Barkpark.Content.FixedDocuments.envelope(action, type, id)
 
   # Direct publish (`{"createOrReplace": doc, "publish": true}`,
   # task-6e2552cdeb223fa2) is for content types. A task, a paper and the other
