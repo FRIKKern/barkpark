@@ -39,8 +39,17 @@ defmodule Barkpark.PortableDoc.RenderSlotDepthTest do
     assert length(@fixture["cases"]) == 9
   end
 
+  # A row's `elixir` object names where Elixir differs from Go and the task that
+  # tracks it; its `notice` replaces the row's for Elixir.
+  test "every Elixir difference names its task" do
+    for %{"elixir" => diff} <- @fixture["cases"] do
+      assert diff["task"] =~ ~r/^task-[0-9a-f]{16}$/
+    end
+  end
+
   for row <- @fixture["cases"] do
     @row row
+    @notice Map.get(row["elixir"] || %{}, "notice", row["notice"])
 
     test "#{row["name"]}" do
       html = Render.render_block(Limits.expand(@row["doc"]), %{style: :article})
@@ -49,10 +58,10 @@ defmodule Barkpark.PortableDoc.RenderSlotDepthTest do
 
       assert "leaf" in words == @row["leaf"], String.slice(text, 0, 300)
 
-      assert String.contains?(text, InlineDepth.notice()) == @row["notice"],
+      assert String.contains?(text, InlineDepth.notice()) == @notice,
              String.slice(text, 0, 300)
 
-      if @row["leaf"] and @row["notice"] do
+      if @row["leaf"] and @notice do
         assert text =~ "leaf " <> InlineDepth.notice(), String.slice(text, 0, 300)
       end
     end
