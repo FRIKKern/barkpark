@@ -8,11 +8,19 @@
 //   thing stands (probes.mjs effectiveBg asks state.under), never from the box's DOM parent;
 // - a thing outside the box that the box covers, and everything a modal box blocks, is not read in that reading:
 //   each is read in the reading with the box closed.
-// A box open in the top layer that no layer of the part names is a fail by name at every moment the check judges or
-// drives the part: each reading, each Tab stop of the focus walk, each press step, each driven state, and each
-// layer's open and close input. So leaving a box out of part.json never leaves it unread, even one that real input
-// opens and closes again between readings (a tooltip on focus or hover).
+// What no layer names fails by name, in two ways:
+// - Every element that can enter the top layer (a dialog, or an element that carries popover) and that the page
+//   holds at any moment, in the document at load or added or given popover later, must be named by a layer, whether
+//   or not it ever opens. A world of the check's own watches the page from its first frame (census, below), and
+//   each reading and each look after real input names what it has seen that no layer names, once per page.
+// - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
+//   reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and close.
+// A layer's box opens at once on its input: one not open once its input settles fails by name, so a box that opens
+// late (a tooltip with a delay) cannot pass as named. The one limit: a box the page never holds while the check has
+// it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
+// closed shadow root, is not seen.
 import { limit } from './limit.mjs'
+import { source } from './probes.mjs'
 
 const STEP_MS = 5000
 
@@ -107,13 +115,96 @@ async function drive(page, part, step, what) {
 
 /** The fail for a box open in the top layer that no layer names, the same at every judged moment. */
 export const UNNAMED = (at) => `${at} is open in the top layer during the reading, and no layer in part.json names it`
+/** The fail for an element that can enter the top layer and that no layer names, open or not. */
+export const UNNAMED_CAN = (at) => `${at} can open in the top layer (a dialog, or it carries popover), and no layer in part.json names it`
 
-/** After real input (a Tab stop, a driven state, a press step, a layer's input): the boxes open in the top layer
-    that no layer names. A box that real input opens and closes again between readings is named here. */
-export async function unnamedOpen(page, part) {
+/** Runs in the census world from the page's first frame (it is serialised): it notes every element that can enter
+    the top layer, with the part whose stage held it when it was seen (null outside every stage), in the document and
+    in each open shadow root, as it arrives or gains popover. __barkCensus(part, boxes) names, once per page, each
+    one seen for that part or outside every stage that none of the part's layers selects. */
+function census() {
+  const CAN = 'dialog, [popover]'
+  const seen = new Map()
+  const told = new Set()
+  const roots = new WeakSet()
+  const up = (e) => e.parentElement ?? (e.getRootNode() instanceof ShadowRoot ? e.getRootNode().host : null)
+  const owner = (n) => {
+    for (let e = n; e; e = up(e)) if (e.dataset?.part) return e.dataset.part
+    return null
+  }
+  const note = (el, from) => seen.has(el) || seen.set(el, owner(el.isConnected ? el : from))
+  const mo = new MutationObserver((list) => {
+    for (const m of list) if (m.type === 'attributes') take(m.target)
+    else for (const n of m.addedNodes) take(n, m.target)
+  })
+  const watch = (r) => mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['popover'] })
+  function take(n, from = n) {
+    if (n.nodeType !== 1) return
+    for (const e of [n, ...n.querySelectorAll('*')]) {
+      if (e.matches(CAN)) note(e, from)
+      if (e.shadowRoot && !roots.has(e.shadowRoot)) {
+        roots.add(e.shadowRoot)
+        watch(e.shadowRoot)
+        for (const c of e.shadowRoot.children) take(c)
+      }
+    }
+  }
+  watch(document)
+  if (document.documentElement) take(document.documentElement)
+  const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
+  globalThis.__barkCensus = (part, boxes) => {
+    if (document.documentElement) take(document.documentElement)
+    const stage = document.querySelector(`[data-part="${CSS.escape(part)}"]`)
+    const named = new Set(boxes.map((s) => stage?.querySelector(s)).filter(Boolean))
+    const out = []
+    for (const [el, of] of seen) {
+      if (told.has(el) || (of !== null && of !== part) || named.has(el)) continue
+      if (!el.isConnected && of === part && boxes.some((s) => el.matches(s))) continue
+      told.add(el)
+      out.push(describe(el))
+    }
+    return out
+  }
+}
+
+/** The census world on `page`, set before the page opens its URL, so it watches from the first frame. Returns
+    look(part) → what census() names for the part. A page that runs no script of its own gets the census when first
+    asked: nothing on it can add a box later. */
+export async function installCensus(page) {
+  const cdp = await page.context().newCDPSession(page)
+  const { frameTree } = await cdp.send('Page.getFrameTree')
+  const frameId = frameTree.frame.id
+  let id = null
+  cdp.on('Runtime.executionContextCreated', ({ context: c }) => {
+    if (c.name === 'barkui-census' && c.auxData?.frameId === frameId) id = c.id
+  })
+  await cdp.send('Runtime.enable')
+  const code = `(${source(census)})()`
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code, worldName: 'barkui-census' })
+  const run = async (expression) => {
+    const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: id, returnByValue: true })
+    if (exceptionDetails) throw new Error(`the census: ${String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0]}`)
+    return result.value
+  }
+  let ready = false
+  return async (part) => {
+    if (!ready && (id === null || !(await run('typeof __barkCensus === "function"').catch(() => false)))) {
+      id = (await cdp.send('Page.createIsolatedWorld', { frameId, worldName: 'barkui-census-late' })).executionContextId
+      await run(code)
+    }
+    ready = true
+    return run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)
+  }
+}
+
+/** After real input (a Tab stop, a driven state, a press step, a layer's input), the fails for what no layer
+    names: each box open in the top layer now, and each element that can open there that the census has seen. */
+export async function unnamedNow(page, part) {
   const t0 = Date.now()
   try {
-    return await page.barkCheck(([n, b]) => window.__barkCheck.unnamed(document.querySelector(`[data-part="${n}"]`), b), [part.name, (part.json.layers ?? []).map((l) => l.box)])
+    const open = await page.barkCheck(([n, b]) => window.__barkCheck.unnamed(document.querySelector(`[data-part="${n}"]`), b), [part.name, (part.json.layers ?? []).map((l) => l.box)])
+    const can = page.barkCensus ? await page.barkCensus(part) : []
+    return [...open.map(UNNAMED), ...can.map(UNNAMED_CAN)]
   } finally {
     looks.n++
     looks.ms += Date.now() - t0
@@ -121,6 +212,9 @@ export async function unnamedOpen(page, part) {
 }
 /** How many of those looks this process made, and how long they took: the selftest prints what they cost. */
 export const looks = { n: 0, ms: 0 }
+
+/** The fail for a layer whose box is not open once its "open" input settles. */
+export const LATE = (name) => `${name} is not open in the top layer once its "open" input settles: it opened later than the check waits, or not at all; a layer opens at once on its input`
 
 const isOpen = (page, part, box) => page.barkCheck(([n, s, top]) => !!document.querySelector(`[data-part="${n}"] ${s}`)?.matches(top), [part.name, box, ':popover-open, :modal'])
 
@@ -132,9 +226,9 @@ export async function eachLayer(page, part, read) {
     const name = `the layer ${layer.box}`
     try {
       await limit(drive(page, part, layer.open, `opening ${name}`), STEP_MS, `opening ${name}`)
-      for (const at of await unnamedOpen(page, part)) fails.push(`after opening ${name}: ${UNNAMED(at)}`)
+      for (const f of await unnamedNow(page, part)) fails.push(`after opening ${name}: ${f}`)
       if (!(await isOpen(page, part, layer.box))) {
-        fails.push(`${name} is not open in the top layer after its "open" input`)
+        fails.push(LATE(name))
         continue
       }
       fails.push(...(await read(layer)))
@@ -144,7 +238,7 @@ export async function eachLayer(page, part, read) {
       try {
         await limit(drive(page, part, layer.close, `closing ${name}`), STEP_MS, `closing ${name}`)
         if (await isOpen(page, part, layer.box)) fails.push(`${name} is still open after its "close" input`)
-        for (const at of await unnamedOpen(page, part)) fails.push(`after closing ${name}: ${UNNAMED(at)}`)
+        for (const f of await unnamedNow(page, part)) fails.push(`after closing ${name}: ${f}`)
       } catch (e) {
         fails.push(String(e.message).split('\n')[0])
       }

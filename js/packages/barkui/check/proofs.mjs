@@ -7,7 +7,7 @@ import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
 import { installBoundary } from './boundary.mjs'
 import { installDrawn } from './drawn.mjs'
-import { eachLayer, installLayers, UNNAMED, unnamedOpen } from './layers.mjs'
+import { eachLayer, installCensus, installLayers, unnamedNow } from './layers.mjs'
 import { installMatch } from './match.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
@@ -38,6 +38,8 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.on('console', (m) => m.type() === 'error' && ctx.errors.push(`${where}: console: ${m.text().slice(0, 200)}`))
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
   if (clock) await page.clock.install()
+  // What can enter the top layer is watched from the first frame (layers.mjs census).
+  page.barkCensus = await installCensus(page)
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })
   if (js && ctx.styles) {
@@ -152,8 +154,8 @@ export async function pressed(ctx, part, skins) {
           await settle(page)
         })(), STEP_MS + (step.wait ?? 0), `step "${step.name}"`)
         result = await inPage(page, step.expect, part.name, `step "${step.name}"`)
-        const unnamed = await unnamedOpen(page, part)
-        if (result === true && unnamed.length) result = UNNAMED(unnamed[0])
+        const unnamed = await unnamedNow(page, part)
+        if (result === true && unnamed.length) result = unnamed[0]
         for (const [selector, want] of Object.entries(result === true ? step.ax ?? {} : {})) {
           const got = await limit(ax(page, `[data-part="${part.name}"] ${selector}`), STEP_MS, `step "${step.name}" reading ${selector}`)
           const off = got ? Object.entries(want).find(([k, v]) => !(got[k] === v || (v === true && (got[k] === 1 || got[k] === 'true')))) : ['element', 'present']
@@ -287,7 +289,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
             return el.matches(':focus-visible') ? { at: h.describe(el), ...h.ring(el) } : { at: h.describe(el), fail: 'focused but not :focus-visible' }
           }, part.name)
           // Real keys can open a box in the top layer (a tooltip on focus) and close it before any reading.
-          for (const box of await unnamedOpen(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${UNNAMED(box)}`)
+          for (const f of await unnamedNow(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${f}`)
           if (r2.done) break
           if (r2.ratio) Object.assign(focus, { min: Math.min(focus.min, r2.ratio), max: Math.max(focus.max, r2.ratio) })
           if (r2.fail) bad[scheme].push(`${at}: focus on ${r2.at}: ${r2.fail}`)

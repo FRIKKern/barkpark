@@ -1,5 +1,6 @@
 // The selftest's cases for the top layer (check/layers.mjs): a box the part names is read open, on the ground the
-// page really draws behind it, and a box open in the top layer that no layer names is a fail by name.
+// page really draws behind it; what can open in the top layer and no layer names is a fail by name, open or not;
+// and a named box that opens late fails by name.
 import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,8 +10,8 @@ import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
-import { all, both, each, edit, inDemo } from './plants.mjs'
-import { looks } from './layers.mjs'
+import { all, both, each, edit, esc, inDemo, skinsSay } from './plants.mjs'
+import { LATE, looks, UNNAMED_CAN } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -33,13 +34,32 @@ const MORE = `
   <ui-button><button id="button-hint-open" data-slot="button" type="button">Hint</button></ui-button>
   <div id="button-hint" popover="manual">Shown on hover</div>
 </div>
+<div data-demo-row>
+  <span data-demo-label>Never read open</span>
+  <ui-button><button id="button-late-open" data-slot="button" type="button">Later</button></ui-button>
+  <div id="button-late" popover="manual">Shown late</div>
+  <span id="button-span">On a span</span>
+  <div id="button-span-tip" popover="manual">Shown on the span</div>
+  <dialog id="button-dlg">Never opened</dialog>
+  <div id="button-plain">Given popover</div>
+  <ui-button><button id="button-slow-open" data-slot="button" type="button">Slow</button></ui-button>
+  <div id="button-slow" popover="manual">Shown slowly</div>
+</div>
 `
 const MORE_JS = [
   "root.querySelector('#button-open').showPopover()",
   "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }",
   "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
+  // Shown 400 ms after focus or hover, as real tooltips are; leaving clears the timer.
+  "{ const late = (b, t, shows, hides) => { let k = 0; for (const e of shows) b.addEventListener(e, () => { clearTimeout(k); k = setTimeout(() => t.matches(':popover-open') || t.showPopover(), 400) }); for (const e of hides) b.addEventListener(e, () => { clearTimeout(k); if (t.matches(':popover-open')) t.hidePopover() }) }; late(root.querySelector('#button-late-open'), root.querySelector('#button-late'), ['focus', 'mouseenter'], ['blur', 'mouseleave']); late(root.querySelector('#button-slow-open'), root.querySelector('#button-slow'), ['mouseenter'], ['mouseleave']) }",
+  // On hover over a plain span, which the check never drives.
+  "{ const b = root.querySelector('#button-span'), t = root.querySelector('#button-span-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
+  // On focus, a box that carries popover is made and gone again within the task, and a plain box carries popover
+  // as long: neither is in the document as such at any look.
+  "root.querySelector('#button-tip-open').addEventListener('focus', () => { const row = root.querySelector('#button-plain'), made = document.createElement('div'); made.id = 'button-made'; made.textContent = 'Made on focus'; made.popover = 'manual'; row.after(made); row.popover = 'manual'; setTimeout(() => { made.remove(); row.removeAttribute('popover') }, 0) })",
 ].join('\n')
 const HINT = { box: '#button-hint', open: { hover: '#button-hint-open' }, close: { leave: true } }
+const SLOW = { box: '#button-slow', open: { hover: '#button-slow-open' }, close: { leave: true } }
 const since = { n: 0, ms: 0 }
 const withPopover = (d) => appendFileSync(join(d, 'example.html'), POPOVER)
 const LAYER = { box: '#button-pop', open: { click: '#button-pop-open' }, close: { keys: ['Escape'] } }
@@ -47,6 +67,7 @@ const named = (d, layers = [LAYER]) => edit(join(d, 'part.json'), (s) => JSON.st
 /** Faint text in a white box drawn in the top layer at the page's left edge, `top` px down: outside the stage. */
 const faint = (id, top) => `#${id} { position: absolute; inset: auto; left: 8px; top: ${top}px; margin: 0; padding: 8px 12px; border: 0; background-color: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif; }`
 const UNNAMED_AT = (box) => `${box} is open in the top layer during the reading, and no layer in part.json names it`
+const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
 
 /** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
     it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
@@ -100,14 +121,14 @@ async function overTwoGrounds() {
 // check run, not four.
 export const LAYER_CASES = [
   {
-    name: 'top layer: a named popover and a named hover hint are read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name',
+    name: 'top layer: a named popover and a named hover hint are read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; so do boxes no layer names that never open while the check looks; a named box that opens late fails by name',
     only: ['skins'],
     plant: all(
       () => Object.assign(since, looks),
       withPopover,
       (d) => appendFileSync(join(d, 'example.html'), MORE),
       (d) => inDemo(d, MORE_JS),
-      (d) => named(d, [LAYER, HINT]),
+      (d) => named(d, [LAYER, HINT, SLOW]),
     ),
     css: [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n'),
     expect: (p, ...rest) => {
@@ -122,7 +143,13 @@ export const LAYER_CASES = [
         'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
         'a box open from the start, named by no layer': both(new RegExp(UNNAMED_AT('div#button-open "Always open"'))),
         'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`Tab to button#button-tip-open "Info": ${UNNAMED_AT('div#button-tip "Shown on focus"')}`)),
-        'every layer read in every view': () => m?.readings === 20,
+        'a tooltip shown 400 ms after focus or hover, named by no layer': can('div#button-late "Shown late"'),
+        'a tooltip on hover over a plain span, named by no layer': can('div#button-span-tip "Shown on the span"'),
+        'a dialog never opened, named by no layer': can('dialog#button-dlg "Never opened"'),
+        'a box with popover made and gone again between looks': can('div#button-made "Made on focus"'),
+        'a box given popover and losing it again between looks': can('div#button-plain "Given popover"'),
+        'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
+        'every layer that opens at once read in every view': () => m?.readings === 20,
         'the looks were made': () => n > 0,
       })(p, ...rest)
     },
