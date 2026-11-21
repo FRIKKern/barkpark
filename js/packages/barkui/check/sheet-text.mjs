@@ -3,6 +3,8 @@
 // drops whole (a selector or condition it does not know) would ship with nothing judging it, and is refused by name.
 // The text lint has already refused a sheet outside the part-sheet forms (sheetForms in build/css-lint.mjs).
 
+import { choiceLists, splitList } from './selectors.mjs'
+
 /** The blocks of a sheet's text, in order: `{ prelude, body, blocks }`, each prelude as written with comments taken
     out and spaces collapsed, each body the text between the block's braces as written, each block's own nested
     blocks inside it. Strings, escapes and comments are skipped, so a
@@ -38,12 +40,39 @@ export function textBlocks(css) {
   return bare(root.blocks)
 }
 
+/** The arms each style block's text writes, for the browser to read one by one (browserReadings): every arm of its
+    own selector list, and the one selector inside each :is() and :where(), where the browser drops an arm it does
+    not know and keeps the rule. A list inside :is(), :where() or :has() is refused here, from the text: an arm in
+    there is a choice coverage cannot see (docs/PARTS.md "every branch"). Returns the blocks with their arms, and the
+    findings. */
+export function textArms(blocks) {
+  const found = []
+  const walk = (list) =>
+    list.map((b) => {
+      if (b.prelude.startsWith('@')) return { ...b, arms: [], blocks: walk(b.blocks) }
+      const lists = choiceLists(b.prelude)
+      for (const c of lists)
+        if (c.arms.length > 1)
+          found.push(`${b.prelude}: :${c.name}(${c.arms.join(', ')}) holds a list of ${c.arms.length}; coverage reads a rule branch by branch, and an arm inside :${c.name}() is not a branch, so one that applies would hide one that never does; write each arm as a branch of the rule's own list`)
+      const choices = lists.filter((c) => c.name !== 'has')
+      const inner = choices.flatMap((c) => c.arms)
+      // Each call's own prelude with that call emptied: the browser reads the arm in its real place beside it.
+      const within = choices.flatMap((c) =>
+        c.arms.map((arm) => ({ name: c.name, arm, emptied: b.prelude.slice(0, c.at[0]) + b.prelude.slice(c.at[1]) })),
+      )
+      return { ...b, arms: [...new Set([...splitList(b.prelude), ...inner])], within, blocks: walk(b.blocks) }
+    })
+  return { written: walk(blocks), found }
+}
+
 const clean = (text) => text.replace(/\/\*[^]*?\*\//g, ' ').replace(/\s+/g, ' ').trim()
 
 /** Runs in the page, so it holds no outside name: the browser's two readings of a part sheet. `alone` mirrors
     `written` (textBlocks): each block, with the body its text gives it, given to the browser alone in its place
     inside the blocks it is written in, as the text (cssText) of each rule that comes back (null when the place itself
-    does not come back as one rule each), with its own blocks read the same way when it came back as exactly one.
+    does not come back as one rule each); when it came back as exactly one, the arms of it (textArms) that the
+    browser drops when each is read alone in the same place, or, for the one inside :is() or :where(), in the rule's
+    own prelude beside that prelude with the call emptied, and its own blocks read the same way.
     `whole` is `rules`, the rules the browser made from the whole sheet, as their text with the rules inside each.
     Declarations that follow nested rules (CSSNestedDeclarations) are no rule of the text. */
 export function browserReadings([written, rules]) {
@@ -66,7 +95,19 @@ export function browserReadings([written, rules]) {
   const alone = (blocks, chain) =>
     blocks.map((b) => {
       const texts = parseIn(chain, b)
-      return { texts, blocks: texts?.length === 1 ? alone(b.blocks, [...chain, b.prelude]) : [] }
+      if (texts?.length !== 1) return { texts, dropped: [], blocks: [] }
+      const dropped = (b.arms ?? []).filter((arm) => parseIn(chain, { prelude: arm, body: '' })?.length !== 1)
+      // An arm can read alone and still be one :is() or :where() drops where it stands: the rule's own prelude as
+      // written is read beside the same prelude with that one call emptied, in the same blocks. The same text back
+      // means the browser dropped the arm; a reading that is not one rule cannot tell, and refuses the arm too.
+      const unclear = []
+      for (const { name, arm, emptied } of b.within ?? []) {
+        const kept = parseIn(chain, { prelude: b.prelude, body: '' })
+        const none = parseIn(chain, { prelude: emptied, body: '' })
+        if (kept?.length !== 1 || none?.length !== 1) unclear.push({ name, arm })
+        else if (kept[0] === none[0] && !dropped.includes(arm)) dropped.push(arm)
+      }
+      return { texts, dropped, unclear, blocks: alone(b.blocks, [...chain, b.prelude]) }
     })
   return { alone: alone(written, []), whole: tree(rules) }
 }
@@ -74,7 +115,7 @@ export function browserReadings([written, rules]) {
 /** The findings, in plain words, from holding the sheet's text (textBlocks) against the browser's readings
     (browserReadings), level by level. The text lint (build/css-lint.mjs) has already refused a sheet outside the
     part-sheet forms; inside them, a block that alone comes back as no rule is a rule the browser drops, refused by
-    name. Each other block must come back alone as exactly one rule, in its place, whose text is the text of the rule
+    name, and so is an arm the browser drops. Each other block must come back alone as exactly one rule, in its place, whose text is the text of the rule
     the whole sheet holds there, at every level; anything else refuses the sheet, naming the block. Runs in the page
     as well, so it holds no outside name. */
 export function sheetFindings([written, { alone, whole }]) {
@@ -88,7 +129,13 @@ export function sheetFindings([written, { alone, whole }]) {
       if (texts === null) cannot(where, `${b.prelude} does not read alone in its place`)
       else if (texts.length === 0) found.push(`${b.prelude}: the browser drops this rule, so nothing would judge it; part.css holds only selectors and conditions the browser reads`)
       else if (texts.length > 1) cannot(where, `${b.prelude} reads as ${texts.length} rules alone`)
-      else kept.push({ b, text: texts[0], inner })
+      else {
+        kept.push({ b, text: texts[0], inner })
+        for (const arm of readings[i].dropped ?? [])
+          found.push(`${b.prelude}: the arm ${arm} is one the browser drops, so the rule would ship with an arm nothing judges; part.css holds only selectors the browser reads`)
+        for (const { name, arm } of readings[i].unclear ?? [])
+          cannot(where, `${b.prelude}: the arm ${arm} does not read as one rule inside :${name}() in its place`)
+      }
     })
     if (kept.length !== rules.length)
       return cannot(where, `part.css writes ${kept.length} rule(s) the browser reads alone, and the browser reads ${rules.length} from the whole sheet`)
