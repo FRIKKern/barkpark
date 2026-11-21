@@ -404,10 +404,12 @@ const CASES = [
     expect: (...a) => refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/)(...a) && refused(/&:bark-made-up-too: the browser drops this rule/)(...a),
   },
   {
-    name: 'a dropped rule is refused by name when a string broken by a newline would even out the count',
+    // Refused at discovery by the part-sheet forms; the browser's reading refuses the same sheet on its own (the
+    // direct case below names the dropped rule).
+    name: 'a dropped rule beside a string broken by a newline is refused at discovery, naming the string',
     only: ['pressed'],
     plant: inCss('[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-y: "a\n; }\n[data-slot="button"].k { gap: 0px; }'),
-    expect: refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/),
+    expect: refused(/part\.css line \d+: a string runs past the end of its line/),
   },
   {
     name: 'a sheet the check cannot read rule for rule the way the browser does is refused, and one it reads is not',
