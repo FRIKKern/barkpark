@@ -13,43 +13,34 @@ defmodule Barkpark.PortableDoc.Slots do
       %{"type" => "callout", "tone" => _, "title"? => _, "collapsible"? => _,
         "collapsed"? => _, "slots" => %{"body" => [<element>, …]}}
 
-  **Callout** is the arity-1, single-slot reference instance: it declares exactly one
-  slot, `%{name: "body", tier: :element, count: {:exactly, 1}}`.
+  **Callout** declares one `body` slot, `%{name: "body", tier: :element, count:
+  {:min, 0}}`: any number of blocks, none included.
 
-  ## Backward-compat default (the crux)
+  ## A callout's words
 
-  The legacy callout `%{"type" => "callout", "content" => [<inline>…]}` IS the compat
-  encoding of a `body` slot holding ONE implicit `paragraph` element whose `content`
-  is that inline array. `slot_elements/2` synthesizes that paragraph when no `slots`
-  key is present, so a legacy doc reads through the slot API unchanged.
+  A callout's words are its content, then every block of its body slot, in that order
+  (api/assets/paper-editor/src/markdown/callout-words.js; task-e70b11497064225b). The
+  two are separate fields and neither is a copy of the other:
 
-  The load-bearing invariant that makes byte-identity PROVABLE is
-  `callout_body_inline/1` — the inline array of the single body element (from the
-  slot's lone paragraph, or from legacy `content`). Both encodings yield the SAME
-  inline array ⟹ `Render.Compose` emits the SAME single `PdText` ⟹ identical
-  reader / TUI / email bytes. The callout widget FLATTENS its single-paragraph body
-  slot to INLINE — it never composes the body element as a block `<p>` (that would add
-  a wrapper + a 12pt margin and break parity). "Render the body slot inline" is the
-  callout widget's own layout contract. The `card` widget (STEP 4) has its OWN
-  flattening contract: it flattens its `body` slot to the legacy `bp-card__d` PLAIN
-  text (marks dropped) — see `card_body_text/1` — so a card renders byte-identically
-  to one legacy `cards` grid item.
+    * `callout_head_inline/1` — the first line: `content` when it is a non-empty
+      inline array, else the legacy `text` string, else `[]`.
+    * `callout_body_blocks/1` — `slots.body` when it is a list, else `[]`. A callout
+      with no `slots` key has an empty body; its `content` is never read as a body.
 
-  ## Wire decision
+  `Render.Compose` composes the first line as one inline `PdText`, then each body
+  block with `compose_block/2`, the function that composes a top-level block. A
+  callout with no body composes exactly the one `PdText` it always did, so a
+  content-only or text-only callout renders byte-identical to before.
+  `normalize_widget/1` leaves a callout as it is stored.
 
-  For callout the body is losslessly inline-encodable, so THIS build keeps `content`
-  as the persisted wire form and treats `slots` as an ADDITIVE, OPTIONAL key that is
-  normalized to/from `content`. `normalize_widget/1` is idempotent and keeps
-  `content` and `slots.body[0].content` in sync (dual-write) if `slots` is ever
-  persisted. That is precisely why callout is the correct REFERENCE slot: it proves
-  the slot MODEL (declaration + typed container + node-view slot editing + validate
-  gate) WITHOUT forcing a cross-runtime wire change. The `card` widget (STEP 4) is the
-  first genuinely SLOTS-NATIVE type — its media/title/body/action slots have no legacy
-  inline encoding, so it persists a real `slots` key (no `content`/`slots` duality,
-  `normalize_widget/1` passes it through untouched). The HTML reader lands here
-  (`card_title_text/1` … `card_action/1` + `Components.card_html/1`); slot-aware
-  `pdrender.go`/email renderers are a filed follow-up (the card degrades to the
-  fallback renderer in the TUI/email until then).
+  The `card` widget (STEP 4) is slots-native: its media/title/body/action slots have
+  no legacy inline encoding, so it persists a real `slots` key and
+  `normalize_widget/1` passes it through untouched. It FLATTENS its `body` slot to
+  the legacy `bp-card__d` PLAIN text (marks dropped) — see `card_body_text/1` — so a
+  card renders byte-identically to one legacy `cards` grid item. The HTML reader
+  lands here (`card_title_text/1` … `card_action/1` + `Components.card_html/1`);
+  slot-aware `pdrender.go`/email renderers are a filed follow-up (the card degrades
+  to the fallback renderer in the TUI/email until then).
 
   ## Layering
 
@@ -100,7 +91,8 @@ defmodule Barkpark.PortableDoc.Slots do
   @doc """
   The slot declarations for a widget block.
 
-    * Callout declares exactly one `body` slot of element tier, arity `{:exactly, 1}`.
+    * Callout declares one `body` slot of element tier, arity `{:min, 0}`: a body
+      holds any number of blocks, or none.
     * Card (STEP 4) declares four element slots — `title` / `body` / `media` /
       `action` — each arity `{:max, 1}` (`media` / `action` OPTIONAL, so an
       absent slot is conforming). The D1 gate rejects a nested widget/section in
@@ -110,7 +102,7 @@ defmodule Barkpark.PortableDoc.Slots do
   """
   @spec slot_decls(term()) :: [slot_decl()]
   def slot_decls(%{"type" => "callout"}),
-    do: [%{name: "body", tier: :element, count: {:exactly, 1}}]
+    do: [%{name: "body", tier: :element, count: {:min, 0}}]
 
   def slot_decls(%{"type" => "card"}),
     do: [
@@ -194,9 +186,9 @@ defmodule Barkpark.PortableDoc.Slots do
       `slots` (the materialized form); no chrome. (gate: pd-note-block, #5731)
     * `card` is slots-native — it consumes `slots` alone (title/body/media/action
       all live under it) plus the `tone` accent chrome. (#5731)
-    * `callout` (census follow-up) consumes `content` (the legacy inline body
-      array `callout_body_inline/1` reads), `slots` (the materialized `body`
-      slot) and `title`; `tone` / `collapsible` / `collapsed` are chrome. The
+    * `callout` (census follow-up) consumes `content` (the first line
+      `callout_head_inline/1` reads), `slots` (the `body` slot
+      `callout_body_blocks/1` reads) and `title`; `tone` / `collapsible` / `collapsed` are chrome. The
       proven legacy `text` dialect is also consumed and canonicalized at write
       boundaries.
     * `pipeline` (census follow-up) consumes `nodes` alone — the node list whose
@@ -226,9 +218,9 @@ defmodule Barkpark.PortableDoc.Slots do
 
   @doc """
   The element-tier children of the named slot. Returns `block["slots"][name]` when a
-  `slots` map carries it, else the legacy synthesis: for a callout `body` slot, a
-  single implicit `paragraph` element wrapping the legacy `content` inline array.
-  Unknown slots (and non-callout blocks) synthesize `[]`.
+  `slots` map carries it, else the legacy synthesis (a note's and a stage's flat
+  fields, below). A callout's `body` slot synthesizes `[]`: its `content` is its
+  first line, never its body. Unknown slots synthesize `[]`.
   """
   @spec slot_elements(term(), String.t()) :: [map()]
   def slot_elements(block, name) do
@@ -238,11 +230,8 @@ defmodule Barkpark.PortableDoc.Slots do
     end
   end
 
-  # The legacy fallback: a callout's `body` slot is its `content` wrapped as ONE
-  # implicit paragraph. Any other slot synthesizes empty (defensive).
-  defp legacy_slot(%{"type" => "callout"} = block, "body"),
-    do: [%{"type" => "paragraph", "content" => Map.get(block, "content") || []}]
-
+  # The legacy fallback. A callout's `body` slot has none: it falls to the last
+  # clause and synthesizes `[]`, so `content` is read once, as the first line.
   # A note's `label`/`lead`/`body` slots are its flat `label`/`lead`/`text`
   # fields wrapped as ONE implicit paragraph each (the compat-read: no `slots`
   # key ⇒ synthesize the three paragraphs). The flat field maps to the slot as
@@ -292,24 +281,26 @@ defmodule Barkpark.PortableDoc.Slots do
   defp note_flat(_block, _key), do: ""
 
   @doc """
-  The inline array of a callout's single body element — from the slot's lone
-  paragraph when materialized, or from legacy `content`. THE load-bearing invariant:
-  both encodings of the same body yield the SAME inline array, so `Render.Compose`
-  emits a byte-identical `PdText`. Always a list (nil-safe).
+  A callout's first line: its `content` when that is a non-empty inline array, else
+  its legacy `text` string as one text run, else `[]`. Never reads the body slot.
+  Always a list (nil-safe).
   """
-  @spec callout_body_inline(term()) :: [map()]
-  def callout_body_inline(block) do
-    case slot_elements(block, "body") do
-      [first | _] when is_map(first) ->
-        case Map.get(first, "content") do
-          content when is_list(content) and content != [] -> content
-          _ -> callout_text_inline(block)
-        end
-
-      _ ->
-        callout_text_inline(block)
+  @spec callout_head_inline(term()) :: [map()]
+  def callout_head_inline(block) do
+    case is_map(block) && Map.get(block, "content") do
+      content when is_list(content) and content != [] -> content
+      _ -> callout_text_inline(block)
     end
   end
+
+  @doc """
+  A callout's body: the blocks of its `slots.body` list, in order, else `[]`.
+  """
+  @spec callout_body_blocks(term()) :: [map()]
+  def callout_body_blocks(%{"slots" => %{"body" => blocks}}) when is_list(blocks),
+    do: Enum.filter(blocks, &is_map/1)
+
+  def callout_body_blocks(_), do: []
 
   defp callout_text_inline(block) do
     case is_map(block) && Map.get(block, "text") do
@@ -323,7 +314,7 @@ defmodule Barkpark.PortableDoc.Slots do
 
   # ── card widget accessors (STEP 4) ──────────────────────────────────────────
   #
-  # Byte-identity accessors, the analogue of `callout_body_inline/1`. `Components.
+  # Byte-identity accessors, the analogue of `callout_head_inline/1`. `Components.
   # card_html/1` reads through these so a card renders byte-identically to one legacy
   # `cards` grid item. The card FLATTENS: `title` → the heading element's plain
   # `text`, `body` → the paragraph element's inline FLATTENED to plain text (marks
@@ -375,7 +366,7 @@ defmodule Barkpark.PortableDoc.Slots do
 
   # ── note widget accessors (the notes-grid split) ─────────────────────────────
   #
-  # THE load-bearing byte-identity invariants — the `callout_body_inline/1` analog,
+  # THE load-bearing byte-identity invariants — the `callout_head_inline/1` analog,
   # one per field. Each returns the PLAIN string of the slot (the lone paragraph's
   # inline FLATTENED to plain text, marks dropped) when materialized, else the
   # legacy flat field. Both encodings of the same note yield the SAME three strings
@@ -414,7 +405,7 @@ defmodule Barkpark.PortableDoc.Slots do
     # `text` field as an empty paragraph, which flattens to "" and blanked the
     # note on the server-rendered reader (1 such block live on guerrilla, census
     # 2026-07-25, task-993d136b0fbf2fd1) while `@barkpark/react` rendered it.
-    # This is the `callout_body_inline/1` law — content ⟂ text, content read
+    # This is the `callout_head_inline/1` law — content ⟂ text, content read
     # FIRST — arriving at the note's BODY only: `label`/`lead` have no `content`
     # spelling, and letting the block's body inline leak into them would print
     # the body twice.
@@ -425,7 +416,7 @@ defmodule Barkpark.PortableDoc.Slots do
   end
 
   # A note block's top-level `content` flattened to plain text. The guard is the
-  # SAME one `callout_body_inline/1` and `paragraph_inline/1` hold — a NON-EMPTY
+  # SAME one `callout_head_inline/1` and `paragraph_inline/1` hold — a NON-EMPTY
   # INLINE ARRAY — and it is load-bearing twice over:
   #
   #   * it is the shape the widget actually persists (`content:[…]` inline
@@ -454,7 +445,7 @@ defmodule Barkpark.PortableDoc.Slots do
 
   @doc """
   The PLAIN string of a stage's named text field (`"kind"` / `"title"` / `"detail"`)
-  — the stage analogue of `callout_body_inline/1`. Reads the lone slot element's
+  — the stage analogue of `callout_head_inline/1`. Reads the lone slot element's
   text-runs FLATTENED to plain text (marks dropped) when a `slots` map carries it, ELSE
   the top-level scalar via the compat synthesis. THE load-bearing invariant: both
   encodings yield the SAME string ⟹ `Components.stage_html/1` escapes the same bytes ⟹
@@ -495,29 +486,16 @@ defmodule Barkpark.PortableDoc.Slots do
   defp flatten_inline_node(_), do: ""
 
   @doc """
-  Normalize a widget block to its canonical dual form, keeping `content` and
-  `slots.body[0].content` in sync (dual-write). Idempotent
-  (`normalize_widget(normalize_widget(x)) == normalize_widget(x)`) and lossless in
-  both directions (a content-form and a slot-form callout with the same body
-  normalize to the identical map).
-
-  Empty-body fidelity: when the body inline array is empty, BOTH keys are omitted —
-  the callout precedent (`compose` maybe_put drops an empty body). A non-widget block
-  passes through untouched.
+  Normalize a widget block to its canonical form. Idempotent
+  (`normalize_widget(normalize_widget(x)) == normalize_widget(x)`). A callout is left
+  as it is stored: its `content` and its `slots.body` are separate fields, neither a
+  copy of the other. A non-widget block passes through untouched.
 
   NOTE: this is a persistence-side utility. It is NOT on the read/compose path —
-  existing papers keep their `content` bytes on disk untouched (no forced backfill);
-  the reader synthesizes the body slot from `content` via `slot_elements/2`.
+  existing papers keep their bytes on disk untouched (no forced backfill).
   """
   @spec normalize_widget(term()) :: term()
-  def normalize_widget(%{"type" => "callout"} = block) do
-    inline = callout_body_inline(block)
-
-    block
-    |> Map.delete("content")
-    |> Map.delete("slots")
-    |> put_callout_body(inline)
-  end
+  def normalize_widget(%{"type" => "callout"} = block), do: block
 
   def normalize_widget(%{"type" => "task-list"} = block) do
     # A LIVE task-list persists its `query` map DIRECTLY (like `card`, it is genuinely
@@ -595,21 +573,13 @@ defmodule Barkpark.PortableDoc.Slots do
   defp put_stage_slots(block, slots), do: Map.put(block, "slots", slots)
 
   # Empty body: omit both keys (precedent). Non-empty: dual-write content + slots.
-  defp put_callout_body(block, []), do: block
-
-  defp put_callout_body(block, inline) do
-    block
-    |> Map.put("content", inline)
-    |> Map.put("slots", %{"body" => [%{"type" => "paragraph", "content" => inline}]})
-  end
-
   @doc """
   The D1 gate: every slot child of a widget must classify as tier `:element`. Returns
   `[]` for a conforming (or non-widget) block, else calm, specific error strings.
 
-  A legacy callout (body synthesized from `content`) yields `[]` — its implicit
-  paragraph is an element. A callout whose `body` slot holds a nested widget (e.g. a
-  callout) or a section yields a non-empty list. Never raises.
+  A callout with no body slot yields `[]`. A callout whose `body` slot holds a nested
+  widget (e.g. a callout) or a section yields a non-empty list (the slot/schema
+  mismatch is task-4f82a01efe3708f0). Never raises.
   """
   @spec slot_type_errors(term()) :: [String.t()]
   def slot_type_errors(block) do
@@ -708,14 +678,15 @@ defmodule Barkpark.PortableDoc.Slots do
       is_nil(card_media(block)) and is_nil(card_action(block))
   end
 
-  # A callout renders no prose when BOTH its body inline (from the `content`
-  # legacy array or the materialized `body` slot, read through the renderer's own
-  # `callout_body_inline/1`) is blank AND its optional `title` is blank — the two
-  # surfaces `Compose.compose_block(callout)` paints. The proven legacy `text`
-  # dialect is consumed by `callout_body_inline/1`; other unread keys stay loud.
+  # A callout renders no prose when its first line (`callout_head_inline/1`: the
+  # `content` array, else the legacy `text` dialect), its optional `title` and its
+  # body are all blank — the surfaces `Compose.compose_block(callout)` paints. A body
+  # block counts as blank only when it is a paragraph with no words; any other body
+  # block is prose. Other unread keys stay loud.
   defp renders_no_prose?(%{"type" => "callout"} = block) do
-    blank?(flatten_inline_text(callout_body_inline(block))) and
-      blank?(to_text(Map.get(block, "title")))
+    blank?(flatten_inline_text(callout_head_inline(block))) and
+      blank?(to_text(Map.get(block, "title"))) and
+      Enum.all?(callout_body_blocks(block), &blank_paragraph?/1)
   end
 
   # A pipeline renders no prose when its `nodes` list carries no readable text in
@@ -728,6 +699,11 @@ defmodule Barkpark.PortableDoc.Slots do
   end
 
   defp renders_no_prose?(_), do: false
+
+  defp blank_paragraph?(%{"type" => "paragraph"} = block),
+    do: blank?(flatten_inline_text(Map.get(block, "content") || []))
+
+  defp blank_paragraph?(_), do: false
 
   defp pipeline_nodes_blank?(nodes) when is_list(nodes) do
     Enum.all?(nodes, fn node ->

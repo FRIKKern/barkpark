@@ -45,6 +45,7 @@
 // PRETTINESS: any block we cannot serialize+parse faithfully uses the sentinel.
 
 import { readerInlineDiffers } from "./reader-inline.js";
+import { calloutBodyBlocks } from "./callout-words.js";
 import { clampLevel, EMPTY_PARAGRAPH_MARKER, SENTINEL_CLOSE, SENTINEL_OPEN } from "./shared.js";
 
 // The prose block kinds with a natural markdown rendering (everything else →
@@ -90,6 +91,10 @@ function serializeBlock(block) {
   // The reader shows other words than the Markdown line would carry (reader-inline.js):
   // the sentinel carries the block, so the line shows and an edit writes what is read.
   if (readerInlineDiffers(block)) return sentinel(block);
+  // A callout's Markdown line carries its first line only; its body is blocks the line
+  // cannot show (callout-words.js), so the sentinel carries the whole callout, as the
+  // rich editor carries it (run-content-codecs.js calloutBlockToNode).
+  if (type === "callout" && calloutBodyBlocks(block).length > 0) return sentinel(block);
 
   switch (type) {
     case "heading":
