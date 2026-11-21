@@ -1099,11 +1099,10 @@ jobs:
       # `security-main`) and main-red-owner.yml. Pinned by
       # scripts/security-gate-shape.test.sh case 8.
       #
-      # ONE LIMIT. On a lock pull request the Decide step compares against
-      # main's newest PUSH run only, not the daily run. After a disclosure, a
-      # lock PR that did not bring the advisory in reads as its own red until a
-      # push run on main carries the same red. That colours that PR's check
-      # only.
+      # ONE LIMIT. While main fails the oracle step, a lock PR whose oracle
+      # step fails reads OWNERSHIP-UNDETERMINED (exit 1), because the oracle
+      # prints no line the breaker's signature reads; it blocks nothing.
+      # Follow-up: task-1934eab18553d6dc.
       - name: Fetch cloud deps (hex.audit cannot load a lock whose deps are absent)
         # No id: a failure here leaves cloud/ unreadable, and the oracle step
         # then exits 3 (CANNOT READ), which counts.
