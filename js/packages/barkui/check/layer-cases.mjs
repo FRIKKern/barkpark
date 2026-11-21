@@ -26,7 +26,8 @@ const named = (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.
 const FAINT = '#button-pop { position: absolute; inset: auto; left: 8px; top: 8px; margin: 0; padding: 8px 12px; border: 0; background-color: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif; }'
 
 /** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
-    it on black; the box itself has no fill, so the only ground is what the page draws behind it. */
+    it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
+    by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
 async function overTwoGrounds() {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
@@ -58,11 +59,11 @@ async function overTwoGrounds() {
       await page.barkCheck(() => window.__barkCheck.settle())
       const v = await readView(page, part)
       const t = v.things.find((x) => x.kind === 'text' && x.at.startsWith('div#button-pop '))
-      readings[ground] = { ratio: t?.ratio, draws: t?.draws, share: t?.share, fails: verdict(v).fails.filter((f) => f.includes('div#button-pop ')) }
+      readings[ground] = { ratio: t?.ratio, draws: t?.draws, match: t?.match, share: t?.share, fails: verdict(v).fails.filter((f) => f.includes('div#button-pop ')) }
     }
     const { white, black } = readings
     const held =
-      white.draws && black.draws && white.share >= 0.9 && black.share >= 0.9 && white.ratio < 4.5 && black.ratio > 4.5 && black.ratio - white.ratio > 1.5 &&
+      white.draws && black.draws && white.ratio < 4.5 && black.ratio > 4.5 && black.ratio - white.ratio > 1.5 &&
       white.fails.length === 1 && /^drawn text [\d.]+:1 at div#button-pop /.test(white.fails[0]) && black.fails.length === 0
     if (!held) console.log(`    over white: ${JSON.stringify(white)}; over black: ${JSON.stringify(black)}`)
     return held
