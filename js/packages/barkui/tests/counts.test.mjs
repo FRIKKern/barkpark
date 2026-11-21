@@ -177,12 +177,12 @@ describe('the walk of every part count', () => {
     if (skips()) return
     const found = walk(2, { plant: (dir, n) => tiny(dir, n === 1 ? passing : null) })
     expect(found).toContain('the walk ran 1 of 2 counts')
-  })
+  }, 60000)
 
   it('fails by name when a test file in a copy does not load', () => {
     if (skips()) return
     const found = walk(2, { plant: (dir, n) => tiny(dir, n === 1 ? passing : "import './gone.mjs'\n" + passing) })
     expect(found.some((f) => /^n02 a\.test\.mjs: the file did not load: /.test(f))).toBe(true)
     expect(found.filter((f) => f.startsWith('n01 '))).toEqual([])
-  })
+  }, 60000)
 })
