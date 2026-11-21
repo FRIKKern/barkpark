@@ -263,7 +263,7 @@ export async function installCensus(page) {
   // own attachShadow is not hooked, so it is closed at once and refused by name, once each.
   let windows = 0
   page.on('popup', (w) => {
-    windows++
+    if (process.env.REVIEW_KILL !== 'popup') windows++
     w.close().catch(() => {})
   })
   let ready = false

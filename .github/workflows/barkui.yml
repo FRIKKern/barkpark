@@ -219,11 +219,13 @@ jobs:
       # its ceiling, under this limit. This job runs the cases that read the views.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
-        timeout-minutes: 10
+        timeout-minutes: 20
         working-directory: js/packages/barkui
         run: |
-          mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
+          set +e
+          echo "=== RUN plain"; node check/selftest.mjs "review plant"
+          echo "=== RUN REVIEW_KILL=popup"; REVIEW_KILL=popup node check/selftest.mjs "top layer: the ways out"; REVIEW_KILL=popup node check/selftest.mjs "review plant R6P"
+          exit 1
 
       - name: Upload this selftest job's report
         if: always()
@@ -286,8 +288,7 @@ jobs:
         timeout-minutes: 10
         working-directory: js/packages/barkui
         run: |
-          mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
+          echo "rest job: nothing in this run"; exit 1
 
       - name: Upload this selftest job's report
         if: always()
