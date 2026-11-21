@@ -25,6 +25,7 @@ import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
+import { REVIEW_CASES } from './review-cases.mjs'
 import { UNNAMED } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES, esc } from './plants.mjs'
 
@@ -667,6 +668,7 @@ steps.push({
   },
   ...CEILING_CASES,
   ...LAYER_CASES,
+  ...REVIEW_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {

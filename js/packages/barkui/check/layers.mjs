@@ -238,10 +238,14 @@ export async function installCensus(page) {
   })
   await cdp.send('Runtime.enable')
   // A script to evaluate on a new document runs only for a session with the Page domain on.
-  await cdp.send('Page.enable')
-  const code = `(${source(census)})()`
+  if (process.env.REVIEW_KILL !== 'first') await cdp.send('Page.enable')
+  const kill = (s, from, to) => { if (!s.includes(from)) throw new Error(`review kill: ${from} not in the source`); return s.replace(from, to) }
+  let censusSrc = source(census)
+  if (process.env.REVIEW_KILL === 'frames') censusSrc = kill(censusSrc, "if (e.matches(FRAMES)) note(e, from, 'frame')", '0')
+  if (process.env.REVIEW_KILL === 'refuse') censusSrc = kill(censusSrc, 'addEventListener(`barkui-census-${at}`', 'void (`barkui-census-${at}`')
+  const code = `(${censusSrc})()`
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code, worldName: 'barkui-census' })
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${source(tellRoots)})()` })
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${process.env.REVIEW_KILL === 'roots' ? kill(source(tellRoots), "tell(this, 'barkui-census-root')", '0') : source(tellRoots)})()` })
   const run = async (expression) => {
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: id, returnByValue: true })
     if (exceptionDetails) throw new Error(`the census: ${String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0]}`)

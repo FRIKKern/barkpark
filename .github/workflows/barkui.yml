@@ -175,7 +175,7 @@ jobs:
     needs: barkui-plan
     if: needs.barkui-plan.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: js
@@ -219,11 +219,13 @@ jobs:
       # its ceiling, under this limit. This job runs the cases that read the views.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
-        timeout-minutes: 10
+        timeout-minutes: 38
         working-directory: js/packages/barkui
         run: |
-          mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
+          set +e
+          echo "=== RUN plain"; node check/selftest.mjs "top layer: a named popover"; node check/selftest.mjs "review plant"
+          for k in reading tab; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "top layer: a named popover"; done
+          exit 1
 
       - name: Upload this selftest job's report
         if: always()
@@ -283,11 +285,15 @@ jobs:
       # its ceiling, under this limit. This job runs every case the views job does not.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
-        timeout-minutes: 10
+        timeout-minutes: 22
         working-directory: js/packages/barkui
         run: |
-          mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
+          set +e
+          echo "=== RUN plain"; node check/selftest.mjs "top layer: a named hover hint"; node check/selftest.mjs "top layer: the ways out"; node check/selftest.mjs "a state on any control of its kind"
+          for k in first roots frames; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "top layer: a named hover hint"; done
+          echo "=== RUN REVIEW_KILL=refuse"; REVIEW_KILL=refuse node check/selftest.mjs "top layer: the ways out"
+          for k in states press; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "a state on any control of its kind"; done
+          exit 1
 
       - name: Upload this selftest job's report
         if: always()
