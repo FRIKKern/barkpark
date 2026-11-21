@@ -4,7 +4,7 @@ defmodule Barkpark.PortableDoc.Render.CalloutBodyRenderTest do
   answers them: the article page and the email show its content (or its text when it
   has no content), then every block of its body slot, in order, each body block drawn
   by the same function that draws a top-level block (task-e70b11497064225b). A callout
-  with no body renders byte-identical to before.
+  with no body renders byte-identical to main.
   """
   use ExUnit.Case, async: true
 
@@ -61,6 +61,106 @@ defmodule Barkpark.PortableDoc.Render.CalloutBodyRenderTest do
   ]
 
   defp count(html, word), do: length(:binary.matches(html, word))
+
+  # What main 9818122b23 rendered for callouts with no body, captured by rendering
+  # each block on main's compose.ex, slots.ex and render.ex: these keep their bytes.
+  @main_bytes [
+    {"content only", :article,
+     %{
+       "content" => [%{"type" => "text", "value" => "Content words"}],
+       "id" => "b1",
+       "tone" => "info",
+       "type" => "callout"
+     }, "<div class=\"bp-callout bp-callout--info\"><span>Content words</span></div>"},
+    {"content only", :email,
+     %{
+       "content" => [%{"type" => "text", "value" => "Content words"}],
+       "id" => "b1",
+       "tone" => "info",
+       "type" => "callout"
+     },
+     "<div style=\"border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0\"><span>Content words</span></div>"},
+    {"content with a title and a mark", :article,
+     %{
+       "content" => [
+         %{"type" => "text", "value" => "Be "},
+         %{"children" => [%{"type" => "text", "value" => "careful"}], "type" => "strong"}
+       ],
+       "id" => "b2",
+       "title" => "Heads up",
+       "tone" => "warning",
+       "type" => "callout"
+     },
+     "<div class=\"bp-callout bp-callout--warning\"><strong>Heads up</strong> <span>Be <span style=\"font-weight:bold\">careful</span></span></div>"},
+    {"content with a title and a mark", :email,
+     %{
+       "content" => [
+         %{"type" => "text", "value" => "Be "},
+         %{"children" => [%{"type" => "text", "value" => "careful"}], "type" => "strong"}
+       ],
+       "id" => "b2",
+       "title" => "Heads up",
+       "tone" => "warning",
+       "type" => "callout"
+     },
+     "<div style=\"border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0\"><div style=\"font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#55635e;margin:0 0 6px\"><span style=\"color:#8a6420\">&#9679;</span>&nbsp; Heads up</div><span>Be <span style=\"font-weight:bold\">careful</span></span></div>"},
+    {"text only", :article,
+     %{"id" => "b3", "text" => "Text words", "tone" => "note", "type" => "callout"},
+     "<div class=\"bp-callout bp-callout--info\"><span>Text words</span></div>"},
+    {"text only", :email,
+     %{"id" => "b3", "text" => "Text words", "tone" => "note", "type" => "callout"},
+     "<div style=\"border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0\"><span>Text words</span></div>"},
+    {"empty content, text shows", :article,
+     %{
+       "content" => [],
+       "id" => "b4",
+       "text" => "Text words",
+       "tone" => "danger",
+       "type" => "callout"
+     }, "<div class=\"bp-callout bp-callout--danger\"><span>Text words</span></div>"},
+    {"empty content, text shows", :email,
+     %{
+       "content" => [],
+       "id" => "b4",
+       "text" => "Text words",
+       "tone" => "danger",
+       "type" => "callout"
+     },
+     "<div style=\"border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0\"><span>Text words</span></div>"},
+    {"collapsible", :article,
+     %{
+       "collapsed" => true,
+       "collapsible" => true,
+       "content" => [%{"type" => "text", "value" => "Folded words"}],
+       "id" => "b5",
+       "title" => "Fold",
+       "tone" => "info",
+       "type" => "callout"
+     },
+     "<details class=\"bp-callout bp-callout--info\"><summary class=\"bp-callout__summary\">Fold</summary><div class=\"bp-callout__body\"><span>Folded words</span></div></details>"},
+    {"collapsible", :email,
+     %{
+       "collapsed" => true,
+       "collapsible" => true,
+       "content" => [%{"type" => "text", "value" => "Folded words"}],
+       "id" => "b5",
+       "title" => "Fold",
+       "tone" => "info",
+       "type" => "callout"
+     },
+     "<div style=\"border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0\"><div style=\"font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#55635e;margin:0 0 6px\"><span style=\"color:#2d5e8f\">&#9679;</span>&nbsp; Fold</div><span>Folded words</span></div>"},
+    {"nothing", :article, %{"id" => "b6", "tone" => "info", "type" => "callout"},
+     "<div class=\"bp-callout bp-callout--info\"><span></span></div>"},
+    {"nothing", :email, %{"id" => "b6", "tone" => "info", "type" => "callout"},
+     "<div style=\"border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0\"><span></span></div>"}
+  ]
+
+  for {name, style, block, html} <- @main_bytes do
+    test "#{style}: a callout with no body keeps main's bytes: #{name}" do
+      assert Render.render_block(unquote(Macro.escape(block)), %{style: unquote(style)}) ==
+               unquote(html)
+    end
+  end
 
   for style <- [:article, :email] do
     test "#{style}: a callout shows its content, then every body block, in order" do
