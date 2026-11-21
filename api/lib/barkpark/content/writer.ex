@@ -474,7 +474,7 @@ defmodule Barkpark.Content.Writer do
   write. Fires `:after_save` asynchronously after a successful write.
   """
   def create_document(type, attrs, dataset, opts \\ []),
-    do: Door.admit(fn -> fixed_then(type, attrs, dataset, opts, &admitted_create_document/4) end)
+    do: Door.admit(fn -> admitted_create_document(type, attrs, dataset, opts) end)
 
   @doc """
   Run the whole `create_document/4` pipeline and return the draft it WOULD
@@ -503,7 +503,8 @@ defmodule Barkpark.Content.Writer do
     with :ok <- refuse_bare_id(attrs, :create),
          :ok <- refuse_versions_id(attrs),
          :ok <- refuse_orphan_top_level_keys(attrs),
-         :ok <- refuse_colliding_status(attrs) do
+         :ok <- refuse_colliding_status(attrs),
+         :ok <- FixedDocuments.check_create(type, attrs, dataset, opts) do
       do_create_document_from_attrs(type, attrs, dataset, opts)
     end
   end
