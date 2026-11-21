@@ -218,7 +218,11 @@ jobs:
       - name: "Each planted break turns its light off"
         timeout-minutes: 10
         working-directory: js/packages/barkui
-        run: node check/selftest.mjs
+        run: |
+          set +e
+          echo "=== RUN plain"; node check/selftest.mjs "top layer:"; node check/selftest.mjs "review plant R4"
+          for k in reading tab states; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "top layer:"; REVIEW_KILL=$k node check/selftest.mjs "review plant R4"; done
+          exit 1
 
   barkui:
     name: "BarkUI showroom check"

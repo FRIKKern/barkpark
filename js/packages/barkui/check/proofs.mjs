@@ -287,7 +287,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
             return el.matches(':focus-visible') ? { at: h.describe(el), ...h.ring(el) } : { at: h.describe(el), fail: 'focused but not :focus-visible' }
           }, part.name)
           // Real keys can open a box in the top layer (a tooltip on focus) and close it before any reading.
-          for (const box of await unnamedOpen(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${UNNAMED(box)}`)
+          if (process.env.REVIEW_KILL !== 'tab') for (const box of await unnamedOpen(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${UNNAMED(box)}`)
           if (r2.done) break
           if (r2.ratio) Object.assign(focus, { min: Math.min(focus.min, r2.ratio), max: Math.max(focus.max, r2.ratio) })
           if (r2.fail) bad[scheme].push(`${at}: focus on ${r2.at}: ${r2.fail}`)
