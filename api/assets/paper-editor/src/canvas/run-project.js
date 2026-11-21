@@ -19,6 +19,7 @@ import {
   actionBlockToNode, fieldBlockToNode, figureBlockToNode, fleetBlockToNode, imageBlockToNode,
   islandBlockToNode, readOnlyAtomBlockToNode, taskListBlockToNode,
 } from "./run-structured-codecs.js";
+import { boundedClone, inlineTooDeep } from "./inline-depth.js";
 import { stampTemplateAttrs } from "./run-template-attrs.js";
 import { tableBlockToNode } from "./table-convert.js";
 
@@ -76,6 +77,13 @@ function blockToNode(block) {
 
     if (OBJECT_OVERRIDES && OBJECT_OVERRIDES.has(bpType)) {
       return { type: "bpOpaque", attrs: { bpId, bpType, bpBlock: deepClone(block) } };
+    }
+
+    // A prose or content block whose inline nests past the depth limit is carried
+    // whole and shown read-only (inline-depth.js): its inline cannot become editor
+    // nodes, and the notice it shows never enters the doc (task-11bbe4b4ae8c85f4).
+    if ((isProseType(bpType) || isCanvasContentType(bpType)) && inlineTooDeep(block)) {
+      return { type: "bpOpaque", attrs: { bpId, bpType, bpBlock: boundedClone(block) } };
     }
 
     if (isProseType(bpType)) {

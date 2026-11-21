@@ -1495,6 +1495,27 @@
       }
     },
     {
+      "name": "em past the value depth",
+      "doc": {
+        "type": "paragraph",
+        "content": [
+          {
+            "$nest": 500,
+            "wrap": {
+              "type": "em",
+              "children": [
+                "$hole"
+              ]
+            },
+            "leaf": {
+              "type": "text",
+              "value": "leaf"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "link one level above the depth limit",
       "doc": {
         "type": "paragraph",
