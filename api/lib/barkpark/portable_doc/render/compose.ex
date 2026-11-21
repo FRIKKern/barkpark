@@ -486,16 +486,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  # A body block composes as a top-level block does. With the callout's carried
-  # render options (Render.prepare_block/2) it gets the same pre-pass first, as a
-  # section's stack children do.
-  defp compose_body_block(block, callout, style) do
-    case render_opts(callout) do
-      nil -> compose_block(block, style)
-      opts -> compose_block(Barkpark.PortableDoc.Render.prepare_block(block, opts), style)
-    end
-  end
-
   # CONTENTLESS ACTION (the empty-chrome invariant — see `blank_field?/2`): an
   # action with NEITHER a label NOR a destination composed to
   # `<a href="#" class="bp-button"></a>` — a zero-width CLICKABLE control on the
@@ -2976,6 +2966,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   """
   def render_opts(b) when is_map(b), do: Map.get(b, "_render_opts")
   def render_opts(_), do: nil
+
+  # A body block composes as a top-level block does. With the callout's carried
+  # render options (Render.prepare_block/2) it gets the same pre-pass first, as a
+  # section's stack children do.
+  defp compose_body_block(block, callout, style) do
+    case render_opts(callout) do
+      nil -> compose_block(block, style)
+      opts -> compose_block(Barkpark.PortableDoc.Render.prepare_block(block, opts), style)
+    end
+  end
 
   # A child of a container renders under the container's opts with three keys
   # held back: `:theme` (nested children render at evergreen by design — the
