@@ -74,7 +74,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   the rebuild. Should the two name different rows, `editor_doc`'s rev is named.
   """
   def seen_rev(%{editor_view: :paper, paper_doc: %{} = paper, editor_doc: %{} = doc}),
-    do: shown_paper_rev(paper, doc)
+    do: Map.get(doc, :rev) || shown_paper_rev(paper, doc)
 
   def seen_rev(%{editor_doc: %{} = doc}), do: Map.get(doc, :rev)
   def seen_rev(_assigns), do: nil
