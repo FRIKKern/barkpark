@@ -120,7 +120,7 @@ for (const [name, owner] of Object.entries(PUBLIC_OWNERS)) {
 const here = dirname(fileURLToPath(import.meta.url));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const GROUPS = `
-P	run-project.js	de56f2ae22fc19227e921c2661e9487400b38bcae38cded5509e6abeb2834498	5221844d09bbe5b77f8a7c591f5a8b6d32feaeda5ee9c4549875ff2af37c5350	660
+P	run-project.js	f4001a6c03902709e2a5f577e5e9d89f9b2cbf7f478def1039f479045cd9bc47	8dcb1b7ddedf966f4d71b0b8f4447425006fdba843a9157914e0963bb4a6aae8	660
 N	run-node-core.js	85bac095f762d0fb3ab77c81e01105991cb589d46139dec1241454807d019d64	69b4e687f4be029a7495adc5e688a90b9b3f7040e190df9731e372cdde22e462	430
 C	run-container-codecs.js	18d587e1c72ca8a501582364d0db65c0711c43b15ca3be831174b21043620471	4bfb6dbf73a700bef03a5e6474d1eebc6e4b214737d41b1793274fd356dbca36	660
 D	run-diff-utils.js	1e4791c5eee4edcf5c6f0a8f99320d9df6597d9dcb15378bcc8ff0470c12ce63	23861bdd6cbc97179b181b5186c22acce7cc47bac007270f14cd39b1aad3363b	200
@@ -131,21 +131,21 @@ O	run-ops.js	9551b89b3ea5c629a3a1645a90a5ea58848944523a457940041a99a4d5d33cf7	3b
   return { id, path, moduleHash, aggregateHash, cap: Number(cap) };
 });
 const DECLARATIONS = `
-P	run-project.js	runToTiptap	1288	2356	2463	ade03c41c44bfa66577232ec193251db3ccf4fe373bcb009ffd597279f309c1e	2a0fe662d6db5f079323ad034e2f152acf33cfebde990abb6272bc56ba825b77
-P	run-project.js	OBJECT_OVERRIDES	2463	2990	3018	7b202892244e22295d7f9b7ddcb3bf00ec2ab32e93629bdab4f448896f8eba53	fbd25d518aebbe3de32515a484e7816c9bea9d01db181b22f6a3acfdcedc7e8a
-P	run-project.js	withObjectOverrides	3018	3020	3232	a94ad7e7977ce2844027936708e9f864b32e6af7a4dd28eae7cbab079bddb7f0	0beb0521892bbd832ba5bc3b56fc3c0861f6e9beb01de4248c674c1d03e36eb6
-P	run-project.js	blockToNode	3232	3569	14367	3d6bc15423d6a1a24a0c62be38ac20e7b1bc08d56f1236ba9b6b667c5444b1dd	9b092e4e88385d05eef7f6ceee3b69c50fb12087ebb60675246a1102bcf6c665
-P	run-project.js	sectionBlockToNode	14367	16138	18463	12c14ab1174c137cd76bc53c985d67df9b9261352964a4b3dacae21aea09a531	6144df2858b595b7169f4fafe71c26f95f81fa8ba9d68f729d7b183e256e33d4
-P	run-project.js	expandableBody	18463	19060	19330	d5523c04ed489cb1074d6c4f18f012e51e56ab220ed9afd9332015845eda65e1	cbf46eb07920f63038240c6b47c2c4013cdd7566033e39f1271a31b994701d80
-P	run-project.js	expandableBlockToNode	19330	19332	20026	d902050ed5028b85613d2eb427933dcd7af7485673dda28d18c935d74cd5c442	bab4fd6c2e99353d32cfd9e85efa9488d5225967f74d47d0552fd28700150bf6
-P	run-project.js	rowsBody	20026	20604	20854	d07dabff8e71848aeae5a36c5ccb9faebed82b85116c830308a9888ae648716c	14447a06f1f72f1e58776620a79a40969023498ee4d3f64ff063c34cbec91b4f
-P	run-project.js	rowsBlockToNode	20854	20856	22007	0ad30d54ea8ca79da13ae4fbabfcf46bf65fb09bea98ead1a65bdc916abf7806	fa3d8fa5b8b64de6e8196a8ec607f73af076daa1627b375507704ccefa19d2b7
-P	run-project.js	childBlockToNode	22007	22577	23052	794bae9158c19a2753861ac760e0892fbd4f12789c560e19d644b94a083eae90	d12b04b55350b122ca60ba4592b2df7f534873ba21cbfe33e0f331b6c8626505
-P	run-project.js	columnAtomBlockToNode	23052	23481	23706	0bd0a12a33ce119804d67d02ccaaa5dca0da5ed625d23b42f02f6e5dcda25ce1	cb33b252822d810e5cd02907762016122a9cb15c64d2a4b613808f90d0abba14
-P	run-project.js	columnsBlockToNode	23706	24219	24839	1a4a77e618590e0e5521bb6546bc2453adcf1e0237c57369f16eafe80e23a36d	29d57e0e8a83609b887a9e208f542c8a195d06ddfff936ed4c43055b9a37f298
-P	run-project.js	terminalChildBlockToNode	24839	26474	26721	f7ae18e62430031a704ebd7a3fd09b83e40a839377d1b4e56a0843c2bf7c98c3	044ba62499e8b65bea3e6e09748daf033dfac91af8142bb48bb19d1b8024bbf9
-P	run-project.js	terminalAtomBlockToNode	26721	26998	27227	4c9e1e9d8db6b26a3e9ad13325be7fb63cf92e098c986b0c50386ed1152d44f3	c5460ba92248a3d9215a490146eb2a82f6a0a820b68d22ed4732d0301b53be82
-P	run-project.js	terminalBlockToNode	27227	27675	28308	c5aa97f4bf1051ca93c5516f14aa6daadfe5bbd716c6bb733843b10d7df9df96	28a9f42461469e6d8afbb4ebd09f8cd094948a4bd2b2c81c63dfd0eb00a50fa4
+P	run-project.js	runToTiptap	1353	2421	2528	ade03c41c44bfa66577232ec193251db3ccf4fe373bcb009ffd597279f309c1e	2a0fe662d6db5f079323ad034e2f152acf33cfebde990abb6272bc56ba825b77
+P	run-project.js	OBJECT_OVERRIDES	2528	3055	3083	7b202892244e22295d7f9b7ddcb3bf00ec2ab32e93629bdab4f448896f8eba53	fbd25d518aebbe3de32515a484e7816c9bea9d01db181b22f6a3acfdcedc7e8a
+P	run-project.js	withObjectOverrides	3083	3085	3297	a94ad7e7977ce2844027936708e9f864b32e6af7a4dd28eae7cbab079bddb7f0	0beb0521892bbd832ba5bc3b56fc3c0861f6e9beb01de4248c674c1d03e36eb6
+P	run-project.js	blockToNode	3297	3634	14868	832282b1555e4d8965b5a4b81da501670f36d00ce3b447f40ba10d3c1d468c57	1e4d58332f9b6a946a895500fa52d1fb8e58abbd90784896bcbd8a3897f8a2a0
+P	run-project.js	sectionBlockToNode	14868	16639	18964	12c14ab1174c137cd76bc53c985d67df9b9261352964a4b3dacae21aea09a531	6144df2858b595b7169f4fafe71c26f95f81fa8ba9d68f729d7b183e256e33d4
+P	run-project.js	expandableBody	18964	19561	19831	d5523c04ed489cb1074d6c4f18f012e51e56ab220ed9afd9332015845eda65e1	cbf46eb07920f63038240c6b47c2c4013cdd7566033e39f1271a31b994701d80
+P	run-project.js	expandableBlockToNode	19831	19833	20527	d902050ed5028b85613d2eb427933dcd7af7485673dda28d18c935d74cd5c442	bab4fd6c2e99353d32cfd9e85efa9488d5225967f74d47d0552fd28700150bf6
+P	run-project.js	rowsBody	20527	21105	21355	d07dabff8e71848aeae5a36c5ccb9faebed82b85116c830308a9888ae648716c	14447a06f1f72f1e58776620a79a40969023498ee4d3f64ff063c34cbec91b4f
+P	run-project.js	rowsBlockToNode	21355	21357	22508	0ad30d54ea8ca79da13ae4fbabfcf46bf65fb09bea98ead1a65bdc916abf7806	fa3d8fa5b8b64de6e8196a8ec607f73af076daa1627b375507704ccefa19d2b7
+P	run-project.js	childBlockToNode	22508	23078	23553	794bae9158c19a2753861ac760e0892fbd4f12789c560e19d644b94a083eae90	d12b04b55350b122ca60ba4592b2df7f534873ba21cbfe33e0f331b6c8626505
+P	run-project.js	columnAtomBlockToNode	23553	23982	24207	0bd0a12a33ce119804d67d02ccaaa5dca0da5ed625d23b42f02f6e5dcda25ce1	cb33b252822d810e5cd02907762016122a9cb15c64d2a4b613808f90d0abba14
+P	run-project.js	columnsBlockToNode	24207	24720	25340	1a4a77e618590e0e5521bb6546bc2453adcf1e0237c57369f16eafe80e23a36d	29d57e0e8a83609b887a9e208f542c8a195d06ddfff936ed4c43055b9a37f298
+P	run-project.js	terminalChildBlockToNode	25340	26975	27222	f7ae18e62430031a704ebd7a3fd09b83e40a839377d1b4e56a0843c2bf7c98c3	044ba62499e8b65bea3e6e09748daf033dfac91af8142bb48bb19d1b8024bbf9
+P	run-project.js	terminalAtomBlockToNode	27222	27499	27728	4c9e1e9d8db6b26a3e9ad13325be7fb63cf92e098c986b0c50386ed1152d44f3	c5460ba92248a3d9215a490146eb2a82f6a0a820b68d22ed4732d0301b53be82
+P	run-project.js	terminalBlockToNode	27728	28176	28809	c5aa97f4bf1051ca93c5516f14aa6daadfe5bbd716c6bb733843b10d7df9df96	28a9f42461469e6d8afbb4ebd09f8cd094948a4bd2b2c81c63dfd0eb00a50fa4
 N	run-node-core.js	walkBlockIds	650	1379	1888	0cb2ae20be5bd94a2aa5f81ef91f715491537474839ea387d5eda8cdb6c691d1	59426c638ca4d1c712c74be0c69949e6a84f31765248da8c2150d7b7e14eab05
 N	run-node-core.js	blockParents	1888	2054	2442	4afd374be9046a50af148c0ba664c5b725e1e6b513965993dd9771544b8e39e1	4a9e69f99aaa6dba1353adf255d1609333d0468af1b421d3771ce9f85588bbcf
 N	run-node-core.js	holdsNodeIds	2442	2660	2814	3f979ed21d995d3438d7d2065d120aa67093845698a79f9a05a0e9d0ea693af6	62c498021280256ca5e1f247e214b8e9a278f022b06200d551312167c1b0b5ec
@@ -220,6 +220,7 @@ run-project.js	./run-kinds.js	CANVAS_ROWS	CANVAS_ROWS
 run-project.js	./run-kinds.js	TECHNICAL_ATOM_SHAPES	TECHNICAL_ATOM_SHAPES
 run-project.js	./run-structured-codecs.js	actionBlockToNode	actionBlockToNode
 run-project.js	../convert.js	blockToTiptap	blockToTiptap
+run-project.js	./inline-depth.js	boundedClone	boundedClone
 run-project.js	./run-content-codecs.js	calloutBlockToNode	calloutBlockToNode
 run-project.js	./run-content-codecs.js	cardBlockEditable	cardBlockEditable
 run-project.js	./run-content-codecs.js	cardBlockToNode	cardBlockToNode
@@ -230,6 +231,7 @@ run-project.js	./run-structured-codecs.js	fieldBlockToNode	fieldBlockToNode
 run-project.js	./run-structured-codecs.js	figureBlockToNode	figureBlockToNode
 run-project.js	./run-structured-codecs.js	fleetBlockToNode	fleetBlockToNode
 run-project.js	./run-structured-codecs.js	imageBlockToNode	imageBlockToNode
+run-project.js	./inline-depth.js	inlineTooDeep	inlineTooDeep
 run-project.js	./run-kinds.js	isCanvasActionType	isCanvasActionType
 run-project.js	./run-kinds.js	isCanvasAtomType	isCanvasAtomType
 run-project.js	./run-kinds.js	isCanvasAttrAtomType	isCanvasAttrAtomType
@@ -489,7 +491,7 @@ rowsNodeToBlock(node, entry.id, taken || new Set());	rowsNodeToBlock(node, entry
 
 assert.equal(GROUPS.length, 6, "all six production leaves are guarded");
 assert.equal(DECLARATIONS.length, 74, "all 74 declarations are guarded");
-assert.equal(IMPORTS.length, 259, "all 259 pre-proved import-owner records are guarded");
+assert.equal(IMPORTS.length, 261, "all 261 pre-proved import-owner records are guarded");
 assert.equal(CALLBACK_EDITS.length, 11, "the callback seam stays limited to 11 edits");
 const sources = Object.fromEntries(GROUPS.map(({ path }) => [path, readFileSync(resolve(here, path), "utf8")]));
 const rootSource = readFileSync(resolve(here, "run-convert.js"), "utf8");
