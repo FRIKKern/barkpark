@@ -429,7 +429,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   def handle_info({:doc_updated, msg} = message, socket) do
     if Discarded.frame?(msg, socket.assigns),
       do: ours({:noreply, Discarded.reload(socket)}),
-      else: message |> StudioLive.handle_info(socket) |> ours()
+      else: message |> StudioLive.handle_info(socket) |> quiet_remote() |> ours()
   end
 
   # A tree codelist's pick: the press went to its component
@@ -588,6 +588,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       {nil, _} -> Panes.open_after(chain, last, next, base)
     end
   end
+
+  # Another user's save over a form with nothing unsaved is taken in and
+  # says nothing: TanStack's footer keeps its "Edited …" and has no words
+  # for it (DocumentPane `DocFooter`, task-22f40460dbb71b27). Over unsaved
+  # edits it is a conflict (`doc_conflict`) and keeps its words.
+  defp quiet_remote({:noreply, socket}) do
+    if socket.assigns[:save_status] == "Updated by another user" and
+         socket.assigns[:doc_conflict] != true,
+       do: {:noreply, assign(socket, :save_status, "")},
+       else: {:noreply, socket}
+  end
+
+  defp quiet_remote(reply), do: reply
 
   defp repatch(socket, to), do: push_patch(%{socket | redirected: nil}, to: to)
 
