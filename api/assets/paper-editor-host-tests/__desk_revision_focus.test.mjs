@@ -49,7 +49,7 @@ async function check(name, fn) {
 // `doc` names another document: its pane and field ids are its own, as the
 // desk's (`desk-pane-<index>-<key>`), so a patch to it removes the fields.
 // `published` draws the published view: read-only, with Unpublish.
-function pane({ revision, published, history = true, tabs = true, footer = true, doc = "" }) {
+function pane({ revision, published, history = true, tabs = true, footer = true, doc = "", seo = false, wrapTabs = false }) {
   revision = revision || published;
   const fields =
     `<form id="editor-form" phx-change="validate">` +
@@ -64,10 +64,12 @@ function pane({ revision, published, history = true, tabs = true, footer = true,
     `<div id="p-title-bar" class="doc-title-bar dk-title-bar"><div role="tablist"><button type="button" id="editor-tab" role="tab" tabindex="0">Editor</button></div></div>` +
     `<div id="p-body" class="pane-body doc-form">` +
     `<div id="p-shell-header" style="visibility: hidden"><button type="button" id="classic">Classic</button></div>` +
+    (tabs && wrapTabs && revision ? `<div id="p-revision-tabs">` : "") +
     (tabs
-      ? `<div class="bp-tab-bar" role="tablist"><button type="button" id="bp-group-tab-all-fields" role="tab" tabindex="0">All fields</button>` +
-        `<button type="button" id="bp-group-tab-seo" role="tab" tabindex="-1">SEO</button></div>`
+      ? `<div class="bp-tab-bar" role="tablist"><button type="button" id="bp-group-tab-all-fields" role="tab" tabindex="${seo ? -1 : 0}">All fields</button>` +
+        `<button type="button" id="bp-group-tab-seo" role="tab" tabindex="${seo ? 0 : -1}">SEO</button></div>`
       : "") +
+    (tabs && wrapTabs && revision ? `</div>` : "") +
     `<fieldset id="p-form-holder" class="dk-revision-form">${box}</fieldset>` +
     (history ? `<aside id="p-history"><ol>${row("r2", !revision)}${row("r1", revision)}</ol></aside>` : "") +
     `</div>` +
@@ -225,6 +227,28 @@ await check("with field groups, Back from a revision on Revert: All fields", asy
   patch({ revision: true });
   document.getElementById("revert").focus();
   patch({ revision: false });
+  assert.equal(active(), "bp-group-tab-all-fields");
+});
+
+await check("another group selected (All fields' roving tabindex -1), Back from a revision: All fields, as the desk opens it", async () => {
+  const { document, patch, active } = page({ history: false, seo: true });
+  patch({ revision: true });
+  document.getElementById("revert").focus();
+  patch({ revision: false });
+  assert.equal(active(), "bp-group-tab-all-fields", "a tab button takes the focus, as focusIntoForm's");
+});
+
+await check("All fields focused on a revision, Back moves it to the live bar (morphdom blurs it): it keeps the focus", async () => {
+  const { window, document, patch, active } = page({ history: false, wrapTabs: true });
+  patch({ revision: true });
+  const tab = document.getElementById("bp-group-tab-all-fields");
+  tab.focus();
+  // Chrome: morphdom moving the keyed tab to its new parent blurs it, and
+  // LiveView's restore does not give a button the focus back.
+  tab.dispatchEvent(new window.FocusEvent("focusout", { bubbles: true }));
+  tab.blur();
+  patch({ revision: false });
+  assert.equal(document.getElementById("bp-group-tab-all-fields"), tab, "the same node, moved");
   assert.equal(active(), "bp-group-tab-all-fields");
 });
 

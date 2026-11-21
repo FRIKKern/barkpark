@@ -32,6 +32,9 @@
 // footer's first control, then the pane's Editor tab
 // (task-8fe9bc3aa4437be6).
 //
+// A control the patch only moved (morphdom blurs a node it moves to a new
+// parent) gets the focus back, as LiveView gives it back to an input.
+//
 // A focus the person moved away (a click on empty space) is forgotten, so
 // nothing takes it back. The patch's own move blurs the field too, while it
 // is still enabled, so that is decided once the patch is done.
@@ -46,6 +49,7 @@
   var last = null;
   var lastPane = null;
   var lastAt = { key: null, index: null };
+  var blurred = null;
 
   // Drawn and seen: the shell's own header controls are kept in the desk's
   // form but hidden.
@@ -66,10 +70,12 @@
     return null;
   }
 
+  // As `focusIntoForm` (and the desk's own open focus), a group tab counts
+  // though its roving tabindex is -1: a button takes the focus.
   function start(pane) {
     var keys = window.BarkparkTabKeys;
     var el = keys && keys.formStart ? keys.formStart(pane) : null;
-    return el && takes(el) ? el : null;
+    return el && !el.matches(":disabled") && shown(el) ? el : null;
   }
 
   // Where opening a document puts the focus, as `focusIntoForm`.
@@ -116,6 +122,11 @@
       if (!free) return;
       pane = paneNow();
       el = pane && opening(pane);
+    } else if (blurred === was && free) {
+      // Moved by the patch (morphdom blurs a node it moves to a new parent,
+      // as a revision's group tabs on Back): it keeps the focus.
+      pane = was.closest(PANE);
+      el = !was.matches(":disabled") && shown(was) ? was : pane && opening(pane);
     } else return;
     if (!el) return;
     last = null;
@@ -134,7 +145,9 @@
     // in the page, enabled, and not focused again.
     var el = e.target;
     if (el !== last || e.relatedTarget) return;
+    blurred = el;
     setTimeout(function () {
+      if (blurred === el) blurred = null;
       if (last === el && el.isConnected && !el.matches(":disabled") && document.activeElement !== el) last = null;
     }, 0);
   });
