@@ -182,6 +182,16 @@ defmodule BarkparkWeb.MutateFixedDocumentsTest do
 
     assert exists?(ctx, "side-om-oss")
 
+    # A listed page that exists only as a draft: deleting the draft is discarding it
+    # (no published document is removed), and the page can be created again.
+    assert mutate(ctx, [%{"create" => doc(ctx, "side-hva-vi-jobber-med")}]).status == 200
+
+    assert mutate(ctx, [
+             %{"delete" => %{"id" => "drafts.side-hva-vi-jobber-med", "type" => ctx.type}}
+           ]).status == 200
+
+    assert mutate(ctx, [%{"create" => doc(ctx, "side-hva-vi-jobber-med")}]).status == 200
+
     # The Writer and Lifecycle doors (Studio, import), not only the mutate API.
     assert {:error, {:fixed_document, :delete, _, "side-om-oss"}} =
              Content.delete_document("drafts.side-om-oss", ctx.type, ctx.dataset, ctx.scope)
