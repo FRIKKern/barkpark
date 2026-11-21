@@ -135,6 +135,15 @@ export const REFUSED = {
   'document.writeln': 'the page called document.writeln after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
   'document.open': 'the page called document.open, which the check refuses: it starts the document again, and the check\'s watch with it',
 }
+/** How a selftest case's check run touched the top layer, by what it did, not by its name: its part names a layer,
+    or the run says one of the top layer's fails (a box no layer names, open or not; a frame; a refused call).
+    Empty when it did neither. */
+export function topLayerTouch(layers, proof) {
+  if (layers?.length) return 'its part names a layer'
+  const text = JSON.stringify(proof ?? {})
+  const hit = [UNNAMED(''), UNNAMED_CAN(''), FRAME(''), ...Object.values(REFUSED)].find((s) => text.includes(JSON.stringify(s.trim()).slice(1, -1)))
+  return hit ? `its run says "${hit.trim()}"` : ''
+}
 /** What the census tells, as the fail it is. */
 const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'call' ? REFUSED[at] : UNNAMED_CAN(at))
 

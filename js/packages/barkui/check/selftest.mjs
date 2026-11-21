@@ -17,7 +17,7 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
-import { SELFTEST_JOBS, selftestPick } from './jobs.mjs'
+import { layerMisplaced, SELFTEST_JOBS, selftestPick } from './jobs.mjs'
 import { selftestReport } from './selftest-report.mjs'
 import { runCheck } from './check.mjs'
 import { open } from './proofs.mjs'
@@ -25,7 +25,7 @@ import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
-import { UNNAMED } from './layers.mjs'
+import { topLayerTouch, UNNAMED } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES, esc } from './plants.mjs'
 
 export const CASES = [
@@ -744,10 +744,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       try {
         html = readFileSync(join(out, 'index.html'), 'utf8')
       } catch {}
-      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60)
+      // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
+      const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, 'button', 'part.json'), 'utf8')).layers, proof))
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60) && !misplaced
       if (pass) held.push(c.name)
       else failures++
       console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
+      if (misplaced) console.log(`    ${misplaced}`)
       if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
     } finally {
       rmSync(scratch, { recursive: true, force: true })

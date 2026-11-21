@@ -37,6 +37,16 @@ export const SELFTEST_JOBS = [
 const VIEWS = ['skins', 'schemes', 'phone']
 /** The selftest job that runs a case, by its key. */
 export const selftestJob = (c) => (!c.direct && !c.states && !c.layers && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
+/** Why case `c` sits in the wrong job, given how its run touched the top layer (`touch`, layers.mjs topLayerTouch):
+    a case that opens a layer or holds a layer refusal is a `layers` case and runs in the rest job, and a `layers`
+    case does one of the two. Empty when it sits where it belongs. The selftest runner asks this of every case it
+    runs, so a new case that forgets the flag is caught by what it does, not by its name. */
+export const layerMisplaced = (c, touch) =>
+  touch && selftestJob(c) === 'views'
+    ? `"${c.name}" runs in the views job, but ${touch}: a case that opens a layer or holds a layer refusal is a layers case and runs in the rest job (check/jobs.mjs)`
+    : c.layers && !touch
+      ? `"${c.name}" is a layers case, but its run opens no layer and holds no layer refusal`
+      : ''
 /** The cases the job `key` runs, in their order. */
 export const casesOf = (cases, key) => cases.filter((c) => selftestJob(c) === key)
 /** The cases one selftest run runs: job `key`'s (every case when `key` is null), narrowed to those whose name holds
