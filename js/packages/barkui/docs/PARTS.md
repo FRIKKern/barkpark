@@ -10,7 +10,8 @@ parts/<name>/
   part.json     name (= folder), family, element, imports, summary; optional paint (selector -> variable
                 per property: a wrong entry turns "every skin" off, and with none the trace still holds every
                 colour to one skin variable); optional textOnly (selectors of controls that draw no
-                boundary, such as a ghost button)
+                boundary, such as a ghost button); optional layers (each box the part opens in the top
+                layer, with the real input that opens and closes it: see "The top layer")
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
@@ -227,6 +228,46 @@ and dark" (dark views) or "phone" (390px) off. Each wait prints as "waiting on t
 and the sheet's work that ends it. Today eight wait, all `--ui-muted-foreground` on `--ui-background` on
 primary (the demo labels), at 3.75 to 3.78:1. For each surface the check also records, as numbers only,
 a disabled control's fill against its ground and against the primary fill.
+
+## The top layer
+
+An open popover or a modal dialog is drawn in the top layer: over the page, not inside its DOM parent, and
+often outside the stage's box. A part names each such box in part.json `layers` as `{ box, open, close }`:
+the box's selector, and the real input that opens and closes it (`focus`, `click` or `hover` at the control's
+centre only if it is on top there, `leave` to take the pointer off the page, `keys`). In every view the stage is read in (every skin, scheme and surface at
+1440px, and at 390px) the check reads the stage closed, then opens each layer by its input, reads the stage
+again with the capture covering the stage and the open box, and closes it by its input. A layer that does
+not open or does not close fails by name. While a box is open, the ground behind it is its `::backdrop`,
+then what the page draws there, read from a capture taken with the open boxes hidden, never its DOM parent;
+what the box covers or a modal box blocks is read in the closed reading.
+
+Every element that can open in the top layer (a `dialog`, or an element that carries `popover`) must be
+named by a layer, whether or not it ever opens. The check watches each page from its first frame, so it sees
+such an element in the document at load, added later, or given `popover` later, even one that is gone again
+before the check looks, and in each open shadow root. Every element the check sees arrive is read with its
+open shadow root, so a host that arrives carrying one (parsed by `setHTMLUnsafe`, cloned, adopted) is read
+on arrival. A root comes to exist on a host already in the page in these ways only, each seen at once or
+refused by name: a script calls `attachShadow` (a hook the check sets in the page before any of its script
+tells it at once, wherever the host stands); the parser meets a declared root in `example.html` (refused,
+"a declared shadow root"); markup is written into the parsed page (`document.write`, `writeln`, `open`:
+refused by name); another window attaches one (every frame in the page, and `window.open`, refused by
+name). One no layer names fails by name, once per page ("… can open in the top layer (a
+dialog, or it carries popover), and no layer in part.json names it"), at the first reading or look after
+real input that follows. A box open in the top layer that no layer names also fails by name ("… is open in
+the top layer during the reading, and no layer in part.json names it") at every moment the check judges or
+drives the part: each reading, each Tab stop of the focus walk, each press step, each driven state, and
+each layer's open and close input. The one limit: a box the page never holds while the check has it open,
+up to the check's last look (one made only after an input the check never gives), or one only inside a
+closed shadow root, is not seen.
+
+A layer's box opens at once on its input. One that is not open once its input settles fails by name ("… is
+not open in the top layer once its "open" input settles: it opened later than the check waits, or not at
+all; a layer opens at once on its input"), so a part's tooltip shows with no delay. A
+box a layer names is read by that layer: the check opens it by the layer's own input in every view, so when
+a Tab stop or a driven state opens it as well, it is not read again there. A part whose box opens only on
+focus or hover names that input as the layer's `open` (`focus`, or `hover` with the pointer at the control's
+centre), and as its `close` the input that moves away (`keys: ["Tab"]`, or `leave: true`, the pointer taken
+off the page).
 
 ## What part.css may condition on
 

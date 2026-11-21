@@ -24,7 +24,9 @@ import { open } from './proofs.mjs'
 import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
-import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
+import { LAYER_CASES } from './layer-cases.mjs'
+import { UNNAMED } from './layers.mjs'
+import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES, esc } from './plants.mjs'
 
 export const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
@@ -609,6 +611,11 @@ steps.push({
       inCss('[data-slot="button"], [data-slot="button"][data-variant="huge"] { --bark-button-text: 0.875rem; }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
       inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
+      // Two boxes no layer names, each open only after one kind of real input and closed before anything else
+      // looks: a tooltip while the pointer is on the Duplicate button (a driven state), and a box from Space on the
+      // primary button until the next key (a press step).
+      (d) => appendFileSync(join(d, 'example.html'), '\n<div data-demo-row><div id="button-hover-tip" popover="manual">Shown on hover</div><div id="button-press-tip" popover="manual">Shown on Space</div></div>\n'),
+      (d) => inDemo(d, "{ const b = root.querySelector('#button-after'), t = root.querySelector('#button-hover-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }\n{ const b = root.querySelector('#button-primary'), t = root.querySelector('#button-press-tip'); b.addEventListener('keydown', (e) => (e.key === ' ' ? t.matches(':popover-open') || t.showPopover() : t.matches(':popover-open') && t.hidePopover())) }"),
     ),
     css: [
       // Beyond the walls (this sheet is the selftest's own, and never pinned): the round-8 review's two hover rules,
@@ -628,6 +635,10 @@ steps.push({
       'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
+      // Each held only by the look after its own input: the state drive's, and the press step's (its result is the
+      // sentence alone; a reading after the step would say "drawn after this step, …" first).
+      'a tooltip open only while a driven state holds, named by no layer': skinsSay(new RegExp(`^real hover on button#button-after "Duplicate": ${esc(UNNAMED('div#button-hover-tip "Shown on hover"'))}$`)),
+      'a box open only after a press step, named by no layer': (p) => (p.parts.button.steps ?? []).some((st) => st.name === 'Space activates it' && st.detail === UNNAMED('div#button-press-tip "Shown on Space"')),
     }),
   },
   // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
@@ -655,6 +666,7 @@ steps.push({
     }),
   },
   ...CEILING_CASES,
+  ...LAYER_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
