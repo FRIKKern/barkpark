@@ -237,10 +237,21 @@ not open or does not close fails by name. While a box is open, the ground behind
 then what the page draws there, read from a capture taken with the open boxes hidden, never its DOM parent;
 what the box covers or a modal box blocks is read in the closed reading.
 
-A box open in the top layer that no layer names fails by name ("… is open in the top layer during the
-reading, and no layer in part.json names it") at every moment the check judges or drives the part: each
-reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and
-close input. So a tooltip that opens on focus or hover and closes before the next reading is named too. A
+Every element that can open in the top layer (a `dialog`, or an element that carries `popover`) must be
+named by a layer, whether or not it ever opens. The check watches each page from its first frame, so it sees
+such an element in the document at load, added later, or given `popover` later, even one that is gone again
+before the check looks. One no layer names fails by name, once per page ("… can open in the top layer (a
+dialog, or it carries popover), and no layer in part.json names it"), at the first reading or look after
+real input that follows. A box open in the top layer that no layer names also fails by name ("… is open in
+the top layer during the reading, and no layer in part.json names it") at every moment the check judges or
+drives the part: each reading, each Tab stop of the focus walk, each press step, each driven state, and
+each layer's open and close input. The one limit: a box the page never holds while the check has it open,
+up to the check's last look (one made only after an input the check never gives), or one only inside a
+closed shadow root, is not seen.
+
+A layer's box opens at once on its input. One that is not open once its input settles fails by name ("… is
+not open in the top layer once its "open" input settles: it opened later than the check waits, or not at
+all; a layer opens at once on its input"), so a part's tooltip shows with no delay. A
 box a layer names is read by that layer: the check opens it by the layer's own input in every view, so when
 a Tab stop or a driven state opens it as well, it is not read again there. A part whose box opens only on
 focus or hover names that input as the layer's `open` (`focus`, or `hover` with the pointer at the control's
