@@ -431,6 +431,28 @@ func TestDecodeKeepsTheWordPastTheValueDepthAndCutsPastItsBound(t *testing.T) {
 	}
 }
 
+// Tabs, steps and list items take four JSON levels per block level, so a word that
+// 990 em hold, inside 60 nested tabs, sits past 2216 levels: maxJSONDepth must count
+// the longest slot path, or Go cuts a word the other readers keep.
+func TestDecodeKeepsTheWordInsideNestedTabs(t *testing.T) {
+	for typ, paths := range blockSlots {
+		for _, path := range paths {
+			if len(path) > maxSlotPath {
+				t.Errorf("%s slot %v is %d JSON levels per block level, past maxSlotPath %d", typ, path, len(path), maxSlotPath)
+			}
+		}
+	}
+	block := `{"type":"paragraph","content":[` + strings.Repeat(`{"type":"em","children":[`, 990) +
+		`{"type":"text","value":"leaf"}` + strings.Repeat(`]}`, 990) + `]}`
+	for range 60 {
+		block = `{"type":"tabs","tabs":[{"label":"t","blocks":[` + block + `]}]}`
+	}
+	got := renderBlockText(t, block, 100)
+	if !strings.Contains(got, "leaf "+nestedTooDeep) {
+		t.Errorf("990 em inside 60 nested tabs: want the word, then the notice: %.300q", got)
+	}
+}
+
 var limitSlots = []struct {
 	typ  string
 	path []string
