@@ -636,7 +636,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
   attr :seen_rev, :string,
     default: nil,
-    doc: "the open document's rev (`editor_doc`); each Restore sends it as `if_rev`"
+    doc:
+      "the shown document's rev (`History.seen_rev/1`: `editor_doc`, or `paper_doc` in paper view); each Restore sends it as `if_rev`"
 
   def history_modal(assigns) do
     ~H"""
