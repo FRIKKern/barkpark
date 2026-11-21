@@ -65,14 +65,16 @@ mailbox when it arrives.
 
 ## The chains
 
-Hop counts are derived in `chains.json`, which cites every enqueue site.
-`census_selftest.py` case C6 reds if a cited site stops enqueueing.
+Hop counts are derived in `chains.json`, which cites every enqueue site by
+its file and the exact text of the call, not by line number, so an edit
+above a site does not move it. `census_selftest.py` case C6 reds if a cited
+call is no longer in its file's code.
 
 | chain | hops | the hops |
 |---|---|---|
-| `CH-PAPEROP` | 1 | `paper_field_block.ex:350/352` `send(self(), {:paper_op, …})` |
-| `CH-CHAT` | 1 | `chat_live.ex:554` `send(self(), {:dispatch_send, …})` |
-| `CH-TREE` | 3 | `tree_codelist_field.ex:179` `send(self(), {:tree_codelist_change, …})` → `handlers/lifecycle.ex:316` `send_update/3`, which is `send(self(), {:phoenix, :send_update, …})` → `paper_field_block.ex:350/352` `send(self(), {:paper_op, …})` |
+| `CH-PAPEROP` | 1 | `paper_field_block.ex` `persist/4`: `send(self(), {:paper_op, …})` |
+| `CH-CHAT` | 1 | `chat_live.ex` `handle_event("send", …)`: `send(self(), {:dispatch_send, …})` |
+| `CH-TREE` | 3 | `tree_codelist_field.ex` `pick/3`: `send(self(), {:tree_codelist_change, …})` → `handlers/lifecycle.ex` `tree_codelist_change/2`: `send_update/3`, which is `send(self(), {:phoenix, :send_update, …})` → `paper_field_block.ex` `persist/4`: `send(self(), {:paper_op, …})` |
 
 ## What v1 got wrong
 
@@ -145,7 +147,9 @@ expected verdict passes for a predicate that answers that verdict always.
 - C5 — determinism over two full runs. This was RED: `calls_of` memoised on
   `id(txt)`, per-file dicts are garbage-collected, CPython reuses the address,
   and two runs over an unchanged tree printed 58/6 then 53/11.
-- C6 — every enqueue site `chains.json` cites still enqueues
+- C6 — every enqueue site `chains.json` cites is still a call in its file
+  (found by its text, not its line), with a control: a gone call and one
+  only named in a comment both read drifted
 - C7a/b — the two refuted sites, pinned by outcome. C7a went RED while this
   was being written: the statement-spanning fix moved the derive-latency
   site's window past its inline `fn -> … render(view) end`, and only the
