@@ -1166,6 +1166,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_delete, :boolean, default: false
   attr :delete_refs, :list, default: []
   attr :editor_doc, :map, default: nil
+  attr :seen_rev, :string, default: nil, doc: "the shown document's rev (`History.seen_rev/1`)"
   attr :show_discard, :boolean, default: false
   attr :account_label, :string, default: nil
   attr :profile_error, :string, default: nil
@@ -1196,7 +1197,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     <.history_modal
       show_history={@show_history}
       revisions={@revisions}
-      seen_rev={@editor_doc && Map.get(@editor_doc, :rev)}
+      seen_rev={@seen_rev}
     />
     <.delete_modal
       show_delete={@show_delete}

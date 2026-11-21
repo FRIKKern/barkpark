@@ -307,9 +307,15 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).rev == after_write.rev
       assert flash(view)["error"] =~ @moved
+
+      # The refusal drops the edits the restore would have overwritten.
+      refused = socket_assigns(view)
+      refute refused.editor_dirty, "the refused press left the form dirty"
+      refute refused.doc_conflict
+      assert MapSet.size(refused.editor_unsaved_keys) == 0
     end
 
-    test "a write the page was never told of: refused (the safe side)", c do
+    test "a write the page was never told of: refused (the safe side), then read again", c do
       view = open(c, c.studio)
       hold_frames(view)
       after_write = write(c.type, c.id, "Words C")
@@ -318,6 +324,13 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).rev == after_write.rev
       assert flash(view)["error"] =~ @moved
+
+      # Only the refusal's reload tells the page of the write.
+      assert socket_assigns(view).editor_form["title"] == "Words C",
+             "the refused press did not read the document again"
+
+      press(view, dialog_values(view, c, "Words A"))
+      assert current(c).title == "Words A"
     end
 
     test "a press with no state, from a page drawn before the fence: restores as before", c do
