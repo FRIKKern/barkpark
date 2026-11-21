@@ -11586,6 +11586,7 @@ msgid "Table too large to show"
 msgstr ""
 
 #: lib/barkpark/portable_doc/render/chrome.ex:104
+#: lib/barkpark_web/studio_locale.ex:772
 #, elixir-autogen, elixir-format
 msgid "Nested too deep to show"
 msgstr ""
