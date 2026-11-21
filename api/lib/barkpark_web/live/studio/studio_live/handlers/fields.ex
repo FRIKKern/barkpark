@@ -363,8 +363,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   change (task-0f806691db0e06dd). `TreeCodelistField` sends the input name
   (`doc[subject]`, or a nested `doc[a][0].b`) and the code: the re-rendered
   hidden input alone fires no `phx-change`. The code goes into the editor
-  buffer at that path and the buffer is saved, as a reference pick does
-  (`Refs.select_ref/2`); `Shared.do_autosave/3` asks the write questions.
+  buffer at that path and the buffer is saved; `Shared.do_autosave/3` asks
+  the write questions.
 
   `press` is the pressed row's params: the pick is written only into the
   document it was pressed in (`PostIdentity.pressed/3`). A message without

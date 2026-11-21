@@ -17,7 +17,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
   - `Lifecycle` — handle_info/2 + `finish_handle_params/6`
   - `Scope` — pane nav, workspace/project/dataset switch, switcher create
   - `Fields` — new/save/autosave, editor toggles, ArrayField ops
-  - `Media` — image picker + upload · `Refs` — reference picker
   - `History` — revision panel + restore + profile · `Delete` · `Discard`
   - `Doc` — publish/unpublish (blast-radius) + duplicate
   - `Shares` — network shares panel · `ItemShare` — per-doc share popover
@@ -50,9 +49,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     ItemShare,
     Lifecycle,
     ObjectBlocks,
-    Media,
     Paper,
-    Refs,
     Schema,
     Scope,
     Secondary,
@@ -420,7 +417,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
     do: Lifecycle.presence_diff(topic, socket)
 
   def handle_info({:document_changed, msg}, socket), do: Lifecycle.document_changed(msg, socket)
-  def handle_info({:autosave_form, form}, socket), do: Lifecycle.autosave_form(form, socket)
 
   # A nested PaperFieldBlock flush carries the browser request id so the
   # component bridge can keep an unsaved draft mounted until THIS exact op has
@@ -581,32 +577,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("object-dialog-save", params, socket), do: ObjectBlocks.save(params, socket)
   def handle_event("object-dialog-close", _params, socket), do: ObjectBlocks.close(socket)
-
-  def handle_event("open-image-picker", params, socket),
-    do: Media.open_image_picker(params, socket)
-
-  def handle_event("close-image-picker", _params, socket), do: Media.close_image_picker(socket)
-
-  def handle_event("select-media", params, socket),
-    do: PostIdentity.pressed(params, socket, &Media.select_media/2)
-
-  def handle_event("clear-image", params, socket),
-    do: PostIdentity.pressed(params, socket, &Media.clear_image/2)
-
-  def handle_event("validate-upload", _params, socket), do: Media.validate_upload(socket)
-
-  def handle_event("upload-image", params, socket),
-    do: PostIdentity.pressed(params, socket, &Media.upload_image/2)
-
-  def handle_event("open-ref-picker", params, socket), do: Refs.open_ref_picker(params, socket)
-  def handle_event("close-ref-picker", _params, socket), do: Refs.close_ref_picker(socket)
-  def handle_event("ref-search", params, socket), do: Refs.ref_search(params, socket)
-
-  def handle_event("select-ref", params, socket),
-    do: PostIdentity.pressed(params, socket, &Refs.select_ref/2)
-
-  def handle_event("clear-ref", params, socket),
-    do: PostIdentity.pressed(params, socket, &Refs.clear_ref/2)
 
   def handle_event("show-history", _params, socket), do: History.show_history(socket)
   def handle_event("close-history", _params, socket), do: History.close_history(socket)

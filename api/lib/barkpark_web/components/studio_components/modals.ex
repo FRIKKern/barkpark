@@ -36,78 +36,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   def env_baseline_immutable, do: @env_baseline_immutable
 
   @doc """
-  Image-picker modal, formerly a legacy inline block in StudioLive, now
-  aggregated by `studio_modals/1`. Renders the overlay + media-grid card when
-  `image_picker_field` is non-nil. All `phx-*` events bubble to the
-  parent LV's `handle_event/3` (StudioLive owns: close-image-picker,
-  validate-upload, upload-image, select-media).
-
-  The `uploads` attr is the LV's full uploads struct; function
-  components render in the parent process so the upload config scopes
-  correctly. Do NOT promote this to a LiveComponent — `@uploads.image`
-  scoping does not carry across LiveComponent boundaries.
-  """
-  attr :image_picker_field, :string, default: nil
-  attr :uploads, :map, required: true
-  attr :media_files, :list, default: []
-
-  def image_picker_modal(assigns) do
-    ~H"""
-    <%= if @image_picker_field do %>
-      <div class="image-picker-overlay" phx-click="close-image-picker"></div>
-      <div
-        class="image-picker"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="image-picker-title"
-        id="image-picker-dialog"
-        phx-hook="ModalFocus"
-        phx-window-keydown="close-image-picker"
-        phx-key="escape"
-      >
-        <div class="image-picker-header">
-          <span id="image-picker-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Select Image") %></span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker" aria-label={gettext("Close")}>×</button>
-        </div>
-        <div class="image-picker-upload">
-          <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
-            <.live_file_input upload={@uploads.image} class="image-file-input" />
-            <%= for err <- upload_errors(@uploads.image) do %>
-              <p class="text-sm image-upload-error" role="alert"><%= upload_error_to_string(err) %></p>
-            <% end %>
-            <%= for entry <- @uploads.image.entries do %>
-              <div class="image-upload-entry">
-                <.live_img_preview entry={entry} width="60" height="60" />
-                <span class="text-sm"><%= entry.client_name %></span>
-                <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Upload") %></button>
-              </div>
-              <%= for err <- upload_errors(@uploads.image, entry) do %>
-                <p class="text-sm image-upload-error" role="alert"><%= upload_error_to_string(err) %></p>
-              <% end %>
-            <% end %>
-          </form>
-        </div>
-        <div class="image-picker-grid">
-          <%= if @media_files == [] do %>
-            <div class="text-sm text-muted" style="padding: 16px; text-align: center;"><%= gettext("No images yet. Upload one above.") %></div>
-          <% end %>
-          <%= for file <- @media_files do %>
-            <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@image_picker_field}>
-              <img
-                src={"/media/files/#{file.path}"}
-                alt={file.original_name}
-                onerror="this.onerror=null;this.classList.add('image-picker-thumb-broken');this.removeAttribute('src');"
-              />
-              <div class="image-picker-name"><%= file.original_name %></div>
-            </div>
-          <% end %>
-        </div>
-      </div>
-    <% end %>
-    """
-  end
-
-  @doc """
   Network shares panel (scoped-sharing P6).
 
   Lists the live shares (env baseline + persisted) and, for an admin caller,
@@ -685,56 +613,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
   defp grant_caps_label(_), do: ""
 
-  @doc """
-  Reference-picker modal, formerly a legacy inline block in StudioLive, now
-  aggregated by `studio_modals/1`. Shares the `.image-picker` overlay styling
-  (deliberate — same modal chrome). Caller pre-filters candidates via
-  `ref_search` so this component is data-only.
-
-  Events bubble to StudioLive: close-ref-picker, ref-search, select-ref.
-  """
-  attr :ref_picker_field, :string, default: nil
-  attr :ref_search, :string, default: ""
-  attr :ref_candidates, :list, default: []
-
-  def ref_picker_modal(assigns) do
-    ~H"""
-    <%= if @ref_picker_field do %>
-      <div class="image-picker-overlay" phx-click="close-ref-picker"></div>
-      <div
-        class="image-picker"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ref-picker-title"
-        id="ref-picker-dialog"
-        phx-hook="ModalFocus"
-        phx-window-keydown="close-ref-picker"
-        phx-key="escape"
-      >
-        <div class="image-picker-header">
-          <span id="ref-picker-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Select reference") %></span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker" aria-label={gettext("Close")}>×</button>
-        </div>
-        <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
-          <input type="text" placeholder={gettext("Search...")} aria-label={gettext("Search documents")} class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} data-modal-focus />
-        </div>
-        <div style="max-height: 400px; overflow-y: auto;">
-          <% filtered = filter_ref_candidates(@ref_candidates, @ref_search) %>
-          <%= for candidate <- filtered do %>
-            <div class="ref-candidate" phx-click="select-ref" phx-value-id={candidate.id} phx-value-field={@ref_picker_field}>
-              <span class="ref-candidate-title"><%= candidate.title %></span>
-              <span class="ref-candidate-id"><%= candidate.id %></span>
-            </div>
-          <% end %>
-          <%= if filtered == [] do %>
-            <div class="text-sm text-muted" style="padding: 20px; text-align: center;"><%= gettext("No documents found") %></div>
-          <% end %>
-        </div>
-      </div>
-    <% end %>
-    """
-  end
-
   # A share's surface and a link's access level, in words.
   defp surface_label("papers"), do: gettext("Papers")
   defp surface_label("docs"), do: gettext("Docs")
@@ -744,17 +622,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   defp link_access_label("read"), do: gettext("Read")
   defp link_access_label("edit"), do: gettext("Edit")
   defp link_access_label(other), do: String.capitalize(other)
-
-  defp filter_ref_candidates(candidates, ""), do: candidates
-  defp filter_ref_candidates(candidates, nil), do: candidates
-
-  defp filter_ref_candidates(candidates, query) do
-    q = String.downcase(query)
-
-    Enum.filter(candidates, fn c ->
-      String.contains?(String.downcase(c.title), q) or String.contains?(String.downcase(c.id), q)
-    end)
-  end
 
   @doc """
   History modal, formerly inline in StudioLive, now aggregated by
@@ -1137,8 +1004,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   Per-modal components remain individually exported for testability and
   for any future LV that wants only one modal in isolation.
 
-  Order matches the legacy render order: profile, image_picker,
-  ref_picker, history, delete. (Profile sits OUTSIDE pane_layout in the
+  Order matches the legacy render order: profile, history, delete. (Profile sits OUTSIDE pane_layout in the
   legacy markup; the other four sit INSIDE. Caller chooses placement.)
   """
   attr :show_profile, :boolean, default: false
@@ -1146,14 +1012,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :user_color, :string, default: ""
   attr :user_name_fallback, :string, default: nil
   attr :account_path, :string, default: nil
-
-  attr :image_picker_field, :string, default: nil
-  attr :uploads, :map, required: true
-  attr :media_files, :list, default: []
-
-  attr :ref_picker_field, :string, default: nil
-  attr :ref_search, :string, default: ""
-  attr :ref_candidates, :list, default: []
 
   attr :show_history, :boolean, default: false
   attr :revisions, :list, default: []
@@ -1178,16 +1036,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       account_path={@account_path}
       profile_error={@profile_error}
     />
-    <.image_picker_modal
-      image_picker_field={@image_picker_field}
-      uploads={@uploads}
-      media_files={@media_files}
-    />
-    <.ref_picker_modal
-      ref_picker_field={@ref_picker_field}
-      ref_search={@ref_search}
-      ref_candidates={@ref_candidates}
-    />
     <.history_modal show_history={@show_history} revisions={@revisions} />
     <.delete_modal
       show_delete={@show_delete}
@@ -1197,20 +1045,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     <.discard_modal show_discard={@show_discard} editor_doc={@editor_doc} />
     """
   end
-
-  # Human-readable copy for the client-side `allow_upload` validation errors
-  # (see StudioLive.mount: accept ~w(.jpg .jpeg .png .gif .webp .svg),
-  # max_entries: 1, max_file_size: 10 MB).
-  defp upload_error_to_string(:too_large),
-    do: gettext("That image is too large — the limit is 10 MB.")
-
-  defp upload_error_to_string(:too_many_files),
-    do: gettext("You can only upload one image at a time.")
-
-  defp upload_error_to_string(:not_accepted),
-    do: gettext("That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG.")
-
-  defp upload_error_to_string(_), do: gettext("That image couldn't be uploaded.")
 
   # The profile swatches and the word each is announced by.
   defp profile_colors do

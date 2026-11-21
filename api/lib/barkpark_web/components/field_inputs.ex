@@ -30,10 +30,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   rendered by Web Components — `<bp-media-picker>` and `<bp-reference-picker>`
   respectively — which own the entire UX (browse / upload / select / search /
   clear). They bridge their value through `BarkparkFieldBridge`; no per-LV
-  events are required. The legacy `"open-image-picker"` / `"clear-image"` /
-  `"select-media"` / `"upload-image"` / `"open-ref-picker"` / `"clear-ref"`
-  handlers and the legacy picker-modal markup remain in StudioLive but are no
-  longer invoked from this component (orphaned-but-harmless until v2 cleanup).
+  events are required. The legacy picker modals and their StudioLive events
+  (`select-ref`, `select-media`, `upload-image`, …) are gone
+  (task-c42545346b93cbb0).
 
   ## Field types
 
