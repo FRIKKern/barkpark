@@ -442,49 +442,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  def compose_block(%{"type" => "callout"} = b, style) do
-    # A callout's words are its content (else its text), then every block of its
-    # body slot, in that order (api/assets/paper-editor/src/markdown/callout-words.js).
-    # The first line is one inline PdText, as it always was. Each body block is
-    # composed by compose_block/2, the same function that composes a top-level
-    # block, so a list, a table or a callout in a body shows whole. A callout with
-    # no body composes the one PdText it always did (byte-identical); one with a
-    # body and no first-line words leaves the empty PdText out.
-    head = %{
-      "kind" => "PdText",
-      "children" => compose_inline_children(Barkpark.PortableDoc.Slots.callout_head_inline(b))
-    }
-
-    body =
-      case Barkpark.PortableDoc.Slots.callout_body_blocks(b) do
-        [] ->
-          [head]
-
-        blocks ->
-          composed = Enum.map(blocks, &compose_body_block(&1, b, style))
-          if head["children"] == [], do: composed, else: [head | composed]
-      end
-
-    tone = Map.get(b, "tone") || "info"
-
-    base =
-      %{"kind" => "PdCallout", "tone" => tone, "children" => body}
-      |> maybe_put("title", Map.get(b, "title"))
-
-    # Collapse is a SCREEN-only affordance: thread collapsible/collapsed ONLY in
-    # article mode (and only when `true`) so the email renderer — which shares
-    # walk.ex callout/3 — always emits the expanded <div>. Email clients strip
-    # <details> and would HIDE the body (the opposite of degrade-to-expanded).
-    # Skipping non-true also keeps existing callouts byte-identical at the Pd
-    # level, even after a re-save that writes an explicit collapsible:false.
-    if style == :article do
-      base
-      |> maybe_put_true("collapsible", Map.get(b, "collapsible"))
-      |> maybe_put_true("collapsed", Map.get(b, "collapsed"))
-    else
-      base
-    end
-  end
+  # A callout's words are its content, then each body block drawn as a block
+  # (Render.Callout).
+  def compose_block(%{"type" => "callout"} = b, style),
+    do: Barkpark.PortableDoc.Render.Callout.compose(b, style)
 
   # CONTENTLESS ACTION (the empty-chrome invariant — see `blank_field?/2`): an
   # action with NEITHER a label NOR a destination composed to
@@ -2900,12 +2861,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
-  # Like maybe_put but writes ONLY when the value is exactly `true` — so a
-  # boolean attr's absence and an explicit `false` render identically (an
-  # un-folded callout stays byte-identical even after a re-save).
-  defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
-  defp maybe_put_true(map, _key, _value), do: map
-
   # tabs (B052) entries: {label, blocks} objects off the `tabs` array,
   # non-object entries dropped. `blocks` stays a raw list — render_blocks/2
   # (called at each compose_block/2 leg, article/email) does the recursion.
@@ -2966,16 +2921,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   """
   def render_opts(b) when is_map(b), do: Map.get(b, "_render_opts")
   def render_opts(_), do: nil
-
-  # A body block composes as a top-level block does. With the callout's carried
-  # render options (Render.prepare_block/2) it gets the same pre-pass first, as a
-  # section's stack children do.
-  defp compose_body_block(block, callout, style) do
-    case render_opts(callout) do
-      nil -> compose_block(block, style)
-      opts -> compose_block(Barkpark.PortableDoc.Render.prepare_block(block, opts), style)
-    end
-  end
 
   # A child of a container renders under the container's opts with three keys
   # held back: `:theme` (nested children render at evergreen by design — the
