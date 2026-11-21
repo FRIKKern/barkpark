@@ -282,7 +282,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         # (task-5b74471e6a2d6de8). `paper_rev` stays the frame's.
         {:noreply,
          socket
-         |> Shared.sync_paper_edit_doc()
          |> assign(:paper_html, Shared.editor_body_html(html))
          |> assign(:paper_block_mode, false)
          |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
