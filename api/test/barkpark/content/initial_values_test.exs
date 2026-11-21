@@ -150,6 +150,49 @@ defmodule Barkpark.Content.InitialValuesTest do
     assert content["publisert"] =~ ~r/^\d{4}-\d\d-\d\d$/
   end
 
+  test "a type with fixed documents: a listed id's create leaves its null empty; an unlisted id is refused, null or not" do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "fast",
+          "title" => "Fast",
+          "visibility" => "public",
+          "fields" => [%{"name" => "publisert", "type" => "date"}],
+          "initial_values" => %{"publisert" => "$today", "kind" => "side"},
+          "fixedDocuments" => ["fast-a"]
+        },
+        @ds
+      )
+
+    for verb <- ["create", "createOrReplace", "createIfNotExists"] do
+      id = "fast-a"
+
+      {:ok, _} =
+        Mutations.apply_mutations(
+          [%{verb => %{"_id" => id, "_type" => "fast", "publisert" => nil}}],
+          @ds
+        )
+
+      {:ok, doc} = Content.get_document("drafts." <> id, "fast", @ds)
+      refute Map.has_key?(doc.content, "publisert"), "#{verb}: publisert came back"
+      assert doc.content["kind"] == "side"
+
+      {:ok, _} =
+        Mutations.apply_mutations(
+          [%{"delete" => %{"id" => "drafts." <> id, "type" => "fast"}}],
+          @ds
+        )
+
+      assert {:error, _} =
+               Mutations.apply_mutations(
+                 [%{verb => %{"_id" => "fast-b", "_type" => "fast", "publisert" => nil}}],
+                 @ds
+               )
+
+      assert {:error, :not_found} = Content.get_document("drafts.fast-b", "fast", @ds)
+    end
+  end
+
   test "over an existing draft, createOrReplace updates as before: its null is stored, no initial values" do
     id = new_id()
     {:ok, _} = Content.create_document("sak", %{"doc_id" => id}, @ds)
