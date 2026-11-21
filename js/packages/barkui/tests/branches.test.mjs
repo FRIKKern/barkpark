@@ -39,6 +39,8 @@ describe('every branch of a selector list is read on its own', () => {
     const [b] = textArms([{ prelude: 'a, b:is(:x), c:where(d) > e:has(> f)', body: '', blocks: [{ prelude: '&:is(:y)', body: '', blocks: [] }] }]).written
     expect(b.arms).toEqual(['a', 'b:is(:x)', 'c:where(d) > e:has(> f)', ':x', 'd'])
     expect(b.blocks[0].arms).toEqual(['&:is(:y)', ':y'])
+    expect(b.within).toEqual([{ name: 'is', arm: ':x' }, { name: 'where', arm: 'd' }])
+    expect(b.blocks[0].within).toEqual([{ name: 'is', arm: ':y' }])
     expect(textArms([{ prelude: '@media (max-width: 600px)', body: '', blocks: [] }]).written[0].arms).toEqual([])
   })
 })

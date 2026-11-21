@@ -402,14 +402,17 @@ const CASES = [
   },
   // One arm the browser does not know: :is() and :where() drop it and keep the rule, so the text is read, not what
   // the browser hands back. A list in them is refused from the text; a single unknown arm, or one in a nested rule,
-  // is read alone and refused by name; a plain list with one drops the whole rule.
+  // is read alone and refused by name, as is an arm that reads alone but not inside :is() (a pseudo-element, a
+  // relative selector); a plain list with one drops the whole rule.
   ...[
     ['a list in :is() with one unknown arm', '[data-slot="button"]:is([data-size="sm"], [data-size="sm"]:bark-made-up) { gap: 0px; }', /:is\(\[data-size="sm"\], \[data-size="sm"\]:bark-made-up\) holds a list of 2/],
     ['a list in :where() with one unknown arm', '[data-slot="button"]:where([data-size="sm"], :bark-made-up) { gap: 0px; }', /:where\(\[data-size="sm"\], :bark-made-up\) holds a list of 2/],
     ['an unknown arm alone in :is()', '[data-slot="button"]:is(:bark-made-up) { gap: 0px; }', /the arm :bark-made-up is one the browser drops/],
     ['an unknown arm alone in :where()', '[data-slot="button"]:where(:bark-made-up) { gap: 0px; }', /the arm :bark-made-up is one the browser drops/],
     ['an unknown arm in :is() in a nested rule', '[data-slot="button"] { &:is(:bark-made-up) { gap: 0px; } }', /&:is\(:bark-made-up\): the arm :bark-made-up is one the browser drops/],
-    ['an unknown arm in a plain list', '[data-slot="button"][data-size="sm"], [data-slot="button"]:bark-made-up { gap: 0px; }', /\[data-slot="button"\]:bark-made-up: the browser drops this rule/],
+    ['a pseudo-element alone in :is()', '[data-slot="button"]:is(::before) { gap: 0px; }', /:is\(::before\): the arm ::before is one the browser drops/],
+    ['a relative arm alone in :is() in a nested rule', '[data-slot="button"] { &:is(> span) { gap: 0px; } }', /&:is\(> span\): the arm > span is one the browser drops/],
+    ['an unknown arm in a plain list','[data-slot="button"][data-size="sm"], [data-slot="button"]:bark-made-up { gap: 0px; }', /\[data-slot="button"\]:bark-made-up: the browser drops this rule/],
   ].map(([what, css, re]) => ({ name: `part.css with ${what} is refused by name`, only: ['pressed'], plant: inCss(css), expect: refused(re) })),
   {
     name: 'a rule the browser drops is refused by name, at the top of part.css and nested',

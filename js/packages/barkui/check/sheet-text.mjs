@@ -54,8 +54,10 @@ export function textArms(blocks) {
       for (const c of lists)
         if (c.arms.length > 1)
           found.push(`${b.prelude}: :${c.name}(${c.arms.join(', ')}) holds a list of ${c.arms.length}; coverage reads a rule branch by branch, and an arm inside :${c.name}() is not a branch, so one that applies would hide one that never does; write each arm as a branch of the rule's own list`)
-      const inner = lists.filter((c) => c.name !== 'has').flatMap((c) => c.arms)
-      return { ...b, arms: [...new Set([...splitList(b.prelude), ...inner])], blocks: walk(b.blocks) }
+      const choices = lists.filter((c) => c.name !== 'has')
+      const inner = choices.flatMap((c) => c.arms)
+      const within = [...new Map(choices.flatMap((c) => c.arms.map((arm) => [`${c.name} ${arm}`, { name: c.name, arm }]))).values()]
+      return { ...b, arms: [...new Set([...splitList(b.prelude), ...inner])], within, blocks: walk(b.blocks) }
     })
   return { written: walk(blocks), found }
 }
@@ -66,7 +68,8 @@ const clean = (text) => text.replace(/\/\*[^]*?\*\//g, ' ').replace(/\s+/g, ' ')
     `written` (textBlocks): each block, with the body its text gives it, given to the browser alone in its place
     inside the blocks it is written in, as the text (cssText) of each rule that comes back (null when the place itself
     does not come back as one rule each); when it came back as exactly one, the arms of it (textArms) that the
-    browser drops when each is read alone in the same place, and its own blocks read the same way.
+    browser drops when each is read alone in the same place, or, for the one inside :is() or :where(), inside its
+    own :is() or :where() there, and its own blocks read the same way.
     `whole` is `rules`, the rules the browser made from the whole sheet, as their text with the rules inside each.
     Declarations that follow nested rules (CSSNestedDeclarations) are no rule of the text. */
 export function browserReadings([written, rules]) {
@@ -91,6 +94,11 @@ export function browserReadings([written, rules]) {
       const texts = parseIn(chain, b)
       if (texts?.length !== 1) return { texts, dropped: [], blocks: [] }
       const dropped = (b.arms ?? []).filter((arm) => parseIn(chain, { prelude: arm, body: '' })?.length !== 1)
+      // An arm can read alone and still be one :is() or :where() drops (a pseudo-element, a relative selector): it
+      // is read inside its own :name() in the same place, and comes back as the text of :name() with nothing in it.
+      const empty = (name) => parseIn(chain, { prelude: `:${name}()`, body: '' })?.[0]
+      for (const { name, arm } of b.within ?? [])
+        if (!dropped.includes(arm) && parseIn(chain, { prelude: `:${name}(${arm})`, body: '' })?.[0] === empty(name)) dropped.push(arm)
       return { texts, dropped, blocks: alone(b.blocks, [...chain, b.prelude]) }
     })
   return { alone: alone(written, []), whole: tree(rules) }
