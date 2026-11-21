@@ -12,10 +12,16 @@
 // - Every element that can enter the top layer (a dialog, or an element that carries popover) and that the page
 //   holds at any moment, in the document at load or added or given popover later, must be named by a layer, whether
 //   or not it ever opens. A world of the check's own watches the page from its first frame (census, below), and
-//   each reading and each look after real input names what it has seen that no layer names, once per page. It sees
-//   each open shadow root the moment it is attached, wherever its host stands (in a stage, outside every one, or
-//   inside another root attached late): a hook set in the page before any of its script runs tells it, and the
-//   page cannot take the hook away.
+//   each reading and each look after real input names what it has seen that no layer names, once per page. Every
+//   element it sees arrive is read with its open shadow root, so a host that arrives carrying one (parsed by
+//   setHTMLUnsafe or parseHTMLUnsafe, cloned, adopted) is read on arrival. A root comes to exist on a host already
+//   in the page in these ways only, each seen at once or refused by name:
+//   - a script calls attachShadow: a hook set in the page before any of its script tells the census at once,
+//     wherever the host stands (tellRoots, below; the page cannot take it away);
+//   - the parser meets a declared root while it parses example.html: refused as the part is read (build/parts.mjs);
+//   - markup is written into the parsed document (document.write, writeln or open): refused by name (tellRoots);
+//   - another window attaches one with its own attachShadow: every frame in the page, and window.open, is refused
+//     by name.
 // - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
 //   reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and close.
 // A layer's box opens at once on its input: one not open once its input settles fails by name, so a box that opens
@@ -120,14 +126,27 @@ async function drive(page, part, step, what) {
 export const UNNAMED = (at) => `${at} is open in the top layer during the reading, and no layer in part.json names it`
 /** The fail for an element that can enter the top layer and that no layer names, open or not. */
 export const UNNAMED_CAN = (at) => `${at} can open in the top layer (a dialog, or it carries popover), and no layer in part.json names it`
+/** The fail for a frame anywhere in the page: another window, whose attachShadow and boxes the census does not watch. */
+export const FRAME = (at) => `${at} is a frame, another window in the page, which the check does not watch; a part makes none`
+/** The fail for a call the page's world refuses (tellRoots): the call, and why. */
+export const REFUSED = {
+  'window.open': 'the page called window.open, which the check refuses: another window, which the check does not watch',
+  'document.write': 'the page called document.write after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
+  'document.writeln': 'the page called document.writeln after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
+  'document.open': 'the page called document.open, which the check refuses: it starts the document again, and the check\'s watch with it',
+}
+/** What the census tells, as the fail it is. */
+const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'call' ? REFUSED[at] : UNNAMED_CAN(at))
 
 /** Runs in the census world from the page's first frame (it is serialised): it notes every element that can enter
     the top layer, with the part whose stage held it when it was seen (null outside every stage), in the document and
     in each open shadow root, as it arrives or gains popover, and watches each open root from the moment
-    attachShadow makes it (ROOT, told by tellRoots). __barkCensus(part, boxes) names, once per page, each one seen for
-    that part or outside every stage that none of the part's layers selects. */
+    attachShadow makes it (told by tellRoots). It also notes every frame (another window), and each call tellRoots
+    refuses. __barkCensus(part, boxes) tells, once per page, each one seen for that part or outside every stage that
+    none of the part's layers selects. */
 function census() {
   const CAN = 'dialog, [popover]'
+  const FRAMES = 'iframe, frame, object, embed, fencedframe'
   const seen = new Map()
   const told = new Set()
   const roots = new WeakSet()
@@ -136,7 +155,7 @@ function census() {
     for (let e = n; e; e = up(e)) if (e.dataset?.part) return e.dataset.part
     return null
   }
-  const note = (el, from) => seen.has(el) || seen.set(el, owner(el.isConnected ? el : from))
+  const note = (el, from, kind) => seen.has(el) || seen.set(el, { of: owner(el.isConnected ? el : from), kind })
   const mo = new MutationObserver((list) => {
     for (const m of list) if (m.type === 'attributes') take(m.target)
     else for (const n of m.addedNodes) take(n, m.target)
@@ -145,7 +164,8 @@ function census() {
   function take(n, from = n) {
     if (n.nodeType !== 1) return
     for (const e of [n, ...n.querySelectorAll('*')]) {
-      if (e.matches(CAN)) note(e, from)
+      if (e.matches(CAN)) note(e, from, 'can')
+      if (e.matches(FRAMES)) note(e, from, 'frame')
       if (e.shadowRoot && !roots.has(e.shadowRoot)) {
         roots.add(e.shadowRoot)
         watch(e.shadowRoot)
@@ -157,37 +177,52 @@ function census() {
   if (document.documentElement) take(document.documentElement)
   // The host, at once inside attachShadow, before the page can put anything in its new root.
   addEventListener('barkui-census-root', (e) => take(e.composedPath()[0]), true)
+  for (const at of ['window.open', 'document.write', 'document.writeln', 'document.open'])
+    addEventListener(`barkui-census-${at}`, () => seen.has(at) || seen.set(at, { of: null, kind: 'call' }), true)
   const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
   globalThis.__barkCensus = (part, boxes) => {
     if (document.documentElement) take(document.documentElement)
     const stage = document.querySelector(`[data-part="${CSS.escape(part)}"]`)
     const named = new Set(boxes.map((s) => stage?.querySelector(s)).filter(Boolean))
     const out = []
-    for (const [el, of] of seen) {
+    for (const [el, { of, kind }] of seen) {
       if (told.has(el) || (of !== null && of !== part) || named.has(el)) continue
-      if (!el.isConnected && of === part && boxes.some((s) => el.matches(s))) continue
+      if (kind === 'can' && !el.isConnected && of === part && boxes.some((s) => el.matches(s))) continue
       told.add(el)
-      out.push(describe(el))
+      out.push({ kind, at: kind === 'call' ? el : describe(el) })
     }
     return out
   }
 }
 
-/** Runs in the page's own world before any of its script (it is serialised): attachShadow, in this window and in
-    every frame it makes, tells the census each host the moment its root exists, by an event the census hears first.
-    The page cannot remove or replace it, and it calls nothing the page can change afterwards. */
+/** Runs in the page's own world before any of its script, in this window and in every frame (it is serialised).
+    attachShadow tells the census each host the moment its root exists, by an event the census hears first. What
+    would put a window or a document out of the census's sight is refused and told by name instead: window.open, and
+    document.open, write and writeln once the document is parsed (while it is parsing, written markup is parsed like
+    the rest). The page cannot remove or replace any of these, and they call nothing it can change afterwards. */
 function tellRoots() {
-  const [apply, attach, send, Ev] = [Reflect.apply, Element.prototype.attachShadow, EventTarget.prototype.dispatchEvent, Event]
-  Object.defineProperty(Element.prototype, 'attachShadow', {
-    value: function attachShadow(init) {
-      const root = apply(attach, this, [init])
-      apply(send, this, [new Ev('barkui-census-root', { bubbles: true, composed: true })])
-      return root
-    },
-    writable: false,
-    enumerable: true,
-    configurable: false,
+  const [apply, define, send, Ev, doc] = [Reflect.apply, Object.defineProperty, EventTarget.prototype.dispatchEvent, Event, document]
+  const [attach, write, writeln, ready] = [Element.prototype.attachShadow, Document.prototype.write, Document.prototype.writeln, Object.getOwnPropertyDescriptor(Document.prototype, 'readyState').get]
+  const tell = (target, type) => apply(send, target, [new Ev(type, { bubbles: true, composed: true })])
+  const fix = (o, k, value) => define(o, k, { value, writable: false, enumerable: true, configurable: false })
+  fix(Element.prototype, 'attachShadow', function attachShadow(init) {
+    const root = apply(attach, this, [init])
+    tell(this, 'barkui-census-root')
+    return root
   })
+  fix(window, 'open', function open() {
+    tell(window, 'barkui-census-window.open')
+    return null
+  })
+  fix(Document.prototype, 'open', function open() {
+    tell(window, 'barkui-census-document.open')
+    return this
+  })
+  for (const [k, f] of [['write', write], ['writeln', writeln]])
+    fix(Document.prototype, k, function (...a) {
+      if (this !== doc || apply(ready, doc, []) === 'loading') return apply(f, this, a)
+      tell(window, `barkui-census-document.${k}`)
+    })
 }
 
 /** The census world on `page`, set before the page opens its URL, so it watches from the first frame. Returns
@@ -219,7 +254,7 @@ export async function installCensus(page) {
       await run(code)
     }
     ready = true
-    return run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)
+    return (await run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)).map(said)
   }
 }
 
@@ -230,7 +265,7 @@ export async function unnamedNow(page, part) {
   try {
     const open = await page.barkCheck(([n, b]) => window.__barkCheck.unnamed(document.querySelector(`[data-part="${n}"]`), b), [part.name, (part.json.layers ?? []).map((l) => l.box)])
     const can = page.barkCensus ? await page.barkCensus(part) : []
-    return [...open.map(UNNAMED), ...can.map(UNNAMED_CAN)]
+    return [...open.map(UNNAMED), ...can]
   } finally {
     looks.n++
     looks.ms += Date.now() - t0

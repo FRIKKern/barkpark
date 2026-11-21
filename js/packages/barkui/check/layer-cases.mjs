@@ -11,7 +11,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
 import { all, both, each, edit, esc, inDemo, skinsSay } from './plants.mjs'
-import { LATE, looks, UNNAMED_CAN } from './layers.mjs'
+import { FRAME, LATE, looks, REFUSED, UNNAMED_CAN } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -61,9 +61,11 @@ const MORE_JS = [
   // empty host; a task later, a root on it holding a box shown at once and a second host; a task later, a root on
   // that one holding a dialog; and a root attached by another window's attachShadow (a frame's). A task after,
   // all of it is gone.
-  "root.querySelector('#button-tip-open').addEventListener('focus', () => { const row = root.querySelector('#button-plain'), host = document.createElement('div'), far = document.createElement('div'), frame = document.createElement('iframe'); row.after(host, far); document.body.append(frame); const attach = frame.contentWindow.Element.prototype.attachShadow; setTimeout(() => { const r = host.attachShadow({ mode: 'open' }), box = document.createElement('div'), inner = document.createElement('span'); box.id = 'button-in-root'; box.textContent = 'In a late root'; box.popover = 'manual'; r.append(box, inner); box.showPopover(); const f = attach.call(far, { mode: 'open' }); f.innerHTML = '<div id=\"button-by-frame\" popover=\"manual\">By a frame</div>'; setTimeout(() => { inner.attachShadow({ mode: 'open' }).innerHTML = '<dialog id=\"button-in-inner\">In a root in a late root</dialog>'; setTimeout(() => { host.remove(); far.remove(); frame.remove() }, 0) }, 0) }, 0) })",
+  "root.querySelector('#button-tip-open').addEventListener('focus', () => { const row = root.querySelector('#button-plain'), host = document.createElement('div'), far = document.createElement('div'), frame = document.createElement('iframe'); frame.id = 'button-frame'; row.after(host, far); document.body.append(frame); const attach = frame.contentWindow.Element.prototype.attachShadow; setTimeout(() => { const r = host.attachShadow({ mode: 'open' }), box = document.createElement('div'), inner = document.createElement('span'); box.id = 'button-in-root'; box.textContent = 'In a late root'; box.popover = 'manual'; r.append(box, inner); box.showPopover(); const f = attach.call(far, { mode: 'open' }); f.innerHTML = '<div id=\"button-by-frame\" popover=\"manual\">By a frame</div>'; setTimeout(() => { inner.attachShadow({ mode: 'open' }).innerHTML = '<dialog id=\"button-in-inner\">In a root in a late root</dialog>'; setTimeout(() => { host.remove(); far.remove(); frame.remove() }, 0) }, 0) }, 0) })",
   // A root that comes with no attachShadow call: parsed from markup (a declarative root) on focus, gone a task later.
   "root.querySelector('#button-tip-open').addEventListener('focus', () => { const row = root.querySelector('#button-plain'), box = document.createElement('div'); row.after(box); box.setHTMLUnsafe('<div><template shadowrootmode=\"open\"><div id=\"button-parsed\" popover=\"manual\">In a parsed root</div></template></div>'); setTimeout(() => box.remove(), 0) })",
+  // Ways out of the census's sight, each refused: another window, and markup written into the parsed document.
+  "root.querySelector('#button-tip-open').addEventListener('focus', () => { window.open(''); document.write('<p>Written late</p>') })",
   // Made by the demo as the page loads and gone a task later, before the check's first look.
   "{ const made = document.createElement('div'); made.id = 'button-at-load'; made.textContent = 'Made at load'; made.popover = 'manual'; root.querySelector('#button-plain').after(made); setTimeout(() => made.remove(), 0) }",
 ].join('\n')
@@ -162,6 +164,9 @@ export const LAYER_CASES = [
         'a dialog in a shadow root attached late inside another late root': can('dialog#button-in-inner "In a root in a late root"'),
         "a box in a shadow root attached by a frame's attachShadow": can('div#button-by-frame "By a frame"'),
         'a box in a shadow root parsed from markup, with no attachShadow call': can('div#button-parsed "In a parsed root"'),
+        'a frame in the page, refused by name': skinsSay(new RegExp(esc(FRAME('iframe#button-frame ""')))),
+        'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
+        'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
         "a box made as the page loads and gone before the check's first look": can('div#button-at-load "Made at load"'),
         'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
         'every layer that opens at once read in every view': () => m?.readings === 20,

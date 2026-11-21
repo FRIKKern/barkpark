@@ -240,8 +240,14 @@ what the box covers or a modal box blocks is read in the closed reading.
 Every element that can open in the top layer (a `dialog`, or an element that carries `popover`) must be
 named by a layer, whether or not it ever opens. The check watches each page from its first frame, so it sees
 such an element in the document at load, added later, or given `popover` later, even one that is gone again
-before the check looks, and in each open shadow root from the moment it is attached, wherever its host
-stands (attachShadow tells the check at once, in the page and in any frame it makes). One no layer names fails by name, once per page ("… can open in the top layer (a
+before the check looks, and in each open shadow root. Every element the check sees arrive is read with its
+open shadow root, so a host that arrives carrying one (parsed by `setHTMLUnsafe`, cloned, adopted) is read
+on arrival. A root comes to exist on a host already in the page in these ways only, each seen at once or
+refused by name: a script calls `attachShadow` (a hook the check sets in the page before any of its script
+tells it at once, wherever the host stands); the parser meets a declared root in `example.html` (refused,
+"a declared shadow root"); markup is written into the parsed page (`document.write`, `writeln`, `open`:
+refused by name); another window attaches one (every frame in the page, and `window.open`, refused by
+name). One no layer names fails by name, once per page ("… can open in the top layer (a
 dialog, or it carries popover), and no layer in part.json names it"), at the first reading or look after
 real input that follows. A box open in the top layer that no layer names also fails by name ("… is open in
 the top layer during the reading, and no layer in part.json names it") at every moment the check judges or
