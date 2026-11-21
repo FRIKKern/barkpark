@@ -42,7 +42,7 @@ Every part BarkUI must draw sits in one of three piles. Each is built differentl
 
 ## The order of families
 
-The first six parts set the look: button, text field, select, dialog, menu and tabs ([0004](decisions/0004-ready-before-any-switch.md) has the step that confirms it). Then ready-made parts land in batches by family:
+The first six parts set the look: button, text field, select, dialog, menu and tabs ([0004](decisions/0004-ready-before-any-switch.md) has the step that confirms it). Tabs come third: select, dialog and menu draw in the browser's top layer, and wait for the check to read it. Then ready-made parts land in batches by family:
 
 1. Forms
 2. Overlays

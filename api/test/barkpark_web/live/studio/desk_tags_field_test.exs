@@ -49,6 +49,17 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
               "ordered" => true,
               "of" => %{"type" => "string"}
             },
+            # An array of objects, even with the tags layout, is not a tags field.
+            %{
+              "name" => "links",
+              "title" => "Links",
+              "type" => "arrayOf",
+              "options" => %{"layout" => "tags"},
+              "of" => %{
+                "type" => "object",
+                "fields" => [%{"name" => "label", "type" => "string"}]
+              }
+            },
             %{
               "name" => "seo",
               "title" => "SEO",
@@ -78,6 +89,7 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
           "title" => "Tagged",
           "tags" => ["fixture", "t0"],
           "highlights" => ["One", "Two"],
+          "links" => [%{"_key" => "l1", "label" => "One"}],
           "seo" => %{"metaTitle" => "Meta", "keywords" => ["k1"]}
         },
         @dataset
@@ -253,5 +265,38 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
     {:ok, studio, _html} = live(c.conn, c.studio)
     refute has_element?(studio, ".tags-box")
     assert has_element?(studio, ~s(button.bp-array-btn-remove[phx-value-field="tags"]))
+  end
+
+  # task-2730627f7a19999a: a tags press is a tags field's only. A hand-made
+  # one naming another array would store a bare string in it.
+  test "add_tag or remove_tag naming a field that is not a tags field stores nothing", c do
+    view = desk(c)
+    before = stored(c)
+
+    for {field, action, value} <- [
+          {"links", "add_tag", "bare"},
+          {"highlights", "add_tag", "bare"},
+          {"highlights", "remove_tag", "One"},
+          {"title", "add_tag", "bare"}
+        ] do
+      EditorPost.press(view, "array_op", %{
+        "action" => action,
+        "field" => field,
+        "path" => "doc[#{field}]",
+        "index" => "0",
+        "value" => value
+      })
+    end
+
+    render(view)
+    after_ = stored(c)
+    assert after_["links"] == [%{"_key" => "l1", "label" => "One"}]
+    assert after_["highlights"] == ["One", "Two"]
+    assert stored_doc(c).title == "Tagged"
+    assert after_ == before
+
+    # Control: the same press on the tags field lands.
+    enter(view, "x")
+    assert eventually(fn -> stored(c)["tags"] == ["fixture", "t0", "x"] end)
   end
 end

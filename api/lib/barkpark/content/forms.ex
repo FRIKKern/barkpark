@@ -1393,8 +1393,8 @@ defmodule Barkpark.Content.Forms do
   `{:error, term}` on a DB upsert failure. The `{:error, {:halted,
   reason}}` shape from a halting `before_save` hook is passed through
   unchanged. Consolidated in Task #11 WI3 from prior duplicate bodies
-  in StudioLive (`handle_event "autosave"`, `handle_info :autosave_form`,
-  `save_doc/3`).
+  in StudioLive (`handle_event "autosave"`, `save_doc/3`, and the
+  `handle_info :autosave_form` removed with the legacy pickers).
   """
   # task-324b4d00706a6cfb: N callers racing the SAME never-yet-drafted
   # published doc converge one at a time once the draft-fork retry (below)

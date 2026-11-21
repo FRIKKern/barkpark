@@ -122,7 +122,27 @@ defmodule Barkpark.Content.FixedDocuments do
   value, because the cast drops `""` items. Duplicates are dropped.
   """
   @spec validate(Ecto.Changeset.t()) :: Ecto.Changeset.t()
-  def validate(changeset) do
+  def validate(changeset), do: changeset |> validate_ids() |> validate_singleton()
+
+  # A singleton's one document has the type's name as its id: a list without
+  # it means that document can never be created (task-f235c9f16a976e57).
+  defp validate_singleton(changeset) do
+    name = Ecto.Changeset.get_field(changeset, :name)
+    ids = Ecto.Changeset.get_field(changeset, :fixed_documents)
+
+    if Ecto.Changeset.get_field(changeset, :singleton) == true and is_list(ids) and
+         is_binary(name) and name not in ids do
+      Ecto.Changeset.add_error(
+        changeset,
+        :fixed_documents,
+        "must hold the singleton's own id, #{name}"
+      )
+    else
+      changeset
+    end
+  end
+
+  defp validate_ids(changeset) do
     with {:ok, raw} when is_list(raw) <- Map.fetch(changeset.params || %{}, "fixed_documents"),
          true <- Enum.all?(raw, &valid_id?/1) do
       case Ecto.Changeset.get_change(changeset, :fixed_documents) do
