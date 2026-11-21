@@ -81,6 +81,7 @@ async function drive(page, part, step, what) {
     const at = await page.barkCheck(([n, s]) => {
       const el = document.querySelector(`[data-part="${n}"] ${s}`)
       if (!el) return { miss: 'is not in the stage' }
+      el.scrollIntoView({ block: 'center', inline: 'center' })
       const r = el.getBoundingClientRect()
       const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
       const top = document.elementFromPoint(x, y)

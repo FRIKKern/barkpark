@@ -78,7 +78,12 @@ export const LAYER_CASES = [
     only: ['skins'],
     plant: all(withPopover, named),
     css: FAINT,
-    expect: both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/),
+    expect: (p) => {
+      // What one open state costs on this runner, for the record (the hosted job prints it).
+      const m = p?.parts?.button?.measures?.layers
+      if (m) console.log(`    the top layer: ${m.readings} readings open in ${m.seconds} s, ${(m.seconds / m.readings).toFixed(2)} s each`)
+      return both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/)(p) && m?.readings === 10
+    },
   },
   {
     name: 'a box open in the top layer that no layer in part.json names fails by name',

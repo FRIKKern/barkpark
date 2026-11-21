@@ -120,6 +120,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
     for (const [k, m] of Object.entries(measures))
       if (k === 'waits') continue
+      else if (k === 'layers') lines.push(`  measured the top layer: ${m.readings} readings with a layer open, ${m.seconds} s with opening and closing, ${m.readings ? (m.seconds / m.readings).toFixed(2) : 0} s each`)
       else if (m?.againstGround) lines.push(`  measured ${k}: against the ground ${m.againstGround.min} to ${m.againstGround.max}:1, against the primary fill ${m.againstPrimary.min} to ${m.againstPrimary.max}:1`)
       else if (m) lines.push(`  measured ${k}: ${m.min} to ${m.max}:1`)
     if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })

@@ -222,6 +222,8 @@ export async function skinsAndSchemes(ctx, part, skins) {
     for (const x of list) d.ground.push(x.ground), d.primary.push(x.primary)
   }
   const free = new Map()
+  // What reading the part's layers open costs: each opened by its input, read, and closed again (layers.mjs).
+  const layered = { readings: 0, ms: 0 }
   const surfaceTo = async (x) => {
     await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, x])
     await settle(page)
@@ -261,7 +263,9 @@ export async function skinsAndSchemes(ctx, part, skins) {
             return v
           }
           const v = await readOne(`${at} on ${surface}`)
-          const open = await eachLayer(page, part, async (layer) => (await readOne(`${at} on ${surface} with ${layer.box} open`), []))
+          const t0 = Date.now()
+          const open = await eachLayer(page, part, async (layer) => (await readOne(`${at} on ${surface} with ${layer.box} open`), layered.readings++, []))
+          layered.ms += Date.now() - t0
           bad[scheme].push(...open.map((f) => `${at} on ${surface}: ${f}`))
           for (const x of v.bounds.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
           controls = Math.max(controls, v.bounds.count)
@@ -298,6 +302,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }
   // Each wait on the sheet that was read, with the least it measured; the page prints it while it is short.
+  if (part.json.layers?.length) measures.layers = { readings: layered.readings, seconds: +(layered.ms / 1000).toFixed(1) }
   measures.waits = SHEET_WAITS.filter((w) => waited.has(w)).map((w) => ({ ...w, now: +fmt(waited.get(w)) }))
   // A part with controls prints a boundary line for them, or names every one text-only.
   const named = new Set([...bare.values()].flat()).size

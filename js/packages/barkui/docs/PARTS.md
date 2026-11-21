@@ -10,7 +10,8 @@ parts/<name>/
   part.json     name (= folder), family, element, imports, summary; optional paint (selector -> variable
                 per property: a wrong entry turns "every skin" off, and with none the trace still holds every
                 colour to one skin variable); optional textOnly (selectors of controls that draw no
-                boundary, such as a ghost button)
+                boundary, such as a ghost button); optional layers (each box the part opens in the top
+                layer, with the real input that opens and closes it: see "The top layer")
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
@@ -223,6 +224,20 @@ and dark" (dark views) or "phone" (390px) off. Each wait prints as "waiting on t
 and the sheet's work that ends it. Today eight wait, all `--ui-muted-foreground` on `--ui-background` on
 primary (the demo labels), at 3.75 to 3.78:1. For each surface the check also records, as numbers only,
 a disabled control's fill against its ground and against the primary fill.
+
+## The top layer
+
+An open popover or a modal dialog is drawn in the top layer: over the page, not inside its DOM parent, and
+often outside the stage's box. A part names each such box in part.json `layers` as `{ box, open, close }`:
+the box's selector, and the real input that opens and closes it (`focus`, `click` at the control's centre
+only if it is on top there, `keys`). In every view the stage is read in (every skin, scheme and surface at
+1440px, and at 390px) the check reads the stage closed, then opens each layer by its input, reads the stage
+again with the capture covering the stage and the open box, and closes it by its input. A layer that does
+not open or does not close fails by name. While a box is open, the ground behind it is its `::backdrop`,
+then what the page draws there, read from a capture taken with the open boxes hidden, never its DOM parent;
+what the box covers or a modal box blocks is read in the closed reading. A box open in the top layer during
+any reading that no layer names fails that reading by name ("… is open in the top layer during the
+reading, and no layer in part.json names it").
 
 ## What part.css may condition on
 
