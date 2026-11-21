@@ -12,7 +12,10 @@
 // - Every element that can enter the top layer (a dialog, or an element that carries popover) and that the page
 //   holds at any moment, in the document at load or added or given popover later, must be named by a layer, whether
 //   or not it ever opens. A world of the check's own watches the page from its first frame (census, below), and
-//   each reading and each look after real input names what it has seen that no layer names, once per page.
+//   each reading and each look after real input names what it has seen that no layer names, once per page. It sees
+//   each open shadow root the moment it is attached, wherever its host stands (in a stage, outside every one, or
+//   inside another root attached late): a hook set in the page before any of its script runs tells it, and the
+//   page cannot take the hook away.
 // - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
 //   reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and close.
 // A layer's box opens at once on its input: one not open once its input settles fails by name, so a box that opens
@@ -120,8 +123,9 @@ export const UNNAMED_CAN = (at) => `${at} can open in the top layer (a dialog, o
 
 /** Runs in the census world from the page's first frame (it is serialised): it notes every element that can enter
     the top layer, with the part whose stage held it when it was seen (null outside every stage), in the document and
-    in each open shadow root, as it arrives or gains popover. __barkCensus(part, boxes) names, once per page, each
-    one seen for that part or outside every stage that none of the part's layers selects. */
+    in each open shadow root, as it arrives or gains popover, and watches each open root from the moment
+    attachShadow makes it (ROOT, told by tellRoots). __barkCensus(part, boxes) names, once per page, each one seen for
+    that part or outside every stage that none of the part's layers selects. */
 function census() {
   const CAN = 'dialog, [popover]'
   const seen = new Map()
@@ -151,6 +155,8 @@ function census() {
   }
   watch(document)
   if (document.documentElement) take(document.documentElement)
+  // The host, at once inside attachShadow, before the page can put anything in its new root.
+  addEventListener('barkui-census-root', (e) => take(e.composedPath()[0]), true)
   const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
   globalThis.__barkCensus = (part, boxes) => {
     if (document.documentElement) take(document.documentElement)
@@ -167,6 +173,23 @@ function census() {
   }
 }
 
+/** Runs in the page's own world before any of its script (it is serialised): attachShadow, in this window and in
+    every frame it makes, tells the census each host the moment its root exists, by an event the census hears first.
+    The page cannot remove or replace it, and it calls nothing the page can change afterwards. */
+function tellRoots() {
+  const [apply, attach, send, Ev] = [Reflect.apply, Element.prototype.attachShadow, EventTarget.prototype.dispatchEvent, Event]
+  Object.defineProperty(Element.prototype, 'attachShadow', {
+    value: function attachShadow(init) {
+      const root = apply(attach, this, [init])
+      apply(send, this, [new Ev('barkui-census-root', { bubbles: true, composed: true })])
+      return root
+    },
+    writable: false,
+    enumerable: true,
+    configurable: false,
+  })
+}
+
 /** The census world on `page`, set before the page opens its URL, so it watches from the first frame. Returns
     look(part) → what census() names for the part. A page that runs no script of its own gets the census when first
     asked: nothing on it can add a box later. */
@@ -179,8 +202,11 @@ export async function installCensus(page) {
     if (c.name === 'barkui-census' && c.auxData?.frameId === frameId) id = c.id
   })
   await cdp.send('Runtime.enable')
+  // A script to evaluate on a new document runs only for a session with the Page domain on.
+  await cdp.send('Page.enable')
   const code = `(${source(census)})()`
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code, worldName: 'barkui-census' })
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${source(tellRoots)})()` })
   const run = async (expression) => {
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: id, returnByValue: true })
     if (exceptionDetails) throw new Error(`the census: ${String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0]}`)
