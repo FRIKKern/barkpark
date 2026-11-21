@@ -1087,6 +1087,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         id={"#{@view.id}-revision-footer"}
         revision={@desk_revision}
         menu_button={"#{@view.id}-actions-button"}
+        seen_rev={BarkparkWeb.Studio.StudioLive.Handlers.History.seen_rev(assigns)}
       />
       <%!-- The published version's footer (`PublishedView`): its words and
             Unpublish, no "…", as TanStack's `PublishedFooter`. --%>

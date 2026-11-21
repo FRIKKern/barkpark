@@ -767,6 +767,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_history, :boolean, default: false
   attr :revisions, :list, default: []
 
+  attr :seen_rev, :string,
+    default: nil,
+    doc: "the open document's rev (`editor_doc`); each Restore sends it as `if_rev`"
+
   def history_modal(assigns) do
     ~H"""
     <%= if @show_history do %>
@@ -811,6 +815,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 class="btn btn-sm"
                 phx-click="restore-revision"
                 phx-value-id={rev.id}
+                phx-value-if_rev={@seen_rev}
                 aria-label={
                   gettext("Restore the version from %{time} (%{action})",
                     time: utc_history_time(rev.inserted_at),
@@ -1161,6 +1166,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_delete, :boolean, default: false
   attr :delete_refs, :list, default: []
   attr :editor_doc, :map, default: nil
+  attr :seen_rev, :string, default: nil, doc: "the shown document's rev (`History.seen_rev/1`)"
   attr :show_discard, :boolean, default: false
   attr :account_label, :string, default: nil
   attr :profile_error, :string, default: nil
@@ -1188,7 +1194,11 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       ref_search={@ref_search}
       ref_candidates={@ref_candidates}
     />
-    <.history_modal show_history={@show_history} revisions={@revisions} />
+    <.history_modal
+      show_history={@show_history}
+      revisions={@revisions}
+      seen_rev={@seen_rev}
+    />
     <.delete_modal
       show_delete={@show_delete}
       delete_refs={@delete_refs}
