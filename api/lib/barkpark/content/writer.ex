@@ -27,6 +27,7 @@ defmodule Barkpark.Content.Writer do
     SchemaDefinition,
     Sheets,
     TitleDerivation,
+    Today,
     Warnings,
     WriteScope
   }
@@ -149,17 +150,13 @@ defmodule Barkpark.Content.Writer do
         {:ok, content, warnings}
 
       {{:ok, _content}, cross_errors} ->
-        {:error, errors_by_field(%{}, cross_errors), cross_errors, warnings}
+        {:error, Barkpark.Content.FieldErrors.add_findings(%{}, cross_errors), cross_errors,
+         warnings}
 
       {{:error, errors}, cross_errors} ->
-        {:error, errors_by_field(errors, cross_errors), error_findings ++ cross_errors, warnings}
+        {:error, Barkpark.Content.FieldErrors.add_findings(errors, cross_errors),
+         error_findings ++ cross_errors, warnings}
     end
-  end
-
-  defp errors_by_field(errors, findings) do
-    Enum.reduce(findings, errors, fn f, acc ->
-      Map.update(acc, top_level_field(f.path), [f.message], &(List.wrap(&1) ++ [f.message]))
-    end)
   end
 
   @doc """
@@ -1037,16 +1034,16 @@ defmodule Barkpark.Content.Writer do
   # initial list wholesale — recursive list merging is ambiguous and a
   # publisher who provides a list almost always means "use exactly this").
   #
-  # Dynamic tokens resolved at create time only:
+  # Dynamic tokens resolved at create time only (`Content.Today`, workspace zone):
   #   * `"$today"`      → today's ISO-8601 date string (e.g. "2026-05-14")
   #   * `"$today.year"` → today's year as a 4-digit string (e.g. "2026")
 
-  defp apply_initial_values(attrs, type, dataset)
+  defp apply_initial_values(attrs, type, dataset, opts)
        when is_binary(type) and is_binary(dataset) do
     initial =
       case schema_for_create(type, dataset, attrs) do
-        {:ok, %SchemaDefinition{initial_values: iv}} when is_map(iv) and map_size(iv) > 0 ->
-          resolve_dynamics(iv)
+        {:ok, %SchemaDefinition{initial_values: iv} = s} when is_map(iv) and map_size(iv) > 0 ->
+          Today.resolve(iv, today(attrs, s, opts))
 
         _ ->
           nil
@@ -1062,7 +1059,11 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
-  defp apply_initial_values(attrs, _type, _dataset), do: attrs
+  defp apply_initial_values(attrs, _type, _dataset, _opts), do: attrs
+
+  # Today in the write's stamped workspace, else the schema's.
+  defp today(attrs, schema, opts),
+    do: Today.later([Keyword.get(stamped_scope(attrs), :workspace_id), schema.workspace_id], opts)
 
   # ── Exp-P3.1 — Create-from-Expectation scaffold ──────────────────────────
   #
@@ -1157,8 +1158,8 @@ defmodule Barkpark.Content.Writer do
       {:ok, %SchemaDefinition{layout: layout} = schema}
       when is_list(layout) and layout != [] ->
         if declares_blocks?(schema),
-          do: apply_initial_values(attrs, type, dataset),
-          else: scaffold_expectation(attrs, schema, dataset)
+          do: apply_initial_values(attrs, type, dataset, opts),
+          else: scaffold_expectation(attrs, schema, dataset, opts)
 
       _ ->
         # R2 chokepoint (id-less backfill). The earlier `maybe_ensure_block_ids`
@@ -1169,14 +1170,14 @@ defmodule Barkpark.Content.Writer do
         # then projects it, as a patch does: bound fields, body and preview are
         # stored at birth, not after the first save (task-b43256e0d9d90733).
         attrs
-        |> apply_initial_values(type, dataset)
+        |> apply_initial_values(type, dataset, opts)
         |> maybe_ensure_block_ids(opts)
         |> maybe_project_created_content(dataset, opts)
     end
   end
 
   defp scaffold_or_apply_initial_values(attrs, type, dataset, opts),
-    do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset), opts)
+    do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset, opts), opts)
 
   # Project-on-create, with one difference from a patch: a `body` the caller
   # sent is kept. An importer that carries a rendered body beside blocks the
@@ -1200,9 +1201,9 @@ defmodule Barkpark.Content.Writer do
   # lives on the document row, not under content — it is folded in under
   # "title" so a bound title field-block picks it up, and re-derived into
   # content["title"] by projection (mirroring synthesize_blocks/3).
-  defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset) do
+  defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset, opts) do
     %{layout: layout, prefill: prefill} = Content.resolve_expectation(schema)
-    prefill = resolve_dynamics(prefill)
+    prefill = Today.resolve(prefill, today(attrs, schema, opts))
     provided = Map.get(attrs, "content") || %{}
 
     values =
@@ -1298,18 +1299,7 @@ defmodule Barkpark.Content.Writer do
   def deep_merge(_a, b), do: b
 
   @doc false
-  def resolve_dynamics(term) when is_map(term) do
-    Map.new(term, fn {k, v} -> {k, resolve_dynamics(v)} end)
-  end
-
-  def resolve_dynamics(list) when is_list(list), do: Enum.map(list, &resolve_dynamics/1)
-
-  def resolve_dynamics("$today"), do: Date.utc_today() |> Date.to_iso8601()
-
-  def resolve_dynamics("$today.year"),
-    do: Date.utc_today().year |> Integer.to_string()
-
-  def resolve_dynamics(other), do: other
+  defdelegate resolve_dynamics(term), to: Today
 
   # ── Legacy upsert (for backward compat) ───────────────────────────────────
 
