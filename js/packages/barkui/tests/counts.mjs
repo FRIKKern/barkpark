@@ -98,14 +98,14 @@ export function walk(most = MOST_PARTS, { plant } = {}) {
 }
 
 /** The command line: with `--since <ref>`, the walk runs only when walkNeeded(the files changed since <ref>, read by
-    changedSince in the repo at `root`); without it, always. Returns the exit code. */
-export function main(argv, { root = repoRoot, walkAll = walk, log = console.log } = {}) {
+    changedSince); without it, always. Returns the exit code. */
+export function main(argv, { walkAll = walk, log = console.log } = {}) {
   const at = argv.indexOf('--since')
   if (at >= 0) {
     const ref = argv[at + 1]
     let files = []
     try {
-      files = changedSince(ref, root)
+      files = changedSince(ref)
     } catch (e) {
       log(`counts: the files changed since ${ref} could not be read (${e.message.split('\n')[0]}), so the walk runs`)
     }
