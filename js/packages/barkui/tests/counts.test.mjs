@@ -30,6 +30,25 @@ const STEP = `      # BarkUI's fast tests hold for every number of parts the sho
 
 const repo = (p) => new URL(`../../../../${p}`, import.meta.url)
 
+/** The job of a workflow that holds the line at `at`: its name, its text, and its own keys (the lines at the job's
+    key depth, two spaces in from its name), read from the indentation the file is written in. */
+function jobOf(wf, at) {
+  const lines = wf.split('\n')
+  const line = wf.slice(0, at).split('\n').length - 1
+  const top = lines.findIndex((l) => l === 'jobs:')
+  let start = line
+  while (start > top && !/^  [\w-]+:\s*$/.test(lines[start])) start--
+  let end = line + 1
+  while (end < lines.length && !/^ {0,2}\S/.test(lines[end])) end++
+  const own = lines.slice(start + 1, end)
+  return {
+    name: start > top ? lines[start].trim().slice(0, -1) : null,
+    from: lines.slice(0, start).join('\n').length + (start ? 1 : 0),
+    text: lines.slice(start, end).join('\n'),
+    keys: own.map((l) => l.match(/^    ([\w-]+):/)?.[1]).filter(Boolean),
+  }
+}
+
 describe('the walk of every part count', () => {
   it('runs for any change to this package, and for any change outside the js packages', () => {
     for (const f of ['parts/button/part.css', 'check/jobs.mjs', 'build/showroom.mjs', 'tests/jobs.test.mjs', 'docs/PARTS.md', 'package.json'])
@@ -95,25 +114,44 @@ describe('the walk of every part count', () => {
     const block = wf.slice(wf.lastIndexOf('\n\n', at) + 2, wf.indexOf('\n\n', at) + 1)
     expect(block, 'The BarkUI walk step in .github/workflows/js-tests.yml, or the comment above it, is not the pinned text. If the change is on purpose, change STEP in js/packages/barkui/tests/counts.test.mjs to match, in the same change.').toBe(STEP)
     expect(Number(STEP.match(/timeout-minutes: (\d+)/)[1]) * 60).toBeGreaterThan(WALK_SECONDS)
-    // Its job is the one that runs the fast tests first, and the job has no condition and nothing that lets it pass.
-    const job = wf.slice(wf.lastIndexOf('\n  test:\n', at), at)
-    expect(job.indexOf('run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}')).toBeGreaterThan(0)
-    const head = job.slice(0, job.indexOf('\n    steps:\n'))
-    expect(head).not.toMatch(/^\s*(if|continue-on-error):/m)
+    // Its job is `test`, the one that runs the fast tests first, and that job has no condition and nothing that lets
+    // it pass, among its own keys wherever they sit.
+    const job = jobOf(wf, at)
+    expect(job.name, 'the walk step is not in the test job').toBe('test')
+    expect(job.text.indexOf('run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}')).toBeGreaterThan(0)
+    expect(job.text.indexOf('run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}')).toBeLessThan(at - job.from)
+    expect(job.keys.filter((k) => ['if', 'continue-on-error'].includes(k)), 'the test job may not carry if or continue-on-error').toEqual([])
   })
 
   it('reads the changed files through changedSince with --since, walks when they need it, and always walks without it', () => {
-    const run = (argv, files) => {
-      const seen = { refs: [], walked: 0, log: [] }
-      const code = main(argv, { changed: (ref) => (seen.refs.push(ref), typeof files === 'function' ? files() : files), walkAll: () => (seen.walked++, []), log: (l) => seen.log.push(l) })
-      return { code, ...seen }
+    const root = mkdtempSync(join(tmpdir(), 'barkui-counts-cli-'))
+    try {
+      const git = (...a) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' })
+      const put = (f, body) => (mkdirSync(join(root, dirname(f)), { recursive: true }), writeFileSync(join(root, f), body))
+      git('init', '-q', '-b', 'main')
+      put('js/packages/barkui/docs/PARTS.md', 'The part folder and the check.\n'.repeat(20))
+      put('js/packages/core/src/index.ts', 'export {}\n')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'base')
+      const run = (argv) => {
+        let walked = 0
+        const code = main(argv, { root, walkAll: () => (walked++, []), log: () => {} })
+        return { code, walked }
+      }
+      // A change only in another package: skipped. A file of this package moved out of it: walked.
+      put('js/packages/core/src/index.ts', 'export const a = 1\n')
+      git('commit', '-q', '-am', 'core only')
+      expect(run(['--since', 'HEAD~1'])).toEqual({ code: 0, walked: 0 })
+      git('mv', 'js/packages/barkui/docs/PARTS.md', 'js/packages/core/zz-PARTS.md')
+      git('commit', '-q', '-m', 'move out')
+      expect(run(['--since', 'HEAD~1'])).toEqual({ code: 0, walked: 1 })
+      // A ref that cannot be read walks; no --since always walks.
+      expect(run(['--since', 'no-such-ref'])).toEqual({ code: 0, walked: 1 })
+      expect(run([])).toEqual({ code: 0, walked: 1 })
+      expect(main([], { walkAll: () => ['n02 a.test.mjs: x: y'], log: () => {} })).toBe(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
-    expect(run(['--since', 'origin/main'], ['js/packages/barkui/check/run.mjs'])).toMatchObject({ code: 0, refs: ['origin/main'], walked: 1 })
-    expect(run(['--since', 'origin/main'], ['js/packages/core/src/index.ts'])).toMatchObject({ code: 0, refs: ['origin/main'], walked: 0 })
-    expect(run(['--since', 'origin/main'], () => { throw new Error('no such ref') })).toMatchObject({ code: 0, walked: 1 })
-    expect(run([], ['js/packages/core/src/index.ts'])).toMatchObject({ code: 0, refs: [], walked: 1 })
-    const red = main([], { walkAll: () => ['n02 a.test.mjs: x: y'], log: () => {} })
-    expect(red).toBe(1)
   })
 
   // Real walks of two counts, with the copies planted: each turns the walk red by name. Inside a walk's copy they
