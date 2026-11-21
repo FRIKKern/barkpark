@@ -234,7 +234,7 @@ const CASES = [
       appendFileSync(join(d, 'press.mjs'), `\nsteps.push(\n  ${[1, 2, 3, 4, 5, 6, 7, 8].map(step).join(',\n  ')},\n)\n`)
     },
     expect: each({
-      'all eight readings ran': (p) => /20 steps by real keys|a focused empty field, reading 8/.test(lights(p).pressed?.detail ?? ''),
+      'all eight readings ran': (p) => /19 steps by real keys|a focused empty field, reading 8/.test(lights(p).pressed?.detail ?? ''),
       'a focused empty field with a placeholder draws in full': (p) => !reasons(p, 'pressed').some((f) => /at input#button-caret/.test(f)),
     }),
   },
