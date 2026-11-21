@@ -1347,7 +1347,7 @@ c8_row_c() {  # <bp-merge.sh> <workflow>: the merge helper names no security.yml
   local n hit=""
   while IFS= read -r n; do
     [ -n "$n" ] && grep -qF -- "$n" "$1" && hit="$hit'$n' "
-  done < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["job_names"]))' "$C8/row.json")
+  done <<<"$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["job_names"]))' "$C8/row.json")"
   [ -z "$hit" ] || { echo "bp-merge.sh names $hit"; return 1; }
 }
 c8_row_d() {  # <workflow>: the report job still fires on a scheduled red on main
