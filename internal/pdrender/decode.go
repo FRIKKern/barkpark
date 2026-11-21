@@ -9,12 +9,16 @@ import (
 
 const (
 	maxNestDepth = 100
+	// maxSlotPath is the longest blockSlots path: tabs, steps and list items take
+	// four JSON levels from a block to the block inside it.
+	maxSlotPath = 4
 	// maxJSONDepth is how deep a document's JSON is read before Decode cuts it
 	// (encoding/json refuses past 10000). It is past the deepest inline whose
 	// words a reader still draws (maxWordDepth inline levels, two JSON levels
-	// each, inside maxNestDepth block levels), so the cut never takes a word that
-	// the inline walk would have read. task-11bbe4b4ae8c85f4.
-	maxJSONDepth  = 2*maxWordDepth + 2*maxNestDepth + 16
+	// each, inside maxNestDepth block levels of up to maxSlotPath JSON levels
+	// each), so the cut never takes a word that the inline walk would have read.
+	// task-11bbe4b4ae8c85f4.
+	maxJSONDepth  = 2*maxWordDepth + maxSlotPath*maxNestDepth + 16
 	nestedTooDeep = "Nested too deep to show"
 	slotEach      = "*"
 )
