@@ -35,7 +35,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
-  alias Barkpark.Content.{PreWriteFences, PreWriteTransforms}
+  alias Barkpark.Content.{InsertOnly, PreWriteFences, PreWriteTransforms}
 
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Projection, Render, Synthesis}
 
@@ -149,17 +149,13 @@ defmodule Barkpark.Content.Writer do
         {:ok, content, warnings}
 
       {{:ok, _content}, cross_errors} ->
-        {:error, errors_by_field(%{}, cross_errors), cross_errors, warnings}
+        {:error, Barkpark.Content.FieldErrors.add_findings(%{}, cross_errors), cross_errors,
+         warnings}
 
       {{:error, errors}, cross_errors} ->
-        {:error, errors_by_field(errors, cross_errors), error_findings ++ cross_errors, warnings}
+        {:error, Barkpark.Content.FieldErrors.add_findings(errors, cross_errors),
+         error_findings ++ cross_errors, warnings}
     end
-  end
-
-  defp errors_by_field(errors, findings) do
-    Enum.reduce(findings, errors, fn f, acc ->
-      Map.update(acc, top_level_field(f.path), [f.message], &(List.wrap(&1) ++ [f.message]))
-    end)
   end
 
   @doc """
@@ -1532,7 +1528,7 @@ defmodule Barkpark.Content.Writer do
     # `prev_doc == nil` exactly like the two birth guards above, so every
     # UPDATE arriving here (autosave, patch merges, block ops, forms) is
     # structurally untouched — parity with `do_create_document:175`.
-    fences = PreWriteFences.list()
+    fences = [{InsertOnly, :refuse_existing} | PreWriteFences.list()]
 
     # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
     # task-2978357a0701cd10, task-d91ccf54d43b9800). Declared by plugins via
@@ -1540,8 +1536,8 @@ defmodule Barkpark.Content.Writer do
     # order. The Tasks plugin's nine (transition legal, close reason lands with
     # a close, draft-only terminal, dataset twin, terminal criteria, criteria
     # required, born adjudicated, surface declared, find-or-create dedup) keep
-    # the order they had when this chain named them. With plugins off the list
-    # is empty and this step is `:ok`.
+    # the order they had when this chain named them. `Content.InsertOnly` runs
+    # first: an insert-only write that read a row is refused before any of them.
     with :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
@@ -1627,9 +1623,7 @@ defmodule Barkpark.Content.Writer do
                 # birth is wrapped for the same reason, and a failed
                 # `save_event` now un-births the row instead of stranding it.
                 Broadcast.write_atomically(fn ->
-                  %Document{}
-                  |> Document.changeset(enc_attrs)
-                  |> Repo.insert()
+                  InsertOnly.insert(enc_attrs, type, dataset, opts)
                   |> Broadcast.tap_broadcast(
                     dataset,
                     type,

@@ -36,10 +36,19 @@ export function installHelpers() {
     c[3] *= fade
     return contrast(over(c, ground), ground)
   }
+  /** A token as it resolves at an element, as an rgb() string. The token is read from the element's own computed
+      style, and only turned into a colour by a probe at body level: no reader puts a child into the element it
+      measures, since an element that draws no children (an input, a textarea, a select, an img) does not give one
+      its own values. A token the element does not define reads as its colour, as `color: var(--missing)` would. */
   const resolve = (name, within = document.body) => {
+    const raw = getComputedStyle(within).getPropertyValue(name).trim()
+    if (!raw) return getComputedStyle(within).color
     const probe = document.createElement('span')
-    probe.style.color = `var(${name})`
-    within.append(probe)
+    // The sheet's colours are light-dark() pairs: the probe takes the element's own scheme, so a surface that
+    // flips it resolves as it does at the element.
+    probe.style.colorScheme = getComputedStyle(within).colorScheme
+    probe.style.color = raw
+    document.body.append(probe)
     const value = getComputedStyle(probe).color
     probe.remove()
     return value

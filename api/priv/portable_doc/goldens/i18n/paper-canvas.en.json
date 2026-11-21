@@ -184,6 +184,7 @@
   "Pullquote": "Pullquote",
   "Quote": "Quote",
   "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.": "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.",
+  "Read only: this callout has a body, which the editor cannot edit yet.": "Read only: this callout has a body, which the editor cannot edit yet.",
   "Recommendation: ": "Recommendation: ",
   "Reference": "Reference",
   "Remove": "Remove",

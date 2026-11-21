@@ -56,9 +56,10 @@
   var CONTROL = 'button, a[href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
   var KEEPS = '[role="dialog"], [role="menu"], [role="listbox"], dialog';
 
-  // The control a document's form starts with: a group tab while the bar is
-  // drawn (none while its tabs wait, disabled), else the form's first
-  // control outside a menu or dialog it holds.
+  // The control a document's form starts with: the bar's first enabled group
+  // tab while the bar is drawn (All fields is never disabled; while History is
+  // open the others wait, disabled), else the form's first control outside a
+  // menu or dialog it holds.
   function formStart(pane) {
     if (!pane) return null;
     var bar = pane.querySelector('.bp-tab-bar[role="tablist"]');

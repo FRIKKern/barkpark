@@ -107,7 +107,14 @@ defmodule Barkpark.PluginFreeBootTest do
     # A sheet's History restore goes through Sheets.Session.restore/4
     # (task-1eaa2c0dc6e60047): the session would overwrite a row written beside it.
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/handlers/history.ex"},
-    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/shared.ex"}
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/shared.ex"},
+    # The desk's Tasks sidebar (task-fe80ab9d86e15e09) reads the plugin's own
+    # Tasks list query (`Tasks.Web.ListQuery.page/2`), so the sidebar and the
+    # plugin's list page read the same rows under the same field gate. Every
+    # read is behind `TasksRead.available?/1` (`PaperTaskSeam.resolver/1`):
+    # under `:plugins []` or with Tasks off for the workspace, the desk draws no
+    # Tasks button and never calls the query.
+    {"Barkpark.Plugins.Tasks", "lib/barkpark_web/live/studio/desk/tasks_read.ex"}
   ]
 
   # host owns the public reader LiveView (the Bulldocs reader at /papers/:slug

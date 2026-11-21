@@ -18,13 +18,12 @@
 // loss of every block.
 //
 // One rule sits next to the fold: a callout holding a body (slots.body) is counted as
-// losing it. The fold keeps the body on an edit elsewhere, but the editor shows a
-// callout's text from slots.body[0] and writes an edit inside it into `content`, over
-// the callout's own words, and no check before opening can see that edit. So such a
-// Paper opens read-only naming the callout until task-6a8137419e0153e4 fixes the
-// callout projection and lifts this rule. `{ calloutBody: "lifted" }` lifts it, for
-// the inside-edit sweep (__source_inside_edit_sweep.test.mjs) that proves the rule is
-// the whole class.
+// losing it. The rich editor carries such a callout whole (run-content-codecs.js
+// calloutBlockToNode), so source mode shows it as its stored block; the Paper still
+// opens read-only naming the callout until task-dde1d993de85a6e3 proves source mode
+// keeps a body and lifts this rule. `{ calloutBody: "lifted" }` lifts it, for the
+// inside-edit sweep (__source_inside_edit_sweep.test.mjs) that proves the rule is the
+// whole class.
 //
 // A second rule is derived, not named: after the save, a prose block must show in the
 // reader the words the editor showed for it (markdown/reader-inline.js mirrors the

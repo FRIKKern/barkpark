@@ -1,9 +1,11 @@
 <!-- doc-tier: agent | canonical-for: schema-cross-validations | budget: 300tok -->
 # Schema cross-field rules
 
-`cross_validations` entries: `{name, title, rule, level, fields}`. `rule` is a `visibleWhen` predicate, or `{all: [...]}` / `{any: [...]}` / `{one: [...]}` (exactly one holds) of them. Studio shows unsatisfied rules as a banner; API writes get the same rules as findings (code `cross_validation`, path `/<first of fields>`) through the same warnings/422 door as `validation` findings ([schema-reference.md](schema-reference.md)), by `level`. A rule naming an undeclared field or an unknown operator, or with no `rule`, is skipped and logged.
+`cross_validations` entries: `{name, title, rule, level, fields, each?, type?}`. `rule` is a `visibleWhen` predicate or `{all|any|one: [...]}` of them (`one`: exactly one). A broken rule is a finding (code `cross_validation`, path `/<first of fields>`) in Studio and the `validation` warnings/422 door ([schema-reference.md](schema-reference.md)), by `level`. A rule with an undeclared field, unknown operator or no `rule` is skipped and logged.
 
-Operators (these and `visibleWhen`): `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`, `count_eq`, `count_neq`, `count_gt`, `count_lt`, and `gt`, `gte`, `lt`, `lte`. A compare fails only when both sides are numbers or non-empty strings (ISO dates compare as text) and the comparison is false. `valueField` in place of `value` compares with another field (`{field: "end", operator: "gte", valueField: "start"}`). A `valueField` naming an undeclared field skips the rule.
+`each: "meny"` (dotted, through lists; `type`, only with `each`, picks a `_type`) runs the rule per object item: a leaf reads the item, `scope: "document"` the root. The first 50 broken items are findings at `/meny/<i>/<first field>`, the rest one at `/meny`.
+
+Operators (as `visibleWhen`): `eq neq in empty non_empty starts_with count_eq count_neq count_gt count_lt gt gte lt lte`. A compare fails only if both sides are numbers or non-empty strings (dates compare as text) and it is false. `valueField` (instead of `value`) names the other side's field.
 
 ## Code anchors
 

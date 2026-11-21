@@ -143,6 +143,41 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
     end
   end
 
+  # The values a paste keeps a whole-value step for besides `DocUndoValues`'
+  # own: those whose typing is the browser's (a number, a url), and a
+  # widget's pick.
+  @pasted_types ~w(number boolean url email date datetime codelist)
+
+  @doc """
+  A paste's write of one top-level field (Paste field, Paste document), the
+  params the server built for it (`EditorHost.write_built/2`), and a step of
+  the undo when it landed, as the TanStack Studio records every write:
+  free text a text step, as typing is (`record/3`); any other value a
+  whole-value step. A rich-text body, a reference or an asset is written
+  and not kept.
+  """
+  def write_built(%{"_target" => ["doc", key]} = params, socket) when is_binary(key) do
+    schema = socket.assigns[:editor_schema]
+    write = &EditorHost.write_built(params, &1)
+
+    cond do
+      RemoteValues.free_text?(schema, key) ->
+        record(write.(socket), params, socket)
+
+      DocUndoValues.recorded?(schema, key) or
+          match?(%{"type" => t} when t in @pasted_types, DocUndoValues.field(schema, key)) ->
+        socket
+        |> assign(:editor_saved_over, [key])
+        |> write.()
+        |> record_value(socket, key, "doc[#{key}]")
+
+      true ->
+        write.(socket)
+    end
+  end
+
+  def write_built(params, socket), do: EditorHost.write_built(params, socket)
+
   @doc """
   After the form's `autosave` post `params` (the result of handling it on
   `before`): the step it made, when it landed.

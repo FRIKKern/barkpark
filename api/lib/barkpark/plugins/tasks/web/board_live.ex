@@ -254,7 +254,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     # (mirrors the L212 no-snapshot-on-static-render guard) and no broadcast can
     # arrive pre-connect, so fail-closed is free of behavioral cost. `:refresh`
     # recomputes it, so a schema edit self-heals within one reconcile cadence.
-    readable? = if connected, do: Board.field_visibility_gate(@dataset), else: fn _ -> false end
+    readable? = if connected, do: gate(socket), else: fn _ -> false end
 
     {:ok,
      socket
@@ -342,7 +342,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     {:noreply,
      socket
      |> assign(:board, snapshot(socket, socket.assigns.dataset))
-     |> assign(:readable?, Board.field_visibility_gate(socket.assigns.dataset))
+     |> assign(:readable?, gate(socket))
      |> assign(:last_change, nil)
      |> refresh_peek()
      |> assign_view()}
@@ -887,8 +887,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         # board mount can never leak it; an undeclared field stays public (legacy
         # parity). No task field declares visibility today — fail-closed
         # hardening, not a behavior change.
-        schema = peek_schema()
-        readable? = fn field -> peek_field_readable?(schema, field) end
+        readable? = gate(socket)
         # nil = SEALED (schema-private field — the section never renders, no
         # empty shell hints it exists); [] = authored-empty (the criteria-first
         # reader shows its honest empty state).
@@ -977,26 +976,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
-  # Resolve the task schema for the peek field-visibility cross-check,
-  # dataset-scoped to the board's own `@dataset` (mirrors `tasks/query.ex`
-  # load_task_schema/3). nil on miss ⇒ every field undeclared ⇒ public (legacy
-  # parity), never a crash. One indexed `Repo.one` per peek open/refresh.
-  defp peek_schema do
-    case Content.get_schema("task", @dataset, []) do
-      {:ok, schema} -> schema
-      _ -> nil
-    end
-  end
-
-  # ANONYMOUS + fail-closed field-visibility check (mirrors `tasks/query.ex`
-  # measure_field_readable?/2). A declared private / owner_only / readable_by
-  # field is denied to the ungated board viewer; an undeclared field is public.
-  defp peek_field_readable?(schema, field) do
-    Barkpark.Content.Envelope.field_readable?(
-      schema,
-      field,
-      Barkpark.Content.CallerContext.anonymous()
-    )
+  # The board's field-visibility predicate for the peek, the cards and the
+  # broadcasts: a scoped mount's own workspace's task schema decides, the flat
+  # mount reads unscoped (task-c626f2be5264f61a). One schema read per call.
+  defp gate(socket) do
+    ws_id = BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket)
+    Board.field_visibility_gate(@dataset, workspace_id: ws_id)
   end
 
   defp peek_claim(content) do

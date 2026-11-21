@@ -41,4 +41,13 @@ defmodule BarkparkWeb.Studio.Desk.ReadonlyFields do
 
   @doc "Whether the desk shows the published version or an old revision in the form's place."
   def readonly?(assigns), do: RevisionView.shown?(assigns) or PublishedView.shown?(assigns)
+
+  @doc """
+  Whether `event` is refused by either view, as the editor's guard refuses it
+  (`EditorHost`). A control drawn for an event, such as the conflict banner's
+  Reload, is disabled exactly when this holds, so it is never drawn live and
+  then refused.
+  """
+  def refused?(event, assigns),
+    do: RevisionView.refuses?(event, assigns) or PublishedView.refuses?(event, assigns)
 end

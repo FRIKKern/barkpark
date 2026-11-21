@@ -27,12 +27,19 @@ export function installDrawn() {
     range.selectNodeContents(node)
     return [...range.getClientRects()].filter((r) => r.width >= 1 && r.height >= 1).map((r) => box(r, pad))
   }
+  /** The colour a text is drawn in: its own style's text fill, read from the pseudo-element when the text is one
+      (a placeholder or a ::before/::after content), never from its host. The reference is drawn in it and the
+      wait match reads it, so the two can never disagree about one text. */
+  const textFill = (el, pseudo = null) => getComputedStyle(el, pseudo).webkitTextFillColor
   const textNodes = (el) => {
     const out = []
     const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
     for (let n; (n = walk.nextNode()); ) if (n.textContent.trim()) out.push(n)
     return out
   }
+  /** The words a field shows as its value: a textarea's, or a text-like input's. A password shows dots, and a
+      date, a colour, a range or a button input draws its value its own way, so none of those is read as words. */
+  const valueOf = (el) => (el.matches('textarea, input:is([type="text" i], [type="search" i], [type="email" i], [type="url" i], [type="tel" i], [type="number" i], :not([type]))') ? el.value : '')
   const quiet = (el) => !!el.closest('[data-disabled], :disabled')
   /** Text kept for screen readers only: inside a box of at most 1px that clips what overflows it. */
   const forReadersOnly = (el, root) => {
@@ -74,9 +81,18 @@ export function installDrawn() {
   // The things of the current view, kept here so their elements never cross to the page or to Node.
   let items = []
   const keyed = new Map()
+  // No reader puts a child into an element it measures (resolve in probes.mjs says why). From the start of a
+  // reading to its judgement, every child added to or taken from a measured element is noted, so a probe put
+  // inside one is named even when it is taken out again; it needs no list of the kinds of element.
+  let watch = null
+  let measured = new Set()
   /** Every visible thing in the stage: text runs and graphics, with the boxes their ink sits in. */
   const things = (root) => {
     items = []
+    watch?.disconnect()
+    measured = new Set([root, ...h.shown(root)])
+    watch = new MutationObserver(() => {})
+    watch.observe(root, { childList: true, subtree: true })
     const graphicEls = [...root.querySelectorAll('svg, img')].filter((g) => !(g.parentElement?.closest('svg')) && g.checkVisibility())
     const painting = new Map()
     for (const el of h.shown(root)) {
@@ -88,9 +104,17 @@ export function installDrawn() {
         if (text) {
           const str = p === '::placeholder' ? el.getAttribute('placeholder') : p === '::marker' ? null : said(ps.content)
           const holes = textNodes(el).flatMap((n) => textRects(n))
-          const draw = str ? { font: fontOf(ps), str, ink: solid(ps.webkitTextFillColor, ground), ground: rgb(ground), at: phase(el.getBoundingClientRect()) } : null
-          items.push({ kind: 'text', el, at: `${h.describe(el)}${p}`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes, key: draw ? `text|${JSON.stringify(draw)}` : null, draw })
+          const draw = str ? { font: fontOf(ps), str, ink: solid(textFill(el, p), ground), ground: rgb(ground), at: phase(el.getBoundingClientRect()) } : null
+          items.push({ kind: 'text', el, pseudo: p, at: `${h.describe(el)}${p}`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes, key: draw ? `text|${JSON.stringify(draw)}` : null, draw })
         }
+      }
+      // A field's value is drawn text, read the way its placeholder is: its words, its own text fill and the
+      // field's box, so its contrast and whether it draws in full are judged. Whether it draws as itself (a value
+      // the field scrolls sideways among them) is not judged here.
+      const value = valueOf(el)
+      if (value) {
+        const draw = { font: fontOf(getComputedStyle(el)), str: value, ink: solid(textFill(el), ground), ground: rgb(ground), at: phase(el.getBoundingClientRect()) }
+        items.push({ kind: 'text', el, pseudo: null, at: `${h.describe(el)} value`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], key: `text|${JSON.stringify(draw)}`, draw })
       }
     }
     // Each line of a text node is one label, matched against its own string drawn alone (match.mjs).
@@ -100,7 +124,7 @@ export function installDrawn() {
       const s = getComputedStyle(el)
       const ground = h.effectiveBg(el)
       for (const l of h.lines(n)) {
-        const draw = { font: fontOf(s), str: l.str, ink: solid(s.webkitTextFillColor, ground), ground: rgb(ground), at: phase(l), run: true }
+        const draw = { font: fontOf(s), str: l.str, ink: solid(textFill(el), ground), ground: rgb(ground), at: phase(l), run: true }
         const line = box(l)
         items.push({ kind: 'text', run: true, el, at: h.describe(el), quiet: quiet(el), rects: [box(l, 1)], line, key: `run|${JSON.stringify(draw)}`, draw })
       }
@@ -272,11 +296,11 @@ export function installDrawn() {
     document.head.prepend(toggle)
   }
 
-  /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill is the first token and its ground
-      the second, both as they resolve where it stands. */
+  /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill (textFill, the colour its reference
+      is drawn in) is the first token and its ground the second, both as they resolve where it stands. */
   const fitsOf = (t, pairs) => {
     const same = (x, y, n) => x.slice(0, n).every((v, i) => Math.abs(v - y[i]) < 0.5)
-    const fill = h.rgba(getComputedStyle(t.el).webkitTextFillColor)
+    const fill = h.rgba(textFill(t.el, t.pseudo))
     const ground = h.effectiveBg(t.el)
     const i = pairs.findIndex(([text, under]) => same(fill, h.rgba(h.resolve(text, t.el)), 4) && same(ground, h.rgba(h.resolve(under, t.el)), 3))
     return i < 0 ? undefined : i
@@ -293,6 +317,10 @@ export function installDrawn() {
       if (t.kind === 'text' && pairs.length) r.fits = fitsOf(t, pairs)
       return r
     })
+    const records = watch?.takeRecords() ?? []
+    watch?.disconnect()
+    watch = null
+    const grown = [...new Set(records.filter((m) => measured.has(m.target)).map((m) => h.describe(m.target)))]
     const shows = (el, kind) => read.some((r) => r.count >= 4 && el.contains(r.t.el) && (!kind || r.t.kind === kind))
     const empty = h.controls(root).filter((el) => !el.matches(h.FIELDS) && !shows(el)).map((el) => h.describe(el))
     const unlabelled = (h.state.bare ?? []).filter((el) => !shows(el, 'text')).map((el) => h.describe(el))
@@ -300,6 +328,7 @@ export function installDrawn() {
       things: read.map(({ t, amount, count, ratio, match, fits }) => ({ kind: t.kind, at: t.at, quiet: t.quiet, draws: count >= 4, ratio, fits, ...(t.run ? { match } : { share: t.key && keyed.get(t.key) ? amount / keyed.get(t.key) : null }) })),
       empty,
       unlabelled,
+      grown,
     }
   }
 
