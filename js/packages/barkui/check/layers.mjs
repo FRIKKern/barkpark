@@ -225,9 +225,14 @@ function census(placement, script) {
     attachShadow tells the census each host the moment its root exists, by an event the census hears first. What
     would put a window or a document out of the census's sight is refused and told by name instead: window.open, and
     document.open, write and writeln once the document is parsed (while it is parsing, written markup is parsed like
-    the rest). The page cannot remove or replace any of these, and they call nothing it can change afterwards. */
+    the rest). removeAttribute and removeAttributeNS bring a style attribute up to date before they run: Chromium
+    writes a style set through el.style or attributeStyleMap into the attribute only when it is next read, and
+    removeAttribute does not read it first, so the record the placement log gets would hold the value before that
+    write, not the one the element held (placement.mjs). The page cannot remove or replace any of these, and they
+    call nothing it can change afterwards. */
 function tellRoots() {
   const [apply, define, send, Ev, doc] = [Reflect.apply, Object.defineProperty, EventTarget.prototype.dispatchEvent, Event, document]
+  const [getAttr, removeAttr, removeAttrNS] = [Element.prototype.getAttribute, Element.prototype.removeAttribute, Element.prototype.removeAttributeNS]
   const [attach, write, writeln, ready] = [Element.prototype.attachShadow, Document.prototype.write, Document.prototype.writeln, Object.getOwnPropertyDescriptor(Document.prototype, 'readyState').get]
   const tell = (target, type) => apply(send, target, [new Ev(type, { bubbles: true, composed: true })])
   const fix = (o, k, value) => define(o, k, { value, writable: false, enumerable: true, configurable: false })
@@ -235,6 +240,14 @@ function tellRoots() {
     const root = apply(attach, this, [init])
     tell(this, 'barkui-census-root')
     return root
+  })
+  fix(Element.prototype, 'removeAttribute', function removeAttribute(...a) {
+    apply(getAttr, this, ['style'])
+    return apply(removeAttr, this, a)
+  })
+  fix(Element.prototype, 'removeAttributeNS', function removeAttributeNS(...a) {
+    apply(getAttr, this, ['style'])
+    return apply(removeAttrNS, this, a)
   })
   fix(window, 'open', function open() {
     tell(window, 'barkui-census-window.open')
