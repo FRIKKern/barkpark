@@ -261,6 +261,45 @@ steps.push({
       'a focused empty field with a placeholder draws in full, its caret in the glyph picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the glyph picture only/.test(st.name) && st.pass),
     }),
   },
+  // A Tab into a filled field selects its whole value, and a browser may paint a selection in colours of its own.
+  // The fixture plants such colours, so a reading after the Tab sees the value selected and painted by them.
+  {
+    name: 'a reading is the same whether or not a value is selected',
+    only: ['pressed'],
+    states: true,
+    green: true,
+    css: '::selection { color: rgb(255, 255, 255); background-color: rgb(51, 103, 214); }',
+    plant: (d) => {
+      appendFileSync(join(d, 'example.html'), `
+<div data-demo-row>
+  <input id="button-sel-before" data-slot="input" placeholder="Before">
+  <input id="button-sel" data-slot="input" value="post-1042">
+</div>
+`)
+      appendFileSync(join(d, 'press.mjs'), `
+steps.push({
+  name: 'the field before the filled one has focus',
+  expect: (root) => {
+    const before = root.querySelector('#button-sel-before')
+    before.focus()
+    return document.activeElement === before || 'the field before lost focus'
+  },
+}, {
+  name: 'Tab selects the filled field\\'s whole value',
+  keys: ['Tab'],
+  expect: (root) => {
+    const field = root.querySelector('#button-sel')
+    if (document.activeElement !== field) return 'Tab did not reach the filled field'
+    return (field.selectionStart === 0 && field.selectionEnd === field.value.length) || 'the value is not selected'
+  },
+})
+`)
+    },
+    expect: each({
+      'both steps ran': (p) => ['the field before the filled one has focus', "Tab selects the filled field's whole value"].every((n) => (p.parts.button.steps ?? []).some((st) => st.name === n)),
+      'a selected value in a field draws as itself': (p) => (p.parts.button.steps ?? []).some((st) => st.name === "Tab selects the filled field's whole value" && st.pass),
+    }),
+  },
   {
     name: 'a press step that never settles fails by name within its time limit',
     only: ['pressed'],
