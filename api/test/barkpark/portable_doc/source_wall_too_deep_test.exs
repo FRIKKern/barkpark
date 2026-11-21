@@ -15,8 +15,15 @@ defmodule Barkpark.PortableDoc.SourceWallTooDeepTest do
   @external_resource @path
   @rows @path |> File.read!() |> Jason.decode!() |> Map.fetch!("rows")
 
-  # The doc a row names: a limit doc is one block written with the pack's macros; a
-  # value-depth case is a whole doc.
+  # The doc a row names: a limit doc or edge is one block written with the pack's
+  # macros; a value-depth case is a whole doc; a golden is one rendered edge, its
+  # block already expanded under "input".
+  defp doc(%{"file" => file, "list" => "golden", "entry" => entry}) do
+    golden = Path.join(Pack.dir(), file) |> File.read!() |> Jason.decode!()
+    assert golden["name"] == entry, "#{file} is not the golden of #{inspect(entry)}"
+    %{"blocks" => [golden["input"]]}
+  end
+
   defp doc(%{"file" => file, "list" => list, "entry" => entry}) do
     found =
       Path.join(Pack.dir(), file)
@@ -28,13 +35,13 @@ defmodule Barkpark.PortableDoc.SourceWallTooDeepTest do
     assert found, "#{file} has no #{list} entry named #{inspect(entry)}"
 
     case list do
-      "docs" -> %{"blocks" => [Limits.expand(found["doc"])]}
+      list when list in ["docs", "edges"] -> %{"blocks" => [Limits.expand(found["doc"])]}
       "cases" -> found["doc"]
     end
   end
 
   test "the list names docs" do
-    assert length(@rows) == 4
+    assert length(@rows) == 6
   end
 
   for row <- @rows do
