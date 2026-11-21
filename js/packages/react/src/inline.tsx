@@ -545,7 +545,10 @@ export function renderInline(node: Inline, depth = 0, insideLink = false): strin
       const value = escapeHtml(textLeafValue(node))
       // The marks that fit under the depth limit are drawn; past them the word is
       // kept and the notice follows (inline-depth.ts).
-      return cutMarks(value, marks, MAX_DEPTH - depth) || (marks.length ? applyMarks(value, marks) : value)
+      return (
+        cutMarks(value, marks, MAX_DEPTH - depth) ||
+        (marks.length ? applyMarks(value, marks) : value)
+      )
     }
     case 'strong':
     case 'bold':
@@ -655,7 +658,7 @@ function cutInline(node: unknown, depth: number): string | undefined {
     const [n, d] = stack.pop()!
     if (d >= MAX_WORD_DEPTH) continue
     const kids = kidsOf(n)
-    if (kids) for (let i = kids.length; i--; ) stack.push([kids[i], d + 1])
+    if (kids) for (let i = kids.length; i--;) stack.push([kids[i], d + 1])
     else words += isMap(n) ? textLeafValue(n) : str(n)
   }
   return words ? words + ' ' + tooDeepNotice : tooDeepNotice
@@ -725,7 +728,8 @@ export function renderCell(cell: unknown): string {
       if (str(n.type) === 'text') {
         const marks = asList(n.marks)
         const value = escapeHtml(textLeafValue(n))
-        const inner = cutMarks(value, marks, MAX_DEPTH) || (marks.length ? applyMarks(value, marks) : value)
+        const inner =
+          cutMarks(value, marks, MAX_DEPTH) || (marks.length ? applyMarks(value, marks) : value)
         // A mark that produced a wrapper element (bold/italic/code/link/…) is the
         // PdText span itself; only genuinely-bare text needs the base `<span>`.
         return inner.startsWith('<') ? inner : `<span>${inner}</span>`
