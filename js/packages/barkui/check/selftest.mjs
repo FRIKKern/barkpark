@@ -473,15 +473,17 @@ const CASES = [
           ['[data-slot="button"]:is(:where(::before)) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
           ['[data-slot="button"]:nth-child(1 of :where(::before)) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
           // Dropped where it stands in its compound, though it reads alone and inside :is() alone.
-          ['[data-slot="button"]::before:is([data-a]) { gap: 0px; }', /the arm \[data-a\] is one the browser drops/, true],
-          ['[data-slot="button"] { &::before:where(:first-child) { gap: 0px; } }', /the arm :first-child is one the browser drops/, true],
+          ['[data-slot="button"]::before:is(:hover) { gap: 0px; }', /::before:is\(:hover\): the arm :hover is one the browser drops/, true],
+          ['[data-slot="button"]::before:is([data-a]) { gap: 0px; }', /::before:is\(\[data-a\]\): the arm \[data-a\] is one the browser drops/, true],
+          ['[data-slot="button"]::before:where(:first-child) { gap: 0px; }', /::before:where\(:first-child\): the arm :first-child is one the browser drops/, true],
+          ['[data-slot="button"]::placeholder:is(:hover) { gap: 0px; }', /::placeholder:is\(:hover\): the arm :hover is one the browser drops/, true],
           // Kept, though the browser writes it back in its own way.
           ['[data-slot="button"]:is([data-size=sm]) { gap: 0px; }', any, false],
           ['[data-slot="button"] { &:where(:HOVER) { gap: 0px; } }', any, false],
           ['[data-slot="button"]:not([data-a], [data-b]):has(> span) { gap: 0px; }', any, false],
           ['[data-slot="button"]:where([data-size=sm])::before { gap: 0px; }', any, false],
         ]) said.push((await readPartCss(browser, css)).found.some((f) => re.test(f)) === wanted)
-        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.indexOf(false) + 1}`)
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.flatMap((ok, k) => (ok ? [] : [k + 1])).join(', ')}`)
         return said.every(Boolean)
       } finally {
         await browser.close()

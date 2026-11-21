@@ -261,8 +261,9 @@ never driven, because no live control is pending when the states are planned, so
 show, so part.css may not hold one: write each arm as a branch. `:not(a, b)` is one negation, not a choice.
 The list is read from the text, since the browser drops an arm it does not know from `:is()` and
 `:where()` and keeps the rule; and each arm the text writes, a branch or the one selector inside
-`:is()` or `:where()`, is read alone by the browser, and the one inside is read inside its own `:is()`
-or `:where()` as well, so an arm it drops is refused by name.
+`:is()` or `:where()`, is read alone by the browser, and the one inside is read where it stands as well,
+the rule's selector beside the same selector with that `:is()` or `:where()` emptied, so an arm it drops
+is refused by name.
 
 ## How many parts the check holds
 
