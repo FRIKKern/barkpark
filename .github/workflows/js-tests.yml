@@ -388,7 +388,8 @@ jobs:
       # not one of the fast tests. On a pull request the walk decides from the files changed since the base
       # (walkNeeded in js/packages/barkui/tests/counts.mjs): it is skipped only when every changed file is
       # in another package; on main it always walks. Its bound is inside the walk (WALK_SECONDS); the
-      # step's timeout is the backstop.
+      # step's timeout is the backstop. This comment and the step are pinned whole, byte for byte, by STEP in
+      # js/packages/barkui/tests/counts.test.mjs: an edit here is red until STEP is changed in the same change.
       - name: "BarkUI: the fast tests hold at every part count"
         timeout-minutes: 15
         run: |

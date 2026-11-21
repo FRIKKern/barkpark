@@ -109,12 +109,8 @@ defmodule BarkparkWeb.Studio.DeskVisionListenTest do
     assert html =~
              ~S|.dk .dk-vision-listen[aria-disabled="true"], .dk .dk-vision-listen[aria-disabled="true"] svg { color: var(--dk-chip-off-fg); }|
 
-    # The dim is Fetch's alone.
-    assert html =~
-             ~S|.dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] { opacity: .5; }|
-
-    refute html =~ ~S|.dk .dk-vision-fetch[aria-disabled="true"] { opacity|
-    refute html =~ ~r/\.dk-vision-listen\[aria-disabled="true"\][^{]*\{[^}]*opacity/
+    # Neither is dimmed with opacity (task-c14b12cd6aa086ba).
+    refute html =~ ~r/\.dk-vision-(fetch|listen)[^{]*\[aria-disabled="true"\][^{]*\{[^}]*opacity/
 
     # TanStack's --chip-off-fg, its light and dark values, for the whole
     # desk: Vision is no document pane.
@@ -122,6 +118,29 @@ defmodule BarkparkWeb.Studio.DeskVisionListenTest do
 
     assert html =~
              ~r/html\[data-theme="dark"\] \.dk \{ --dk-bg-soft: [^}]*--dk-chip-off-fg: rgb\(90 96 123\); \}/
+  end
+
+  # task-c14b12cd6aa086ba: TanStack's Fetch waiting on bad Params greys as a
+  # disabled Publish (styles.css `.vision-actions .btn-primary:disabled`:
+  # --publish-disabled-bg/-fg), and its disabled Listen under the pointer
+  # has no fill (`.btn:not(.danger):disabled:hover { background: none }`
+  # outranks the secondary fill).
+  test "a disabled Fetch is TanStack's disabled Publish; a disabled Listen has no fill under the pointer",
+       c do
+    {:ok, _view, html} = live(signed_in(c), c.vision)
+
+    assert html =~
+             ~S|.dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] { background: var(--dk-publish-off-bg); color: var(--dk-publish-off-fg); }|
+
+    assert html =~ ~S|.dk .dk-vision-listen[aria-disabled="true"]:hover { background: none; }|
+
+    # TanStack's --publish-disabled-bg/-fg, light and dark, for the whole
+    # desk: Vision is neither the footer nor the bulk bar.
+    assert html =~
+             ~r/\.dk \{ --dk-bg-soft: [^}]*--dk-publish-off-bg: rgb\(187 189 201\); --dk-publish-off-fg: rgb\(236 237 243\);/
+
+    assert html =~
+             ~r/html\[data-theme="dark"\] \.dk \{ --dk-bg-soft: [^}]*--dk-publish-off-bg: rgb\(85 92 117\); --dk-publish-off-fg: rgb\(33 38 57\);/
   end
 
   test "a change in this workspace and project comes back as the listen stream's mutation", c do

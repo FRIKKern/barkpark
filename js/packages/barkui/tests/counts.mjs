@@ -61,15 +61,20 @@ function copyWith(scratch, n) {
   return root
 }
 
-/** Walks every count; returns the findings, one per red test at a count, or why the walk itself failed. */
-export function walk(most = MOST_PARTS) {
+/** Walks every count; returns the findings, one per red test or test file that did not load at a count, or why the
+    walk itself failed. `plant(dir, n)` is for this package's own tests: it may change the copy at count n. */
+export function walk(most = MOST_PARTS, { plant } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-part-counts-'))
   try {
-    for (let n = 1; n <= most; n++) copyWith(scratch, n)
+    for (let n = 1; n <= most; n++) {
+      const dir = join(copyWith(scratch, n), below)
+      if (plant) plant(dir, n)
+    }
     const config = join(scratch, 'vitest.config.mjs')
     writeFileSync(config, `export default { test: { environment: 'node', include: ${JSON.stringify(walkInclude())} } }\n`)
     const out = join(scratch, 'results.json')
-    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('VITEST')))
+    // BARKUI_IN_WALK tells a copy's tests they run inside a walk, so the walk's own plant rows do not walk again.
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('VITEST'))), BARKUI_IN_WALK: '1' }
     const run = spawnSync(process.execPath, [join(pkg, 'node_modules', 'vitest', 'vitest.mjs'), 'run', '--root', scratch, '--config', config, '--reporter=json', `--outputFile=${out}`], { env, encoding: 'utf8', timeout: WALK_SECONDS * 1000 })
     if (run.error?.code === 'ETIMEDOUT') return [`the walk ran past its bound of ${WALK_SECONDS} s`]
     if (!existsSync(out)) return [`the child vitest wrote no results: ${run.stderr.slice(-1000)}`]
@@ -78,9 +83,13 @@ export function walk(most = MOST_PARTS) {
     const ran = new Set(testResults.map(count))
     const found = []
     if (ran.size !== most) found.push(`the walk ran ${ran.size} of ${most} counts`)
-    for (const r of testResults)
-      for (const a of r.assertionResults.filter((x) => x.status !== 'passed'))
-        found.push(`${count(r)} ${r.name.split(sep).at(-1)}: ${a.fullName}: ${(a.failureMessages?.[0] ?? '').split('\n')[0].slice(0, 300)}`)
+    for (const r of testResults) {
+      const file = `${count(r)} ${r.name.split(sep).at(-1)}`
+      const red = r.assertionResults.filter((x) => x.status !== 'passed')
+      if (r.status === 'failed' && !red.length) found.push(`${file}: the file did not load: ${(r.message ?? '').split('\n')[0].slice(0, 300)}`)
+      for (const a of red)
+        found.push(`${file}: ${a.fullName}: ${(a.failureMessages?.[0] ?? '').split('\n')[0].slice(0, 300)}`)
+    }
     if (!found.length && run.status !== 0) found.push(`the child vitest left with ${run.status}: ${run.stderr.slice(-1000)}`)
     return found
   } finally {
@@ -88,24 +97,28 @@ export function walk(most = MOST_PARTS) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const at = process.argv.indexOf('--since')
-  if (at > 0) {
-    const ref = process.argv[at + 1]
-    let changed = []
+/** The command line: with `--since <ref>`, the walk runs only when walkNeeded(the files changed since <ref>, read by
+    changedSince); without it, always. Returns the exit code. */
+export function main(argv, { walkAll = walk, log = console.log } = {}) {
+  const at = argv.indexOf('--since')
+  if (at >= 0) {
+    const ref = argv[at + 1]
+    let files = []
     try {
-      changed = changedSince(ref)
+      files = changedSince(ref)
     } catch (e) {
-      console.log(`counts: the files changed since ${ref} could not be read (${e.message.split('\n')[0]}), so the walk runs`)
+      log(`counts: the files changed since ${ref} could not be read (${e.message.split('\n')[0]}), so the walk runs`)
     }
-    if (!walkNeeded(changed)) {
-      console.log(`counts: skipped; every file changed since ${ref} is in another package`)
-      process.exit(0)
+    if (!walkNeeded(files)) {
+      log(`counts: skipped; every file changed since ${ref} is in another package`)
+      return 0
     }
   }
   const t0 = Date.now()
-  const found = walk()
-  for (const f of found) console.log(`counts: ${f}`)
-  console.log(`counts: ${found.length ? 'FAIL' : 'pass'}, ${MOST_PARTS} counts walked in ${Math.round((Date.now() - t0) / 1000)} s`)
-  process.exit(found.length ? 1 : 0)
+  const found = walkAll()
+  for (const f of found) log(`counts: ${f}`)
+  log(`counts: ${found.length ? 'FAIL' : 'pass'}, ${MOST_PARTS} counts walked in ${Math.round((Date.now() - t0) / 1000)} s`)
+  return found.length ? 1 : 0
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exit(main(process.argv.slice(2)))
