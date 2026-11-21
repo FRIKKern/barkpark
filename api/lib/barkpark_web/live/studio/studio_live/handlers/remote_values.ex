@@ -76,8 +76,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   Tells the page of each top-level text field that differs between `old_form`
   and `new_form`, with the value it showed before. A free-text field is
   remembered, and its numbers ride along in `seqs`.
+
+  `bases` gives, per field, what to remember under those numbers when it is
+  not the shown value: `{base of was, base of value}`. A field with unsaved
+  words of this tab's own shows them (`was`), but its next post is made on
+  the stored value they were typed on, and a merged value on the stored one
+  it was merged onto (TanStack's edit-bases.ts: a base never holds this
+  editor's unsaved words, or the next version reads them as removed).
   """
-  def push(socket, old_form, new_form) do
+  def push(socket, old_form, new_form, bases \\ %{}) do
     changed =
       for {key, new} <- new_form,
           is_binary(key) and is_binary(new),
@@ -94,7 +101,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
           values = Map.put(values, name, %{value: new, was: old})
 
           if free_text?(s.assigns[:editor_schema], key) do
-            {s, pair} = remember(s, key, old, new)
+            {was_base, base} = Map.get(bases, key, {old, new})
+            {s, pair} = remember(s, key, was_base, base)
             {s, values, Map.put(seqs, name, pair)}
           else
             {s, values, seqs}

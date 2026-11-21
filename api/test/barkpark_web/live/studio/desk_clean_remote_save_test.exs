@@ -100,12 +100,14 @@ defmodule BarkparkWeb.Studio.DeskCleanRemoteSaveTest do
 
     :sys.replace_state(a.pid, fn state ->
       socket = state.socket
-      form = Map.put(socket.assigns.editor_form, "excerpt", "Mine, unsent")
+      # The title, the field B's save rewrites: a conflict only where the
+      # remote save rewrote this page's own field (task-65543203e7b71c80).
+      form = Map.put(socket.assigns.editor_form, "title", "Mine, unsent")
 
       assigns =
         Map.merge(socket.assigns, %{
           editor_dirty: true,
-          editor_unsaved_keys: MapSet.new(["excerpt"]),
+          editor_unsaved_keys: MapSet.new(["title"]),
           editor_form: form
         })
 
