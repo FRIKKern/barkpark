@@ -117,8 +117,18 @@ try {
     assert.equal(view.textContent, NOTICE);
   });
 
+  // 5) A word deeper than the word bound (1000) is not read: 1001 nested em, inside the
+  //    carry bound, show the notice alone. Without the word bound the word would show.
+  await own("5) 1001 em, one word past the word bound", async () => {
+    const { canvas } = await mount([nestedEm(1001)]);
+    mounted.push(canvas);
+    const view = canvas.querySelector('[data-bp-inline-depth-readonly="d1"]');
+    assert.ok(view, "the block is shown read-only");
+    assert.equal(view.textContent, NOTICE, "the notice alone, no word");
+  });
+
   if (failures.length > 0) throw new Error(failures.join("\n"));
-  console.log("inline depth notice: 4 cases passed");
+  console.log("inline depth notice: 5 cases passed");
 } finally {
   for (const canvas of mounted) canvas.remove();
 }
