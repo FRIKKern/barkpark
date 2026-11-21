@@ -1,0 +1,78 @@
+03:36:29.422 [notice]     :alarm_handler: {:set, {{:disk_almost_full, ~c"C:\\"}, []}}
+03:36:29.442 [notice]     :alarm_handler: {:set, {{:disk_almost_full, ~c"E:\\"}, []}}
+03:36:29.506 [warning] MAIL IS NOT DELIVERABLE — this node accepts transactional email and discards it.
+
+  adapter: Swoosh.Adapters.Local (local_mailbox)
+
+Magic-link sign-in, password reset, email verification and access-grant
+invitations will be ACCEPTED and never sent. The HTTP responses stay 200 by
+design (anti-enumeration), so nothing else will tell you this.
+
+Set SMTP_HOST (plus SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD as your relay
+requires) to enable delivery — see deploy/smtp.env.example. Ignore this if
+the box is not meant to send mail.
+
+03:36:29.507 [warning] [Operator] The instance-operator allowlist is UNSET (BARKPARK_OPERATOR_EMAILS and BARKPARK_OPERATOR_TOKEN_IDS are
+both empty), so the `admin` permission alone still opens these eight INSTANCE-GLOBAL
+route groups to ANY admin-permissioned token, including one whose only membership is an
+admin seat in a single workspace:
+  1. POST|GET /v1/admin/self-update, POST /v1/admin/rollback, POST|GET /v1/admin/site-deploy
+  2. GET /v1/plugins
+  3. GET|PUT|DELETE /v1/plugins/settings/:plugin_name
+  4. GET /v1/secrets, GET /v1/secrets/:name, GET /v1/secrets/:name/audit,
+     PUT /v1/secrets/:name, DELETE /v1/secrets/:name
+  5. POST /v1/status/incidents, POST /v1/status/incidents/:id/resolve
+  6. POST /api/playground
+  7. POST /api/workspaces/:workspace_slug/import
+  8. GET /v1/instance/site-deploy, GET /v1/instance/metrics
+On a SINGLE-TENANT instance that is fine — the only admin is the operator. On a
+MULTI-TENANT one it hands your first customer-admin the instance: run-secrets in
+cleartext, the instance-wide plugin credentials record, and the release itself.
+Set BARKPARK_OPERATOR_EMAILS (comma-separated operator emails) and/or BARKPARK_OPERATOR_TOKEN_IDS
+(comma-separated api_token ids) to arm the allowlist; once either is non-empty the
+eight groups are allowlist-only and fail closed.
+
+03:36:29.617 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:36:29.864 [info] Plugins.Bootstrap: registered schema "paper" (dataset="production", visibility="public") from plugin "bulldocs"
+03:36:29.869 [info] Plugins.Bootstrap: registered schema "form_response" (dataset="production", visibility="private") from plugin "bulldocs"
+03:36:29.872 [info] Plugins.Bootstrap: registered schema "session" (dataset="production", visibility="private") from plugin "bulldocs"
+03:36:29.877 [info] Plugins.Bootstrap: registered schema "paper_master" (dataset="production", visibility="private") from plugin "bulldocs"
+03:36:29.880 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
+03:36:29.882 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
+C109 nested VM executable: c:/Users/Frikk/scoop/apps/elixir/current/bin/elixir.bat
+Running ExUnit with seed: 507702, max_cases: 40
+
+........    warning: redefining module Barkpark.Media.PendingDeleteMigrationDigestTest.SourceId323 (current version defined in memory)
+    │
+  1 │ defmodule Barkpark.Media.PendingDeleteMigrationDigestTest.SourceId323 do
+    │ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ c:/Users/Frikk/AppData/Local/Temp/Barkdown-C105-aroYnh/pending-source-id-digest-259/api/priv/repo/migrations/source_id.exs:1: Barkpark.Media.PendingDeleteMigrationDigestTest.SourceId323 (module)
+
+..........................03:36:32.116 [error] GenServer {Barkpark.ManagedRuntime.WriteAdmission, "fixture-A"} terminating
+** (stop) {:journal_unavailable, :closed_journal}
+Last message (from #PID<0.686.0>): :admission_message_redacted
+...03:36:32.628 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:36:32.628 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:36:32.628 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:36:32.629 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+.03:36:33.194 [error] GenServer {Barkpark.ManagedRuntime.WriteAdmission, "fixture-A"} terminating
+** (stop) {:journal_unavailable, :closed_journal}
+Last message (from #PID<0.724.0>): :admission_message_redacted
+......................03:36:33.479 [error] Task #PID<0.923.0> started from #PID<0.922.0> terminating
+** (stop) :kill
+    c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/managed_runtime/write_admission/physical_effect_test.exs:118: anonymous fn/2 in Barkpark.ManagedRuntime.WriteAdmission.PhysicalEffectTest."test a physical child death retains a live ordinary parent root"/1
+    (elixir 1.20.1) lib/task/supervised.ex:105: Task.Supervised.invoke_mfa/2
+    (elixir 1.20.1) lib/task/supervised.ex:40: Task.Supervised.reply/4
+Function: #Function<14.68614465/0 in Barkpark.ManagedRuntime.WriteAdmission.PhysicalEffectTest."test a physical child death retains a live ordinary parent root"/1>
+    Args: []
+...
+Finished in 2.0 seconds (0.1s async, 1.9s sync)
+
+Result: 63 passed
+[os_mon] win32 supervisor port (win32sysinfo): Erlang has closed

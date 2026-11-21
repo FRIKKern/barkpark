@@ -1,34 +1,31 @@
 <!-- doc-tier: human | canonical-for: media-pending-cleanup | budget: 500tok -->
 # Pending local cleanup
 
-`Media.commit_pending_delete/2` is internal. Existing HTTP
-delete routes still call `Media.delete_file/2`; they do not adopt it.
+`Media.commit_pending_delete/2` is internal. HTTP delete still uses
+`Media.delete_file/2`; native cleanup is not enabled.
 
-The transaction captures the raw media row, supplied Windows observation and
-matching asset documents, then removes the row and documents with a durable
-`pending_cleanup` record. Outer rollback restores these changes. An
-outer receipt says `awaiting_outer_commit`; it never claims physical removal or
-permission to recover.
+The transaction retains the migration-versioned raw row, supplied Windows
+observation and matching asset documents before removing the row and documents.
+Outer rollback restores them. Receipts distinguish `awaiting_outer_commit` from
+committed `pending_cleanup`; neither grants physical settlement or recovery.
+Retries require the same request, scope and database reservation. Insert, update
+and COPY cannot reclaim a reserved address. Unknown schemas refuse; SQL changes
+require a forward migration and digest. Rollback cannot discard retained intent.
 
-Retries require the same request, caller scope and database reservation. Insert,
-update and COPY triggers reserve ASCII keys across scopes and case aliases.
-Ordinary co-owners and legacy addresses remain valid; intent preparation
-requires one physical claimant and a validated Windows-relative key. Migration
-rollback refuses to discard retained operations.
-The migration binds its SQL digest; later changes require a forward version.
+When write admission is configured, `LocalWrite.run/2` takes the preparation
+transaction's media-table lock before original-blob copy, byte write or delete.
+Unresolved addresses refuse before I/O; unsupported Windows aliases refuse
+conservatively. Unrelated supported keys remain writable. Ordinary servers
+retain their existing admission path. Managed delete reports filesystem errors.
 
-Physical writers can write before inserting rows. Native cleanup stays disabled
-until they share the reservation. Windows paths are compared after separator and
-drive normalization; observations expire and cannot authorize later deletion.
-Native identity, HTTP receipts, admission, remote storage, event/rendition retries
-and complete collection remain separate integration work.
+Physical-effect admission retains pending evidence on owner/child death or
+failed/unverified I/O, even before a hold. The journal survives restart.
+A database lock alone cannot prove filesystem settlement after connection loss.
+Renditions, caches, remote writers, native identity, HTTP receipt propagation,
+full writer coverage and reconciliation remain separate integration work.
 
-Release tests: `api/test/barkpark/media/media_pending_delete_live.exs`
-and `media_pending_delete_interrupt_live.exs`. They require an owned fresh
-database and native-observed fixtures through `C105_PROOF_INPUT`; never use a
-person's library.
-Host-local operations and reservations are excluded from workspace bundles;
-unresolved operations refuse ordinary and development export before copy.
-This is a preflight refusal; an export-time writer/snapshot fence remains open.
-
-13 October: migration/media/export regressions are in validation.
+[Windows release proof](../../../../../docs/media/evidence/C109-windows-managed-blob/README.md)
+uses the three live scripts in `api/test/barkpark/media/`. Use owned fresh databases and native-observed
+fixtures through `C105_PROOF_INPUT`; the writer proof also needs `C109_JOURNALS`.
+Host-local operations/reservations never enter workspace bundles; unresolved
+intent refuses export before copy. An export-time snapshot fence remains open.

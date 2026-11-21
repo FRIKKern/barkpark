@@ -1,0 +1,38 @@
+{
+  "buildRevision": "ae3be838480c7910b23b9a9568c61d16c08b23a0",
+  "fixtureRevision": "a1b7e8fda0140408b137ab23d3dcd74ee8d74b9f",
+  "sourceDifference": [
+    "api/test/barkpark/media/local_write_live.exs"
+  ],
+  "productionInputsExact": true,
+  "proofHashes": [
+    {
+      "file": "api/lib/barkpark/managed_runtime/write_admission.ex",
+      "sha256": "2c470fe49c11adc97fb524d063895a7f4c478e77ce1dea1360babd3179675b03"
+    },
+    {
+      "file": "api/lib/barkpark/media/blobstore/local.ex",
+      "sha256": "fd5eeebeed0230f9680f5c1ef508583846a085ac2cc7402ab9a45534f14fc924"
+    },
+    {
+      "file": "api/lib/barkpark/media/storage/local_write.ex",
+      "sha256": "fad8e0985e8898440b076432995cb01797eda17469abaacd2803222c877d0ef3"
+    },
+    {
+      "file": "api/test/barkpark/media/local_write_live.exs",
+      "sha256": "9f670a3e52afe9e56cdd309d61277f0e6bc6ca5a41bb3bc9a9d443e4a0b94816"
+    },
+    {
+      "file": "api/test/barkpark/media/local_write_test.exs",
+      "sha256": "5e9163d904ba01b77a46d83ad133ee931dcf844f1a15c0f66e0c2a95fc468cbd"
+    },
+    {
+      "file": "api/test/barkpark/managed_runtime/write_admission_test.exs",
+      "sha256": "1417e57e99b011dc6fcb393576e9aa0c10792b7e613ff2f61e20e433da3218eb"
+    },
+    {
+      "file": "api/test/barkpark/managed_runtime/write_admission/physical_effect_test.exs",
+      "sha256": "28d999b2748de9b4d57bf102471d4500ff84242947cedfe743840629950ef7c0"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+scanned 10 baseline entries against 192 inline annotation coverings
+PASS: no baseline entry duplicates an inline sobelow waiver
+scanned 182 binding sobelow annotations (180 inline + 2 attribute)
+PASS: every sobelow annotation is well-formed, attached to a def, and attached to a def its own detector type can flag whenever a sibling function it could flag goes unwaived
+PASS: all 182 annotation pairing(s) match /c/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/.sobelow-annotation-bindings — none has migrated to another def

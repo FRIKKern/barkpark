@@ -2,8 +2,8 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   @moduledoc """
   Internal, explicitly started admission coordinator for a dedicated runtime.
 
-  This module is not wired to content/media writers or the application tree and
-  advertises no seal capability. It cannot yet establish runtime exclusivity.
+  Configured doors wrap audited content/media writers. These counters alone do
+  not establish complete filesystem exclusivity or reconcile escaped effects.
   The host must exclusively own the instance and journal directory across OS
   processes; the registered name prevents duplicate coordinators within a node.
 
@@ -23,8 +23,9 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   root's final settlement is refused with `children_pending` while any such
   child is still admitted. A `:failed` settlement while an operation is closing
   leaves the instance in recovery; while open it is an ordinary failure. Writer
-  death while open releases that admission for the same reason: nothing is
-  seeking exclusion, and a later hold drains from a fresh start.
+  death while open releases an ordinary admission for the same reason. A root
+  upgraded by `checkout_effect/1` instead retains its pending evidence: bytes
+  may have escaped even though no hold had started.
   """
 
   use GenServer
@@ -45,10 +46,19 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
     do: GenServer.call(server, {:checkout, Process.get(:"$callers", [])})
 
   @doc """
+  Admit a physical effect. Its root remains uncertain on owner or child death,
+  including while admission is open. The existing pending journal survives a
+  node restart; no new journal format or recovery authority is introduced.
+  """
+  def checkout_effect(server),
+    do: GenServer.call(server, {:checkout_effect, Process.get(:"$callers", [])})
+
+  @doc """
   Acknowledge that all effects owned by this admission have settled.
 
   `:failed` records that the write raised or exited: while an operation is
-  closing, the instance moves to recovery; while open, it settles normally.
+  closing, the instance moves to recovery; while open, an ordinary write settles
+  normally. A physical-effect failure retains its pending root in either phase.
   """
   def checkin(server, ticket, outcome \\ :settled) when outcome in [:settled, :failed],
     do: GenServer.call(server, {:checkin, ticket, outcome})
@@ -129,6 +139,24 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
      }), state}
   end
 
+  def handle_call({:checkout_effect, callers}, {owner, _} = from, state) do
+    case handle_call({:checkout, callers}, from, state) do
+      {:reply, {:ok, _ticket} = reply, next} ->
+        root = next.writers[owner].root
+
+        writers =
+          Map.new(next.writers, fn {pid, writer} ->
+            {pid,
+             if(writer.root == root, do: Map.put(writer, :physical_effect?, true), else: writer)}
+          end)
+
+        {:reply, reply, %{next | writers: writers}}
+
+      other ->
+        other
+    end
+  end
+
   def handle_call({:checkout, callers}, {owner, _}, state) do
     case Map.get(state.writers, owner) do
       %{tickets: tickets} = writer when state.record.phase in [:open, :closing] ->
@@ -168,11 +196,19 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   def handle_call({:checkin, ticket, outcome}, {owner, _}, state) do
     case Map.get(state.writers, owner) do
       %{tickets: tickets} = writer ->
-        {state, failed_while_closing} = note_outcome(state, outcome)
+        {state, failed_while_closing} =
+          if MapSet.member?(tickets, ticket),
+            do: note_outcome(state, outcome),
+            else: {state, false}
 
         cond do
           not MapSet.member?(tickets, ticket) ->
             {:reply, {:error, :invalid_ticket}, state}
+
+          outcome == :failed and physical_root?(state, owner) ->
+            # Failure is acknowledged as retained uncertainty, not settlement.
+            # Keep the ticket/root until the operator reconciles its effects.
+            commit(put_in(state.record.phase, :recovery_required), :ok)
 
           MapSet.size(tickets) > 1 ->
             state =
@@ -311,7 +347,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
     lost_holder = match?(%{monitor: ^monitor}, state.holder)
 
     cond do
-      lost_writer and state.record.phase == :open ->
+      lost_writer and state.record.phase == :open and not physical_root?(state, owner) ->
         # No operation is seeking exclusion: a crashed writer is an ordinary
         # failed request. A later hold drains whatever is admitted then.
         persist_or_stop(release(state, owner))
@@ -365,6 +401,14 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
 
   defp root_shared?(state, owner, root),
     do: Enum.any?(state.writers, fn {pid, writer} -> pid != owner and writer.root == root end)
+
+  defp physical_root?(state, owner) do
+    root = state.writers[owner].root
+
+    Enum.any?(state.writers, fn {_pid, writer} ->
+      writer.root == root and Map.get(writer, :physical_effect?, false)
+    end)
+  end
 
   # Remove a writer; its root leaves the journal once no admitted process shares it.
   defp release(state, owner) do

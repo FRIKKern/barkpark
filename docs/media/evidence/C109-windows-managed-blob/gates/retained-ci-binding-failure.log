@@ -1,0 +1,356 @@
+﻿2026-10-15T01:16:32.9138197Z Current runner version: '2.337.0'
+2026-10-15T01:16:32.9163688Z ##[group]Runner Image Provisioner
+2026-10-15T01:16:32.9164700Z Hosted Compute Agent
+2026-10-15T01:16:32.9165506Z Version: 20261002.596
+2026-10-15T01:16:32.9166179Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-15T01:16:32.9166987Z Build Date: 2026-10-02T22:28:27Z
+2026-10-15T01:16:32.9167694Z Worker ID: {77b9f397-4276-46f6-a166-764355b256f6}
+2026-10-15T01:16:32.9168455Z Region: westcentralus
+2026-10-15T01:16:32.9169135Z Cloud: Azure
+2026-10-15T01:16:32.9169715Z ##[endgroup]
+2026-10-15T01:16:32.9171204Z ##[group]Operating System
+2026-10-15T01:16:32.9171858Z Ubuntu
+2026-10-15T01:16:32.9172440Z 24.04.5
+2026-10-15T01:16:32.9173064Z LTS
+2026-10-15T01:16:32.9173636Z ##[endgroup]
+2026-10-15T01:16:32.9174247Z ##[group]Runner Image
+2026-10-15T01:16:32.9174898Z Image: ubuntu-24.04
+2026-10-15T01:16:32.9175749Z Version: 20261004.327.1
+2026-10-15T01:16:32.9177114Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-15T01:16:32.9178739Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-15T01:16:32.9179771Z ##[endgroup]
+2026-10-15T01:16:32.9181107Z ##[group]GITHUB_TOKEN Permissions
+2026-10-15T01:16:32.9183150Z Contents: read
+2026-10-15T01:16:32.9183774Z Metadata: read
+2026-10-15T01:16:32.9184505Z Packages: read
+2026-10-15T01:16:32.9185293Z ##[endgroup]
+2026-10-15T01:16:32.9187486Z Secret source: Actions
+2026-10-15T01:16:32.9188450Z Cache mode: write
+2026-10-15T01:16:32.9189147Z Prepare workflow directory
+2026-10-15T01:16:32.9567464Z Prepare all required actions
+2026-10-15T01:16:32.9615624Z Getting action download info
+2026-10-15T01:16:33.2288066Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-15T01:16:33.4192912Z Complete job name: Sobelow baseline does not swallow its own inline waivers (blocking)
+2026-10-15T01:16:33.4956879Z ##[group]Run actions/checkout@v7
+2026-10-15T01:16:33.4957769Z with:
+2026-10-15T01:16:33.4958232Z   repository: FRIKKern/barkpark
+2026-10-15T01:16:33.4962052Z   token: ***
+2026-10-15T01:16:33.4962515Z   ssh-strict: true
+2026-10-15T01:16:33.4962971Z   ssh-user: git
+2026-10-15T01:16:33.4963428Z   persist-credentials: true
+2026-10-15T01:16:33.4963925Z   clean: true
+2026-10-15T01:16:33.4964382Z   sparse-checkout-cone-mode: true
+2026-10-15T01:16:33.4964910Z   fetch-depth: 1
+2026-10-15T01:16:33.4965598Z   fetch-tags: false
+2026-10-15T01:16:33.4966062Z   show-progress: true
+2026-10-15T01:16:33.4966522Z   lfs: false
+2026-10-15T01:16:33.4966945Z   submodules: false
+2026-10-15T01:16:33.4967397Z   set-safe-directory: true
+2026-10-15T01:16:33.4967911Z   allow-unsafe-pr-checkout: false
+2026-10-15T01:16:33.4968675Z ##[endgroup]
+2026-10-15T01:16:33.6013681Z Syncing repository: FRIKKern/barkpark
+2026-10-15T01:16:33.6016322Z ##[group]Getting Git version info
+2026-10-15T01:16:33.6017525Z Working directory is '/home/runner/work/barkpark/barkpark'
+2026-10-15T01:16:33.6019322Z [command]/usr/bin/git version
+2026-10-15T01:16:33.6078411Z git version 2.55.0
+2026-10-15T01:16:33.6099074Z ##[endgroup]
+2026-10-15T01:16:33.6111216Z Temporarily overriding HOME='/home/runner/work/_temp/59f5552d-1983-4498-bbba-fbaf3374a673' before making global git config changes
+2026-10-15T01:16:33.6113436Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-15T01:16:33.6119928Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/barkpark/barkpark
+2026-10-15T01:16:33.6169850Z Deleting the contents of '/home/runner/work/barkpark/barkpark'
+2026-10-15T01:16:33.6176798Z ##[group]Determining repository object format
+2026-10-15T01:16:33.6178814Z ##[endgroup]
+2026-10-15T01:16:33.6180605Z ##[group]Initializing the repository
+2026-10-15T01:16:33.6182157Z [command]/usr/bin/git init /home/runner/work/barkpark/barkpark
+2026-10-15T01:16:33.6265227Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-15T01:16:33.6270058Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-15T01:16:33.6272460Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-15T01:16:33.6274112Z hint: call:
+2026-10-15T01:16:33.6275154Z hint:
+2026-10-15T01:16:33.6276071Z hint: 	git config --global init.defaultBranch <name>
+2026-10-15T01:16:33.6277082Z hint:
+2026-10-15T01:16:33.6278035Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-15T01:16:33.6279575Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-15T01:16:33.6280803Z hint:
+2026-10-15T01:16:33.6281474Z hint: 	git branch -m <name>
+2026-10-15T01:16:33.6282252Z hint:
+2026-10-15T01:16:33.6283261Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-15T01:16:33.6284889Z Initialized empty Git repository in /home/runner/work/barkpark/barkpark/.git/
+2026-10-15T01:16:33.6287796Z [command]/usr/bin/git remote add origin https://github.com/FRIKKern/barkpark
+2026-10-15T01:16:33.6336279Z ##[endgroup]
+2026-10-15T01:16:33.6337571Z ##[group]Disabling automatic garbage collection
+2026-10-15T01:16:33.6340903Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-15T01:16:33.6376311Z ##[endgroup]
+2026-10-15T01:16:33.6377433Z ##[group]Setting up auth
+2026-10-15T01:16:33.6378279Z Removing SSH command configuration
+2026-10-15T01:16:33.6383659Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-15T01:16:33.6420294Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-15T01:16:33.6784735Z Removing HTTP extra header
+2026-10-15T01:16:33.6786584Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-15T01:16:33.6820925Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-15T01:16:33.7071377Z Removing includeIf entries pointing to credentials config files
+2026-10-15T01:16:33.7077757Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-15T01:16:33.7126156Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-15T01:16:33.7371498Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-15T01:16:33.7415646Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/barkpark/barkpark/.git.path /home/runner/work/_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:33.7454118Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:33.7493028Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:33.7532666Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:33.7566811Z ##[endgroup]
+2026-10-15T01:16:33.7573338Z ##[group]Fetching the repository
+2026-10-15T01:16:33.7574725Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +b72717002d2cb9bb4b568fa3fd5048576cbba293:refs/remotes/pull/23205/merge
+2026-10-15T01:16:37.3673916Z From https://github.com/FRIKKern/barkpark
+2026-10-15T01:16:37.3676354Z  * [new ref]           b72717002d2cb9bb4b568fa3fd5048576cbba293 -> pull/23205/merge
+2026-10-15T01:16:37.3680786Z ##[endgroup]
+2026-10-15T01:16:37.3682654Z ##[group]Determining the checkout info
+2026-10-15T01:16:37.3684512Z ##[endgroup]
+2026-10-15T01:16:37.3686124Z [command]/usr/bin/git sparse-checkout disable
+2026-10-15T01:16:37.3740800Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-15T01:16:37.3777704Z ##[group]Checking out the ref
+2026-10-15T01:16:37.3781607Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/23205/merge
+2026-10-15T01:16:38.3977739Z Updating files:  48% (8548/17466)
+2026-10-15T01:16:38.4209152Z Updating files:  49% (8559/17466)
+2026-10-15T01:16:38.4398635Z Updating files:  50% (8733/17466)
+2026-10-15T01:16:38.4564461Z Updating files:  51% (8908/17466)
+2026-10-15T01:16:38.4718428Z Updating files:  52% (9083/17466)
+2026-10-15T01:16:38.4853812Z Updating files:  53% (9257/17466)
+2026-10-15T01:16:38.4950525Z Updating files:  54% (9432/17466)
+2026-10-15T01:16:38.5116751Z Updating files:  55% (9607/17466)
+2026-10-15T01:16:38.5253019Z Updating files:  56% (9781/17466)
+2026-10-15T01:16:38.5324711Z Updating files:  57% (9956/17466)
+2026-10-15T01:16:38.5393147Z Updating files:  58% (10131/17466)
+2026-10-15T01:16:38.5476334Z Updating files:  59% (10305/17466)
+2026-10-15T01:16:38.5585159Z Updating files:  60% (10480/17466)
+2026-10-15T01:16:38.5682407Z Updating files:  61% (10655/17466)
+2026-10-15T01:16:38.5786253Z Updating files:  62% (10829/17466)
+2026-10-15T01:16:38.5912972Z Updating files:  63% (11004/17466)
+2026-10-15T01:16:38.6186688Z Updating files:  64% (11179/17466)
+2026-10-15T01:16:38.6367087Z Updating files:  65% (11353/17466)
+2026-10-15T01:16:38.6758721Z Updating files:  66% (11528/17466)
+2026-10-15T01:16:38.6990833Z Updating files:  67% (11703/17466)
+2026-10-15T01:16:38.7148503Z Updating files:  68% (11877/17466)
+2026-10-15T01:16:38.7332037Z Updating files:  69% (12052/17466)
+2026-10-15T01:16:38.7555880Z Updating files:  70% (12227/17466)
+2026-10-15T01:16:38.7717311Z Updating files:  71% (12401/17466)
+2026-10-15T01:16:38.7863675Z Updating files:  72% (12576/17466)
+2026-10-15T01:16:38.7972228Z Updating files:  73% (12751/17466)
+2026-10-15T01:16:38.8074480Z Updating files:  74% (12925/17466)
+2026-10-15T01:16:38.8192185Z Updating files:  75% (13100/17466)
+2026-10-15T01:16:38.8270584Z Updating files:  76% (13275/17466)
+2026-10-15T01:16:38.8334665Z Updating files:  77% (13449/17466)
+2026-10-15T01:16:38.8399171Z Updating files:  78% (13624/17466)
+2026-10-15T01:16:38.8489058Z Updating files:  79% (13799/17466)
+2026-10-15T01:16:38.8563759Z Updating files:  80% (13973/17466)
+2026-10-15T01:16:38.8626702Z Updating files:  81% (14148/17466)
+2026-10-15T01:16:38.8701395Z Updating files:  82% (14323/17466)
+2026-10-15T01:16:38.8765846Z Updating files:  83% (14497/17466)
+2026-10-15T01:16:38.8828980Z Updating files:  84% (14672/17466)
+2026-10-15T01:16:38.8895407Z Updating files:  85% (14847/17466)
+2026-10-15T01:16:38.8962061Z Updating files:  86% (15021/17466)
+2026-10-15T01:16:38.9027085Z Updating files:  87% (15196/17466)
+2026-10-15T01:16:38.9103668Z Updating files:  88% (15371/17466)
+2026-10-15T01:16:38.9168248Z Updating files:  89% (15545/17466)
+2026-10-15T01:16:38.9231112Z Updating files:  90% (15720/17466)
+2026-10-15T01:16:38.9293899Z Updating files:  91% (15895/17466)
+2026-10-15T01:16:38.9360714Z Updating files:  92% (16069/17466)
+2026-10-15T01:16:38.9454286Z Updating files:  93% (16244/17466)
+2026-10-15T01:16:38.9619637Z Updating files:  94% (16419/17466)
+2026-10-15T01:16:38.9700218Z Updating files:  95% (16593/17466)
+2026-10-15T01:16:39.1457723Z Updating files:  96% (16768/17466)
+2026-10-15T01:16:39.1849586Z Updating files:  97% (16943/17466)
+2026-10-15T01:16:39.2001960Z Updating files:  98% (17117/17466)
+2026-10-15T01:16:39.2168033Z Updating files:  99% (17292/17466)
+2026-10-15T01:16:39.2168489Z Updating files: 100% (17466/17466)
+2026-10-15T01:16:39.2168975Z Updating files: 100% (17466/17466), done.
+2026-10-15T01:16:39.2346045Z Note: switching to 'refs/remotes/pull/23205/merge'.
+2026-10-15T01:16:39.2346654Z
+2026-10-15T01:16:39.2346979Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-15T01:16:39.2348113Z changes and commit them, and you can discard any commits you make in this
+2026-10-15T01:16:39.2348899Z state without impacting any branches by switching back to a branch.
+2026-10-15T01:16:39.2349348Z
+2026-10-15T01:16:39.2349648Z If you want to create a new branch to retain commits you create, you may
+2026-10-15T01:16:39.2350362Z do so (now or later) by using -c with the switch command. Example:
+2026-10-15T01:16:39.2350764Z
+2026-10-15T01:16:39.2350936Z   git switch -c <new-branch-name>
+2026-10-15T01:16:39.2351215Z
+2026-10-15T01:16:39.2351371Z Or undo this operation with:
+2026-10-15T01:16:39.2351634Z
+2026-10-15T01:16:39.2351764Z   git switch -
+2026-10-15T01:16:39.2351964Z
+2026-10-15T01:16:39.2352299Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-15T01:16:39.2352843Z
+2026-10-15T01:16:39.2353452Z HEAD is now at b7271700 Merge ae794bec291367b8f23fc553156b78e3af879b41 into 1872e11ab93d916ac05217f4f6f1a26ec7f3a994
+2026-10-15T01:16:39.3202332Z ##[endgroup]
+2026-10-15T01:16:39.3259805Z [command]/usr/bin/git log -1 --format=%H
+2026-10-15T01:16:39.3292050Z b72717002d2cb9bb4b568fa3fd5048576cbba293
+2026-10-15T01:16:39.3520241Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:16:39.3521783Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:16:39.3522726Z [36;1mbash api/scripts/sobelow-inline-overlap-check.sh --selftest[0m
+2026-10-15T01:16:39.3744212Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:39.3744509Z ##[endgroup]
+2026-10-15T01:16:39.4121129Z selftest: overlap mutation fixtures
+2026-10-15T01:16:39.4255667Z   ok  baseline carries a waived finding  exit 1
+2026-10-15T01:16:39.4463761Z   ok  same baseline minus that line      exit 0
+2026-10-15T01:16:39.4661030Z   ok  malformed annotation is NOT an overlap exit 0
+2026-10-15T01:16:39.4854686Z   ok  zero baseline entries fails closed exit 2
+2026-10-15T01:16:39.5055297Z   ok  zero annotations fails closed      exit 2
+2026-10-15T01:16:39.5418777Z selftest: annotation-binding mutation fixtures
+2026-10-15T01:16:39.5716635Z   ok  green control (heredoc + @spec + clauses) exit 0
+2026-10-15T01:16:39.5982995Z   ok  MISSPELL — parse.ex:61 near-miss       exit 1
+2026-10-15T01:16:39.6225691Z   ok  DETACHED — annotation on the call site exit 1
+2026-10-15T01:16:39.6483618Z   ok  INDENT — annotation left at the old column exit 1
+2026-10-15T01:16:39.6757489Z   ok  MULTICLAUSE 4a — sibling shares the module exit 1
+2026-10-15T01:16:39.7020172Z   ok  MULTICLAUSE 4b — waiver on the empty clause exit 1
+2026-10-15T01:16:39.7255629Z   ok  MULTICLAUSE 4c — imported send_resp sibling exit 1
+2026-10-15T01:16:39.7489935Z   ok  4c control — sibling makes no flaggable call exit 0
+2026-10-15T01:16:39.7775870Z   ok  TRANSFER — clean transfer onto an unflaggable def exit 1
+2026-10-15T01:16:39.8036012Z   ok  RESIDUAL LIMIT: both defs flaggable, map silent exit 0
+2026-10-15T01:16:39.8751779Z   ok  PIN — transferred waiver REDs          exit 1
+2026-10-15T01:16:39.9097184Z   ok  PIN — untransferred tree stays green   exit 0
+2026-10-15T01:16:39.9709888Z   ok  def inserted ABOVE waiver REDs           exit 1
+2026-10-15T01:16:40.0040178Z   ok  PIN — waiver did NOT move: stays green exit 0
+2026-10-15T01:16:40.0270265Z   ok  zero annotations fails closed            exit 2
+2026-10-15T01:16:40.0346758Z   ok  missing shared token table fails closed exit 2
+2026-10-15T01:16:40.0442475Z   ok  row-less shared token table fails closed exit 2
+2026-10-15T01:16:40.0875362Z   ok  default run carries BOTH ratchets        exit 1
+2026-10-15T01:16:40.0877000Z SELFTEST PASS: the overlap ratchet reds on overlap and fails closed on either empty population; each binding predicate reds on its own fixture, the green control stays green, and the default run carries both
+2026-10-15T01:16:40.0983767Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:16:40.0985686Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:16:40.0986563Z [36;1mbash api/scripts/sobelow-inline-overlap-check.sh[0m
+2026-10-15T01:16:40.1057670Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:40.1057947Z ##[endgroup]
+2026-10-15T01:16:43.4226988Z scanned 10 baseline entries against 192 inline annotation coverings
+2026-10-15T01:16:43.4227493Z PASS: no baseline entry duplicates an inline sobelow waiver
+2026-10-15T01:16:51.4029470Z scanned 182 binding sobelow annotations (180 inline + 2 attribute)
+2026-10-15T01:16:51.4030866Z PASS: every sobelow annotation is well-formed, attached to a def, and attached to a def its own detector type can flag whenever a sibling function it could flag goes unwaived
+2026-10-15T01:16:51.4103875Z FAIL: an annotation is bound to a DIFFERENT def than the pin records.
+2026-10-15T01:16:51.4104780Z       < pinned (what the author wrote it for)   > current (what it waives now)
+2026-10-15T01:16:51.4117269Z @@ -8,9 +8,9 @@
+2026-10-15T01:16:51.4117785Z  lib/barkpark/epic_fleet/benchmark.ex	cleanup_temporary_file
+2026-10-15T01:16:51.4118201Z  lib/barkpark/epic_fleet/benchmark.ex	select_attrs
+2026-10-15T01:16:51.4118742Z  lib/barkpark/epic_fleet/benchmark.ex	write_json_file
+2026-10-15T01:16:51.4119394Z +lib/barkpark/media/blobstore/local.ex	admitted_put_bytes
+2026-10-15T01:16:51.4119835Z +lib/barkpark/media/blobstore/local.ex	admitted_put_file
+2026-10-15T01:16:51.4120174Z  lib/barkpark/media/blobstore/local.ex	delete
+2026-10-15T01:16:51.4120604Z -lib/barkpark/media/blobstore/local.ex	put_bytes
+2026-10-15T01:16:51.4121484Z -lib/barkpark/media/blobstore/local.ex	put_file
+2026-10-15T01:16:51.4121929Z  lib/barkpark/media/blobstore/s3.ex	delete
+2026-10-15T01:16:51.4122382Z  lib/barkpark/media/blobstore/s3.ex	download
+2026-10-15T01:16:51.4122843Z  lib/barkpark/media/blobstore/s3.ex	put_file
+2026-10-15T01:16:51.4123301Z
+2026-10-15T01:16:51.4123789Z       A def defined between a comment block and its def STEALS the
+2026-10-15T01:16:51.4124474Z       annotation: the original loses its waiver and the new function
+2026-10-15T01:16:51.4125438Z       silently inherits one nobody reasoned about. Move the annotation
+2026-10-15T01:16:51.4126108Z       back down onto its def. If the pairing changed on purpose (a
+2026-10-15T01:16:51.4126700Z       rename, a genuinely new annotation), re-pin with:
+2026-10-15T01:16:51.4127498Z         api/scripts/sobelow-inline-overlap-check.sh --regen-bindings-pin   # then READ THE DIFF
+2026-10-15T01:16:51.4216144Z breaker-capture: ── this step FAILED (exit 1) ──────────────────────────
+2026-10-15T01:16:51.4216906Z breaker-capture: the command that failed, verbatim:
+2026-10-15T01:16:51.4217563Z breaker-capture:     bash api/scripts/sobelow-inline-overlap-check.sh
+2026-10-15T01:16:51.4218350Z breaker-capture: this step runs 1 command(s); its NAME can point at only one.
+2026-10-15T01:16:51.4219040Z breaker-capture: the full list, in source order:
+2026-10-15T01:16:51.4252139Z breaker-capture:        1. bash api/scripts/sobelow-inline-overlap-check.sh
+2026-10-15T01:16:51.4293467Z ##[warning]bash api/scripts/sobelow-inline-overlap-check.sh
+2026-10-15T01:16:51.4333916Z ##[error]Process completed with exit code 1.
+2026-10-15T01:16:51.4381329Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:16:51.4382930Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:16:51.4383841Z [36;1mbash api/scripts/sobelow-baseline-staleness-check.sh --selftest[0m
+2026-10-15T01:16:51.4451159Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:51.4451426Z ##[endgroup]
+2026-10-15T01:16:51.4742340Z selftest: mutation fixtures
+2026-10-15T01:16:51.4846299Z   ok  every entry resolves                     exit 0
+2026-10-15T01:16:51.4947662Z   ok  one entry shifted by ONE line            exit 1
+2026-10-15T01:16:51.5046809Z   ok  entry whose file moved away              exit 1
+2026-10-15T01:16:51.5144431Z   ok  entry past end of file                   exit 1
+2026-10-15T01:16:51.5242720Z   ok  only anchorless types fails closed       exit 2
+2026-10-15T01:16:51.5339625Z   ok  zero baseline entries fails closed       exit 2
+2026-10-15T01:16:51.5437963Z   ok  unknown detector type fails closed       exit 2
+2026-10-15T01:16:51.5505661Z   ok  --derive on a non-tree fails closed      exit 2
+2026-10-15T01:16:51.5556789Z   ok  missing shared token table fails closed  exit 2
+2026-10-15T01:16:51.5625388Z   ok  row-less shared token table fails closed exit 2
+2026-10-15T01:16:51.5626844Z SELFTEST PASS: the ratchet greens on live entries and reds on a one-line shift, a moved file and a past-EOF line, and fails closed on an unknown type, an empty checkable population, or a missing/row-less shared anchor-token table
+2026-10-15T01:16:51.5700884Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:16:51.5702347Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:16:51.5703267Z [36;1mbash api/scripts/sobelow-baseline-staleness-check.sh[0m
+2026-10-15T01:16:51.5771354Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:51.5771632Z ##[endgroup]
+2026-10-15T01:16:51.6102569Z SKIP  Config.HTTPS — whole-file/router finding, no per-line anchor to check
+2026-10-15T01:16:51.6103278Z SKIP  Config.CSRF — whole-file/router finding, no per-line anchor to check
+2026-10-15T01:16:51.6103794Z checked 2 of 10 baseline entries (8 skipped: no per-line anchor)
+2026-10-15T01:16:51.6104373Z PASS: every checkable baseline entry still points at a construct of its own type
+2026-10-15T01:16:51.6205731Z ##[group]Run bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-inline-overlap -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+2026-10-15T01:16:51.6206858Z [36;1mbash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-inline-overlap -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"[0m
+2026-10-15T01:16:51.6273513Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:51.6273782Z env:
+2026-10-15T01:16:51.6274741Z   STEP_OUTCOMES: {
+  "s1": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  },
+  "s2": {
+    "outputs": {},
+    "outcome": "failure",
+    "conclusion": "success"
+  },
+  "s3": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  },
+  "s4": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  }
+}
+2026-10-15T01:16:51.6276828Z   STEP_NAMES: {"s1": "Selftest (the overlap + binding ratchets must be able to fail)", "s2": "No baseline entry duplicates an inline waiver, and every annotation is bound to its def", "s3": "Selftest (the staleness ratchet must be able to fail)", "s4": "Every baseline entry still points at a construct of its own type"}
+2026-10-15T01:16:51.6278005Z   JOB_NAME: Sobelow baseline does not swallow its own inline waivers (blocking)
+2026-10-15T01:16:51.6278404Z   WORKFLOW_FILE: security.yml
+2026-10-15T01:16:51.6281197Z   GITHUB_TOKEN: ***
+2026-10-15T01:16:51.6281423Z ##[endgroup]
+2026-10-15T01:16:54.6986674Z main-red-breaker: FAIL — 'Sobelow baseline does not swallow its own inline waivers (blocking)' failed on a step main does not: No baseline entry duplicates an inline waiver, and every annotation is bound to its def. Main RAN that step and it PASSED, so the red is this PR's own. (Main run 38656533063, head 1872e11a, concluded success 81 min ago, after skipping 0 uninformative cancelled/skipped run(s).)
+2026-10-15T01:16:54.7006614Z ##[error]'Sobelow baseline does not swallow its own inline waivers (blocking)' failed on a step main runs and passes: No baseline entry duplicates an inline waiver, and every annotation is bound to its def.
+2026-10-15T01:16:54.7022301Z instrument main-red-breaker-inline-overlap: exit 1 -> MEASURED-DEFECT
+2026-10-15T01:16:54.7053988Z ##[error]Process completed with exit code 1.
+2026-10-15T01:16:54.7093135Z ##[group]Run echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+2026-10-15T01:16:54.7093617Z [36;1mecho "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"[0m
+2026-10-15T01:16:54.7160438Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:54.7160701Z env:
+2026-10-15T01:16:54.7160921Z   BP_STEP_VERDICT: MEASURED-DEFECT
+2026-10-15T01:16:54.7161195Z ##[endgroup]
+2026-10-15T01:16:54.7372949Z Post job cleanup.
+2026-10-15T01:16:54.8253725Z [command]/usr/bin/git version
+2026-10-15T01:16:54.8302950Z git version 2.55.0
+2026-10-15T01:16:54.8346122Z Temporarily overriding HOME='/home/runner/work/_temp/ad4469c2-ce60-4cab-9489-a9b49a0e613c' before making global git config changes
+2026-10-15T01:16:54.8355890Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-15T01:16:54.8365993Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/barkpark/barkpark
+2026-10-15T01:16:54.8380692Z Removing SSH command configuration
+2026-10-15T01:16:54.8386703Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-15T01:16:54.8429305Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-15T01:16:54.8712270Z Removing HTTP extra header
+2026-10-15T01:16:54.8718830Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-15T01:16:54.8767854Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-15T01:16:54.9057370Z Removing includeIf entries pointing to credentials config files
+2026-10-15T01:16:54.9066666Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-15T01:16:54.9101041Z includeif.gitdir:/home/runner/work/barkpark/barkpark/.git.path
+2026-10-15T01:16:54.9102054Z includeif.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path
+2026-10-15T01:16:54.9103149Z includeif.gitdir:/github/workspace/.git.path
+2026-10-15T01:16:54.9103987Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-15T01:16:54.9109875Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/barkpark/barkpark/.git.path
+2026-10-15T01:16:54.9140106Z /home/runner/work/_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:54.9152680Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/barkpark/barkpark/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-1fb51dbc\-a154\-46d0\-93c1\-99d162c890dc\.config
+2026-10-15T01:16:54.9199630Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path
+2026-10-15T01:16:54.9230056Z /home/runner/work/_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:54.9249377Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-1fb51dbc\-a154\-46d0\-93c1\-99d162c890dc\.config
+2026-10-15T01:16:54.9297506Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-15T01:16:54.9329227Z /github/runner_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:54.9337594Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-1fb51dbc\-a154\-46d0\-93c1\-99d162c890dc\.config
+2026-10-15T01:16:54.9378687Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-15T01:16:54.9408355Z /github/runner_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config
+2026-10-15T01:16:54.9418586Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-1fb51dbc\-a154\-46d0\-93c1\-99d162c890dc\.config
+2026-10-15T01:16:54.9462170Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-15T01:16:54.9723531Z Removing credentials config '/home/runner/work/_temp/git-credentials-1fb51dbc-a154-46d0-93c1-99d162c890dc.config'
+2026-10-15T01:16:54.9880024Z Evaluate and set job outputs
+2026-10-15T01:16:54.9887092Z Set output 'verdict'
+2026-10-15T01:16:54.9888939Z Cleaning up orphan processes

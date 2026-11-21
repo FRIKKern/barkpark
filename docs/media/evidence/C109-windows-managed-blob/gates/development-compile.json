@@ -1,0 +1,7 @@
+{
+  "at": "2026-10-15T01:23:09.535Z",
+  "exit": 0,
+  "stdout": "",
+  "stderr": "    warning: redefining module Barkpark.ManagedRuntime.WriteAdmission (current version loaded from runtime/C105-full-current-08/lib/barkpark-0.1.0/ebin/Elixir.Barkpark.ManagedRuntime.WriteAdmission.beam)\n    │\n  1 │ defmodule Barkpark.ManagedRuntime.WriteAdmission do\n    │ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    │\n    └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/lib/barkpark/managed_runtime/write_admission.ex:1: Barkpark.ManagedRuntime.WriteAdmission (module)\n\n    warning: redefining module Barkpark.Media.Blobstore.Local (current version loaded from runtime/C105-full-current-08/lib/barkpark-0.1.0/ebin/Elixir.Barkpark.Media.Blobstore.Local.beam)\n    │\n  1 │ defmodule Barkpark.Media.Blobstore.Local do\n    │ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    │\n    └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/lib/barkpark/media/blobstore/local.ex:1: Barkpark.Media.Blobstore.Local (module)\n\n",
+  "scope": "Development compile only against carried release ebin; no current-source acceptance"
+}

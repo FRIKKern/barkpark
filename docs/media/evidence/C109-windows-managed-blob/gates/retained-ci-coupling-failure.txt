@@ -1,0 +1,40 @@
+Original head ae794bec291367b8f23fc553156b78e3af879b41
+https://github.com/FRIKKern/barkpark/actions/runs/38664708878/job/116193959026
+9429 tests, 1 failure: original moved annotation binding. Final source restores public function bindings; local182 binding guard passes. New hosted matrix remains required.
+
+2026-10-15T01:21:45.5954983Z   1) test PREDICATE 2 goes QUIET on a clean tree the real guard exits 0 on this checkout, so the pin arm reports nothing (Barkpark.CoupledArtifactsTest)
+2026-10-15T01:21:45.5959908Z ##[error]     test/barkpark/coupled_artifacts_test.exs:346
+2026-10-15T01:21:45.5961621Z      The pin guard reds on a tree with no pending change, which means either
+2026-10-15T01:21:45.5962535Z      the pin is genuinely stale (re-pin it, in THIS commit, with
+2026-10-15T01:21:45.5963888Z      bash api/scripts/sobelow-inline-overlap-check.sh --regen-bindings-pin — then READ THE DIFF) or the guard is
+2026-10-15T01:21:45.5964653Z      measuring something else. Guard output:
+2026-10-15T01:21:45.5965193Z      scanned 10 baseline entries against 192 inline annotation coverings
+2026-10-15T01:21:45.5965774Z      PASS: no baseline entry duplicates an inline sobelow waiver
+2026-10-15T01:21:45.5966604Z      scanned 182 binding sobelow annotations (180 inline + 2 attribute)
+2026-10-15T01:21:45.5968090Z      PASS: every sobelow annotation is well-formed, attached to a def, and attached to a def its own detector type can flag whenever a sibling function it could flag goes unwaived
+2026-10-15T01:21:45.5969622Z      FAIL: an annotation is bound to a DIFFERENT def than the pin records.
+2026-10-15T01:21:45.5970495Z            < pinned (what the author wrote it for)   > current (what it waives now)
+2026-10-15T01:21:45.5971355Z      @@ -8,9 +8,9 @@
+2026-10-15T01:21:45.5971897Z       lib/barkpark/epic_fleet/benchmark.ex	cleanup_temporary_file
+2026-10-15T01:21:45.5972431Z       lib/barkpark/epic_fleet/benchmark.ex	select_attrs
+2026-10-15T01:21:45.5972921Z       lib/barkpark/epic_fleet/benchmark.ex	write_json_file
+2026-10-15T01:21:45.5973424Z      +lib/barkpark/media/blobstore/local.ex	admitted_put_bytes
+2026-10-15T01:21:45.5973950Z      +lib/barkpark/media/blobstore/local.ex	admitted_put_file
+2026-10-15T01:21:45.5974417Z       lib/barkpark/media/blobstore/local.ex	delete
+2026-10-15T01:21:45.5974873Z      -lib/barkpark/media/blobstore/local.ex	put_bytes
+2026-10-15T01:21:45.5975326Z      -lib/barkpark/media/blobstore/local.ex	put_file
+2026-10-15T01:21:45.5975761Z       lib/barkpark/media/blobstore/s3.ex	delete
+2026-10-15T01:21:45.5976186Z       lib/barkpark/media/blobstore/s3.ex	download
+2026-10-15T01:21:45.5976615Z       lib/barkpark/media/blobstore/s3.ex	put_file
+2026-10-15T01:21:45.5976886Z
+2026-10-15T01:21:45.5979809Z            A def defined between a comment block and its def STEALS the
+2026-10-15T01:21:45.5980746Z            annotation: the original loses its waiver and the new function
+2026-10-15T01:21:45.5981720Z            silently inherits one nobody reasoned about. Move the annotation
+2026-10-15T01:21:45.5982695Z            back down onto its def. If the pairing changed on purpose (a
+2026-10-15T01:21:45.5983525Z            rename, a genuinely new annotation), re-pin with:
+2026-10-15T01:21:45.5984476Z              api/scripts/sobelow-inline-overlap-check.sh --regen-bindings-pin   # then READ THE DIFF
+2026-10-15T01:21:45.5984898Z
+2026-10-15T01:21:45.5984910Z
+2026-10-15T01:21:45.5985060Z      code: assert status == 0,
+2026-10-15T01:21:45.5985350Z      stacktrace:
+2026-10-15T01:21:45.5985687Z        test/barkpark/coupled_artifacts_test.exs:354: (test)

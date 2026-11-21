@@ -18,12 +18,12 @@ Sanity image and file URLs, `@sanity/image-url` config, `sourceId`: [../media/SA
 
 Media discovery: **Find-vs-Pick** (search-first Find pane, browse Pick modal) and the OpenSearch/Meilisearch choice: docs/media/DISCOVERY.md. Plugin: `api/lib/barkpark/plugins/media.ex`; assets: `priv/plugins/media/`.
 
-Pending local cleanup captures the exact migration-versioned raw row, including `source_id`; unknown schemas refuse.
+Pending cleanup and managed original-blob fences: [storage owner](../../api/lib/barkpark/media/storage/README.md). Unknown schemas refuse; no native cleanup authority.
 
 ## Code anchors
 - api/lib/barkpark/search/query_pipeline.ex — def search
 - api/lib/barkpark/search/intelligence.ex — def record, def record_interaction
-- api/lib/barkpark/media/delivery/retriever.ex — defmodule Barkpark.Media.Delivery.Retriever
+- api/lib/barkpark/media/delivery/retriever.ex — defmodule
 - api/lib/barkpark/plugins/media.ex — defmodule (media plugin)
 - api/lib/barkpark/media/storage/delete_operation.ex — def commit
-- api/lib/barkpark/media/transform.ex — defmodule Barkpark.Media.Transform
+- api/lib/barkpark/media/transform.ex — defmodule
