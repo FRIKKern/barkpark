@@ -708,11 +708,20 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
       data-desk-save={BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns)}
+      data-desk-conflict={
+        assigns[:doc_conflict] == true and
+          BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns) == "Updated by another user"
+      }
       data-desk-inspecting={inspector(@view.pane) != nil}
       aria-label={@page_title}
     >
       <%!-- `data-desk-save`: the save token (`SaveStatus`), not its words;
-            `bp-desk.js` asks before the tab closes over "Save failed". --%>
+            `bp-desk.js` asks before the tab closes over "Save failed".
+            `data-desk-conflict`: another user saved over edits not saved
+            here, and the status still says so. Both, as `doc_conflict` can
+            outlive the conflict: a save through `{:autosave_form, …}` (a
+            reference or image pick) says "Saved" and leaves it set.
+            `Desk.DocStyle` tones the form's status by both marks. --%>
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
