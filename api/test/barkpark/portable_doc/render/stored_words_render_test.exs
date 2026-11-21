@@ -131,10 +131,19 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
 
   # {path, string} for every stored string under a top-level block, the path being
   # the map keys down to it (a list's strings take the list's key), last key first.
+  #
+  # A `text` stored next to a non-empty `content` list is a fallback: the reader
+  # draws it only when `content` is empty, in the reader's own content-else-text
+  # order (Render.Compose paragraph_inline/1, which paragraphs, quotes and list items
+  # read through normalize_list_item/1; Slots.callout_head_inline/1 for a callout's
+  # first line). So it counts only when `content` is empty.
   defp leaves(value, path, acc) when is_binary(value), do: [{path, value} | acc]
 
   defp leaves(value, path, acc) when is_list(value),
     do: Enum.reduce(value, acc, &leaves(&1, path, &2))
+
+  defp leaves(%{"content" => [_ | _], "text" => text} = value, path, acc) when is_binary(text),
+    do: value |> Map.delete("text") |> leaves(path, acc)
 
   defp leaves(value, path, acc) when is_map(value),
     do: Enum.reduce(value, acc, fn {k, v}, acc -> leaves(v, [k | path], acc) end)
@@ -206,8 +215,10 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
   defp alnum(s), do: s |> String.downcase() |> String.replace(~r/[^\p{L}\p{N}]+/u, "")
 
   # {type, path, word} for each stored word the page does not show.
-  defp missing(blocks, style) do
-    html = Render.render_blocks(blocks, %{style: style})
+  defp missing(blocks, style),
+    do: missing_in(blocks, Render.render_blocks(blocks, %{style: style}))
+
+  defp missing_in(blocks, html) do
     {set, joined} = shown(html)
 
     for block <- blocks,
@@ -259,6 +270,44 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
     assert {"fixtures/nested-list-carriers.json", _} =
              List.keyfind(docs, "fixtures/nested-list-carriers.json", 0)
   end
+
+  # The fallback rule cannot hide a loss: a `text` stored with an empty `content` is
+  # the words the reader shows, so it counts, and a page that drops it reds.
+  for style <- [:article, :email] do
+    test "#{style}: a text stored with empty content counts, and a page without it reds" do
+      blocks = [
+        %{"type" => "paragraph", "content" => [], "text" => "Fallbackparagraph words"},
+        %{
+          "type" => "callout",
+          "tone" => "info",
+          "content" => [],
+          "text" => "Fallbackcallout words"
+        },
+        %{
+          "type" => "list",
+          "ordered" => false,
+          "items" => [%{"content" => [], "text" => "Fallbackitem words"}]
+        }
+      ]
+
+      render = &Render.render_blocks(&1, %{style: unquote(style)})
+      assert missing_in(blocks, render.(blocks)) == []
+
+      for {block, i} <- Enum.with_index(blocks) do
+        word = ~w(fallbackparagraph fallbackcallout fallbackitem) |> Enum.at(i)
+        dropped = List.replace_at(blocks, i, drop_text(block))
+
+        assert {block["type"], "text", word} in missing_in(blocks, render.(dropped)) or
+                 {block["type"], "items.text", word} in missing_in(blocks, render.(dropped)),
+               "#{unquote(style)}: a page that drops the #{block["type"]}'s text reds"
+      end
+    end
+  end
+
+  defp drop_text(%{"items" => items} = list),
+    do: %{list | "items" => Enum.map(items, &Map.delete(&1, "text"))}
+
+  defp drop_text(block), do: Map.delete(block, "text")
 
   test "the known losses are capped at their count" do
     assert length(@known_losses) <= @known_losses_cap
