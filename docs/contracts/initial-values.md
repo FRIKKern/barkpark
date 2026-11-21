@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: initial-values-today-token | budget: 500tok -->
 # Initial values and `"$today"`
 
-A schema's `initial_values` fill a new document on create; values the caller sends win, and maps merge deeply. A desk list's `initialValues` preset its "+". `GET /v1/schemas` and `/v1/structure` serve both as written. A Studio resolves them when it starts a document: barkpark-studio does from #1339 on; an older one stores the literal on its first edit.
+A schema's `initial_values` fill a new document on create; values the caller sends win, and maps merge deeply. An explicit `null` at a path with an initial value, even `false`, `0`, `""`, `[]` or `{}`, and on a layout type's prefill, means: leave it empty (not filled, not stored); a `null` elsewhere is stored. A desk list's `initialValues` preset its "+". `GET /v1/schemas` and `/v1/structure` serve both as written. barkpark-studio resolves them when it starts a document (from #1339; an older one stores the literal).
 
 `"$today"` is today's date (`2026-11-21`) and `"$today.year"` its year (`"2026"`), on any field, at any depth. Only that exact string is a token; `"$todayx"`, `" $today"`, a longer string or another `$name` stay text.
 

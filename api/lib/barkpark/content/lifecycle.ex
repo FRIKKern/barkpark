@@ -1185,8 +1185,12 @@ defmodule Barkpark.Content.Lifecycle do
   `:prev_doc` carry the about-to-be-deleted document (the published row
   if present, otherwise the draft).
   """
-  def delete_document(doc_id, type, dataset, opts \\ []),
-    do: span_write(:delete, opts, fn -> do_delete_document(doc_id, type, dataset, opts) end)
+  def delete_document(doc_id, type, dataset, opts \\ []) do
+    # A listed fixed document is not deleted (Content.FixedDocuments); bulk
+    # dataset/workspace removal and the sync mirror pass `fixed_documents: :skip`.
+    with :ok <- Barkpark.Content.FixedDocuments.check_delete(doc_id, type, dataset, opts),
+         do: span_write(:delete, opts, fn -> do_delete_document(doc_id, type, dataset, opts) end)
+  end
 
   defp do_delete_document(doc_id, type, dataset, opts) do
     pid = DraftId.published_id(doc_id)

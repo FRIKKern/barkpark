@@ -150,6 +150,7 @@ var codeExit = map[string]int{
 	"rev_mismatch":        exitConflict,
 	"paper_exists":        exitConflict,
 	"paper_not_in_scope":  exitConflict,
+	"fixed_document":      exitConflict, // 409, content/fixed_documents.ex (task-f4c80d82cc25b19b)
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
 	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
