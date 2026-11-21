@@ -143,6 +143,26 @@ defmodule BarkparkWeb.Studio.DeskVisionListenTest do
              ~r/html\[data-theme="dark"\] \.dk \{ --dk-bg-soft: [^}]*--dk-publish-off-bg: rgb\(85 92 117\); --dk-publish-off-fg: rgb\(33 38 57\);/
   end
 
+  # task-f6ffad61b1efc426: TanStack draws the enabled Fetch's icon in its
+  # --primary-btn-icon (styles.css `.btn-primary.vision-fetch svg`), a tint of
+  # the blue, light #bfcbfe and dark #303c7a; a disabled Fetch's icon takes its
+  # words' grey (`.vision-actions .btn-primary:disabled svg { color: inherit }`).
+  test "the enabled Fetch's icon is TanStack's tint of the blue, the disabled one its words' grey",
+       c do
+    {:ok, _view, html} = live(signed_in(c), c.vision)
+
+    assert html =~
+             ".dk .dk-vision-fetch:not(.dk-vision-listen) svg { color: var(--dk-primary-btn-icon); }"
+
+    assert html =~
+             ~S|.dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] svg { color: inherit; }|
+
+    assert html =~ ~r/\.dk \{ --dk-bg-soft: [^}]*--dk-primary-btn-icon: rgb\(191 203 254\);/
+
+    assert html =~
+             ~r/html\[data-theme="dark"\] \.dk \{ --dk-bg-soft: [^}]*--dk-primary-btn-icon: rgb\(48 60 122\);/
+  end
+
   test "a change in this workspace and project comes back as the listen stream's mutation", c do
     {:ok, view, _html} = live(signed_in(c), c.vision)
     listen(view, %{"type" => "post", "qs" => "filter%5Btitle%5D=Listen+probe&perspective=drafts"})
