@@ -1863,7 +1863,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert blocks["stat"] == ["label", "value", "denom", "verdict", "source", "dots"]
       assert blocks["lineage-node"] == ["title", "overline", "source", "tone", "unit", "value"]
       assert blocks["expandable"] == ["id", "summary", "open"]
-      assert blocks["paper"] == ["slug", "title"]
+      assert blocks["paper"] == ["slug", "title", "print"]
       # aliases ride the table — <strong> teaches nothing new
       assert inline["b"] == "strong"
       assert inline["strong"] == "strong"
