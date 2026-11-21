@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Path
 
   # The field types whose writes are kept as whole-value steps.
   @types ~w(string select slug arrayOf array composite object)
@@ -42,9 +43,14 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
   typed in (nil for a list's button): nil when it is not kept here.
   """
   @spec target(String.t(), map(), map()) :: {String.t(), String.t() | nil} | nil
+  # A checkbox list in an object or a row names its whole path dotted in
+  # one bracket (`doc[obj.tags][]`): the step is its top-level field's.
   def target("autosave", %{"_target" => ["doc", key | rest]}, assigns) when is_binary(key) do
-    if recorded?(assigns[:editor_schema], key),
-      do: {key, "doc[" <> Enum.join([key | rest], "][") <> "]"}
+    schema = assigns[:editor_schema]
+    field = Path.target_field(key, Path.field_names(schema))
+
+    if recorded?(schema, field),
+      do: {field, "doc[" <> Enum.join([key | rest], "][") <> "]"}
   end
 
   # A nested input's name is dotted (`doc[address].street`,
@@ -68,6 +74,20 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
       end
 
     if is_binary(key) and recorded?(assigns[:editor_schema], key), do: {key, nil}
+  end
+
+  # A pick or a Remove in a tree codelist names its input (`doc[subject]`,
+  # `doc[pair].a`): the step is its top-level field's, a codelist of its own
+  # or the object or list it sits in.
+  def target("tree_codelist_pick", %{name: name}, assigns) when is_binary(name) do
+    schema = assigns[:editor_schema]
+
+    with [key | _] when is_binary(key) <- StudioLive.parse_path(name),
+         true <- recorded?(schema, key) or match?(%{"type" => "codelist"}, field(schema, key)) do
+      {key, nil}
+    else
+      _ -> nil
+    end
   end
 
   def target(_event, _params, _assigns), do: nil
@@ -148,4 +168,15 @@ defmodule BarkparkWeb.Studio.Desk.DocUndoValues do
     do: Enum.find(fields, &(is_map(&1) and &1["name"] == key))
 
   def field(_schema, _key), do: nil
+
+  @doc """
+  The post of an undo or redo that turns `now` (what the store holds) into
+  `next`: `next` itself, which the save writes whole, nulls and emptied
+  keys as they are (`Fields.autosave_built/2` marks the field `:whole`). A
+  field `next` has no value for is posted "", which takes it off the
+  document.
+  """
+  @spec post(term(), term()) :: term()
+  def post(now, nil) when not is_nil(now), do: ""
+  def post(_now, next), do: next
 end

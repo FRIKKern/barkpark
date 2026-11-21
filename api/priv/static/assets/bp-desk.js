@@ -731,6 +731,8 @@
       deskScript("data-desk-tags", window.BarkparkDeskTags);
       // A tree codelist's keys (bp-desk-codelist.js).
       deskScript("data-desk-codelist", window.BarkparkDeskCodelist);
+      // A localized text's language tabs (bp-desk-lang-tabs.js).
+      deskScript("data-desk-lang-tabs", window.BarkparkDeskLangTabs);
       root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
@@ -744,6 +746,10 @@
       deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
       // The document's undo and redo, Mod+Z and Shift+Mod+Z (bp-desk-undo.js).
       deskScript("data-desk-undo", window.BarkparkDeskUndo);
+      // A read-only field shows the server's value, focused too (bp-desk-locked-value.js).
+      deskScript("data-desk-locked-value", window.BarkparkDeskLockedValue);
+      // A field moved into a revision's disabled fields hands the focus on (bp-desk-revision-focus.js).
+      deskScript("data-desk-revision-focus", window.BarkparkDeskRevisionFocus);
       // The navbar Create new's type search (bp-desk-new-doc.js).
       deskScript("data-desk-new-doc", window.BarkparkDeskNewDoc);
       // Vision's query, result tree and Save (bp-desk-vision.js), on its page only.

@@ -181,7 +181,10 @@
 // showed before (`RemoteValues.push/3`). The focused input takes the
 // new value only while it still shows exactly the old one: anything else is
 // typing not yet sent, and stays. Focus stays; the caret keeps its place in
-// the text around the other's change.
+// the text around the other's change. A focused select is set the same way
+// (task-165052f4fad43c1e): the desk's undo leaves the focus in the select it
+// put back, so another editor's later pick stayed out of sight there until
+// the person's next action.
 (function () {
   "use strict";
 
@@ -198,13 +201,25 @@
     return now.length - s;
   }
 
+  function hasOption(select, value) {
+    for (var i = 0; i < select.options.length; i++) if (select.options[i].value === value) return true;
+    return false;
+  }
+
   function takeFocused(values) {
     var el = document.activeElement;
     if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
-    if (!(el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
+    var select = el.tagName === "SELECT" && !el.multiple;
+    if (!(select || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
     if (!Object.prototype.hasOwnProperty.call(values, el.name)) return;
     var change = values[el.name];
     if (!change || typeof change.value !== "string" || el.value !== change.was) return;
+    // A choice has no caret; one the select does not offer is left to the
+    // patch, once the focus leaves it.
+    if (select) {
+      if (hasOption(el, change.value)) el.value = change.value;
+      return;
+    }
     var start = shift(el.selectionStart, change.was, change.value);
     var end = shift(el.selectionEnd, change.was, change.value);
     el.value = change.value;

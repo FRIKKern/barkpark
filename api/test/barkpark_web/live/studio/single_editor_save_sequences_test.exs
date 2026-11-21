@@ -50,6 +50,13 @@ defmodule BarkparkWeb.Studio.SingleEditorSaveSequencesTest do
       stored value when they typed nothing. The input just typed in is left
       out: a patch never sets it.
 
+  One exception, in the desk only (#27936): a refused clear, the person
+  taking text away from a stored value, is not held. The input is drawn as
+  stored, and the field reads "Not saved". Nothing is stored for it (STORED
+  holds as above). That a later post leaves the field out is pinned in
+  `desk_refused_clear_test.exs`: the page modelled here posts what the
+  server drew, so it never posts the clear again.
+
   Seeded: sequence `n` is the same on every run. `SEQUENCES` sets how many
   run per surface at compile time (default #{20}; 300 take about four
   minutes). The two sequences the reviews found are also run by name.
@@ -248,6 +255,7 @@ defmodule BarkparkWeb.Studio.SingleEditorSaveSequencesTest do
       # What the person last typed in each field; the start value otherwise.
       meant: store,
       store: store,
+      surface: surface,
       failed?: false,
       log: ["start (must #{if with_must?, do: "stored", else: "missing"}): #{inspect(store)}"]
     }
@@ -328,13 +336,25 @@ defmodule BarkparkWeb.Studio.SingleEditorSaveSequencesTest do
           "the person last typed #{inspect(state.meant[name])}"
       end
 
+    not_saved = not_saved(page)
+
     shown =
-      for {name, value} <- drawn(page), name != typed, value != state.meant[name] do
+      for {name, value} <- drawn(page),
+          name != typed,
+          value != state.meant[name],
+          not refused_clear?(state, now, name, value, not_saved) do
         "DRAWN: the #{name} input shows #{inspect(value)}; the person last typed " <>
           inspect(state.meant[name])
       end
 
     moved ++ shown
+  end
+
+  # The desk draws a refused clear as stored, and the field reads "Not saved"
+  # (#27936): the person emptied a field the store still holds.
+  defp refused_clear?(state, now, name, value, not_saved) do
+    state.surface == :desk and state.meant[name] == "" and now[name] != "" and
+      value == now[name] and MapSet.member?(not_saved, name)
   end
 
   # ── The page and the store ────────────────────────────────────────────────
@@ -344,6 +364,18 @@ defmodule BarkparkWeb.Studio.SingleEditorSaveSequencesTest do
     form = view |> element(sel) |> render() |> LazyHTML.from_fragment()
 
     for name <- @names, value = drawn_value(form, name), into: %{}, do: {name, value}
+  end
+
+  # The fields whose row in the form reads "Not saved".
+  defp not_saved({view, sel}) do
+    form = view |> element(sel) |> render() |> LazyHTML.from_fragment()
+
+    for name <- @names,
+        row <- LazyHTML.query(form, ".editor-field"),
+        Enum.count(LazyHTML.query(row, ~s|[name="doc[#{name}]"]|)) > 0,
+        row |> LazyHTML.query(".field-errors") |> LazyHTML.text() =~ "Not saved",
+        into: MapSet.new(),
+        do: name
   end
 
   defp drawn_value(form, name) do

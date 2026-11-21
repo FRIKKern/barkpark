@@ -57,7 +57,7 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   alias Barkpark.Content.DraftId
   alias BarkparkWeb.Components.Fields.Visibility
   alias BarkparkWeb.Studio.Caps
-  alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.DocUndo
   alias BarkparkWeb.Studio.Desk.FieldClip
   alias BarkparkWeb.Studio.Desk.FieldLock
   alias BarkparkWeb.Studio.Desk.Menu
@@ -211,9 +211,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
 
         case FieldPaste.plan(field, current, clip, &ref?(socket, &1, &2)) do
           {:save, params} ->
-            # The typed edit's own way in, with the desk's guards. The params
+            # The typed edit's own way in, with the desk's guards, and a step
+            # of the document's undo (`DocUndo.write_built/2`). The params
             # are built here for the open document: no browser post.
-            {:noreply, saved} = EditorHost.write_built(params, socket)
+            {:noreply, saved} = DocUndo.write_built(params, socket)
             {:noreply, remount(saved, field)}
 
           :nothing ->

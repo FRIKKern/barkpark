@@ -492,7 +492,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
             ><%= gettext("Clear") %></button>
           <% end %>
           <button
-            :if={@selected not in [nil, ""] and not @readonly}
+            :if={(@kept or @selected not in [nil, ""]) and not @readonly}
             type="button"
             class="bp-btn bp-tree-remove"
             data-test-id="tree-codelist-remove"
@@ -559,6 +559,10 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
 
   # The desk's current-code line: the code and its label path from the root
   # (`Fiction › Modern fiction`); a code not in the list has no label.
+  # A stored value that is no code (a number, a list) is kept as stored; the
+  # line says so and offers Remove, which writes "" for this field only.
+  defp current(%{desk: true, kept: true}), do: %{code: nil, label: nil}
+
   defp current(%{desk: true, selected: code, nodes_by_code: nodes})
        when is_binary(code) and code != "" do
     label =

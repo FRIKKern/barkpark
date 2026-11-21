@@ -1,18 +1,17 @@
 defmodule Barkpark.PortableDoc.SlotsTest do
   @moduledoc """
-  STEP 3 (loop-epic/widget-slots) — the callout SLOT-MODEL proof.
-
-  The load-bearing claim is byte-identity: the additive `body`-slot encoding and the
-  legacy inline `content` encoding of the SAME body compose to a byte-identical Pd
-  tree, so reader / TUI / email bytes never move. These tests prove that at the
-  compose layer (the reference implementation), plus the D1 slot-type gate and the
-  idempotent content⇄slots normalizer.
+  The callout slot model (task-e70b11497064225b): a callout's words are its content
+  (else its text), then every block of its body slot, in that order
+  (api/assets/paper-editor/src/markdown/callout-words.js). `content` and
+  `slots.body` are separate fields; neither is read as the other. A callout with no
+  body composes exactly the one `PdText` it always did. Plus the D1 slot-type gate,
+  and the card / note / stage widget slots.
   """
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.{Constraints, Slots}
   alias Barkpark.PortableDoc.Render
-  alias Barkpark.PortableDoc.Render.Compose
+  alias Barkpark.PortableDoc.Render.{Compose, Inline}
 
   # A shared body with a bold run, to prove the mark survives the slot indirection.
   @body [
@@ -39,33 +38,42 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     )
   end
 
-  describe "slot_elements/2 + callout_body_inline/1 (the compat reader)" do
-    test "legacy callout synthesizes a one-paragraph body slot from `content`" do
-      assert Slots.slot_elements(legacy(), "body") == [
-               %{"type" => "paragraph", "content" => @body}
+  describe "callout_head_inline/1 + callout_body_blocks/1" do
+    test "the slot declaration is one body slot of any length, none included" do
+      assert Slots.slot_decls(%{"type" => "callout"}) == [
+               %{name: "body", tier: :element, count: {:min, 0}}
              ]
     end
 
-    test "materialized slot form returns its body list verbatim" do
-      assert Slots.slot_elements(slotted(), "body") == [
-               %{"type" => "paragraph", "content" => @body}
-             ]
+    test "a callout with no slots key has an empty body; its content is never a body" do
+      assert Slots.slot_elements(legacy(), "body") == []
+      assert Slots.callout_body_blocks(legacy()) == []
     end
 
-    test "callout_body_inline/1 yields the SAME inline array for both encodings" do
-      assert Slots.callout_body_inline(legacy()) == @body
-      assert Slots.callout_body_inline(slotted()) == @body
-      assert Slots.callout_body_inline(legacy()) == Slots.callout_body_inline(slotted())
+    test "the body slot is returned verbatim, in order" do
+      body = [%{"type" => "paragraph", "content" => @body}, %{"type" => "code", "value" => "x"}]
+      assert Slots.callout_body_blocks(slotted(%{"slots" => %{"body" => body}})) == body
+      assert Slots.slot_elements(slotted(%{"slots" => %{"body" => body}}), "body") == body
     end
 
-    test "nil / absent content is nil-safe (empty inline array)" do
-      assert Slots.callout_body_inline(%{"type" => "callout"}) == []
-      assert Slots.callout_body_inline(%{"type" => "callout", "content" => nil}) == []
-    end
+    test "the first line is content, else text, and never the body" do
+      assert Slots.callout_head_inline(legacy()) == @body
+      assert Slots.callout_head_inline(slotted()) == []
 
-    test "legacy prose stranded under text remains visible" do
-      assert Slots.callout_body_inline(%{"type" => "callout", "text" => "Visible"}) ==
+      assert Slots.callout_head_inline(%{"type" => "callout", "text" => "Visible"}) ==
                [%{"type" => "text", "value" => "Visible"}]
+
+      assert Slots.callout_head_inline(legacy(%{"text" => "shadow"})) == @body
+
+      assert Slots.callout_head_inline(legacy(%{"content" => [], "text" => "from text"})) ==
+               [%{"type" => "text", "value" => "from text"}]
+    end
+
+    test "nil / absent fields are nil-safe" do
+      assert Slots.callout_head_inline(%{"type" => "callout"}) == []
+      assert Slots.callout_head_inline(%{"type" => "callout", "content" => nil}) == []
+      assert Slots.callout_body_blocks(%{"type" => "callout", "slots" => %{"body" => nil}}) == []
+      assert Slots.callout_body_blocks(%{"type" => "callout", "slots" => "x"}) == []
     end
 
     test "unknown slot / non-callout block synthesizes []" do
@@ -74,102 +82,60 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     end
   end
 
-  describe "byte-identity via compose (the proof)" do
-    # DISTRUST-VACUOUS-GREEN: assert the inputs GENUINELY differ, then assert the
-    # composed Pd trees are EQUAL — a test that passed on identical inputs proves
-    # nothing.
-    test "legacy and slot encodings compose to byte-identical Pd trees (article + email)" do
-      refute legacy() == slotted(), "the two source encodings must genuinely differ"
-
+  describe "compose: the first line, then each body block as a block" do
+    test "a callout with no body composes one PdText from its content (article + email)" do
       for style <- [:article, :email] do
-        assert Compose.compose_block(legacy(), style) == Compose.compose_block(slotted(), style),
-               "callout compose diverged between legacy and slot form for #{inspect(style)}"
+        assert %{"kind" => "PdCallout", "children" => [%{"kind" => "PdText"} = head]} =
+                 Compose.compose_block(legacy(), style)
+
+        assert head == %{"kind" => "PdText", "children" => Inline.compose_inline_children(@body)}
       end
     end
 
-    test "the composed callout body is ONE flattened PdText (never a block PdParagraph)" do
-      # The single most important implementation constraint: the widget FLATTENS its
-      # single-paragraph body slot to inline. A PdParagraph would add a <p> wrapper +
-      # 12pt margin and break parity.
-      composed = Compose.compose_block(slotted(), :article)
-      assert %{"kind" => "PdCallout", "children" => [body]} = composed
-      assert %{"kind" => "PdText"} = body
-      refute match?(%{"kind" => "PdParagraph"}, body)
+    test "content and body compose the first line, then each body block as compose_block/2 does" do
+      block = legacy(%{"slots" => %{"body" => [%{"type" => "paragraph", "content" => @body}]}})
+
+      for style <- [:article, :email] do
+        assert %{"children" => [%{"kind" => "PdText"}, para]} =
+                 Compose.compose_block(block, style)
+
+        assert para == Compose.compose_block(%{"type" => "paragraph", "content" => @body}, style)
+      end
     end
 
-    test "legacy callout renders byte-identical article HTML (standing golden shape)" do
-      # Mirrors render_test.exs "non-collapsible callout is byte-identical".
-      html =
-        Render.render_blocks([legacy(%{"tone" => "info", "content" => plain()})], %{
-          style: :article
-        })
-
-      assert html =~ ~s(<div class="bp-callout bp-callout--info">)
-      refute html =~ "<details"
-      refute html =~ "border-left:4px solid"
-
-      # And the slot form renders the SAME article HTML.
-      slot_html =
-        Render.render_blocks(
-          [
-            slotted(%{
-              "tone" => "info",
-              "slots" => %{"body" => [%{"type" => "paragraph", "content" => plain()}]}
-            })
-          ],
-          %{style: :article}
-        )
-
-      assert slot_html == html
+    test "a body with no first-line words composes the body blocks alone" do
+      for style <- [:article, :email] do
+        assert %{"children" => [para]} = Compose.compose_block(slotted(), style)
+        assert para == Compose.compose_block(%{"type" => "paragraph", "content" => @body}, style)
+      end
     end
 
-    test "chrome (title/collapsible/collapsed) stays a widget attr, threaded identically" do
+    test "an empty body list composes as no body" do
+      for style <- [:article, :email] do
+        assert Compose.compose_block(legacy(%{"slots" => %{"body" => []}}), style) ==
+                 Compose.compose_block(legacy(), style)
+      end
+    end
+
+    test "chrome (title/collapsible/collapsed) stays a widget attr" do
       lc = legacy(%{"title" => "Heads up", "collapsible" => true, "collapsed" => true})
-      sc = slotted(%{"title" => "Heads up", "collapsible" => true, "collapsed" => true})
-
       article = Compose.compose_block(lc, :article)
       assert article["title"] == "Heads up"
       assert article["collapsible"] == true
       assert article["collapsed"] == true
-      assert Compose.compose_block(lc, :article) == Compose.compose_block(sc, :article)
     end
   end
 
-  describe "empty-body fidelity" do
-    test "content:[] composes to the same empty PdText as a slot with an empty paragraph" do
-      le = legacy(%{"content" => []})
-      se = slotted(%{"slots" => %{"body" => [%{"type" => "paragraph", "content" => []}]}})
-
-      for style <- [:article, :email] do
-        assert Compose.compose_block(le, style) == Compose.compose_block(se, style)
+  describe "normalize_widget/1" do
+    test "a callout is left as it is stored" do
+      for input <- [
+            legacy(),
+            slotted(),
+            legacy(%{"content" => []}),
+            legacy(%{"slots" => %{"body" => []}})
+          ] do
+        assert Slots.normalize_widget(input) == input
       end
-
-      assert Slots.callout_body_inline(le) == []
-    end
-  end
-
-  describe "normalize_widget/1 (idempotent, lossless content⇄slots)" do
-    test "is idempotent (normalize∘normalize == normalize)" do
-      for input <- [legacy(), slotted(), legacy(%{"content" => []})] do
-        once = Slots.normalize_widget(input)
-        assert Slots.normalize_widget(once) == once
-      end
-    end
-
-    test "content-form and slot-form of the same body normalize to the IDENTICAL map" do
-      assert Slots.normalize_widget(legacy()) == Slots.normalize_widget(slotted())
-    end
-
-    test "normal form dual-writes content AND slots.body[0].content in sync" do
-      normalized = Slots.normalize_widget(legacy())
-      assert normalized["content"] == @body
-      assert normalized["slots"]["body"] == [%{"type" => "paragraph", "content" => @body}]
-    end
-
-    test "empty body omits BOTH keys (the callout precedent)" do
-      normalized = Slots.normalize_widget(legacy(%{"content" => []}))
-      refute Map.has_key?(normalized, "content")
-      refute Map.has_key?(normalized, "slots")
     end
 
     test "a non-widget block passes through untouched" do
@@ -609,7 +575,7 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     # `text` as an empty paragraph, which flattens to "". The reader served a
     # blank note (1 live block on guerrilla, full-corpus census 2026-07-25)
     # while `@barkpark/react` rendered it. `note_body_text/1` now falls back to
-    # the block's top-level `content`, the `callout_body_inline/1` law.
+    # the block's top-level `content`, the `callout_head_inline/1` law.
     test "note_body_text/1 falls back to the block's top-level content[]" do
       n = %{
         "type" => "note",
@@ -671,7 +637,7 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     # prose was stranded under a SCALAR `content`, and it asks this very accessor
     # whether the reader shows anything. Consuming a bare string here would
     # silently disarm that ratchet, so the fallback takes a non-empty INLINE
-    # ARRAY only — the same guard `callout_body_inline/1` holds.
+    # ARRAY only — the same guard `callout_head_inline/1` holds.
     test "a SCALAR content stays unread, so the field-loss ratchet stays armed" do
       stranded = %{"id" => "n1", "type" => "note", "content" => "Stranded note prose"}
       assert Slots.note_body_text(stranded) == ""

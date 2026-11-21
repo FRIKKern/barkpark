@@ -115,7 +115,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Plugins.Bulldocs.Web.WriteGate
   alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Validate.NewErrors
-  alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
   alias BarkparkWeb.{ErrorResponse, StudioLocale}
 
@@ -167,9 +166,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
   real write's wall stays authoritative.
   """
   def validate(conn, params) do
-    case validate_normalize(params) do
+    case validate_normalize(conn, params) do
       {:error, bpml_errors} ->
         json(conn, %{valid: false, violations: Enum.map(bpml_errors, &bpml_violation/1)})
+
+      {:refused, body} ->
+        json(conn, %{valid: false, violations: [Map.take(body, [:code, :message, :hint])]})
 
       {:ok, slug, blocks, merged} ->
         ref = %Barkpark.Content.Document{
@@ -347,16 +349,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
     * the paper's CURRENT blocks are unprintable → 422 `bpml_unprintable`
       BEFORE any op derives (a BPML document cannot describe them, so a sync
       would silently delete every non-kernel block behind a 200);
-    * applied but the post-write state is unprintable → still 200 with `rev`
-      (the write LANDED — a 500 would strand the anchor) and `bpml: nil` plus a
-      `bpml_unprintable` marker;
+    * the Paper as saved has no reader's view that prints → 422 with the
+      view's refusal, and the write is rolled back (`BpmlView.saved_check/1`
+      runs inside the write's transaction);
     * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
       is silently lost);
     * no changes → 200 `{ok, unchanged: true}`;
-    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the CANONICAL
-      print of the persisted blocks (post-normalization) — the client
-      overwrites its file with it, so working copies always converge on the
-      server's truth.
+    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the reader's
+      view of the Paper as saved, read back before commit: the bytes a pull
+      gives at that rev. The client overwrites its file with it.
   """
   def sync(conn, %{"slug" => slug} = params) do
     bpml = params["bpml"]
@@ -380,7 +381,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         })
 
       true ->
-        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+        case Barkpark.PortableDoc.Bpml.parse_copy(bpml) do
           {:error, errors} ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -424,28 +425,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # is a distinct refusal below, never a comparand.
         rev_read = Content.Papers.op_rev(paper)
         current_rev = with {:ok, rev} <- rev_read, do: to_string(rev)
-        current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
-        unprintable = unprintable_current(current_blocks)
 
         cond do
-          # ENTRY GUARD, before anything derives. If the paper's CURRENT blocks
-          # cannot be printed as BPML, the pushed document cannot describe them
-          # either — and `Diff.derive/2` would faithfully remove every block the
-          # (necessarily kernel-only) parse does not carry: a silent DESTRUCTION
-          # behind a 200. Nothing legitimate breaks, because pull already
-          # refuses such a paper (422) — no client can hold a working copy of
-          # one. Ordered before the rev check on purpose: an unprintable paper
-          # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
-          unprintable != nil ->
-            conn
-            |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-              code: "bpml_unprintable",
-              message:
-                "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
-              hint:
-                "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
-            })
-
           # A failed READ is NOT a mismatch. Ordered before the comparison so
           # the comparison is only ever reached with a rev we actually read.
           match?({:error, _}, rev_read) ->
@@ -468,7 +449,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+            case Content.Papers.BpmlView.push(paper, parsed, dataset) do
+              {:refused, body} ->
+                ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
+
               {:error, :diff_verification_failed} ->
                 conn
                 |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -477,27 +461,29 @@ defmodule BarkparkWeb.BulldocsIngestController do
                   hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
                 })
 
-              {:ok, _minted, []} ->
+              {:ok, [], notes} ->
+                payload = %{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0}
+
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
-                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+                |> json(Content.Papers.BpmlView.with_notes(payload, notes))
 
-              {:ok, _minted, ops} ->
-                sync_persist(conn, slug, ops, base_rev, dataset, scope)
+              {:ok, ops, notes} ->
+                sync_persist(assign(conn, :notes, notes), slug, ops, base_rev, dataset, scope)
             end
         end
     end
   end
 
-  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
-    case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
-      {:ok, result} ->
-        {canonical, echo_refusal} =
-          case Content.get_paper(slug, dataset, scope) do
-            nil -> {nil, nil}
-            paper -> canonical_echo(paper)
-          end
+  defp write_check(conn), do: WriteGate.write_check(conn.assigns)
 
+  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
+    ref = make_ref()
+    check = Content.Papers.BpmlView.saved_check(ref)
+    opts = scope ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
+
+    case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
+      {:ok, result} ->
         payload = %{
           ok: true,
           slug: result.slug,
@@ -505,12 +491,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # rev spelling for the working copy to anchor on.
           rev: to_string(result.rev),
           op_count: result.op_count,
-          bpml: canonical
+          bpml: Content.Papers.BpmlView.checked(ref)
         }
 
         conn
         |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(maybe_mark_echo(payload, echo_refusal))
+        |> json(Content.Papers.BpmlView.with_notes(payload, conn.assigns.notes))
+
+      {:error, {:view_refused, body}} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
       {:error, :precondition_failed} ->
         conn
@@ -572,19 +561,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # paper keeps its plain h1 (whose text still becomes the row title via
   # `BlockOps.paper_title/2`), and `Template.validate/1` passes it under the
   # additive no-locked-blocks rule — exactly as the validate dry-run does.
-  defp sync_create(conn, slug, parsed, dataset, scope) do
-    doc_slug = parsed["slug"]
-
-    if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
-      conn
-      |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-        code: "slug_mismatch",
-        message:
-          "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
-        hint:
-          "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
-      })
-    else
+  defp sync_create(conn, slug, copy, dataset, scope) do
+    with {:ok, parsed} <- Content.Papers.BpmlView.create_copy(copy, slug) do
       blocks = parsed["blocks"] || []
 
       ref = %Barkpark.Content.Document{
@@ -627,6 +605,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         nil ->
           sync_create_walled(conn, slug, parsed, blocks, dataset, scope, wall_tuples)
       end
+    else
+      {:refused, body} -> ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
     end
   end
 
@@ -664,14 +644,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
       |> maybe_put("workspace_id", scope[:workspace_id])
       |> maybe_put("project_id", scope[:project_id])
 
-    # Advisory channel — same reset+drain pair as the ingest legs (D36/D42),
-    # so the wall's advise band (soft-dup near-miss, off-norm tag count) rides
-    # the created receipt instead of being silently dropped.
+    # Advisory channel (D36/D42): the wall's advise band rides the receipt.
     Warnings.reset()
+    ref = make_ref()
+    check = Content.Papers.BpmlView.saved_check(ref)
 
-    case Content.upsert_paper(attrs) do
+    case Content.upsert_paper(attrs, before_commit: check, may_write: write_check(conn)) do
       {:ok, paper} ->
-        {canonical, echo_refusal} = canonical_echo(paper)
         rev = to_string(get_in(paper.content || %{}, ["rev"]))
 
         payload = %{
@@ -680,12 +659,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
           created: true,
           rev: rev,
           op_count: length(get_in(paper.content || %{}, ["blocks"]) || []),
-          bpml: canonical
+          bpml: Content.Papers.BpmlView.checked(ref)
         }
 
         conn
         |> put_resp_header("x-paper-rev", rev)
-        |> json(maybe_mark_echo(with_warnings(payload), echo_refusal))
+        |> json(with_warnings(payload))
+
+      # The Paper as saved has no reader's view that prints: rolled back.
+      {:error, {:view_refused, body}} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
       # The residual refusals AFTER the validate-first precheck (a dedup race,
       # an encryption seal failure, a changeset) — routed exactly like the
@@ -732,58 +715,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
 
-  # The sync entry guard's probe: nil when every current block is printable,
-  # else the printer's typed refusal message (kind+type). A print is pure string
-  # work on blocks already in memory — cheap enough to run before deriving.
-  defp unprintable_current(blocks) do
-    _ = Barkpark.PortableDoc.Bpml.print_blocks(blocks)
-    nil
-  rescue
-    e in UnprintableError -> Exception.message(e)
-  end
+  # Normalize the two accepted validate bodies down to {slug, blocks, merged}; a
+  # BPML copy is read as a push to its <paper slug> would read it.
+  defp validate_normalize(conn, %{"bpml" => bpml} = params) when is_binary(bpml) do
+    dataset = blank_to_nil(params["dataset"]) || Content.paper_default_dataset()
+    scope = resolve_write_scope(conn, params)
 
-  # The canonical echo AFTER a successful write. The ops already committed, so an
-  # unprintable post-write state must NOT change the verdict: a 500 would strand
-  # the client's rev anchor on a write that landed, and a 422 would simply lie.
-  # It degrades to `bpml: nil` plus an explicit marker, and the rev is still the
-  # anchor to pull from. Only UnprintableError is rescued — a real printer bug
-  # still crashes loudly (charter D3).
-  # Public (not an action — no route names it) so the degrade contract is
-  # directly testable: the sync path itself can no longer REACH an unprintable
-  # post-write state now that the entry guard closes that door, and a rescue
-  # nobody can prove is a rescue nobody should trust.
-  @doc false
-  def canonical_echo(paper) do
-    blocks = get_in(paper.content || %{}, ["blocks"]) || []
-
-    bpml =
-      Barkpark.PortableDoc.Bpml.print_paper(Barkpark.Content.Papers.bpml_paper_map(paper, blocks))
-
-    {bpml, nil}
-  rescue
-    e in UnprintableError -> {nil, Exception.message(e)}
-  end
-
-  @doc false
-  def maybe_mark_echo(payload, nil), do: payload
-
-  def maybe_mark_echo(payload, refusal) do
-    Map.merge(payload, %{
-      bpml_unprintable: refusal,
-      hint:
-        "the ops applied and `rev` is your new anchor, but the persisted blocks can no longer be printed as BPML — pull format=json to see them"
-    })
-  end
-
-  # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
-  defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
-    case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
-      {:ok, parsed} -> {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
-      {:error, errors} -> {:error, errors}
+    with {:ok, copy} <- Barkpark.PortableDoc.Bpml.parse_copy(bpml),
+         {:ok, parsed} <- Content.Papers.BpmlView.check_copy(copy, dataset, scope) do
+      {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
     end
   end
 
-  defp validate_normalize(%{} = params) do
+  defp validate_normalize(_conn, %{} = params) do
     {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
   end
 
@@ -2248,16 +2192,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # `is_nil(ws)` arm) used to honour a named workspace for ANY credential. A
   # workspace-less admin token seated only in A could then create, overwrite
   # and edit B's papers and sessions by naming B. Now a TOKEN that names a
-  # workspace must hold write access there (`Tenancy.Auth.authorize/3`) or be
-  # on an ARMED instance-operator allowlist; else 403 `workspace_forbidden`.
+  # workspace must be able to write there (`WriteGate.may_write?/2` on its `:write_caller`:
+  # a seat allowing write, or an ARMED operator allowlist); else 403 `workspace_forbidden`.
   # The shared-secret producer carries no `:api_token` and is unchanged; a
   # workspace-bound token is already confined by the reconciliations
   # themselves. One door for every action, so the read twin is covered too.
   defp require_named_workspace_access(conn, _opts) do
-    with %Barkpark.Auth.ApiToken{} = token <- conn.assigns[:api_token],
+    with token when not is_nil(token) <- conn.assigns[:api_token],
          nil <- pipeline_workspace(conn),
          {ws_id, _project} when is_binary(ws_id) <- requested_scope(conn, conn.params),
-         false <- may_address_workspace?(token, ws_id) do
+         false <- WriteGate.may_write?(conn.assigns[:write_caller], ws_id) do
       conn
       |> ErrorResponse.emit_custom(
         :forbidden,
@@ -2269,19 +2213,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
       |> halt()
     else
       _ -> conn
-    end
-  end
-
-  defp may_address_workspace?(token, ws_id) do
-    Tenancy.Auth.authorize(token, ws_id, :write) == :ok or armed_operator?(token)
-  end
-
-  # The instance operator, only when the allowlist is ARMED: an unset allowlist
-  # admits every admin token, which is exactly the population this closes.
-  defp armed_operator?(token) do
-    case BarkparkWeb.Plugs.RequirePlatformOperator.allowlist() do
-      %{emails: [], token_ids: []} -> false
-      _ -> BarkparkWeb.Plugs.RequirePlatformOperator.permits?(token)
     end
   end
 

@@ -21,7 +21,7 @@ defmodule Barkpark.Content.Query do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, DraftId, Query.DraftShadow, Schema}
+  alias Barkpark.Content.{Document, DraftId, Query.DraftShadow, Schema, Today}
 
   import Barkpark.Content.Scope,
     only: [
@@ -1976,7 +1976,7 @@ defmodule Barkpark.Content.Query do
     query = apply_or_groups(query, groups, type, dataset, opts)
 
     map =
-      map
+      Today.in_filter(map, opts)
       |> resolve_reference_count_ops(type, dataset, opts)
       |> resolve_references_eq(type, dataset, opts)
       |> resolve_reference_id_text_ops(type, dataset, opts)

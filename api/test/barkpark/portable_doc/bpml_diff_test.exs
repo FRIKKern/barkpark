@@ -19,7 +19,7 @@ defmodule Barkpark.PortableDoc.BpmlDiffTest do
   end
 
   defp assert_derives!(old, new) do
-    assert {:ok, minted, ops} = Diff.derive(old, new)
+    assert {:ok, minted, ops} = Diff.derive(old, new, old)
     assert {:ok, replayed} = Patch.apply_patches(old, ops)
     assert replayed == minted
     {minted, ops}
@@ -28,7 +28,7 @@ defmodule Barkpark.PortableDoc.BpmlDiffTest do
   describe "crafted cases" do
     test "equal documents derive zero ops" do
       blocks = [block("a"), block("b")]
-      assert {:ok, ^blocks, []} = Diff.derive(blocks, blocks)
+      assert {:ok, ^blocks, []} = Diff.derive(blocks, blocks, blocks)
     end
 
     test "pure content edit is one replace-block" do
@@ -90,7 +90,7 @@ defmodule Barkpark.PortableDoc.BpmlDiffTest do
         old = Enum.map(1..Enum.random(0..8)//1, &block("s#{&1}"))
         new = mutate(old, Enum.random(1..5))
 
-        case Diff.derive(old, new) do
+        case Diff.derive(old, new, old) do
           {:ok, minted, ops} ->
             assert {:ok, replayed} = Patch.apply_patches(old, ops)
 

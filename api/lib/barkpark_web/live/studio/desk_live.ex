@@ -51,10 +51,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.ScopeSwitch
   alias BarkparkWeb.Studio.Desk.Search
   alias BarkparkWeb.Studio.Desk.Style
+  alias BarkparkWeb.Studio.Desk.TasksPanel
+  alias BarkparkWeb.Studio.Desk.TasksRead
   alias BarkparkWeb.Studio.Desk.DocStyle
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.Desk.Vision
+  alias BarkparkWeb.Studio.Desk.VisionListen
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -108,6 +111,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
       |> assign(:desk_scope, nil)
       |> Bulk.init()
+      # The navbar's Tasks sidebar (`TasksPanel`): offered while the Tasks
+      # plugin is on for the workspace, closed until its button is pressed.
+      |> assign(:desk_tasks?, TasksRead.available?(socket.assigns[:current_workspace]))
+      |> assign(:desk_tasks_open?, false)
       # The search's hits: up to 50, as the TanStack Studio's text search,
       # the first 40 drawn, then more as the list's end scrolls near (`Search`).
       |> assign(desk_search_limit: Search.limit(), desk_search_drawn: Search.step())
@@ -123,6 +130,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   @impl true
   def handle_params(params, uri, socket) do
+    {:noreply, socket} = route(params, uri, socket)
+    # Vision's Listen ends when Vision is left or the page's dataset changes.
+    {:noreply, VisionListen.follow(socket)}
+  end
+
+  defp route(params, uri, socket) do
     cond do
       # A live patch to such a dataset segment goes back to the desk it left.
       # So does one to a dataset longer than any name can be.
@@ -355,7 +368,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # undo when it landed (`DocUndo`).
   def handle_event("autosave" = event, params, socket),
     do:
-      DocUndo.around(event, params, socket, fn ->
+      DocUndo.around(event, params, socket, fn socket ->
         EditorHost.handle_event(event, params, socket)
       end)
 
@@ -379,15 +392,26 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("bulk-" <> _ = event, params, socket),
     do: Bulk.handle_event(event, params, socket)
 
+  # The navbar's and the drawer's Tasks button (`TasksPanel`).
+  def handle_event("desk-tasks-toggle", _params, socket) do
+    if socket.assigns.desk_tasks?,
+      do: {:noreply, assign(socket, :desk_tasks_open?, !socket.assigns.desk_tasks_open?)},
+      else: {:noreply, socket}
+  end
+
   # The navbar's workspace, project and dataset switcher (`ScopeSwitch`).
   def handle_event("desk-scope-" <> _ = event, params, socket),
     do: ScopeSwitch.handle_event(event, params, socket)
+
+  # Vision's Listen and its Stop (`VisionListen`).
+  def handle_event("vision-listen-" <> _ = event, params, socket),
+    do: VisionListen.handle_event(event, params, socket)
 
   # The rest is the editor's; a list's buttons (`array_op`) are a step of the
   # document's undo when they landed (`DocUndo`).
   def handle_event(event, params, socket),
     do:
-      DocUndo.around(event, params, socket, fn ->
+      DocUndo.around(event, params, socket, fn socket ->
         EditorHost.handle_event(event, params, socket)
       end)
 
@@ -430,6 +454,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # A bulk publish or unpublish is back (`Bulk`).
   def handle_async({:desk_bulk, task}, result, socket),
     do: Bulk.handle_async(task, result, socket)
+
+  defp account_path(%{scope_prefix: prefix, dataset: dataset})
+       when is_binary(prefix) and prefix != "" and is_binary(dataset),
+       do: Paths.studio_path(prefix, ["_account"], dataset)
+
+  defp account_path(_assigns), do: nil
 
   defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
@@ -505,6 +535,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
     {:noreply, assign(socket, list_sorts: sorts, warm: warm)}
   end
 
+  # A change Vision's Listen may show (`VisionListenStream`).
+  def handle_info({:vision_listen, _ref, _message} = message, socket),
+    do: VisionListen.handle_info(message, socket)
+
+  # A pick or a Remove in a tree codelist (`TreeCodelistField`) comes as a
+  # message, and is a step of the document's undo when it landed, as a typed
+  # edit is (`DocUndo`, task-a895a60bcc1302d9).
+  def handle_info({:tree_codelist_pick, %{} = msg} = message, socket),
+    do:
+      DocUndo.around("tree_codelist_pick", msg, socket, fn socket ->
+        EditorHost.handle_info(message, socket)
+      end)
+
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
   @impl true
@@ -515,7 +558,24 @@ defmodule BarkparkWeb.Studio.DeskLive do
     <BarkparkWeb.Studio.Desk.NavbarStyle.sheet />
     <BarkparkWeb.Studio.Desk.NavDrawerStyle.sheet />
     <BarkparkWeb.Studio.Desk.VisionStyle.sheet :if={@desk_tool == :vision} />
-    <div class="dk" style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column">
+    <BarkparkWeb.Studio.Desk.TasksStyle.sheet :if={@desk_tasks?} />
+    <div
+      class="dk dk-tasks-host"
+      data-tasks-open={@desk_tasks_open?}
+      style="flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column"
+    >
+    <%!-- The navbar's Tasks sidebar (`TasksPanel`), at the right of the panes. --%>
+    <.live_component
+      :if={@desk_tasks_open?}
+      module={TasksPanel}
+      id="dk-tasks"
+      dataset={@dataset}
+      workspace_id={@current_workspace.id}
+      project_id={assigns[:current_project] && assigns[:current_project].id}
+      target={active_doc_id(@active, assigns[:editor_doc])}
+      base={@base}
+      root={@desk.root}
+    />
     <%!-- The search is a dialog, as the TanStack Studio's: the navbar's
           search button (`data-desk-search-open`), Cmd+K and "/" open it
           (`bp-desk.js`). A patch keeps it open: `open` is the browser's. --%>
@@ -535,6 +595,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
     </dialog>
     <%!-- The navbar's Create new (J37): its button is the layout's. --%>
     <NewDocMenu.picker picks={NewDocMenu.picks(@desk.new)} />
+    <%!-- The presence profile (the display name and colour others see):
+          the navbar's own pill and the drawer's "Your profile" open it, with
+          a document open or not. The hosted editor's shell leaves its own
+          copy out (`EditorHost`), so there is one. --%>
+    <BarkparkWeb.StudioComponents.profile_modal
+      show_profile={@show_profile}
+      user_name={@user_name}
+      user_name_fallback={assigns[:user_name_fallback]}
+      user_color={@user_color}
+      account_label={assigns[:account_label]}
+      account_path={account_path(assigns)}
+      profile_error={assigns[:profile_error]}
+    />
     <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its
@@ -552,12 +625,15 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-doc-clip={BarkparkWeb.StaticAssets.path("bp-desk-doc-clip.js")}
       data-desk-tags={BarkparkWeb.StaticAssets.path("bp-desk-tags.js")}
       data-desk-codelist={BarkparkWeb.StaticAssets.path("bp-desk-codelist.js")}
+      data-desk-lang-tabs={BarkparkWeb.StaticAssets.path("bp-desk-lang-tabs.js")}
       data-desk-validation={BarkparkWeb.StaticAssets.path("bp-desk-validation.js")}
       data-desk-bulk={BarkparkWeb.StaticAssets.path("bp-desk-bulk.js")}
       data-desk-array-menu={BarkparkWeb.StaticAssets.path("bp-desk-array-menu.js")}
       data-desk-image={BarkparkWeb.StaticAssets.path("bp-desk-image.js")}
       data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       data-desk-undo={BarkparkWeb.StaticAssets.path("bp-desk-undo.js")}
+      data-desk-locked-value={BarkparkWeb.StaticAssets.path("bp-desk-locked-value.js")}
+      data-desk-revision-focus={BarkparkWeb.StaticAssets.path("bp-desk-revision-focus.js")}
       data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
       data-desk-new-doc={BarkparkWeb.StaticAssets.path("bp-desk-new-doc.js")}
       style="flex: 1 1 auto; min-height: 0"
@@ -608,6 +684,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
     </div>
     """
   end
+
+  # The document open in the desk, for the Tasks sidebar's Active Document.
+  defp active_doc_id(active, %{doc_id: id}) when is_integer(active) and is_binary(id),
+    do: Barkpark.Content.published_id(id)
+
+  defp active_doc_id(_active, _doc), do: nil
 
   # The tree is the same for every click in a dataset: build it once.
   defp desk(%{dataset: dataset} = desk, dataset, _scope), do: desk

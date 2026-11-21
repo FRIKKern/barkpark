@@ -28,6 +28,8 @@ defmodule Barkpark.Content.LiveWriteGateCensusTest do
     # Writes `drafts.<id>` only; publishing is Lifecycle's.
     "barkpark/content/writer.ex" =>
       {:drafts_only, "every write target goes through DraftId.draft_id/1"},
+    "barkpark/content/insert_only.ex" =>
+      {:drafts_only, "the birth insert of Writer's upsert; Writer passes only drafts.<id> attrs"},
     "barkpark/content/papers/proposals.ex" =>
       {:drafts_only, "a proposal writes the paper's draft row, never the live one"},
     # Derived data, recomputed from content someone already published.

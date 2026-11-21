@@ -26,6 +26,12 @@ defmodule Barkpark.Content.FieldVisibility do
   parity E1.5 — Sanity's `hidden: ({parent}) => parent.banners?.length !== 2`
   becomes `{"field": "banners", "operator": "count_neq", "value": 2}` read as
   "visible when …"; a list counts its rows, a map its keys, nil/"" count 0).
+  The compare family `gt`, `gte`, `lt`, `lte` (task-606283a5dedc2403) holds when
+  both sides are numbers or both are non-empty strings (ISO dates compare as
+  text) and the comparison is true; when either side is missing, empty, or of
+  another kind it holds, so an optional field never breaks a rule.
+  `"valueField"` in place of `"value"` compares with another field of the same
+  root: `{"field": "sluttdato", "operator": "gte", "valueField": "startdato"}`.
   Field references support dotted paths (`"foo.bar.baz"` walks the doc map).
 
   `"scope"` picks where the path starts (task-9905a69475b1ff3b):
@@ -48,7 +54,8 @@ defmodule Barkpark.Content.FieldVisibility do
   `hidden: ({document}) => document.a != "x" || document.b == "y"` is
   `{"all": [{"field": "a", "operator": "eq", "value": "x"},
   {"field": "b", "operator": "neq", "value": "y"}]}`. Each leaf carries its own
-  `"scope"`.
+  `"scope"`. `{"one": [...]}` holds when exactly one of its predicates holds
+  (Sanity's "a page or an area, not both, not none").
 
   Field input flavours handled transparently:
 
@@ -122,6 +129,12 @@ defmodule Barkpark.Content.FieldVisibility do
   defp holds?(%{any: [_ | _] = preds}, doc, parent),
     do: Enum.any?(preds, &holds?(&1, doc, parent))
 
+  defp holds?(%{"one" => [_ | _] = preds}, doc, parent),
+    do: Enum.count(preds, &holds?(&1, doc, parent)) == 1
+
+  defp holds?(%{one: [_ | _] = preds}, doc, parent),
+    do: Enum.count(preds, &holds?(&1, doc, parent)) == 1
+
   defp holds?(%{} = cond, doc, parent), do: evaluate(cond, scope_root(cond, doc, parent))
   defp holds?(_, _, _), do: true
 
@@ -152,17 +165,25 @@ defmodule Barkpark.Content.FieldVisibility do
 
   defp evaluate(%{"field" => field_ref, "operator" => op} = cond, doc) do
     value = walk_path(doc, String.split(field_ref, "."))
-    expected = Map.get(cond, "value")
-    apply_op(op, value, expected)
+    apply_op(op, value, expected(cond, doc))
   end
 
   defp evaluate(%{field: field_ref, operator: op} = cond, doc) do
     value = walk_path(doc, String.split(to_string(field_ref), "."))
-    expected = Map.get(cond, :value)
-    apply_op(to_string(op), value, expected)
+    apply_op(to_string(op), value, expected(cond, doc))
   end
 
   defp evaluate(_, _), do: true
+
+  # The value a leaf compares with: another field's (`valueField`, read from the
+  # same root as `field`), else its own `value`.
+  defp expected(%{"valueField" => ref}, doc) when is_binary(ref),
+    do: walk_path(doc, String.split(ref, "."))
+
+  defp expected(%{valueField: ref}, doc) when is_binary(ref),
+    do: walk_path(doc, String.split(ref, "."))
+
+  defp expected(cond, _doc), do: Map.get(cond, "value", Map.get(cond, :value))
 
   defp walk_path(value, []), do: value
 
@@ -210,6 +231,13 @@ defmodule Barkpark.Content.FieldVisibility do
 
   defp apply_op("starts_with", _, _), do: false
 
+  defp apply_op(op, value, other) when op in ~w(gt gte lt lte) do
+    case comparable(value, other) do
+      {a, b} -> compare(op, a, b)
+      nil -> true
+    end
+  end
+
   # Unknown operator → default visible (back-compat with future operators
   # that ship in schema before the renderer learns them).
   defp apply_op(_, _, _), do: true
@@ -226,6 +254,17 @@ defmodule Barkpark.Content.FieldVisibility do
   end
 
   defp safe_atom(_), do: nil
+
+  # Two sides the compare family can order: both numbers, or both non-empty
+  # strings. Anything else (nil, "", a list, mixed kinds) is not comparable.
+  defp comparable(a, b) when is_number(a) and is_number(b), do: {a, b}
+  defp comparable(a, b) when is_binary(a) and is_binary(b) and a != "" and b != "", do: {a, b}
+  defp comparable(_, _), do: nil
+
+  defp compare("gt", a, b), do: a > b
+  defp compare("gte", a, b), do: a >= b
+  defp compare("lt", a, b), do: a < b
+  defp compare("lte", a, b), do: a <= b
 
   # Row count for the `count_*` operators. The editor form keeps an arrayOf as a
   # list; a map-shaped array (index-keyed params) counts its keys; scalars 0.

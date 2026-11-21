@@ -219,6 +219,13 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
       assert b =~ @shared_marker, "query/:ds/:type dropped the shared layer"
     end
 
+    test "a \"$today\" filter on an unresolved request answers 200, as without it (no 500)", %{
+      raw: raw
+    } do
+      assert {200, _} = fetch(raw, "/v1/data/query/#{@ds}/post?filter[title]=x")
+      assert {200, _} = fetch(raw, "/v1/data/query/#{@ds}/post?filter[title]=%24today")
+    end
+
     test "doc/:ds/:type/:id does not resolve another tenant's document", %{raw: raw} do
       {_s, b} = fetch(raw, "/v1/data/doc/#{@ds}/post/esl-a-doc")
       refute b =~ @marker, "doc/:ds/:type/:id leaked a workspace-owned row"

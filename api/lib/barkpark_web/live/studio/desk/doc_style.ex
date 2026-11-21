@@ -70,8 +70,6 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-selected-fill: rgb(238 238 241); --dk-tab-selected-fg: rgb(99 103 118); --dk-icon-muted: rgb(106 110 125); --dk-tag-x: rgb(102 106 121); --dk-fg-strong: rgb(13 14 18);
         --dk-icon-btn-hover: rgb(246 246 248); --dk-focus-ring: rgb(85 107 252); --dk-input-hover-ring: rgb(187 189 201);
         --dk-danger-text: rgb(189 51 40); --dk-placeholder: rgb(148 153 173);
-        --dk-bg-soft: rgb(246 246 248); --dk-btn2-fg: rgb(78 85 109); --dk-btn2-ring: rgb(230 230 234);
-        --dk-btn2-hover-bg: rgb(238 238 241); --dk-btn2-hover-fg: rgb(53 58 77); --dk-btn2-hover-ring: rgb(222 222 228);
         --dk-upload-fill: rgb(246 246 248); --dk-upload-ring: rgb(219 220 226); --dk-ghost-fg: rgb(56 61 81); --dk-hover-strong: rgb(233 234 238); --dk-glass: rgb(255 255 255 / 0.88);
         --bg: var(--dk-bg); background: var(--bg);
       }
@@ -80,8 +78,6 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-selected-fill: rgb(42 45 63); --dk-tab-selected-fg: rgb(157 159 174); --dk-icon-muted: rgb(147 148 159); --dk-tag-x: rgb(144 145 155); --dk-fg-strong: rgb(255 255 255);
         --dk-icon-btn-hover: rgb(33 35 47); --dk-focus-ring: rgb(89 111 252); --dk-input-hover-ring: rgb(61 66 88);
         --dk-danger-text: rgb(255 123 114); --dk-placeholder: rgb(85 92 117);
-        --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);
-        --dk-btn2-hover-bg: rgb(33 35 47); --dk-btn2-hover-fg: rgb(193 195 208); --dk-btn2-hover-ring: rgb(46 49 65);
         --dk-upload-fill: rgb(13 14 18); --dk-upload-ring: rgb(37 40 55); --dk-ghost-fg: rgb(189 191 203); --dk-hover-strong: rgb(42 45 63); --dk-glass: rgb(19 20 27 / 0.85);
       }
       .dk .dk-edit > .doc-title-bar { box-sizing: border-box; height: 50px; flex: none; display: flex; align-items: center; padding: 0 20px; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
@@ -173,6 +169,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.TagsStyle.css()) %>
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.CodelistStyle.css()) %>
+      <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.LocalizedStyle.css()) %>
       .dk-field-toast { box-sizing: border-box; inset: auto 16px 56px auto; margin: 0; max-width: min(420px, calc(100vw - 32px)); padding: 10px 14px; border: 0; border-radius: 6px; background: var(--surface-raised); color: var(--text); box-shadow: 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 3px 5px -2px rgba(114, 120, 146, 0.1), 0 6px 10px 0 rgba(114, 120, 146, 0.07), 0 1px 18px 1px rgba(114, 120, 146, 0.06); font-size: 13px; line-height: 19px; }
       .dk-field-toast strong { display: block; font-weight: 600; }
       .dk-field-toast[data-tone="critical"] { box-shadow: inset 3px 0 0 var(--danger), 0 0 0 0.5px rgba(110, 116, 142, 0.3), 0 6px 10px 0 rgba(114, 120, 146, 0.07); }
