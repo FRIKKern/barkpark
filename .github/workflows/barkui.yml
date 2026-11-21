@@ -223,8 +223,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           set +e
-          echo "=== RUN plain"; node check/selftest.mjs "top layer: a named popover"; node check/selftest.mjs "review plant"
-          for k in reading tab; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "top layer: a named popover"; done
+          echo "=== RUN P"; node check/selftest.mjs "review plant R6P"
           exit 1
 
       - name: Upload this selftest job's report
@@ -289,10 +288,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           set +e
-          echo "=== RUN plain"; node check/selftest.mjs "top layer: a named hover hint"; node check/selftest.mjs "top layer: the ways out"; node check/selftest.mjs "a state on any control of its kind"
-          for k in first roots frames; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "top layer: a named hover hint"; done
-          echo "=== RUN REVIEW_KILL=refuse"; REVIEW_KILL=refuse node check/selftest.mjs "top layer: the ways out"
-          for k in states press; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "a state on any control of its kind"; done
+          echo "rest job: nothing in this run"
           exit 1
 
       - name: Upload this selftest job's report

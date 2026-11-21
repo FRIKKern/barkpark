@@ -40,18 +40,29 @@ const JS = [
   `once('#button-r6j-open', () => { const h = document.createElement('span'), r = h.attachShadow({ mode: 'open' }); ${later(`row.append(h); ${later(`const b = box('button-r6j', 'Probe J'); r.append(b); b.showPopover(); say('J open ' + b.matches(':popover-open')); ${later('h.remove()')}`)}`)} })`,
 ].join('\n')
 
-// P, in its own run: another window that is not window.open and not a frame. A link with target=_blank opens a
-// blob: page in a new window; that page reaches its opener and attaches a root on a host already in the stage with
-// its own window's attachShadow, holding a box shown at once and gone a task later.
-const POPUP = `<script>const d = opener.document, h = d.querySelector('#button-r6p-host'); opener.console.error('review r6: P reached'); const r = Element.prototype.attachShadow.call(h, { mode: 'open' }); const b = d.createElement('div'); b.id = 'button-r6p'; b.textContent = 'Probe P'; b.popover = 'manual'; r.append(b); b.showPopover(); opener.console.error('review r6: P open ' + b.matches(':popover-open')); opener.setTimeout(() => b.remove(), 0); window.close()</` + `script>`
+// P, in its own run: another window that is not window.open and not a frame, opened by a link with
+// target=_blank. Its page reaches its opener and attaches a root on a host already in the stage with its own
+// window's attachShadow, holding a box shown at once and gone a task later. Two ways in: a blob: page (Pb), and a
+// javascript: link run in the new window (Pj). Every step reports to the page's console, so the log shows whether
+// the window opened, whether it reached the page, and why not.
+const ATTACH = (t) => `opener.postMessage('P${t} alive', '*'); try { const d = opener.document, h = d.querySelector('#button-r6p-host-${t}'); const r = Element.prototype.attachShadow.call(h, { mode: 'open' }); const b = d.createElement('div'); b.id = 'button-r6p${t}'; b.textContent = 'Probe P${t}'; b.popover = 'manual'; r.append(b); b.showPopover(); opener.console.error('review r6: P${t} open ' + b.matches(':popover-open')); opener.setTimeout(() => b.remove(), 0) } catch (e) { opener.postMessage('P${t} err ' + e.name + ': ' + e.message, '*') } window.close()`
+const BLOB = '<script>' + ATTACH('b') + '</' + 'script>'
 const HTML_P = `
 <div data-demo-row id="button-r6p-row">
   <span data-demo-label>Probe P</span>
-  <ui-button><button id="button-r6p-open" data-slot="button" type="button">P</button></ui-button>
-  <span id="button-r6p-host"></span>
+  <ui-button><button id="button-r6pb-open" data-slot="button" type="button">Pb</button></ui-button>
+  <span id="button-r6p-host-b"></span>
+  <ui-button><button id="button-r6pj-open" data-slot="button" type="button">Pj</button></ui-button>
+  <span id="button-r6p-host-j"></span>
 </div>
 `
-const JS_P = `{ let done = false; root.querySelector('#button-r6p-open').addEventListener('focus', () => { if (done) return; done = true; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([${JSON.stringify(POPUP).replace(/<\//g, '<\\/')}], { type: 'text/html' })); a.target = '_blank'; root.querySelector('#button-r6p-row').append(a); a.click(); a.remove() }) }`
+const lit = (s) => JSON.stringify(s).replace(/<\//g, '<\\/')
+const JS_P = [
+  "addEventListener('message', (e) => console.error('review r6: P msg ' + e.data))",
+  "const link = (id, href) => { let done = false; root.querySelector(id).addEventListener('focus', () => { if (done) return; done = true; console.error('review r6: ' + id + ' activation ' + navigator.userActivation.isActive); const a = document.createElement('a'); a.href = href(); a.target = '_blank'; root.querySelector('#button-r6p-row').append(a); a.click(); a.remove(); console.error('review r6: ' + id + ' clicked') }) }",
+  `link('#button-r6pb-open', () => URL.createObjectURL(new Blob([${lit(BLOB)}], { type: 'text/html' })))`,
+  `link('#button-r6pj-open', () => 'javascript:' + encodeURIComponent(${lit(ATTACH('j'))}))`,
+].join('\n')
 
 const report = (tag) => (p) => {
   const s = Object.entries(lights(p)).flatMap(([l, x]) => (x.fails ?? [x.detail ?? '']).filter((f) => f.includes(tag) || f.includes('review r6')).map((f) => `${l}: ${f}`))
@@ -83,7 +94,10 @@ export const REVIEW_CASES = [
     plant: all((d) => appendFileSync(join(d, 'example.html'), HTML_P), (d) => inDemo(d, JS_P)),
     expect: (p, ...rest) => {
       report('button-r6p')(p)
-      return each({ 'P: a box in a root attached from a window a link opened': can('div#button-r6p "Probe P"') })(p, ...rest)
+      return each({
+        'Pb: a box in a root attached from a blob: window a link opened': can('div#button-r6pb "Probe Pb"'),
+        'Pj: a box in a root attached from a javascript: link in a new window': can('div#button-r6pj "Probe Pj"'),
+      })(p, ...rest)
     },
   },
 ]
