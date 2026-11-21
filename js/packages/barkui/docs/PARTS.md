@@ -160,6 +160,11 @@ matches; a rule or a pair nobody judges fails the part by name.
   other rule type (`@keyframes`, `@layer`, `@container`, `@supports`, `@property`, `@font-face`, and
   any the browser adds later) and every other condition refuses the run before a light is read, and so
   do `!important`, a `var()` with a fallback, and a custom property inside a reduced-motion query.
+  A part sheet keeps to a few forms: a `url(` has a quoted string straight after it, a string closes on
+  the line it opens, and a comment stands only between declarations and between rules; outside them the
+  sheet is refused by name. Inside them, every rule the text writes must be one the browser read
+  (`check/sheet-text.mjs`): a rule it drops, for a selector or condition it does not know, is refused by
+  name, since nothing would judge it.
   Selectors are read as the browser writes them back: a pinned state (`:hover`, `:active`,
   `:focus-visible`, `:checked`, in any case) may stand only on the element the rule styles, never on a host,
   ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
