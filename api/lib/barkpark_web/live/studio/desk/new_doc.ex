@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.Desk.NewDoc do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Content.Forms
+  alias Barkpark.Content.Today
   alias Barkpark.Content.Writer
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.QuotaGate
@@ -133,7 +134,11 @@ defmodule BarkparkWeb.Studio.Desk.NewDoc do
   # starts from: the type's initial values, then the template's, each in the
   # stored shape (a reference by id is stored as `{_ref, _type}`).
   defp content(schema, choice) do
-    initial = Writer.resolve_dynamics(schema.initial_values || %{})
+    initial =
+      Today.resolve(schema.initial_values || %{}, fn ->
+        Today.clock(Map.get(schema, :workspace_id))
+      end)
+
     Writer.deep_merge(initial, Forms.coerce_params(choice.value, schema))
   end
 
