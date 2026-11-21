@@ -92,14 +92,17 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       a = open(c.conn, c.path)
       b = open(c.conn, c.path)
 
-      # A's excerpt edit is not saved yet.
+      # A's title edit is not saved yet.
       :sys.replace_state(a.pid, fn state ->
         socket = state.socket
 
+        # The title, the field B's save rewrites: a conflict only where the
+        # remote save rewrote this page's own field (task-65543203e7b71c80).
         assigns =
           Map.merge(socket.assigns, %{
             editor_dirty: true,
-            editor_unsaved_keys: MapSet.new(["excerpt"])
+            editor_unsaved_keys: MapSet.new(["title"]),
+            editor_form: Map.put(socket.assigns.editor_form, "title", "Mine, unsent")
           })
 
         %{state | socket: %{socket | assigns: assigns}}
@@ -127,10 +130,13 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       :sys.replace_state(a.pid, fn state ->
         socket = state.socket
 
+        # The title, the field B's save rewrites: a conflict only where the
+        # remote save rewrote this page's own field (task-65543203e7b71c80).
         assigns =
           Map.merge(socket.assigns, %{
             editor_dirty: true,
-            editor_unsaved_keys: MapSet.new(["excerpt"])
+            editor_unsaved_keys: MapSet.new(["title"]),
+            editor_form: Map.put(socket.assigns.editor_form, "title", "Mine, unsent")
           })
 
         %{state | socket: %{socket | assigns: assigns}}

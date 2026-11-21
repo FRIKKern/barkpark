@@ -48,6 +48,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil,
         doc_conflict: false,
+        editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
       )
@@ -81,10 +82,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # changed keeps the remote one (`Forms.upsert_draft/6`). `RemoteValues`
   # tells the focused input of the new value (task-e6ef964ac2e41d5a).
   #
-  # With unsaved local edits (`editor_dirty`), raise the `doc_conflict` banner.
-  # The fields named in `editor_unsaved_keys` keep their local value and the
-  # other fields take the remote save (task-6f5426c4b04de74b); with none named
-  # (an array op, a slug derive) the whole buffer is kept, as before.
+  # With unsaved local edits (`editor_dirty`), the fields named in
+  # `editor_unsaved_keys` keep their local value and the other fields take
+  # the remote save (task-6f5426c4b04de74b). It is a conflict, the
+  # `doc_conflict` banner and "Updated by another user", only where the
+  # remote save rewrote one of those fields as TanStack's `rebase` and
+  # `clash` (barkpark-studio edit-bases.ts, edits.ts) read it
+  # (task-65543203e7b71c80): a field whose stored value did not move from
+  # its base stays ours; a text field both changed merges (`TextRebase.
+  # merge3_both/3`, TanStack's `merge3`), and only a merge that cannot keep
+  # both changes clashes; any other value stays ours. A save that rewrote
+  # none of them is taken in quietly. The base is the newest stored version
+  # this tab saw (`base_doc/1`). With none named (an array op, a slug
+  # derive) the whole buffer is kept and it is a conflict, as before.
   #
   # A SIBLING PROJECT's save is ignored (r4a realtime authz sweep). The doc
   # topic is keyed by id + type + workspace + dataset NAME, which a same-id
@@ -106,10 +116,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
-        {:noreply,
-         socket
-         |> keep_unsaved_fields(doc_data)
-         |> assign(doc_conflict: true, save_status: "Updated by another user")}
+        {socket, clashed?} = keep_unsaved_fields(socket, doc_data)
+
+        socket =
+          if clashed?,
+            do: assign(socket, doc_conflict: true, save_status: "Updated by another user"),
+            else: socket
+
+        {:noreply, assign(socket, :editor_store_doc, doc_data)}
 
       true ->
         schema = socket.assigns[:editor_schema]
@@ -125,6 +139,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
          |> RemoteValues.push(socket.assigns[:editor_form] || %{}, updated_form)
          |> PostedEdits.remote(socket.assigns[:editor_form] || %{}, updated_form)
          |> assign(
+           editor_store_doc: doc_data,
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
@@ -144,26 +159,85 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   defp fresher(frame, _doc), do: frame
 
+  # The remote save taken into the form, and whether it rewrote one of the
+  # unsaved fields so both changes cannot stand (`clash/4`).
   defp keep_unsaved_fields(socket, doc_data) do
     keys = socket.assigns[:editor_unsaved_keys] || MapSet.new()
 
     if MapSet.size(keys) == 0 do
-      socket
+      {socket, true}
     else
       schema = socket.assigns[:editor_schema]
       local = socket.assigns[:editor_form] || %{}
+      base = Content.doc_to_form(base_doc(socket), schema)
+      theirs = Content.doc_to_form(doc_data, schema)
 
-      form =
-        doc_data
-        |> Content.doc_to_form(schema)
-        |> Map.merge(Map.take(local, MapSet.to_list(keys)))
+      {mine, clashed} =
+        Enum.reduce(keys, {%{}, []}, fn key, {mine, clashed} ->
+          case clash(Map.get(base, key), Map.get(local, key), Map.get(theirs, key), schema, key) do
+            {:keep, value} -> {Map.put(mine, key, value), clashed}
+            :clash -> {Map.put(mine, key, Map.get(local, key)), [key | clashed]}
+          end
+        end)
 
+      form = Map.merge(theirs, Map.filter(mine, fn {key, _} -> Map.has_key?(local, key) end))
       changed? = Shared.widget_values_changed?(schema, local, form)
 
-      socket
-      |> RemoteValues.push(local, form)
-      |> PostedEdits.remote(local, form)
-      |> assign(editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
+      socket =
+        socket
+        |> RemoteValues.push(local, form)
+        |> PostedEdits.remote(local, form)
+        |> assign(editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
+
+      {socket, clashed != []}
+    end
+  end
+
+  # One unsaved field under a remote save, as TanStack's `rebase` and
+  # `merge3`: theirs did not move from the base, ours stands; ours did not
+  # (or is theirs), theirs stands. A string both changed: free text merges
+  # (`TextRebase.merge3_both/3`, the splice merge a post gets), and a merge
+  # that cannot keep both is a clash; any other string (a choice, a date)
+  # cannot keep both, so it clashes. Any other value stays ours ("else ours
+  # wins").
+  defp clash(base, mine, theirs, schema, key) do
+    strings? = is_binary(base) and is_binary(mine) and is_binary(theirs)
+
+    cond do
+      theirs == base ->
+        {:keep, mine}
+
+      mine == base or mine == theirs ->
+        {:keep, theirs}
+
+      strings? and RemoteValues.free_text?(schema, key) ->
+        case Barkpark.Content.TextRebase.merge3_both(base, mine, theirs) do
+          nil -> :clash
+          merged -> {:keep, merged}
+        end
+
+      strings? ->
+        :clash
+
+      true ->
+        {:keep, mine}
+    end
+  end
+
+  # The newest stored version of the open document this tab saw: its own
+  # last save (`editor_doc`), or a remote save taken in since. TanStack moves
+  # a field's base to theirs on every frame.
+  defp base_doc(socket) do
+    own = socket.assigns[:editor_doc]
+
+    case socket.assigns[:editor_store_doc] do
+      %{doc_id: id} = seen when is_map(own) ->
+        if Content.published_id(id) == Content.published_id(own.doc_id),
+          do: fresher(seen, own),
+          else: own
+
+      _ ->
+        own
     end
   end
 
