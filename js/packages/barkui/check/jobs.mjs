@@ -10,16 +10,50 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PER_JOB } from './capacity.mjs'
 import { copyAs } from './copy.mjs'
+import { readSelftestReports } from './selftest-report.mjs'
 
 // The closing check's name in .github/workflows/barkui.yml, written here once; a test holds the workflow to it.
 export const AGGREGATE = 'BarkUI showroom check'
 // The jobs it reads, by their ids in barkui.yml, and the names they render. Every name here and every group
 // name the split can make has a row in .github/required-checks.json (a test holds that too).
-export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest' }
+export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest' }
 export const NAMES = {
   plan: 'BarkUI plan (does this change touch it, and which groups)',
-  selftest: 'BarkUI selftest',
+  selftest: 'BarkUI selftest, views',
+  selftestRest: 'BarkUI selftest, presses, states and refusals',
   group: (k) => `BarkUI check, group ${k}`,
+}
+
+// The selftest runs as two jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
+// case is the one rule below, written here once: `views` runs the cases that read the wide or phone views and
+// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`); `rest` runs every other
+// case: presses, states, refusals, the no-script print and the direct readings. A test holds that every case runs
+// in exactly one job and that the two together run every case (coverCases).
+export const SELFTEST_JOBS = [
+  { key: 'views', id: JOBS.selftest, name: NAMES.selftest },
+  { key: 'rest', id: JOBS.selftestRest, name: NAMES.selftestRest },
+]
+const VIEWS = ['skins', 'schemes', 'phone']
+/** The selftest job that runs a case, by its key. */
+export const selftestJob = (c) => (!c.direct && !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
+/** The cases the job `key` runs, in their order. */
+export const casesOf = (cases, key) => cases.filter((c) => selftestJob(c) === key)
+/** The cases one selftest run runs: job `key`'s (every case when `key` is null), narrowed to those whose name holds
+    `words`. The runner (check/selftest.mjs) and the fast tests both call this; there is no second copy. */
+export const selftestPick = (cases, key, words = '') => (key === null ? cases : casesOf(cases, key)).filter((c) => c.name.includes(words))
+/** What is wrong with the jobs' case lists ({ key: cases }) against every case, in plain words; empty when every
+    case runs in exactly one job, no job runs anything else, and the jobs run as many cases as there are. */
+export function coverCases(lists, cases) {
+  const out = []
+  const runs = new Map(cases.map((c) => [c, []]))
+  for (const [key, list] of Object.entries(lists)) for (const c of list) runs.has(c) ? runs.get(c).push(key) : out.push(`the ${key} job runs "${c.name}", which is no selftest case`)
+  for (const [c, keys] of runs) {
+    if (!keys.length) out.push(`"${c.name}": no selftest job runs it`)
+    if (keys.length > 1) out.push(`"${c.name}": the ${keys.join(' and ')} jobs both run it`)
+  }
+  const total = Object.values(lists).reduce((n, l) => n + l.length, 0)
+  if (total !== cases.length) out.push(`the selftest jobs run ${total} cases, and there are ${cases.length}`)
+  return out
 }
 
 export const partsDir = join(import.meta.dirname, '..', 'parts')
@@ -134,7 +168,8 @@ export function legGroup(k, given, dir = partsDir, env = process.env) {
 }
 
 const said = { failure: 'is red', cancelled: 'was cancelled', missing: 'is missing from this run' }
-const named = { [JOBS.plan]: 'the plan job', [JOBS.check]: 'the check jobs', [JOBS.selftest]: 'the selftest' }
+const named = { [JOBS.plan]: 'the plan job', [JOBS.check]: 'the check jobs', ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, `the selftest job "${j.name}"`])) }
+const LEGS = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
 
 /** The closing check. Trusts the jobs' results first and their reports second: a report cannot turn a job that
     failed or was cancelled green, and a report from another group, part list or commit counts as missing. */
@@ -147,13 +182,13 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   const { run, groups: planned } = needs[JOBS.plan].outputs ?? {}
   const rows = []
   if (run === 'false') {
-    for (const id of [JOBS.check, JOBS.selftest]) if (result(id) !== 'skipped') rows.push(`${named[id]} ${state(id)}, though the plan said BarkUI was not touched`)
-    return rows.length ? red(rows) : { ok: true, rows: ['green: the plan said BarkUI was not touched, and the check jobs and the selftest were skipped'] }
+    for (const id of LEGS) if (result(id) !== 'skipped') rows.push(`${named[id]} ${state(id)}, though the plan said BarkUI was not touched`)
+    return rows.length ? red(rows) : { ok: true, rows: ['green: the plan said BarkUI was not touched, and the check jobs and both selftest jobs were skipped'] }
   }
   if (run !== 'true') return red([`the plan job said run=${JSON.stringify(run)}, neither "true" nor "false"`])
-  for (const id of [JOBS.check, JOBS.selftest]) {
+  for (const id of LEGS) {
     const r = result(id)
-    if (r === 'skipped') rows.push(`${named[id]} were skipped by mistake: the plan said BarkUI was touched`)
+    if (r === 'skipped') rows.push(`${named[id]} ${id === JOBS.check ? 'were' : 'was'} skipped by mistake: the plan said BarkUI was touched`)
     else if (r !== 'success') rows.push(`${named[id]} ${state(id)}`)
   }
   let expected
@@ -165,7 +200,7 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   for (const w of cover(expected, names, perJob)) rows.push(`this checkout's split: ${w}`)
   if (planned !== JSON.stringify(toMatrix(expected))) rows.push(`the plan's groups ${planned} differ from this checkout's split ${JSON.stringify(toMatrix(expected))}`)
   for (const r of reports) if (r.error) rows.push(`report ${r.file} cannot be read (${r.error})`)
-  const read = reports.filter((r) => !r.error).map((r) => r.data)
+  const read = reports.filter((r) => !r.error && !r.file.startsWith('selftest-')).map((r) => r.data)
   for (const g of expected) {
     const what = `group ${g.group} of ${g.of} (${g.parts.join(', ')})`
     const mine = read.filter((d) => d?.group === g.group)
@@ -176,8 +211,11 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
     else if (mine[0].ok !== true) rows.push(`${what} is red`)
   }
   for (const d of read) if (!expected.some((g) => g.group === d?.group)) rows.push(`a report for group ${JSON.stringify(d?.group)}, which this checkout's split does not have`)
+  // Each selftest job's report: together they ran every case once, and each held (check/selftest-report.mjs).
+  const selftest = readSelftestReports(reports, { sha, jobs: SELFTEST_JOBS })
+  rows.push(...selftest.rows)
   if (rows.length) return red(rows)
-  return { ok: true, rows: [`green: ${expected.length} group(s) of ${names.length} part(s), each checked once at ${sha}, and the selftest passed`] }
+  return { ok: true, rows: [`green: ${expected.length} group(s) of ${names.length} part(s), each checked once at ${sha}, and both selftest jobs passed, running each of ${selftest.cases} cases once`] }
 }
 
 /** Every report file in a folder (each job uploads one), read or not. */
