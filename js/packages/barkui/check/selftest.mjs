@@ -219,24 +219,22 @@ const CASES = [
     expect: (p) => /cut off|clipped/.test(lights(p).noscript.detail),
   },
   // Pressed by real keys.
-  // A caret in one capture of a reading and not another: this one never blinks (caret-animation: manual) and has
-  // no colour until a sheet sets transition: none, as the glyph capture's does, so only that capture would draw it.
+  // A caret blinks while its field is focused, so a reading can catch it in one capture and not another. The spot
+  // is the one a part was red at: an empty field in UI SDK's own look, focused, its placeholder read under the
+  // caret. Eight readings in a row, one after each step, span several blinks, so the case does not hang on one.
   {
     name: 'a reading is the same whether or not the caret is drawn',
     only: ['pressed'],
     states: true,
     green: true,
     plant: (d) => {
-      appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" placeholder="Caret">\n</div>\n')
-      appendFileSync(join(d, 'press.mjs'), "\nsteps.push({ name: 'a focused empty field', expect: (root) => (root.querySelector('#button-caret').focus(), true) })\n")
+      appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" data-slot="input" placeholder="Caret">\n</div>\n')
+      // Each expect is sent to the page alone, so each step is written out whole, with nothing shared.
+      const step = (n) => `{ name: 'a focused empty field, reading ${n}', wait: 150, expect: (root) => {${n === 1 ? " root.querySelector('#button-caret').focus();" : ''} return document.activeElement === root.querySelector('#button-caret') || 'the field lost focus' } }`
+      appendFileSync(join(d, 'press.mjs'), `\nsteps.push(\n  ${[1, 2, 3, 4, 5, 6, 7, 8].map(step).join(',\n  ')},\n)\n`)
     },
-    css: [
-      '#button-caret { font: inherit; padding: 4px 8px; border: 1px solid var(--ui-foreground); background: var(--ui-background); color: var(--ui-foreground); caret-animation: manual; caret-color: transparent; transition: caret-color 1000000s steps(1, end); }',
-      '#button-caret::placeholder { color: var(--ui-muted-foreground); }',
-      '#button-caret:focus { caret-color: var(--ui-foreground); }',
-    ].join('\n'),
     expect: each({
-      'the step ran': (p) => /a focused empty field|\d+ steps by real keys/.test(lights(p).pressed?.detail ?? ''),
+      'all eight readings ran': (p) => /20 steps by real keys|a focused empty field, reading 8/.test(lights(p).pressed?.detail ?? ''),
       'a focused empty field with a placeholder draws in full': (p) => !reasons(p, 'pressed').some((f) => /at input#button-caret/.test(f)),
     }),
   },
