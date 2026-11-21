@@ -131,27 +131,35 @@ def main():
     if not ok:
         fails.append('C5')
 
-    # chains.json must still describe the tree it claims to describe.
+    # chains.json must still describe the tree it claims to describe.  A site
+    # is found by its code (`file` + the exact call text `match`, on a code
+    # line), never by a line number: an edit above it no longer drifts it.
     root = census.ROOT
-    missing = []
-    for name, c in census.CHAINS.items():
-        for site in c['enqueue_sites']:
-            head = site.split('HOP ')[-1].split(' ', 1)[-1] if site.startswith('HOP') else site
-            path, _, rest = head.partition(':')
-            lineno = rest.split(' ', 1)[0]
-            if not lineno.isdigit():
-                continue
-            fp = os.path.join(root, path.strip())
+
+    def drifted(sites):
+        out = []
+        for site in sites:
+            fp = os.path.join(root, site['file'])
             if not os.path.exists(fp):
-                missing.append(site); continue
-            lines = open(fp, encoding='utf8', errors='replace').read().split('\n')
-            i = int(lineno) - 1
-            if i >= len(lines) or not ('self()' in lines[i] or 'send_update(' in lines[i]):
-                missing.append(site)
+                out.append(site); continue
+            code = [l for l in open(fp, encoding='utf8', errors='replace').read().split('\n')
+                    if not l.lstrip().startswith('#')]
+            if not any(site['match'] in l and ('self()' in l or 'send_update(' in l) for l in code):
+                out.append(site)
+        return out
+
+    missing = [s for c in census.CHAINS.values() for s in drifted(c['enqueue_sites'])]
+    # Control: a site whose call is gone (or only named in a comment) reads drifted.
+    real = census.CHAINS['CH-CHAT']['enqueue_sites'][0]
+    gone = dict(real, match=real['match'].replace('dispatch_send', 'dispatch_gone'))
+    comment = dict(file='api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex',
+                   match='send(self(), {:paper_op, op})')
+    if drifted([gone, comment]) != [gone, comment] or drifted([real]) != []:
+        missing.append({'file': 'C6 control', 'match': 'drifted/1 does not tell a gone site from a live one'})
     ok = not missing
     print(('PASS ' if ok else 'FAIL ') + 'C6  chains.json enqueue sites still enqueue')
     for m in missing:
-        print('      drifted:', m)
+        print('      drifted: %s  %s' % (m['file'], m['match']))
     if not ok:
         fails.append('C6')
 
