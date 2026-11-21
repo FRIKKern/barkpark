@@ -9,7 +9,7 @@ import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
-import { all, both, edit, inDemo } from './plants.mjs'
+import { all, both, each, edit, inDemo } from './plants.mjs'
 import { looks } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
@@ -21,19 +21,32 @@ const POPOVER = `
   <div id="button-pop" popover>Saved two minutes ago</div>
 </div>
 `
-// A tooltip shown while the "Info" button has focus, and hidden as focus moves on: open only between readings.
-const TOOLTIP = `
+// Three more boxes for the run that holds every top-layer reading at once: one the demo opens at the start and
+// keeps open (no layer names it), a tooltip shown only while its button has focus (no layer names it), and a hint
+// shown only while the pointer is on its button (a layer names it, opened by hover, closed by the pointer leaving).
+const MORE = `
 <div data-demo-row>
-  <span data-demo-label>Tooltip</span>
+  <span data-demo-label>More boxes</span>
+  <div id="button-open" popover="manual">Always open</div>
   <ui-button><button id="button-tip-open" data-slot="button" type="button">Info</button></ui-button>
-  <div id="button-tip" popover="manual">Saved two minutes ago</div>
+  <div id="button-tip" popover="manual">Shown on focus</div>
+  <ui-button><button id="button-hint-open" data-slot="button" type="button">Hint</button></ui-button>
+  <div id="button-hint" popover="manual">Shown on hover</div>
 </div>
 `
+const MORE_JS = [
+  "root.querySelector('#button-open').showPopover()",
+  "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }",
+  "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
+].join('\n')
+const HINT = { box: '#button-hint', open: { hover: '#button-hint-open' }, close: { leave: true } }
 const since = { n: 0, ms: 0 }
 const withPopover = (d) => appendFileSync(join(d, 'example.html'), POPOVER)
 const LAYER = { box: '#button-pop', open: { click: '#button-pop-open' }, close: { keys: ['Escape'] } }
-const named = (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers: [LAYER] }, null, 2))
-const FAINT = '#button-pop { position: absolute; inset: auto; left: 8px; top: 8px; margin: 0; padding: 8px 12px; border: 0; background-color: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif; }'
+const named = (d, layers = [LAYER]) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers }, null, 2))
+/** Faint text in a white box drawn in the top layer at the page's left edge, `top` px down: outside the stage. */
+const faint = (id, top) => `#${id} { position: absolute; inset: auto; left: 8px; top: ${top}px; margin: 0; padding: 8px 12px; border: 0; background-color: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif; }`
+const UNNAMED_AT = (box) => `${box} is open in the top layer during the reading, and no layer in part.json names it`
 
 /** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
     it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
@@ -83,53 +96,36 @@ async function overTwoGrounds() {
   }
 }
 
+// One run holds every top-layer reading at once (each plant asserts its own fail), so the selftest pays for one
+// check run, not four.
 export const LAYER_CASES = [
   {
-    name: 'faint text in a popover the part names is read with it open, outside the stage, in both schemes',
-    only: ['skins'],
-    plant: all(withPopover, named),
-    css: FAINT,
-    expect: (p) => {
-      // What one open state costs on this runner, for the record (the hosted job prints it).
-      const m = p?.parts?.button?.measures?.layers
-      if (m) console.log(`    the top layer: ${m.readings} readings open in ${m.seconds} s, ${(m.seconds / m.readings).toFixed(2)} s each`)
-      return both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/)(p) && m?.readings === 10
-    },
-  },
-  {
-    name: 'a box open in the top layer that no layer in part.json names fails by name',
-    only: ['skins'],
-    plant: all(withPopover, (d) => inDemo(d, "root.querySelector('#button-pop').showPopover()")),
-    css: FAINT,
-    expect: both(/div#button-pop "Saved two minutes ago" is open in the top layer during the reading, and no layer in part.json names it/),
-  },
-  {
-    name: 'a tooltip no layer names, open only while its button has focus, fails by name at that Tab stop',
+    name: 'top layer: a named popover and a named hover hint are read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name',
     only: ['skins'],
     plant: all(
       () => Object.assign(since, looks),
-      (d) => appendFileSync(join(d, 'example.html'), TOOLTIP),
-      (d) => inDemo(d, "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }"),
+      withPopover,
+      (d) => appendFileSync(join(d, 'example.html'), MORE),
+      (d) => inDemo(d, MORE_JS),
+      (d) => named(d, [LAYER, HINT]),
     ),
-    css: FAINT.replace('#button-pop', '#button-tip'),
-    expect: (p) => {
-      // What the looks after real input cost on this runner, for the record (the hosted job prints it).
+    css: [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n'),
+    expect: (p, ...rest) => {
+      // What one open state and the looks after real input cost on this runner, for the record (the hosted job prints it).
+      const m = p?.parts?.button?.measures?.layers
+      if (m) console.log(`    the top layer: ${m.readings} readings open in ${m.seconds} s, ${(m.seconds / m.readings).toFixed(2)} s each`)
       const n = looks.n - since.n
       const s = (looks.ms - since.ms) / 1000
       console.log(`    looks for a box no layer names: ${n} in ${s.toFixed(1)} s, ${n ? ((s * 1000) / n).toFixed(1) : 0} ms each`)
-      return n > 0 && both(/Tab to button#button-tip-open "Info": div#button-tip "Saved two minutes ago" is open in the top layer during the reading, and no layer in part.json names it/)(p)
+      return each({
+        'a named popover, opened by a click, read open': both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/),
+        'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
+        'a box open from the start, named by no layer': both(new RegExp(UNNAMED_AT('div#button-open "Always open"'))),
+        'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`Tab to button#button-tip-open "Info": ${UNNAMED_AT('div#button-tip "Shown on focus"')}`)),
+        'every layer read in every view': () => m?.readings === 20,
+        'the looks were made': () => n > 0,
+      })(p, ...rest)
     },
-  },
-  {
-    name: 'a faint tooltip a layer names, opened by hover and closed by the pointer leaving, is read with it open',
-    only: ['skins'],
-    plant: all(
-      (d) => appendFileSync(join(d, 'example.html'), TOOLTIP),
-      (d) => inDemo(d, "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }"),
-      (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers: [{ box: '#button-tip', open: { hover: '#button-tip-open' }, close: { leave: true } }] }, null, 2)),
-    ),
-    css: FAINT.replace('#button-pop', '#button-tip'),
-    expect: both(/with #button-tip open: drawn text [\d.]+:1 at div#button-tip "Saved two minutes ago"/),
   },
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
