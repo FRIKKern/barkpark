@@ -219,40 +219,46 @@ const CASES = [
     expect: (p) => /cut off|clipped/.test(lights(p).noscript.detail),
   },
   // Pressed by real keys.
-  // A caret blinks while its field is focused, so a reading can catch it in one capture and not another. The spot
-  // is the one a part was red at: an empty field in UI SDK's own look, focused, its placeholder read under the
-  // caret. Eight readings in a row, one after each step, span several blinks, so the case does not hang on one.
+  // A caret blinks while its field is focused, so a reading can catch it in one capture and not another. Two
+  // focused empty fields hold each half of that on purpose: each caret is held steady by the browser (no blink),
+  // and a sheet of the fixture's own turns it out, or back on, only while the reading has the glyphs unpainted.
   {
     name: 'a reading is the same whether or not the caret is drawn',
     only: ['pressed'],
     states: true,
     green: true,
-    // A caret blinks, so a reading's pictures can catch it in one and not the next. This field's caret does that on
-    // purpose: it is held on (no blink) and goes out while the reading has the glyphs unpainted.
-    css: '#button-caret { caret-animation: manual; }',
+    css: '#button-caret-drawn { caret-animation: manual; } #button-caret-glyphs { caret-animation: manual; caret-color: transparent; }',
     plant: (d) => {
-      appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" data-slot="input" placeholder="Spring reading list">\n</div>\n')
-      appendFileSync(join(d, 'press.mjs'), `
+      appendFileSync(join(d, 'example.html'), `
+<div data-demo-row>
+  <input id="button-caret-drawn" data-slot="input" placeholder="Spring reading list">
+  <input id="button-caret-glyphs" data-slot="input" placeholder="Spring reading list">
+</div>
+`)
+      // Each expect is sent to the page alone, so each step is written out whole, with nothing shared.
+      const step = (id, picture, caret) => `
 steps.push({
-  name: 'a focused empty field whose caret shows in one picture only',
+  name: 'a focused empty field whose caret shows in the ${picture} picture only',
   expect: (root) => {
-    const field = root.querySelector('#button-caret')
+    const field = root.querySelector('#${id}')
     field.focus()
-    const out = document.createElement('style')
-    out.textContent = '#button-caret { caret-color: transparent; }'
+    const sheet = document.createElement('style')
+    sheet.textContent = '#${id} { caret-color: ${caret}; }'
     new MutationObserver(() => {
       const unpainted = getComputedStyle(field).webkitTextFillColor === 'rgba(0, 0, 0, 0)'
-      if (unpainted && !out.isConnected) document.head.append(out)
-      if (!unpainted && out.isConnected) out.remove()
+      if (unpainted && !sheet.isConnected) document.head.append(sheet)
+      if (!unpainted && sheet.isConnected) sheet.remove()
     }).observe(document.head, { childList: true })
     return document.activeElement === field || 'the field lost focus'
   },
 })
-`)
+`
+      appendFileSync(join(d, 'press.mjs'), step('button-caret-drawn', 'drawn', 'transparent') + step('button-caret-glyphs', 'glyph', 'auto'))
     },
     expect: each({
-      'the reading ran': (p) => /12 steps by real keys|caret shows in one picture only/.test(lights(p).pressed?.detail ?? ''),
-      'a focused empty field with a placeholder draws in full': (p) => !reasons(p, 'pressed').some((f) => /at input#button-caret/.test(f)),
+      'both readings ran': (p) => ['drawn', 'glyph'].every((w) => (p.parts.button.steps ?? []).some((st) => st.name === `a focused empty field whose caret shows in the ${w} picture only`)),
+      'a focused empty field with a placeholder draws in full, its caret in the drawn picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the drawn picture only/.test(st.name) && st.pass),
+      'a focused empty field with a placeholder draws in full, its caret in the glyph picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the glyph picture only/.test(st.name) && st.pass),
     }),
   },
   {
