@@ -218,7 +218,7 @@ export const LAYER_CASES = [
   {
     name: "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), and markup written into the parsed page (document.write)",
     only: ['skins'],
-    layers: true,
+    
     plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; a.target = '_blank'; a.rel = 'opener'; document.body.append(a); a.click(); a.remove(); window.open(''); document.write('<p>Written late</p>') })"),
     expect: each({
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
