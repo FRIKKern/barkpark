@@ -455,6 +455,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_async({:desk_bulk, task}, result, socket),
     do: Bulk.handle_async(task, result, socket)
 
+  defp account_path(%{scope_prefix: prefix, dataset: dataset})
+       when is_binary(prefix) and prefix != "" and is_binary(dataset),
+       do: Paths.studio_path(prefix, ["_account"], dataset)
+
+  defp account_path(_assigns), do: nil
+
   defp fresh?({:reading, _hovered}, _now), do: true
   defp fresh?({_data, at}, now), do: now - at < @warm_ttl_ms
 
@@ -533,6 +539,15 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_info({:vision_listen, _ref, _message} = message, socket),
     do: VisionListen.handle_info(message, socket)
 
+  # A pick or a Remove in a tree codelist (`TreeCodelistField`) comes as a
+  # message, and is a step of the document's undo when it landed, as a typed
+  # edit is (`DocUndo`, task-a895a60bcc1302d9).
+  def handle_info({:tree_codelist_pick, %{} = msg} = message, socket),
+    do:
+      DocUndo.around("tree_codelist_pick", msg, socket, fn socket ->
+        EditorHost.handle_info(message, socket)
+      end)
+
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
   @impl true
@@ -580,6 +595,19 @@ defmodule BarkparkWeb.Studio.DeskLive do
     </dialog>
     <%!-- The navbar's Create new (J37): its button is the layout's. --%>
     <NewDocMenu.picker picks={NewDocMenu.picks(@desk.new)} />
+    <%!-- The presence profile (the display name and colour others see):
+          the navbar's own pill and the drawer's "Your profile" open it, with
+          a document open or not. The hosted editor's shell leaves its own
+          copy out (`EditorHost`), so there is one. --%>
+    <BarkparkWeb.StudioComponents.profile_modal
+      show_profile={@show_profile}
+      user_name={@user_name}
+      user_name_fallback={assigns[:user_name_fallback]}
+      user_color={@user_color}
+      account_label={assigns[:account_label]}
+      account_path={account_path(assigns)}
+      profile_error={assigns[:profile_error]}
+    />
     <LiveRefresh.gone_notice gone={@desk_gone} panes={@desk_panes} chain={@chain} base={@base} />
     <%!-- `panes` is the TanStack Studio's name for this element. It is the
           page's main landmark until the Studio's editor, which brings its

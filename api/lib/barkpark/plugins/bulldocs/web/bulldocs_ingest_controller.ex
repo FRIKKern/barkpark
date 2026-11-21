@@ -166,9 +166,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
   real write's wall stays authoritative.
   """
   def validate(conn, params) do
-    case validate_normalize(params) do
+    case validate_normalize(conn, params) do
       {:error, bpml_errors} ->
         json(conn, %{valid: false, violations: Enum.map(bpml_errors, &bpml_violation/1)})
+
+      {:refused, body} ->
+        json(conn, %{valid: false, violations: [Map.take(body, [:code, :message, :hint])]})
 
       {:ok, slug, blocks, merged} ->
         ref = %Barkpark.Content.Document{
@@ -378,7 +381,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         })
 
       true ->
-        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+        case Barkpark.PortableDoc.Bpml.parse_copy(bpml) do
           {:error, errors} ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -446,7 +449,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
 
           true ->
-            case Content.Papers.BpmlView.push(paper, parsed["blocks"] || [], dataset) do
+            case Content.Papers.BpmlView.push(paper, parsed, dataset) do
               {:refused, body} ->
                 ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
 
@@ -458,13 +461,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
                   hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
                 })
 
-              {:ok, []} ->
+              {:ok, [], notes} ->
+                payload = %{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0}
+
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
-                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+                |> json(Content.Papers.BpmlView.with_notes(payload, notes))
 
-              {:ok, ops} ->
-                sync_persist(conn, slug, ops, base_rev, dataset, scope)
+              {:ok, ops, notes} ->
+                sync_persist(assign(conn, :notes, notes), slug, ops, base_rev, dataset, scope)
             end
         end
     end
@@ -491,7 +496,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         conn
         |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(payload)
+        |> json(Content.Papers.BpmlView.with_notes(payload, conn.assigns.notes))
 
       {:error, {:view_refused, body}} ->
         ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
@@ -556,19 +561,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # paper keeps its plain h1 (whose text still becomes the row title via
   # `BlockOps.paper_title/2`), and `Template.validate/1` passes it under the
   # additive no-locked-blocks rule — exactly as the validate dry-run does.
-  defp sync_create(conn, slug, parsed, dataset, scope) do
-    doc_slug = parsed["slug"]
-
-    if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
-      conn
-      |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-        code: "slug_mismatch",
-        message:
-          "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
-        hint:
-          "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
-      })
-    else
+  defp sync_create(conn, slug, copy, dataset, scope) do
+    with {:ok, parsed} <- Content.Papers.BpmlView.create_copy(copy, slug) do
       blocks = parsed["blocks"] || []
 
       ref = %Barkpark.Content.Document{
@@ -611,6 +605,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         nil ->
           sync_create_walled(conn, slug, parsed, blocks, dataset, scope, wall_tuples)
       end
+    else
+      {:refused, body} -> ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
     end
   end
 
@@ -719,15 +715,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
     Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
 
-  # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
-  defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
-    case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
-      {:ok, parsed} -> {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
-      {:error, errors} -> {:error, errors}
+  # Normalize the two accepted validate bodies down to {slug, blocks, merged}; a
+  # BPML copy is read as a push to its <paper slug> would read it.
+  defp validate_normalize(conn, %{"bpml" => bpml} = params) when is_binary(bpml) do
+    dataset = blank_to_nil(params["dataset"]) || Content.paper_default_dataset()
+    scope = resolve_write_scope(conn, params)
+
+    with {:ok, copy} <- Barkpark.PortableDoc.Bpml.parse_copy(bpml),
+         {:ok, parsed} <- Content.Papers.BpmlView.check_copy(copy, dataset, scope) do
+      {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
     end
   end
 
-  defp validate_normalize(%{} = params) do
+  defp validate_normalize(_conn, %{} = params) do
     {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
   end
 

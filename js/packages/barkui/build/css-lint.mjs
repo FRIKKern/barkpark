@@ -42,12 +42,51 @@ function block(text, from) {
   return [open, text.length]
 }
 
+/** The forms a part sheet is written in, so that the text reads one way here, in the check's own text reader
+    (check/sheet-text.mjs) and in the browser: a url( has a quoted string straight after it; a string closes on the
+    line it opens; a comment opens only between declarations and between rules, never inside a selector, a condition
+    or a value. (A backslash is refused below, wherever it stands outside a comment.) Returns the findings and the
+    spans of the comments, read the way the browser reads them. */
+export function sheetForms(css) {
+  const found = []
+  const comments = []
+  const lineOf = (i) => css.slice(0, i).split('\n').length
+  let between = true
+  for (let i = 0; i < css.length; i++) {
+    const c = css[i]
+    if (c === '/' && css[i + 1] === '*') {
+      if (!between) found.push(`line ${lineOf(i)}: a comment inside a selector, a condition or a value; part.css writes a comment only between declarations and between rules`)
+      const end = css.indexOf('*/', i + 2)
+      comments.push([i, end < 0 ? css.length : end + 2])
+      if (end < 0) {
+        found.push(`line ${lineOf(i)}: a comment is never closed`)
+        break
+      }
+      i = end + 1
+    } else if (c === '"' || c === "'") {
+      between = false
+      let j = i + 1
+      while (j < css.length && css[j] !== c && css[j] !== '\n') j += css[j] === '\\' ? 2 : 1
+      if (css[j] !== c) found.push(`line ${lineOf(i)}: a string runs past the end of its line; part.css closes every string on the line it opens`)
+      i = j
+    } else if (/^url\($/i.test(css.slice(i, i + 4)) && !/[\w-]/.test(css[i - 1] ?? '')) {
+      between = false
+      if (!/["']/.test(css[i + 4] ?? '')) found.push(`line ${lineOf(i)}: url( with no quoted string straight after it; part.css writes url("…")`)
+      i += 3
+    } else if (c === ';' || c === '{' || c === '}') between = true
+    else if (!/\s/.test(c)) between = false
+  }
+  return { found, comments }
+}
+
 /** part.css as the build places it in the page: inside the bark-parts layer. */
 export const inPartsLayer = (css) => `@layer bark-parts {\n${css}\n}`
 
 export function lintPartCss(css) {
-  const found = []
-  const text = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
+  const { found, comments } = sheetForms(css)
+  // The comments as the browser reads them, blanked; a /* inside a string or a quoted url opens none.
+  let text = css
+  for (const [from, to] of comments) text = text.slice(0, from) + text.slice(from, to).replace(/[^\n]/g, ' ') + text.slice(to)
   const lineOf = (i) => text.slice(0, i).split('\n').length
   // An escape lets a name read one way here and another way in the browser, so part.css has none. (The check
   // also reads part.css as the browser parses it, check/cssom.mjs.)

@@ -18,7 +18,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLive do
     * every `handle_params/3` checks the gate again and reads the scope again,
       because a patch link reaches it without passing the gate's event hook;
     * the flat mount reads every workspace, a scoped mount reads its own;
-    * fields go through `Barkpark.Tasks.Board.field_visibility_gate/1`, the
+    * fields go through `Barkpark.Tasks.Board.field_visibility_gate/2`, the
       board's fail-closed predicate (see `ListQuery` for what it hides).
 
   ## State
@@ -94,15 +94,12 @@ defmodule Barkpark.Plugins.Tasks.Web.ListLive do
   end
 
   defp load(socket, params) do
-    readable? = Board.field_visibility_gate(@dataset)
+    ws_id = OpsOperatorGate.scoped_workspace_id(socket)
+    readable? = Board.field_visibility_gate(@dataset, workspace_id: ws_id)
     filters = ListQuery.parse(params, readable?)
 
     result =
-      ListQuery.page(filters,
-        dataset: @dataset,
-        workspace_id: OpsOperatorGate.scoped_workspace_id(socket),
-        readable?: readable?
-      )
+      ListQuery.page(filters, dataset: @dataset, workspace_id: ws_id, readable?: readable?)
 
     socket
     |> assign(:loading, false)
