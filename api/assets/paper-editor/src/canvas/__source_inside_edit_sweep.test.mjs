@@ -28,8 +28,9 @@
 // no words must keep every block the key did not change. Before any typing, each prose
 // block's line must show the words the reader shows.
 //   - With the callout rule on, nothing is lost: a callout with a body never opens.
-//   - With the rule lifted (here only), the sweep finds the callout body and nothing
-//     else, so the one named rule covers the class.
+//   - With the rule lifted (here only), the sweep finds nothing: the rich editor
+//     carries a callout with a body whole (task-c6355c4cb9cb7707), so source mode
+//     shows it as its stored block and a key on it is judged as on any sentinel.
 // Run: node src/canvas/__source_inside_edit_sweep.test.mjs
 
 import assert from "node:assert/strict";
@@ -42,7 +43,7 @@ import { docToBlocks } from "./run-convert.js";
 import { sentinelRefusal, settledBlocks, sourceSaved, sourceStored, sourceWallLoss } from "./source-save.js";
 import { canonicalJSON } from "./projection-json.js";
 import { clampLockedPrefix, realignAcrossCommits } from "./source-realign.js";
-import { sourceWallGoldens } from "../__source_wall_goldens.mjs";
+import { jsonDepth, MAX_VALUE_DEPTH, sharedFixtureWalk } from "../__source_wall_goldens.mjs";
 import { blocksToMarkdown, changedSentinel, firstLoss, markdownToBlockSpans, markdownToBlocks } from "../markdown.js";
 import { readerInline } from "../markdown/reader-inline.js";
 import { SENTINEL_CLOSE, SENTINEL_OPEN } from "../markdown/shared.js";
@@ -52,7 +53,11 @@ const TYPED = "Ж";
 
 function papers() {
   const out = [];
-  for (const [name, block] of sourceWallGoldens()) out.push([name, [block]]);
+  // Every document of the shared fixtures, read by the same walk the wall's fixture
+  // test pins, but those past the value-depth limit, which no Paper can hold.
+  for (const [name, blocks] of sharedFixtureWalk().docs) {
+    if (jsonDepth({ blocks }) <= MAX_VALUE_DEPTH) out.push([`goldens/${name}`, blocks]);
+  }
   for (const dir of [".demo-content/papers", ".demo-content/repo-papers", "api/test/support/fixtures/bpml",
     "api/test/support/fixtures/portable-doc-validate/valid"]) {
     for (const name of readdirSync(join(REPO, dir)).sort()) {
@@ -369,7 +374,7 @@ try {
   tally("lifted", off);
   const kinds = [...new Set(off.losers.map((loser) => loser.replace(/^.* \((\w+)\) line \d+: (\w+) (\S+).*$/, "$1 $3").replace(/\[\d+\]/g, "")))];
   for (const loser of off.losers.slice(0, 20)) console.log(`  ${loser}`);
-  assert.deepEqual(kinds, ["callout content.value"], "lifted, the sweep finds the callout body and nothing else");
+  assert.deepEqual(kinds, [], "lifted, the sweep finds nothing: a callout with a body shows as its stored block");
   console.log("source inside-edit sweep: passed");
 } finally {
   canvas.remove();

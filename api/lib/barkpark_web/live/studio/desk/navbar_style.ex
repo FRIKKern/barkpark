@@ -1,12 +1,22 @@
 defmodule BarkparkWeb.Studio.Desk.NavbarStyle do
   @moduledoc """
-  The look of the desk navbar's brand, switcher, help and user menus
-  (`ScopeSwitch`, `HelpMenu`, `UserMenu`), after the TanStack Studio's
-  `styles.css` (`.navbar .logo`, `.brand-button`, `.scope-popover`,
-  `.scope-place`, `.user-head`, `.studio-version`, `.update-dot`): 25 px icon
+  The look of the desk navbar's brand, switcher, help, who-is-here and user
+  menus (`ScopeSwitch`, `HelpMenu`, `WhoMenu`, `UserMenu`), after the
+  TanStack Studio's `styles.css` (`.navbar .logo`, `.brand-button`,
+  `.scope-popover`, `.scope-place`, `.user-head`, `.studio-version`,
+  `.update-dot`, `.who-dot`, `.who-menu`): 25 px icon
   buttons with 21 px icons, 44 px on a touch screen (`pointer: coarse`), as
   every button in the bar. The menus are `Desk.Menu`'s (`.dk .dk-menu`):
   each wrapper carries `dk`, so they take its tokens and its look.
+
+  Who is here's menu hangs from its button's right edge, and it stays 4 px
+  inside the window, as TanStack's (`centre()`): where it would run past the
+  left edge it moves to 4 px from the right one (`@position-try`), and it is
+  never wider than the window less 8 px (a long name ellipsizes).
+
+  Under 600 px the bar has no room for your own avatar beside the others'
+  button, and TanStack's phone bar draws none (its user menu is in the
+  drawer): the presence pill gives way there.
 
   Colours are the desk's tokens (`--dk-*`, `Desk.Style`) and the design
   tokens. A place's icon is the hue `ScopeSwitch` gives it.
@@ -85,6 +95,22 @@ defmodule BarkparkWeb.Studio.Desk.NavbarStyle do
       .studio-shell:has(.dk) .navbar .dk-nav-dialog footer { display: flex; padding: 12px 20px 16px; }
       .studio-shell:has(.dk) .navbar .version-dialog footer .publish { flex: 1; justify-content: center; }
       .studio-shell:has(.dk) .navbar .whats-new-foot a { color: var(--dk-fg); text-decoration: none; }
+      .studio-shell:has(.dk) .navbar .icon-btn.who .who-dot { position: absolute; top: 6px; right: 6px; width: 4px; height: 4px; border-radius: 3px; background: var(--dk-published); box-shadow: 0 0 0 1px var(--dk-nav-bg); }
+      .studio-shell:has(.dk) .navbar .who-menu { box-sizing: border-box; min-width: 260px; max-width: calc(100vw - 8px); position-try-fallbacks: --dk-who-inside; font-weight: 400; }
+      @position-try --dk-who-inside { right: 4px; left: auto; }
+      .studio-shell:has(.dk) .navbar .who-empty { box-sizing: border-box; display: grid; gap: 2px; width: 260px; margin: -4px; padding: 11px 16px; line-height: 19px; white-space: normal; }
+      .studio-shell:has(.dk) .navbar .who-empty p { margin: 0; color: var(--dk-muted); }
+      .studio-shell:has(.dk) .navbar .who-empty p:first-child { color: var(--dk-fg); font-weight: 500; }
+      .studio-shell:has(.dk) .navbar .who-row { gap: 8px; }
+      .studio-shell:has(.dk) .navbar .who-row .avatar { flex: none; color: var(--dk-avatar-fg); }
+      .studio-shell:has(.dk) .navbar .who-row:disabled { cursor: default; }
+      .studio-shell:has(.dk) .navbar .who-row:disabled .who-name { color: var(--dk-muted); }
+      .studio-shell:has(.dk) .navbar .who-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .studio-shell:has(.dk) .navbar .who-doc { flex: none; margin-left: auto; max-width: 140px; overflow: hidden; text-overflow: ellipsis; color: var(--dk-muted); font-size: 12px; font-weight: 400; }
+      .studio-shell:has(.dk) .navbar :is(.who-menu .who-row:hover, .who-menu:not(:hover) .who-row:focus-visible):not(:disabled) .who-doc { color: inherit; }
+      @media (max-width: 599px) {
+        .studio-shell:has(.dk) .navbar .presence-me-group { display: none; }
+      }
       @media (pointer: coarse) {
         .studio-shell:has(.dk) .navbar button { min-width: 44px; min-height: 44px; }
         .studio-shell:has(.dk) .navbar .icon-btn { width: 44px; height: 44px; }

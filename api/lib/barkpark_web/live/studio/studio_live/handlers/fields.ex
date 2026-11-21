@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   alias Barkpark.Content
   alias Barkpark.Content.Forms
+  alias Barkpark.Content.Forms.CodelistShape
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
@@ -262,22 +263,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => doc} -> do_save(doc, socket)
-      _ -> {:noreply, socket}
+      %{"doc" => doc} ->
+        {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
+        do_save(doc, not_codes, socket)
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
-  defp do_save(params, socket) do
-    socket = Shared.do_autosave(socket, params, :save)
+  defp do_save(params, not_codes, socket) do
+    socket =
+      socket
+      |> Shared.do_autosave(params, :save)
+      |> RefusedSave.not_codes(not_codes)
 
     case socket.assigns[:save_status] do
       "Saved" ->
         # An explicit save reloads the editor from the just-persisted row —
         # the local buffer is now clean, so drop the dirty flag and any
-        # stale concurrent-edit banner.
+        # stale concurrent-edit banner. A field it left out (a refused clear,
+        # a value that is not a code) is still not saved (`RefusedSave`), and
+        # the page says so, not "Saved".
         socket =
           socket
-          |> put_flash(:info, gettext("Saved"))
+          |> saved_flash()
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
           |> clear_touched()
@@ -289,13 +299,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
+  defp saved_flash(socket) do
+    if RefusedSave.token(socket.assigns) == "Saved",
+      do: put_flash(socket, :info, gettext("Saved")),
+      else: socket
+  end
+
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
   def reload_remote_doc(socket) do
     socket =
       socket
       |> Shared.rebuild_panes()
-      |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+      |> assign(
+        editor_dirty: false,
+        doc_conflict: false,
+        editor_unsaved_keys: MapSet.new(),
+        editor_refused_clears: nil
+      )
       |> clear_touched()
 
     {:noreply, socket}
@@ -354,8 +375,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     PostIdentity.pressed(Map.get(msg, :press), socket, fn _params, socket ->
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
-          form = StudioLive.Path.put_value_at(base_form(socket), path, code)
-          socket = socket |> assign(editor_form: form) |> RefusedSave.target(Enum.take(path, 1))
+          form = picked_form(socket, path, code)
+          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1))
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
           {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
@@ -366,6 +387,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   def tree_codelist_pick(_msg, socket), do: {:noreply, socket}
+
+  # In the desk a Remove unsets the code, nested too, as TanStack does, by
+  # the same rule as a cleared language (`unset_at/2`); the old Studio stores
+  # "" at a nested path, as it did.
+  defp picked_form(%{assigns: %{desk_base: base}} = socket, path, "") when is_binary(base),
+    do: unset_at(base_form(socket), path)
+
+  defp picked_form(socket, path, code),
+    do: StudioLive.Path.put_value_at(base_form(socket), path, code)
 
   @doc """
   The slug Generate derives from a title: Latin letters with accents or
@@ -406,7 +436,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def autosave(params, socket) when is_map(params) do
     if PostIdentity.ours?(params, socket),
-      do: autosave_open(params, socket),
+      do: autosave_open(params, socket, :page),
       else: {:noreply, socket}
   end
 
@@ -428,10 +458,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   """
   def autosave_built(params, socket) when is_map(params) do
     {bases, params} = Map.pop(params, :bases, %{})
-    autosave_open(params, socket, bases)
+    autosave_open(params, socket, {:built, bases})
   end
 
-  defp autosave_open(params, socket, built_bases \\ %{}) do
+  # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
+  # server built. Only a browser post is read for codelist shape
+  # (`CodelistShape`): a built one writes a stored value back as it is.
+  defp autosave_open(params, socket, origin) do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
 
@@ -442,7 +475,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       %{"doc" => doc} ->
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
-        keys = target_key(params)
+        keys = target_key(params, socket.assigns[:editor_schema])
+        {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
         saved =
           socket
@@ -452,12 +486,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> Shared.do_autosave(doc, :change)
           |> RemoteValues.settle(socket, keys, doc)
 
-        {:noreply, saved |> keep_unsaved_values(doc, keys) |> settle_dirty(keys)}
+        {:noreply,
+         saved
+         |> keep_unsaved_values(doc, keys)
+         |> RefusedSave.not_codes(not_codes)
+         |> settle_dirty(keys)}
 
       _ ->
         {:noreply, socket}
     end
   end
+
+  defp page_codes(doc, socket, :page) do
+    {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
+    {doc, not_codes, %{}}
+  end
+
+  defp page_codes(doc, _socket, {:built, bases}), do: {doc, [], bases}
 
   # ── The dot-path fold (S9 crit 3, task-6d80c6cc7d97b1d1) ────────────────────
   #
@@ -516,7 +561,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
   defp fold_dot_paths(params, socket) do
-    params = BarkparkWeb.Studio.StudioLive.Path.unmangle_params(params)
+    names = StudioLive.Path.field_names(socket.assigns[:editor_schema])
+    params = StudioLive.Path.unmangle_params(params, names)
     touched = touched_paths(socket)
     base_form = base_form(socket)
     targets = params |> Map.get("_target") |> List.wrap()
@@ -628,6 +674,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
+  # Also a desk Remove in a tree codelist (`picked_form/3`).
   defp unset_at(doc, [root]), do: Map.put(doc, root, "")
 
   # A key in an object is written as `Forms.unset/0`, which the save reads
@@ -938,13 +985,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       dirty? = MapSet.size(held) > 0
       assign(socket, editor_dirty: dirty?, editor_unsaved_keys: held, doc_conflict: false)
     else
-      unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
-
-      assign(socket,
-        editor_dirty: true,
-        editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
-      )
+      settle_unsaved(socket, keys -- RefusedSave.clears(socket))
     end
+  end
+
+  # A refused clear is not kept (`RefusedSave`): the field is as stored.
+  defp settle_unsaved(socket, []), do: socket
+
+  defp settle_unsaved(socket, keys) do
+    unsaved = socket.assigns[:editor_unsaved_keys] || MapSet.new()
+
+    assign(socket,
+      editor_dirty: true,
+      editor_unsaved_keys: MapSet.union(unsaved, MapSet.new(keys))
+    )
   end
 
   # A save that did not land leaves the typed field's posted value in the form
@@ -952,13 +1006,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # the value from before it (#25880 review). Only `keys`, the field typed in:
   # every other posted value is what the browser showed, which can be older
   # than what the server already took from the other editor (#25946 review).
-  # Same shape as a landed save's buffer (`Forms.coerce_params/2`).
+  # Same shape as a landed save's buffer (`Forms.coerce_params/2`). A refused
+  # clear is left out: the field stays as stored (`RefusedSave`).
   defp keep_unsaved_values(socket, posted, keys) do
     if socket.assigns[:save_status] in ["Save failed", "Save cancelled"] do
       posted =
         posted
         |> Barkpark.Content.Forms.coerce_params(socket.assigns[:editor_schema])
-        |> Map.take(keys)
+        |> Map.take(keys -- RefusedSave.clears(socket))
 
       PostedEdits.put(socket, posted)
     else
@@ -968,14 +1023,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   # The top-level field a `phx-change` typed in, from its `_target`:
   # `["doc", "title"]` for a bracket name, `["doc[altText].nob"]` for a dotted one.
-  defp target_key(%{"_target" => ["doc", key | _]}) when is_binary(key), do: [key]
+  # A checkbox list in an object or a row names its whole path in one
+  # bracket, dotted (`doc[obj.tags][]`): its field is the first part, unless
+  # the key is a top-level field's own name (`Path.target_field/2`).
+  defp target_key(%{"_target" => ["doc", key | _]}, schema) when is_binary(key),
+    do: [StudioLive.Path.target_field(key, StudioLive.Path.field_names(schema))]
 
-  defp target_key(%{"_target" => [name]}) when is_binary(name) do
+  defp target_key(%{"_target" => [name]}, _schema) when is_binary(name) do
     case StudioLive.parse_path(name) do
       [key | _] when is_binary(key) -> [key]
       _ -> []
     end
   end
 
-  defp target_key(_params), do: []
+  defp target_key(_params, _schema), do: []
 end

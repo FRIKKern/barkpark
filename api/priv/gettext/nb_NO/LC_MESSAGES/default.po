@@ -752,6 +752,11 @@ msgstr "De siste endringene i arket kunne ikke lagres, så det ble ikke publiser
 msgid "%{names} are editing"
 msgstr "%{names} redigerer"
 
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:242
+#, elixir-autogen, elixir-format
+msgid "%{count} others are editing: %{names}"
+msgstr "%{count} andre redigerer: %{names}"
+
 #: lib/barkpark_web/components/studio_components/editor.ex:939
 #, elixir-autogen, elixir-format
 msgid "%{name} is editing"
@@ -6334,6 +6339,11 @@ msgstr "kilde"
 #, elixir-autogen, elixir-format
 msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
 msgstr "Bare lesing: Markdown kan ikke ta med %{part} i blokk %{number} (%{type}) ennå."
+
+#: lib/barkpark_web/studio_locale.ex:831
+#, elixir-autogen, elixir-format
+msgid "Read only: this callout has a body, which the editor cannot edit yet."
+msgstr "Bare lesing: denne merknadsboksen har en brødtekst som redigeringsverktøyet ikke kan endre ennå."
 
 #: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
@@ -15728,3 +15738,151 @@ msgstr "Ingen %{primary}-tekst: leserne får %{fallback}-teksten i stedet."
 #, elixir-autogen, elixir-format
 msgid ", has an error"
 msgstr ", har en feil"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Active Document"
+msgstr "Aktivt dokument"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "To Do"
+msgstr "Å gjøre"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Go to previous task"
+msgstr "Gå til forrige oppgave"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Go to next task"
+msgstr "Gå til neste oppgave"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Deadline"
+msgstr "Frist"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Worker"
+msgstr "Arbeider"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Criteria"
+msgstr "Kriterier"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Task id"
+msgstr "Oppgave-ID"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Open the task to edit it"
+msgstr "Åpne oppgaven for å redigere den"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Open a document to see its task"
+msgstr "Åpne et dokument for å se oppgaven"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks on your active document will be shown here."
+msgstr "Oppgaver på det aktive dokumentet vises her."
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "This document doesn't have any tasks yet"
+msgstr "Dette dokumentet har ingen oppgaver ennå"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Once a document has connected tasks, they will be shown here."
+msgstr "Når et dokument har tilknyttede oppgaver, vises de her."
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "No tasks"
+msgstr "Ingen oppgaver"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks in this workspace and dataset will be shown here."
+msgstr "Oppgaver i dette arbeidsområdet og datasettet vises her."
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgctxt "task status"
+msgid "Open"
+msgstr "Åpen"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "In progress"
+msgstr "Pågår"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked"
+msgstr "Blokkert"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Cancelled"
+msgstr "Avbrutt"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Considering"
+msgstr "Vurderes"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Researching"
+msgstr "Undersøkes"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Worker: %{worker}"
+msgstr "Arbeider: %{worker}"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "%{met} of %{total} met"
+msgstr "%{met} av %{total} oppfylt"
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "1 more task to do is not shown"
+msgid_plural "%{count} more tasks to do are not shown"
+msgstr[0] "1 oppgave til vises ikke"
+msgstr[1] "%{count} oppgaver til vises ikke"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:39
+#, elixir-autogen, elixir-format
+msgid "Global presence"
+msgstr "Global tilstedeværelse"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:40
+#, elixir-autogen, elixir-format
+msgid "Who is here"
+msgstr "Hvem er her"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:56
+#, elixir-autogen, elixir-format
+msgid "No one else is here"
+msgstr "Ingen andre er her"
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:57
+#, elixir-autogen, elixir-format
+msgid "Invite people to the project to see their online status."
+msgstr "Inviter folk til prosjektet for å se om de er pålogget."
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:69
+#, elixir-autogen, elixir-format
+msgid "Not in a document"
+msgstr "Ikke i et dokument"

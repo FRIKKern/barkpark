@@ -83,15 +83,12 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     #    with a nil workspace is the deliberate global read, so the global row
     #    already resolves and no fallback is needed.
     "barkpark/tenancy.ex:pulled_schema_row" => "unscoped 2-arity provenance guard",
-    "barkpark/tasks/board.ex:field_visibility_gate" => "explicit [] — unscoped global read",
     "barkpark/plugins/tasks.ex:task_schema_present?" => "unscoped 2-arity presence probe",
     "barkpark/plugins/tickets.ex:ticket_schema_present?" => "unscoped 2-arity presence probe",
     "barkpark/plugins/quiz.ex:schema_present?" =>
       "unscoped 2-arity presence probe (desk item gate)",
     "barkpark/plugins/forms.ex:schema_present?" =>
       "unscoped 2-arity presence probe (desk item gate)",
-    "barkpark/plugins/tasks/web/board_live.ex:peek_schema" =>
-      "explicit [] — unscoped global read",
     "barkpark/content/edges.ex:doc_scoped_schema" =>
       "unscoped arm only (document carries no scope), edge write path",
     "barkpark/content/encryption.ex:schema_for_write" =>
@@ -181,7 +178,7 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/federated_search_controller.ex:schema_resolver",
                               "barkpark_web/channels/search_channel.ex:schema_resolver",
                               "barkpark_web/controllers/history_controller.ex:show",
-                              "barkpark_web/controllers/history_controller.ex:restore",
+                              "barkpark_web/controllers/history_controller.ex:restore_with",
                               "barkpark_web/controllers/listen_controller.ex:fetch_schema",
                               "barkpark_web/controllers/tasks_controller.ex:seal_ctx",
                               "barkpark/content/export.ex:fetch_schema",
@@ -189,6 +186,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               # ctx-b6: row_field_visibility_gate and load_task_schema both read the
                               # task schema through task_schema/3 (one read per render), which calls it.
                               "barkpark/tasks/query.ex:task_schema",
+                              # the board, the Tasks list and the desk's Tasks
+                              # sidebar gate task fields by the scoped
+                              # workspace's own schema (task-c626f2be5264f61a)
+                              "barkpark/tasks/board.ex:field_visibility_gate",
                               # search facets: the schema feeds
                               # Envelope.field_readable?/3 to drop an author /
                               # category bucket the caller may not read

@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       |> assign(
         editor_dirty: false,
         editor_unsaved_keys: MapSet.new(),
+        editor_refused_clears: nil,
         doc_conflict: false,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
