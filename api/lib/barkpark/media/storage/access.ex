@@ -263,8 +263,9 @@ defmodule Barkpark.Media.Storage.Access do
   # make the account arm stricter than the token arm it exists to match.
   #
   # PUBLIC (task-f71cab067a90a89d): the Studio LiveView image-picker handler
-  # (`StudioLive.Handlers.Media.open_image_picker/2`) needs the SAME principal
-  # question to clamp its listing for an anonymous demo visitor, and must not
+  # (`StudioLive.Handlers.Media.open_image_picker/2`, since removed with the
+  # legacy picker, task-c42545346b93cbb0) needed the SAME principal question
+  # to clamp its listing for an anonymous demo visitor, and must not
   # grow a second, narrower answer to it — a local re-derivation is exactly the
   # "one rule, several private copies" defect class this module's own history
   # (the comment above) already warns about. Works unmodified on a

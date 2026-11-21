@@ -297,31 +297,6 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # Sent by hand with no type: nothing to create.
   def handle_event("new-document", _params, socket), do: {:noreply, socket}
 
-  # The editor's reference and media events, and the params each one's
-  # handler takes. With no document in the editor (no form), or without those
-  # params, there is nothing to pick for: sent by hand they killed the page.
-  @picks %{
-    "select-ref" => ~w(id field),
-    "clear-ref" => ~w(field),
-    "ref-search" => ~w(value),
-    "open-ref-picker" => ~w(field ref-type),
-    "select-media" => ~w(url field),
-    "clear-image" => ~w(field)
-  }
-
-  def handle_event(event, params, socket) when is_map_key(@picks, event) do
-    with true <- is_map_key(socket.assigns, :editor_form),
-         false <- RevisionView.shown?(socket.assigns),
-         false <- PublishedView.active?(socket.assigns),
-         true <- Enum.all?(@picks[event], &is_map_key(params, &1)),
-         :cont <- NewDoc.guard(event, params, socket) do
-      event |> StudioLive.handle_event(params, socket) |> ours()
-    else
-      {:halt, socket} -> {:noreply, socket}
-      _ -> {:noreply, socket}
-    end
-  end
-
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
 

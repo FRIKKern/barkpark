@@ -14,7 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
 
   use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign_new: 3]
-  import Phoenix.LiveView, only: [get_connect_params: 1, stream: 3, allow_upload: 3]
+  import Phoenix.LiveView, only: [get_connect_params: 1, stream: 3]
 
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PresenceState
@@ -136,11 +136,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       inspector_pref_closed: connect_params["inspector_closed"] == true,
       presence_topic: nil,
       subscribed_doc: nil,
-      image_picker_field: nil,
-      media_files: [],
-      ref_picker_field: nil,
-      ref_candidates: [],
-      ref_search: "",
       show_history: false,
       revisions: [],
       show_delete: false,
@@ -400,11 +395,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       create_open: nil
     )
     |> stream(:paper_blocks, [])
-    |> allow_upload(:image,
-      accept: ~w(.jpg .jpeg .png .gif .webp .svg),
-      max_entries: 1,
-      max_file_size: 10_000_000
-    )
   end
 
   @doc """
