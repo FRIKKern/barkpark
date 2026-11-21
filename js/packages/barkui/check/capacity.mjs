@@ -37,7 +37,7 @@ export const INPUT = {
     // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
       views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
-      rest: { seconds: 137, job: 136906448828, run: 44923426286, commit: 'dcae531939' },
+      rest: { seconds: 222, job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
     },
   },
 }

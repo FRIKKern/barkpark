@@ -154,6 +154,21 @@ describe('discoverParts', () => {
     expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
   })
 
+  it('takes a part.json layer with its box and real input, and refuses one without them', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+    const good = { box: '#aa-pop', open: { click: '#aa-open' }, close: { keys: ['Escape'] } }
+    writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, layers: [good] }))
+    expect(() => discoverParts(root)).not.toThrow()
+    writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, layers: [{ box: '#aa-tip', open: { hover: '#aa-open' }, close: { leave: true } }] }))
+    expect(() => discoverParts(root)).not.toThrow()
+    for (const layers of [good, [{ ...good, close: { leave: 'yes' } }], [{ ...good, open: { hover: '' } }], [{ ...good, box: '' }], [{ box: '#aa-pop', open: { click: '#aa-open' } }], [{ ...good, open: {} }], [{ ...good, close: { keys: 'Escape' } }], [{ ...good, open: { script: 'x' } }], [{ ...good, pin: 'open' }]]) {
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, layers }))
+      expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "layers" must be a list of \{ box, open, close \}/)
+    }
+  })
+
   it('refuses a part.json that tries to excuse a property (allow is gone)', () => {
     const root = scratch()
     const dir = plantPart(root, 'aa')
