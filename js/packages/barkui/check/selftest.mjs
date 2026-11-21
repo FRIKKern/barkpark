@@ -108,6 +108,8 @@ const CASES = [
       '#button-more svg { fill: #ff0000; }',
       '[data-slot="button"][data-size="lg"]::before { content: "\\25CF  "; color: #ff0000; }',
       '#button-disabled { background-color: #ffffff; color: #eeeeee; }',
+      // The trace reads caret-color from style, never while the readings hide the caret with a sheet of their own.
+      '#button-save { caret-color: #ff0000; }',
     ].join('\n'),
     expect: each({
       'a frozen colour': skinsSay(/button#button-after .* is not one skin variable/),
@@ -117,6 +119,7 @@ const CASES = [
       'a right border colour': skinsSay(/button#button-destructive .*border-right-color is not one skin variable/),
       'an icon in its own fill': skinsSay(/svg .* fill is not one skin variable/),
       'a red ::before': skinsSay(/button "Large"::before color is not one skin variable/),
+      'a caret colour': skinsSay(/button#button-save .*caret-color is not one skin variable/),
       'a paint-free element with its own fill': skinsSay(/paint-free button#button-disabled .* carries its own background/),
       'text-only on controls that draw an edge': skinsSay(/text-only button.* draws its (edge|fill) at [\d.]+:1/),
     }),
@@ -216,6 +219,48 @@ const CASES = [
     expect: (p) => /cut off|clipped/.test(lights(p).noscript.detail),
   },
   // Pressed by real keys.
+  // A caret blinks while its field is focused, so a reading can catch it in one capture and not another. Two
+  // focused empty fields hold each half of that on purpose: each caret is held steady by the browser (no blink),
+  // and a sheet of the fixture's own turns it out, or back on, only while the reading has the glyphs unpainted.
+  {
+    name: 'a reading is the same whether or not the caret is drawn',
+    only: ['pressed'],
+    states: true,
+    green: true,
+    css: '#button-caret-drawn { caret-animation: manual; } #button-caret-glyphs { caret-animation: manual; caret-color: transparent; }',
+    plant: (d) => {
+      appendFileSync(join(d, 'example.html'), `
+<div data-demo-row>
+  <input id="button-caret-drawn" data-slot="input" placeholder="Spring reading list">
+  <input id="button-caret-glyphs" data-slot="input" placeholder="Spring reading list">
+</div>
+`)
+      // Each expect is sent to the page alone, so each step is written out whole, with nothing shared.
+      const step = (id, picture, caret) => `
+steps.push({
+  name: 'a focused empty field whose caret shows in the ${picture} picture only',
+  expect: (root) => {
+    const field = root.querySelector('#${id}')
+    field.focus()
+    const sheet = document.createElement('style')
+    sheet.textContent = '#${id} { caret-color: ${caret}; }'
+    new MutationObserver(() => {
+      const unpainted = getComputedStyle(field).webkitTextFillColor === 'rgba(0, 0, 0, 0)'
+      if (unpainted && !sheet.isConnected) document.head.append(sheet)
+      if (!unpainted && sheet.isConnected) sheet.remove()
+    }).observe(document.head, { childList: true })
+    return document.activeElement === field || 'the field lost focus'
+  },
+})
+`
+      appendFileSync(join(d, 'press.mjs'), step('button-caret-drawn', 'drawn', 'transparent') + step('button-caret-glyphs', 'glyph', 'auto'))
+    },
+    expect: each({
+      'both readings ran': (p) => ['drawn', 'glyph'].every((w) => (p.parts.button.steps ?? []).some((st) => st.name === `a focused empty field whose caret shows in the ${w} picture only`)),
+      'a focused empty field with a placeholder draws in full, its caret in the drawn picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the drawn picture only/.test(st.name) && st.pass),
+      'a focused empty field with a placeholder draws in full, its caret in the glyph picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the glyph picture only/.test(st.name) && st.pass),
+    }),
+  },
   {
     name: 'a press step that never settles fails by name within its time limit',
     only: ['pressed'],
@@ -304,6 +349,12 @@ const CASES = [
     ['an escaped outline', String.raw`#button-after { outl\000069ne: none; }`, /a backslash/],
     ['a paint change at phone width, on one surface', '@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); --bark-button-edge: var(--bark-button-bg); } }', /--bark-button-fg inside @media \(max-width: 600px\): only layout and type/],
     ['a brace that closes the bark-parts layer early', '} [data-slot="button"] { box-shadow: none; } @layer bark-parts {', /a \} with no \{ before it/],
+    // The forms a part sheet is written in (build/css-lint.mjs sheetForms), each refused by name outside them.
+    ['a url( with no quoted string straight after it', '#button-after { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor/%3E); }', /url\( with no quoted string straight after it/],
+    ['a string that runs past the end of its line', '#button-after { --bark-y: "a\n; }', /a string runs past the end of its line/],
+    ['a comment inside a value', '#button-after { gap: 0px /* x */; }', /a comment inside a selector, a condition or a value/],
+    ['a comment inside a selector', '#button-after /* x */ span { gap: 0px; }', /a comment inside a selector, a condition or a value/],
+    ['a comment opened in an unquoted url( that hides a dropped rule', '[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E/*%3C/svg%3E); }\n[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E*/}[data-slot="button"]{%3C/svg%3E); }', /url\( with no quoted string straight after it/],
   ].map(([what, css, re]) => ({
     name: `part.css with ${what} is refused at discovery`,
     only: ['pressed'],
@@ -387,6 +438,53 @@ const CASES = [
     only: ['pressed'],
     plant: inCss('ui-button:hover > [data-slot="button"] { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
     expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
+  },
+  {
+    name: 'a rule the browser drops is refused by name, at the top of part.css and nested',
+    only: ['pressed'],
+    plant: all(
+      inCss('[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }'),
+      inCss('[data-slot="button"] { &:bark-made-up-too { color: var(--ui-foreground); } }'),
+    ),
+    expect: (...a) => refused(/\[data-slot="button"\]:bark-made-up: the browser drops this rule, so nothing would judge it/)(...a) && refused(/&:bark-made-up-too: the browser drops this rule/)(...a),
+  },
+  {
+    // Refused at discovery by the part-sheet forms; the browser's reading refuses the same sheet on its own (the
+    // direct case below names the dropped rule).
+    name: 'a dropped rule beside a string broken by a newline is refused at discovery, naming the string',
+    only: ['pressed'],
+    plant: inCss('[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-y: "a\n; }\n[data-slot="button"].k { gap: 0px; }'),
+    expect: refused(/part\.css line \d+: a string runs past the end of its line/),
+  },
+  {
+    name: 'a sheet the check cannot read rule for rule the way the browser does is refused, and one it reads is not',
+    direct: async () => {
+      const browser = await chromium.launch()
+      const cannot = /the check cannot read this sheet the way the browser does/
+      const either = /the check cannot read this sheet the way the browser does|the browser drops this rule/
+      try {
+        const said = []
+        for (const [css, re, wanted] of [
+          // A string left open at a newline, between a dropped rule and a plain one.
+          ['[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-y: "a\n; }\n[data-slot="button"].k { gap: 0px; }', /\[data-slot="button"\]:bark-made-up: the browser drops this rule/, true],
+          // A rule with no block, so the counts would even out: the dropped rule is still named, and the count refused.
+          ['@layer x;\na:bark-made-up { gap: 0; }', /^a:bark-made-up: the browser drops this rule/, true],
+          ['@layer x;\na:bark-made-up { gap: 0; }', /does: at the top of part\.css: part\.css writes 0 rule\(s\) the browser reads alone, and the browser reads 1/, true],
+          // A brace inside an unquoted url(), which the text reader takes for a block.
+          ['a { --x: url({); }\nb { gap: 0; }', cannot, true],
+          // A comment opened inside an unquoted url(), which hides a dropped rule from the text reader.
+          ['[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E/*%3C/svg%3E); }\n[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E*/}[data-slot="button"]{%3C/svg%3E); }', cannot, true],
+          // Nothing refused where the two readings agree.
+          ['[title="{"] { content: "}"; } a\\{b { gap: 0 } /* } */ c { gap: 0; }', either, false],
+          ['a { gap: 0; &:hover { gap: 1px; } gap: 2px; @media (max-width: 600px) { gap: 3px; } }', either, false],
+          ['@keyframes bark-x { from { gap: 0; } to { gap: 1px; } }\n@media (prefers-reduced-motion: no-preference) { a { & > b { gap: 0; } } }', either, false],
+        ]) said.push((await readPartCss(browser, css)).found.some((f) => re.test(f)) === wanted)
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.indexOf(false) + 1}`)
+        return said.every(Boolean)
+      } finally {
+        await browser.close()
+      }
+    },
   },
   {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',

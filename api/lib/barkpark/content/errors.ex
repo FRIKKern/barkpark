@@ -199,6 +199,10 @@ defmodule Barkpark.Content.Errors do
                          "bpml",
                          "bpml_unavailable",
                          "bpml_unprintable",
+                         # A callout's body on push (Bpml.CalloutBody, task-4c27c15194ae9369).
+                         "bpml_stale_copy",
+                         "bpml_inline_body",
+                         "bpml_kept",
                          "unknown_format",
                          "hollow_paper",
                          "structure",

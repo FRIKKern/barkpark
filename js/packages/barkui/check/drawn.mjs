@@ -296,6 +296,18 @@ export function installDrawn() {
     document.head.prepend(toggle)
   }
 
+  // The caret, hidden (false) or shown again (true) by a first-layer sheet of the check's own. A blinking caret is
+  // not part of what a reading compares; its colour is still judged where every colour is (the trace in probes.mjs).
+  let hideCaret = null
+  const caret = (shown) => {
+    hideCaret?.remove()
+    hideCaret = null
+    if (shown) return
+    hideCaret = document.createElement('style')
+    hideCaret.textContent = '@layer barkui-check { * { caret-color: transparent !important; } }'
+    document.head.prepend(hideCaret)
+  }
+
   /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill (textFill, the colour its reference
       is drawn in) is the first token and its ground the second, both as they resolve where it stands. */
   const fitsOf = (t, pairs) => {
@@ -332,5 +344,5 @@ export function installDrawn() {
     }
   }
 
-  Object.assign(h, { things, specs, alone, measureAlone, keep, unpaint, judge })
+  Object.assign(h, { things, specs, alone, measureAlone, keep, unpaint, caret, judge })
 }
