@@ -154,6 +154,20 @@ describe('discoverParts', () => {
     expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
   })
 
+  it('takes a notCovered list of { name, why }, and refuses any other shape or a name given twice', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+    const withList = (notCovered) => {
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, notCovered }))
+      return () => discoverParts(root)
+    }
+    expect(withList([{ name: 'ui-badge', why: 'Not on the stage.' }])).not.toThrow()
+    for (const bad of ['ui-badge', [{ name: 'ui-badge' }], [{ name: 'ui-badge', why: 'x', more: 1 }], [{ name: ' ', why: 'x' }]])
+      expect(withList(bad), JSON.stringify(bad)).toThrow(/parts\/aa: part\.json "notCovered" must be a list of \{ name, why \}/)
+    expect(withList([{ name: 'a', why: 'x' }, { name: 'a', why: 'y' }])).toThrow(/part\.json "notCovered" names "a" twice/)
+  })
+
   it('takes a part.json layer with its box and real input, and refuses one without them', () => {
     const root = scratch()
     const dir = plantPart(root, 'aa')
