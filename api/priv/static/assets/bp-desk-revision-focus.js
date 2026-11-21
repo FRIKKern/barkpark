@@ -1,6 +1,7 @@
 // bp-desk-revision-focus.js: opening a revision, or the published version,
-// while a field has the focus leaves the focus on a named control in the
-// pane, never on the page (task-74c8db8d9303dc84).
+// while a field has the focus, and going Back from one, leave the focus on a
+// named control in the pane, never on the page (task-74c8db8d9303dc84,
+// task-8fe9bc3aa4437be6).
 //
 // The read-only form keeps the live form's ids, so LiveView's morphdom moves
 // the focused input into the read-only fields' disabled fieldset
@@ -22,6 +23,15 @@
 //   3. the footer's first control: Revert to revision on a revision (it
 //      only opens its confirm);
 //   4. the pane's Editor tab.
+// A patch can also remove the focused control: Back from a revision or the
+// published view to the live document drops Revert to revision or Unpublish,
+// and Back onto another document's revision drops that document's fields.
+// The focus then falls to the page. After that patch the pane the control
+// was in, or the one drawn in its place, takes the focus where the TanStack
+// Studio's `focusIntoForm` puts it as a document opens: `formStart`, then the
+// footer's first control, then the pane's Editor tab
+// (task-8fe9bc3aa4437be6).
+//
 // A focus the person moved away (a click on empty space) is forgotten, so
 // nothing takes it back. The patch's own move blurs the field too, while it
 // is still enabled, so that is decided once the patch is done.
@@ -32,7 +42,10 @@
   if (window.BarkparkDeskRevisionFocus) return;
 
   var TABBABLE = "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]";
+  var PANE = '[data-pane-kind="doc"]';
   var last = null;
+  var lastPane = null;
+  var lastAt = { key: null, index: null };
 
   // Drawn and seen: the shell's own header controls are kept in the desk's
   // form but hidden.
@@ -59,26 +72,51 @@
     return el && takes(el) ? el : null;
   }
 
-  function target(pane) {
+  // Where opening a document puts the focus, as `focusIntoForm`.
+  function opening(pane) {
     return (
-      first(pane, '[data-desk-revision][aria-current="true"]') ||
       start(pane) ||
       first(pane.querySelector(".dk-edit-footer"), TABBABLE) ||
       first(pane.querySelector(".dk-title-bar"), '[role="tab"]')
     );
   }
 
+  function target(pane) {
+    return first(pane, '[data-desk-revision][aria-current="true"]') || opening(pane);
+  }
+
   function locked(el) {
     return el.isConnected && el.matches(":disabled") && !!el.closest("fieldset.dk-readonly-fields:disabled");
   }
 
+  // The pane the removed control was in, or the one drawn in its place: the
+  // same document's, else the one at the same place in the row of panes.
+  function paneNow() {
+    if (lastPane && lastPane.isConnected && lastPane.getAttribute("data-pane") === lastAt.key) return lastPane;
+    var panes = Array.prototype.slice.call(document.querySelectorAll(PANE));
+    var same = function (name, value) {
+      return panes.filter(function (p) {
+        return value !== null && p.getAttribute(name) === value;
+      })[0];
+    };
+    return same("data-pane", lastAt.key) || same("data-pane-index", lastAt.index) || null;
+  }
+
   function rescue() {
     var was = last;
-    if (!was || !locked(was)) return;
+    if (!was) return;
     var active = document.activeElement;
-    if (active && active !== document.body && active !== was) return;
-    var pane = was.closest('[data-pane-kind="doc"]');
-    var el = pane && target(pane);
+    var free = !active || active === document.body;
+    var pane, el;
+    if (locked(was)) {
+      if (!free && active !== was) return;
+      pane = was.closest(PANE);
+      el = pane && target(pane);
+    } else if (!was.isConnected) {
+      if (!free) return;
+      pane = paneNow();
+      el = pane && opening(pane);
+    } else return;
     if (!el) return;
     last = null;
     el.focus({ preventScroll: true });
@@ -86,7 +124,10 @@
 
   document.addEventListener("focusin", function (e) {
     var el = e.target;
-    last = el && el.closest && el.closest('[data-pane-kind="doc"]') ? el : null;
+    var pane = el && el.closest ? el.closest(PANE) : null;
+    last = pane ? el : null;
+    lastPane = pane;
+    lastAt = pane ? { key: pane.getAttribute("data-pane"), index: pane.getAttribute("data-pane-index") } : { key: null, index: null };
   });
   document.addEventListener("focusout", function (e) {
     // Moved away by the person: once this task is done, the field is still

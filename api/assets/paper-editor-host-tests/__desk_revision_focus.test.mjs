@@ -46,17 +46,21 @@ async function check(name, fn) {
 // One document pane, as EditorHost draws it: the title bar's Editor tab, the
 // shell's header controls (kept in the form, hidden), the group tabs, the
 // form holder, the History panel and the footer.
-function pane({ revision, history = true, tabs = true, footer = true }) {
+// `doc` names another document: its pane and field ids are its own, as the
+// desk's (`desk-pane-<index>-<key>`), so a patch to it removes the fields.
+// `published` draws the published view: read-only, with Unpublish.
+function pane({ revision, published, history = true, tabs = true, footer = true, doc = "" }) {
+  revision = revision || published;
   const fields =
     `<form id="editor-form" phx-change="validate">` +
-    `<textarea id="excerpt" name="doc[excerpt]">${revision ? "Old" : "Draft"}</textarea></form>`;
+    `<textarea id="excerpt${doc && "-" + doc}" name="doc[excerpt]">${revision ? "Old" : "Draft"}</textarea></form>`;
   const box = revision
     ? `<div id="p-form-box-revision" data-desk-form-box><fieldset class="dk-readonly-fields" disabled data-desk-readonly-fields>${fields}</fieldset></div>`
     : `<div id="p-form-box" data-desk-form-box><fieldset class="dk-readonly-fields">${fields}</fieldset></div>`;
   const row = (id, current) =>
     `<li><button type="button" id="row-${id}" data-desk-revision="${id}"${current ? ' aria-current="true"' : ""}>Edited</button></li>`;
   return (
-    `<section id="p" data-pane-kind="doc">` +
+    `<section id="p${doc && "-" + doc}" data-pane-kind="doc" data-pane="doc:${doc || "d"}" data-pane-index="1">` +
     `<div id="p-title-bar" class="doc-title-bar dk-title-bar"><div role="tablist"><button type="button" id="editor-tab" role="tab" tabindex="0">Editor</button></div></div>` +
     `<div id="p-body" class="pane-body doc-form">` +
     `<div id="p-shell-header" style="visibility: hidden"><button type="button" id="classic">Classic</button></div>` +
@@ -68,7 +72,9 @@ function pane({ revision, history = true, tabs = true, footer = true }) {
     (history ? `<aside id="p-history"><ol>${row("r2", !revision)}${row("r1", revision)}</ol></aside>` : "") +
     `</div>` +
     (footer
-      ? revision
+      ? published
+        ? `<footer id="p-published-footer" class="dk-edit-footer published-footer"><button type="button" id="unpublish">Unpublish</button></footer>`
+        : revision
         ? `<footer id="p-revision-footer" class="dk-edit-footer revision-footer"><button type="button" id="revert">Revert to revision</button></footer>`
         : `<footer id="p-footer" class="dk-edit-footer doc-footer"><button type="button" id="publish">Publish</button></footer>`
       : "") +
@@ -107,7 +113,7 @@ function page(opts = {}, { script = true } = {}) {
     const focused = document.activeElement;
     const to = document.createElement("div");
     to.innerHTML = pane({ ...opts, ...next });
-    morphdom(document.getElementById("p"), to.firstChild, { getNodeKey: (node) => node.id });
+    morphdom(document.querySelector('[data-pane-kind="doc"]'), to.firstChild, { getNodeKey: (node) => node.id });
     if (focused && focused !== document.body && focused.isConnected && document.activeElement !== focused) focused.focus();
     document.dispatchEvent(new window.CustomEvent("phx:update", { bubbles: true, cancelable: true }));
   };
@@ -192,6 +198,83 @@ await check("the fieldset disabled in place, the field still holding the focus: 
   assert.equal(active(), "excerpt");
   window.document.dispatchEvent(new window.CustomEvent("phx:update", { bubbles: true }));
   assert.equal(active(), "row-r2", "the pane's current entry, the focus off the disabled field");
+});
+
+// task-8fe9bc3aa4437be6: Back from a revision or the published view, and
+// Back onto another document's revision, remove the focused control.
+await check("the instrument: with no rescue, Back from a revision with Revert focused leaves the focus on BODY", async () => {
+  const { document, patch, active } = page({ history: false, tabs: false }, { script: false });
+  patch({ revision: true });
+  document.getElementById("revert").focus();
+  patch({ revision: false });
+  assert.equal(document.getElementById("revert"), null, "Back to the live document removes Revert");
+  assert.equal(active(), "BODY", "the defect");
+});
+
+await check("History closed, a revision opens on Revert, Back: the live form's start, as focusIntoForm", async () => {
+  const { excerpt, patch, active } = page({ history: false, tabs: false });
+  excerpt().focus();
+  patch({ revision: true });
+  assert.equal(active(), "revert", "#28058's hand-off");
+  patch({ revision: false });
+  assert.equal(active(), "excerpt", "the form's first control, not BODY");
+});
+
+await check("with field groups, Back from a revision on Revert: All fields", async () => {
+  const { document, patch, active } = page({ history: false });
+  patch({ revision: true });
+  document.getElementById("revert").focus();
+  patch({ revision: false });
+  assert.equal(active(), "bp-group-tab-all-fields");
+});
+
+await check("Back from the published view on Unpublish: the live form's start", async () => {
+  const { document, patch, active } = page({ history: false, tabs: false });
+  patch({ published: true });
+  document.getElementById("unpublish").focus();
+  patch({ revision: false });
+  assert.equal(active(), "excerpt");
+});
+
+await check("Back onto another document's revision, its field focused: that pane takes the focus, never BODY", async () => {
+  const { document, patch, active } = page({ history: false, tabs: false });
+  patch({ revision: false, doc: "rv2" });
+  document.getElementById("excerpt-rv2").focus();
+  patch({ revision: true, doc: "rv1" });
+  assert.equal(document.getElementById("excerpt-rv2"), null, "the other document's field is removed, not moved");
+  assert.equal(active(), "revert", "its form is read-only: the footer's first control");
+});
+
+await check("the same, with field groups: All fields", async () => {
+  const { document, patch, active } = page({ history: false });
+  patch({ revision: false, doc: "rv2" });
+  document.getElementById("excerpt-rv2").focus();
+  patch({ revision: true, doc: "rv1" });
+  assert.equal(active(), "bp-group-tab-all-fields");
+});
+
+await check("a removed control whose focus was moved on (a dialog, a row): left where it is", async () => {
+  const { document, patch, active } = page({ history: false, tabs: false });
+  patch({ revision: true });
+  document.getElementById("revert").focus();
+  const other = document.createElement("button");
+  other.id = "elsewhere";
+  document.body.appendChild(other);
+  patch({ revision: false });
+  other.focus();
+  document.dispatchEvent(new document.defaultView.CustomEvent("phx:update", { bubbles: true }));
+  assert.equal(active(), "elsewhere");
+});
+
+await check("Revert blurred by the person, then Back: nothing takes the focus back", async () => {
+  const { document, patch, tick, active } = page({ history: false, tabs: false });
+  patch({ revision: true });
+  document.getElementById("revert").focus();
+  document.getElementById("revert").blur();
+  await tick();
+  patch({ revision: false });
+  await tick();
+  assert.equal(active(), "BODY");
 });
 
 await check("the desk loads it, as it loads its other scripts", () => {
