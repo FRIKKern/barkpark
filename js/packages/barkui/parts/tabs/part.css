@@ -20,6 +20,12 @@
   }
 }
 
+/* One text size for a tab and a panel; set on both, since the showroom's pinned tabs stand outside a <ui-tabs>. */
+[data-slot="tabs-tab"],
+[data-slot="tabs-panel"] {
+  --bark-tabs-text: 0.875rem;
+}
+
 [data-slot="tabs-list"] {
   display: flex;
   flex-wrap: wrap;
@@ -34,7 +40,6 @@
 
 [data-slot="tabs-tab"] {
   --bark-tab-fg: var(--ui-muted-foreground);
-  --bark-tab-text: 0.875rem;
   --bark-tabs-edge: 2px;
 
   box-sizing: border-box;
@@ -43,7 +48,7 @@
   border: 0;
   background: transparent;
   color: var(--bark-tab-fg);
-  font-size: var(--bark-tab-text);
+  font-size: var(--bark-tabs-text);
   font-weight: 500;
   line-height: 1.25;
   text-align: start;
@@ -68,9 +73,7 @@
 }
 
 [data-slot="tabs-panel"] {
-  --bark-tabs-panel-text: 0.875rem;
-
   color: var(--ui-foreground);
-  font-size: var(--bark-tabs-panel-text);
+  font-size: var(--bark-tabs-text);
   line-height: 1.5;
 }

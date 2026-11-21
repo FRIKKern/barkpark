@@ -30,8 +30,8 @@ export const steps = [
     },
   },
   {
-    name: 'ArrowRight reaches the disabled tab: it takes focus, Enter does not select it, and the Analytics panel stays',
-    keys: ['ArrowRight', 'Enter'],
+    name: 'ArrowRight reaches the disabled tab: it takes focus, Enter and Space select nothing, and the Analytics panel stays',
+    keys: ['ArrowRight', 'Enter', 'Space'],
     expect: (root, h) => {
       const t = root.querySelector('#tabs-reports')
       if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
