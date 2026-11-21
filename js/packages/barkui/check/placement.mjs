@@ -2,13 +2,14 @@
 // attribute, and names the control it hangs from there too. That is the one thing a style attribute in a stage may
 // hold: where a top-layer box sits, never how anything looks. The look belongs in part.css.
 //
-// The closed list is here, once, with the UI SDK control that writes each entry. A box is an element the census
+// The closed list is here, once, with the UI SDK control that writes each entry, and apart from it one more entry
+// with its own reason, transition, the one entry whose value is read. A box is an element the census
 // (layers.mjs) has seen can open in the top layer for the part: a dialog, or an element that carries popover. Every
 // box property is allowed only on such a box; anchor-name only on an element whose anchor name a box's
 // position-anchor names; anything else, anywhere in a stage, fails by name. docs/PARTS.md "Placement" prints the
 // same list, and a unit row is red when the two differ.
 //
-// What is read: the declarations the browser applies, by property name, as it parses the attribute's text (a
+// What is read: the declarations the browser applies, by property name (values are not read, except transition's), as it parses the attribute's text (a
 // shorthand is judged by its longhands, so `inset` is top, right, bottom and left, and `all` is its own name).
 // Text the browser drops is not a declaration. When it is read: every value the attribute holds, from the page's
 // first frame (placementWorld, below, in the census's world), so a property written while a box is open and taken
@@ -42,14 +43,22 @@ export const PLACEMENT = [
   { property: '--dialog-stack', on: 'box', writer: 'UI SDK dialog, on the box (components/dialog/dialog-parts.js)' },
   { property: '--keyboard-inset', on: 'box', writer: 'UI SDK dialog, on the box (foundation/platform/keyboard.js)' },
   { property: '--visual-viewport-height', on: 'box', writer: 'UI SDK dialog, on the box (foundation/platform/keyboard.js)' },
-  {
-    property: 'transition',
-    longhands: ['transition-behavior', 'transition-duration', 'transition-timing-function', 'transition-delay', 'transition-property'],
-    value: 'none',
-    on: 'box',
-    writer: 'UI SDK select and menu, on the box, for the one task in which it first places it (foundation/platform/position.js)',
-  },
 ]
+
+/** Apart from the list, with its own reason: UI SDK writes "transition: none" on a select or menu box when it first
+    places it and puts the old value back in the same task (foundation/platform/position.js), so only a reader from
+    the first frame sees it. Allowed only on a box, and only as "none" in all five longhands; any other value, or
+    none on an element that is not a box, fails by name. */
+export const TRANSITION = {
+  property: 'transition',
+  longhands: ['transition-behavior', 'transition-duration', 'transition-timing-function', 'transition-delay', 'transition-property'],
+  value: 'none',
+  on: 'box',
+  reason: 'UI SDK switches motion off on a box while it measures where to put it; none takes motion away and adds no look',
+  writer: 'UI SDK select and menu, on the box, in the task in which it first places it (foundation/platform/position.js)',
+}
+/** Every entry the judge allows: the list, then transition. */
+export const ALLOWED = [...PLACEMENT, TRANSITION]
 
 /** The fail for a property that is not placement, on any element in a stage. */
 export const NOT_PLACEMENT = (at, prop) => `${at} was given ${prop} in a style attribute, which is not placement: the look belongs in part.css`
@@ -58,12 +67,12 @@ export const NOT_A_BOX = (at, prop) => `${at} was given ${prop} in a style attri
 /** The fail for an anchor name no box's position-anchor names. */
 export const NOT_ANCHORED = (at, name) => `${at} was given anchor-name ${name} in a style attribute, and no box in the top layer anchors to it`
 /** The fail for an entry with one value, given another. */
-export const NOT_VALUE = (at, prop, entry) => `${at} was given ${prop} in a style attribute other than "${entry.property}: ${entry.value}", the one ${entry.property} placement holds`
+export const NOT_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and ${entry.property} is allowed there only as "${entry.property}: ${entry.value}"`
 /** The fail for any style attribute on a stage with no script. */
 export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage with no script, where nothing may write one`
 
 /** Runs in the census's world (it is serialised): the log of every value each style attribute in a stage holds,
-    from the first frame, and the judge of it. `list` is PLACEMENT; `script` is false on a page with no script; `say`
+    from the first frame, and the judge of it. `list` is ALLOWED; `script` is false on a page with no script; `say`
     holds the fails' wording; `owner(el)` names the part whose stage holds el (null outside every stage);
     `boxes(part)` the elements the census has seen can open in the top layer for that part; `describe(el)` names an
     element. Returns { watch(root): observe a document or an open shadow root from now on, look(part): the fails
@@ -146,7 +155,7 @@ export function placementWorld(list, script, say, owner, boxes, describe) {
           const e = entries.get(prop)
           if (!e) fail(say.NOT_PLACEMENT(at, prop))
           else if (e.on === 'box' && !mine.has(el)) fail(say.NOT_A_BOX(at, prop))
-          else if (e.value !== undefined && p.of(e.property) !== e.value) fail(say.NOT_VALUE(at, prop, e))
+          else if (e.value !== undefined && p.of(e.property) !== e.value) fail(say.NOT_VALUE(at, prop, value, e))
           else if (e.on === 'anchor') for (const name of value.split(',').map((s) => s.trim())) if (!anchors.has(name)) fail(say.NOT_ANCHORED(at, name))
         }
       }
@@ -160,5 +169,5 @@ export function placementWorld(list, script, say, owner, boxes, describe) {
 export function placementSource(source) {
   const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT }
   const said = `{ ${Object.entries(say).map(([k, f]) => `${k}: ${source(f)}`).join(', ')} }`
-  return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify(PLACEMENT)}, script, ${said}, owner, boxes, describe))`
+  return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify(ALLOWED)}, script, ${said}, owner, boxes, describe))`
 }

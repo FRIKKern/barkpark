@@ -289,11 +289,17 @@ where each may stand and what writes it:
   `--anchor-width`, `--anchor-height`, `--transform-origin`, `--arrow-offset`: only on a box. UI SDK select and
   menu, on the box.
 - `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
-- `transition`, as `none` only: only on a box. UI SDK select and menu, for the one task in which it first places
-  the box.
 
-Any other property, a box's property on an element that is not a box, and an anchor name no box hangs from fail by
-name ("… was given opacity in a style attribute, which is not placement: the look belongs in part.css"). What is
+Values are not read, except transition's. Apart from the list, one more entry has its own reason: UI SDK switches
+motion off on a box while it measures where to put it, and `none` takes motion away and adds no look. UI SDK writes it
+when it first places a select or menu box and puts the old value back in the same task, so only a reader from the
+first frame sees it:
+
+- `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
+
+Any other property, a box's property on an element that is not a box, an anchor name no box hangs from, and any
+other transition value fail by name ("… was given opacity in a style attribute, which is not placement: the look
+belongs in part.css"). What is
 read is each declaration the browser applies, by its name: a shorthand by its longhands (`inset` is `top`,
 `right`, `bottom` and `left`), and `all` by its own name. Text the browser drops is not a declaration. Every value
 a `style` attribute in a stage holds is read, from the page's first frame, however it is written (the attribute,

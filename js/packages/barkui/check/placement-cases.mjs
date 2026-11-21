@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { noscript } from './proofs.mjs'
-import { NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_PLACEMENT } from './placement.mjs'
+import { NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_PLACEMENT, NOT_VALUE, TRANSITION } from './placement.mjs'
 import { all, edit, each, inDemo, lights } from './plants.mjs'
 
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
@@ -43,11 +43,20 @@ const WRITES = [
   "root.querySelector('#button-placed').setAttribute(S, 'top: 4px')",
   "root.querySelector('#button-anchor').setAttribute(S, 'anchor-name: --nobody')",
   "{ const f = root.querySelector('#button-flash'); f.showPopover(); f[S]['set' + 'Property']('color', 'rgb(255, 0, 0)'); f.removeAttribute(S); f.hidePopover() }",
+  "root.querySelector('#button-still').setAttribute(S, 'transition: none')",
+  "root.querySelector('#button-fading').setAttribute(S, 'transition: opacity 1s')",
+  "root.querySelector('#button-slowed').setAttribute(S, 'transition-duration: 0.2s')",
+  // removeAttribute taken from another window's Element, after a write through el.style, in one task.
+  "{ const t = root.querySelector('#button-framed'), f = document.createElement('iframe'); document.body.append(f); const rm = f.contentWindow.Element.prototype.removeAttribute; t[S]['set' + 'Property']('color', 'rgb(255, 0, 0)'); rm.call(t, S); f.remove() }",
 ].join('\n')
 const PLACED = `<div id="button-box" popover="manual">A box</div>
 <span id="button-placed">Placed</span>
 <span id="button-anchor">Anchored</span>
-<div id="button-flash" popover="manual">Flash</div>`
+<div id="button-flash" popover="manual">Flash</div>
+<span id="button-still">Still</span>
+<div id="button-fading" popover="manual">Fading</div>
+<div id="button-slowed" popover="manual">Slowed</div>
+<span id="button-framed">Framed</span>`
 
 /** The no-script stage with a box holding a listed property and a span holding an empty attribute: example.html may
     carry neither (the build refuses style=), so they are written into the built page. */
@@ -93,7 +102,7 @@ export const PLACEMENT_CASES = [
     }),
   },
   {
-    name: 'placement: what is not placement fails by name: an unlisted property beside a listed one, a box property off a box, an anchor name no box hangs from, a property held only while a box was open',
+    name: 'placement: what is not placement fails by name: an unlisted property beside a listed one, a box property off a box, an anchor name no box hangs from, a property held only while a box was open, a transition other than none on a box or none off one, and a value removed by a method from another window',
     only: ['pressed'],
     plant: all((d) => row(d, PLACED), (d) => inDemo(d, WRITES)),
     expect: each({
@@ -101,6 +110,10 @@ export const PLACEMENT_CASES = [
       'top on an element that cannot open in the top layer fails by name': has(NOT_A_BOX('span#button-placed "Placed"', 'top')),
       'anchor-name on an element no box anchors to fails by name': has(NOT_ANCHORED('span#button-anchor "Anchored"', '--nobody')),
       'color written while a box is open and taken away as it closes fails by name': has(NOT_PLACEMENT('div#button-flash "Flash"', 'color')),
+      'transition: none on an element that is not a box fails by name': has(NOT_A_BOX('span#button-still "Still"', 'transition-duration')),
+      'a transition other than none on a box fails by name, with its value': has(NOT_VALUE('div#button-fading "Fading"', 'transition-duration', '1s', TRANSITION)),
+      'one transition longhand that is not none (a duration) on a box fails by name': has(NOT_VALUE('div#button-slowed "Slowed"', 'transition-duration', '0.2s', TRANSITION)),
+      "removeAttribute taken from a frame's window after an el.style write: the value is still seen": has(NOT_PLACEMENT('span#button-framed "Framed"', 'color')),
     }),
   },
   {
