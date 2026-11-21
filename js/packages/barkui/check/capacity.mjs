@@ -37,9 +37,7 @@ export const INPUT = {
     // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
       views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
-      // PROVISIONAL, for one interim head: this job's 129 s plus about 80 s for the top-layer cases it now runs;
-      // replaced by this job's own hosted reading.
-      rest: { seconds: 210, job: 136951528449, run: 44938846979, commit: '4006485fef' },
+      rest: { seconds: 222, job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
     },
   },
 }
