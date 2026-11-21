@@ -13,9 +13,9 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
   its reason.
 
   How words are counted: a stored string splits at white space, with punctuation
-  taken off each end. A word counts as shown when the page's text holds it, also
-  when inline markup splits it, or when an attribute a reader gets (alt, title,
-  aria-label) holds it. An equation's TeX is drawn as math, so for every equation
+  taken off each end. A word counts as shown only when the page holds it as a whole
+  word: in its text, each tag read as a space, or in an attribute a reader gets (alt,
+  title, aria-label). A word inside a longer one does not count. An equation's TeX is drawn as math, so for every equation
   its letters and digits, TeX command names taken out, must appear in that order in
   the drawn text's letters and digits.
 
@@ -196,10 +196,10 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
     |> String.replace("&amp;", "&")
   end
 
-  # The page's words two ways: with each tag as a space, and the text run together
-  # (a word split by inline markup, <strong>care</strong>ful, reads as one). The words
-  # a reader gets from an attribute (an image's alt, a hover title, an aria-label)
-  # count as shown.
+  # The page's whole words, each tag read as a space, and its text run together, which
+  # only the equation rule reads (its letters and digits in order). The words a reader
+  # gets from an attribute (an image's alt, a hover title, an aria-label) count as
+  # shown.
   defp shown(html) do
     attrs =
       ~r/\s(?:alt|title|aria-label)="([^"]*)"/
@@ -237,9 +237,9 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
     if String.contains?(alnum(joined), want), do: [], else: [want]
   end
 
-  defp missing_words(type, path, string, set, joined) do
+  defp missing_words(type, path, string, set, _joined) do
     for word <- words(readable(type, path, string)),
-        not MapSet.member?(set, word) and not String.contains?(joined, word),
+        not MapSet.member?(set, word),
         do: word
   end
 
@@ -269,6 +269,13 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
 
     assert {"fixtures/nested-list-carriers.json", _} =
              List.keyfind(docs, "fixtures/nested-list-carriers.json", 0)
+
+    # The one shared document whose callout holds a body: a paragraph, a list, a table
+    # and a callout with its own body, so a body the page does not draw reds the walk.
+    assert {"fixtures/callout-body.json", [%{"type" => "callout", "slots" => %{"body" => body}}]} =
+             List.keyfind(docs, "fixtures/callout-body.json", 0)
+
+    assert Enum.map(body, & &1["type"]) == ~w(paragraph list table callout)
   end
 
   # The fallback rule cannot hide a loss: a `text` stored with an empty `content` is
