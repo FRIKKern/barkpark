@@ -1376,9 +1376,9 @@ c8_row "8l: the report job's if: still covers a scheduled red on main" pass c8_r
 python3 - "$WF" "$C8/hold.yml" <<'PY'
 import sys
 s = open(sys.argv[1]).read()
-o = "      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)\n        if: always()\n        env:\n          STEP_OUTCOMES"
-assert s.count(o) == 1
-open(sys.argv[2], "w").write(s.replace(o, "      - name: planted hold\n        run: bash scripts/main-red-hold.sh open --tree api\n\n" + o))
+o = "      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)\n"
+assert o in s, "no Decide step to plant before"
+open(sys.argv[2], "w").write(s.replace(o, "      - name: planted hold\n        run: bash scripts/main-red-hold.sh open --tree api\n\n" + o, 1))
 PY
 c8_row "8i MUTANT: a planted 'main-red-hold.sh open' step" fire c8_row_a "$C8/hold.yml"
 python3 - "$C8_REQ" "$C8/req.json" <<'PY'
