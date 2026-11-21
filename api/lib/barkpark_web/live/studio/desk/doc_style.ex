@@ -53,6 +53,18 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       5 px apart), shown under the pointer or the focus and while its menu is open;
       always drawn where nothing hovers, 44 px on a touch phone. Its menu
       opens to its right, above it where the pane leaves no room.
+    * A save that did not land (`data-desk-save` "Save failed" or "Save
+      cancelled", so "Not saved: <field>" or "Save failed: <reason>") draws
+      the form's save status in TanStack's caution words (`.save-state`
+      `[data-state=refused]`: `--warn-fg`, 500), at full strength. So do
+      two more refusals, each in the tone TanStack gives it:
+      "Read-only" (a write this person may not make, such as a checked-out
+      asset's metadata: TanStack's caution toast, "read-only for you: the
+      change was not saved"; the form's status only ever says it after a
+      refused write) and another user's save over edits not saved here
+      (`data-desk-conflict`, while the conflict banner is up: TanStack's
+      `refused`). Taken in by a form with nothing unsaved, "Updated by
+      another user" stays as it was, as do "Saved" and the old Studio.
     * `.dk-field-toast` is the one rule outside the edit pane: the words
       `bp-desk-field-actions.js` shows for a copy or a paste, bottom right
       as TanStack's toasts, over the pane's footer. It is on the page's body, so no patch of the
@@ -70,8 +82,6 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-selected-fill: rgb(238 238 241); --dk-tab-selected-fg: rgb(99 103 118); --dk-icon-muted: rgb(106 110 125); --dk-tag-x: rgb(102 106 121); --dk-fg-strong: rgb(13 14 18);
         --dk-icon-btn-hover: rgb(246 246 248); --dk-focus-ring: rgb(85 107 252); --dk-input-hover-ring: rgb(187 189 201);
         --dk-danger-text: rgb(189 51 40); --dk-placeholder: rgb(148 153 173);
-        --dk-bg-soft: rgb(246 246 248); --dk-btn2-fg: rgb(78 85 109); --dk-btn2-ring: rgb(230 230 234);
-        --dk-btn2-hover-bg: rgb(238 238 241); --dk-btn2-hover-fg: rgb(53 58 77); --dk-btn2-hover-ring: rgb(222 222 228);
         --dk-upload-fill: rgb(246 246 248); --dk-upload-ring: rgb(219 220 226); --dk-ghost-fg: rgb(56 61 81); --dk-hover-strong: rgb(233 234 238); --dk-glass: rgb(255 255 255 / 0.88);
         --bg: var(--dk-bg); background: var(--bg);
       }
@@ -80,8 +90,6 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
         --dk-selected-fill: rgb(42 45 63); --dk-tab-selected-fg: rgb(157 159 174); --dk-icon-muted: rgb(147 148 159); --dk-tag-x: rgb(144 145 155); --dk-fg-strong: rgb(255 255 255);
         --dk-icon-btn-hover: rgb(33 35 47); --dk-focus-ring: rgb(89 111 252); --dk-input-hover-ring: rgb(61 66 88);
         --dk-danger-text: rgb(255 123 114); --dk-placeholder: rgb(85 92 117);
-        --dk-bg-soft: rgb(25 26 36); --dk-btn2-fg: rgb(153 158 179); --dk-btn2-ring: rgb(38 40 55);
-        --dk-btn2-hover-bg: rgb(33 35 47); --dk-btn2-hover-fg: rgb(193 195 208); --dk-btn2-hover-ring: rgb(46 49 65);
         --dk-upload-fill: rgb(13 14 18); --dk-upload-ring: rgb(37 40 55); --dk-ghost-fg: rgb(189 191 203); --dk-hover-strong: rgb(42 45 63); --dk-glass: rgb(19 20 27 / 0.85);
       }
       .dk .dk-edit > .doc-title-bar { box-sizing: border-box; height: 50px; flex: none; display: flex; align-items: center; padding: 0 20px; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
@@ -169,6 +177,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .field > button.change-bar::before { content: ""; position: absolute; top: 0; bottom: 0; left: -7px; width: 15px; }
       .dk .dk-edit .field-actions > .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
       .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-anchor: --dk-field-actions; position-area: right center; position-try-fallbacks: top; }
+      .dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-save="Read-only"], [data-desk-conflict]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }
       @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.TagsStyle.css()) %>

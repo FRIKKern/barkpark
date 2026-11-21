@@ -58,8 +58,12 @@ neither base.css nor a part mixes a tint of its own.
   (`api/priv/barkui/**`), `barkui.yml` itself or `js/package.json`, or changes lines of
   `js/pnpm-lock.yaml` that name one of BarkUI's own dependencies (a Playwright bump brings a new
   Chromium), and whenever the changed files cannot be worked out. The check runs as one job per group
-  of parts, the selftest as its own job, and one closing check reads them all (see "How many parts the
-  check holds"); on any other change only the plan and the closing check run. The fast tests run with
+  of parts, the selftest as two jobs of its own ("BarkUI selftest, views" runs `--job views`, and
+  "BarkUI selftest, presses, states and refusals" runs `--job rest`), and one closing check
+  reads them all (see "How many parts the check holds"). Each selftest job reports, by name, every case
+  it ran and every case that held, and the closing check is red, naming the case, unless the two jobs
+  together ran every case of the list once and each held (`check/selftest-report.mjs`). On any other
+  change only the plan and the closing check run. The fast tests run with
   the rest of the js suite (`js-tests.yml`).
 - `build/sheet-waits.mjs` lists the contrast the tokens sheet does not deliver yet, each wait bound to one
   skin, scheme, surface and pair of tokens, with the ratio measured there (see "Surfaces" below).
@@ -170,7 +174,8 @@ matches; a rule or a pair nobody judges fails the part by name.
   ancestor or sibling or inside another pseudo-class, where no `data-pin` reaches; other pseudo-classes
   come from a short list of structure (`check/selectors.mjs`): any other a person changes by clicking or
   typing (`:placeholder-shown`, `:user-invalid`, `:focus-within`, `:enabled` and the like) is refused until a
-  part needs it, when it joins the pinned states with a way for the check to drive it, as `:checked` did. Pseudo-elements are the four the check
+  part needs it, when it joins the pinned states with a way for the check to drive it, as `:checked` did;
+  `:is()`, `:where()` and `:has()` take one selector each (why: "every branch", below). Pseudo-elements are the four the check
   reads. Then the check parses the page's own `barkui.css`, every part in one sheet as
   the page loads it, in the same browser, and each part's section must hold, rule by rule and with its
   states pinned, what was read from that part alone; a difference refuses the run, naming the part.
@@ -250,20 +255,28 @@ Tab stop, below. The motion pass reads one skin in light on purpose:
 part.css cannot tell skins or schemes apart, and with motion allowed it can change only timing and,
 through the shared keyframes, turn an element, so what motion changes is the same in every skin. The
 focus ring's edge is measured on every Tab stop on the base surface at 1440px, in every skin and scheme.
-A rule counts as read when it applied at a judged moment, through any branch of its selector list: in
+A rule counts as read only when every branch of its selector list applied at a judged moment. A branch
+is one selector of the rule's own list; a nested rule's branches are each of its own crossed with each of
+its parent's. In
 `[inert] [data-slot="button"]:not([data-pin]), #x-save[data-pending]:hover { --bark-button-hover-fg: … }`
-the first branch applies, harmlessly, at every reading, while the second (a live button pending under
-the pointer) is never driven, because no live control is pending when the states are planned. Written
-alone, the second branch fails as "a rule nothing read".
+the first branch applies at every reading, but the second (a live button pending under the pointer) is
+never driven, because no live control is pending when the states are planned, so the rule fails as
+"a branch nothing read". A list inside `:is()`, `:where()` or `:has()` is a choice the branches would not
+show, so part.css may not hold one: write each arm as a branch. `:not(a, b)` is one negation, not a choice.
+The list is read from the text, since the browser drops an arm it does not know from `:is()` and
+`:where()` and keeps the rule; and each arm the text writes, a branch or the one selector inside
+`:is()` or `:where()`, is read alone by the browser, and the one inside is read where it stands as well,
+the rule's selector beside the same selector with that `:is()` or `:where()` emptied, so an arm it drops
+is refused by name.
 
 ## How many parts the check holds
 
 <!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->
-On CI's hosted runner one job of the check took 570 s for 5 parts, with 14 parts in the folder; a job may take at most 1.5 times its reading, scaled linearly past the most parts read (171 s a part), and stops, failing, once it passes that, so one job's 15-minute check step in CI holds 5 parts, whose ceiling of 855 s is 95% of it. The ceilings are made from readings (`check/capacity.mjs`): each is one job's whole run on CI's hosted runner, and each ceiling is 1.5 times the slowest reading for its number of parts. The readings: the check, 1 part of 1 in 135 s (run 44623848758 at ddb4ba55b6); 4 parts of 14 in 430 s (run 44642580444 at fa14e54128); 4 parts of 14 in 432 s (run 44642580444 at fa14e54128); 3 parts of 14 in 252 s (run 44642580444 at fa14e54128); 3 parts of 14 in 211 s (run 44642580444 at fa14e54128); 5 parts of 14 in 570 s (run 44662694458 at d9d277ad73); 5 parts of 14 in 567 s (run 44662694458 at d9d277ad73); the selftest, 308 s (run 44623848758 at ddb4ba55b6). A job checks 3 parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (`check/ceiling.mjs`, one timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can lower a ceiling, down to 0 s, for a test, never raise it). Given more than 5 parts, a job refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into `check/capacity.mjs` and the numbers move by measurement; a test holds the steps' minutes to `barkui.yml`, the ceiling of 5 parts under the check step and of one more over it, and this passage word for word.
+On CI's hosted runner one job of the check took 570 s for 5 parts, with 14 parts in the folder; a job may take at most 1.5 times its reading, scaled linearly past the most parts read (171 s a part), and stops, failing, once it passes that, so one job's 15-minute check step in CI holds 5 parts, whose ceiling of 855 s is 95% of it. The ceilings are made from readings (`check/capacity.mjs`): each is one job's whole run on CI's hosted runner, and each ceiling is 1.5 times the slowest reading for its number of parts. The readings: the check, 1 part of 1 in 135 s (run 44623848758 at ddb4ba55b6); 4 parts of 14 in 430 s (run 44642580444 at fa14e54128); 4 parts of 14 in 432 s (run 44642580444 at fa14e54128); 3 parts of 14 in 252 s (run 44642580444 at fa14e54128); 3 parts of 14 in 211 s (run 44642580444 at fa14e54128); 5 parts of 14 in 570 s (run 44662694458 at d9d277ad73); 5 parts of 14 in 567 s (run 44662694458 at d9d277ad73); the selftest, its views job in 210 s (job 136906448861 of run 44923426286 at dcae531939) and its rest job in 137 s (job 136906448828 of run 44923426286 at dcae531939). A job checks 3 parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (`check/ceiling.mjs`, one timer for the check and the selftest; `BARKUI_CEILING_SECONDS` can lower a ceiling, down to 0 s, for a test, never raise it). Given more than 5 parts, a job refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into `check/capacity.mjs` and the numbers move by measurement; a test holds the steps' minutes to `barkui.yml`, the ceiling of 5 parts under the check step and of one more over it, and this passage word for word.
 
-In CI the check runs as jobs side by side. `check/jobs.mjs` splits the sorted part folders into the fewest groups of at most 5 parts, their sizes within one of each other, and the job matrix in `barkui.yml` reads that list; no list is written by hand. The plan, each job and the closing check compute the split again from the same checkout and must agree. Every job builds and loads the whole page, and the readings above were taken with at most 14 parts in the folder: with more, a job's ceiling stays where it is, so a page that makes it slower fails the job instead of stretching it. One closing check (its name is `AGGREGATE` in `check/jobs.mjs`) always runs and is red when the plan, any group or the selftest is red, cancelled, missing, or skipped while the plan said BarkUI was touched.
+In CI the check runs as jobs side by side. `check/jobs.mjs` splits the sorted part folders into the fewest groups of at most 5 parts, their sizes within one of each other, and the job matrix in `barkui.yml` reads that list; no list is written by hand. The plan, each job and the closing check compute the split again from the same checkout and must agree. Every job builds and loads the whole page, and the readings above were taken with at most 14 parts in the folder: with more, a job's ceiling stays where it is, so a page that makes it slower fails the job instead of stretching it. One closing check (its name is `AGGREGATE` in `check/jobs.mjs`) always runs and is red when the plan, any group or either selftest job is red, cancelled, missing, or skipped while the plan said BarkUI was touched.
 
-The selftest copies one part, so its time does not grow with the parts folder. On CI's hosted runner the selftest took 308 s; it may take at most 1.5 times that, 462 s, 77% of its 10-minute step in CI, and stops, failing, once it passes that. Its ceiling stays at or under 80% of its step; a selftest that outgrows that is split across jobs, never given a longer step.
+The selftest copies one part, so its time does not grow with the parts folder. It runs as 2 jobs side by side, and one rule in `check/jobs.mjs` (`selftestJob`) puts each case in exactly one: the `views` job runs the cases that read the wide or phone views and drive no states, the `rest` job every other case; a test holds that the two together run every case, each once. On CI's hosted runner the selftest's views job took 210 s; it may take at most 1.5 times that, 315 s, 53% of its 10-minute step in CI, and stops, failing, once it passes that. On CI's hosted runner the selftest's rest job took 137 s; it may take at most 1.5 times that, 206 s, 34% of its 10-minute step in CI, and stops, failing, once it passes that. Each ceiling stays at or under 80% of its step; a job that outgrows that is split again, never given a longer step.
 <!-- /capacity -->
 
 The check runs at most 8 groups (`MOST_GROUPS` in `check/jobs.mjs`), so at most 40 parts, and

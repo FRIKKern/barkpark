@@ -209,22 +209,6 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   end
 
   @doc """
-  A form the page sends itself to save (`{:autosave_form, form}`), kept to
-  the document the socket holds as it is built.
-  """
-  def own(form, socket), do: {:own, of(socket), form}
-
-  @doc """
-  The form of such a message when the socket still holds its document,
-  else `nil`. A bare form is one the server built for the open document.
-  """
-  def own?({:own, doc, form}, socket),
-    do: if(is_binary(doc) and doc === of(socket), do: form)
-
-  def own?(form, _socket) when is_map(form), do: form
-  def own?(_form, _socket), do: nil
-
-  @doc """
   `params` without the two keys among the document's fields. A post that
   carries them inside `doc` (sent by hand) would leave them in the form
   buffer.

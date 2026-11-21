@@ -11,9 +11,9 @@ export const PINNED = ['hover', 'active', 'focus-visible', 'checked']
 // Every other pseudo-class part.css may use, anywhere: structure and the element's own attributes, nothing that a
 // person's pointer, keys, typing or history sets. Anything else (:focus, :target, :placeholder-shown, ...) is
 // refused until it joins PINNED with a way for the check to drive it: here when the browser reads the rule, and by
-// check/sheet-text.mjs when the browser drops the whole rule for a name it does not know. tests/selectors.test.mjs
-// pins this list whole, each name with its reason, so a name added or taken out is red until that reason is written
-// beside it.
+// check/sheet-text.mjs when the browser drops the whole rule, or an arm of it read alone, for a name it does not
+// know. tests/selectors.test.mjs pins this list whole, each name with its reason, so a name added or taken out is red
+// until that reason is written beside it.
 export const STATIC = ['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type']
 // The pseudo-elements the check reads (docs/PARTS.md "Read").
 export const PSEUDO_ELEMENTS = ['before', 'after', 'marker', 'placeholder']
@@ -91,7 +91,26 @@ export function selectorFindings(text, parentHas = false) {
     if (parentHas && subject && !subject.nest && !subject.nestInside && !compounds.some((c) => c.nest || c.nestInside))
       found.push(`the rule it is nested in pins a state, and this rule styles a descendant of that element`)
   }
+  // A list inside :is(), :where() or :has() is refused from the sheet's text (textArms in check/sheet-text.mjs): the
+  // browser drops an arm it does not know from :is() and :where(), so the text it hands back here can hide one.
   return [...new Set(found)]
+}
+
+/** Each :is(), :where() and :has() in a selector, with its arms (its list split at its own top-level commas) and
+    `at`, where its list starts and ends in the text. :not() is left out: its list is one negation, not a choice. */
+export function choiceLists(text) {
+  const open = []
+  const out = []
+  scan(text, (i, depth, c) => {
+    if (c === ':') {
+      const m = text.slice(i + 1).match(/^(is|where|has)\(/i)
+      if (m) open.push({ name: m[1].toLowerCase(), from: i + m[0].length + 1, depth })
+    } else if (c === ')' && open.length && open[open.length - 1].depth === depth) {
+      const o = open.pop()
+      out.push({ name: o.name, arms: splitList(text.slice(o.from, i)), at: [o.from, i] })
+    }
+  })
+  return out
 }
 
 /** The states of a pinned sheet that the pin did not reach: each must read `:is(:x, [data-pin~="x"])`. */

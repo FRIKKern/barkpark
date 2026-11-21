@@ -123,8 +123,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # "anonymous is now denied".
   # pds-w42-bl-handle-info-write-seam-audit — PUBLIC, because the paper ops are
   # not the only hook-invisible write door. The `handle_info` sweep found a
-  # second one: `{:autosave_form, form}` → `Shared.do_autosave/2` →
-  # `Content.upsert_draft`, which reached persisted state with no principal
+  # second one: `{:autosave_form, form}` (removed since) → `Shared.do_autosave/2` →
+  # `Content.upsert_draft`, reaching persisted state with no principal
   # check of its own. That seam calls THESE two functions rather than
   # re-deriving the rule, so the two doors cannot drift into two answers to
   # "may this principal write" — the acceptance criterion is explicitly "no
@@ -201,8 +201,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   The TARGET-aware companion to `write_denied?/1`, and the second question every
   hook-invisible write seam must ask. PUBLIC for the same reason `write_denied?/1`
-  is: `Shared.do_autosave/2` — the `{:autosave_form, …}` `handle_info`, a third
-  hook-invisible door — must ask it too, and must ask THIS copy. Do not
+  is: `Shared.do_autosave/2` — reached from a `handle_info` (a tree codelist
+  pick), a third hook-invisible door — must ask it too, and must ask THIS copy. Do not
   re-derive it; a fork here is a fork in the authorization answer.
 
   Inert (`false`, no query) unless the socket is grant-graded; fail-closed on an

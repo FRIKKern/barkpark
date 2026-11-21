@@ -24,8 +24,8 @@ import { inPartsLayer, SELECTOR_RULES } from '../build/css-lint.mjs'
 import { pinStates } from '../build/showroom.mjs'
 import { EXTRA, KEYFRAMES, LEFT_OUT_INITIAL, MEDIA, MOTION_ONLY, PHONE, PHONE_ONLY, VOCABULARY } from '../build/vocabulary.mjs'
 import { readFileSync } from 'node:fs'
-import { resolve, selectorFindings, statesOnSubject, strip, unpinned } from './selectors.mjs'
-import { browserReadings, sheetFindings, textBlocks } from './sheet-text.mjs'
+import { resolve, selectorFindings, splitList, statesOnSubject, strip, unpinned } from './selectors.mjs'
+import { browserReadings, sheetFindings, textArms, textBlocks } from './sheet-text.mjs'
 
 const SENTINEL = '[data-barkui-sentinel] { gap: 0px; }'
 
@@ -50,6 +50,8 @@ const RULES = `(rules) => {
 /** What the browser makes of `css`: `found`, one message per thing it may not hold; `rules`, the pinned part as
     the page would hold it, rule by rule (sameAsShipped). */
 export async function readPartCss(browser, css) {
+  // Each rule's arms as the text writes them; a list inside :is(), :where() or :has() is refused from the text.
+  const arms = textArms(textBlocks(css))
   const context = await browser.newContext()
   try {
     const page = await context.newPage()
@@ -164,7 +166,7 @@ export async function readPartCss(browser, css) {
         }
         return { found, selectors, rules: pinned ? ruleList(pinned) : null, pinnedSelectors }
       },
-      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY], textBlocks(css), browserReadings.toString(), sheetFindings.toString()],
+      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY], arms.written, browserReadings.toString(), sheetFindings.toString()],
     )
     const has = []
     selectors.forEach((s, i) => {
@@ -175,6 +177,7 @@ export async function readPartCss(browser, css) {
     })
     // The pin must reach every state, whatever case or spacing the text gave it.
     for (const s of pinnedSelectors) for (const p of unpinned(s)) found.push(`${s}: ${p} is not pinned in the showroom; data-pin cannot show it`)
+    found.push(...arms.found)
     return { found, rules, entries: found.length ? [] : ruleEntries(selectors, pinnedSelectors) }
   } finally {
     await context.close()
@@ -184,12 +187,15 @@ export async function readPartCss(browser, css) {
 /** Each rule of the part that sets anything, for the coverage reading (check/coverage.mjs): `label`, its selector
     made absolute; `now`, the selector the page holds (states pinned), less any pseudo-element, which an element
     matches while the rule applies to it; `rest`, the same with its states taken out, which an element matches when
-    a state is all it needs; `states`, those states; `media`, the conditions it sits in. */
-function ruleEntries(selectors, pinned) {
+    a state is all it needs; `states`, those states; `media`, the conditions it sits in; `branches`, each branch of
+    its selector list as `{ label, now }`, a nested rule's crossed with each branch of its parent's, so a branch that
+    applies cannot hide one that never does. */
+export function ruleEntries(selectors, pinned) {
   const label = []
   const now = []
   const rest = []
   const states = []
+  const branches = []
   const entries = []
   selectors.forEach((s, i) => {
     const up = s.parent >= 0 ? s.parent : null
@@ -198,7 +204,10 @@ function ruleEntries(selectors, pinned) {
     const own = strip(s.text)
     rest[i] = strip(resolve(s.text, up === null ? null : rest[up])).selector
     states[i] = [...new Set([...own.states, ...(up !== null && statesOnSubject(s.text, true) ? states[up] : [])])]
-    if (s.decls) entries.push({ label: label[i], now: strip(now[i]).selector, rest: rest[i], states: states[i], media: s.media })
+    const [asWritten, asPinned] = [splitList(s.text), splitList(pinned[i])]
+    if (asWritten.length !== asPinned.length) throw new Error(`cssom: ${s.text} has ${asWritten.length} branches as written and ${asPinned.length} pinned`)
+    branches[i] = (up === null ? [{ label: null, now: null }] : branches[up]).flatMap((u) => asWritten.map((t, b) => ({ label: resolve(t, u.label), now: resolve(asPinned[b], u.now) })))
+    if (s.decls) entries.push({ label: label[i], now: strip(now[i]).selector, rest: rest[i], states: states[i], media: s.media, branches: branches[i].map((b) => ({ label: b.label, now: strip(b.now).selector })) })
   })
   return entries
 }

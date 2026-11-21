@@ -424,13 +424,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   #
   # `Caps.attach/1` arms the Studio deny-gate as
   # `attach_hook(_, :handle_event, _)`, and no `handle_event` hook — parent
-  # socket or component socket — can see a `handle_info`. This function is the
-  # body of one: `handle_info({:autosave_form, form})` → `autosave_form/2` →
-  # here → `Content.upsert_draft`. Before this gate the ONLY thing standing in
-  # a write-denied principal's way was the socket gate on the five parent
-  # events that send to this seam today (select-media / clear-image /
-  # upload-image / select-ref / clear-ref, all in `Caps` `@write_events`) —
-  # a property of today's CALLERS, not of the seam. That is precisely the
+  # socket or component socket — can see a `handle_info`. This function was
+  # the body of one: `handle_info({:autosave_form, form})` → here →
+  # `Content.upsert_draft` (that door and the legacy picker events that fed
+  # it are gone, task-c42545346b93cbb0; `{:tree_codelist_pick, …}` →
+  # `Fields.tree_codelist_pick/2` still reaches this seam from a
+  # `handle_info`). Before this gate the ONLY thing standing in a
+  # write-denied principal's way was the socket gate on the parent events
+  # that sent to this seam — a property of the CALLERS, not of the seam. That is precisely the
   # argument that held for `paper_op` right up until `PaperFieldBlock` started
   # sending to it and turned it into a live bypass.
   #
@@ -607,8 +608,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # them: the autosave path left no trace, so every instance had to be
     # reconstructed from row timestamps alone. One line per write attempt,
     # naming the socket, WHICH door fired (a `phx-change`, an explicit save,
-    # the slug-derive arm, an array op, or the `{:autosave_form, …}`
-    # handle_info), how many params were posted, and whether the store would
+    # the slug-derive arm, an array op, or a tree codelist pick), how many
+    # params were posted, and whether the store would
     # actually move. A future instance is then one grep, not an archaeology.
     #
     # `:info`, not `:debug` — prod runs at `:info` and a line nobody ships is

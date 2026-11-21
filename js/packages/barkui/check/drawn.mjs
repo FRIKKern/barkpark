@@ -307,6 +307,20 @@ export function installDrawn() {
     hideCaret.textContent = '@layer barkui-check { * { caret-color: transparent !important; } }'
     document.head.prepend(hideCaret)
   }
+  // Selected text, painted as itself (false) or in the selection's own colours again (true), by a first-layer sheet
+  // of the check's own. A Tab into a filled field selects its value, and a browser may paint a selection in colours
+  // of its own: the reading compares the field's own text, so every capture is taken with the selection's paint
+  // neutral.
+  let plainSelection = null
+  const selection = (shown) => {
+    plainSelection?.remove()
+    plainSelection = null
+    if (shown) return
+    plainSelection = document.createElement('style')
+    plainSelection.textContent =
+      '@layer barkui-check { *::selection { background-color: transparent !important; color: inherit !important; -webkit-text-fill-color: inherit !important; } }'
+    document.head.prepend(plainSelection)
+  }
 
   /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill (textFill, the colour its reference
       is drawn in) is the first token and its ground the second, both as they resolve where it stands. */
@@ -344,5 +358,5 @@ export function installDrawn() {
     }
   }
 
-  Object.assign(h, { things, specs, alone, measureAlone, keep, unpaint, caret, judge })
+  Object.assign(h, { things, specs, alone, measureAlone, keep, unpaint, caret, selection, judge })
 }

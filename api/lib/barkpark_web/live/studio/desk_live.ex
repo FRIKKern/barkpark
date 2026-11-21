@@ -57,6 +57,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.Desk.Tree
   alias BarkparkWeb.Studio.Desk.Vision
+  alias BarkparkWeb.Studio.Desk.VisionListen
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -129,6 +130,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   @impl true
   def handle_params(params, uri, socket) do
+    {:noreply, socket} = route(params, uri, socket)
+    # Vision's Listen ends when Vision is left or the page's dataset changes.
+    {:noreply, VisionListen.follow(socket)}
+  end
+
+  defp route(params, uri, socket) do
     cond do
       # A live patch to such a dataset segment goes back to the desk it left.
       # So does one to a dataset longer than any name can be.
@@ -396,6 +403,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-scope-" <> _ = event, params, socket),
     do: ScopeSwitch.handle_event(event, params, socket)
 
+  # Vision's Listen and its Stop (`VisionListen`).
+  def handle_event("vision-listen-" <> _ = event, params, socket),
+    do: VisionListen.handle_event(event, params, socket)
+
   # The rest is the editor's; a list's buttons (`array_op`) are a step of the
   # document's undo when they landed (`DocUndo`).
   def handle_event(event, params, socket),
@@ -524,6 +535,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
     {:noreply, assign(socket, list_sorts: sorts, warm: warm)}
   end
 
+  # A change Vision's Listen may show (`VisionListenStream`).
+  def handle_info({:vision_listen, _ref, _message} = message, socket),
+    do: VisionListen.handle_info(message, socket)
+
   # A pick or a Remove in a tree codelist (`TreeCodelistField`) comes as a
   # message, and is a step of the document's undo when it landed, as a typed
   # edit is (`DocUndo`, task-a895a60bcc1302d9).
@@ -618,7 +633,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-navbar={BarkparkWeb.StaticAssets.path("bp-desk-navbar.js")}
       data-desk-undo={BarkparkWeb.StaticAssets.path("bp-desk-undo.js")}
       data-desk-locked-value={BarkparkWeb.StaticAssets.path("bp-desk-locked-value.js")}
+      data-desk-revision-focus={BarkparkWeb.StaticAssets.path("bp-desk-revision-focus.js")}
       data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
+      data-desk-new-doc={BarkparkWeb.StaticAssets.path("bp-desk-new-doc.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

@@ -1,4 +1,4 @@
-// node check/selftest.mjs: proves the check can still lose. Each case copies
+// node check/selftest.mjs [--job <key>] [words]: proves the check can still lose. Each case copies
 // the button into a scratch parts folder, plants breaks, runs the check on it
 // and asserts the run fails for the right reason. A part's own files may not
 // style the stage except through part.css, so breaks in paint go in through
@@ -15,14 +15,18 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
+import { SELFTEST_JOBS, selftestPick } from './jobs.mjs'
+import { selftestReport } from './selftest-report.mjs'
 import { runCheck } from './check.mjs'
+import { open } from './proofs.mjs'
+import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
-const CASES = [
+export const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
     name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
@@ -261,6 +265,47 @@ steps.push({
       'a focused empty field with a placeholder draws in full, its caret in the glyph picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the glyph picture only/.test(st.name) && st.pass),
     }),
   },
+  // A Tab into a filled field selects its whole value, and a browser may paint a selection in colours of its own.
+  // The fixture plants such colours and holds the value selected by a real Tab; its twin, the same value in the same
+  // style, is never selected. The check's own reader reads both in one view.
+  {
+    name: 'a reading is the same whether or not text in a field is selected',
+    direct: async () => {
+      const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
+      const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+      try {
+        const dir = join(scratch, 'parts')
+        cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
+        appendFileSync(join(dir, 'button', 'example.html'), `
+<div data-demo-row>
+  <input id="button-sel-before" data-slot="input" placeholder="Before">
+  <input id="button-sel" data-slot="input" value="post-1042">
+  <input id="button-sel-twin" data-slot="input" value="post-1042">
+</div>
+`)
+        const css = '::selection { color: rgb(255, 255, 255); background-color: rgb(51, 103, 214); }'
+        const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
+        const part = built.parts.find((x) => x.name === 'button')
+        const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { scale: 2, height: 1600 })
+        await page.barkCheck(() => document.getElementById('button-sel-before').focus())
+        await page.keyboard.press('Tab')
+        const held = await page.barkCheck(() => {
+          const f = document.getElementById('button-sel')
+          return document.activeElement === f && f.selectionStart === 0 && f.selectionEnd === f.value.length
+        })
+        const { things } = await readView(page, part)
+        const of = (id) => things.find((t) => t.at.startsWith(`input#${id} `) && t.kind === 'text')
+        const [sel, twin] = [of('button-sel'), of('button-sel-twin')]
+        const measures = ['draws', 'ratio', 'share', 'match'].map((k) => [k, ...[sel, twin].map((t) => (typeof t?.[k] === 'number' ? t[k].toFixed(2) : t?.[k]))])
+        const same = held && sel && twin && measures.every(([, a, b]) => a === b)
+        if (!same) console.log(`    selected by Tab: ${held}; ${measures.map(([k, a, b]) => `${k} ${a} selected, ${b} twin`).join('; ')}`)
+        return same
+      } finally {
+        await browser.close()
+        rmSync(scratch, { recursive: true, force: true })
+      }
+    },
+  },
   {
     name: 'a press step that never settles fails by name within its time limit',
     only: ['pressed'],
@@ -440,6 +485,23 @@ steps.push({
     expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
   },
   {
+    name: 'a list inside :is() in part.css is refused from the text, as a branch coverage cannot see',
+    only: ['pressed'],
+    plant: inCss('[data-slot="button"]:is([data-size="sm"], [data-size="huge"]) { --bark-button-text: 0.875rem; }'),
+    expect: refused(/:is\(\[data-size="sm"\], \[data-size="huge"\]\) holds a list of 2; coverage reads a rule branch by branch/),
+  },
+  // One arm the browser does not know: :is() and :where() drop it and keep the rule, so the text is read, not what
+  // the browser hands back. A list in them is refused from the text; a single unknown arm, or one in a nested rule,
+  // is read alone and refused by name; a plain list with one drops the whole rule.
+  ...[
+    ['a list in :is() with one unknown arm', '[data-slot="button"]:is([data-size="sm"], [data-size="sm"]:bark-made-up) { gap: 0px; }', /:is\(\[data-size="sm"\], \[data-size="sm"\]:bark-made-up\) holds a list of 2/],
+    ['a list in :where() with one unknown arm', '[data-slot="button"]:where([data-size="sm"], :bark-made-up) { gap: 0px; }', /:where\(\[data-size="sm"\], :bark-made-up\) holds a list of 2/],
+    ['an unknown arm alone in :is()', '[data-slot="button"]:is(:bark-made-up) { gap: 0px; }', /the arm :bark-made-up is one the browser drops/],
+    ['an unknown arm alone in :where()', '[data-slot="button"]:where(:bark-made-up) { gap: 0px; }', /the arm :bark-made-up is one the browser drops/],
+    ['an unknown arm in :is() in a nested rule', '[data-slot="button"] { &:is(:bark-made-up) { gap: 0px; } }', /&:is\(:bark-made-up\): the arm :bark-made-up is one the browser drops/],
+    ['an unknown arm in a plain list', '[data-slot="button"][data-size="sm"], [data-slot="button"]:bark-made-up { gap: 0px; }', /\[data-slot="button"\]:bark-made-up: the browser drops this rule/],
+  ].map(([what, css, re]) => ({ name: `part.css with ${what} is refused by name`, only: ['pressed'], plant: inCss(css), expect: refused(re) })),
+  {
     name: 'a rule the browser drops is refused by name, at the top of part.css and nested',
     only: ['pressed'],
     plant: all(
@@ -487,6 +549,38 @@ steps.push({
     },
   },
   {
+    name: 'an arm inside :is() or :where() that the browser drops in its place is refused by name, and one it keeps is not',
+    direct: async () => {
+      const browser = await chromium.launch()
+      const any = /the arm |inside :(is|where)\(\) in its place/
+      try {
+        const said = []
+        for (const [css, re, wanted] of [
+          ['[data-slot="button"]:is(::before) { gap: 0px; }', /^\[data-slot="button"\]:is\(::before\): the arm ::before is one the browser drops/, true],
+          ['[data-slot="button"] { &:is(> span) { gap: 0px; } }', /^&:is\(> span\): the arm > span is one the browser drops/, true],
+          ['[data-slot="button"], [data-slot="button"]:is(::before) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
+          ['[data-slot="button"]:not(:where(::after)) { gap: 0px; }', /the arm ::after is one the browser drops/, true],
+          ['[data-slot="button"]:is(:where(::before)) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
+          ['[data-slot="button"]:nth-child(1 of :where(::before)) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
+          // Dropped where it stands in its compound, though it reads alone and inside :is() alone.
+          ['[data-slot="button"]::before:is(:hover) { gap: 0px; }', /::before:is\(:hover\): the arm :hover is one the browser drops/, true],
+          ['[data-slot="button"]::before:is([data-a]) { gap: 0px; }', /::before:is\(\[data-a\]\): the arm \[data-a\] is one the browser drops/, true],
+          ['[data-slot="button"]::before:where(:first-child) { gap: 0px; }', /::before:where\(:first-child\): the arm :first-child is one the browser drops/, true],
+          ['[data-slot="button"]::placeholder:is(:hover) { gap: 0px; }', /::placeholder:is\(:hover\): the arm :hover is one the browser drops/, true],
+          // Kept, though the browser writes it back in its own way.
+          ['[data-slot="button"]:is([data-size=sm]) { gap: 0px; }', any, false],
+          ['[data-slot="button"] { &:where(:HOVER) { gap: 0px; } }', any, false],
+          ['[data-slot="button"]:not([data-a], [data-b]):has(> span) { gap: 0px; }', any, false],
+          ['[data-slot="button"]:where([data-size=sm])::before { gap: 0px; }', any, false],
+        ]) said.push((await readPartCss(browser, css)).found.some((f) => re.test(f)) === wanted)
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.flatMap((ok, k) => (ok ? [] : [k + 1])).join(', ')}`)
+        return said.every(Boolean)
+      } finally {
+        await browser.close()
+      }
+    },
+  },
+  {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
     only: ['skins', 'schemes'],
     plant: all(
@@ -511,6 +605,8 @@ steps.push({
       // A later control reached by structure alone, and a rule that applies to nothing.
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
+      // A dead branch beside one that applies at every reading.
+      inCss('[data-slot="button"], [data-slot="button"][data-variant="huge"] { --bark-button-text: 0.875rem; }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
       inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
     ),
@@ -529,6 +625,7 @@ steps.push({
       'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
       'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
       'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
+      'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     }),
@@ -587,19 +684,38 @@ steps.push({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let failures = 0
-  // node check/selftest.mjs <words>: only the cases whose name holds those words.
-  const pick = process.argv.slice(2).join(' ')
-  const run = CASES.filter((c) => c.name.includes(pick))
+  // node check/selftest.mjs --job <key> [words]: the cases that job runs (check/jobs.mjs, selftestJob), under its
+  // ceiling; CI runs one job per key. Without --job, every case, under the sum of the jobs' ceilings. With words,
+  // only the cases whose name holds them.
+  // --report <file>: the job's report for the closing check (check/selftest-report.mjs).
+  const args = process.argv.slice(2)
+  const at = args.indexOf('--report')
+  const report = at < 0 ? null : args.splice(at, 2)[1]
+  const key = args[0] === '--job' ? args[1] : null
+  if (key !== null && !SELFTEST_JOBS.some((j) => j.key === key)) {
+    console.log(`FAIL the selftest has no job ${JSON.stringify(key)}; its jobs are ${SELFTEST_JOBS.map((j) => j.key).join(', ')} (check/jobs.mjs)`)
+    process.exit(1)
+  }
+  const pick = args.slice(key === null ? 0 : 2).join(' ')
+  const run = selftestPick(CASES, key, pick)
+  if (!run.length) {
+    console.log(`FAIL the selftest${key === null ? '' : ` job ${key}`} has no case${pick ? ` whose name holds "${pick}"` : ''} to run; a selftest of nothing is never green`)
+    process.exit(1)
+  }
   const start = Date.now()
   let now = ''
-  enforceCeiling(SELFTEST_CEILING, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${selftestSentence()} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest across jobs.`)
+  const keys = key === null ? SELFTEST_JOBS.map((j) => j.key) : [key]
+  const ceiling = keys.reduce((n, k) => n + SELFTEST_CEILINGS[k], 0)
+  enforceCeiling(ceiling, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${keys.map((k) => selftestSentence(k)).join(' ')} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest again.`)
+  const held = []
   for (const c of run) {
     now = c.name
     if (c.direct) {
       const t0 = Date.now()
-      const held = await c.direct()
-      if (!held) failures++
-      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+      const ok = await c.direct()
+      if (ok) held.push(c.name)
+      else failures++
+      console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
       continue
     }
     const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
@@ -616,14 +732,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       try {
         html = readFileSync(join(out, 'index.html'), 'utf8')
       } catch {}
-      const held = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60)
-      if (!held) failures++
-      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
-      if (!held) console.log(logs.map((l) => `    ${l}`).join('\n'))
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60)
+      if (pass) held.push(c.name)
+      else failures++
+      console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
+      if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }
   }
-  console.log(`selftest: ${run.length - failures} of ${run.length} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
+  const count = { held: run.length - failures, of: run.length }
+  console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
+  if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)
 }

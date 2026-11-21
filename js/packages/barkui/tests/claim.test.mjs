@@ -38,25 +38,30 @@ describe('how many parts the check holds', () => {
     const workflow = readFileSync(new URL('../../../../.github/workflows/barkui.yml', import.meta.url), 'utf8')
     const minutes = (name) => workflow.slice(workflow.indexOf(name)).match(/timeout-minutes: (\d+)/)[1]
     expect(minutes('name: "Check this group\'s parts (real keys in Chromium)"')).toBe(String(p.STEP_MINUTES))
-    expect(minutes('name: "Each planted break turns its light off"')).toBe(String(p.SELFTEST_STEP_MINUTES))
+    // Each selftest job's step has the one limit, and each job has its own reading, by the keys check/jobs.mjs names.
+    const { SELFTEST_JOBS } = await import('../check/jobs.mjs')
+    const steps = workflow.split('name: "Each planted break turns its light off"').slice(1)
+    expect(steps.length).toBe(SELFTEST_JOBS.length)
+    for (const step of steps) expect(step.match(/timeout-minutes: (\d+)/)[1]).toBe(String(p.SELFTEST_STEP_MINUTES))
+    expect(Object.keys(p.READINGS.selftest).sort()).toEqual(SELFTEST_JOBS.map((j) => j.key).sort())
     // Every reading names its run and commit; every ceiling has room over its own reading.
-    for (const r of [...p.READINGS.check, p.READINGS.selftest]) expect(r.run > 0 && /^[0-9a-f]{10}$/.test(r.commit) && r.seconds > 0).toBe(true)
+    for (const r of [...p.READINGS.check, ...Object.values(p.READINGS.selftest)]) expect(r.run > 0 && /^[0-9a-f]{10}$/.test(r.commit) && r.seconds > 0).toBe(true)
     for (const r of p.READINGS.check) expect(Number.isInteger(r.folder) && r.folder >= r.parts).toBe(true)
     expect(p.HEADROOM).toBeGreaterThan(1)
     for (const r of p.READINGS.check) expect(p.ceilingFor(r.parts)).toBeGreaterThanOrEqual(p.HEADROOM * r.seconds)
-    expect(p.SELFTEST_CEILING).toBeGreaterThanOrEqual(p.HEADROOM * p.READINGS.selftest.seconds)
+    for (const [k, r] of Object.entries(p.READINGS.selftest)) expect(p.SELFTEST_CEILINGS[k], k).toBeGreaterThanOrEqual(p.HEADROOM * r.seconds)
     // The ceiling of the most parts held stays under the check step; one part more would not.
     expect(p.PER_JOB).toBeGreaterThanOrEqual(1)
     expect(p.ceilingFor(p.PER_JOB)).toBeLessThan(p.STEP_MINUTES * 60)
     expect(p.ceilingFor(p.PER_JOB + 1)).toBeGreaterThanOrEqual(p.STEP_MINUTES * 60)
-    expect(p.SELFTEST_CEILING).toBeLessThanOrEqual(p.SELFTEST_MOST * p.SELFTEST_STEP_MINUTES * 60)
+    for (const [k, c] of Object.entries(p.SELFTEST_CEILINGS)) expect(c, k).toBeLessThanOrEqual(p.SELFTEST_MOST * p.SELFTEST_STEP_MINUTES * 60)
     // The passage between the marks is exactly what the numbers make, and any other input makes another.
     const raw = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8')
     const [a, b] = c.MARKS.map((m) => raw.indexOf(m))
     const passage = raw.slice(a + c.MARKS[0].length, b).trim()
     expect(a >= 0 && b > a).toBe(true)
     expect(passage).toBe(c.capacityPassage())
-    for (const change of [{ HEADROOM: 1.4 }, { SELFTEST_MOST: 0.75 }, { STEP_MINUTES: 20 }, { AT_ONCE: 2 }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, seconds: 300 } } }, { READINGS: { ...c.INPUT.READINGS, check: c.INPUT.READINGS.check.map((r) => ({ ...r, folder: r.folder + 12 })) } }])
+    for (const change of [{ HEADROOM: 1.4 }, { SELFTEST_MOST: 0.75 }, { STEP_MINUTES: 20 }, { AT_ONCE: 2 }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, views: { ...c.INPUT.READINGS.selftest.views, seconds: 300 } } } }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, rest: { ...c.INPUT.READINGS.selftest.rest, seconds: 100 } } } }, { READINGS: { ...c.INPUT.READINGS, check: c.INPUT.READINGS.check.map((r) => ({ ...r, folder: r.folder + 12 })) } }])
       expect(c.capacityPassage(c.plan({ ...c.INPUT, ...change })), JSON.stringify(change)).not.toBe(passage)
   })
 

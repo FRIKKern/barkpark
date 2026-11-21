@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
-import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, split } from '../check/jobs.mjs'
+import { reportFile, selftestReport } from '../check/selftest-report.mjs'
+import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
 
 const scratch = mkdtempSync(join(tmpdir(), 'barkui-jobs-test-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -15,6 +16,13 @@ const folderOf = (n, tag = `n${n}`) => {
   return d
 }
 const flat = (groups) => groups.flatMap((g) => (typeof g.parts === 'string' ? g.parts.split(',') : g.parts))
+
+// Both selftest jobs' reports, as they are when the jobs ran every case once and each held (check/selftest-report.mjs).
+const selftestOk = (sha) =>
+  SELFTEST_JOBS.map((j, i) => {
+    const ran = i === 0 ? ['c1', 'c2'] : ['c3']
+    return { file: reportFile(j.key), data: selftestReport({ key: j.key, sha, all: ['c1', 'c2', 'c3'], ran, held: ran, count: { held: ran.length, of: ran.length } }) }
+  })
 
 describe('the job split covers every part folder exactly once', () => {
   it('every real part folder is in exactly one group, and the set is the folder counted another way', () => {
@@ -60,20 +68,24 @@ describe('the job split covers every part folder exactly once', () => {
       for (const g of m) expect(legGroup(g.group, g.parts, dir, {}).parts.join(','), `n=${n} group ${g.group}`).toBe(g.parts)
       expect(() => legGroup(1, `${m[0].parts},extra`, dir, {})).toThrow(/the plan gave group 1/)
       expect(() => legGroup(m.length + 1, '', dir, {})).toThrow(/is not in this checkout's split/)
-      const reports = m.map((g) => ({ file: `${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts.split(','), sha: 's', ok: true } }))
+      const reports = [...m.map((g) => ({ file: `${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts.split(','), sha: 's', ok: true } })), ...selftestOk('s')]
       expect(judge({ needs: needsWith(JSON.stringify(m)), reports, names: partNames(dir, {}), sha: 's' }).ok, `n=${n}`).toBe(true)
     }
   })
 })
 
-describe('thirteen parts and more, made as copies under a test-only root', () => {
-  it('13 copies of the button beside the real parts are real parts, each its own bytes, split into jobs that each hold under the step', () => {
-    const env = { BARKUI_PROOF_COPIES: '13' }
+describe('more parts than the folder holds, made as copies under a test-only root', () => {
+  // Every count of proof copies here comes from the one limit, MOST_PARTS in check/jobs.mjs, less the real parts,
+  // so the tests hold for every number of real parts the limit allows (tests/counts.mjs walks them).
+  const top = MOST_PARTS - folderNames(partsDir).length
+
+  it(`the most copies of the button the knob takes beside the real parts (${top}) are real parts, each its own bytes, split into jobs that each hold under the step`, () => {
+    const env = { BARKUI_PROOF_COPIES: String(top) }
     const root = materialize(partsDir, env, scratch)
-    expect(root.startsWith(scratch)).toBe(true)
+    expect(root.startsWith(scratch)).toBe(top > 0)
     const real = folderNames(partsDir)
     const names = partNames(partsDir, env)
-    expect(names.length).toBe(real.length + 13)
+    expect(names.length).toBe(real.length + top)
     expect(folderNames(root)).toEqual(names)
     const parts = discoverParts(root)
     expect(parts.map((p) => p.name)).toEqual(names)
@@ -90,8 +102,7 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
   it('the proof knob can only add parts: every real part stays in a group for every value it takes, and other values refuse', () => {
     const real = folderNames(partsDir)
     const alone = split(real).length
-    const top = MOST_PARTS - real.length
-    for (const v of [undefined, '', '0', '1', '13', String(top)]) {
+    for (const v of [undefined, '', '0', String(Math.floor(top / 2)), String(top)]) {
       const env = v === undefined ? {} : { BARKUI_PROOF_COPIES: v }
       const names = partNames(partsDir, env)
       for (const r of real) expect(names, `value ${v}`).toContain(r)
@@ -104,7 +115,6 @@ describe('thirteen parts and more, made as copies under a test-only root', () =>
   })
 
   it(`the knob at its top makes exactly MOST_GROUPS (${MOST_GROUPS}) groups, and a folder past MOST_PARTS refuses with the way out the file it names holds`, () => {
-    const top = MOST_PARTS - folderNames(partsDir).length
     expect(split(partNames(partsDir, { BARKUI_PROOF_COPIES: String(top) })).length).toBe(MOST_GROUPS)
     expect(split(partNames(folderOf(MOST_PARTS, 'at-most'), {})).length).toBe(MOST_GROUPS)
     expect(() => partNames(folderOf(MOST_PARTS + 1, 'past-most'), {})).toThrow(/raise MOST_GROUPS in check\/jobs.mjs .*docs\/PARTS\.md/)
@@ -126,14 +136,15 @@ function needsWith(groups, over = {}) {
   return {
     [JOBS.plan]: { result: 'success', outputs: { run: 'true', groups } },
     [JOBS.check]: { result: 'success', outputs: {} },
-    [JOBS.selftest]: { result: 'success', outputs: {} },
+    ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, { result: 'success', outputs: {} }])),
     ...over,
   }
 }
-const goodReports = () => GROUPS.map((g) => ({ file: `group-${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts, sha: 'abc', ok: true } }))
+const groupReports = () => GROUPS.map((g) => ({ file: `group-${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts, sha: 'abc', ok: true } }))
+const goodReports = () => [...groupReports(), ...selftestOk('abc')]
 const verdict = (needs, reports = goodReports()) => judge({ needs, reports, names: NAMES, sha: 'abc', perJob: 4 })
 const redWith = (v, re) => v.ok === false && v.rows.some((r) => r.startsWith('RED ') && re.test(r))
-const withLast = (fn) => goodReports().map((r, i, all) => (i === all.length - 1 ? fn(r) : r))
+const withLast = (fn) => [...groupReports().map((r, i, all) => (i === all.length - 1 ? fn(r) : r)), ...selftestOk('abc')]
 
 describe(`the closing check, "${AGGREGATE}"`, () => {
   it('refuses an empty or missing commit id, even when every job and report would be green against it', () => {
@@ -144,9 +155,9 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     }
   })
 
-  it('is green when the plan, every group and the selftest passed, and names them', () => {
+  it('is green when the plan, every group and both selftest jobs passed, and names them', () => {
     const v = verdict(needsWith(MATRIX))
-    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and the selftest passed'] })
+    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and both selftest jobs passed, running each of 3 cases once'] })
   })
 
   it('is red for a red, cancelled, skipped-by-mistake or missing group job, even when every report says ok', () => {
@@ -158,12 +169,16 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(gone), /the check jobs is missing from this run/)).toBe(true)
   })
 
-  it('is red for a red, cancelled, skipped-by-mistake or missing selftest', () => {
-    for (const [result, re] of [['failure', /the selftest is red/], ['cancelled', /the selftest was cancelled/], ['skipped', /the selftest were skipped by mistake/]])
-      expect(redWith(verdict(needsWith(MATRIX, { [JOBS.selftest]: { result } })), re), result).toBe(true)
-    const gone = needsWith(MATRIX)
-    delete gone[JOBS.selftest]
-    expect(redWith(verdict(gone), /the selftest is missing/)).toBe(true)
+  it('is red for either selftest job red, cancelled, skipped by mistake or missing, by its name', () => {
+    expect(SELFTEST_JOBS.length).toBe(2)
+    for (const j of SELFTEST_JOBS) {
+      const who = `the selftest job "${j.name}"`
+      for (const [result, said] of [['failure', 'is red'], ['cancelled', 'was cancelled'], ['skipped', 'was skipped by mistake']])
+        expect(verdict(needsWith(MATRIX, { [j.id]: { result } })).rows, `${j.id} ${result}`).toContain(`RED ${who} ${said}${result === 'skipped' ? ': the plan said BarkUI was touched' : ''}`)
+      const gone = needsWith(MATRIX)
+      delete gone[j.id]
+      expect(verdict(gone).rows, `${j.id} missing`).toContain(`RED ${who} is missing from this run`)
+    }
   })
 
   it('a plan job that failed, was cancelled, was skipped or is missing is red, never read as "not touched"', () => {
@@ -175,10 +190,11 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(needsWith(MATRIX, { [JOBS.plan]: { result: 'success', outputs: { run: '', groups: MATRIX } } })), /neither "true" nor "false"/)).toBe(true)
   })
 
-  it('"not touched" is green only with the groups and the selftest skipped', () => {
-    const skipped = { [JOBS.check]: { result: 'skipped' }, [JOBS.selftest]: { result: 'skipped' } }
+  it('"not touched" is green only with the groups and both selftest jobs skipped', () => {
+    const skipped = { [JOBS.check]: { result: 'skipped' }, ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, { result: 'skipped' }])) }
     const plan = { result: 'success', outputs: { run: 'false', groups: MATRIX } }
     expect(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan }), []).ok).toBe(true)
+    for (const j of SELFTEST_JOBS) expect(redWith(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan, [j.id]: { result: 'success' } }), []), /though the plan said BarkUI was not touched/), j.id).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan, [JOBS.check]: { result: 'failure' } }), []), /the check jobs is red, though the plan said BarkUI was not touched/)).toBe(true)
   })
 
@@ -190,7 +206,7 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
   })
 
   it('a group with no report, a report from another commit or naming other parts, or two reports, is missing or red', () => {
-    expect(redWith(verdict(needsWith(MATRIX), goodReports().slice(0, -1)), /group 3 of 3 \(x6, x7, x8\) is missing: no report/)).toBe(true)
+    expect(redWith(verdict(needsWith(MATRIX), [...groupReports().slice(0, -1), ...selftestOk('abc')]), /group 3 of 3 \(x6, x7, x8\) is missing: no report/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), withLast((r) => ({ ...r, data: { ...r.data, sha: 'old' } }))), /group 3 of 3 .* is missing: its report is from commit old, not abc/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), withLast((r) => ({ ...r, data: { ...r.data, parts: ['x7'] } }))), /group 3 of 3 .* is missing: its report names \["x7"\]/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), [...goodReports(), goodReports()[2]]), /group 3 of 3 .* reported 2 times/)).toBe(true)
@@ -210,19 +226,23 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     for (const plan of results)
       for (const run of ['true', 'false'])
         for (const check of results)
-          for (const selftest of results) {
-            const needs = {}
-            if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
-            if (check !== 'missing') needs[JOBS.check] = { result: check }
-            if (selftest !== 'missing') needs[JOBS.selftest] = { result: selftest }
-            const touched = plan === 'success' && run === 'true' && check === 'success' && selftest === 'success'
-            const untouched = plan === 'success' && run === 'false' && check === 'skipped' && selftest === 'skipped'
-            const v = verdict(needs)
-            expect(v.ok, JSON.stringify({ plan, run, check, selftest })).toBe(touched || untouched)
-            if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), JSON.stringify({ plan, run, check, selftest })).toBe(true)
-            greens += v.ok ? 1 : 0
-            rows++
-          }
-    expect([rows, greens]).toEqual([250, 2])
+          for (const views of results)
+            for (const rest of results) {
+              const needs = {}
+              if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
+              if (check !== 'missing') needs[JOBS.check] = { result: check }
+              if (views !== 'missing') needs[JOBS.selftest] = { result: views }
+              if (rest !== 'missing') needs[JOBS.selftestRest] = { result: rest }
+              const all = [check, views, rest]
+              const touched = plan === 'success' && run === 'true' && all.every((r) => r === 'success')
+              const untouched = plan === 'success' && run === 'false' && all.every((r) => r === 'skipped')
+              const v = verdict(needs)
+              const at = JSON.stringify({ plan, run, check, views, rest })
+              expect(v.ok, at).toBe(touched || untouched)
+              if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), at).toBe(true)
+              greens += v.ok ? 1 : 0
+              rows++
+            }
+    expect([rows, greens]).toEqual([1250, 2])
   })
 })

@@ -2213,12 +2213,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         account_label={assigns[:account_label]}
         account_path={account_path(assigns)}
         profile_error={assigns[:profile_error]}
-        image_picker_field={@image_picker_field}
-        uploads={@uploads}
-        media_files={@media_files}
-        ref_picker_field={@ref_picker_field}
-        ref_search={@ref_search}
-        ref_candidates={@ref_candidates}
         show_history={@show_history}
         revisions={@revisions}
         show_delete={@show_delete}

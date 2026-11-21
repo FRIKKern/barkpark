@@ -36,6 +36,14 @@ defmodule BarkparkWeb.Studio.DeskVisionParamsTest do
 
     assert has_element?(view, ~s{textarea#vision-params[data-vision-params][spellcheck="false"]})
 
+    # The box is described by why it is refused: an empty reason until the script fills it.
+    assert has_element?(view, ~s{textarea#vision-params[aria-describedby="vision-params-why"]})
+
+    assert has_element?(
+             view,
+             ~s{[data-vision-params-pane] #vision-params-why[data-vision-params-why]}
+           )
+
     assert has_element?(
              view,
              ~s{[data-vision-params-error][hidden][role="img"][aria-label="Parameters are not valid JSON"]}

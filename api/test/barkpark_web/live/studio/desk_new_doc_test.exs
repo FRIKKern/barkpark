@@ -315,4 +315,42 @@ defmodule BarkparkWeb.Studio.DeskNewDocTest do
     assert landed =~ ~r"^#{Regex.escape(c.base)}/#{c.post};#{@uuid},template=nd-by-alan$"
     assert poll(view, fn -> editing?(view) end)
   end
+
+  test "the navbar's Create new has TanStack's Search document types box over its list", c do
+    view = open(c.conn, "#{c.base}/#{c.form}")
+
+    # The box: a combobox over the list, focused when the list opens (the
+    # popover's autofocus), nothing lit (no active descendant) until a key moves.
+    find =
+      ~s(#dk-new-doc .dk-new-doc-find input#dk-new-doc-find[role="combobox"][aria-label="Search document types"][placeholder="Search document types"][autofocus][aria-controls="dk-new-doc-list"][aria-autocomplete="list"][data-desk-new-doc-find])
+
+    assert has_element?(view, find)
+    refute has_element?(view, "#dk-new-doc-find[aria-activedescendant]")
+
+    # The options are the list's, by id for the box's active descendant, and
+    # not Tab stops; what the script sets on them survives a patch.
+    assert has_element?(view, ~s(#dk-new-doc-list[role="listbox"][aria-label="New document"]))
+    option = ~s(#dk-new-doc-list > button[role="option"][tabindex="-1"][aria-selected="false"])
+
+    assert has_element?(
+             view,
+             option <> ~s([id^="dk-new-doc-option-"][phx-value-template="nd-by-alan"]),
+             "Post by Alan Turing"
+           )
+
+    refute has_element?(view, ~s|#dk-new-doc-list > [role="option"]:not([tabindex="-1"])|)
+    assert has_element?(view, ~s(#dk-new-doc-list > [role="option"][phx-mounted*="ignore_attrs"]))
+
+    # With nothing left, "No results for" the text, which the script fills in.
+    assert has_element?(
+             view,
+             ~s(#dk-new-doc p#dk-new-doc-empty[hidden][phx-update="ignore"] strong[data-desk-new-doc-query]),
+             ""
+           )
+
+    assert view |> element("#dk-new-doc-empty") |> render() =~ "No results for"
+
+    # The script that filters it is the desk's to load.
+    assert has_element?(view, ~s(#desk-panes[data-desk-new-doc*="bp-desk-new-doc.js"]))
+  end
 end

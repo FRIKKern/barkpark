@@ -1128,6 +1128,281 @@ else
 fi
 echo
 
+# ── case 8: the CVE audit job's light tells the truth (task-eb4b9903a92011cd) ─
+# The advisory oracle step's verdict must REACH the job's verdict: an advisory
+# at or above the floor (HIGH, CRITICAL, or no severity) that is neither in the
+# lock's mix.exs `ignored_advisories` nor in .github/hex-audit-baseline.txt
+# reds `Dependency CVE audit` by name. The path is driven end to end, with no
+# network: the real oracle (copied onto a fixture root, `mix` stubbed to replay
+# a planted report) runs with the step's own arguments read from security.yml;
+# its exit becomes that step's outcome in a `toJSON(steps)`-shaped
+# STEP_OUTCOMES, keyed by the step's `id:` (a step without one is absent, as
+# Actions renders it); and the job's own Decide step, scripts/main-red-breaker.sh,
+# decides with the Decide step's own STEP_NAMES and JOB_NAME.
+echo "case 8: a planted unrecorded HIGH reaches the CVE audit job's verdict"
+C8="$TMPROOT/c8"
+mkdir -p "$C8/bin"
+C8_REQ="$REAL_ROOT/.github/required-checks.json"
+C8_BPM="$REAL_ROOT/scripts/bp-merge.sh"
+
+# The mix-audit job's wiring, read structurally: <workflow> <facts.json>
+c8_facts() {
+  python3 - "$1" "$2" <<'PY'
+import json, re, sys, yaml
+wf, out = sys.argv[1], sys.argv[2]
+d = yaml.safe_load(open(wf))
+jobs = d.get("jobs") or {}
+job = jobs.get("mix-audit") or {}
+steps = job.get("steps") or []
+def run(s): return s.get("run") or ""
+oracle = [s for s in steps if re.search(r"hex-audit-oracle\.sh\s+--baseline", run(s))]
+decide = [s for s in steps if "main-red-breaker.sh" in run(s)]
+o = oracle[0] if len(oracle) == 1 else {}
+line = next((l for l in run(o).splitlines() if "hex-audit-oracle.sh" in l), "")
+on = d.get(True, d.get("on")) or {}
+report = [j for j in jobs.values() if any("file-ci-failure-issue.sh" in run(s) for s in j.get("steps") or [])]
+json.dump({
+    "job_name": job.get("name", ""),
+    "oracle_count": len(oracle),
+    "oracle_id": str(o.get("id") or ""),
+    "oracle_name": o.get("name", ""),
+    "oracle_args": re.sub(r"^.*?hex-audit-oracle\.sh\s*", "", line).strip(),
+    "ids": [str(s["id"]) for s in steps if re.fullmatch(r"s\d+", str(s.get("id") or ""))],
+    "step_names": ((decide[0].get("env") or {}).get("STEP_NAMES", "")) if len(decide) == 1 else "",
+    "crons": [c.get("cron") for c in ((on.get("schedule") or []) if isinstance(on, dict) else [])],
+    "hold_writers": [f"{k}: {s.get('name', '')}" for k, j in jobs.items() for s in j.get("steps") or []
+                     if re.search(r"main-red-hold\.sh\s+(open|lift)\b", run(s))],
+    "job_names": [j.get("name") for j in jobs.values() if j.get("name")],
+    "report_ifs": [str(j.get("if", "")) for j in report],
+}, open(out, "w"))
+PY
+}
+c8f() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1]))[sys.argv[2]]; print(v if isinstance(v, str) else json.dumps(v))' "$1" "$2"; }
+
+cat >"$C8/bin/mix" <<'STUB'
+#!/usr/bin/env bash
+# replays a planted report per lock directory; no network, no project
+case "$1" in
+  deps.audit) echo "No vulnerabilities found." ;;
+  hex.audit) f="$C8_REPORTS/$(basename "$PWD").txt"; if [ -f "$f" ]; then cat "$f"; else echo "No retired or security advisory packages found"; fi ;;
+  *) exit 2 ;;
+esac
+STUB
+printf '#!/usr/bin/env bash\necho "curl stubbed in case 8: no network" >&2\nexit 7\n' >"$C8/bin/curl"
+chmod +x "$C8/bin/mix" "$C8/bin/curl"
+
+# Planted reports. The ids are invented and match no real advisory.
+c8_report() {  # <file> <severity or ""> : one api advisory
+  { echo "Advisories:"
+    echo "  planted 0.0.1 - EEF-CVE-2099-80001${2:+ ($2)}"
+    echo "    aka: CVE-2099-80001"; } >"$1"
+}
+mkdir -p "$C8/reports"
+c8_report "$C8/reports/high.txt" HIGH
+c8_report "$C8/reports/medium.txt" MEDIUM
+c8_report "$C8/reports/unknown.txt" ""
+
+# run_c8 <workflow> <api report|-> <event> [mix.exs list id] [baseline record] [main jobs fixture] [main log fixture]
+# Sets C8_ORC (the oracle's exit), C8_RC (the breaker's exit) and C8_OUT.
+run_c8() {
+  local wf="$1" rep="$2" ev="$3" exs="${4:-}" brec="${5:-}" mainjobs="${6:-}" mainlog="${7:-}" r="$C8/root"
+  rm -rf "$r" "$C8/rep"; mkdir -p "$r/scripts" "$r/api" "$r/cloud" "$r/.github" "$C8/rep"
+  cp "$REAL_ROOT/scripts/hex-audit-oracle.sh" "$r/scripts/"
+  : >"$r/api/mix.lock"; : >"$r/cloud/mix.lock"
+  [ "$rep" = "-" ] || cp "$rep" "$C8/rep/api.txt"
+  [ -z "$exs" ] || printf '  defp ignored_advisories do\n    [\n      "%s"\n    ]\n  end\n' "$exs" >"$r/api/mix.exs"
+  { cat "$REAL_ROOT/.github/hex-audit-baseline.txt"; [ -z "$brec" ] || echo "$brec"; } >"$r/.github/hex-audit-baseline.txt"
+  c8_facts "$wf" "$C8/facts.json"
+  local args; args="$(c8f "$C8/facts.json" oracle_args)"
+  # shellcheck disable=SC2086  # the step's own argument words, as the runner splits them
+  C8_ORC=0
+  ( cd "$r" && C8_REPORTS="$C8/rep" PATH="$C8/bin:$PATH" bash scripts/hex-audit-oracle.sh $args ) >"$C8/oracle.out" 2>&1 || C8_ORC=$?
+  local outcomes
+  outcomes="$(python3 - "$C8/facts.json" "$C8_ORC" <<'PY'
+import json, sys
+f = json.load(open(sys.argv[1])); rc = int(sys.argv[2])
+o = {i: {"outcome": "success", "conclusion": "success", "outputs": {}} for i in f["ids"]}
+if f["oracle_id"]:
+    o[f["oracle_id"]] = {"outcome": "failure" if rc else "success", "conclusion": "success", "outputs": {}}
+print(json.dumps(o))
+PY
+)"
+  C8_RC=0
+  C8_OUT="$( (unset GITHUB_EVENT_PATH MAIN_RED_BREAKER_FIXTURE MAIN_RED_BREAKER_RUNS_FIXTURE MAIN_RED_BREAKER_LOG_FIXTURE
+    export PATH="$C8/bin:$PATH" STEP_OUTCOMES="$outcomes" STEP_NAMES="$(c8f "$C8/facts.json" step_names)" \
+      JOB_NAME="$(c8f "$C8/facts.json" job_name)" WORKFLOW_FILE=security.yml GITHUB_EVENT_NAME="$ev" \
+      GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$C8/summary.md"
+    [ -z "$mainjobs" ] || export MAIN_RED_BREAKER_FIXTURE="$mainjobs"
+    [ -z "$mainlog" ] || export MAIN_RED_BREAKER_LOG_FIXTURE="$mainlog"
+    bash "$REAL_ROOT/scripts/main-red-breaker.sh" 2>&1) )" || C8_RC=$?
+}
+
+c8_facts "$WF" "$C8/real.json"
+C8_JOB="$(c8f "$C8/real.json" job_name)"
+C8_STEP="$(c8f "$C8/real.json" oracle_name)"
+if [ "$(c8f "$C8/real.json" oracle_count)" = 1 ] && [ -n "$C8_STEP" ]; then
+  ok "the CVE job has exactly one ratchet oracle step: '$C8_STEP'"
+else
+  no "the CVE job has $(c8f "$C8/real.json" oracle_count) steps running hex-audit-oracle.sh --baseline, wanted 1"
+fi
+
+# 8a — THE RED. A planted unrecorded HIGH, on a push to main.
+c8_names_step() { has "$C8_OUT" "MAIN-FAILED-STEP in '$C8_JOB': $C8_STEP"; }
+run_c8 "$WF" "$C8/reports/high.txt" push
+if [ "$C8_ORC" = 1 ] && [ "$C8_RC" = 1 ] && c8_names_step; then
+  ok "8a: an unrecorded HIGH reds '$C8_JOB' by name on a push (oracle exit 1, Decide exit 1, step named)"
+else
+  no "8a: an unrecorded HIGH did not red '$C8_JOB' by name (oracle exit $C8_ORC, Decide exit $C8_RC): ${C8_OUT##*$'\n'}"
+fi
+# 8b — the same HIGH on a lock pull request, main green on that step: this PR's own.
+# Main's green is proven the way the breaker requires: its jobs listing has the
+# step, and its Decide line says no gate step failed (a continue-on-error step
+# reads 'success' in the jobs API whatever it did).
+printf '{"jobs":[{"name":"%s","conclusion":"success","steps":[{"name":"%s","conclusion":"success"}]}]}' \
+  "$C8_JOB" "$C8_STEP" >"$C8/main-green.json"
+printf "2026-11-21T04:45:00.0000000Z main-red-breaker: no gate step failed in '%s' — nothing to decide\n" "$C8_JOB" >"$C8/main-green.log"
+run_c8 "$WF" "$C8/reports/high.txt" pull_request "" "" "$C8/main-green.json" "$C8/main-green.log"
+if [ "$C8_ORC" = 1 ] && [ "$C8_RC" = 1 ] && has "$C8_OUT" "the red is this PR's own" && has "$C8_OUT" "$C8_STEP"; then
+  ok "8b: on a lock PR with main green on the step, the HIGH is the PR's own red (Decide exit 1)"
+else
+  no "8b: on a lock PR with main green on the step, Decide exit $C8_RC (oracle $C8_ORC), wanted 1 and 'the red is this PR's own': ${C8_OUT##*$'\n'}"
+fi
+# 8c/8d — the controls: the same HIGH excepted in mix.exs, or recorded in the baseline.
+run_c8 "$WF" "$C8/reports/high.txt" push "EEF-CVE-2099-80001"
+if [ "$C8_ORC" = 0 ] && [ "$C8_RC" = 0 ]; then
+  ok "8c: CONTROL — the same HIGH in api/mix.exs ignored_advisories leaves the job green"
+else
+  no "8c: the HIGH excepted in mix.exs still reds (oracle exit $C8_ORC, Decide exit $C8_RC)"
+fi
+run_c8 "$WF" "$C8/reports/high.txt" push "" "api:EEF-CVE-2099-80001 planted 0.0.1 HIGH"
+if [ "$C8_ORC" = 0 ] && [ "$C8_RC" = 0 ]; then
+  ok "8d: CONTROL — the same HIGH recorded in the baseline leaves the job green"
+else
+  no "8d: the HIGH recorded in the baseline still reds (oracle exit $C8_ORC, Decide exit $C8_RC)"
+fi
+# 8e/8f — the floor: MEDIUM prints and does not red; no severity counts as HIGH.
+run_c8 "$WF" "$C8/reports/medium.txt" push
+if [ "$C8_ORC" = 0 ] && [ "$C8_RC" = 0 ] && has "$(cat "$C8/oracle.out")" "EEF-CVE-2099-80001"; then
+  ok "8e: FLOOR — an unrecorded MEDIUM is printed and leaves the job green"
+else
+  no "8e: an unrecorded MEDIUM: oracle exit $C8_ORC, Decide exit $C8_RC, wanted 0 and 0 with the id printed"
+fi
+run_c8 "$WF" "$C8/reports/unknown.txt" push
+if [ "$C8_ORC" = 1 ] && [ "$C8_RC" = 1 ] && c8_names_step; then
+  ok "8f: FLOOR — an unrecorded advisory with no severity reds by name (never downgraded)"
+else
+  no "8f: an unrecorded advisory with no severity: oracle exit $C8_ORC, Decide exit $C8_RC, wanted 1 and 1"
+fi
+# 8g — MUTANT: the oracle step loses its id. 8a's red must vanish, or 8a proves nothing.
+python3 - "$WF" "$C8/no-id.yml" "$C8_STEP" <<'PY'
+import sys
+src, dst, name = sys.argv[1], sys.argv[2], sys.argv[3]
+lines, out, at = open(src).read().split("\n"), [], False
+for l in lines:
+    if l.strip() == f"- name: {name}":
+        at = True
+    elif at and l.strip().startswith("- name:"):
+        at = False
+    if at and l.strip().startswith("id:"):
+        at = False
+        continue
+    out.append(l)
+open(dst, "w").write("\n".join(out))
+PY
+if cmp -s "$WF" "$C8/no-id.yml"; then
+  no "8g: MUTANT no-id: the plant did not change the workflow (the oracle step carries no id)"
+else
+  run_c8 "$C8/no-id.yml" "$C8/reports/high.txt" push
+  if [ "$C8_RC" = 0 ]; then
+    ok "8g: MUTANT no-id — without the step's id the same HIGH leaves Decide at exit 0, so 8a can fire"
+  else
+    no "8g: MUTANT no-id — Decide still exit $C8_RC without the step's id; 8a is not testing the id"
+  fi
+fi
+# 8h — the daily run: a new advisory reds main within a day, with no diff.
+if has "$(c8f "$C8/real.json" crons)" '"41 4 \* \* \*"'; then
+  ok "8h: security.yml runs daily on a schedule (cron 41 4 * * *)"
+else
+  no "8h: security.yml has no daily schedule (crons: $(c8f "$C8/real.json" crons))"
+fi
+
+# 8i-8l — WHY A RED HERE STOPS NO OTHER PR'S MERGE. The job's light is its own;
+# these four facts keep a red security run from holding anyone else's merge.
+# Each takes its files as arguments, so a planted copy proves it can fire.
+c8_row_a() {  # <workflow>: no step opens or lifts a main-red hold from a CI run
+  c8_facts "$1" "$C8/row.json"; local w; w="$(c8f "$C8/row.json" hold_writers)"
+  [ "$w" = "[]" ] || { echo "a step runs main-red-hold.sh open/lift: $w"; return 1; }
+}
+c8_row_b() {  # <required-checks.json> <workflow>: Security gate and the CVE job are excluded, never required
+  c8_facts "$2" "$C8/row.json"
+  python3 - "$1" "$(c8f "$C8/row.json" job_name)" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); job = sys.argv[2]
+excl = [e.get("context", "") for e in d.get("exclusions") or []]
+req = [c.get("context", "") for c in ((d.get("protection") or {}).get("required_status_checks") or {}).get("checks") or []]
+ours = lambda c: c == "Security gate" or c == job or c.startswith(job + " (") or c.startswith("Dependency CVE audit (")
+bad = [c for c in req if ours(c)]
+if "Security gate" not in excl: bad.append("'Security gate' missing from exclusions")
+if not any(c == job or c.startswith(job + " (") for c in excl): bad.append(f"'{job}' missing from exclusions")
+if bad: print("; ".join(bad)); sys.exit(1)
+PY
+}
+c8_row_c() {  # <bp-merge.sh> <workflow>: the merge helper names no security.yml check
+  c8_facts "$2" "$C8/row.json"
+  local n hit=""
+  while IFS= read -r n; do
+    [ -n "$n" ] && grep -qF -- "$n" "$1" && hit="$hit'$n' "
+  done <<<"$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["job_names"]))' "$C8/row.json")"
+  [ -z "$hit" ] || { echo "bp-merge.sh names $hit"; return 1; }
+}
+c8_row_d() {  # <workflow>: the report job still fires on a scheduled red on main
+  c8_facts "$1" "$C8/row.json"
+  python3 - "$C8/row.json" <<'PY'
+import json, re, sys
+ifs = json.load(open(sys.argv[1]))["report_ifs"]
+if len(ifs) != 1: print(f"{len(ifs)} jobs call file-ci-failure-issue.sh, wanted 1"); sys.exit(1)
+c = ifs[0]
+if "github.ref == 'refs/heads/main'" not in c: print("its if: no longer matches main"); sys.exit(1)
+if re.search(r"github\.event_name\s*[!=]=", c): print("its if: is narrowed by event: " + " ".join(c.split())); sys.exit(1)
+PY
+}
+c8_row() {  # <label> <want: pass|fire> <function> <args…>
+  local label="$1" want="$2" f="$3" why rc=0; shift 3
+  why="$("$f" "$@" 2>&1)" || rc=$?
+  if [ "$want" = pass ] && [ "$rc" = 0 ]; then ok "$label"
+  elif [ "$want" = fire ] && [ "$rc" != 0 ]; then ok "$label (fired: $why)"
+  else no "$label (exit $rc${why:+: $why})"; fi
+}
+c8_row "8i: no step in security.yml opens or lifts a main-red hold" pass c8_row_a "$WF"
+c8_row "8j: Security gate and the CVE job are excluded and not required" pass c8_row_b "$C8_REQ" "$WF"
+c8_row "8k: scripts/bp-merge.sh names no security.yml check" pass c8_row_c "$C8_BPM" "$WF"
+c8_row "8l: the report job's if: still covers a scheduled red on main" pass c8_row_d "$WF"
+# Their mutants, on copies.
+python3 - "$WF" "$C8/hold.yml" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+o = "      - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)\n"
+assert o in s, "no Decide step to plant before"
+open(sys.argv[2], "w").write(s.replace(o, "      - name: planted hold\n        run: bash scripts/main-red-hold.sh open --tree api\n\n" + o, 1))
+PY
+c8_row "8i MUTANT: a planted 'main-red-hold.sh open' step" fire c8_row_a "$C8/hold.yml"
+python3 - "$C8_REQ" "$C8/req.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["protection"]["required_status_checks"]["checks"].append({"context": "Security gate", "app_id": 15368})
+json.dump(d, open(sys.argv[2], "w"))
+PY
+c8_row "8j MUTANT: Security gate moved into the required set" fire c8_row_b "$C8/req.json" "$WF"
+{ cat "$C8_BPM"; echo "CVE_CHECK_NAME=\"$C8_JOB\""; } >"$C8/bp-merge.sh"
+c8_row "8k MUTANT: bp-merge.sh names the CVE job" fire c8_row_c "$C8/bp-merge.sh" "$WF"
+sed "s/      failure()\$/      failure() \&\& github.event_name == 'push'/" "$WF" >"$C8/narrow.yml"
+if cmp -s "$WF" "$C8/narrow.yml"; then
+  no "8l MUTANT: the plant did not change the report job's if:"
+else
+  c8_row "8l MUTANT: the report job's if: narrowed to push" fire c8_row_d "$C8/narrow.yml"
+fi
+echo
+
 echo "----"
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1

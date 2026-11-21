@@ -1,7 +1,7 @@
 // What a new part changes outside its folder, as docs/PARTS.md says it: nothing a
 // script writes, and by hand only a changeset, up to MOST_PARTS parts.
 import { createHash } from 'node:crypto'
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -12,17 +12,38 @@ import { buildShowroom, root, tokensPath } from '../build/showroom.mjs'
 import { readFacts, renderRows } from '../build/status.mjs'
 
 const SKIP = new Set(['node_modules', 'dist', 'parts', '.turbo'])
-/** Every file of the package outside parts/ (and what is never tracked), plus the sheet, as path -> hash. */
-function tree(dir = root, out = {}) {
+/** Every file of the package outside parts/ (and what is never tracked), plus the sheet, as path -> hash. A link is
+    read through, so a worktree whose node_modules is a link to another one's reads the same as one with a real
+    folder. */
+function tree(dir = root, out = {}, from = root) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP.has(e.name)) continue
     const p = join(dir, e.name)
-    if (e.isDirectory()) { if (!SKIP.has(e.name)) tree(p, out) } else out[relative(root, p)] = createHash('sha256').update(readFileSync(p)).digest('hex')
+    if (statSync(p).isDirectory()) tree(p, out, from)
+    else out[relative(from, p)] = createHash('sha256').update(readFileSync(p)).digest('hex')
   }
   return out
 }
 const flat = (s) => s.replace(/\s+/g, ' ')
 
 describe('a new part', () => {
+  it('reads the package the same whether node_modules and other folders are real or links', () => {
+    const at = mkdtempSync(join(tmpdir(), 'barkui-tree-'))
+    try {
+      const make = (d, files) => Object.entries(files).forEach(([f, body]) => (mkdirSync(join(d, f, '..'), { recursive: true }), writeFileSync(join(d, f), body)))
+      make(join(at, 'real'), { 'a.mjs': 'a', 'docs/b.md': 'b', 'node_modules/x/index.js': 'x', 'parts/p/part.css': 'p' })
+      make(join(at, 'away'), { 'node_modules/x/index.js': 'x', 'docs/b.md': 'b' })
+      make(join(at, 'linked'), { 'a.mjs': 'a', 'parts/p/part.css': 'p' })
+      symlinkSync(join(at, 'away', 'node_modules'), join(at, 'linked', 'node_modules'))
+      symlinkSync(join(at, 'away', 'docs'), join(at, 'linked', 'docs'))
+      const real = tree(join(at, 'real'), {}, join(at, 'real'))
+      expect(real).toEqual(tree(join(at, 'linked'), {}, join(at, 'linked')))
+      expect(Object.keys(real).sort()).toEqual(['a.mjs', join('docs', 'b.md')])
+    } finally {
+      rmSync(at, { recursive: true, force: true })
+    }
+  })
+
   it('changes no file outside parts/ when it is built, split into groups and counted', async () => {
     const before = { ...tree(), sheet: statSync(tokensPath).mtimeMs }
     const at = mkdtempSync(join(tmpdir(), 'barkui-new-part-'))
