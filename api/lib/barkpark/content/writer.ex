@@ -149,17 +149,13 @@ defmodule Barkpark.Content.Writer do
         {:ok, content, warnings}
 
       {{:ok, _content}, cross_errors} ->
-        {:error, errors_by_field(%{}, cross_errors), cross_errors, warnings}
+        {:error, Barkpark.Content.FieldErrors.add_findings(%{}, cross_errors), cross_errors,
+         warnings}
 
       {{:error, errors}, cross_errors} ->
-        {:error, errors_by_field(errors, cross_errors), error_findings ++ cross_errors, warnings}
+        {:error, Barkpark.Content.FieldErrors.add_findings(errors, cross_errors),
+         error_findings ++ cross_errors, warnings}
     end
-  end
-
-  defp errors_by_field(errors, findings) do
-    Enum.reduce(findings, errors, fn f, acc ->
-      Map.update(acc, top_level_field(f.path), [f.message], &(List.wrap(&1) ++ [f.message]))
-    end)
   end
 
   @doc """
