@@ -949,6 +949,10 @@
       "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-plan`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The dispatcher: it renders on every head, decides whether a change touches BarkUI and prints the groups of parts (check/jobs.mjs --matrix); it installs nothing. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
     },
     {
+      "context": "BarkUI selftest",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest` under its PRE-RENAME title. RETIRED NAME as of this commit: the job's `name:` now reads `BarkUI selftest, views`, because the selftest runs as two jobs and the old name read as the whole selftest. This row is KEPT, not rewritten: every head merged before the rename still renders the old string, and a census that keys on the string would red on those heads if the row went away. Delete it once no sampled head can render it. ADDED BY HAND 2026-11-21 (task-464c046d3267d4a7)."
+    },
+    {
       "context": "BarkUI selftest, views",
       "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The first half of the showroom check's own proof that it can still lose: the selftest runs as two jobs (SELFTEST_JOBS in js/packages/barkui/check/jobs.mjs), and this one runs the cases that read the wide or phone views and drive no states; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a); RENAMED BY HAND 2026-11-21 from `BarkUI selftest` (task-464c046d3267d4a7)."
     },
