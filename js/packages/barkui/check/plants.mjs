@@ -95,8 +95,8 @@ export const CEILING_CASES = [
   {
     name: 'a selftest whose last case passes its ceiling stops there, failing, with the sentence',
     direct: async () => {
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a state on any control of its kind'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
-      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 0 s while "a state on any control of its kind') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), '--job', 'rest', 'a state on any control of its kind'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 0 s while "a state on any control of its kind') && r.stdout.includes(selftestSentence('rest')) && !r.stdout.includes('cases held')
     },
   },
 ]
