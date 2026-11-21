@@ -56,6 +56,8 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   #     understates a search snippet but never blanks a rendered surface — left
   #     alone deliberately rather than changed without a measured need.
 
+  alias Barkpark.PortableDoc.Render.InlineDepth
+
   @max_inline_depth Barkpark.PortableDoc.Validate.max_depth()
 
   def compose_inline_children(nodes) when is_list(nodes), do: compose_children(nodes, 0)
@@ -107,8 +109,11 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     |> Enum.map(&compose_inline(&1, false, depth))
   end
 
-  defp compose_inline(_node, _inside_link, depth) when depth >= @max_inline_depth,
-    do: Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
+  # A wrapper at the depth limit or past it keeps its words, then the notice
+  # (Render.InlineDepth); a leaf there is drawn as usual.
+  defp compose_inline(node, _inside_link, depth)
+       when depth >= @max_inline_depth and (is_list(node) or is_map_key(node, "children")),
+       do: InlineDepth.cut(node, depth)
 
   defp compose_inline(%{"type" => "text"} = n, inside_link, depth) do
     # Coerce a non-string `value` — a raw API/SDK/CLI mutate can persist a number
@@ -140,8 +145,12 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       [] ->
         value
 
-      marks when is_list(marks) and depth + length(marks) >= @max_inline_depth ->
-        Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
+      # The marks that fit under the depth limit are drawn; past them the word is
+      # kept and the notice follows (Render.InlineDepth).
+      marks when is_list(marks) and depth + length(marks) > @max_inline_depth ->
+        fit = max(@max_inline_depth - depth, 0)
+        kept = apply_marks(value, marks |> Enum.take(fit) |> Enum.map(&mark_map/1), inside_link)
+        %{"kind" => "PdText", "children" => [kept, " " <> InlineDepth.notice()]}
 
       marks when is_list(marks) ->
         apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
