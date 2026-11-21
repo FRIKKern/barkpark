@@ -394,8 +394,8 @@ FIX
   baseline_verdict "$T/base.txt" "$T/seen.fewer.txt" >/dev/null
   [ "$B_NEW" = 0 ] && [ "$B_CLEARED" = 1 ] && ok "RATCHET OTHER DIRECTION: a cleared id is a notice (new=0 cleared=1), never a red" || no "fewer gave new=$B_NEW cleared=$B_CLEARED"
   # THE FLOOR (task-eb4b9903a92011cd), on the same ratchet code.
-  printf 'EEF-CVE-2026-65623 HIGH\nEEF-CVE-2099-80002 MEDIUM\n' >"$T/seen.medium.txt"
-  printf 'EEF-CVE-2026-65623 HIGH\nEEF-CVE-2099-80003 CRITICAL\n' >"$T/seen.critical.txt"
+  printf 'EEF-CVE-2099-80002 MEDIUM\n' >"$T/seen.medium.txt"
+  printf 'EEF-CVE-2099-80003 CRITICAL\n' >"$T/seen.critical.txt"
   baseline_verdict "$T/base.txt" "$T/seen.medium.txt" >/dev/null
   [ "$B_NEW" = 0 ] && [ "$B_BELOW" = 1 ] && ok "FLOOR HIGH: an unrecorded MEDIUM is a notice (new=0 below=1), not a red" || no "medium gave new=$B_NEW below=$B_BELOW"
   RED_AT=MEDIUM baseline_verdict "$T/base.txt" "$T/seen.medium.txt" >/dev/null
