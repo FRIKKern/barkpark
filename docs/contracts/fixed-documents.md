@@ -8,4 +8,4 @@
 - Deleting a listed document is refused. An unlisted one may be deleted.
 - Edits, publish, unpublish, discard and a mutate `delete` of `drafts.<id>` (the draft only) are unchanged. `Content.delete_document/4` of `drafts.<id>` removes both rows, so a listed id is refused there.
 
-Refusal: 409 `fixed_document`, `details.{action,type,id}`; one refused op fails the batch. Emptying a dataset or workspace and sync are unchanged. Ids are strings without `drafts.`/`versions.`; else 422. `null` removes the list; no key = no limit. A list on a shared schema holds in every workspace that has no schema of its own for the type.
+Refusal: 409 `fixed_document`, `details.{action,type,id}`; one refused op fails the batch. Emptying a dataset or workspace and sync are unchanged. Ids are strings without `drafts.`/`versions.`; else 422. A singleton's list must hold the type name; a write that breaks that is 422. `null` removes the list; no key = no limit. A list on a shared schema holds in every workspace that has no schema of its own for the type.
