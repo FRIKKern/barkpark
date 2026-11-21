@@ -275,8 +275,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         # off-the-wire markup that lands straight in `raw(@paper_html)`, so
         # leaving it unscrubbed would re-open on the broadcast exactly what the
         # mount-side clamp closes.
+        #
+        # `paper_doc` is re-read with the painted words, as the delta arm does:
+        # history's Restore names its rev (`History.seen_rev/1`), and a stale
+        # one refused the first press after another writer's save
+        # (task-5b74471e6a2d6de8). `paper_rev` stays the frame's.
         {:noreply,
          socket
+         |> Shared.sync_paper_edit_doc()
          |> assign(:paper_html, Shared.editor_body_html(html))
          |> assign(:paper_block_mode, false)
          |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}

@@ -2218,6 +2218,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         show_delete={@show_delete}
         delete_refs={@delete_refs}
         editor_doc={@editor_doc}
+        seen_rev={BarkparkWeb.Studio.StudioLive.Handlers.History.seen_rev(assigns)}
         show_discard={@show_discard} doc_mark={BarkparkWeb.Studio.StudioLive.PostIdentity.of(%{assigns: assigns})}
       />
 
