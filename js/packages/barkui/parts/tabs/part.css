@@ -1,6 +1,7 @@
 /* Tabs: UI SDK's <ui-tabs>, a list of tabs, each a native button, and the panel of the selected one.
-   The selected tab is marked by its own edge, an inset line under it (across) or beside it (down), in
-   --ui-primary; the other tabs are text only. BarkUI's tabs do not style UI SDK's <ui-tabs-indicator> and the
+   The selected tab is marked by its own edge, a border under it (across) or beside it (down), in
+   --ui-primary; the other tabs keep the same border in transparent, so nothing moves, and are text only.
+   The edge is a border, not a box-shadow, so base.css's focus ring (a box-shadow) cannot replace it. BarkUI's tabs do not style UI SDK's <ui-tabs-indicator> and the
    stage holds none: it writes the selected tab's measures into a style attribute, which the check refuses on a
    stage, so an indicator here would go unjudged.
    The look keys only on what UI SDK writes: data-selected, data-disabled and data-orientation, and on :hover.
@@ -11,8 +12,9 @@
   display: flex;
   flex-direction: column;
   gap: calc(var(--ui-spacing) * 3);
-  width: calc(var(--ui-spacing) * 88);
-  max-width: 100%;
+  /* A share of the row up to 88 steps: a fixed width would hold a grid column open past a phone's edge. */
+  width: 100%;
+  max-width: calc(var(--ui-spacing) * 88);
   min-width: 0;
 
   &[data-orientation="vertical"] {
@@ -40,12 +42,14 @@
 
 [data-slot="tabs-tab"] {
   --bark-tab-fg: var(--ui-muted-foreground);
+  --bark-tab-edge: transparent;
   --bark-tabs-edge: 2px;
 
   box-sizing: border-box;
   height: calc(var(--ui-spacing) * 9);
   padding-inline: calc(var(--ui-spacing) * 3);
   border: 0;
+  border-bottom: var(--bark-tabs-edge) solid var(--bark-tab-edge);
   background: transparent;
   color: var(--bark-tab-fg);
   font-size: var(--bark-tabs-text);
@@ -58,13 +62,14 @@
     --bark-tab-fg: var(--ui-foreground);
   }
 
-  &[data-selected] {
-    --bark-tab-fg: var(--ui-foreground);
-    box-shadow: inset 0 calc(var(--bark-tabs-edge) * -1) 0 var(--ui-primary);
+  &[data-orientation="vertical"] {
+    border-bottom: 0;
+    border-inline-start: var(--bark-tabs-edge) solid var(--bark-tab-edge);
   }
 
-  &[data-selected][data-orientation="vertical"] {
-    box-shadow: inset var(--bark-tabs-edge) 0 0 var(--ui-primary);
+  &[data-selected] {
+    --bark-tab-fg: var(--ui-foreground);
+    --bark-tab-edge: var(--ui-primary);
   }
 
   &[data-disabled] {

@@ -80,8 +80,17 @@ export const steps = [
     },
   },
   {
-    name: 'Down the side: Tab reaches the selected tab, ArrowDown selects the next, ArrowRight does nothing',
-    keys: ['Tab', 'ArrowDown', 'ArrowRight'],
+    name: 'Down the side: Tab reaches the selected tab, ArrowDown selects the next',
+    keys: ['Tab', 'ArrowDown'],
+    expect: (root, h) => {
+      const t = root.querySelector('#tabs-password')
+      if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
+      return t.getAttribute('aria-selected') === 'true' || 'Password is not selected'
+    },
+  },
+  {
+    name: 'Down the side: ArrowRight does nothing',
+    keys: ['ArrowRight'],
     expect: (root, h) => {
       const t = root.querySelector('#tabs-password')
       if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
