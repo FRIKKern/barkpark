@@ -1,9 +1,11 @@
 {
-  "_comment": "The shared Portable Doc fixtures that nest past the value-depth limit, which the source-mode wall names instead of running (task-368b4fe38e75712d). The editor's api/assets/paper-editor/src/__source_wall_fixtures.test.mjs lists exactly these names; test/barkpark/portable_doc/source_wall_too_deep_test.exs runs each doc through Barkpark.PortableDoc.Validate and fails unless it is refused as too_deep. Each row names its file under api/priv/portable_doc/goldens, the list in it and the entry's name there.",
+  "_comment": "The shared Portable Doc fixtures that nest past the value-depth limit, which the source-mode wall names instead of running (task-368b4fe38e75712d). The editor's api/assets/paper-editor/src/__source_wall_fixtures.test.mjs lists exactly these names; test/barkpark/portable_doc/source_wall_too_deep_test.exs runs each doc through Barkpark.PortableDoc.Validate and fails unless it is refused as too_deep. Each row names its file under api/priv/portable_doc/goldens, the list in it and the entry's name there; a golden row's file is one rendered edge, and its entry is that edge's name.",
   "rows": [
     { "name": "limit-docs docs/nested columns", "file": "limit-docs.json", "list": "docs", "entry": "nested columns" },
     { "name": "limit-docs docs/nested section", "file": "limit-docs.json", "list": "docs", "entry": "nested section" },
     { "name": "limit-docs docs/nested strong", "file": "limit-docs.json", "list": "docs", "entry": "nested strong" },
+    { "name": "limit-docs edges/em past the value depth", "file": "limit-docs.json", "list": "edges", "entry": "em past the value depth" },
+    { "name": "limits/em-past-the-value-depth", "file": "limits/em-past-the-value-depth.golden.json", "list": "golden", "entry": "em past the value depth" },
     { "name": "limits/value-too-deep series one level past the value-depth limit", "file": "limits/value-too-deep.json", "list": "cases", "entry": "series one level past the value-depth limit" }
   ]
 }
