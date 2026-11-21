@@ -26,8 +26,9 @@ export const NAMES = {
 
 // The selftest runs as two jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
 // case is the one rule below, written here once: `views` runs the cases that read the wide or phone views and
-// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`); `rest` runs every other
-// case: presses, states, refusals, the no-script print and the direct readings. A test holds that every case runs
+// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`, not `layers`); `rest` runs
+// every other case: presses, states, refusals, the no-script print, the direct readings, and the top layer's cases
+// (`layers`), each of which opens its boxes by real input or holds a refusal. A test holds that every case runs
 // in exactly one job and that the two together run every case (coverCases).
 export const SELFTEST_JOBS = [
   { key: 'views', id: JOBS.selftest, name: NAMES.selftest },
@@ -35,7 +36,7 @@ export const SELFTEST_JOBS = [
 ]
 const VIEWS = ['skins', 'schemes', 'phone']
 /** The selftest job that runs a case, by its key. */
-export const selftestJob = (c) => (!c.direct && !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
+export const selftestJob = (c) => (!c.direct && !c.states && !c.layers && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
 /** The cases the job `key` runs, in their order. */
 export const casesOf = (cases, key) => cases.filter((c) => selftestJob(c) === key)
 /** The cases one selftest run runs: job `key`'s (every case when `key` is null), narrowed to those whose name holds

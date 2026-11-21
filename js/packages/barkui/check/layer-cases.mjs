@@ -22,9 +22,9 @@ const POPOVER = `
   <div id="button-pop" popover>Saved two minutes ago</div>
 </div>
 `
-// Three more boxes for the run that holds every top-layer reading at once: one the demo opens at the start and
-// keeps open (no layer names it), a tooltip shown only while its button has focus (no layer names it), and a hint
-// shown only while the pointer is on its button (a layer names it, opened by hover, closed by the pointer leaving).
+// More boxes for the two top-layer runs: one the demo opens at the start and keeps open (no layer names it), a
+// tooltip shown only while its button has focus (no layer names it), and a hint shown only while the pointer is on
+// its button (opened by hover, closed by the pointer leaving).
 const MORE = `
 <div data-demo-row>
   <span data-demo-label>More boxes</span>
@@ -46,12 +46,16 @@ const MORE = `
   <div id="button-slow" popover="manual">Shown slowly</div>
 </div>
 `
-const MORE_JS = [
+// What both runs plant: the boxes that open, at once or late.
+const BOXES_JS = [
   "root.querySelector('#button-open').showPopover()",
   "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }",
   "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
   // Shown 400 ms after focus or hover, as real tooltips are; leaving clears the timer.
   "{ const late = (b, t, shows, hides) => { let k = 0; for (const e of shows) b.addEventListener(e, () => { clearTimeout(k); k = setTimeout(() => t.matches(':popover-open') || t.showPopover(), 400) }); for (const e of hides) b.addEventListener(e, () => { clearTimeout(k); if (t.matches(':popover-open')) t.hidePopover() }) }; late(root.querySelector('#button-late-open'), root.querySelector('#button-late'), ['focus', 'mouseenter'], ['blur', 'mouseleave']); late(root.querySelector('#button-slow-open'), root.querySelector('#button-slow'), ['mouseenter'], ['mouseleave']) }",
+].join('\n')
+// What only the census run plants: boxes that never open while the check looks.
+const CENSUS_JS = [
   // On hover over a plain span, which the check never drives.
   "{ const b = root.querySelector('#button-span'), t = root.querySelector('#button-span-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
   // On focus, a box that carries popover is made and gone again within the task, and a plain box carries popover
@@ -126,54 +130,95 @@ async function overTwoGrounds() {
   }
 }
 
-// One run holds every top-layer reading at once (each plant asserts its own fail), so the selftest pays for one
-// check run, not four.
+// Two runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
+// time for one case: the first reads named and unnamed boxes open, the second the boxes the census must name.
+const BOXES_CSS = [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n')
+/** What one open state and the looks after real input cost on this runner, for the record (the hosted job prints it). */
+const measured = (p) => {
+  const m = p?.parts?.button?.measures?.layers
+  if (m) console.log(`    the top layer: ${m.readings} readings open in ${m.seconds} s, ${(m.seconds / m.readings).toFixed(2)} s each`)
+  return m
+}
+/** The first run's rows: named and unnamed boxes read open. `m` is the part's measure of its layers. */
+const popoverRows = (m) => ({
+  'a named popover, opened by a click, read open': both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/),
+  // In the reading's own form ("<skin> <scheme> on base: …"), so only the reading holds it, not the looks.
+  'a box open from the start, named by no layer, in the reading': both(new RegExp(`^\\w+ (light|dark) on base: ${esc(UNNAMED_AT('div#button-open "Always open"'))}$`)),
+  'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`^\\w+ (light|dark): Tab to button#button-tip-open "Info": ${esc(UNNAMED_AT('div#button-tip "Shown on focus"'))}$`)),
+  'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
+  'every layer that opens at once read in every view': () => m?.readings === 10,
+})
+/** The second run's rows: the named hint read open, and every box the census must name. `n` is the looks made. */
+const censusRows = (m, n) => ({
+  'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
+  'a tooltip shown 400 ms after focus or hover, named by no layer': can('div#button-late "Shown late"'),
+  'a tooltip on hover over a plain span, named by no layer': can('div#button-span-tip "Shown on the span"'),
+  'a dialog never opened, named by no layer': can('dialog#button-dlg "Never opened"'),
+  'a box with popover made and gone again between looks': can('div#button-made "Made on focus"'),
+  'a box given popover and losing it again between looks': can('div#button-plain "Given popover"'),
+  'a box in a shadow root attached after its host is in the page, gone before the next look': can('div#button-in-root "In a late root"'),
+  'a dialog in a shadow root attached late inside another late root': can('dialog#button-in-inner "In a root in a late root"'),
+  "a box in a shadow root attached by a frame's attachShadow": can('div#button-by-frame "By a frame"'),
+  'a box in a shadow root parsed from markup, with no attachShadow call': can('div#button-parsed "In a parsed root"'),
+  'a frame in the page, refused by name': skinsSay(new RegExp(esc(FRAME('iframe#button-frame ""')))),
+  "a box made as the page loads and gone before the check's first look": can('div#button-at-load "Made at load"'),
+  'the named hint read in every view': () => m?.readings === 10,
+  'the looks were made': () => n > 0,
+})
+/** The rows of the two top-layer runs, by run, as their cases hold them. */
+export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), census: Object.keys(censusRows()) }
+/** What is wrong with `runs` ({ run: rows }) against the rows of one run they replace, in plain words; empty when
+    each old row is in exactly one run. */
+export function rowsMoved(old, runs) {
+  const wrong = []
+  for (const row of old) {
+    const in_ = Object.keys(runs).filter((r) => runs[r].filter((x) => x === row).length)
+    const times = Object.values(runs).reduce((k, rows) => k + rows.filter((x) => x === row).length, 0)
+    if (times === 0) wrong.push(`the row "${row}" is in neither top-layer run`)
+    else if (times > 1) wrong.push(`the row "${row}" is in ${in_.length > 1 ? `both top-layer runs (${in_.join(', ')})` : `the ${in_[0]} run ${times} times`}`)
+  }
+  return wrong
+}
+// Each top-layer case is `layers`: it opens its boxes by real input (a click, a hover, a Tab) or holds a refusal,
+// and runs in the selftest's rest job by its one rule (check/jobs.mjs).
 export const LAYER_CASES = [
   {
-    name: 'top layer: a named popover and a named hover hint are read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; so do boxes no layer names that never open while the check looks; a named box that opens late fails by name',
+    name: 'top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name',
     only: ['skins'],
+    layers: true,
     plant: all(
-      () => Object.assign(since, looks),
       withPopover,
       (d) => appendFileSync(join(d, 'example.html'), MORE),
-      (d) => inDemo(d, MORE_JS),
-      (d) => named(d, [LAYER, HINT, SLOW]),
+      (d) => inDemo(d, BOXES_JS),
+      (d) => named(d, [LAYER, SLOW]),
     ),
-    css: [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n'),
+    css: BOXES_CSS,
+    expect: (p, ...rest) => each(popoverRows(measured(p)))(p, ...rest),
+  },
+  {
+    name: 'top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load',
+    only: ['skins'],
+    layers: true,
+    plant: all(
+      () => Object.assign(since, looks),
+      (d) => appendFileSync(join(d, 'example.html'), MORE),
+      (d) => inDemo(d, [BOXES_JS, CENSUS_JS].join('\n')),
+      (d) => named(d, [HINT]),
+    ),
+    css: BOXES_CSS,
     expect: (p, ...rest) => {
-      // What one open state and the looks after real input cost on this runner, for the record (the hosted job prints it).
-      const m = p?.parts?.button?.measures?.layers
-      if (m) console.log(`    the top layer: ${m.readings} readings open in ${m.seconds} s, ${(m.seconds / m.readings).toFixed(2)} s each`)
+      const m = measured(p)
       const n = looks.n - since.n
       const s = (looks.ms - since.ms) / 1000
       console.log(`    looks for a box no layer names: ${n} in ${s.toFixed(1)} s, ${n ? ((s * 1000) / n).toFixed(1) : 0} ms each`)
-      return each({
-        'a named popover, opened by a click, read open': both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/),
-        'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
-        // In the reading's own form ("<skin> <scheme> on base: …"), so only the reading holds it, not the looks.
-        'a box open from the start, named by no layer, in the reading': both(new RegExp(`^\\w+ (light|dark) on base: ${esc(UNNAMED_AT('div#button-open "Always open"'))}$`)),
-        'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`^\\w+ (light|dark): Tab to button#button-tip-open "Info": ${esc(UNNAMED_AT('div#button-tip "Shown on focus"'))}$`)),
-        'a tooltip shown 400 ms after focus or hover, named by no layer': can('div#button-late "Shown late"'),
-        'a tooltip on hover over a plain span, named by no layer': can('div#button-span-tip "Shown on the span"'),
-        'a dialog never opened, named by no layer': can('dialog#button-dlg "Never opened"'),
-        'a box with popover made and gone again between looks': can('div#button-made "Made on focus"'),
-        'a box given popover and losing it again between looks': can('div#button-plain "Given popover"'),
-        'a box in a shadow root attached after its host is in the page, gone before the next look': can('div#button-in-root "In a late root"'),
-        'a dialog in a shadow root attached late inside another late root': can('dialog#button-in-inner "In a root in a late root"'),
-        "a box in a shadow root attached by a frame's attachShadow": can('div#button-by-frame "By a frame"'),
-        'a box in a shadow root parsed from markup, with no attachShadow call': can('div#button-parsed "In a parsed root"'),
-        'a frame in the page, refused by name': skinsSay(new RegExp(esc(FRAME('iframe#button-frame ""')))),
-        "a box made as the page loads and gone before the check's first look": can('div#button-at-load "Made at load"'),
-        'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
-        'every layer that opens at once read in every view': () => m?.readings === 20,
-        'the looks were made': () => n > 0,
-      })(p, ...rest)
+      return each(censusRows(m, n))(p, ...rest)
     },
   },
   // Its own run: were either call let through, it would take the page away and every other row with it.
   {
     name: "top layer: the ways out of the census's sight are refused by name: another window (window.open), and markup written into the parsed page (document.write)",
     only: ['skins'],
+    layers: true,
     plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { window.open(''); document.write('<p>Written late</p>') })"),
     expect: each({
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
