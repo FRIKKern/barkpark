@@ -8,6 +8,12 @@ defmodule Barkpark.Quiz.StatsTest do
   alias Barkpark.Quiz
   alias Barkpark.Quiz.Stats
 
+  @registry Barkpark.Quiz.RoomRegistry
+
+  # The pins of every room the registry holds now.
+  defp live_pins,
+    do: @registry |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}]) |> MapSet.new()
+
   test "live_room_count grows with started rooms; room_stats reflects players" do
     n = System.unique_integer([:positive])
     pin1 = "TST#{n}a"
@@ -18,7 +24,14 @@ defmodule Barkpark.Quiz.StatsTest do
       Quiz.stop_room(pin2)
     end)
 
+    # The count is global, and a room an earlier test stopped can still be leaving
+    # the registry (it drops a stopped room's entry after the stop returns), so a
+    # bare before/after count can come up short. The row counts what it started:
+    # each room live around the first count that is gone by the second is taken off;
+    # a room started elsewhere only adds.
+    others = live_pins()
     before = Stats.live_room_count()
+    others = MapSet.union(others, live_pins())
     # Joins never start rooms (Decision N) — ensure (host) first, then join.
     {:ok, _} = Quiz.ensure_room(pin1)
     {:ok, _} = Quiz.ensure_room(pin2)
@@ -26,7 +39,11 @@ defmodule Barkpark.Quiz.StatsTest do
     Quiz.join(pin1, "p2", "Bob")
     Quiz.join(pin2, "p3", "Carol")
 
-    assert Stats.live_room_count() >= before + 2
+    now = Stats.live_room_count()
+    ended = Enum.count(others, &(Registry.lookup(@registry, &1) == []))
+
+    assert now >= before + 2 - ended,
+           "live rooms #{now}, before #{before}, ended #{ended}: the row's two rooms are not counted"
 
     st = Stats.room_stats(pin1)
     assert st.players == 2

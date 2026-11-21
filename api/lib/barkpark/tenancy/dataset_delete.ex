@@ -635,7 +635,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   end
 
   defp delete_documents(%{dataset: ds, project: p, workspace: ws} = target) do
-    opts = [workspace_id: ws.id, project_id: p.id]
+    # Emptying a dataset removes fixed documents too (Content.FixedDocuments).
+    opts = [workspace_id: ws.id, project_id: p.id, fixed_documents: :skip]
 
     Document
     |> in_dataset(target)

@@ -15936,3 +15936,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Unknown perspective: %{value}"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Search document types"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No results for"
+msgstr ""

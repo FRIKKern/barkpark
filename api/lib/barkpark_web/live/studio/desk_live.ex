@@ -635,6 +635,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-locked-value={BarkparkWeb.StaticAssets.path("bp-desk-locked-value.js")}
       data-desk-revision-focus={BarkparkWeb.StaticAssets.path("bp-desk-revision-focus.js")}
       data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
+      data-desk-new-doc={BarkparkWeb.StaticAssets.path("bp-desk-new-doc.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

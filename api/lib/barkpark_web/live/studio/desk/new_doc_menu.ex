@@ -13,6 +13,14 @@ defmodule BarkparkWeb.Studio.Desk.NewDocMenu do
 
   Both are HTML popovers: their buttons open them before the page's script
   runs, Escape and a click outside close them, and a choice closes its own.
+
+  The navbar's has TanStack's "Search document types" box (`TypePicker` in
+  `NewDocMenu.tsx`): it has the focus when the list opens (`autofocus`, the
+  popover's own), and typing keeps the ways whose title holds the text.
+  Nothing is lit until an arrow key moves; Enter then opens the lit one.
+  With nothing left the list says "No results for" the text.
+  `bp-desk-new-doc.js` does the filtering and the keys; the options are not
+  Tab stops, as in a combobox.
   """
   use BarkparkWeb, :html
 
@@ -20,6 +28,7 @@ defmodule BarkparkWeb.Studio.Desk.NewDocMenu do
   alias BarkparkWeb.Studio.Desk.Menu
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.PaneBuilder
+  alias Phoenix.LiveView.JS
 
   @picker "dk-new-doc"
 
@@ -164,12 +173,43 @@ defmodule BarkparkWeb.Studio.Desk.NewDocMenu do
           <span aria-hidden="true">×</span>
         </button>
       </header>
-      <div role="listbox" aria-label={gettext("New document")} class="dk-new-doc-list">
+      <%!-- The search filters the ways to start (`bp-desk-new-doc.js`). What
+            the script sets on these is the page's: a patch keeps it. --%>
+      <div class="dk-new-doc-find">
+        <span class="search-icon" aria-hidden="true">
+          <BarkparkWeb.Studio.Desk.Glyph.glyph name="search" />
+        </span>
+        <input
+          id={"#{@picker}-find"}
+          type="text"
+          role="combobox"
+          aria-label={gettext("Search document types")}
+          placeholder={gettext("Search document types")}
+          aria-autocomplete="list"
+          aria-expanded={to_string(@picks != [])}
+          aria-controls={"#{@picker}-list"}
+          autocomplete="off"
+          spellcheck="false"
+          autofocus
+          data-desk-new-doc-find
+          phx-mounted={JS.ignore_attributes(["aria-expanded", "aria-activedescendant"])}
+        />
+      </div>
+      <div
+        id={"#{@picker}-list"}
+        role="listbox"
+        aria-label={gettext("New document")}
+        class="dk-new-doc-list"
+        phx-mounted={JS.ignore_attributes(["hidden"])}
+      >
         <button
-          :for={pick <- @picks}
+          :for={{pick, i} <- Enum.with_index(@picks)}
+          id={"#{@picker}-option-#{i}"}
           type="button"
           role="option"
+          tabindex="-1"
           aria-selected="false"
+          phx-mounted={JS.ignore_attributes(["hidden", "aria-selected"])}
           class="dk-menu-item menu-item"
           phx-click="new-document"
           phx-value-type={pick.type}
@@ -179,6 +219,15 @@ defmodule BarkparkWeb.Studio.Desk.NewDocMenu do
           popovertargetaction="hide"
         >{pick.title}</button>
       </div>
+      <p
+        id={"#{@picker}-empty"}
+        class="dk-new-doc-empty"
+        hidden
+        phx-update="ignore"
+        phx-mounted={JS.ignore_attributes(["hidden"])}
+      >
+        {gettext("No results for")} <strong data-desk-new-doc-query></strong>
+      </p>
     </div>
     """
   end
