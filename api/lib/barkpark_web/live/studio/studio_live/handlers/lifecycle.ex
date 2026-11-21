@@ -13,7 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{Fields, RemoteValues}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -378,11 +378,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   # A form built in one document is not saved into the next one the pane
   # opened before this message was read (`PostIdentity`).
+  #
+  # The `select-ref`/`clear-ref`/`select-media`/`clear-image`/`upload-image`
+  # events save through here (`Refs`, `Media`); today's pickers write a hidden
+  # input and save as typed. This save settles the buffer as a typed one does
+  # (`Fields.settle_dirty/2`, task-a81b3c8c40eaf659): landed, the form equals
+  # the store, so it is no longer dirty and an "Updated by another user"
+  # conflict is over (the whole form went, the kept edits with it, as
+  # TanStack's edit after a clash overrules theirs). Not landed, the fields
+  # the form changes from the store stay unsaved.
   def autosave_form(sent, socket) do
     case BarkparkWeb.Studio.StudioLive.PostIdentity.own?(sent, socket) do
-      %{} = form -> {:noreply, Shared.do_autosave(socket, form, :autosave_form)}
-      _ -> {:noreply, socket}
+      %{} = form ->
+        saved = Shared.do_autosave(socket, form, :autosave_form)
+        {:noreply, Fields.settle_dirty(saved, changed_keys(socket, form))}
+
+      _ ->
+        {:noreply, socket}
     end
+  end
+
+  # The top-level fields `form` holds otherwise than the store does.
+  defp changed_keys(socket, form) do
+    stored = Content.doc_to_form(socket.assigns[:editor_doc], socket.assigns[:editor_schema])
+    for {key, value} <- form, Map.get(stored, key) != value, do: key
   end
 
   def paper_op(%{"op" => _} = op, socket) do
