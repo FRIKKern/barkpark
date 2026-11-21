@@ -7,9 +7,12 @@
 // folding JSON tree (a folded branch's contents leave the page), with the query
 // URL to copy, the timings, Save result as JSON, and a word for screen readers.
 //
+// Listen (§9) asks the desk's socket through the desk hook's bpPush, and hears its
+// changes as the `phx:desk-vision-listen` window event; both are stubbed here.
+//
 // Runs the TRACKED static assets api/priv/static/assets/bp-desk-vision-query.js,
-// bp-desk-vision-tree.js and bp-desk-vision.js (in Desk.Vision's order) under
-// jsdom on a form shaped like Desk.Vision's render, with fetch stubbed.
+// bp-desk-vision-tree.js, bp-desk-vision-listen.js and bp-desk-vision.js (in Desk.Vision's
+// order) under jsdom on a form shaped like Desk.Vision's render, with fetch stubbed.
 //
 // Run: node ../paper-editor-host-tests/__desk_vision.test.mjs
 import assert from "node:assert/strict";
@@ -19,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "./jsdom.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCRIPTS = ["bp-desk-vision-query.js", "bp-desk-vision-tree.js", "bp-desk-vision.js"].map((f) => join(here, "../../priv/static/assets", f));
+const SCRIPTS = ["bp-desk-vision-query.js", "bp-desk-vision-tree.js", "bp-desk-vision-listen.js", "bp-desk-vision.js"].map((f) => join(here, "../../priv/static/assets", f));
 
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
   url: "http://localhost:4000/w/a/p/b/d/production/studio/_desk/_tools/vision",
@@ -36,25 +39,31 @@ const words = {
   copied: "The URL is copied to the clipboard", "not-copied": "The URL could not be copied",
   "params-json": "Parameters are not valid JSON: %{detail}", "params-object": "Params must be a JSON object",
   "params-missing": "Param $%{name} referenced, but not provided",
+  listen: "Listen", stop: "Stop", connecting: "Connecting…", listening: "Listening for changes…",
+  "listen-closed": "The listener closed", "listen-skipped": "%{count} changes not shown: more than 20 a second",
 };
 const attrs = Object.entries(words).map(([k, v]) => `data-t-${k}="${v}"`).join(" ");
 const TODAY = `v${new Date().toISOString().split("T")[0]}`;
-doc.body.innerHTML = `<div id="dk-vision" class="dk-vision" data-desk-vision data-scope="/w/a/p/b" data-dataset="production" ${attrs}>
+doc.body.innerHTML = `<div data-phx-main><div id="desk-panes"><div id="dk-vision" class="dk-vision" data-desk-vision data-scope="/w/a/p/b" data-dataset="production" ${attrs}>
   <select data-vision-dataset><option value="production" selected>production</option><option value="staging">Staging (staging)</option><option value="locked" disabled>locked</option></select>
   <select data-vision-version><option value="v1">v1</option><option value="vX">vX</option><option value="v2025-02-19">v2025-02-19</option><option value="${TODAY}" selected>${TODAY}</option><option value="other">Other</option></select>
   <label data-vision-custom hidden><span>Custom API version</span><input value="v" aria-invalid="true"></label>
   <select data-vision-perspective><option value="raw">No perspective (raw)</option><option value="published">published</option><option value="drafts" selected>drafts</option></select>
   <div data-vision-url hidden><button type="button" data-vision-copy>[Copy to clipboard]</button><span role="status" data-vision-copied></span><input id="vision-url" readonly></div>
   <textarea id="dk-vision-query">*[_type == "post"]</textarea>
-  <div data-vision-params-pane><span role="img" data-vision-params-error hidden></span><textarea id="vision-params" data-vision-params>{
+  <div data-vision-params-pane><span role="img" data-vision-params-error hidden></span><textarea id="vision-params" aria-describedby="vision-params-why" data-vision-params>{
   
-}</textarea></div>
+}</textarea><span id="vision-params-why" data-vision-params-why></span></div>
   <button type="button" data-vision-fetch>Fetch</button>
+  <button type="button" aria-pressed="false" data-vision-listen><span data-vision-listen-play></span><span data-vision-listen-stop hidden></span><span data-vision-listen-word>Listen</span></button>
   <section class="dk-vision-result" aria-label="Result" aria-busy="false"><div data-vision-out></div>
     <footer><span data-vision-ms>Execution: n/a</span><span data-vision-total>End-to-end: n/a</span>
     <span data-vision-save hidden><a href="#" download="vision-production.json" data-vision-json>JSON</a></span></footer></section>
   <div role="status" data-testid="announcer" data-vision-said></div>
-</div>`;
+</div></div></div>`;
+// The desk hook's push (bp-desk.js sets it on #desk-panes): every event the page sends the socket.
+const pushed = [];
+doc.getElementById("desk-panes").bpPush = (event, payload) => pushed.push([event, JSON.parse(JSON.stringify(payload))]);
 
 // Every request the page makes, and the answer the next one gets.
 const asked = [];
@@ -311,6 +320,10 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(s.searchParams.get("dataset"), null);
   const shown = Vision.target(api, "production", "post?filter[title][contains]=$t&limit=$n", "drafts", "v1", { t: "post 1", n: 2 }).shown;
   assert.match(shown, /\/post\?filter\[title\]\[contains\]=post\+1&limit=2&perspective=drafts$/, "the Query URL shows the query string as typed, as TanStack's");
+  // Only the brackets: a value's & and # stay encoded, so the copied URL is the same request.
+  const tricky = Vision.target(api, "production", "post?filter[title][contains]=$t", "drafts", "v1", { t: "a&limit=1#x" });
+  assert.match(tricky.shown, /filter\[title\]\[contains\]=a%26limit%3D1%23x&perspective=drafts$/);
+  assert.deepEqual([...new URL(tricky.shown, "http://x").searchParams], [...new URL(tricky.path, "http://x").searchParams], "the shown URL reads as the sent one");
   // The page's objects are jsdom's: compared as JSON.
   const plain = (v) => JSON.parse(JSON.stringify(v));
   assert.deepEqual(plain(Vision.target(api, "production", "post?filter[_id]=$id", "drafts", "v1", {})), { error: "params-missing", name: "id" });
@@ -342,6 +355,8 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal(params.getAttribute("aria-invalid"), "true");
   assert.equal(icon.hidden, false);
   assert.match(icon.title, /^Parameters are not valid JSON: ./);
+  assert.equal(icon.getAttribute("aria-label"), icon.title, "the icon is named by the reason");
+  assert.equal(doc.getElementById(params.getAttribute("aria-describedby")).textContent, icon.title, "the box is described by it");
   assert.equal(button.getAttribute("aria-disabled"), "true");
   click(button);
   params.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
@@ -351,10 +366,13 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   assert.equal($("[data-vision-url]").hidden, true);
   type(params, "[1]");
   assert.equal(icon.title, "Params must be a JSON object");
+  assert.equal(icon.getAttribute("aria-label"), "Params must be a JSON object", "not \"not valid JSON\" for valid JSON that is not an object");
+  assert.equal($("[data-vision-params-why]").textContent, "Params must be a JSON object");
   // An object again: Fetch is back, and Ctrl+Enter in Params runs, as in the query.
   type(params, '{"t": "page"}');
   assert.equal(pane.hasAttribute("data-invalid"), false);
   assert.equal(icon.hidden, true);
+  assert.equal($("[data-vision-params-why]").textContent, "", "no reason while Params are an object");
   assert.equal(button.hasAttribute("aria-disabled"), false);
   params.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
   await settle();
@@ -366,6 +384,127 @@ const fold = (name) => [...out.querySelectorAll("button.json-toggle")].find((b) 
   await settle();
   assert.equal(asked.length, 2);
   assert.match(out.querySelector("[role=alert]").textContent, /Param \$id referenced, but not provided/);
+}
+
+// 9. Listen, as TanStack's: over the desk's socket, never with a token in the page. The page
+// asks for what the query names; the socket's changes come back newest first, the last 50.
+{
+  const api = "/w/a/p/b";
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  const Listen = window.BarkparkDeskVisionListen;
+  assert.ok(Listen, "bp-desk-vision-listen.js sets window.BarkparkDeskVisionListen");
+  // What a Listen asks for: the query-string form's type and query string, or the GROQ, its Params and perspective.
+  assert.deepEqual(plain(Vision.target(api, "production", "post?filter[title]=Listen probe", "drafts", "v1").listen), { type: "post", qs: "filter%5Btitle%5D=Listen+probe&perspective=drafts" });
+  assert.deepEqual(plain(Vision.target(api, "production", "*[_type == $t]", "raw", "v1", { t: "post" }).listen), { query: "*[_type == $t]", params: { t: "post" }, perspective: "raw" });
+
+  const listen = $("[data-vision-listen]");
+  const word = $("[data-vision-listen-word]");
+  const params = $("[data-vision-params]");
+  const type = (el, value) => ((el.value = value), el.dispatchEvent(new window.Event("input", { bubbles: true })));
+  const hear = (detail) => window.dispatchEvent(new window.CustomEvent("phx:desk-vision-listen", { detail }));
+  const html = (el) => el.textContent;
+  type(params, "{}");
+  $("[data-vision-dataset]").value = "production";
+  query.value = "post?filter[title]=Listen probe";
+  pushed.length = 0;
+  asked.length = 0;
+  click(listen);
+  assert.deepEqual(pushed, [["vision-listen-start", { id: 1, dataset: "production", type: "post", qs: "filter%5Btitle%5D=Listen+probe&perspective=drafts" }]], "the socket is asked; nothing is fetched");
+  assert.equal(asked.length, 0);
+  assert.equal(JSON.stringify(pushed).match(/token|bearer|authorization/i), null, "no token in what the page sends");
+  assert.equal(listen.getAttribute("aria-pressed"), "true");
+  assert.equal(word.textContent, "Stop");
+  assert.equal($("[data-vision-listen-stop]").hidden, false);
+  assert.equal($("[data-vision-listen-play]").hidden, true);
+  assert.equal(html(out), "Connecting…");
+  assert.equal($("[data-vision-url]").hidden, true, "a Listen has no Query URL");
+  hear({ id: 1, kind: "open" });
+  assert.equal(html(out), "Listening for changes…");
+  // 52 changes: the last 50 stay, newest first.
+  for (let n = 1; n <= 52; n++) hear({ id: 1, kind: "mutation", event: { documentId: `drafts.p-${String(n).padStart(3, "0")}`, mutation: "update" } });
+  const ids = [...out.textContent.matchAll(/drafts\.p-(\d{3})/g)].map((m) => Number(m[1]));
+  assert.equal(ids.length, 50, "the last 50");
+  assert.deepEqual(ids.slice(0, 3), [52, 51, 50], "newest first");
+  assert.equal(ids.includes(2), false);
+  // A message for another Listen is not this one's; skipped changes are said.
+  hear({ id: 99, kind: "mutation", event: { documentId: "drafts.stale" } });
+  assert.doesNotMatch(out.textContent, /drafts\.stale/);
+  hear({ id: 1, kind: "skipped", count: 3 });
+  assert.match(out.textContent, /^3 changes not shown: more than 20 a second/);
+  // Stop: the socket is told, the button reads Listen, the Result is empty.
+  pushed.length = 0;
+  click(listen);
+  assert.deepEqual(pushed, [["vision-listen-stop", {}]]);
+  assert.equal(listen.getAttribute("aria-pressed"), "false");
+  assert.equal(word.textContent, "Listen");
+  assert.equal(html(out), "");
+  hear({ id: 1, kind: "mutation", event: { documentId: "drafts.after-stop" } });
+  assert.equal(html(out), "", "nothing drawn after Stop");
+
+  // GROQ: the query, its Params and perspective go; the server's refusal is the alert, and Listen is back.
+  pushed.length = 0;
+  query.value = "*[title == $t]";
+  type(params, '{"t": "x"}');
+  click(listen);
+  assert.deepEqual(pushed, [["vision-listen-start", { id: 2, dataset: "production", query: "*[title == $t]", params: { t: "x" }, perspective: "drafts" }]]);
+  hear({ id: 2, kind: "error", message: 'Listen follows the document types a query names: add a _type filter, like _type == "post"' });
+  assert.match(out.querySelector("[role=alert]").textContent, /add a _type filter/);
+  assert.equal(listen.getAttribute("aria-pressed"), "false");
+  assert.equal(word.textContent, "Listen");
+
+  // A Fetch ends a Listen; so does picking another dataset; a closed listener says so.
+  query.value = '*[_type == "post"]';
+  click(listen);
+  pushed.length = 0;
+  click($("[data-vision-fetch]"));
+  await settle();
+  assert.deepEqual(pushed, [["vision-listen-stop", {}]], "Fetch stops listening");
+  assert.equal(listen.getAttribute("aria-pressed"), "false");
+  click(listen);
+  pushed.length = 0;
+  const ds = $("[data-vision-dataset]");
+  ds.value = "staging";
+  ds.dispatchEvent(new window.Event("change", { bubbles: true }));
+  assert.deepEqual(pushed, [["vision-listen-stop", {}]], "another dataset stops it");
+  click(listen);
+  assert.equal(pushed.at(-1)[1].dataset, "staging", "the next Listen names the dataset picked");
+  hear({ id: pushed.at(-1)[1].id, kind: "closed" });
+  assert.equal(out.querySelector("[role=alert]").textContent, "The listener closed");
+  ds.value = "production";
+
+  // The socket drops while listening: its Listen ended with the LiveView, so the listener closed.
+  $("[data-phx-main]").classList.add("phx-connected");
+  click(listen);
+  assert.equal(listen.getAttribute("aria-pressed"), "true");
+  $("[data-phx-main]").classList.replace("phx-connected", "phx-disconnected");
+  await settle();
+  assert.equal(out.querySelector("[role=alert]").textContent, "The listener closed", "a dropped socket closes the listener");
+  assert.equal(listen.getAttribute("aria-pressed"), "false");
+
+  // Pressed before the page's socket has joined: "Connecting…" until the desk hook is there, then sent.
+  const host = doc.getElementById("desk-panes");
+  const hook = host.bpPush;
+  delete host.bpPush;
+  pushed.length = 0;
+  click(listen);
+  assert.equal(html(out), "Connecting…");
+  assert.equal(listen.getAttribute("aria-pressed"), "true");
+  await new Promise((r) => setTimeout(r, 150));
+  assert.deepEqual(pushed, [], "nothing to send it with yet");
+  host.bpPush = hook;
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pushed.length, 1);
+  assert.equal(pushed[0][0], "vision-listen-start", "sent once the hook is there");
+  click(listen);
+
+  // Params that are not an object: Listen waits and sends nothing, as Fetch does.
+  pushed.length = 0;
+  type(params, '{"t":');
+  assert.equal(listen.getAttribute("aria-disabled"), "true");
+  click(listen);
+  assert.deepEqual(pushed, [], "nothing sent");
+  type(params, "{}");
+  assert.equal(listen.hasAttribute("aria-disabled"), false);
 }
 
 console.log("__desk_vision: ok");
