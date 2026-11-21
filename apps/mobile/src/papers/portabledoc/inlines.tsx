@@ -22,6 +22,7 @@ import { Linking, Text, type StyleProp, type TextStyle } from 'react-native'
 import type { Theme } from '../../ui/theme'
 import { scale } from '../../ui/typography'
 import { chromeWord } from './chrome'
+import { cutInline, isInlineWrapper } from './inline-depth'
 import { MAX_DEPTH, asList, isMap, markAttr, markName, openableUrl, str, type Inline } from './model'
 
 /** Which typographic voice the same tree speaks in. `paper` is the reader's
@@ -178,7 +179,10 @@ function inlineText(nodes: unknown): string {
 
 /** Render one inline node. Mirrors inline.tsx renderInline's dispatch. */
 export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number, depth = 0): ReactNode {
-  if (depth >= MAX_DEPTH) return chromeWord(ctx.locale, 'Nested too deep to show')
+  // A wrapper at the depth limit or past it keeps its words, then the notice
+  // (inline-depth.ts); a leaf there is drawn as usual.
+  if (depth >= MAX_DEPTH && isInlineWrapper(node))
+    return cutInline(node, depth, chromeWord(ctx.locale, 'Nested too deep to show'))
   if (typeof node === 'string') return node
   if (typeof node === 'number') return String(node)
   // A bare ARRAY where an inline node was expected (`content: [[{text…}]]` —
@@ -197,7 +201,16 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number, dept
     case 'text': {
       const value = str(node.value)
       const marks = asList(node.marks)
-      if (depth + marks.length >= MAX_DEPTH) return chromeWord(ctx.locale, 'Nested too deep to show')
+      // The marks that fit under the depth limit are drawn; past them the word is
+      // kept and the notice follows (inline-depth.ts).
+      const fit = Math.max(MAX_DEPTH - depth, 0)
+      if (marks.length > fit)
+        return (
+          <Text key={key}>
+            {applyMarks(key, value, marks.slice(0, fit), ctx)}
+            {' ' + chromeWord(ctx.locale, 'Nested too deep to show')}
+          </Text>
+        )
       return marks.length ? applyMarks(key, value, marks, ctx) : value
     }
     case 'strong':
