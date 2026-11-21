@@ -133,6 +133,25 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
              ".dk .dk-edit :where(button, a, [role=tab], [tabindex]):focus-visible { outline: 1px solid var(--dk-focus-ring);"
   end
 
+  # task-19a22bca8affd5fd: a refusal drew "Not saved: <field>" in the success
+  # green. TanStack draws a save that did not land in its caution words
+  # (styles.css `.save-state:is(..., [data-state=refused])`: `--warn-fg`, 500).
+  test "a save that did not land draws the form's save status in TanStack's caution words", c do
+    {:ok, view, _html} = live(c.conn, c.desk)
+    html = render(view)
+
+    assert html =~
+             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }|
+
+    # TanStack's --warn-fg, light and dark, at the desk level.
+    assert html =~ ~r/\.dk \{ [^}]*--dk-warn-fg: #6b5300;/
+    assert html =~ ~r/html\[data-theme="dark"\] \.dk \{ [^}]*--dk-warn-fg: #f2d36b;/
+
+    # Only the failed tokens: "Saved" and the rest keep the Studio's colour.
+    refute html =~ ~r/data-desk-save="Saved"[^{]*\{/
+    assert length(Regex.scan(~r/\.save-status[^{<"]*\{/, html)) == 1
+  end
+
   test "control: the old Studio's editor keeps its type line and field count", c do
     {:ok, view, _html} = live(c.conn, c.studio)
     render_async(view, 5_000)
