@@ -128,6 +128,10 @@ defmodule Barkpark.MixProject do
       # image_dep/0 (vix has no Windows prebuilt NIF). macOS/Linux/Docker keep it.
       # WI2: json schema validator dep
       {:ex_json_schema, "~> 0.10"},
+      # IANA time zones for the "$today" token (a workspace's date in its own
+      # zone). Data compiled in, no runtime download; passed explicitly to
+      # DateTime.shift_zone/3, so the global :time_zone_database stays UTC-only.
+      {:tz, "~> 0.28"},
       # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
       {:lazy_html, ">= 0.1.0", only: :test},
       # Phase 7 WI3: in-process HTTP mock for Bokbasen client tests

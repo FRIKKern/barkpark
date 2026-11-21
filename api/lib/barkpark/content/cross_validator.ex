@@ -26,7 +26,30 @@ defmodule Barkpark.Content.CrossValidator do
   Returns each rule annotated with `"satisfied" => true | false` so callers
   can render mixed satisfied/violating UIs; `violations/2` is the convenience
   filter for the banner case.
+
+  ## Item rules (task-5bb338ffd4621865)
+
+  `"each": "meny"` runs the rule once per item of that list; `"type":
+  "sakerFraKnagg"` keeps only items whose `_type` is that. `each` is a dotted
+  path (`"meny.under"`) that fans out over the lists on its way, as a
+  condition's path does; the items are the objects in the list it ends at
+  (scalars and nested lists are not items). Inside an item rule a leaf reads
+  the ITEM: no `scope`, or `"parent"`, is the item, exactly the enclosing
+  object a `visibleWhen` with `"scope": "parent"` reads from a field inside
+  it; `"scope": "document"` reads the document root. `fields` name the
+  item's fields. Each violated item is its own violation (carrying `"item"`,
+  its path) and its own finding, at `/meny/1` (+ `/<first field>`), the same
+  JSON-pointer form as every other finding. A list that is missing or not a
+  list has no items, so the rule holds. Only the first #{50} broken items of a
+  rule are named (`item_cap/0`); the rest are ONE violation at the list's path
+  (`/meny`, `/meny/under`) saying how many more break it, at the rule's level,
+  so a write with many broken items stays cheap to check and to refuse.
   """
+
+  @item_cap 50
+
+  @doc "How many broken items one item rule names; the rest are one summary violation."
+  def item_cap, do: @item_cap
 
   alias Barkpark.Content.FieldVisibility
 
@@ -44,8 +67,7 @@ defmodule Barkpark.Content.CrossValidator do
 
     Enum.map(rules, fn rule ->
       rule_str = stringify_top(rule)
-      satisfied = evaluate(Map.get(rule_str, "rule") || %{}, doc)
-      Map.put(rule_str, "satisfied", satisfied)
+      Map.put(rule_str, "satisfied", broken_at(rule_str, doc) == [])
     end)
   end
 
@@ -59,10 +81,96 @@ defmodule Barkpark.Content.CrossValidator do
   def violations(schema_or_rules, doc) do
     {rules, _unevaluable} = partition(schema_or_rules)
 
-    rules
-    |> validate(doc)
-    |> Enum.reject(& &1["satisfied"])
+    Enum.flat_map(rules, fn rule ->
+      rule_str = Map.put(stringify_top(rule), "satisfied", false)
+
+      Enum.map(broken_at(rule_str, doc), fn
+        :document -> rule_str
+        {:more, list_path, n} -> rule_str |> Map.put("item", list_path) |> Map.put("more", n)
+        item_path -> Map.put(rule_str, "item", item_path)
+      end)
+    end)
   end
+
+  # Where a rule breaks: [:document] or [] for a plain rule; for an item rule
+  # the first @item_cap violated items' paths, then {:more, list_path, n} for
+  # the rest: one pass, counting past the cap without a path or a list.
+  defp broken_at(%{"each" => each} = rule, doc) when is_binary(each) do
+    type = rule["type"]
+    body = item_scoped(rule["rule"] || %{})
+    segs = String.split(each, ".")
+
+    {kept, count} =
+      fold_items(doc, segs, [], {[], 0}, fn item, idxs, {kept, count} = acc ->
+        cond do
+          type != nil and item["_type"] != type -> acc
+          evaluate(body, doc, item) -> acc
+          count < @item_cap -> {[pointer(segs, idxs) | kept], count + 1}
+          true -> {kept, count + 1}
+        end
+      end)
+
+    more = count - @item_cap
+
+    Enum.reverse(kept) ++ if(more > 0, do: [{:more, "/" <> Enum.join(segs, "/"), more}], else: [])
+  end
+
+  defp broken_at(rule, doc),
+    do: if(evaluate(rule["rule"] || %{}, doc, nil), do: [], else: [:document])
+
+  # Folds `fun.(item, idxs, acc)` over the objects in the list `segs` ends at,
+  # in order, without building a list of them: `idxs` holds (reversed) each
+  # list step's index, nil for an object step, so a path is only made for an
+  # item that needs one (`pointer/2`). Memory stays flat however long the list.
+  defp fold_items(node, [seg | rest], idxs, acc, fun) when is_map(node) do
+    case {Map.get(node, seg), rest} do
+      {list, []} when is_list(list) ->
+        fold_list(list, 0, acc, fn item, i, acc ->
+          if is_map(item), do: fun.(item, [i | idxs], acc), else: acc
+        end)
+
+      {list, _} when is_list(list) ->
+        fold_list(list, 0, acc, fn item, i, acc ->
+          fold_items(item, rest, [i | idxs], acc, fun)
+        end)
+
+      {%{} = obj, [_ | _]} ->
+        fold_items(obj, rest, [nil | idxs], acc, fun)
+
+      _ ->
+        acc
+    end
+  end
+
+  defp fold_items(_, _, _, acc, _), do: acc
+
+  defp fold_list([], _i, acc, _fun), do: acc
+  defp fold_list([h | t], i, acc, fun), do: fold_list(t, i + 1, fun.(h, i, acc), fun)
+
+  # The item's JSON pointer: "/meny/1", "/meny/0/under/2", "/innstillinger/meny/1".
+  defp pointer(segs, idxs) do
+    segs
+    |> Enum.zip(Enum.reverse(idxs))
+    |> Enum.map_join(fn
+      {seg, nil} -> "/" <> seg
+      {seg, i} -> "/#{seg}/#{i}"
+    end)
+  end
+
+  # Inside an item rule a leaf reads the item unless it says "document".
+  defp item_scoped(%{} = pred) do
+    case Enum.find(["all", "any", "one", :all, :any, :one], &is_list(Map.get(pred, &1))) do
+      nil ->
+        if Map.get(pred, "scope", Map.get(pred, :scope)) in ["document", :document],
+          do: pred,
+          else: Map.put(pred, "scope", "parent")
+
+      key ->
+        Map.update!(pred, key, fn preds -> Enum.map(preds, &item_scoped/1) end)
+    end
+  end
+
+  defp item_scoped(pred), do: pred
 
   @operators ~w(eq neq in empty non_empty starts_with count_eq count_neq count_gt count_lt gt gte lt lte)
 
@@ -118,34 +226,76 @@ defmodule Barkpark.Content.CrossValidator do
     fields = if is_list(v["fields"]), do: Enum.filter(v["fields"], &is_binary/1), else: []
     first = List.first(fields)
 
+    title = v["title"] || v["name"] || "cross-field rule"
+
+    {path, message} =
+      case v do
+        %{"more" => n} ->
+          {v["item"], "#{title} (#{n} more #{if n == 1, do: "item", else: "items"})"}
+
+        %{"item" => item} when is_binary(item) ->
+          {if(first, do: item <> "/" <> first, else: item), title}
+
+        _ ->
+          {"/" <> (first || "_document"), title}
+      end
+
     %{
-      path: "/" <> (first || "_document"),
-      message: v["title"] || v["name"] || "cross-field rule",
+      path: path,
+      message: message,
       code: :cross_validation,
       params: %{name: v["name"], fields: fields, level: v["level"] || "error"}
     }
   end
 
   defp unevaluable_reason(rule, names) when is_map(rule) do
-    case Map.get(rule, "rule", Map.get(rule, :rule)) do
-      body when is_map(body) and map_size(body) > 0 -> body_reason(body, names)
-      _ -> "no rule body"
+    each = Map.get(rule, "each", Map.get(rule, :each))
+    type = Map.get(rule, "type", Map.get(rule, :type))
+
+    cond do
+      each != nil and
+          (not is_binary(each) or
+             Enum.any?(String.split(each, "."), &(&1 == "" or &1 =~ ~r/^\d+$/))) ->
+        "each is not a field path"
+
+      is_list(names) and is_binary(each) and hd(String.split(each, ".")) not in names ->
+        "no field #{inspect(each)} (each)"
+
+      type != nil and each == nil ->
+        "type needs each"
+
+      type != nil and (not is_binary(type) or type == "") ->
+        "type is not a type name"
+
+      true ->
+        case Map.get(rule, "rule", Map.get(rule, :rule)) do
+          body when is_map(body) and map_size(body) > 0 -> body_reason(body, names, each != nil)
+          _ -> "no rule body"
+        end
     end
   end
 
   defp unevaluable_reason(_rule, _names), do: "not a map"
 
-  defp body_reason(body, names) do
+  # In an item rule (`item?`) a leaf names the ITEM's fields, which the
+  # schema's top-level names cannot check; one with "scope": "document" names
+  # the document's and is checked.
+  defp body_reason(body, names, item?) do
     case Map.get(body, "all", Map.get(body, :all)) || Map.get(body, "any", Map.get(body, :any)) ||
            Map.get(body, "one", Map.get(body, :one)) do
       preds when is_list(preds) and preds != [] ->
         Enum.find_value(preds, fn
-          p when is_map(p) -> body_reason(p, names)
+          p when is_map(p) -> body_reason(p, names, item?)
           _ -> "a predicate is not a map"
         end)
 
       nil ->
-        leaf_reason(body, names)
+        scope = Map.get(body, "scope", Map.get(body, :scope))
+
+        leaf_reason(
+          body,
+          if(item? and scope not in ["document", :document], do: nil, else: names)
+        )
 
       _ ->
         "an all/any/one list is empty or not a list"
@@ -201,54 +351,47 @@ defmodule Barkpark.Content.CrossValidator do
 
   # ── predicate evaluation ───────────────────────────────────────────────────
 
-  defp evaluate(%{"all" => preds}, doc) when is_list(preds) do
-    Enum.all?(preds, &eval_leaf(&1, doc))
-  end
+  defp evaluate(%{"all" => preds}, doc, parent) when is_list(preds),
+    do: Enum.all?(preds, &eval_leaf(&1, doc, parent))
 
-  defp evaluate(%{all: preds}, doc) when is_list(preds) do
-    Enum.all?(preds, &eval_leaf(&1, doc))
-  end
+  defp evaluate(%{all: preds}, doc, parent) when is_list(preds),
+    do: Enum.all?(preds, &eval_leaf(&1, doc, parent))
 
-  defp evaluate(%{"any" => preds}, doc) when is_list(preds) do
-    Enum.any?(preds, &eval_leaf(&1, doc))
-  end
+  defp evaluate(%{"any" => preds}, doc, parent) when is_list(preds),
+    do: Enum.any?(preds, &eval_leaf(&1, doc, parent))
 
-  defp evaluate(%{any: preds}, doc) when is_list(preds) do
-    Enum.any?(preds, &eval_leaf(&1, doc))
-  end
+  defp evaluate(%{any: preds}, doc, parent) when is_list(preds),
+    do: Enum.any?(preds, &eval_leaf(&1, doc, parent))
 
   # Exactly one of its predicates holds (task-606283a5dedc2403).
-  defp evaluate(%{"one" => preds}, doc) when is_list(preds) do
-    Enum.count(preds, &eval_leaf(&1, doc)) == 1
-  end
+  defp evaluate(%{"one" => preds}, doc, parent) when is_list(preds),
+    do: Enum.count(preds, &eval_leaf(&1, doc, parent)) == 1
 
-  defp evaluate(%{one: preds}, doc) when is_list(preds) do
-    Enum.count(preds, &eval_leaf(&1, doc)) == 1
-  end
+  defp evaluate(%{one: preds}, doc, parent) when is_list(preds),
+    do: Enum.count(preds, &eval_leaf(&1, doc, parent)) == 1
 
-  defp evaluate(pred, doc) when is_map(pred) and map_size(pred) > 0 do
-    eval_leaf(pred, doc)
-  end
+  defp evaluate(pred, doc, parent) when is_map(pred) and map_size(pred) > 0,
+    do: eval_leaf(pred, doc, parent)
 
   # No rule body → treat as satisfied (vacuously true). Matches the
   # visibility default — never fail a doc on a malformed schema rule.
-  defp evaluate(_, _), do: true
+  defp evaluate(_, _, _), do: true
 
-  # A leaf predicate may itself be a composed `all` / `any` (nested rules),
-  # so recurse through evaluate/2 first. Otherwise feed to FieldVisibility,
-  # which is the single source of truth for operator semantics.
-  defp eval_leaf(%{"all" => _} = pred, doc), do: evaluate(pred, doc)
-  defp eval_leaf(%{all: _} = pred, doc), do: evaluate(pred, doc)
-  defp eval_leaf(%{"any" => _} = pred, doc), do: evaluate(pred, doc)
-  defp eval_leaf(%{any: _} = pred, doc), do: evaluate(pred, doc)
-  defp eval_leaf(%{"one" => _} = pred, doc), do: evaluate(pred, doc)
-  defp eval_leaf(%{one: _} = pred, doc), do: evaluate(pred, doc)
+  # A leaf predicate may itself be a composed `all` / `any` / `one` (nested
+  # rules), so recurse through evaluate/3 first. Otherwise feed to
+  # FieldVisibility, the single source of truth for operator semantics; the
+  # parent is the item of an item rule (nil for a plain rule: the document).
+  defp eval_leaf(%{"all" => _} = pred, doc, parent), do: evaluate(pred, doc, parent)
+  defp eval_leaf(%{all: _} = pred, doc, parent), do: evaluate(pred, doc, parent)
+  defp eval_leaf(%{"any" => _} = pred, doc, parent), do: evaluate(pred, doc, parent)
+  defp eval_leaf(%{any: _} = pred, doc, parent), do: evaluate(pred, doc, parent)
+  defp eval_leaf(%{"one" => _} = pred, doc, parent), do: evaluate(pred, doc, parent)
+  defp eval_leaf(%{one: _} = pred, doc, parent), do: evaluate(pred, doc, parent)
 
-  defp eval_leaf(pred, doc) when is_map(pred) do
-    FieldVisibility.visible?(%{"visibleWhen" => pred}, doc)
-  end
+  defp eval_leaf(pred, doc, parent) when is_map(pred),
+    do: FieldVisibility.visible?(%{"visibleWhen" => pred}, doc, parent)
 
-  defp eval_leaf(_, _), do: true
+  defp eval_leaf(_, _, _), do: true
 
   # ── helpers ────────────────────────────────────────────────────────────────
 

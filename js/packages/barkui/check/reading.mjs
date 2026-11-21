@@ -12,7 +12,8 @@ export async function readView(page, part, waits = []) {
   const scale = page.barkScale
   const frame = () => world(() => window.__barkCheck.frame())
   // Captures go through Playwright, which keeps the page's pixel ratio: a capture from a CDP session of our
-  // own resets the emulated ratio to 1 for everything after it. The caret is left as it is (no style added).
+  // own resets the emulated ratio to 1 for everything after it. Playwright is told to leave the caret alone, so it
+  // adds no style of its own to the page: the check hides the caret itself, from its own world (caret in drawn.mjs).
   const capture = async (p, c) => (await p.screenshot({ clip: { x: c.x, y: c.y, width: c.w, height: c.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
   const shoot = (clip) => capture(page, clip)
   const bounds = await world(([s, t]) => window.__barkCheck.boundaries(document.querySelector(s), t), [sel, part.json.textOnly ?? []])
@@ -34,16 +35,23 @@ export async function readView(page, part, waits = []) {
     const y = Math.floor(r.top + scrollY)
     return { x, y, w: Math.ceil(r.right + scrollX) - x, h: Math.ceil(r.bottom + scrollY) - y }
   }, sel)
-  const drawn = await shoot(clip)
+  // A caret blinks, so it could be in one capture and not another by chance: every capture is taken without it.
+  let drawn
   const without = {}
   try {
+    await world(() => window.__barkCheck.caret(false))
+    await frame()
+    drawn = await shoot(clip)
     for (const what of ['glyphs', 'graphics']) {
       await world((w) => window.__barkCheck.unpaint(w), what)
       await frame()
       without[what] = await shoot(clip)
     }
   } finally {
-    await world(() => window.__barkCheck.unpaint(null))
+    await world(() => {
+      window.__barkCheck.unpaint(null)
+      window.__barkCheck.caret(true)
+    })
     await frame()
   }
   const pairs = waits.map((w) => [w.text, w.ground])
