@@ -86,6 +86,11 @@ defmodule BarkparkWeb.Studio.DeskVisionListenTest do
     assert html =~
              ~S|.dk .dk-vision-listen:hover:not([aria-disabled="true"]) { background: var(--dk-btn2-hover-bg); box-shadow: inset 0 0 0 1px var(--dk-btn2-hover-ring); color: var(--dk-btn2-hover-fg); }|
 
+    # Fetch's blue under the pointer is Fetch's alone: a Listen waiting on bad
+    # Params (aria-disabled) keeps its soft fill, as TanStack's.
+    assert html =~ ".dk .dk-vision-fetch:not(.dk-vision-listen):hover { background: color-mix("
+    refute html =~ ".dk .dk-vision-fetch:hover {"
+
     # Defined for the whole desk, not the editing pane only: Vision is no pane.
     assert html =~
              ".dk { --dk-bg-soft: rgb(246 246 248); --dk-btn2-fg: rgb(78 85 109); --dk-btn2-ring: rgb(230 230 234);"

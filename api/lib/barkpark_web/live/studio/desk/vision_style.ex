@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk textarea.dk-vision-code:focus-visible { box-shadow: inset 0 0 0 1px var(--dk-focus-ring); border-radius: 3px; }
       .dk .dk-vision-actions { display: flex; gap: 12px; padding: 12px; border-top: 1px solid var(--dk-border); }
       .dk .dk-vision-fetch { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 33px; padding: 0 18px 0 12px; border: 0; border-radius: 3px; background: var(--dk-selected); color: var(--dk-on-selected); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
-      .dk .dk-vision-fetch:hover { background: color-mix(in srgb, var(--dk-selected) 88%, var(--dk-fg)); }
+      .dk .dk-vision-fetch:not(.dk-vision-listen):hover { background: color-mix(in srgb, var(--dk-selected) 88%, var(--dk-fg)); }
       .dk .dk-vision-fetch:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; }
       .dk .dk-vision-fetch[aria-disabled="true"] { opacity: .5; cursor: default; }
       .dk .dk-vision-fetch svg { width: 21px; height: 21px; }
