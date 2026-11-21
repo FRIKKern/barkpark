@@ -62,6 +62,8 @@ const MORE_JS = [
   // that one holding a dialog; and a root attached by another window's attachShadow (a frame's). A task after,
   // all of it is gone.
   "root.querySelector('#button-tip-open').addEventListener('focus', () => { const row = root.querySelector('#button-plain'), host = document.createElement('div'), far = document.createElement('div'), frame = document.createElement('iframe'); row.after(host, far); document.body.append(frame); const attach = frame.contentWindow.Element.prototype.attachShadow; setTimeout(() => { const r = host.attachShadow({ mode: 'open' }), box = document.createElement('div'), inner = document.createElement('span'); box.id = 'button-in-root'; box.textContent = 'In a late root'; box.popover = 'manual'; r.append(box, inner); box.showPopover(); const f = attach.call(far, { mode: 'open' }); f.innerHTML = '<div id=\"button-by-frame\" popover=\"manual\">By a frame</div>'; setTimeout(() => { inner.attachShadow({ mode: 'open' }).innerHTML = '<dialog id=\"button-in-inner\">In a root in a late root</dialog>'; setTimeout(() => { host.remove(); far.remove(); frame.remove() }, 0) }, 0) }, 0) })",
+  // A root that comes with no attachShadow call: parsed from markup (a declarative root) on focus, gone a task later.
+  "root.querySelector('#button-tip-open').addEventListener('focus', () => { const row = root.querySelector('#button-plain'), box = document.createElement('div'); row.after(box); box.setHTMLUnsafe('<div><template shadowrootmode=\"open\"><div id=\"button-parsed\" popover=\"manual\">In a parsed root</div></template></div>'); setTimeout(() => box.remove(), 0) })",
   // Made by the demo as the page loads and gone a task later, before the check's first look.
   "{ const made = document.createElement('div'); made.id = 'button-at-load'; made.textContent = 'Made at load'; made.popover = 'manual'; root.querySelector('#button-plain').after(made); setTimeout(() => made.remove(), 0) }",
 ].join('\n')
@@ -159,6 +161,7 @@ export const LAYER_CASES = [
         'a box in a shadow root attached after its host is in the page, gone before the next look': can('div#button-in-root "In a late root"'),
         'a dialog in a shadow root attached late inside another late root': can('dialog#button-in-inner "In a root in a late root"'),
         "a box in a shadow root attached by a frame's attachShadow": can('div#button-by-frame "By a frame"'),
+        'a box in a shadow root parsed from markup, with no attachShadow call': can('div#button-parsed "In a parsed root"'),
         "a box made as the page loads and gone before the check's first look": can('div#button-at-load "Made at load"'),
         'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
         'every layer that opens at once read in every view': () => m?.readings === 20,
