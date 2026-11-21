@@ -68,7 +68,7 @@ describe('the job split covers every part folder exactly once', () => {
 
 describe('more parts than the folder holds, made as copies under a test-only root', () => {
   // Every count of proof copies here comes from the one limit, MOST_PARTS in check/jobs.mjs, less the real parts,
-  // so the tests hold for every number of real parts the limit allows (tests/part-counts.test.mjs walks them).
+  // so the tests hold for every number of real parts the limit allows (tests/counts.mjs walks them).
   const top = MOST_PARTS - folderNames(partsDir).length
 
   it(`the most copies of the button the knob takes beside the real parts (${top}) are real parts, each its own bytes, split into jobs that each hold under the step`, () => {
