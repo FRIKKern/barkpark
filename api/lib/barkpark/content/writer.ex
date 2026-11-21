@@ -36,7 +36,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
-  alias Barkpark.Content.{InsertOnly, PreWriteFences, PreWriteTransforms}
+  alias Barkpark.Content.{FixedDocuments, InsertOnly, PreWriteFences, PreWriteTransforms}
 
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Projection, Render, Synthesis}
 
@@ -474,7 +474,7 @@ defmodule Barkpark.Content.Writer do
   write. Fires `:after_save` asynchronously after a successful write.
   """
   def create_document(type, attrs, dataset, opts \\ []),
-    do: Door.admit(fn -> admitted_create_document(type, attrs, dataset, opts) end)
+    do: Door.admit(fn -> fixed_then(type, attrs, dataset, opts, &admitted_create_document/4) end)
 
   @doc """
   Run the whole `create_document/4` pipeline and return the draft it WOULD
@@ -1310,7 +1310,13 @@ defmodule Barkpark.Content.Writer do
   `:after_save` around the DB write, same contract as `create_document/4`.
   """
   def upsert_document(type, attrs, dataset, opts \\ []),
-    do: Door.admit(fn -> admitted_upsert_document(type, attrs, dataset, opts) end)
+    do: Door.admit(fn -> fixed_then(type, attrs, dataset, opts, &admitted_upsert_document/4) end)
+
+  # A type with fixed documents takes no new one (Content.FixedDocuments).
+  defp fixed_then(type, attrs, dataset, opts, write) do
+    with :ok <- FixedDocuments.check_create(type, attrs, dataset, opts),
+         do: write.(type, attrs, dataset, opts)
+  end
 
   defp admitted_upsert_document(type, attrs, dataset, opts) do
     # [own-status-field], patch/autosave half: the same schema question the

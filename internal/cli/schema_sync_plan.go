@@ -58,6 +58,7 @@ var schemaEchoKeys = []schemaEchoKey{
 	{echo: "layout", def: []any{}},
 	{echo: "prefill", def: map[string]any{}},
 	{echo: "readerWrites", cast: "reader_writes"},
+	{echo: "fixedDocuments", cast: "fixed_documents"},
 }
 
 // schemaKeyValue reads one stored key from a definition under either

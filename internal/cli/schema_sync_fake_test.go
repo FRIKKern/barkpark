@@ -31,8 +31,8 @@ type syncFakeServer struct {
 	old bool
 }
 
-var syncFakeCamel = map[string]string{"deskGroups": "desk_groups", "listPreview": "list_preview", "initialValues": "initial_values", "crossValidations": "cross_validations", "readerWrites": "reader_writes"}
-var syncFakeCast = []string{"name", "title", "icon", "visibility", "singleton", "kind", "fields", "actions", "groups", "fieldsets", "desk_groups", "desk", "list_preview", "initial_values", "cross_validations", "layout", "prefill", "reader_writes"}
+var syncFakeCamel = map[string]string{"deskGroups": "desk_groups", "listPreview": "list_preview", "initialValues": "initial_values", "crossValidations": "cross_validations", "readerWrites": "reader_writes", "fixedDocuments": "fixed_documents"}
+var syncFakeCast = []string{"name", "title", "icon", "visibility", "singleton", "kind", "fields", "actions", "groups", "fieldsets", "desk_groups", "desk", "list_preview", "initial_values", "cross_validations", "layout", "prefill", "reader_writes", "fixed_documents"}
 
 func newSyncFakeServer(t *testing.T) *syncFakeServer {
 	t.Helper()
@@ -135,6 +135,9 @@ func syncFakeEcho(row map[string]any) map[string]any {
 	}
 	if rw, ok := row["reader_writes"].(map[string]any); ok {
 		out["readerWrites"] = rw
+	}
+	if ids, ok := row["fixed_documents"].([]any); ok {
+		out["fixedDocuments"] = ids
 	}
 	return out
 }
