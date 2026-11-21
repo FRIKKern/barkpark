@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pinStates } from '../build/showroom.mjs'
-import { resolve, selectorFindings, statesOnSubject, strip, unpinned } from '../check/selectors.mjs'
+import { PINNED, resolve, selectorFindings, STATIC, statesOnSubject, strip, unpinned } from '../check/selectors.mjs'
 
 // Inputs as the browser hands them back (selectorText): lowercase, `& ` before a nested descendant.
 describe('a pinned state may stand only on the element a rule styles', () => {
@@ -19,8 +19,38 @@ describe('a pinned state may stand only on the element a rule styles', () => {
     expect(selectorFindings('a:target')[0]).toMatch(/:target is not a pseudo-class/)
     expect(selectorFindings('a::selection')[0]).toMatch(/::selection is not a pseudo-element/)
     expect(selectorFindings('a[title=":target"]::before')).toEqual([])
-    // What a person changes by clicking or typing waits until a part reads it as a state.
-    for (const p of ['checked', 'placeholder-shown', 'enabled', 'disabled', 'indeterminate']) expect(selectorFindings(`a:${p}`).length, p).toBe(1)
+    // The refusal is "not on the allowed list": a name on no list at all is refused by name the same way.
+    expect(selectorFindings('a:bark-made-up')).toEqual([expect.stringMatching(/^:bark-made-up is not a pseudo-class part\.css may use/)])
+    // A sample, not the judge (the pinned list below is): what a person changes waits until the check drives it.
+    for (const p of ['focus', 'focus-within', 'placeholder-shown', 'user-invalid', 'enabled', 'open', 'muted', 'target-current', 'state']) expect(selectorFindings(`a:${p}`).length, p).toBe(1)
+  })
+
+  it('always allows only structure: the list is pinned whole, each name with why no click or key changes it', () => {
+    const structure = {
+      not: 'a negation of the selectors inside it, which are judged as any selector is',
+      is: 'a group of the selectors inside it, which are judged as any selector is',
+      where: 'a group like :is() with no weight, judged the same way',
+      has: 'a relation to other elements, which are judged as any selector is',
+      defined: 'a custom element is defined once its script registers it, as the page loads',
+      'first-child': 'a place in the markup',
+      'last-child': 'a place in the markup',
+      'only-child': 'a place in the markup',
+      'nth-child': 'a place in the markup',
+      'nth-last-child': 'a place in the markup',
+      'first-of-type': 'a place in the markup',
+      'last-of-type': 'a place in the markup',
+      'only-of-type': 'a place in the markup',
+      'nth-of-type': 'a place in the markup',
+      'nth-last-of-type': 'a place in the markup',
+    }
+    expect(STATIC).toEqual(Object.keys(structure))
+    expect(PINNED.filter((p) => STATIC.includes(p))).toEqual([])
+  })
+
+  it('takes :checked as a pinned state, on the element a rule styles only', () => {
+    for (const [sel, parent] of [['input[type="checkbox"]:checked', false], ['&:checked', false]]) expect(selectorFindings(sel, parent), sel).toEqual([])
+    for (const sel of ['label:has(:checked)', 'input:checked + span', 'a:not(:checked)']) expect(selectorFindings(sel).length, sel).toBeGreaterThan(0)
+    expect(strip('input:checked::before')).toEqual({ selector: 'input', states: ['checked'] })
   })
 
   it('makes a nested selector absolute and takes its states and pseudo-element out, for element.matches', () => {
@@ -31,6 +61,7 @@ describe('a pinned state may stand only on the element a rule styles', () => {
 
   it('pins a state whatever its case, and names one the pin did not reach', () => {
     expect(pinStates('a:HOVER { }')).toBe('a:is(:hover, [data-pin~="hover"]) { }')
+    for (const p of PINNED) expect(unpinned(pinStates(`a:${p.toUpperCase()}`)), p).toEqual([])
     expect(unpinned('a:is(:hover, [data-pin~="hover"])')).toEqual([])
     expect(unpinned('a:hover')).toEqual([':hover'])
   })

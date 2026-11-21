@@ -54,8 +54,13 @@ const CASES = [
     name: 'each drawn reading turns both wide lights off at its own control',
     only: ['skins', 'schemes'],
     motion: true,
-    plant: all(wrap, inCss('#button-after > span { color: var(--ui-background); }')),
+    plant: all(wrap, inCss('#button-after > span { color: var(--ui-background); }'), (d) =>
+      appendFileSync(join(d, 'example.html'), `\n<div data-demo-row>\n${['ok', 'low', 'cut', 'clear'].map((v) => `  <input id="button-val-${v}" value="Typed ${v}">`).join('\n')}\n</div>\n`)),
     css: [
+      '[id^="button-val-"] { font: inherit; padding: 4px 8px; border: 1px solid var(--ui-foreground); background: var(--ui-background); color: var(--ui-foreground); }',
+      '#button-val-low { color: var(--ui-border); }',
+      '#button-val-cut { box-sizing: border-box; height: 8px; padding: 0 8px; }',
+      '#button-val-clear { color: transparent; }',
       '[data-slot="button"][data-size="sm"] { font-size: 0; }',
       'ui-button:has(> #button-secondary) { display: inline-flex; opacity: 0.15; }',
       'button:not(#button-more) > svg { opacity: 0.1; }',
@@ -69,6 +74,10 @@ const CASES = [
       '@media (prefers-reduced-motion: no-preference) { #button-primary { animation: x 1ms forwards; } }',
     ].join('\n'),
     expect: each({
+      'a typed value under 4.5:1 on its ground': both(/drawn text [\d.]+:1 at input#button-val-low "" value/),
+      'a typed value cut by a box too low for it': both(/label is cut: \d+% of it draws at input#button-val-cut "" value/),
+      'a typed value painted transparent': both(/text does not draw at input#button-val-clear "" value/),
+      'a typed value that draws in full stays on': (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /at input#button-val-ok "" value/.test(f))),
       'a size with no font': drawnOff('button "Small"'),
       'opacity on an ancestor': drawnOff('button#button-secondary "Save draft"'),
       'an icon faded out': drawnOff('button "New page" svg'),
@@ -433,6 +442,30 @@ const CASES = [
       'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
+    }),
+  },
+  // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
+  // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
+  {
+    name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
+    only: ['skins'],
+    states: true,
+    secs: 120,
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
+      inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
+      // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
+      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
+      // A change only the real click shows: no pinned row carries it.
+      inCss('#button-tick:checked { border-width: 3px; }'),
+      // The demo's change handler marks another element; the check puts back only what is checked.
+      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
+    ),
+    expect: each({
+      'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
+      'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
+      'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
+      'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
     }),
   },
   ...CEILING_CASES,

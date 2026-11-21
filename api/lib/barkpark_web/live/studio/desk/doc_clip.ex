@@ -41,7 +41,7 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
   import Phoenix.LiveView, only: [push_event: 3]
 
   alias Barkpark.Content.DraftId
-  alias BarkparkWeb.Studio.Desk.EditorHost
+  alias BarkparkWeb.Studio.Desk.DocUndo
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FieldClip
   alias BarkparkWeb.Studio.Desk.PublishedView
@@ -190,7 +190,9 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
     saved =
       Enum.reduce(writes, socket, fn {name, _field, value}, acc ->
         params = %{"doc" => %{name => value}, "_target" => ["doc", name]}
-        {:noreply, acc} = EditorHost.write_built(params, acc)
+        # Each field a step of the document's undo, as TanStack's paste
+        # writes each with its own edit (`DocUndo.write_built/2`).
+        {:noreply, acc} = DocUndo.write_built(params, acc)
         acc
       end)
 
