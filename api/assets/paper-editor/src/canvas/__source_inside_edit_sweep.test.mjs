@@ -28,10 +28,9 @@
 // no words must keep every block the key did not change. Before any typing, each prose
 // block's line must show the words the reader shows.
 //   - With the callout rule on, nothing is lost: a callout with a body never opens.
-//   - With the rule lifted (here only), nothing is lost either: the rich editor shows
-//     a callout's words from its first body block, the reader shows its content first
-//     (markdown/reader-inline.js, task-e70b11497064225b), so the derived rule opens
-//     the built callout with a body read-only for its content.
+//   - With the rule lifted (here only), the sweep finds nothing: the rich editor
+//     carries a callout with a body whole (task-c6355c4cb9cb7707), so source mode
+//     shows it as its stored block and a key on it is judged as on any sentinel.
 // Run: node src/canvas/__source_inside_edit_sweep.test.mjs
 
 import assert from "node:assert/strict";
@@ -377,9 +376,9 @@ try {
   for (const loser of off.losers.slice(0, 20)) console.log(`  ${loser}`);
   const built = off.rows.filter(([name]) => name.startsWith("built/"));
   for (const [name, says] of built) console.log(`  ${name}: ${says}`);
-  assert.deepEqual(kinds, [], "lifted, the sweep finds nothing lost");
-  assert.deepEqual(built, [["built/callout-with-a-body", "read-only: callout content"]],
-    "lifted, the callout with a body opens read-only: the editor shows its body's first words, the reader its content");
+  assert.deepEqual(kinds, [], "lifted, the sweep finds nothing: a callout with a body shows as its stored block");
+  assert.deepEqual(built, [["built/callout-with-a-body", "writable: 3 lines typed, kept 2, refused 1, losers 0"]],
+    "lifted, the built callout with a body opens writable, shown as its stored block, and loses nothing");
   console.log("source inside-edit sweep: passed");
 } finally {
   canvas.remove();
