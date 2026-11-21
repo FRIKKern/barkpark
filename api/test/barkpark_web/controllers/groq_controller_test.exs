@@ -301,6 +301,30 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert body["error"]["code"] == "malformed"
   end
 
+  # task-63b105dbf2e71209: v1 predates perspectives, as on Sanity.
+  test "API v1 refuses a perspective other than raw, as Sanity does", %{conn: conn, token: token} do
+    v1 = "/w/groq-ws-a/p/site/v1/data/query/#{@dataset}"
+
+    for p <- ["drafts", "published", "previewDrafts"] do
+      body =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> get(v1, %{"query" => "1", "perspective" => p})
+        |> json_response(400)
+
+      assert body["error"]["description"] == "Perspectives are not supported for this version"
+      assert body["error"]["type"] == "validationError"
+    end
+
+    for extra <- [%{"perspective" => "raw"}, %{}] do
+      assert conn
+             |> put_req_header("authorization", "Bearer " <> token)
+             |> get(v1, Map.put(extra, "query", "1"))
+             |> json_response(200)
+             |> Map.fetch!("result") == 1
+    end
+  end
+
   test "an unknown perspective is a 400", %{conn: conn, token: token} do
     assert conn |> get_query(token, "1", %{"perspective" => "bogus"}) |> json_response(400)
   end
