@@ -6,7 +6,19 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import config from '../vitest.config.ts'
-import { changedSince, WALK_SECONDS, walkInclude, walkNeeded } from './counts.mjs'
+import { changedSince, main, walk, WALK_SECONDS, walkInclude, walkNeeded } from './counts.mjs'
+
+// The walk step in js-tests.yml, whole: the one allowed form. Any edit to the step is red here until this pin is
+// changed on purpose, in the same change.
+const STEP = `      - name: "BarkUI: the fast tests hold at every part count"
+        timeout-minutes: 15
+        run: |
+          if [ "\${{ github.event_name }}" = "pull_request" ]; then
+            pnpm --filter @barkpark/barkui run test:counts --since "origin/\${{ github.base_ref }}"
+          else
+            pnpm --filter @barkpark/barkui run test:counts
+          fi
+`
 
 const repo = (p) => new URL(`../../../../${p}`, import.meta.url)
 
@@ -65,16 +77,58 @@ describe('the walk of every part count', () => {
     }
   })
 
-  it('is one package script, which CI runs after the fast tests, on main always and on a pull request since its base', () => {
+  it('is one package script, which CI runs as one pinned step after the fast tests, in a job nothing lets pass', () => {
     expect(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts['test:counts']).toBe('node tests/counts.mjs')
     const wf = readFileSync(repo('.github/workflows/js-tests.yml'), 'utf8')
-    const step = wf.slice(wf.indexOf('- name: "BarkUI: the fast tests hold at every part count"'))
-    expect(step.length < wf.length).toBe(true)
-    const body = step.slice(0, step.indexOf('\n      - name:', 1) > 0 ? step.indexOf('\n      - name:', 1) : undefined)
-    expect(body).toMatch(/timeout-minutes: \d+/)
-    expect(Number(body.match(/timeout-minutes: (\d+)/)[1]) * 60).toBeGreaterThan(WALK_SECONDS)
-    expect(body).toContain('pnpm --filter @barkpark/barkui run test:counts --since "origin/${{ github.base_ref }}"')
-    expect(body).toMatch(/else\n\s+pnpm --filter @barkpark\/barkui run test:counts\n/)
-    expect(wf.indexOf('run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}')).toBeLessThan(wf.indexOf(body))
+    const at = wf.indexOf('      - name: "BarkUI: the fast tests hold at every part count"\n')
+    expect(at).toBeGreaterThan(0)
+    expect(wf.indexOf('      - name: "BarkUI: the fast tests hold at every part count"', at + 1)).toBe(-1)
+    // The step ends at the first blank line: everything up to it is the step, and it is the pin, byte for byte.
+    expect(wf.slice(at, wf.indexOf('\n\n', at) + 1)).toBe(STEP)
+    expect(Number(STEP.match(/timeout-minutes: (\d+)/)[1]) * 60).toBeGreaterThan(WALK_SECONDS)
+    // Its job is the one that runs the fast tests first, and the job has no condition and nothing that lets it pass.
+    const job = wf.slice(wf.lastIndexOf('\n  test:\n', at), at)
+    expect(job.indexOf('run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}')).toBeGreaterThan(0)
+    const head = job.slice(0, job.indexOf('\n    steps:\n'))
+    expect(head).not.toMatch(/^\s*(if|continue-on-error):/m)
+  })
+
+  it('reads the changed files through changedSince with --since, walks when they need it, and always walks without it', () => {
+    const run = (argv, files) => {
+      const seen = { refs: [], walked: 0, log: [] }
+      const code = main(argv, { changed: (ref) => (seen.refs.push(ref), typeof files === 'function' ? files() : files), walkAll: () => (seen.walked++, []), log: (l) => seen.log.push(l) })
+      return { code, ...seen }
+    }
+    expect(run(['--since', 'origin/main'], ['js/packages/barkui/check/run.mjs'])).toMatchObject({ code: 0, refs: ['origin/main'], walked: 1 })
+    expect(run(['--since', 'origin/main'], ['js/packages/core/src/index.ts'])).toMatchObject({ code: 0, refs: ['origin/main'], walked: 0 })
+    expect(run(['--since', 'origin/main'], () => { throw new Error('no such ref') })).toMatchObject({ code: 0, walked: 1 })
+    expect(run([], ['js/packages/core/src/index.ts'])).toMatchObject({ code: 0, refs: [], walked: 1 })
+    const red = main([], { walkAll: () => ['n02 a.test.mjs: x: y'], log: () => {} })
+    expect(red).toBe(1)
+  })
+
+  // Real walks of two counts, with the copies planted: each turns the walk red by name. Inside a walk's copy they
+  // hold nothing (the walk sets BARKUI_IN_WALK): they read the walk, not the part count, and a walk in every copy
+  // would multiply its time.
+  const outer = !process.env.BARKUI_IN_WALK
+  const tiny = (dir, body) => {
+    rmSync(join(dir, 'tests'), { recursive: true, force: true })
+    if (body === null) return
+    mkdirSync(join(dir, 'tests'), { recursive: true })
+    writeFileSync(join(dir, 'tests', 'a.test.mjs'), body)
+  }
+  const passing = "import { it, expect } from 'vitest'\nit('holds', () => expect(1).toBe(1))\n"
+
+  it('fails by name when it runs fewer copies than it says', () => {
+    if (!outer) return
+    const found = walk(2, { plant: (dir, n) => tiny(dir, n === 1 ? passing : null) })
+    expect(found).toContain('the walk ran 1 of 2 counts')
+  })
+
+  it('fails by name when a test file in a copy does not load', () => {
+    if (!outer) return
+    const found = walk(2, { plant: (dir, n) => tiny(dir, n === 1 ? passing : "import './gone.mjs'\n" + passing) })
+    expect(found.some((f) => /^n02 a\.test\.mjs: the file did not load: /.test(f))).toBe(true)
+    expect(found.filter((f) => f.startsWith('n01 '))).toEqual([])
   })
 })
