@@ -18,6 +18,8 @@ import { partsDir } from '../build/parts.mjs'
 import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
 import { runCheck } from './check.mjs'
+import { open } from './proofs.mjs'
+import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
@@ -260,6 +262,47 @@ steps.push({
       'a focused empty field with a placeholder draws in full, its caret in the drawn picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the drawn picture only/.test(st.name) && st.pass),
       'a focused empty field with a placeholder draws in full, its caret in the glyph picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the glyph picture only/.test(st.name) && st.pass),
     }),
+  },
+  // A Tab into a filled field selects its whole value, and a browser may paint a selection in colours of its own.
+  // The fixture plants such colours and holds the value selected by a real Tab; its twin, the same value in the same
+  // style, is never selected. The check's own reader reads both in one view.
+  {
+    name: 'a reading is the same whether or not text in a field is selected',
+    direct: async () => {
+      const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
+      const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+      try {
+        const dir = join(scratch, 'parts')
+        cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
+        appendFileSync(join(dir, 'button', 'example.html'), `
+<div data-demo-row>
+  <input id="button-sel-before" data-slot="input" placeholder="Before">
+  <input id="button-sel" data-slot="input" value="post-1042">
+  <input id="button-sel-twin" data-slot="input" value="post-1042">
+</div>
+`)
+        const css = '::selection { color: rgb(255, 255, 255); background-color: rgb(51, 103, 214); }'
+        const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
+        const part = built.parts.find((x) => x.name === 'button')
+        const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { scale: 2, height: 1600 })
+        await page.barkCheck(() => document.getElementById('button-sel-before').focus())
+        await page.keyboard.press('Tab')
+        const held = await page.barkCheck(() => {
+          const f = document.getElementById('button-sel')
+          return document.activeElement === f && f.selectionStart === 0 && f.selectionEnd === f.value.length
+        })
+        const { things } = await readView(page, part)
+        const of = (id) => things.find((t) => t.at.startsWith(`input#${id} `) && t.kind === 'text')
+        const [sel, twin] = [of('button-sel'), of('button-sel-twin')]
+        const measures = ['draws', 'ratio', 'share', 'match'].map((k) => [k, ...[sel, twin].map((t) => (typeof t?.[k] === 'number' ? t[k].toFixed(2) : t?.[k]))])
+        const same = held && sel && twin && measures.every(([, a, b]) => a === b)
+        if (!same) console.log(`    selected by Tab: ${held}; ${measures.map(([k, a, b]) => `${k} ${a} selected, ${b} twin`).join('; ')}`)
+        return same
+      } finally {
+        await browser.close()
+        rmSync(scratch, { recursive: true, force: true })
+      }
+    },
   },
   {
     name: 'a press step that never settles fails by name within its time limit',

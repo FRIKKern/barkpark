@@ -71,7 +71,8 @@ defmodule Barkpark.PortableDoc.Render do
                         ] ++
                           Enum.map(
                             ~w(
-                              cards_email.ex chrome.ex components.ex compose.ex data_viz.ex figures.ex
+                              callout.ex cards_email.ex chrome.ex components.ex compose.ex data_viz.ex
+                              figures.ex
                               fleet_email.ex forms.ex inline.ex math.ex palettes.ex
                               panels_email.ex section_layout.ex status_vocab.ex stylesheet.ex tokens_gen.ex
                               util.ex walk.ex
@@ -301,7 +302,7 @@ defmodule Barkpark.PortableDoc.Render do
   # embed placed inside a columns block fell back to its unresolved placeholder
   # on the public reader while the same block at top level resolved
   # (task-00c1e5bae06da161).
-  @container_types ~w(section columns terminal tabs figure card expandable steps)
+  @container_types ~w(section columns terminal tabs figure card expandable steps callout)
 
   @doc """
   The per-block pre-pass `render_block/2` runs before composition: resolves

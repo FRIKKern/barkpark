@@ -36,10 +36,12 @@ export async function readView(page, part, waits = []) {
     return { x, y, w: Math.ceil(r.right + scrollX) - x, h: Math.ceil(r.bottom + scrollY) - y }
   }, sel)
   // A caret blinks, so it could be in one capture and not another by chance: every capture is taken without it.
+  // A selection is painted in the browser's colours, not the field's: every capture is taken with it painted plain.
   let drawn
   const without = {}
   try {
     await world(() => window.__barkCheck.caret(false))
+    await world(() => window.__barkCheck.selection(false))
     await frame()
     drawn = await shoot(clip)
     for (const what of ['glyphs', 'graphics']) {
@@ -51,6 +53,7 @@ export async function readView(page, part, waits = []) {
     await world(() => {
       window.__barkCheck.unpaint(null)
       window.__barkCheck.caret(true)
+      window.__barkCheck.selection(true)
     })
     await frame()
   }

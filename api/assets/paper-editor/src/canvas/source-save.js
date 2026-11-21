@@ -105,10 +105,6 @@ function withoutUnshownWords(block, shown) {
   const wrap = (content) => [{ type: "paragraph", content }];
   if (!firstLoss(wrap(readerInline(shown)), wrap(read))) return block;
   const key = readerInlineKey(block);
-  if (key === "slots.body") {
-    const { body: _body, ...slots } = block.slots;
-    return { ...block, slots };
-  }
   const { [key]: _words, ...rest } = block;
   return rest;
 }
