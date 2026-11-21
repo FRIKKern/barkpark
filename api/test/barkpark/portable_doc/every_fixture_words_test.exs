@@ -22,9 +22,9 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
 
   @script Path.expand("../../support/shared_fixture_documents.mjs", __DIR__)
 
-  # A count pin, not a cap: 185 since the limit pack gained "em past the value depth"
-  # (task-11bbe4b4ae8c85f4).
-  @documents 185
+  # A count pin, not a cap: 186 since the limit pack gained "em past the value depth",
+  # once as an edge in limit-docs.json and once as its golden (task-11bbe4b4ae8c85f4).
+  @documents 186
 
   @callout_documents [
     "blocks/callout",
