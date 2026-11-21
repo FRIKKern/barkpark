@@ -10,7 +10,7 @@ import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { noscript } from './proofs.mjs'
 import { NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_PLACEMENT } from './placement.mjs'
-import { all, edit, each, inDemo } from './plants.mjs'
+import { all, edit, each, inDemo, lights } from './plants.mjs'
 
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
 const S = "const S = 'sty' + 'le'"
@@ -27,6 +27,13 @@ const SELECT = `<ui-select id="button-sel" default-value="beta">
 </ui-select>
 <span id="button-empty">Empty</span>`
 const SELECT_LAYER = { box: 'ui-select-content', open: { click: '#button-sel-open' }, close: { keys: ['Escape'] } }
+// Two press steps after the part's own: a click opens the select, Escape closes it; the guard judges each.
+const SELECT_STEPS = `
+steps.push(
+  { name: 'A click opens the select', click: '#button-sel-open', expect: (root) => root.querySelector('ui-select-content').matches(':popover-open') || 'the select is not open' },
+  { name: 'Escape closes it', keys: ['Escape'], expect: (root) => !root.querySelector('ui-select-content').matches(':popover-open') || 'the select is still open' },
+)
+`
 
 // Each written as the page loads; the last is written while its box is open and taken away as it closes, in one task,
 // so no look ever finds it.
@@ -70,16 +77,18 @@ async function noScriptStage() {
 
 export const PLACEMENT_CASES = [
   {
-    name: 'placement: a UI SDK select opened and closed by its layer in every view writes only placement, and an empty style attribute holds nothing; both pass',
-    only: ['skins'],
+    name: 'placement: a UI SDK select opened by a click and closed by Escape writes only placement, and an empty style attribute holds nothing; both pass',
+    only: ['pressed'],
     layers: true,
+    green: true,
     plant: all(
       (d) => row(d, SELECT),
       (d) => json(d, (j) => ({ ...j, imports: [...j.imports, '@ui-sdk/web/select'], layers: [SELECT_LAYER] })),
       (d) => inDemo(d, `${S}\nroot.querySelector('#button-empty').setAttribute(S, '')`),
+      (d) => appendFileSync(join(d, 'press.mjs'), SELECT_STEPS),
     ),
     expect: each({
-      'the select read open in every view': (p) => p?.parts?.button?.measures?.layers?.readings === 10,
+      'every press step passed, the select opened and closed among them': (p) => lights(p).pressed?.pass === true && (p?.parts?.button?.steps ?? []).length > 0,
       "no fail names a style attribute: the select's trigger, its box, or the empty one": (p) => !STYLE_FAIL.test(said(p)),
     }),
   },
