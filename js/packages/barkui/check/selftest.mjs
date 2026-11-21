@@ -231,7 +231,7 @@ const CASES = [
     // purpose: it is held on (no blink) and goes out while the reading has the glyphs unpainted.
     css: '#button-caret { caret-animation: manual; }',
     plant: (d) => {
-      appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" data-slot="input" placeholder="Caret">\n</div>\n')
+      appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" data-slot="input" placeholder="Spring reading list">\n</div>\n')
       appendFileSync(join(d, 'press.mjs'), `
 steps.push({
   name: 'a focused empty field whose caret shows in one picture only',
