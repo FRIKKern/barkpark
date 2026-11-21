@@ -147,6 +147,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   def put_bases(socket, _keys, _seen), do: assign(socket, :editor_field_bases, %{})
 
   @doc """
+  Whether a post with `seen` (the raw `_bp_seen`) names no number for `key`
+  from a page that numbers every value it shows, while the server never sent
+  it one: the page shows the value the form was drawn with
+  (`Handlers.UnsavedBases`).
+  """
+  def unnumbered?(socket, key, seen) when is_binary(seen) do
+    seen = decode_seen(seen)
+    name = "doc[#{key}]"
+
+    Map.get(seen, "v") == @seen_version and is_nil(Map.get(seen, name)) and
+      is_nil(Map.get(drawn_numbers(seen), name)) and Map.get(history(socket), key, []) == []
+  end
+
+  def unnumbered?(_socket, _key, _seen), do: false
+
+  @doc """
   Adds the bases of a change the server built (`Fields.autosave_built/2`)
   to those `put_bases/3` stored: the value each field was computed from.
   """

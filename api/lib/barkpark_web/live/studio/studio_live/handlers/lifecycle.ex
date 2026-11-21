@@ -13,7 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -92,8 +92,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # its base stays ours; a text field both changed merges (`TextRebase.
   # merge3_both/3`, TanStack's `merge3`), and only a merge that cannot keep
   # both changes clashes; any other value stays ours. A save that rewrote
-  # none of them is taken in quietly. The base is the newest stored version
-  # this tab saw (`base_doc/1`). With none named (an array op, a slug
+  # none of them is taken in quietly. A text field's base is the stored
+  # value its words were typed on (`UnsavedBases`); with none known it
+  # merges nothing and both changed is a conflict. Any other field's base is
+  # the newest stored version this tab saw (`base_doc/1`). With none named (an array op, a slug
   # derive) the whole buffer is kept and it is a conflict, as before.
   #
   # A SIBLING PROJECT's save is ignored (r4a realtime authz sweep). The doc
@@ -172,11 +174,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       base = Content.doc_to_form(base_doc(socket), schema)
       theirs = Content.doc_to_form(doc_data, schema)
 
-      {mine, clashed} =
-        Enum.reduce(keys, {%{}, []}, fn key, {mine, clashed} ->
-          case clash(Map.get(base, key), Map.get(local, key), Map.get(theirs, key), schema, key) do
-            {:keep, value} -> {Map.put(mine, key, value), clashed}
-            :clash -> {Map.put(mine, key, Map.get(local, key)), [key | clashed]}
+      # Each field's base is the stored value its words were typed on
+      # (`UnsavedBases`), which can be older than `base_doc/1`.
+      typed = Map.new(keys, fn key -> {key, UnsavedBases.fetch(socket, key)} end)
+
+      {mine, clashed, kept} =
+        Enum.reduce(keys, {%{}, [], UnsavedBases.all(socket)}, fn key, {mine, clashed, kept} ->
+          theirs_value = Map.get(theirs, key)
+
+          case clash(
+                 typed[key],
+                 Map.get(base, key),
+                 Map.get(local, key),
+                 theirs_value,
+                 schema,
+                 key
+               ) do
+            {:ours, value} ->
+              {Map.put(mine, key, value), clashed, kept}
+
+            {:took, value} ->
+              {Map.put(mine, key, value), clashed, took(kept, schema, key, theirs_value, value)}
+
+            :clash ->
+              {Map.put(mine, key, Map.get(local, key)), [key | clashed], kept}
           end
         end)
 
@@ -185,41 +206,79 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # The page's next post of an unsaved field is made on the stored value
       # its words were typed on (it kept typing) or on theirs (it took the
       # merge), never on its own unsaved words.
-      bases = Map.new(keys, fn key -> {key, {Map.get(base, key), Map.get(theirs, key)}} end)
+      bases =
+        Map.new(keys, fn key ->
+          was_base =
+            case typed[key] do
+              {:ok, typed_on} -> typed_on
+              :error -> Map.get(base, key)
+            end
+
+          {key, {was_base, Map.get(theirs, key)}}
+        end)
 
       socket =
         socket
         |> RemoteValues.push(local, form, bases)
         |> PostedEdits.remote(local, form)
-        |> assign(editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
+        |> assign(
+          editor_form: form,
+          editor_form_gen: Shared.next_form_gen(socket, changed?),
+          editor_unsaved_bases: kept
+        )
 
       {socket, clashed != []}
     end
   end
 
+  # A text field that took theirs (or a merge onto it) is typed on theirs.
+  defp took(kept, schema, key, theirs, value) do
+    if RemoteValues.free_text?(schema, key),
+      do: UnsavedBases.put(kept, key, theirs, value),
+      else: kept
+  end
+
   # One unsaved field under a remote save, as TanStack's `rebase` and
-  # `merge3`: theirs did not move from the base, ours stands; ours did not
-  # (or is theirs), theirs stands. A string both changed: free text merges
-  # (`TextRebase.merge3_both/3`, the splice merge a post gets), and a merge
-  # that cannot keep both is a clash; any other string (a choice, a date)
-  # cannot keep both, so it clashes. A list or an object both changed
+  # `merge3`, from the base its words were typed on (`{:ok, base}`): theirs
+  # did not move from the base, ours stands (`:ours`); ours did not (or is
+  # theirs), theirs stands (`:took`). A string both changed: free text
+  # merges (`TextRebase.merge3_both/3`, the splice merge a post gets), and a
+  # merge that cannot keep both is a clash; any other string (a choice, a
+  # date) cannot keep both, so it clashes. A list or an object both changed
   # clashes too: TanStack's `mergeList3` keeps theirs only where it can place
   # mine, and an unplaced one kept ours unseen. Any other value (a number, a
   # switch) stays ours ("else ours wins").
-  defp clash(base, mine, theirs, schema, key) do
+  #
+  # Free text with no known base (`:error`) merges nothing: theirs that did
+  # not move from the stored value leaves ours, and theirs that differs from
+  # ours is a clash. A field that is not free text reads the stored value as
+  # its base.
+  defp clash(:error, stored, mine, theirs, schema, key) do
+    if RemoteValues.free_text?(schema, key) do
+      cond do
+        theirs == stored -> {:ours, mine}
+        mine == theirs -> {:took, theirs}
+        true -> :clash
+      end
+    else
+      clash({:ok, stored}, stored, mine, theirs, schema, key)
+    end
+  end
+
+  defp clash({:ok, base}, _stored, mine, theirs, schema, key) do
     strings? = is_binary(base) and is_binary(mine) and is_binary(theirs)
 
     cond do
       theirs == base ->
-        {:keep, mine}
+        {:ours, mine}
 
       mine == base or mine == theirs ->
-        {:keep, theirs}
+        {:took, theirs}
 
       strings? and RemoteValues.free_text?(schema, key) ->
         case Barkpark.Content.TextRebase.merge3_both(base, mine, theirs) do
           nil -> :clash
-          merged -> {:keep, merged}
+          merged -> {:took, merged}
         end
 
       strings? ->
@@ -229,7 +288,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         :clash
 
       true ->
-        {:keep, mine}
+        {:ours, mine}
     end
   end
 

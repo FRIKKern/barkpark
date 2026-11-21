@@ -78,15 +78,20 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
 
   defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
-  # A holds `edits` that did not reach the store (a save that did not land).
+  # A holds `edits` that did not reach the store (a save that did not land),
+  # typed on the stored values (`Handlers.UnsavedBases`).
   defp unsaved!(view, edits) do
     :sys.replace_state(view.pid, fn state ->
       socket = state.socket
+
+      typed_on =
+        Map.new(edits, fn {key, edit} -> {key, {socket.assigns.editor_form[key], edit}} end)
 
       assigns =
         Map.merge(socket.assigns, %{
           editor_dirty: true,
           editor_unsaved_keys: MapSet.new(Map.keys(edits)),
+          editor_unsaved_bases: typed_on,
           editor_form: Map.merge(socket.assigns.editor_form, edits)
         })
 
@@ -124,13 +129,24 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
   # field kept), then B saves "Lead " in front of the stored title. Returns
   # the numbers of the push A was sent: [the value it showed, the merge].
   defp held_title_under_remote_save(a, b) do
-    saves(a, "title", %{"title" => @long, "excerpt" => "First words"})
+    held_title!(a, fn ->
+      posts(a, "title", %{"title" => @long, "excerpt" => "First words"}, %{})
+    end)
+
+    remote_title(a, b, "Lead Fixture")
+  end
+
+  defp held_title!(a, post) do
+    post.()
 
     assert eventually(fn ->
              MapSet.member?(assigns(a).editor_unsaved_keys || MapSet.new(), "title")
            end)
+  end
 
-    saves(b, "title", %{"title" => "Lead Fixture", "excerpt" => "First words"})
+  # B saves `title`: the numbers of the push A was sent for it.
+  defp remote_title(a, b, title) do
+    saves(b, "title", %{"title" => title, "excerpt" => "First words"})
     render(a)
     assert_push_event(a, "bp:form-remote-values", %{seqs: %{"doc[title]" => [was, merged]}})
     [was, merged]
@@ -202,6 +218,73 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
       })
 
       assert eventually(fn -> stored(c).title == "Lead Fixture xx" end)
+    end
+
+    # #28176 review, round 2: A typed through B's first save, then B saved
+    # again. A's held text was typed on "Fixture", not on B's first save, so
+    # a merge against the newest version read A as deleting "Lead ".
+    test "#{surface}: B saves twice over A's held title, A typing through the first: A's save keeps both",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      [was, _merged] = held_title_under_remote_save(a, b)
+
+      posts(a, "title", %{"title" => @long <> "y", "excerpt" => "First words"}, %{
+        "doc[title]" => was
+      })
+
+      [_was, merged] = remote_title(a, b, "Big Lead Fixture")
+      assert assigns(a).editor_form["title"] == "Big Lead " <> @long <> "y"
+
+      # The page took the merge, then trims.
+      posts(a, "title", %{"title" => "Big Lead Fixture xx", "excerpt" => "First words"}, %{
+        "doc[title]" => merged
+      })
+
+      assert eventually(fn -> stored(c).title == "Big Lead Fixture xx" end)
+    end
+
+    test "#{surface}: B saves three times over A's held title, A typing through two: A's save keeps all",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      [was, _merged] = held_title_under_remote_save(a, b)
+
+      posts(a, "title", %{"title" => @long <> "y", "excerpt" => "First words"}, %{
+        "doc[title]" => was
+      })
+
+      [was, _merged] = remote_title(a, b, "Big Lead Fixture")
+
+      posts(a, "title", %{"title" => @long <> "yz", "excerpt" => "First words"}, %{
+        "doc[title]" => was
+      })
+
+      [_was, merged] = remote_title(a, b, "Very Big Lead Fixture")
+      assert assigns(a).editor_form["title"] == "Very Big Lead " <> @long <> "yz"
+      refute has_element?(a, @banner)
+
+      posts(a, "title", %{"title" => "Very Big Lead Fixture xx", "excerpt" => "First words"}, %{
+        "doc[title]" => merged
+      })
+
+      assert eventually(fn -> stored(c).title == "Very Big Lead Fixture xx" end)
+    end
+
+    # A post that names no base (no `_bp_seen`: an older page, a built
+    # value) leaves nothing that says what its words were typed on: B's save
+    # over them is a conflict, not a merge against a guessed base.
+    test "#{surface}: B saves over a held title whose base is not known: a conflict, never merged unseen",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      held_title!(a, fn -> saves(a, "title", %{"title" => @long, "excerpt" => "First words"}) end)
+
+      saves(b, "title", %{"title" => "Lead Fixture", "excerpt" => "First words"})
+
+      assert eventually(fn -> assigns(a).doc_conflict == true end)
+      assert assigns(a).editor_form["title"] == @long
+      assert has_element?(a, @banner)
     end
 
     test "#{surface}: a list both changed is a conflict, never ours kept unseen", c do
