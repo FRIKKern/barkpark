@@ -1,4 +1,4 @@
-// node check/selftest.mjs: proves the check can still lose. Each case copies
+// node check/selftest.mjs [--job <key>] [words]: proves the check can still lose. Each case copies
 // the button into a scratch parts folder, plants breaks, runs the check on it
 // and asserts the run fails for the right reason. A part's own files may not
 // style the stage except through part.css, so breaks in paint go in through
@@ -15,8 +15,9 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
+import { casesOf, SELFTEST_JOBS } from './jobs.mjs'
 import { runCheck } from './check.mjs'
 import { open } from './proofs.mjs'
 import { readView } from './reading.mjs'
@@ -24,7 +25,7 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
-const CASES = [
+export const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
     name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
@@ -682,12 +683,26 @@ steps.push({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let failures = 0
-  // node check/selftest.mjs <words>: only the cases whose name holds those words.
-  const pick = process.argv.slice(2).join(' ')
-  const run = CASES.filter((c) => c.name.includes(pick))
+  // node check/selftest.mjs --job <key> [words]: the cases that job runs (check/jobs.mjs, selftestJob), under its
+  // ceiling; CI runs one job per key. Without --job, every case, under the sum of the jobs' ceilings. With words,
+  // only the cases whose name holds them.
+  const args = process.argv.slice(2)
+  const key = args[0] === '--job' ? args[1] : null
+  if (key !== null && !SELFTEST_JOBS.some((j) => j.key === key)) {
+    console.log(`FAIL the selftest has no job ${JSON.stringify(key)}; its jobs are ${SELFTEST_JOBS.map((j) => j.key).join(', ')} (check/jobs.mjs)`)
+    process.exit(1)
+  }
+  const pick = args.slice(key === null ? 0 : 2).join(' ')
+  const run = (key === null ? CASES : casesOf(CASES, key)).filter((c) => c.name.includes(pick))
+  if (!run.length) {
+    console.log(`FAIL the selftest${key === null ? '' : ` job ${key}`} has no case${pick ? ` whose name holds "${pick}"` : ''} to run; a selftest of nothing is never green`)
+    process.exit(1)
+  }
   const start = Date.now()
   let now = ''
-  enforceCeiling(SELFTEST_CEILING, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${selftestSentence()} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest across jobs.`)
+  const keys = key === null ? SELFTEST_JOBS.map((j) => j.key) : [key]
+  const ceiling = keys.reduce((n, k) => n + SELFTEST_CEILINGS[k], 0)
+  enforceCeiling(ceiling, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${keys.map((k) => selftestSentence(k)).join(' ')} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest again.`)
   for (const c of run) {
     now = c.name
     if (c.direct) {

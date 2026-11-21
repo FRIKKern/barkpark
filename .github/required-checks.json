@@ -953,6 +953,10 @@
       "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The showroom check's own proof that it can still lose; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
     },
     {
+      "context": "BarkUI selftest, presses, states and refusals",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest-rest`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The second half of the showroom check's own proof that it can still lose: the selftest runs as two jobs (SELFTEST_JOBS in js/packages/barkui/check/jobs.mjs), and this one runs every case the `BarkUI selftest` job does not; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-21."
+    },
+    {
       "context": "BarkUI check, group ${{ matrix.group }}",
       "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-check`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The SKIPPED-SHAPE twin of the matrixed group job: when the plan says BarkUI was not touched the job is skipped and publishes its bare, uninterpolated `name:`. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a)."
     },

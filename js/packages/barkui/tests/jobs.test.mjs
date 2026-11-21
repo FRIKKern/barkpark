@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
-import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, split } from '../check/jobs.mjs'
+import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
 
 const scratch = mkdtempSync(join(tmpdir(), 'barkui-jobs-test-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -128,7 +128,7 @@ function needsWith(groups, over = {}) {
   return {
     [JOBS.plan]: { result: 'success', outputs: { run: 'true', groups } },
     [JOBS.check]: { result: 'success', outputs: {} },
-    [JOBS.selftest]: { result: 'success', outputs: {} },
+    ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, { result: 'success', outputs: {} }])),
     ...over,
   }
 }
@@ -146,9 +146,9 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     }
   })
 
-  it('is green when the plan, every group and the selftest passed, and names them', () => {
+  it('is green when the plan, every group and both selftest jobs passed, and names them', () => {
     const v = verdict(needsWith(MATRIX))
-    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and the selftest passed'] })
+    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and both selftest jobs passed'] })
   })
 
   it('is red for a red, cancelled, skipped-by-mistake or missing group job, even when every report says ok', () => {
@@ -160,12 +160,16 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(gone), /the check jobs is missing from this run/)).toBe(true)
   })
 
-  it('is red for a red, cancelled, skipped-by-mistake or missing selftest', () => {
-    for (const [result, re] of [['failure', /the selftest is red/], ['cancelled', /the selftest was cancelled/], ['skipped', /the selftest were skipped by mistake/]])
-      expect(redWith(verdict(needsWith(MATRIX, { [JOBS.selftest]: { result } })), re), result).toBe(true)
-    const gone = needsWith(MATRIX)
-    delete gone[JOBS.selftest]
-    expect(redWith(verdict(gone), /the selftest is missing/)).toBe(true)
+  it('is red for either selftest job red, cancelled, skipped by mistake or missing, by its name', () => {
+    expect(SELFTEST_JOBS.length).toBe(2)
+    for (const j of SELFTEST_JOBS) {
+      const who = `the selftest job "${j.name}"`
+      for (const [result, said] of [['failure', 'is red'], ['cancelled', 'was cancelled'], ['skipped', 'was skipped by mistake']])
+        expect(verdict(needsWith(MATRIX, { [j.id]: { result } })).rows, `${j.id} ${result}`).toContain(`RED ${who} ${said}${result === 'skipped' ? ': the plan said BarkUI was touched' : ''}`)
+      const gone = needsWith(MATRIX)
+      delete gone[j.id]
+      expect(verdict(gone).rows, `${j.id} missing`).toContain(`RED ${who} is missing from this run`)
+    }
   })
 
   it('a plan job that failed, was cancelled, was skipped or is missing is red, never read as "not touched"', () => {
@@ -177,10 +181,11 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(needsWith(MATRIX, { [JOBS.plan]: { result: 'success', outputs: { run: '', groups: MATRIX } } })), /neither "true" nor "false"/)).toBe(true)
   })
 
-  it('"not touched" is green only with the groups and the selftest skipped', () => {
-    const skipped = { [JOBS.check]: { result: 'skipped' }, [JOBS.selftest]: { result: 'skipped' } }
+  it('"not touched" is green only with the groups and both selftest jobs skipped', () => {
+    const skipped = { [JOBS.check]: { result: 'skipped' }, ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, { result: 'skipped' }])) }
     const plan = { result: 'success', outputs: { run: 'false', groups: MATRIX } }
     expect(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan }), []).ok).toBe(true)
+    for (const j of SELFTEST_JOBS) expect(redWith(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan, [j.id]: { result: 'success' } }), []), /though the plan said BarkUI was not touched/), j.id).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan, [JOBS.check]: { result: 'failure' } }), []), /the check jobs is red, though the plan said BarkUI was not touched/)).toBe(true)
   })
 
@@ -212,19 +217,23 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     for (const plan of results)
       for (const run of ['true', 'false'])
         for (const check of results)
-          for (const selftest of results) {
-            const needs = {}
-            if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
-            if (check !== 'missing') needs[JOBS.check] = { result: check }
-            if (selftest !== 'missing') needs[JOBS.selftest] = { result: selftest }
-            const touched = plan === 'success' && run === 'true' && check === 'success' && selftest === 'success'
-            const untouched = plan === 'success' && run === 'false' && check === 'skipped' && selftest === 'skipped'
-            const v = verdict(needs)
-            expect(v.ok, JSON.stringify({ plan, run, check, selftest })).toBe(touched || untouched)
-            if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), JSON.stringify({ plan, run, check, selftest })).toBe(true)
-            greens += v.ok ? 1 : 0
-            rows++
-          }
-    expect([rows, greens]).toEqual([250, 2])
+          for (const views of results)
+            for (const rest of results) {
+              const needs = {}
+              if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
+              if (check !== 'missing') needs[JOBS.check] = { result: check }
+              if (views !== 'missing') needs[JOBS.selftest] = { result: views }
+              if (rest !== 'missing') needs[JOBS.selftestRest] = { result: rest }
+              const all = [check, views, rest]
+              const touched = plan === 'success' && run === 'true' && all.every((r) => r === 'success')
+              const untouched = plan === 'success' && run === 'false' && all.every((r) => r === 'skipped')
+              const v = verdict(needs)
+              const at = JSON.stringify({ plan, run, check, views, rest })
+              expect(v.ok, at).toBe(touched || untouched)
+              if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), at).toBe(true)
+              greens += v.ok ? 1 : 0
+              rows++
+            }
+    expect([rows, greens]).toEqual([1250, 2])
   })
 })
