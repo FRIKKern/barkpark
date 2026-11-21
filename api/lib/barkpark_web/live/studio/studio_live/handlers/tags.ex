@@ -7,7 +7,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Tags do
   (`PostIdentity.pressed/3`), and are saved as the old list buttons are:
   the list is read from the editor's buffer, changed (`TagsField.apply_op/3`)
   and saved through the Studio's autosave with its guards
-  (`Shared.do_autosave/3`). A press that changes nothing saves nothing.
+  (`Shared.do_autosave/3`). A press that changes nothing saves nothing,
+  and neither does one naming a field that is not a tags field
+  (`TagsField.tags_field?/1`): a hand-made `add_tag` on an array of objects
+  would store a bare string in it.
 
   The last tag removed unsets the field, as Sanity's and the TanStack
   Studio's do: the save carries an empty value for the key, and the store
@@ -24,7 +27,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Tags do
 
   @doc "Runs an `add_tag` or `remove_tag` press against the open document."
   def array_op(%{"action" => action} = params, socket) do
-    with {field, key_path} when not is_nil(field) and key_path != [] <- target(params, socket) do
+    with {field, key_path} when not is_nil(field) and key_path != [] <- target(params, socket),
+         true <- TagsField.tags_field?(field) do
       form = socket.assigns[:editor_form] || %{}
       current = StudioLive.list_value_at(form, key_path)
 
