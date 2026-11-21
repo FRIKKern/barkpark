@@ -250,11 +250,6 @@ defmodule Barkpark.Content.Papers.BpmlView do
     end
   end
 
-  @doc "The answer to a push that changed nothing, with `with_notes/2`'s notes."
-  @spec unchanged(String.t(), String.t(), [String.t()]) :: map()
-  def unchanged(slug, rev, notes),
-    do: with_notes(%{ok: true, slug: slug, unchanged: true, rev: rev, op_count: 0}, notes)
-
   @doc """
   A push answer with `notes`: one line per callout whose stored body the push
   kept (`Bpml.CalloutBody`). No key when there are none.

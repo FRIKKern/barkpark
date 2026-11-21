@@ -462,9 +462,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
                 })
 
               {:ok, [], notes} ->
+                payload = %{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0}
+
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
-                |> json(Content.Papers.BpmlView.unchanged(slug, current_rev, notes))
+                |> json(Content.Papers.BpmlView.with_notes(payload, notes))
 
               {:ok, ops, notes} ->
                 sync_persist(conn, slug, ops, base_rev, dataset, scope, notes)
