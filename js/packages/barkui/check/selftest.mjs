@@ -395,7 +395,7 @@ const CASES = [
     expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
   },
   {
-    name: 'a list inside :is() in part.css is refused at the browser read, as a branch coverage cannot see',
+    name: 'a list inside :is() in part.css is refused from the text, as a branch coverage cannot see',
     only: ['pressed'],
     plant: inCss('[data-slot="button"]:is([data-size="sm"], [data-size="huge"]) { --bark-button-text: 0.875rem; }'),
     expect: refused(/:is\(\[data-size="sm"\], \[data-size="huge"\]\) holds a list of 2; coverage reads a rule branch by branch/),
