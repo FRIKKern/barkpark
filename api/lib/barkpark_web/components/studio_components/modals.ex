@@ -815,7 +815,6 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 class="btn btn-sm"
                 phx-click="restore-revision"
                 phx-value-id={rev.id}
-                phx-value-if_rev={@seen_rev}
                 aria-label={
                   gettext("Restore the version from %{time} (%{action})",
                     time: utc_history_time(rev.inserted_at),
