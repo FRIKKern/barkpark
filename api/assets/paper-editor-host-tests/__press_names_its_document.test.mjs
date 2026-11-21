@@ -1,7 +1,7 @@
 // __press_names_its_document.test.mjs — task-8908b6e031268f77: a press that
 // writes the open document without posting the editor form (a list's Add,
-// Remove and Move, Generate on a slug, the old pickers' pick, clear and
-// upload) names the document it was pressed in. The page puts the editor
+// Remove and Move, Generate on a slug, a tree codelist's pick and Remove, a
+// field's Revert) names the document it was pressed in. The page puts the editor
 // form's own mark on the pressed control, read at the press, before
 // LiveView's listener reads the control's `phx-value-`s.
 //
@@ -29,14 +29,14 @@ function mount(doc) {
   const form = doc === null ? "" : `<form id="editor-form" ${MARK}="${esc(doc)}">` +
     `<button id="add" type="button" phx-click="array_op" phx-value-action="add_row"><span id="plus">+</span> Add</button>` +
     `<button id="slug" type="button" phx-click="slug-generate" phx-value-field="slug">Generate</button>` +
-    `<button id="js" type="button" phx-click='[["push",{"event":"clear-ref","value":{"field":"author"}}]]'>Clear</button>` +
+    `<button id="js" type="button" phx-click='[["push",{"event":"tree_node_clear","target":3}]]'>Remove</button>` +
     `<button id="other" type="button" phx-click="toggle-diff">Diff</button>` +
     `</form>`;
   document.body.innerHTML = form +
-    `<div id="pick" phx-click="select-ref" phx-value-id="p2" phx-value-field="author">Kari</div>` +
-    `<div id="media" phx-click="select-media" phx-value-url="/x.png" phx-value-field="cover">x</div>` +
-    `<button id="clear" type="button" phx-click="clear-image" phx-value-field="cover">Clear</button>` +
-    `<form id="upload-form" phx-submit="upload-image" phx-value-field="cover"></form>` +
+    `<div id="pick" phx-click="tree_node_select" phx-value-code="p2" phx-target="3">Kari</div>` +
+    `<button id="revert" type="button" phx-click="desk-field-revert" phx-value-field="cover">Revert</button>` +
+    // No write is a form's submit today; the page names one all the same.
+    `<form id="write-form" phx-submit="slug-generate" phx-value-field="slug"></form>` +
     `<form id="search" phx-submit="desk-search"></form>` +
     `<button id="publish" type="button" phx-click="publish">Publish</button>`;
 }
@@ -69,8 +69,8 @@ function check(name, fn) {
 
 check("each press that writes the document carries the form's mark, whatever the id holds", () => {
   mount(A);
-  for (const id of ["add", "plus", "slug", "js", "pick", "media", "clear"]) assert.equal(press(id), A, id);
-  assert.equal(submit("upload-form"), A);
+  for (const id of ["add", "plus", "slug", "js", "pick", "revert"]) assert.equal(press(id), A, id);
+  assert.equal(submit("write-form"), A);
 });
 
 check("the mark is the form's at the press: the same control pressed in the next document carries that one", () => {
@@ -86,14 +86,14 @@ check("with no editor form on the page a press carries an empty mark: never the 
   assert.equal(press("pick"), A);
   document.getElementById("editor-form").remove();
   assert.equal(press("pick"), "");
-  assert.equal(submit("upload-form"), "");
+  assert.equal(submit("write-form"), "");
 });
 
 check("a control drawn after the page loaded, in the form or in a component outside it, is named too", () => {
   mount(A);
   const form = document.getElementById("editor-form");
   form.insertAdjacentHTML("beforeend", `<ol><li><button id="late" type="button" phx-click="array_op" phx-target="3" phx-value-action="remove_row">x</button></li></ol>`);
-  document.body.insertAdjacentHTML("beforeend", `<div data-phx-component="7"><div id="late-pick" phx-click="select-media" phx-target="7"><img id="late-img"></div></div>`);
+  document.body.insertAdjacentHTML("beforeend", `<div data-phx-component="7"><div id="late-pick" phx-click="tree_node_select" phx-target="7"><img id="late-img"></div></div>`);
   assert.equal(press("late"), A);
   assert.equal(press("late-img"), A);
 });

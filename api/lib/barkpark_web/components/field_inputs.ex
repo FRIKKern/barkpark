@@ -413,8 +413,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # reference: bp-reference-picker Web Component (Task #12 WI2) bridged
   # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
-  # The WC owns search + select + clear; the legacy phx-click=
-  # "open-ref-picker"/"clear-ref" modal flow is bypassed. The hidden
+  # The WC owns search + select + clear (the old picker modal is gone,
+  # task-c42545346b93cbb0). The hidden
   # input persists the ref doc id as a string, matching the v1
   # reference-field persistence model exactly.
   #

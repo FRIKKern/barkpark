@@ -707,8 +707,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             `bp-desk.js` asks before the tab closes over "Save failed".
             `data-desk-conflict`: another user saved over edits not saved
             here, and the status still says so. Both, as `doc_conflict` can
-            outlive the conflict: a save through `{:autosave_form, …}` (a
-            reference or image pick) says "Saved" and leaves it set.
+            outlive the conflict: a save through `Shared.do_autosave/3` (a
+            tree codelist pick) says "Saved" and leaves it set.
             `Desk.DocStyle` tones the form's status by both marks. --%>
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
