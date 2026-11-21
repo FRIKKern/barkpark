@@ -122,7 +122,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
             :error,
             gettext("The document changed since you loaded it — reload and retry.")
           )
-          |> Shared.rebuild_panes()
 
         {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
 
@@ -143,7 +142,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   defp restore_open_doc(socket, rev_id, "sheet", fence) do
     doc = socket.assigns.editor_doc
     dataset = socket.assigns.dataset
-    opts = Shared.hook_opts(socket) ++ fence
+    opts = Shared.hook_opts(socket) ++ Enum.take(fence, 0)
 
     with :ok <- Content.check_restore(rev_id, "sheet", dataset, opts) do
       Session.restore(

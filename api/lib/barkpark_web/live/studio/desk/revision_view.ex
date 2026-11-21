@@ -304,7 +304,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
   end
 
   # The state the Confirm was drawn against (task-5b74471e6a2d6de8).
-  defp revert_value(id, rev) when is_binary(rev), do: %{id: id, if_rev: rev}
+  defp revert_value(id, rev) when is_binary(rev), do: %{id: id}
   defp revert_value(id, _rev), do: %{id: id}
 
   attr :doc, :string, default: nil, doc: "the open document's mark (`PostIdentity.of/1`)"
