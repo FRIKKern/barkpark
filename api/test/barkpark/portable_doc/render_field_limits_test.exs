@@ -405,16 +405,17 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
 
     for mark <- ["strong", "em", "link"] do
       @mark mark
-      test "#{mark}: an inline mark at the same depth shows the notice, one above it renders" do
+      # task-11bbe4b4ae8c85f4: past the depth the word stays and the notice follows it.
+      test "#{mark}: an inline mark keeps its word at the depth and writes the notice after it past it" do
         inline = fn depth ->
           article(%{"type" => "paragraph", "content" => [nest_inline(@mark, depth)]})
         end
 
         max = Validate.max_depth()
-        assert inline.(max - 1) =~ "leaf"
-        refute inline.(max - 1) =~ "Nested too deep to show"
-        assert inline.(max) =~ "Nested too deep to show"
-        refute inline.(max) =~ "leaf"
+        assert inline.(max) =~ "leaf"
+        refute inline.(max) =~ "Nested too deep to show"
+        assert inline.(max + 1) =~ "leaf Nested too deep to show"
+        assert inline.(500) =~ "leaf Nested too deep to show"
       end
     end
 
@@ -429,21 +430,34 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
       end
 
       max = Validate.max_depth()
-      assert marked.(0, max - 1) =~ "leaf"
-      assert marked.(0, max) =~ "Nested too deep to show"
-      assert marked.(10, max - 11) =~ "leaf"
-      assert marked.(10, max - 10) =~ "Nested too deep to show"
+      assert marked.(0, max) =~ "leaf"
+      refute marked.(0, max) =~ "Nested too deep to show"
+      assert marked.(0, max + 1) =~ ~r/leaf(<\/span>)+ Nested too deep to show/
+      refute marked.(10, max - 10) =~ "Nested too deep to show"
+      assert marked.(10, max - 9) =~ ~r/leaf(<\/span>)+ Nested too deep to show/
     end
 
     test "a chain of bare lists counts toward the same depth" do
       chain = fn depth -> Enum.reduce(1..depth, "leaf", fn _, inner -> [inner] end) end
       paragraph = &article(%{"type" => "paragraph", "content" => [chain.(&1)]})
 
-      assert paragraph.(Validate.max_depth() - 1) =~ "leaf"
-      assert paragraph.(Validate.max_depth()) =~ "Nested too deep to show"
+      assert paragraph.(Validate.max_depth()) =~ "leaf"
+      refute paragraph.(Validate.max_depth()) =~ "Nested too deep to show"
+      assert paragraph.(Validate.max_depth() + 1) =~ "leaf Nested too deep to show"
     end
 
-    test "inline marks past the depth stop composing" do
+    test "words deeper than the word bound are not read, and the notice still shows" do
+      html =
+        article(%{
+          "type" => "paragraph",
+          "content" => [nest_inline("strong", 1000 + 5)]
+        })
+
+      assert html =~ "Nested too deep to show"
+      refute html =~ "leaf"
+    end
+
+    test "inline marks past the depth stop composing and keep the word" do
       html =
         article(%{
           "type" => "paragraph",
@@ -451,6 +465,7 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
         })
 
       assert length(String.split(html, "font-weight:bold")) - 1 == Validate.max_depth()
+      assert html =~ "leaf Nested too deep to show"
     end
 
     test "the notice is in the reader's language" do
