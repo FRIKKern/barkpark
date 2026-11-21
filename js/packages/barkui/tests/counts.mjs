@@ -15,6 +15,7 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { copyAs } from '../check/copy.mjs'
 import { MOST_PARTS } from '../check/jobs.mjs'
+import { FAST_TESTS } from './fast-tests.mjs'
 
 const pkg = fileURLToPath(new URL('..', import.meta.url))
 const repoRoot = join(pkg, '..', '..', '..')
@@ -29,6 +30,16 @@ export function walkNeeded(changed) {
   const files = changed.filter(Boolean)
   return !files.length || files.some((f) => f.startsWith(`${below.split(sep).join('/')}/`) || !/^js\/(packages|test-harnesses)\/[^/]+\//.test(f))
 }
+
+/** The files changed since `ref`, as git lists them in the repo at `root`. Without rename detection, so a file moved
+    out of this package lists its old path too, and the move counts as a change to this package. */
+export function changedSince(ref, root = repoRoot) {
+  return execFileSync('git', ['-C', root, 'diff', '--name-only', '--no-renames', `${ref}...HEAD`], { encoding: 'utf8' }).split('\n')
+}
+
+/** The child vitest's include: the package's own fast test files (FAST_TESTS, which vitest.config.ts runs too), in
+    every copy. */
+export const walkInclude = () => FAST_TESTS.map((p) => `n*/${below.split(sep).join('/')}/${p}`)
 
 /** A folder whose entries are links to `from`'s entries, but for `except`, which the caller fills. */
 function mirror(from, to, except) {
@@ -56,7 +67,7 @@ export function walk(most = MOST_PARTS) {
   try {
     for (let n = 1; n <= most; n++) copyWith(scratch, n)
     const config = join(scratch, 'vitest.config.mjs')
-    writeFileSync(config, `export default { test: { environment: 'node', include: [${JSON.stringify(`n*/${below.split(sep).join('/')}/tests/*.test.mjs`)}] } }\n`)
+    writeFileSync(config, `export default { test: { environment: 'node', include: ${JSON.stringify(walkInclude())} } }\n`)
     const out = join(scratch, 'results.json')
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('VITEST')))
     const run = spawnSync(process.execPath, [join(pkg, 'node_modules', 'vitest', 'vitest.mjs'), 'run', '--root', scratch, '--config', config, '--reporter=json', `--outputFile=${out}`], { env, encoding: 'utf8', timeout: WALK_SECONDS * 1000 })
@@ -83,7 +94,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const ref = process.argv[at + 1]
     let changed = []
     try {
-      changed = execFileSync('git', ['-C', repoRoot, 'diff', '--name-only', `${ref}...HEAD`], { encoding: 'utf8' }).split('\n')
+      changed = changedSince(ref)
     } catch (e) {
       console.log(`counts: the files changed since ${ref} could not be read (${e.message.split('\n')[0]}), so the walk runs`)
     }
