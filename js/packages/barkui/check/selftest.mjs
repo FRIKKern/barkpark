@@ -1,4 +1,4 @@
-// node check/selftest.mjs: proves the check can still lose. Each case copies
+// node check/selftest.mjs [--job <key>] [words]: proves the check can still lose. Each case copies
 // the button into a scratch parts folder, plants breaks, runs the check on it
 // and asserts the run fails for the right reason. A part's own files may not
 // style the stage except through part.css, so breaks in paint go in through
@@ -15,8 +15,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
+import { SELFTEST_JOBS, selftestPick } from './jobs.mjs'
+import { selftestReport } from './selftest-report.mjs'
 import { runCheck } from './check.mjs'
 import { open } from './proofs.mjs'
 import { readView } from './reading.mjs'
@@ -24,7 +26,7 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
-const CASES = [
+export const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
     name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
@@ -682,19 +684,38 @@ steps.push({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let failures = 0
-  // node check/selftest.mjs <words>: only the cases whose name holds those words.
-  const pick = process.argv.slice(2).join(' ')
-  const run = CASES.filter((c) => c.name.includes(pick))
+  // node check/selftest.mjs --job <key> [words]: the cases that job runs (check/jobs.mjs, selftestJob), under its
+  // ceiling; CI runs one job per key. Without --job, every case, under the sum of the jobs' ceilings. With words,
+  // only the cases whose name holds them.
+  // --report <file>: the job's report for the closing check (check/selftest-report.mjs).
+  const args = process.argv.slice(2)
+  const at = args.indexOf('--report')
+  const report = at < 0 ? null : args.splice(at, 2)[1]
+  const key = args[0] === '--job' ? args[1] : null
+  if (key !== null && !SELFTEST_JOBS.some((j) => j.key === key)) {
+    console.log(`FAIL the selftest has no job ${JSON.stringify(key)}; its jobs are ${SELFTEST_JOBS.map((j) => j.key).join(', ')} (check/jobs.mjs)`)
+    process.exit(1)
+  }
+  const pick = args.slice(key === null ? 0 : 2).join(' ')
+  const run = selftestPick(CASES, key, pick)
+  if (!run.length) {
+    console.log(`FAIL the selftest${key === null ? '' : ` job ${key}`} has no case${pick ? ` whose name holds "${pick}"` : ''} to run; a selftest of nothing is never green`)
+    process.exit(1)
+  }
   const start = Date.now()
   let now = ''
-  enforceCeiling(SELFTEST_CEILING, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${selftestSentence()} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest across jobs.`)
+  const keys = key === null ? SELFTEST_JOBS.map((j) => j.key) : [key]
+  const ceiling = keys.reduce((n, k) => n + SELFTEST_CEILINGS[k], 0)
+  enforceCeiling(ceiling, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${keys.map((k) => selftestSentence(k)).join(' ')} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest again.`)
+  const held = []
   for (const c of run) {
     now = c.name
     if (c.direct) {
       const t0 = Date.now()
-      const held = await c.direct()
-      if (!held) failures++
-      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+      const ok = await c.direct()
+      if (ok) held.push(c.name)
+      else failures++
+      console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
       continue
     }
     const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
@@ -711,14 +732,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       try {
         html = readFileSync(join(out, 'index.html'), 'utf8')
       } catch {}
-      const held = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60)
-      if (!held) failures++
-      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
-      if (!held) console.log(logs.map((l) => `    ${l}`).join('\n'))
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60)
+      if (pass) held.push(c.name)
+      else failures++
+      console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
+      if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }
   }
-  console.log(`selftest: ${run.length - failures} of ${run.length} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
+  const count = { held: run.length - failures, of: run.length }
+  console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
+  if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)
 }

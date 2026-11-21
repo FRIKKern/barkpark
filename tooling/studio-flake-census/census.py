@@ -69,7 +69,6 @@ CHAINS = json.load(open(os.path.join(HERE, "chains.json")))["chains"]
 TRIG = {
  'CH-TREE':    r'"tree_node_select"',
  'CH-PAPEROP': r'"inner-change"|"inner-flush"|"inner-array-op"',
- 'CH-AUTOSAVE':r'"select-media"|"clear-image"|"upload-image"|"select-ref"|"clear-ref"',
  'CH-CHAT':    r'phx-submit=["\']?send|render_hook\([^\n]*"send"|"dispatch_send"',
 }
 ANYTRIG = '|'.join('(?:%s)' % v for v in TRIG.values())

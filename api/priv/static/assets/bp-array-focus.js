@@ -436,8 +436,8 @@
 })();
 
 // task-8908b6e031268f77: a press that writes the open document names it.
-// A list's Add, Remove and Move, Generate on a slug, the old pickers'
-// pick, clear and upload, and a tree codelist's pick and Remove are events
+// A list's Add, Remove and Move, Generate on a slug, a tree codelist's
+// pick and Remove, and a field's Revert are events
 // of their own, not posts of the editor form. The server writes one only
 // into the document it was pressed in (`PostIdentity`), so the pressed
 // control is given the form's own mark,
@@ -455,7 +455,7 @@
 
   var MARK = "phx-value-_bp_doc";
   var WRITES = [
-    "array_op", "slug-generate", "select-ref", "clear-ref", "select-media", "clear-image", "upload-image",
+    "array_op", "slug-generate",
     "publish", "unpublish", "confirm-unpublish", "delete-doc", "confirm-delete", "discard-draft",
     "confirm-discard", "duplicate-doc", "restore-revision", "paper-publish", "desk-field-revert",
     "tree_node_select", "tree_node_clear"

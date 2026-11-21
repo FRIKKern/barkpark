@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PER_JOB } from '../check/capacity.mjs'
-import { AGGREGATE, folderNames, JOBS, NAMES, partNames, partsDir, MOST_GROUPS, MOST_PARTS, split } from '../check/jobs.mjs'
+import { reportFile } from '../check/selftest-report.mjs'
+import { AGGREGATE, folderNames, JOBS, NAMES, partNames, partsDir, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
 
 const repo = (p) => new URL(`../../../../${p}`, import.meta.url)
 const wf = readFileSync(repo('.github/workflows/barkui.yml'), 'utf8')
@@ -14,6 +15,8 @@ const job = (id) => {
 }
 const LEG_TEMPLATE = NAMES.group('${{ matrix.group }}')
 
+const run = (j) => `node check/selftest.mjs --job ${j.key} --report "$RUNNER_TEMP/barkui-report/${reportFile(j.key)}"`
+
 describe('barkui.yml runs the split it is given and closes on one name', () => {
   it('has no paths filter on its triggers, so the closing name renders on every head', () => {
     const on = wf.slice(wf.indexOf('\non:\n'), wf.indexOf('\nconcurrency:'))
@@ -22,11 +25,11 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
     expect(on).not.toMatch(/paths/)
   })
 
-  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and the selftest`, () => {
+  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and both selftest jobs`, () => {
     expect(wf.split('\n').filter((l) => l.includes(AGGREGATE))).toEqual([`    name: "${AGGREGATE}"`])
     const close = job('barkui')
     expect(close).toContain(`name: "${AGGREGATE}"`)
-    expect(close).toContain(`needs: [${JOBS.plan}, ${JOBS.check}, ${JOBS.selftest}]`)
+    expect(close).toContain(`needs: [${JOBS.plan}, ${JOBS.check}, ${SELFTEST_JOBS.map((j) => j.id).join(', ')}]`)
     expect(close).toMatch(/\n {4}if: always\(\)\n/)
     expect(close).toContain('NEEDS: ${{ toJSON(needs) }}')
     expect(close).toContain('node check/jobs.mjs --judge')
@@ -46,9 +49,17 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
     expect(check).toContain('fail-fast: false')
     expect(check).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
     expect(check).toContain('node check/run.mjs --group "$GROUP" --parts "$PARTS" --report')
-    const self = job(JOBS.selftest)
-    expect(self).toContain(`name: "${NAMES.selftest}"`)
-    expect(self).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
+    // Each selftest job runs its own cases by its key, and no other selftest command.
+    for (const j of SELFTEST_JOBS) {
+      const self = job(j.id)
+      expect(self).toContain(`name: "${j.name}"`)
+      expect(self).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
+      expect(self.match(/node check\/selftest\.mjs.*/g)).toEqual([run(j)])
+      // Its report reaches the closing check, which reads it by its file name, whatever the run's result.
+      expect(self).toContain(`name: barkui-report-selftest-${j.key}`)
+      expect(self).toMatch(/Upload this selftest job's report\n\s+if: always\(\)/)
+    }
+    expect(wf.match(/node check\/selftest\.mjs.*/g)).toEqual(SELFTEST_JOBS.map(run))
   })
 
   it('js-tests.yml no longer runs BarkUI', () => {
@@ -90,12 +101,12 @@ describe('every name barkui.yml can render has a row in .github/required-checks.
     expect(readme).toContain(`Past ${MOST_PARTS} parts the plan job refuses`)
   })
 
-  it('the plan, the selftest, the closing check and the skipped-matrix template each have a row', () => {
-    expect(missing([NAMES.plan, NAMES.selftest, AGGREGATE, LEG_TEMPLATE])).toEqual([])
+  it('the plan, both selftest jobs, the closing check and the skipped-matrix template each have a row', () => {
+    expect(missing([NAMES.plan, ...SELFTEST_JOBS.map((j) => j.name), AGGREGATE, LEG_TEMPLATE])).toEqual([])
   })
 
   it('none of them is required: branch protection stays as it is', () => {
-    for (const n of [NAMES.plan, NAMES.selftest, AGGREGATE, LEG_TEMPLATE, ...groupNames(most)]) expect(required.has(n), n).toBe(false)
+    for (const n of [NAMES.plan, ...SELFTEST_JOBS.map((j) => j.name), AGGREGATE, LEG_TEMPLATE, ...groupNames(most)]) expect(required.has(n), n).toBe(false)
   })
 
   it('one group more than the rows cover is found: the check is red the day the knob or the folder would make it', () => {
