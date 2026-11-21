@@ -94,12 +94,17 @@ export function browserReadings([written, rules]) {
       const texts = parseIn(chain, b)
       if (texts?.length !== 1) return { texts, dropped: [], blocks: [] }
       const dropped = (b.arms ?? []).filter((arm) => parseIn(chain, { prelude: arm, body: '' })?.length !== 1)
-      // An arm can read alone and still be one :is() or :where() drops (a pseudo-element, a relative selector): it
-      // is read inside its own :name() in the same place, and comes back as the text of :name() with nothing in it.
-      const empty = (name) => parseIn(chain, { prelude: `:${name}()`, body: '' })?.[0]
-      for (const { name, arm } of b.within ?? [])
-        if (!dropped.includes(arm) && parseIn(chain, { prelude: `:${name}(${arm})`, body: '' })?.[0] === empty(name)) dropped.push(arm)
-      return { texts, dropped, blocks: alone(b.blocks, [...chain, b.prelude]) }
+      // An arm can read alone and still be one :is() or :where() drops in its place: each is also read inside its own
+      // :name() there, beside :name() with nothing in it. The same text back means the browser dropped the arm; a
+      // reading that is not one rule cannot tell, and refuses the arm too.
+      const unclear = []
+      for (const { name, arm } of b.within ?? []) {
+        const kept = parseIn(chain, { prelude: `:${name}(${arm})`, body: '' })
+        const none = parseIn(chain, { prelude: `:${name}()`, body: '' })
+        if (kept?.length !== 1 || none?.length !== 1) unclear.push({ name, arm })
+        else if (kept[0] === none[0] && !dropped.includes(arm)) dropped.push(arm)
+      }
+      return { texts, dropped, unclear, blocks: alone(b.blocks, [...chain, b.prelude]) }
     })
   return { alone: alone(written, []), whole: tree(rules) }
 }
@@ -125,6 +130,8 @@ export function sheetFindings([written, { alone, whole }]) {
         kept.push({ b, text: texts[0], inner })
         for (const arm of readings[i].dropped ?? [])
           found.push(`${b.prelude}: the arm ${arm} is one the browser drops, so the rule would ship with an arm nothing judges; part.css holds only selectors the browser reads`)
+        for (const { name, arm } of readings[i].unclear ?? [])
+          cannot(where, `${b.prelude}: the arm ${arm} does not read as one rule inside :${name}() in its place`)
       }
     })
     if (kept.length !== rules.length)
