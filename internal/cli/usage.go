@@ -516,6 +516,7 @@ func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, pr
 		// output — so -o json/yaml stdout stays byte-identical.
 		if note := staleClientNote(); note != "" {
 			out.errf("%s", note)
+			out.staleNoted = true
 		}
 	}, nounHint(tree, typed), "unknown command %q", typed)
 }

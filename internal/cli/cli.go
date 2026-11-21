@@ -64,9 +64,18 @@ var taskVerbAliases = map[string]string{
 // Execute is the CLI entry point. args is os.Args[1:]. It returns the process
 // exit code; main() passes it straight to os.Exit. Execute never calls os.Exit
 // itself so it stays unit-testable.
+//
+// A command that fails gets one more stderr line when the cached latest
+// release is newer than this binary (staleOnFailureLine, update_notice.go):
+// an agent debugging a failure learns that `bp upgrade` may already fix it.
 func Execute(args []string) int {
 	out := newWriter(os.Stdout, os.Stderr)
+	rc := execute(out, args)
+	reportStaleOnFailure(out, args, rc)
+	return rc
+}
 
+func execute(out *writer, args []string) int {
 	g, rest, err := parseGlobals(args)
 	if err != nil {
 		out.userErr("%v", err)
@@ -111,7 +120,11 @@ func Execute(args []string) int {
 	// prints after the command — at most one stderr line, never stdout or the
 	// exit code.
 	pendingUpdate := startUpdateCheck(noun)
-	defer finishUpdateNotice(os.Stderr, pendingUpdate)
+	defer func() {
+		if finishUpdateNotice(os.Stderr, pendingUpdate) {
+			out.staleNoted = true
+		}
+	}()
 
 	// A broken repo context file (.barkpark.json) fails LOUDLY before any
 	// dispatch — above all one carrying a "token" field, which is a credential
