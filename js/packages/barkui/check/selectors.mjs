@@ -96,8 +96,8 @@ export function selectorFindings(text, parentHas = false) {
   return [...new Set(found)]
 }
 
-/** Each :is(), :where() and :has() in a selector, with its arms (its list split at its own top-level commas).
-    :not() is left out: its list is one negation, not a choice. */
+/** Each :is(), :where() and :has() in a selector, with its arms (its list split at its own top-level commas) and
+    `at`, where its list starts and ends in the text. :not() is left out: its list is one negation, not a choice. */
 export function choiceLists(text) {
   const open = []
   const out = []
@@ -107,7 +107,7 @@ export function choiceLists(text) {
       if (m) open.push({ name: m[1].toLowerCase(), from: i + m[0].length + 1, depth })
     } else if (c === ')' && open.length && open[open.length - 1].depth === depth) {
       const o = open.pop()
-      out.push({ name: o.name, arms: splitList(text.slice(o.from, i)) })
+      out.push({ name: o.name, arms: splitList(text.slice(o.from, i)), at: [o.from, i] })
     }
   })
   return out

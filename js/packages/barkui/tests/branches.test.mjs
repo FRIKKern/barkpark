@@ -32,15 +32,21 @@ describe('every branch of a selector list is read on its own', () => {
     for (const sel of ['&:is([data-a], [data-b])', ':where(ui-button, ui-link) > svg', 'ui-row:has([data-a], [data-b])'])
       expect(one(sel).found).toEqual([expect.stringMatching(/holds a list of 2; coverage reads a rule branch by branch/)])
     for (const sel of ['&:not([data-a], [data-b])', '&:is([data-a])', '[x=":is(a, b)"]']) expect(one(sel).found).toEqual([])
-    expect(choiceLists('a:is(b, :where(c, d))')).toEqual([{ name: 'where', arms: ['c', 'd'] }, { name: 'is', arms: ['b', ':where(c, d)'] }])
+    expect(choiceLists('a:is(b, :where(c, d))')).toEqual([
+      { name: 'where', arms: ['c', 'd'], at: [15, 19] },
+      { name: 'is', arms: ['b', ':where(c, d)'], at: [5, 20] },
+    ])
   })
 
   it("gives the browser each arm the text writes, the rule's own and the one inside :is() and :where(), but not :has()'s", () => {
     const [b] = textArms([{ prelude: 'a, b:is(:x), c:where(d) > e:has(> f)', body: '', blocks: [{ prelude: '&:is(:y)', body: '', blocks: [] }] }]).written
     expect(b.arms).toEqual(['a', 'b:is(:x)', 'c:where(d) > e:has(> f)', ':x', 'd'])
     expect(b.blocks[0].arms).toEqual(['&:is(:y)', ':y'])
-    expect(b.within).toEqual([{ name: 'is', arm: ':x' }, { name: 'where', arm: 'd' }])
-    expect(b.blocks[0].within).toEqual([{ name: 'is', arm: ':y' }])
+    expect(b.within).toEqual([
+      { name: 'is', arm: ':x', emptied: 'a, b:is(), c:where(d) > e:has(> f)' },
+      { name: 'where', arm: 'd', emptied: 'a, b:is(:x), c:where() > e:has(> f)' },
+    ])
+    expect(b.blocks[0].within).toEqual([{ name: 'is', arm: ':y', emptied: '&:is()' }])
     expect(textArms([{ prelude: '@media (max-width: 600px)', body: '', blocks: [] }]).written[0].arms).toEqual([])
   })
 })

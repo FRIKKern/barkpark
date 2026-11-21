@@ -56,7 +56,10 @@ export function textArms(blocks) {
           found.push(`${b.prelude}: :${c.name}(${c.arms.join(', ')}) holds a list of ${c.arms.length}; coverage reads a rule branch by branch, and an arm inside :${c.name}() is not a branch, so one that applies would hide one that never does; write each arm as a branch of the rule's own list`)
       const choices = lists.filter((c) => c.name !== 'has')
       const inner = choices.flatMap((c) => c.arms)
-      const within = [...new Map(choices.flatMap((c) => c.arms.map((arm) => [`${c.name} ${arm}`, { name: c.name, arm }]))).values()]
+      // Each call's own prelude with that call emptied: the browser reads the arm in its real place beside it.
+      const within = choices.flatMap((c) =>
+        c.arms.map((arm) => ({ name: c.name, arm, emptied: b.prelude.slice(0, c.at[0]) + b.prelude.slice(c.at[1]) })),
+      )
       return { ...b, arms: [...new Set([...splitList(b.prelude), ...inner])], within, blocks: walk(b.blocks) }
     })
   return { written: walk(blocks), found }
@@ -68,8 +71,8 @@ const clean = (text) => text.replace(/\/\*[^]*?\*\//g, ' ').replace(/\s+/g, ' ')
     `written` (textBlocks): each block, with the body its text gives it, given to the browser alone in its place
     inside the blocks it is written in, as the text (cssText) of each rule that comes back (null when the place itself
     does not come back as one rule each); when it came back as exactly one, the arms of it (textArms) that the
-    browser drops when each is read alone in the same place, or, for the one inside :is() or :where(), inside its
-    own :is() or :where() there, and its own blocks read the same way.
+    browser drops when each is read alone in the same place, or, for the one inside :is() or :where(), in the rule's
+    own prelude beside that prelude with the call emptied, and its own blocks read the same way.
     `whole` is `rules`, the rules the browser made from the whole sheet, as their text with the rules inside each.
     Declarations that follow nested rules (CSSNestedDeclarations) are no rule of the text. */
 export function browserReadings([written, rules]) {
@@ -94,13 +97,13 @@ export function browserReadings([written, rules]) {
       const texts = parseIn(chain, b)
       if (texts?.length !== 1) return { texts, dropped: [], blocks: [] }
       const dropped = (b.arms ?? []).filter((arm) => parseIn(chain, { prelude: arm, body: '' })?.length !== 1)
-      // An arm can read alone and still be one :is() or :where() drops in its place: each is also read inside its own
-      // :name() there, beside :name() with nothing in it. The same text back means the browser dropped the arm; a
-      // reading that is not one rule cannot tell, and refuses the arm too.
+      // An arm can read alone and still be one :is() or :where() drops where it stands: the rule's own prelude as
+      // written is read beside the same prelude with that one call emptied, in the same blocks. The same text back
+      // means the browser dropped the arm; a reading that is not one rule cannot tell, and refuses the arm too.
       const unclear = []
-      for (const { name, arm } of b.within ?? []) {
-        const kept = parseIn(chain, { prelude: `:${name}(${arm})`, body: '' })
-        const none = parseIn(chain, { prelude: `:${name}()`, body: '' })
+      for (const { name, arm, emptied } of b.within ?? []) {
+        const kept = parseIn(chain, { prelude: b.prelude, body: '' })
+        const none = parseIn(chain, { prelude: emptied, body: '' })
         if (kept?.length !== 1 || none?.length !== 1) unclear.push({ name, arm })
         else if (kept[0] === none[0] && !dropped.includes(arm)) dropped.push(arm)
       }
