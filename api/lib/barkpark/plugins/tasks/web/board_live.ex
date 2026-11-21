@@ -186,6 +186,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   alias Barkpark.Tasks
   alias Barkpark.Tasks.Board
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.FieldGates
   alias Barkpark.Tenancy
 
   # The slow reconcile cadence. Realtime motion is instant off the broadcast;
@@ -307,7 +308,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # re-check; the topic IS the scope). Drop an exact-repeat/echo via the
   # seen-set, else project → re-bucket → flash.
   @impl true
-  def handle_info({:document_changed, %{type: "task", doc: doc}}, socket)
+  def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, socket)
       when is_map(doc) do
     key = {doc.doc_id, doc.updated_at}
 
@@ -316,7 +317,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     else
       board = socket.assigns.board
       prev = board.cards_by_id[Content.published_id(doc.doc_id)]
-      card = Board.card_from_broadcast(doc, prev, socket.assigns.readable?)
+      readable? = FieldGates.pick(socket.assigns.readable?, msg)
+      card = Board.card_from_broadcast(doc, prev, readable?)
       {board, change} = Board.apply_change(board, card)
 
       {:noreply,
@@ -872,9 +874,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     case peek_doc(task_id, socket) do
       %Document{} = doc ->
         content = doc.content || %{}
+        readable? = FieldGates.pick(FieldGates.for_rows(@dataset, [doc]), doc)
         lid = Content.published_id(doc.doc_id)
         card = board.cards_by_id[lid]
-        ancestors = peek_ancestors(board, Map.get(content, "parent_id"))
+        # A parent the schema hides starts no breadcrumb.
+        ancestors = peek_ancestors(board, readable?.("parent_id") && content["parent_id"])
         subtree = peek_subtree(board, lid)
 
         # Field-visibility seal: this panel hand-picks content fields straight
@@ -887,7 +891,6 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         # board mount can never leak it; an undeclared field stays public (legacy
         # parity). No task field declares visibility today — fail-closed
         # hardening, not a behavior change.
-        readable? = gate(socket)
         # nil = SEALED (schema-private field — the section never renders, no
         # empty shell hints it exists); [] = authored-empty (the criteria-first
         # reader shows its honest empty state).
@@ -976,12 +979,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
-  # The board's field-visibility predicate for the peek, the cards and the
-  # broadcasts: a scoped mount's own workspace's task schema decides, the flat
-  # mount reads unscoped (task-c626f2be5264f61a). One schema read per call.
+  # The broadcasts' field-visibility gates: one for each workspace and project
+  # with a task on this board, each card by its own (`FieldGates`). The peek
+  # gates by its task's own.
   defp gate(socket) do
-    ws_id = BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket)
-    Board.field_visibility_gate(@dataset, workspace_id: ws_id)
+    FieldGates.for_dataset(@dataset, BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket))
   end
 
   defp peek_claim(content) do
