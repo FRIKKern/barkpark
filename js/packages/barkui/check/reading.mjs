@@ -16,6 +16,36 @@ export async function readView(page, part, waits = []) {
   // adds no style of its own to the page: the check hides the caret itself, from its own world (caret in drawn.mjs).
   const capture = async (p, c) => (await p.screenshot({ clip: { x: c.x, y: c.y, width: c.w, height: c.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
   const shoot = (clip) => capture(page, clip)
+  // The stage's box, widened to whole CSS pixels (so whole device pixels too): a capture's pixels are the page's own.
+  // With a box of the part's layers open in the top layer, the capture covers that box too, and what the page draws
+  // behind it is captured first with the open boxes hidden (layers.mjs).
+  const open = await world(([s, b]) => window.__barkCheck.layers(document.querySelector(s), b), [sel, (part.json.layers ?? []).map((l) => l.box)])
+  const clip = await world(([s, boxes]) => {
+    const r = document.querySelector(s).getBoundingClientRect()
+    const all = [{ x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }, ...boxes]
+    const x = Math.floor(Math.min(...all.map((b) => b.x)))
+    const y = Math.floor(Math.min(...all.map((b) => b.y)))
+    return { x, y, w: Math.ceil(Math.max(...all.map((b) => b.x + b.w))) - x, h: Math.ceil(Math.max(...all.map((b) => b.y + b.h))) - y }
+  }, [sel, open.boxes])
+  if (open.boxes.length) {
+    try {
+      await world(() => window.__barkCheck.hideLayers(true))
+      await frame()
+      const behind = await shoot(clip)
+      await world(([png, c, k]) => window.__barkCheck.under(png, c, k), [behind, clip, scale])
+    } finally {
+      await world(() => window.__barkCheck.hideLayers(false))
+      await frame()
+    }
+  }
+  try {
+    return { ...(await readNow(page, part, waits, { sel, world, scale, frame, capture, shoot, clip })), unnamed: open.unnamed }
+  } finally {
+    if (open.boxes.length) await world(() => window.__barkCheck.under(null))
+  }
+}
+
+async function readNow(page, part, waits, { sel, world, scale, frame, capture, shoot, clip }) {
   const bounds = await world(([s, t]) => window.__barkCheck.boundaries(document.querySelector(s), t), [sel, part.json.textOnly ?? []])
   // The things of the view and, for any not yet drawn alone, their references, drawn and measured in the
   // reference tab (see drawn.mjs) so the page under test is never laid out differently.
@@ -28,13 +58,6 @@ export async function readView(page, part, waits = []) {
     const png = await capture(ref.page, at)
     await world((list) => window.__barkCheck.keep(list), await ref.world(([p, c, k]) => window.__barkCheck.measureAlone(p, c, k), [png, at, scale]))
   }
-  // The stage's box, widened to whole CSS pixels (so whole device pixels too): a capture's pixels are the page's own.
-  const clip = await world((s) => {
-    const r = document.querySelector(s).getBoundingClientRect()
-    const x = Math.floor(r.left + scrollX)
-    const y = Math.floor(r.top + scrollY)
-    return { x, y, w: Math.ceil(r.right + scrollX) - x, h: Math.ceil(r.bottom + scrollY) - y }
-  }, sel)
   // A caret blinks, so it could be in one capture and not another by chance: every capture is taken without it.
   // A selection is painted in the browser's colours, not the field's: every capture is taken with it painted plain.
   let drawn
@@ -95,6 +118,7 @@ export function verdict(view, where = '', waits = []) {
       }
     }
   }
+  for (const at of view.unnamed ?? []) fails.push(`${where}${at} is open in the top layer during the reading, and no layer in part.json names it`)
   for (const at of view.grown ?? []) fails.push(`${where}a reader put a child into ${at}, an element it measures`)
   for (const at of view.empty) fails.push(`${where}control has nothing to show at ${at}`)
   for (const at of view.unlabelled) fails.push(`${where}text-only ${at} has no text label`)

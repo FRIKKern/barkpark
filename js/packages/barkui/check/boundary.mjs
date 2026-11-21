@@ -68,7 +68,7 @@ export function installBoundary() {
   }
 
   /** The controls in a stage that a person can operate now. */
-  const controls = (root) => [...root.querySelectorAll(CONTROLS)].filter((el) => el.getClientRects().length && !off(el))
+  const controls = (root) => [...root.querySelectorAll(CONTROLS)].filter((el) => el.getClientRects().length && !off(el) && !h.behind?.(el))
 
   /** What marks where each control is: the best of its fill and its drawn edge (border, outline, inset ring),
       against the ground next to it. A control part.json calls text-only is left out only when, at rest, it

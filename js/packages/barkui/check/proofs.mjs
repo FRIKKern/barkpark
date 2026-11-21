@@ -7,6 +7,7 @@ import { assertStyles, isolate, styleReader } from './guard.mjs'
 import { limit } from './limit.mjs'
 import { installBoundary } from './boundary.mjs'
 import { installDrawn } from './drawn.mjs'
+import { eachLayer, installLayers } from './layers.mjs'
 import { installMatch } from './match.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
@@ -50,6 +51,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   await page.barkCheck(installBoundary)
   await page.barkCheck(installMatch)
   await page.barkCheck(installDrawn)
+  await page.barkCheck(installLayers)
   page.barkCdp = await page.context().newCDPSession(page)
   page.barkScale = scale
   // A blank tab in the same context, where things are drawn alone for reference (see drawn.mjs).
@@ -246,14 +248,21 @@ export async function skinsAndSchemes(ctx, part, skins) {
         for (const surface of surfacesOf(ctx)) {
           await surfaceTo(surface)
           const waits = waitsFor(skin, scheme, surface)
-          const v = await readView(page, part, waits)
-          const d = verdict(v, `${at} on ${surface}: `, waits)
-          bad[scheme].push(...d.fails)
-          for (const x of d.waited) if (!waited.has(x.wait) || waited.get(x.wait) > x.ratio) waited.set(x.wait, x.ratio)
-          drawnWeakest[scheme] = Math.min(drawnWeakest[scheme], d.weakest.text.ratio)
-          fullest[scheme] = least(fullest[scheme], d.weakest)
-          for (const c of v.bounds.read) if (c.ratio < 3) bad[scheme].push(`${at} on ${surface}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
-          keepBounds(surface, v.bounds, at)
+          // One reading of the stage as it stands now: closed, then with each of the part's layers open (layers.mjs).
+          const readOne = async (where) => {
+            const v = await readView(page, part, waits)
+            const d = verdict(v, `${where}: `, waits)
+            bad[scheme].push(...d.fails)
+            for (const x of d.waited) if (!waited.has(x.wait) || waited.get(x.wait) > x.ratio) waited.set(x.wait, x.ratio)
+            drawnWeakest[scheme] = Math.min(drawnWeakest[scheme], d.weakest.text.ratio)
+            fullest[scheme] = least(fullest[scheme], d.weakest)
+            for (const c of v.bounds.read) if (c.ratio < 3) bad[scheme].push(`${where}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
+            keepBounds(surface, v.bounds, at)
+            return v
+          }
+          const v = await readOne(`${at} on ${surface}`)
+          const open = await eachLayer(page, part, async (layer) => (await readOne(`${at} on ${surface} with ${layer.box} open`), []))
+          bad[scheme].push(...open.map((f) => `${at} on ${surface}: ${f}`))
           for (const x of v.bounds.bare) bare.set(x.selector, [...new Set([...(bare.get(x.selector) ?? []), ...x.controls])])
           controls = Math.max(controls, v.bounds.count)
           keepDisabled(surface, await page.barkCheck((n) => window.__barkCheck.disabledFill(document.querySelector(`[data-part="${n}"]`)), part.name))
@@ -415,15 +424,20 @@ export async function phone(ctx, part, skins) {
           const r = await sideways()
           if (r !== true) return light(false, `${where}: ${r}`)
           const waits = waitsFor(skin, scheme, surface)
-          const v = await readView(page, part, waits)
-          const d = verdict(v, `${where}: `, waits)
-          fails.push(...d.fails)
-          text = Math.min(text, d.weakest.text.ratio)
-          weakest = least(weakest, d.weakest)
-          for (const c of v.bounds.read) {
-            if (c.ratio < 3) fails.push(`${where}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
-            edge = Math.min(edge, c.ratio)
+          const readOne = async (said) => {
+            const v = await readView(page, part, waits)
+            const d = verdict(v, `${said}: `, waits)
+            fails.push(...d.fails)
+            text = Math.min(text, d.weakest.text.ratio)
+            weakest = least(weakest, d.weakest)
+            for (const c of v.bounds.read) {
+              if (c.ratio < 3) fails.push(`${said}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
+              edge = Math.min(edge, c.ratio)
+            }
           }
+          await readOne(where)
+          const open = await eachLayer(page, part, async (layer) => (await readOne(`${where} with ${layer.box} open`), []))
+          fails.push(...open.map((f) => `${where}: ${f}`))
         }
         await page.barkCheck((n) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', 'base'), part.name)
       }

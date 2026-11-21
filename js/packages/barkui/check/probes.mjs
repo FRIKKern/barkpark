@@ -13,12 +13,26 @@ export function installHelpers() {
     return [r, g, b, a / 255]
   }
   const over = (top, under) => top.slice(0, 3).map((c, i) => c * top[3] + under[i] * (1 - top[3])).concat(1)
+  /** A box the browser draws in the top layer (an open popover, a modal dialog): it is drawn over the page,
+      not inside its DOM parent, so nothing of its ancestors is behind it, fades it or paints its ground. */
+  const TOP = ':popover-open, :modal'
   const effectiveBg = (el) => {
     const layers = []
     for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
       const c = rgba(getComputedStyle(n).backgroundColor)
       if (c[3] > 0) layers.push(c)
       if (c[3] >= 1) break
+      if (n.matches(TOP)) {
+        // Behind a top-layer box: its ::backdrop, then what the page really draws there, read from a capture
+        // taken with the open boxes hidden (check/layers.mjs). With no such capture the ground is not known,
+        // so it reads as no colour at all, and nothing drawn on it can pass as itself.
+        const b = rgba(getComputedStyle(n, '::backdrop').backgroundColor)
+        if (b[3] > 0) layers.push(b)
+        if (b[3] >= 1) break
+        const under = state.under?.(el)
+        if (!under) return [NaN, NaN, NaN, 1]
+        return layers.reduceRight((below, top) => over(top, below), under)
+      }
     }
     return layers.reduceRight((under, top) => over(top, under), [255, 255, 255, 1])
   }
@@ -78,7 +92,7 @@ export function installHelpers() {
       const s = getComputedStyle(n)
       // A box-less element (display: contents) draws no opacity of its own.
       if (s.display !== 'contents') f *= parseFloat(s.opacity)
-      if (rgba(s.backgroundColor)[3] >= 1) break
+      if (rgba(s.backgroundColor)[3] >= 1 || n.matches(TOP)) break
     }
     return f
   }
@@ -294,7 +308,8 @@ export function installHelpers() {
     }
   }
 
-  window.__barkCheck = { settle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state: {} }
+  const state = {}
+  window.__barkCheck = { TOP, settle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

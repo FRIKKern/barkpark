@@ -49,6 +49,9 @@ function readPart(dir, name) {
   }
   if (json.textOnly !== undefined && !(Array.isArray(json.textOnly) && json.textOnly.every((x) => typeof x === 'string' && x)))
     throw new Error(`${where}: part.json "textOnly" must be a list of selectors (controls that draw no boundary)`)
+  const steps = (x) => x && typeof x === 'object' && Object.keys(x).every((k) => ['focus', 'click', 'keys'].includes(k)) && (x.focus || x.click || x.keys?.length) && ['focus', 'click'].every((k) => x[k] === undefined || (typeof x[k] === 'string' && x[k])) && (x.keys === undefined || (Array.isArray(x.keys) && x.keys.every((k) => typeof k === 'string' && k)))
+  if (json.layers !== undefined && !(Array.isArray(json.layers) && json.layers.every((l) => l && typeof l.box === 'string' && l.box && steps(l.open) && steps(l.close) && Object.keys(l).every((k) => ['box', 'open', 'close'].includes(k)))))
+    throw new Error(`${where}: part.json "layers" must be a list of { box, open, close }: the selector of a box the part opens in the top layer, and the real input (focus, click, keys) that opens and closes it`)
   if ('allow' in json)
     throw new Error(`${where}: part.json "allow" is gone: a part cannot excuse itself; a property beyond the vocabulary is a row in build/vocabulary.mjs EXTRA, with the values it may take`)
   if (json.name !== name) throw new Error(`${where}: part.json names the part ${JSON.stringify(json.name)}; it must be the folder name`)
