@@ -1,7 +1,8 @@
 // The selftest runs as two jobs (SELFTEST_JOBS in check/jobs.mjs); one rule puts each case in one of them. These
 // hold that no case falls between the jobs or runs in both, so none can be dropped to make room under a ceiling.
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { casesOf, coverCases, SELFTEST_JOBS, selftestJob } from '../check/jobs.mjs'
+import { casesOf, coverCases, NAMES, SELFTEST_JOBS, selftestJob } from '../check/jobs.mjs'
 import { CASES } from '../check/selftest.mjs'
 
 const lists = () => Object.fromEntries(SELFTEST_JOBS.map((j) => [j.key, casesOf(CASES, j.key)]))
@@ -12,6 +13,15 @@ describe('the selftest jobs', () => {
     for (const [key, list] of Object.entries(lists())) expect(list.length, key).toBeGreaterThan(0)
     // The rule gives no key that is not a job, so no case can fall between them.
     expect([...new Set(CASES.map(selftestJob))].sort()).toEqual(SELFTEST_JOBS.map((j) => j.key).sort())
+  })
+
+  it('are each named by what they run, and docs/PARTS.md names them as check/jobs.mjs does', () => {
+    // No job keeps the bare name "BarkUI selftest": a green job of that name would read as the whole selftest.
+    expect(SELFTEST_JOBS.map((j) => j.name)).toEqual([NAMES.selftest, NAMES.selftestRest])
+    for (const j of SELFTEST_JOBS) expect(j.name, j.key).toMatch(/^BarkUI selftest, \S/)
+    const doc = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+    for (const j of SELFTEST_JOBS) expect(doc, j.key).toContain(`"${j.name}" runs \`--job ${j.key}\``)
+    expect(doc).not.toMatch(/"BarkUI selftest"/)
   })
 
   it('a case left out, or run in both jobs, is red by its name', () => {

@@ -18,7 +18,7 @@ export const AGGREGATE = 'BarkUI showroom check'
 export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest' }
 export const NAMES = {
   plan: 'BarkUI plan (does this change touch it, and which groups)',
-  selftest: 'BarkUI selftest',
+  selftest: 'BarkUI selftest, views',
   selftestRest: 'BarkUI selftest, presses, states and refusals',
   group: (k) => `BarkUI check, group ${k}`,
 }

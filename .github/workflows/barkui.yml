@@ -171,7 +171,7 @@ jobs:
           retention-days: 3
 
   barkui-selftest:
-    name: "BarkUI selftest"
+    name: "BarkUI selftest, views"
     needs: barkui-plan
     if: needs.barkui-plan.outputs.run == 'true'
     runs-on: ubuntu-latest
