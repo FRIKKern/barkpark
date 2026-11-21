@@ -61,11 +61,10 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       "Read-only" (a write this person may not make, such as a checked-out
       asset's metadata: TanStack's caution toast, "read-only for you: the
       change was not saved"; the form's status only ever says it after a
-      refused write) and "Updated by another user" while this form has
-      edits not saved (`data-desk-conflict`, the conflict banner up:
-      TanStack's `refused`). Taken in from a form with nothing unsaved,
-      "Updated by another user" stays as it was, as do "Saved" and the old
-      Studio.
+      refused write) and another user's save over edits not saved here
+      (`data-desk-conflict`, while the conflict banner is up: TanStack's
+      `refused`). Taken in by a form with nothing unsaved, "Updated by
+      another user" stays as it was, as do "Saved" and the old Studio.
     * `.dk-field-toast` is the one rule outside the edit pane: the words
       `bp-desk-field-actions.js` shows for a copy or a paste, bottom right
       as TanStack's toasts, over the pane's footer. It is on the page's body, so no patch of the
@@ -178,7 +177,7 @@ defmodule BarkparkWeb.Studio.Desk.DocStyle do
       .dk .dk-edit .field > button.change-bar::before { content: ""; position: absolute; top: 0; bottom: 0; left: -7px; width: 15px; }
       .dk .dk-edit .field-actions > .icon-btn[aria-expanded="true"] { background: var(--dk-selected-fill); color: var(--dk-fg); }
       .dk .dk-edit .dk-field-menu { inset: auto; margin: 4px; min-width: 0; position-anchor: --dk-field-actions; position-area: right center; position-try-fallbacks: top; }
-      .dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-save="Read-only"], [data-desk-save="Updated by another user"][data-desk-conflict]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }
+      .dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-save="Read-only"], [data-desk-conflict]) .editor-actions .save-status { color: var(--dk-warn-fg); font-weight: 500; opacity: 1; }
       @media (hover: none) { .dk .dk-edit .field > .field-actions { opacity: 1; } }
       @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .field > .field-actions { top: -10px; right: 44px; } .dk .dk-edit .field-actions > .icon-btn { width: 44px; height: 44px; } }
       <%= Phoenix.HTML.raw(BarkparkWeb.Studio.Desk.TagsStyle.css()) %>
