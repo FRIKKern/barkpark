@@ -114,7 +114,6 @@ export function inlineDepthText(run, notice = t(NOTICE)) {
     // The notice after a cut part: one space after its words, or alone when it has none.
     // (`d` here is where the cut part's words start in `out`.)
     if (n === NOTICE_MARK) { out.push(out.slice(d).join("") !== "" ? ` ${notice}` : notice); continue; }
-    if (cut && d >= MAX_WORD_DEPTH) continue;
     if (typeof n === "string" || typeof n === "number") { out.push(String(n)); continue; }
     if (isWrapper(n)) {
       const kids = Array.isArray(n) ? n : Array.isArray(n.children) ? n.children : [];
