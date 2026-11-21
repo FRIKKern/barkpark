@@ -1,0 +1,13 @@
+{
+  "name": "tabs-q4",
+  "family": "navigation",
+  "element": "ui-tabs",
+  "imports": [
+    "@ui-sdk/web/tabs"
+  ],
+  "summary": "Switches between panels in one place, across or down: the selected tab marked by its own edge, a disabled tab that takes focus but is never selected. UI SDK's tabs indicator is not styled and not covered.",
+  "textOnly": [
+    "[data-slot=\"tabs-tab\"]:not([data-selected])",
+    "[data-slot=\"tabs-panel\"]"
+  ]
+}
