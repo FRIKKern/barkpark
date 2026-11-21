@@ -173,8 +173,18 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
     b = open(c)
 
     # B's title typing does not land; neither does the slug made from it.
+    # The title is posted as the page posts it, with `_bp_seen`: what it was
+    # typed on is known, so A's save merges with it (`UnsavedBases`).
     type_in(b, "excerpt", " FAIL")
-    post_form(b, "title", %{"title" => "Fail title", "excerpt" => "First FAIL"})
+
+    b
+    |> element("#editor-form")
+    |> render_change(%{
+      "_target" => ["doc", "title"],
+      "doc" => %{"title" => "Fail title", "excerpt" => "First FAIL"},
+      "_bp_seen" => ~s({"v":2})
+    })
+
     BarkparkWeb.EditorPost.press(b, "slug-generate", %{"field" => "slug"})
 
     type_in(a, "title", " A2")
