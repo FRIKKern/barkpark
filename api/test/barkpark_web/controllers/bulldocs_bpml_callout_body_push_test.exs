@@ -250,6 +250,30 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       assert stored(ctx.slug) == ctx.before
     end
 
+    test "an old copy, pulled before <kept> lines, is stale: untouched or edited elsewhere", ctx do
+      old =
+        ctx.bpml
+        |> String.replace(~s( print="2"), "")
+        |> String.replace(@kept_line, ~s(  <callout id="c1" tone="info">Look.</callout>\n))
+        |> then(
+          &Regex.replace(
+            ~r/  <callout id="c2".*?<\/callout>\n/s,
+            &1,
+            ~s(  <callout id="c2" tone="info">Other words.</callout>\n)
+          )
+        )
+
+      refute old =~ "<kept"
+      edited = String.replace(old, "Opening paragraph.", "Opening words.")
+
+      for copy <- [old, edited] do
+        answer = push_copy(ctx.slug, copy, ctx.rev) |> json_response(422)
+        assert answer["error"]["code"] == "bpml_stale_copy"
+        assert answer["error"]["hint"] == "bp paper pull, then make your edit again"
+        assert stored(ctx.slug) == ctx.before
+      end
+    end
+
     test "bp paper push --check passes the pulled copy, and fails an edited <kept> by name",
          ctx do
       assert %{"valid" => true, "violations" => []} = check(ctx.bpml)
@@ -291,6 +315,32 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
                  "push it unchanged to the Paper it was pulled from; edit that block in Studio"
              }
            ]
+  end
+
+  test "the inline form over a body with no content key keeps the block byte for byte" do
+    bodied = %{
+      "id" => "c1",
+      "type" => "callout",
+      "tone" => "info",
+      "slots" => %{"body" => [p("c1-a", "The body paragraph.")]}
+    }
+
+    slug = with_blocks!(new_slug(), [p("p1", "Opening paragraph."), bodied])
+    {bpml, rev} = pull!(slug)
+    before = stored(slug)
+    refute bpml =~ "<content>"
+
+    inline =
+      Regex.replace(
+        ~r/  <callout id="c1".*?<\/callout>\n/s,
+        bpml,
+        ~s(  <callout id="c1" tone="info"></callout>\n)
+      )
+
+    answer = push_copy(slug, inline, rev) |> json_response(200)
+    assert answer["unchanged"] == true
+    assert [_note] = answer["notes"]
+    assert stored(slug) == before
   end
 
   # P6

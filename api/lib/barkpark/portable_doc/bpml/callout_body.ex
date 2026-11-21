@@ -114,7 +114,8 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     stored_by_id = by_id(stored)
 
     with :ok <- no_nested_kept(pushed),
-         {:ok, pushed, done} <- resolve_kept(pushed, pulled, stored_by_id),
+         old? = marked?(view) and Map.get(copy, "print") != "2",
+         {:ok, pushed, done} <- resolve_kept(pushed, pulled, stored_by_id, old?),
          {:ok, pushed, notes} <- old_copy(pushed, done, view, stored_by_id, copy),
          {:ok, pushed, more} <- inline_form(pushed, done, view, stored) do
       {:ok, strip_forms(pushed), notes ++ more}
@@ -140,7 +141,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     end)
   end
 
-  defp resolve_kept(pushed, pulled, stored_by_id) do
+  defp resolve_kept(pushed, pulled, stored_by_id, old?) do
     printed = for %{"type" => @kept, "id" => id, "of" => of} <- pulled, into: %{}, do: {id, of}
     counts = Enum.frequencies_by(pushed, & &1["id"])
 
@@ -157,23 +158,31 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       end)
 
     with {:ok, rev} <- resolved,
-         :ok <- every_kept_back(printed, pushed) do
+         :ok <- every_kept_back(printed, pushed, stored_by_id, old?) do
       {:ok, Enum.reverse(rev), MapSet.new(Map.keys(printed))}
     end
   end
 
-  defp every_kept_back(printed, pushed) do
+  # An old copy was pulled before <kept> lines were printed, so it never had
+  # one: it is stale, not an edit of the line.
+  defp every_kept_back(printed, pushed, stored_by_id, old?) do
     kept_ids = for %{"type" => @kept, "id" => id} <- pushed, into: MapSet.new(), do: id
 
     Enum.find_value(printed, :ok, fn {id, of} ->
-      if MapSet.member?(kept_ids, id),
-        do: false,
-        else:
+      cond do
+        MapSet.member?(kept_ids, id) ->
+          false
+
+        old? ->
+          stale(stored_by_id[id])
+
+        true ->
           refuse(
             "bpml_kept",
             "#{of} #{id} was pulled as <kept> and your copy removed or replaced it",
             "BPML cannot change this block: keep its <kept> line as pulled and edit it in Studio"
           )
+      end
     end)
   end
 
@@ -248,8 +257,12 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
         if spells_as?(content_only(c), content_only(v)) do
           s = Map.get(kept, c["id"], v)
 
+          # The stored callout's own content: no content key stays no key.
           block =
-            c |> Map.put("content", Map.get(s, "content", [])) |> Map.put("slots", s["slots"])
+            c
+            |> Map.delete("content")
+            |> Map.merge(Map.take(s, ["content"]))
+            |> Map.put("slots", s["slots"])
 
           {:ok, block, notes ++ [kept_note(c["id"])]}
         else
