@@ -10,18 +10,6 @@
       ],
       "terminus": "api/lib/barkpark_web/live/studio/studio_live.ex:328/342 handle_info({:paper_op, ...}) -> Lifecycle.paper_op/2 -> Shared.paper_op/2 (store write). The handler issues no further self-enqueue."
     },
-    "CH-AUTOSAVE": {
-      "hops": 1,
-      "trigger_events": ["select-media", "clear-image", "upload-image", "select-ref", "clear-ref"],
-      "enqueue_sites": [
-        "api/lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:42  send(self(), {:autosave_form, form})",
-        "api/lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:49  send(self(), {:autosave_form, form})",
-        "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex:59  send(self(), {:autosave_form, form})",
-        "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex:66  send(self(), {:autosave_form, form})",
-        "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex:93  send(self(), {:autosave_form, form})"
-      ],
-      "terminus": "api/lib/barkpark_web/live/studio/studio_live.ex:321 handle_info({:autosave_form, form}) -> Lifecycle.autosave_form/2 -> Shared.do_autosave/2 (store write). No further self-enqueue."
-    },
     "CH-CHAT": {
       "hops": 1,
       "trigger_events": ["send (chat form phx-submit)"],

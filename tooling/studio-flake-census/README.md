@@ -71,7 +71,6 @@ Hop counts are derived in `chains.json`, which cites every enqueue site.
 | chain | hops | the hops |
 |---|---|---|
 | `CH-PAPEROP` | 1 | `paper_field_block.ex:350/352` `send(self(), {:paper_op, …})` |
-| `CH-AUTOSAVE` | 1 | `handlers/refs.ex:42,49` + `handlers/media.ex:59,66,93` `send(self(), {:autosave_form, …})` |
 | `CH-CHAT` | 1 | `chat_live.ex:554` `send(self(), {:dispatch_send, …})` |
 | `CH-TREE` | 3 | `tree_codelist_field.ex:179` `send(self(), {:tree_codelist_change, …})` → `handlers/lifecycle.ex:316` `send_update/3`, which is `send(self(), {:phoenix, :send_update, …})` → `paper_field_block.ex:350/352` `send(self(), {:paper_op, …})` |
 
@@ -112,18 +111,11 @@ not a hand-list; v1's 301-file fence was a snapshot). 67 sites in 13 files.
     by hop count   1-hop: 63      3-hop (CH-TREE): 4
     by verdict     MASKED-BY-BARRIER 57 | RACING-ONE-HOP 6
                    RACING-MULTI-HOP 1  | SETTLED-MULTI-HOP 3
-    by chain       CH-CHAT 37 | CH-PAPEROP 26 | CH-TREE 4 | CH-AUTOSAVE 0
+    by chain       CH-CHAT 37 | CH-PAPEROP 26 | CH-TREE 4
 
-`CH-AUTOSAVE` is zero, and the absence has a control. Its five event names
-appear exactly three times in all of `api/test`, and every one of them is a
-markup assertion, never a driven event:
-
-    field_inputs_test.exs:435       refute html =~ ~s(phx-click="clear-ref")
-    field_inputs_test.exs:505       refute html =~ ~s(phx-click="clear-image")
-    studio_live_editor_test.exs:275 refute html =~ ~s(phx-click="clear-image")
-
-So no test drives the autosave chain at all. (The same pass finds 26
-CH-PAPEROP and 37 CH-CHAT sites, so the machinery is not dead either.)
+This run also counted a fourth chain, `CH-AUTOSAVE` (the old pickers'
+`{:autosave_form, …}`), at zero sites: no test drove it. It went with that
+flow (task-c42545346b93cbb0), and the census no longer looks for it.
 
 ### Leads, ranked. UNMEASURED.
 
