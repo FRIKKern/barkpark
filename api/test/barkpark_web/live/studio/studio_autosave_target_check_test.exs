@@ -21,7 +21,9 @@ defmodule BarkparkWeb.Studio.StudioAutosaveTargetCheckTest do
   by a pds-w43 run on `origin/main`: `save_status: "Saved"` and
   `title == "ESCALATED-BY-AUTOSAVE"` read back from the store.
 
-  `{:autosave_form, form}` (studio_live.ex) is a `handle_INFO`, so
+  `{:autosave_form, form}` (studio_live.ex; since removed,
+  task-c42545346b93cbb0, and `{:tree_codelist_pick, …}` reaches the seam the
+  same way) is a `handle_INFO`, so
   `LiveScope.attach_write_gate/2` — an `attach_hook(_, :handle_event, _)` —
   never observes it. That is the same structural argument that motivated the
   wave-44 door; this seam is the third instance of it.
@@ -221,7 +223,7 @@ defmodule BarkparkWeb.Studio.StudioAutosaveTargetCheckTest do
   end
 
   # The assigns a mount of `slug` in the form editor leaves behind — the shape
-  # `{:autosave_form, form}` finds when it lands.
+  # a `handle_info` write finds when it lands.
   defp with_editor_doc(socket, ws, proj, slug) do
     doc = Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: proj.id)
 

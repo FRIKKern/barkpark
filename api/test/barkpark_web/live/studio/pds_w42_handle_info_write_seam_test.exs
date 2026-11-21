@@ -23,6 +23,11 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
   copy — reusing `Shared.Paper.write_denied?/1` rather than forking a second
   predicate.
 
+  SINCE. The `{:autosave_form, …}` head and the legacy picker events that
+  sent it are gone (task-c42545346b93cbb0). The chokepoint gate stays:
+  `{:tree_codelist_pick, …}` still reaches `Shared.do_autosave/3` from a
+  `handle_info`, and the seam tests below drive it.
+
   HONEST SCOPE, unchanged from the paper slice: "any principal `Caps` denies
   write" — a read-only api_token or a read-only member. NOT "anonymous":
   `write_capable?/2` returns TRUE for a principal-LESS socket by design (the
@@ -71,8 +76,6 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"presence_diff", :no_write},
     # Lifecycle.document_changed/2 — `rebuild_panes` is a read
     {"{:document_changed, msg}", :no_write},
-    # THE SEAM THIS SLICE CLOSES — Content.upsert_draft
-    {"{:autosave_form, form}", :write},
     # closed by pds-w42-paper-op-principal-gate (its own suite)
     {"{:paper_op, %{\"op\" => _} = op, request_id}", :write},
     {"{:paper_op, %{\"op\" => _} = op}, socket)", :write},
@@ -81,7 +84,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"{:tree_codelist_change, msg}", :write},
     # Fields.tree_codelist_pick/2 — a tree codelist pick in the document
     # editor (task-0f806691db0e06dd): buffer put + Shared.do_autosave/3, the
-    # same gated seam as {:autosave_form, …}, for the document its press
+    # gated seam this slice closed, for the document its press
     # names (PostIdentity.pressed/3); run below
     {"{:tree_codelist_pick, msg}", :write},
     # Enablement.forget/1 — drops this process's memo (task-c8a87043cb286a2f)
@@ -264,7 +267,8 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every StudioLive handle_info head is enumerated and classified" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
-      assert length(heads) == 19,
+      # 18 since `{:autosave_form, …}` went (task-c42545346b93cbb0).
+      assert length(heads) == 18,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 
@@ -341,11 +345,6 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/studio_live.ex", "{:drop_focus_query,"},
-               {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
-               {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
-               {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
-               {"live/studio/studio_live/handlers/refs.ex", "{:autosave_form,"},
-               {"live/studio/studio_live/handlers/refs.ex", "{:autosave_form,"},
                {"live/studio/webhooks_live.ex", "{:forget_secret,"}
              ]
     end
@@ -353,7 +352,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
 
   # ── 2. the autosave seam: the run, not a reading ────────────────────────────
 
-  describe "a write-denied principal at the {:autosave_form, …} seam" do
+  describe "a write-denied principal at the Shared.do_autosave seam" do
     test "ROUTE A (control): the `autosave` handle_event is halted by the socket gate",
          %{conn: conn} do
       view = open!(conn, @readonly)
@@ -372,26 +371,10 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       assert socket_of(view).assigns.flash["error"] == "You don't have access to do that."
     end
 
-    test "ROUTE B (the seam): the same intent as a MESSAGE is refused too", %{conn: conn} do
-      view = open!(conn, @readonly)
-      assert_write_denied_socket!(view)
-
-      # No `:handle_event` hook is on this path at all — this is what a future
-      # LiveComponent sender, or a fifteenth handler, would produce.
-      drive_seam(
-        view,
-        {:autosave_form, %{"title" => "Seam Post", "body" => "ESCALATED-VIA-INFO"}}
-      )
-
-      # NON-VACUOUS: read back from the STORE. Remove the chokepoint gate and
-      # this prints `left: "ESCALATED-VIA-INFO"`.
-      assert stored_body() == @untouched
-    end
-
     test "the seam reports the refusal honestly instead of claiming a save", %{conn: conn} do
       view = open!(conn, @readonly)
 
-      drive_seam(view, {:autosave_form, %{"title" => "Seam Post", "body" => "ESCALATED-STATUS"}})
+      drive_seam(view, {:tree_codelist_pick, pick(view, "ESCALATED-STATUS")})
 
       # STORE FIRST — the mechanism assertions below must never shadow it.
       assert stored_body() == @untouched
@@ -399,21 +382,6 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       socket = socket_of(view)
       assert socket.assigns.save_status == "Read-only"
       assert socket.assigns.flash["error"] == "You don't have access to do that."
-    end
-
-    # POSITIVE CONTROL. Refute-on-absence alone cannot tell "the gate works"
-    # from "my fixture never drove anything". The SAME seam, the SAME message,
-    # a principal who IS entitled — the bytes must land.
-    test "POSITIVE CONTROL: a write-capable member drives the same seam and the write LANDS",
-         %{conn: conn} do
-      view = open!(conn, @writer)
-
-      socket = socket_of(view)
-      assert Caps.write_capable?(socket.assigns, Caps.derive(socket)) == true
-
-      drive_seam(view, {:autosave_form, %{"title" => "Seam Post", "body" => "ENTITLED-WRITE"}})
-
-      assert stored_body() == {"ENTITLED-WRITE", :absent}
     end
 
     # The public-demo posture survives. `write_capable?/2` returns TRUE for a
@@ -426,9 +394,20 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       socket = socket_of(view)
       assert Caps.write_capable?(socket.assigns, Caps.derive(socket)) == true
 
-      drive_seam(view, {:autosave_form, %{"title" => "Seam Post", "body" => "ANON-WRITE"}})
+      drive_seam(view, {:tree_codelist_pick, pick(view, "ANON-WRITE")})
 
       assert stored_body() == {"ANON-WRITE", :absent}
+    end
+
+    # task-c42545346b93cbb0: the legacy pickers' `{:autosave_form, …}` door is
+    # gone. Even from a writer the message saves nothing now.
+    test "an {:autosave_form, …} message is no longer a door, even from a writer",
+         %{conn: conn} do
+      view = open!(conn, @writer)
+
+      drive_seam(view, {:autosave_form, %{"title" => "Seam Post", "body" => "OLD-DOOR"}})
+
+      assert stored_body() == @untouched
     end
 
     # The tree codelist pick (task-0f806691db0e06dd) rides the same seam: the

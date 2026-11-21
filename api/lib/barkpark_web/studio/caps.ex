@@ -140,8 +140,8 @@ defmodule BarkparkWeb.Studio.Caps do
   # The remedy IF that posture ever changes is NOT a tier bump but a
   # capability check in the handler itself (`Caps.derive(socket).read`), which
   # is the only place in this path that can tell an anonymous socket apart.
-  # `select-view` (Gyldendal parity E10) is the same shape as `search`,
-  # `ref-search` and `backlinks-refresh` above it: a UI event whose only effect
+  # `select-view` (Gyldendal parity E10) is the same shape as `search` and
+  # `backlinks-refresh` above it: a UI event whose only effect
   # is a SCOPED read through `Content.list_documents/3`, filtered to the open
   # document's own id. It reads no capability the socket does not already hold
   # to see the document it is standing on, and it writes nothing. `view-more`
@@ -152,7 +152,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # makes. It writes nothing.
   #
   # `desk-search` / `desk-search-clear` (Gyldendal parity E8) sit beside
-  # `search` and `ref-search` below for the same reason: the only effect is a
+  # `search` below for the same reason: the only effect is a
   # SCOPED read, through `Query.search_documents_across_types/4`, which carries
   # the tenant, owner, grant and schema-visibility guards of the typeless batch
   # read and refuses a caller with no workspace outright. Clearing writes
@@ -170,10 +170,9 @@ defmodule BarkparkWeb.Studio.Caps do
     jump-to-user show-profile preview-profile close-profile
     toggle-content-preview toggle-diff toggle-category editor-set-mode
     width-bucket
-    search ref-search validate-upload reload-remote-doc
+    search reload-remote-doc
     select-view view-more
     desk-search desk-search-clear desk-list-more select-sort
-    open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal object-dialog-close
     open-secondary-picker close-secondary-picker secondary-search
@@ -223,7 +222,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # unclassified event fails closed (require admin) until explicitly classified.
   @write_events ~w(
     create-workspace create-project new-document save slug-generate autosave
-    array_op select-media clear-image upload-image select-ref clear-ref
+    array_op
     restore-revision save-profile delete-doc confirm-delete
     discard-draft confirm-discard
     duplicate-doc toggle-doc-checkbox desk-doc-paste desk-undo

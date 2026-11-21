@@ -74,9 +74,6 @@ defmodule BarkparkWeb.Studio.StudioQuotaGateTest do
 
   defp fire(view, "new-document"), do: render_click(view, "new-document", %{"type" => @type_name})
 
-  defp fire(view, "upload-image"),
-    do: BarkparkWeb.EditorPost.press(view, "upload-image", %{"field" => "image"})
-
   defp fire(view, event), do: BarkparkWeb.EditorPost.press(view, event)
 
   defp suspend!(ws_id), do: {:ok, _} = Quota.suspend(Tenancy.get_workspace_by_id(ws_id), "test")
@@ -101,11 +98,11 @@ defmodule BarkparkWeb.Studio.StudioQuotaGateTest do
 
   test "a suspended workspace: every write is refused with a flash and writes nothing",
        %{conn: conn, ws_id: ws_id} do
-    ids = for _ <- 1..5, do: new_doc!()
+    ids = for _ <- 1..4, do: new_doc!()
     conn = user_conn(conn, ws_id, "member")
     suspend!(ws_id)
 
-    for {event, id} <- Enum.zip(~w(save publish new-document duplicate-doc upload-image), ids) do
+    for {event, id} <- Enum.zip(~w(save publish new-document duplicate-doc), ids) do
       before = snapshot(id)
       {:ok, view, _} = open(conn, id)
 

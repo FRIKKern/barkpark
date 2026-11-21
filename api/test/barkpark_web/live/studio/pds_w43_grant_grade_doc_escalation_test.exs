@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.PdsW43GrantGradeDocEscalationTest do
 
   ## ONE SIBLING SEAM IS NOT CLOSED — reported, not fixed here
 
-  `Shared.do_autosave/2` (the `{:autosave_form, …}` `handle_info`) gates on
+  `Shared.do_autosave/2` (reached from a `handle_info`) gates on
   `write_denied?/1` ALONE and never consults the target. The last case drives it
   on the very socket whose escalation the paper seams refuse and records what
   reaches the store. Its result is stated as the run found it. Any remedy is an

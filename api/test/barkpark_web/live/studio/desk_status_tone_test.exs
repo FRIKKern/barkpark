@@ -115,12 +115,20 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
              end)
 
       assert status(a) == "Updated by another user"
+
+      # The footer's words, where its caution rule reaches them
+      # (task-d64e58f43f48de16).
+      footer =
+        ~s(#{@pane}[data-desk-save="Updated by another user"][data-desk-conflict] .dk-edit-footer button.dk-footer-status .save-state)
+
+      assert has_element?(a, footer, "Updated by another user")
     end
 
-    # #28139 review: a save through `{:autosave_form, …}` (a reference or an
-    # image pick) says "Saved" but leaves `doc_conflict` set; the mark follows
-    # the words, so "Saved" is not drawn as a refusal.
-    test "a pick's save during a conflict says Saved, with no conflict mark", c do
+    # #28139 review: a save that says "Saved" while `doc_conflict` is still
+    # set (the legacy pick's `{:autosave_form, …}` did, before it was removed,
+    # task-c42545346b93cbb0) is not drawn as a refusal: the mark follows the
+    # words.
+    test "Saved during a conflict carries no conflict mark", c do
       a = open(c.conn, c.path)
       b = open(c.conn, c.path)
 
@@ -139,7 +147,10 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       save_from(b, "From B")
       assert eventually(fn -> has_element?(a, "#{@pane}[data-desk-conflict]") end)
 
-      send(a.pid, {:autosave_form, %{"title" => "From B", "excerpt" => "Mine"}})
+      :sys.replace_state(a.pid, fn state ->
+        socket = state.socket
+        %{state | socket: %{socket | assigns: Map.put(socket.assigns, :save_status, "Saved")}}
+      end)
 
       assert eventually(fn -> has_element?(a, ~s(#{@pane}[data-desk-save="Saved"])) end)
       assert :sys.get_state(a.pid).socket.assigns.doc_conflict == true
@@ -147,6 +158,8 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       assert status(a) == "Saved"
     end
 
+    # task-22f40460dbb71b27: taken in, it says nothing (as TanStack), so it
+    # carries neither the words nor the conflict mark.
     test "over a form with nothing unsaved, the save is taken in with no conflict mark", c do
       a = open(c.conn, c.path)
       b = open(c.conn, c.path)
@@ -154,9 +167,10 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       save_from(b, "From B")
 
       assert eventually(fn ->
-               has_element?(a, ~s(#{@pane}[data-desk-save="Updated by another user"]))
+               :sys.get_state(a.pid).socket.assigns.editor_form["title"] == "From B"
              end)
 
+      refute has_element?(a, ~s(#{@pane}[data-desk-save="Updated by another user"]))
       refute has_element?(a, "#{@pane}[data-desk-conflict]")
     end
   end

@@ -329,7 +329,7 @@ defmodule BarkparkWeb.LiveScope do
     scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
     jump-to-user show-profile preview-profile close-profile
     toggle-content-preview toggle-diff toggle-category
-    editor-set-mode search ref-search validate-upload
+    editor-set-mode search
   )
 
   defp maybe_attach_readonly_gate(socket, :share_read),
