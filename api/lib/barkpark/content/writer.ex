@@ -1204,8 +1204,8 @@ defmodule Barkpark.Content.Writer do
   # content["title"] by projection (mirroring synthesize_blocks/3).
   defp scaffold_expectation(attrs, %SchemaDefinition{} = schema, dataset, opts) do
     %{layout: layout, prefill: prefill} = Content.resolve_expectation(schema)
-    prefill = Today.resolve(prefill, today(attrs, schema, opts))
-    provided = Map.get(attrs, "content") || %{}
+    resolved = Today.resolve(prefill, today(attrs, schema, opts))
+    {prefill, provided} = Content.InitialValues.cancel(resolved, attrs["content"])
 
     values =
       provided

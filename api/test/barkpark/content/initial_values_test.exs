@@ -83,6 +83,82 @@ defmodule Barkpark.Content.InitialValuesTest do
            }
   end
 
+  test "merge and cancel: a null clears a falsy initial value too; content that is not a map wins whole" do
+    iv = %{"f" => false, "z" => 0, "s" => "", "l" => [], "m" => %{}}
+    nulls = Map.new(iv, fn {k, _} -> {k, nil} end)
+    assert InitialValues.merge(iv, nulls) == %{}
+    assert InitialValues.cancel(iv, nulls) == {%{}, %{}}
+    assert InitialValues.merge(%{"a" => 1}, "text") == "text"
+    # cancel: the cleared path leaves both sides; other nulls and values stay with the caller.
+    assert InitialValues.cancel(%{"a" => 1, "m" => %{"d" => 2}}, %{
+             "a" => nil,
+             "x" => nil,
+             "m" => %{"d" => nil}
+           }) ==
+             {%{"m" => %{}}, %{"x" => nil, "m" => %{}}}
+
+    assert InitialValues.cancel(%{"a" => 1}, nil) == {%{"a" => 1}, %{}}
+  end
+
+  test "a layout type (its scaffold fills the prefill): publisert null stays empty, kind null is not stored" do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "lsak",
+          "title" => "Layout sak",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{"name" => "publisert", "type" => "date"}
+          ],
+          "layout" => [
+            %{"kind" => "field", "name" => "title"},
+            %{"kind" => "field", "name" => "publisert"},
+            %{"kind" => "region", "name" => "body"}
+          ],
+          "initial_values" => %{"publisert" => "$today", "kind" => "nyhet"}
+        },
+        @ds
+      )
+
+    id = new_id()
+
+    {:ok, _} =
+      Mutations.apply_mutations(
+        [
+          %{
+            "create" => %{
+              "_id" => id,
+              "_type" => "lsak",
+              "title" => "T",
+              "publisert" => nil,
+              "kind" => nil
+            }
+          }
+        ],
+        @ds
+      )
+
+    {:ok, doc} = Content.get_document("drafts." <> id, "lsak", @ds)
+
+    # Its field block is empty, so the projection reads "" (a layout type's empty field), not the prefill.
+    assert doc.content["publisert"] == "",
+           "publisert came back: #{inspect(doc.content["publisert"])}"
+
+    refute Map.has_key?(doc.content, "kind")
+    # Left out, the scaffold still fills it: absent is Barkpark's.
+    other = new_id()
+
+    {:ok, _} =
+      Mutations.apply_mutations(
+        [%{"create" => %{"_id" => other, "_type" => "lsak", "title" => "T"}}],
+        @ds
+      )
+
+    {:ok, filled} = Content.get_document("drafts." <> other, "lsak", @ds)
+    assert filled.content["publisert"] =~ ~r/^\d{4}-\d\d-\d\d$/
+  end
+
   defp new_id, do: "sak-#{System.unique_integer([:positive])}"
 
   defp stored(id) do
