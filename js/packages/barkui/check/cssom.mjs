@@ -10,7 +10,10 @@
 // their values); animation names from KEYFRAMES only; inside the phone
 // breakpoint only PHONE_ONLY (layout and type); selectors to the pseudo-classes
 // and pseudo-elements in check/selectors.mjs, a pinned state only on the element
-// a rule styles. Any other rule type, condition, property or selector is refused.
+// a rule styles. Any other rule type, condition, property or selector is refused. A sheet outside the part-sheet
+// forms is refused by the text lint (sheetForms in build/css-lint.mjs); inside them, each rule the text writes is
+// given to the browser alone (check/sheet-text.mjs), and one it drops whole, for a selector or condition it does
+// not know, is refused by name, as is one whose text alone is not the rule the whole sheet holds in its place.
 //
 // The page loads every part in one barkui.css, so part.css must also end where
 // its rules end: a rule placed after it (SENTINEL) must come back as a rule of
@@ -22,6 +25,7 @@ import { pinStates } from '../build/showroom.mjs'
 import { EXTRA, KEYFRAMES, LEFT_OUT_INITIAL, MEDIA, MOTION_ONLY, PHONE, PHONE_ONLY, VOCABULARY } from '../build/vocabulary.mjs'
 import { readFileSync } from 'node:fs'
 import { resolve, selectorFindings, statesOnSubject, strip, unpinned } from './selectors.mjs'
+import { browserReadings, sheetFindings, textBlocks } from './sheet-text.mjs'
 
 const SENTINEL = '[data-barkui-sentinel] { gap: 0px; }'
 
@@ -50,7 +54,7 @@ export async function readPartCss(browser, css) {
   try {
     const page = await context.newPage()
     const { found, selectors, rules, pinnedSelectors } = await page.evaluate(
-      ([texts, sentinel, rulesSrc, vocabulary, motionOnly, extra, leftOut, keyframes, media, phone, phoneOnly]) => {
+      ([texts, sentinel, rulesSrc, vocabulary, motionOnly, extra, leftOut, keyframes, media, phone, phoneOnly, written, readingsSrc, findingsSrc]) => {
         const found = []
         const selectors = []
         // Every longhand a vocabulary property sets, as this browser expands it.
@@ -144,6 +148,9 @@ export async function readPartCss(browser, css) {
         }
         const asWritten = layer(texts.asWritten, true)
         if (asWritten) walk(asWritten, { inMotion: false, inPhone: false, media: [] }, -1)
+        // Every rule the text writes is one the browser read alone and in the whole sheet, or the sheet is refused
+        // (check/sheet-text.mjs).
+        if (asWritten) found.push(...(0, eval)(`(${findingsSrc})`)([written, (0, eval)(`(${readingsSrc})`)([written, asWritten])]))
         const pinned = asWritten && layer(texts.pinned, true)
         const pinnedSelectors = []
         if (pinned) {
@@ -157,7 +164,7 @@ export async function readPartCss(browser, css) {
         }
         return { found, selectors, rules: pinned ? ruleList(pinned) : null, pinnedSelectors }
       },
-      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY]],
+      [{ asWritten: inPartsLayer(`${css}\n${SENTINEL}`), pinned: pinStates(inPartsLayer(`${css}\n${SENTINEL}`)) }, SENTINEL, RULES, [...VOCABULARY], [...MOTION_ONLY], EXTRA, LEFT_OUT_INITIAL, KEYFRAMES, MEDIA, PHONE, [...PHONE_ONLY], textBlocks(css), browserReadings.toString(), sheetFindings.toString()],
     )
     const has = []
     selectors.forEach((s, i) => {
