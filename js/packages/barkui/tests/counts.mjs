@@ -66,7 +66,10 @@ function copyWith(scratch, n) {
 export function walk(most = MOST_PARTS, { plant } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-part-counts-'))
   try {
-    for (let n = 1; n <= most; n++) plant?.(join(copyWith(scratch, n), below), n)
+    for (let n = 1; n <= most; n++) {
+      const dir = join(copyWith(scratch, n), below)
+      if (plant) plant(dir, n)
+    }
     const config = join(scratch, 'vitest.config.mjs')
     writeFileSync(config, `export default { test: { environment: 'node', include: ${JSON.stringify(walkInclude())} } }\n`)
     const out = join(scratch, 'results.json')

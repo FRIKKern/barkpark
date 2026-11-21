@@ -4,13 +4,21 @@ import { execFileSync } from 'node:child_process'
 import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import config from '../vitest.config.ts'
 import { changedSince, main, walk, WALK_SECONDS, walkInclude, walkNeeded } from './counts.mjs'
 
-// The walk step in js-tests.yml, whole: the one allowed form. Any edit to the step is red here until this pin is
-// changed on purpose, in the same change.
-const STEP = `      - name: "BarkUI: the fast tests hold at every part count"
+// The walk step in js-tests.yml, whole, with the comment above it: the one allowed form. Any edit to either is red
+// here until this pin is changed on purpose, in the same change; the red says so, and so does the comment.
+const STEP = `      # BarkUI's fast tests hold for every number of parts the showroom allows, 1 to MOST_PARTS
+      # (js/packages/barkui/check/jobs.mjs): the walk runs them once per count, about a minute, so it is
+      # not one of the fast tests. On a pull request the walk decides from the files changed since the base
+      # (walkNeeded in js/packages/barkui/tests/counts.mjs): it is skipped only when every changed file is
+      # in another package; on main it always walks. Its bound is inside the walk (WALK_SECONDS); the
+      # step's timeout is the backstop. This comment and the step are pinned whole, byte for byte, by STEP in
+      # js/packages/barkui/tests/counts.test.mjs: an edit here is red until STEP is changed in the same change.
+      - name: "BarkUI: the fast tests hold at every part count"
         timeout-minutes: 15
         run: |
           if [ "\${{ github.event_name }}" = "pull_request" ]; then
@@ -83,8 +91,9 @@ describe('the walk of every part count', () => {
     const at = wf.indexOf('      - name: "BarkUI: the fast tests hold at every part count"\n')
     expect(at).toBeGreaterThan(0)
     expect(wf.indexOf('      - name: "BarkUI: the fast tests hold at every part count"', at + 1)).toBe(-1)
-    // The step ends at the first blank line: everything up to it is the step, and it is the pin, byte for byte.
-    expect(wf.slice(at, wf.indexOf('\n\n', at) + 1)).toBe(STEP)
+    // The block runs from the blank line above the comment to the first blank line after the step, and it is the pin.
+    const block = wf.slice(wf.lastIndexOf('\n\n', at) + 2, wf.indexOf('\n\n', at) + 1)
+    expect(block, 'The BarkUI walk step in .github/workflows/js-tests.yml, or the comment above it, is not the pinned text. If the change is on purpose, change STEP in js/packages/barkui/tests/counts.test.mjs to match, in the same change.').toBe(STEP)
     expect(Number(STEP.match(/timeout-minutes: (\d+)/)[1]) * 60).toBeGreaterThan(WALK_SECONDS)
     // Its job is the one that runs the fast tests first, and the job has no condition and nothing that lets it pass.
     const job = wf.slice(wf.lastIndexOf('\n  test:\n', at), at)
@@ -110,7 +119,14 @@ describe('the walk of every part count', () => {
   // Real walks of two counts, with the copies planted: each turns the walk red by name. Inside a walk's copy they
   // hold nothing (the walk sets BARKUI_IN_WALK): they read the walk, not the part count, and a walk in every copy
   // would multiply its time.
+  // Only a file in a walk's own copy may skip: BARKUI_IN_WALK set by hand anywhere else is red, never a skip.
+  const inCopy = /barkui-part-counts-[^/\\]+[/\\]n\d+[/\\]/.test(fileURLToPath(import.meta.url))
   const outer = !process.env.BARKUI_IN_WALK
+  const skips = () => {
+    if (outer) return false
+    expect(inCopy, 'BARKUI_IN_WALK is set, but this file is not in a copy the walk made').toBe(true)
+    return true
+  }
   const tiny = (dir, body) => {
     rmSync(join(dir, 'tests'), { recursive: true, force: true })
     if (body === null) return
@@ -120,13 +136,13 @@ describe('the walk of every part count', () => {
   const passing = "import { it, expect } from 'vitest'\nit('holds', () => expect(1).toBe(1))\n"
 
   it('fails by name when it runs fewer copies than it says', () => {
-    if (!outer) return
+    if (skips()) return
     const found = walk(2, { plant: (dir, n) => tiny(dir, n === 1 ? passing : null) })
     expect(found).toContain('the walk ran 1 of 2 counts')
   })
 
   it('fails by name when a test file in a copy does not load', () => {
-    if (!outer) return
+    if (skips()) return
     const found = walk(2, { plant: (dir, n) => tiny(dir, n === 1 ? passing : "import './gone.mjs'\n" + passing) })
     expect(found.some((f) => /^n02 a\.test\.mjs: the file did not load: /.test(f))).toBe(true)
     expect(found.filter((f) => f.startsWith('n01 '))).toEqual([])
