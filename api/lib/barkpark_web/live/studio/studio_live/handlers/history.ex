@@ -64,24 +64,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   def restore_revision(_params, socket),
     do: {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
 
-  @doc """
-  The rev a Restore or Revert button names: that of the document the page shows.
-
-  In paper view that is `paper_doc`. The pane rebuild sets it from
-  `editor_doc`'s row (`Shared.Paper.setup_paper_view/2`); after that the page's
-  own paper ops and the frames it paints re-read `paper_doc` only
-  (`Shared.Paper.sync_paper_edit_doc/1`), and `editor_doc` keeps the row from
-  the rebuild. Should the two name different rows, `editor_doc`'s rev is named.
-  """
-  def seen_rev(%{editor_view: :paper, paper_doc: %{} = paper, editor_doc: %{} = doc}),
-    do: shown_paper_rev(paper, doc)
-
-  def seen_rev(%{editor_doc: %{} = doc}), do: Map.get(doc, :rev)
-  def seen_rev(_assigns), do: nil
-
-  defp shown_paper_rev(%{doc_id: id, rev: rev}, %{doc_id: id}) when is_binary(id), do: rev
-  defp shown_paper_rev(_paper, doc), do: Map.get(doc, :rev)
-
   defp revision_of_open_doc?(rev_id, socket) do
     with %{doc_id: open_id} when is_binary(open_id) <- socket.assigns[:editor_doc],
          type when is_binary(type) <- socket.assigns[:editor_type],
