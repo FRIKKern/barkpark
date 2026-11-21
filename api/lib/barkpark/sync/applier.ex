@@ -205,7 +205,12 @@ defmodule Barkpark.Sync.Applier do
     mutations =
       [%{"createOrReplace" => result}] ++ maybe_publish(result, type)
 
-    case Content.apply_mutations(mutations, dataset, scope ++ [source: :sync]) do
+    # A mirror writes what the remote holds, fixed types too (Content.FixedDocuments).
+    case Content.apply_mutations(
+           mutations,
+           dataset,
+           scope ++ [source: :sync, fixed_documents: :skip]
+         ) do
       {:ok, _} -> {:ok, :applied}
       {:error, _} = err -> err
     end
@@ -237,7 +242,13 @@ defmodule Barkpark.Sync.Applier do
 
     cond do
       is_binary(doc_id) and is_binary(type) ->
-        case Content.delete_document(doc_id, type, dataset, scope ++ [source: :sync]) do
+        # A mirror applies the remote's delete as is (Content.FixedDocuments).
+        case Content.delete_document(
+               doc_id,
+               type,
+               dataset,
+               scope ++ [source: :sync, fixed_documents: :skip]
+             ) do
           {:ok, _} -> {:ok, :applied}
           {:error, :not_found} -> {:ok, :applied}
           {:error, _} = err -> err
