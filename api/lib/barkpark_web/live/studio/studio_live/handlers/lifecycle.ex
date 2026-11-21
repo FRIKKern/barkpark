@@ -226,7 +226,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           cond do
             PaperCanvas.paper_canvas_enabled?() ->
               socket
-              |> Shared.sync_paper_edit_doc()
               |> Shared.push_block_to_wc(frame.block_id)
               |> Paper.push_canvas_echo()
 
