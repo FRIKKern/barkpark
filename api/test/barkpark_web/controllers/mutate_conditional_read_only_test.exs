@@ -91,6 +91,69 @@ defmodule BarkparkWeb.MutateConditionalReadOnlyTest do
     assert set(id, %{"title" => "T2"}).status == 200
   end
 
+  # task-65ce4299f6f432f0: a condition on an envelope key reads the stored row's
+  # envelope, as the Studio's document has it. HSO's Sanity source locks a field
+  # once the document exists: readOnly: ({document}) => Boolean(document?._createdAt).
+  defp omrade(ws_id, key) do
+    type = "omrade_#{String.trim_leading(key, "_")}"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => type,
+          "title" => type,
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{
+              "name" => "farge",
+              "title" => "Farge",
+              "type" => "string",
+              "readOnly" => %{"field" => key, "operator" => "non_empty"}
+            }
+          ]
+        },
+        @dataset,
+        workspace_id: ws_id
+      )
+
+    type
+  end
+
+  defp saved_then_patched(type, id) do
+    created = mutate([%{"create" => %{"_id" => id, "_type" => type, "farge" => "rod"}}])
+    patch = %{"patch" => %{"id" => id, "type" => type, "set" => %{"farge" => "bla"}}}
+    {created.status, mutate([patch]).status}
+  end
+
+  test "a readOnly condition on _createdAt refuses the write on a saved document and allows it on the create",
+       %{id: id, ws_id: ws_id} do
+    type = omrade(ws_id, "_createdAt")
+    assert saved_then_patched(type, id) == {200, 422}
+
+    {:ok, doc} = Content.get_document("drafts." <> id, type, @dataset, workspace_id: ws_id)
+    assert doc.content["farge"] == "rod"
+    title = %{"patch" => %{"id" => id, "type" => type, "set" => %{"title" => "T"}}}
+    assert mutate([title]).status == 200
+  end
+
+  test "_updatedAt, _id and _type read the stored row's envelope; a content field as before",
+       %{id: id, ws_id: ws_id} do
+    for key <- ~w(_updatedAt _id _type) do
+      assert saved_then_patched(omrade(ws_id, key), "#{id}#{key}") == {200, 422}, key
+    end
+
+    # A content field: locked once it holds a value, writable while it is empty.
+    type = omrade(ws_id, "farge")
+    assert saved_then_patched(type, id) == {200, 422}
+
+    assert mutate([%{"create" => %{"_id" => "#{id}-e", "_type" => type, "title" => "T"}}]).status ==
+             200
+
+    set = %{"patch" => %{"id" => "#{id}-e", "type" => type, "set" => %{"farge" => "rod"}}}
+    assert mutate([set]).status == 200
+  end
+
   test "the Studio resolves the condition against the form" do
     alias Barkpark.Content.ReadOnlyFields
 
