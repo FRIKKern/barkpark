@@ -227,14 +227,31 @@ const CASES = [
     only: ['pressed'],
     states: true,
     green: true,
+    // A caret blinks, so a reading's pictures can catch it in one and not the next. This field's caret does that on
+    // purpose: it is held on (no blink) and goes out while the reading has the glyphs unpainted.
+    css: '#button-caret { caret-animation: manual; }',
     plant: (d) => {
       appendFileSync(join(d, 'example.html'), '\n<div data-demo-row>\n  <input id="button-caret" data-slot="input" placeholder="Caret">\n</div>\n')
-      // Each expect is sent to the page alone, so each step is written out whole, with nothing shared.
-      const step = (n) => `{ name: 'a focused empty field, reading ${n}', wait: 150, expect: (root) => {${n === 1 ? " root.querySelector('#button-caret').focus();" : ''} return document.activeElement === root.querySelector('#button-caret') || 'the field lost focus' } }`
-      appendFileSync(join(d, 'press.mjs'), `\nsteps.push(\n  ${[1, 2, 3, 4, 5, 6, 7, 8].map(step).join(',\n  ')},\n)\n`)
+      appendFileSync(join(d, 'press.mjs'), `
+steps.push({
+  name: 'a focused empty field whose caret shows in one picture only',
+  expect: (root) => {
+    const field = root.querySelector('#button-caret')
+    field.focus()
+    const out = document.createElement('style')
+    out.textContent = '#button-caret { caret-color: transparent; }'
+    new MutationObserver(() => {
+      const unpainted = getComputedStyle(field).webkitTextFillColor === 'rgba(0, 0, 0, 0)'
+      if (unpainted && !out.isConnected) document.head.append(out)
+      if (!unpainted && out.isConnected) out.remove()
+    }).observe(document.head, { childList: true })
+    return document.activeElement === field || 'the field lost focus'
+  },
+})
+`)
     },
     expect: each({
-      'all eight readings ran': (p) => /19 steps by real keys|a focused empty field, reading 8/.test(lights(p).pressed?.detail ?? ''),
+      'the reading ran': (p) => /12 steps by real keys|caret shows in one picture only/.test(lights(p).pressed?.detail ?? ''),
       'a focused empty field with a placeholder draws in full': (p) => !reasons(p, 'pressed').some((f) => /at input#button-caret/.test(f)),
     }),
   },
