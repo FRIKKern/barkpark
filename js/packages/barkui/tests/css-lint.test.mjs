@@ -137,3 +137,23 @@ describe('lintPartCss', () => {
       expect(lintPartCss(css).join(), css).toMatch(/line 1: @(media|container|supports) .*not a view the check renders/)
   })
 })
+
+// The forms a part sheet is written in, so its text reads one way in the lint, in the check's text reader and in
+// the browser (build/css-lint.mjs sheetForms). Outside them, each is refused by name; inside them, nothing is.
+describe('the forms a part sheet is written in', () => {
+  const refuses = {
+    'a url( with no quoted string straight after it': ['a { --i: url(data:image/svg+xml,%3Csvg/%3E); }', /line 1: url\( with no quoted string straight after it/],
+    'a url( with a space before its string': ['a { --i: url( "data:image/svg+xml,%3Csvg/%3E"); }', /line 1: url\( with no quoted string/],
+    'a string that runs past the end of its line': ['a {\n  --y: "a\n; }', /line 2: a string runs past the end of its line/],
+    'a comment inside a value': ['a { gap: 0 /* x */; }', /line 1: a comment inside a selector, a condition or a value/],
+    'a comment inside a selector': ['a /* x */ b { gap: 0; }', /line 1: a comment inside a selector, a condition or a value/],
+    'a comment never closed': ['a { gap: 0; } /* x', /line 1: a comment is never closed/],
+    'a backslash outside a string': [String.raw`a\:b { gap: 0; }`, /line 1: a backslash/],
+  }
+  for (const [what, [css, re]] of Object.entries(refuses)) it(`refuses ${what}`, () => expect(lintPartCss(css).join('\n')).toMatch(re))
+
+  it('reads a /* inside a quoted string or a quoted url( as no comment, and passes comments between declarations and rules', () => {
+    expect(lintPartCss('/* top */\na { /* first */ gap: 0; /* after */ }\n/* between */\nb { gap: 0; }')).toEqual([])
+    expect(lintPartCss(`a { --i: url("data:image/svg+xml,%3Csvg fill='currentColor'/%3E/*"); } b { color: #fff; } c { --j: url("*/"); }`).join('\n')).toMatch(/color uses a hex colour \(#fff\)/)
+  })
+})

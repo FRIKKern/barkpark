@@ -10,9 +10,10 @@
 // their values); animation names from KEYFRAMES only; inside the phone
 // breakpoint only PHONE_ONLY (layout and type); selectors to the pseudo-classes
 // and pseudo-elements in check/selectors.mjs, a pinned state only on the element
-// a rule styles. Any other rule type, condition, property or selector is refused. Each rule the text writes is
-// also given to the browser alone (check/sheet-text.mjs): one it drops whole, for a selector or condition it does
-// not know, is refused by name, and a sheet the check cannot read rule for rule the way the browser does is refused.
+// a rule styles. Any other rule type, condition, property or selector is refused. A sheet outside the part-sheet
+// forms is refused by the text lint (sheetForms in build/css-lint.mjs); inside them, each rule the text writes is
+// given to the browser alone (check/sheet-text.mjs), and one it drops whole, for a selector or condition it does
+// not know, is refused by name, as is one whose text alone is not the rule the whole sheet holds in its place.
 //
 // The page loads every part in one barkui.css, so part.css must also end where
 // its rules end: a rule placed after it (SENTINEL) must come back as a rule of

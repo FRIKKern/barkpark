@@ -304,6 +304,12 @@ const CASES = [
     ['an escaped outline', String.raw`#button-after { outl\000069ne: none; }`, /a backslash/],
     ['a paint change at phone width, on one surface', '@media (max-width: 600px) { [data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); --bark-button-edge: var(--bark-button-bg); } }', /--bark-button-fg inside @media \(max-width: 600px\): only layout and type/],
     ['a brace that closes the bark-parts layer early', '} [data-slot="button"] { box-shadow: none; } @layer bark-parts {', /a \} with no \{ before it/],
+    // The forms a part sheet is written in (build/css-lint.mjs sheetForms), each refused by name outside them.
+    ['a url( with no quoted string straight after it', '#button-after { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor/%3E); }', /url\( with no quoted string straight after it/],
+    ['a string that runs past the end of its line', '#button-after { --bark-y: "a\n; }', /a string runs past the end of its line/],
+    ['a comment inside a value', '#button-after { gap: 0px /* x */; }', /a comment inside a selector, a condition or a value/],
+    ['a comment inside a selector', '#button-after /* x */ span { gap: 0px; }', /a comment inside a selector, a condition or a value/],
+    ['a comment opened in an unquoted url( that hides a dropped rule', '[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E/*%3C/svg%3E); }\n[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E*/}[data-slot="button"]{%3C/svg%3E); }', /url\( with no quoted string straight after it/],
   ].map(([what, css, re]) => ({
     name: `part.css with ${what} is refused at discovery`,
     only: ['pressed'],
@@ -419,6 +425,8 @@ const CASES = [
           ['@layer x;\na:bark-made-up { gap: 0; }', /does: at the top of part\.css: part\.css writes 0 rule\(s\) the browser reads alone, and the browser reads 1/, true],
           // A brace inside an unquoted url(), which the text reader takes for a block.
           ['a { --x: url({); }\nb { gap: 0; }', cannot, true],
+          // A comment opened inside an unquoted url(), which hides a dropped rule from the text reader.
+          ['[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E/*%3C/svg%3E); }\n[data-slot="button"]:bark-made-up { color: var(--ui-foreground); }\n[data-slot="button"] { --bark-i: url(data:image/svg+xml,%3Csvg%20fill=currentColor%3E*/}[data-slot="button"]{%3C/svg%3E); }', cannot, true],
           // Nothing refused where the two readings agree.
           ['[title="{"] { content: "}"; } a\\{b { gap: 0 } /* } */ c { gap: 0; }', either, false],
           ['a { gap: 0; &:hover { gap: 1px; } gap: 2px; @media (max-width: 600px) { gap: 3px; } }', either, false],
