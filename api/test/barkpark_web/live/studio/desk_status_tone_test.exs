@@ -3,8 +3,9 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
   task-0ab0e8ca066765f0: "Updated by another user" over edits not saved
   here is TanStack's `refused` state, so `Desk.DocStyle` tones the form's
   status by the marks on the edit pane (`data-desk-save`,
-  `data-desk-conflict`). Over a form with nothing unsaved the remote save is
-  simply taken in, and the pane carries no conflict mark.
+  `data-desk-conflict`, set while `doc_conflict` is and the status still
+  says so). Over a form with nothing unsaved the remote save is simply
+  taken in, and the pane carries no conflict mark.
 
   "Read-only" is in the same rule (pinned in `DeskDocStyleTest`) but has no
   row here: the desk mounts for admins only, and an admin's write is never
@@ -114,6 +115,36 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
              end)
 
       assert status(a) == "Updated by another user"
+    end
+
+    # #28139 review: a save through `{:autosave_form, …}` (a reference or an
+    # image pick) says "Saved" but leaves `doc_conflict` set; the mark follows
+    # the words, so "Saved" is not drawn as a refusal.
+    test "a pick's save during a conflict says Saved, with no conflict mark", c do
+      a = open(c.conn, c.path)
+      b = open(c.conn, c.path)
+
+      :sys.replace_state(a.pid, fn state ->
+        socket = state.socket
+
+        assigns =
+          Map.merge(socket.assigns, %{
+            editor_dirty: true,
+            editor_unsaved_keys: MapSet.new(["excerpt"])
+          })
+
+        %{state | socket: %{socket | assigns: assigns}}
+      end)
+
+      save_from(b, "From B")
+      assert eventually(fn -> has_element?(a, "#{@pane}[data-desk-conflict]") end)
+
+      send(a.pid, {:autosave_form, %{"title" => "From B", "excerpt" => "Mine"}})
+
+      assert eventually(fn -> has_element?(a, ~s(#{@pane}[data-desk-save="Saved"])) end)
+      assert :sys.get_state(a.pid).socket.assigns.doc_conflict == true
+      refute has_element?(a, "#{@pane}[data-desk-conflict]")
+      assert status(a) == "Saved"
     end
 
     test "over a form with nothing unsaved, the save is taken in with no conflict mark", c do
