@@ -35,12 +35,12 @@ export function folderNames(dir = partsDir) {
 
 // The most groups, written here once. .github/required-checks.json holds one row for each of groups 1 to
 // MOST_GROUPS (a test holds the rows to this number), so the split never makes a group without a row: the parts,
-// real and proof copies together, stop at MOST_GROUPS × PER_JOB, and past that the run is refused (the readme says
+// real and proof copies together, stop at MOST_GROUPS × PER_JOB, and past that the run is refused (docs/PARTS.md says
 // what to do then).
 export const MOST_GROUPS = 8
 export const MOST_PARTS = MOST_GROUPS * PER_JOB
 const OUTGROWN = (n) =>
-  `jobs: ${n} parts, more than ${MOST_GROUPS} groups of ${PER_JOB} hold (${MOST_PARTS}); raise MOST_GROUPS in check/jobs.mjs and add the new group rows to .github/required-checks.json, as js/packages/barkui/README.md says`
+  `jobs: ${n} parts, more than ${MOST_GROUPS} groups of ${PER_JOB} hold (${MOST_PARTS}); raise MOST_GROUPS in check/jobs.mjs and add the new group rows to .github/required-checks.json, as js/packages/barkui/docs/PARTS.md says`
 
 // The proof knob, read here and nowhere else: BARKUI_PROOF_COPIES adds that many copies of the button to the
 // real parts, made under a scratch root (never in parts/), so CI can be shown a folder larger than the real one.

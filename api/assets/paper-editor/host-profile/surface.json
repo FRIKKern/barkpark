@@ -1,7 +1,7 @@
 {
   "contract": "1.23.0",
   "editor": "0.1.0-alpha.2",
-  "build": "089a42993f68",
+  "build": "8576740dce6c",
   "declared": {
     "canvas": {
       "DOM attribute": [
@@ -1008,6 +1008,8 @@
       "bp-canvas-action-href",
       "bp-canvas-action-priority",
       "bp-canvas-callout",
+      "bp-canvas-callout-readonly",
+      "bp-canvas-callout-readonly-note",
       "bp-canvas-card",
       "bp-canvas-card-menu",
       "bp-canvas-card__controls",
@@ -1342,6 +1344,10 @@
       "data-body-key",
       "data-bp-block",
       "data-bp-body",
+      "data-bp-callout-body-block",
+      "data-bp-callout-readonly",
+      "data-bp-callout-readonly-note",
+      "data-bp-callout-words",
       "data-bp-child",
       "data-bp-child-type",
       "data-bp-cite",

@@ -355,6 +355,38 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
     end
   end
 
+  # task-27fdb358ec25df6a: the published view is read-only too, and draws no
+  # tree; a pick sent to it anyway must not reach the draft.
+  describe "a tree codelist's pick while the published version is shown" do
+    test "leaves the draft byte-identical", c do
+      d =
+        doc!(
+          [
+            %{
+              "name" => "subject",
+              "title" => "Subject",
+              "type" => "codelist",
+              "codelistId" => "onixedit:rvg-none"
+            }
+          ],
+          %{"title" => "Pub v1", "subject" => "FBA"},
+          %{"title" => "Pub draft", "subject" => "FBC"}
+        )
+
+      before = draft(d)
+      view = open(c, d, "?perspective=published")
+
+      send(
+        view.pid,
+        {:tree_codelist_pick, %{name: "doc[subject]", value: "YFB", press: own_mark(d)}}
+      )
+
+      render_async(view, 5_000)
+      assert draft(d) == before
+      assert published(d).content["subject"] == "FBA"
+    end
+  end
+
   describe "the header menu while a revision is shown" do
     test "offers no write, and Publish or Discard pressed anyway does nothing", c do
       d =

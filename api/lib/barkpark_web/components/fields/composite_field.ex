@@ -357,7 +357,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       on_change: assigns.on_change,
       plugin_name: assigns.plugin_name,
       path: path,
-      readonly: assigns.readonly
+      readonly: assigns.readonly,
+      id_base: child_id_base(assigns, sub.name)
     }
 
     CodelistField.codelist_field(sub_assigns)

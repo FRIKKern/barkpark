@@ -23,6 +23,11 @@ type fakePaperServer struct {
 	syncCalls int
 	lastBase  string
 	lastBpml  string
+	// noText plays a server whose applied answer carries no BPML (the
+	// reader's view of the paper does not print).
+	noText bool
+	// notes are the lines every sync answer carries (a kept callout body).
+	notes []string
 }
 
 func (f *fakePaperServer) handler() http.Handler {
@@ -65,14 +70,19 @@ func (f *fakePaperServer) handler() http.Handler {
 			_, _ = w.Write([]byte(`{"error":{"code":"bpml","message":"the BPML document did not parse","errors":[{"code":"unknown-tag","message":"unknown tag <div>","line":2,"hint":"group content with <section>"}]}}`))
 
 		case body.Bpml == f.bpml:
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "slug": "p1", "unchanged": true, "rev": f.rev, "op_count": 0})
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "slug": "p1", "unchanged": true, "rev": f.rev, "op_count": 0, "notes": f.notes})
 
 		default:
 			// applied: bump the rev, canonicalize (the fake canonical differs
 			// from the client's edit so convergence is observable)
 			f.rev = f.rev + "0"
 			f.bpml = strings.ReplaceAll(body.Bpml, "edited", "edited-canonical")
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "slug": "p1", "rev": f.rev, "op_count": 1, "bpml": f.bpml})
+			answer := map[string]any{"ok": true, "slug": "p1", "rev": f.rev, "op_count": 1, "bpml": f.bpml, "notes": f.notes}
+			if f.noText {
+				answer["bpml"] = nil
+				answer["bpml_unprintable"] = "kind: block"
+			}
+			_ = json.NewEncoder(w).Encode(answer)
 		}
 	})
 

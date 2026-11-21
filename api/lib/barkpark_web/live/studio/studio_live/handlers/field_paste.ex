@@ -14,6 +14,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
       exactly (typing has no such bound; that is the typed path's to fix);
     * a select takes only a value on its list, at every depth: the field
       itself, a subfield of an object, a row of a list of objects;
+    * a codelist takes one code, as a typed one is saved: a code its list
+      does not have is stored, and Validation warns under the field
+      (task-400a66c6ebd31026); a list, a map or a string over
+      #{Barkpark.Content.Forms.CodelistShape.max_length()} characters is not a
+      code and is refused, by the rule a typed value is read by
+      (`CodelistShape.code?/1`). A list of codelist values reads each row
+      the same way, and a row of nothing is not a code either
+      (task-98885f8aa1aa21f1);
     * a reference must name a document of the field's type that exists
       (`ref?`, the caller's scoped read);
     * an object keeps only the subfields its schema declares, each read the
@@ -24,9 +32,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
       that is an object gets a fresh `_key`, and its `_type` is dropped;
     * the item is at most #{262_144} bytes.
 
-  Kinds that paste: string, text, url, email, select, slug, number, boolean,
-  reference, an object of those, and a list of texts, numbers, booleans or
-  objects. Refused in words, never written: image, rich text, date and
+  Kinds that paste: string, text, url, email, select, codelist, slug, number,
+  boolean, reference, an object of those, and a list of texts, numbers, booleans,
+  codes or objects. Refused in words, never written: image, rich text, date and
   date-time, a list with several member types or of references, and every
   other type.
 
@@ -41,6 +49,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content.DraftId
+  alias Barkpark.Content.Forms.CodelistShape
   alias Barkpark.Content.SelectOptions
   alias Barkpark.Content.SlugValue
   alias BarkparkWeb.Studio.Desk.FieldClip
@@ -53,7 +62,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   # The largest whole number a double holds exactly (JavaScript's
   # MAX_SAFE_INTEGER): past it the site and the Studio read another number.
   @max_integer 9_007_199_254_740_991
-  @row_types ~w(string text url email number boolean composite)
+  @row_types ~w(string text url email number boolean composite codelist)
 
   @typedoc """
   `{:save, params}`: the `autosave` params that write the paste.
@@ -223,6 +232,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
 
   defp fit(%{"type" => "select"}, _value, _ref?, _depth), do: incompatible()
 
+  # A row of a list holds a code: nothing there is no row.
+  defp fit(%{"type" => "codelist"}, nil, _ref?, depth) when depth > 0, do: not_code()
+
+  defp fit(%{"type" => "codelist"}, value, _ref?, _depth) do
+    if CodelistShape.code?(value),
+      do: {:ok, value},
+      else: not_code()
+  end
+
   defp fit(%{"type" => "number"}, value, _ref?, _depth) do
     cond do
       not is_number(value) -> incompatible()
@@ -324,6 +342,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldPaste do
   defp keyed(row), do: row
 
   # ── The words ───────────────────────────────────────────────────────────
+
+  defp not_code, do: {:error, gettext("Not a code (kept as stored)")}
 
   defp incompatible,
     do: {:error, gettext("Source and target schema types are not compatible")}

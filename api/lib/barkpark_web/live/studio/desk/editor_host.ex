@@ -412,6 +412,17 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp gone?(%{editing: {_dataset, type, id}} = assigns), do: LiveRefresh.gone?(assigns, type, id)
   defp gone?(_assigns), do: false
 
+  # The Studio's shell, without its profile dialog: the desk draws that one
+  # itself, outside the panes (`DeskLive`), so the navbar's pill and the
+  # drawer open it with no document open too. Inside a shown revision its
+  # form would sit in the revision's disabled fieldset.
+  defp shell(assigns), do: Components.studio_live_shell(assign(assigns, :show_profile, false))
+
+  # Whether nothing may be written from the form: its document is gone, or an
+  # old revision or the published version is shown in its place.
+  defp shut?(assigns),
+    do: gone?(assigns) or RevisionView.shown?(assigns) or PublishedView.active?(assigns)
+
   @doc "A message the page does not own is the editor's."
   # Someone else discarded the open draft: the frame carries the dead draft,
   # which the Studio would put in the form (`Discarded`).
@@ -424,11 +435,11 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # A tree codelist's pick: the press went to its component
   # (`TreeCodelistField`), past `handle_event/3`'s guards, and comes here as a
   # message. It meets the same ones: nothing is written while an old revision
-  # is shown, into a document deleted elsewhere, or from the form of a draft
-  # discarded elsewhere.
+  # or the published version is shown, into a document deleted elsewhere, or
+  # from the form of a draft discarded elsewhere.
   def handle_info({:tree_codelist_pick, _msg} = message, socket) do
     cond do
-      gone?(socket.assigns) or RevisionView.shown?(socket.assigns) -> {:noreply, socket}
+      shut?(socket.assigns) -> {:noreply, socket}
       Discarded.drop?(socket.assigns) -> {:noreply, Discarded.drop(socket)}
       true -> message |> StudioLive.handle_info(socket) |> ours()
     end
@@ -960,15 +971,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           <%= cond do %>
             <% @edit_failed or gone?(assigns) -> %>
             <% RevisionView.shown?(assigns) -> %>
-              {Components.studio_live_shell(RevisionView.shell_assigns(assigns))}
+              {shell(RevisionView.shell_assigns(assigns))}
             <% PublishedView.shown?(assigns) -> %>
-              {Components.studio_live_shell(PublishedView.shell_assigns(assigns))}
+              {shell(PublishedView.shell_assigns(assigns))}
             <% RevisionView.missing?(assigns) -> %>
               <p class="dk-note" role="alert" data-desk-revision-missing>
                 {gettext("This revision can't be found. Pick another entry in the history.")}
               </p>
             <% true -> %>
-              {Components.studio_live_shell(
+              {shell(
                 assigns
                 |> assign(show_delete: false, show_unpublish_guard: false)
                 |> HistoryPanel.waiting()
@@ -1054,7 +1065,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         id={"#{@view.id}-revision-footer"}
         revision={@desk_revision}
         menu_button={"#{@view.id}-actions-button"}
-        seen_rev={BarkparkWeb.Studio.StudioLive.SeenRev.of(assigns)}
+        seen_rev={BarkparkWeb.Studio.StudioLive.Handlers.History.seen_rev(assigns)}
       />
       <%!-- The published version's footer (`PublishedView`): its words and
             Unpublish, no "…", as TanStack's `PublishedFooter`. --%>

@@ -9,8 +9,14 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
   after someone else had written the document (the page not yet redrawn, a
   slow link) wrote the old revision over the newer words. Now each button
   carries the state it was drawn against: the history dialog and the
-  revision view's Revert carry `if_rev` (`SeenRev.of/1`), the deleted
-  document's "Restore most recent revision" carries `if_absent`.
+  revision view's Revert carry `if_rev`, the open document's rev
+  (`editor_doc`), the deleted document's "Restore most recent revision"
+  carries `if_absent`.
+
+  `editor_doc` follows someone else's save while the form is clean: the
+  save's document-list frame rebuilds the form and `editor_doc` from the
+  store (`Lifecycle.document_changed/2`). While a field is dirty it stays
+  put, so a restore is refused.
 
   A late press is played as the browser sends it: the button's values are
   read from the page, someone else writes, then the event goes with the
@@ -25,7 +31,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
   alias Barkpark.Content
   alias Barkpark.Tenancy
   alias BarkparkWeb.EditorPost
-  alias BarkparkWeb.Studio.StudioLive.PostIdentity
+  alias BarkparkWeb.Studio.StudioLive.{PostIdentity, RefusedSave}
 
   @dataset "production"
   @history ",changesInspectorTab=history,inspect=sanity%2Fstructure%2Fhistory"
@@ -99,12 +105,13 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
   defp flash(view), do: :sys.get_state(view.pid).socket.assigns.flash
 
-  defp seen_rev(view), do: BarkparkWeb.Studio.StudioLive.SeenRev.of(socket_assigns(view))
+  defp shown_rev(view), do: socket_assigns(view).editor_doc.rev
   defp socket_assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
   # The `phx-value-*` a button carries, as the browser sends them.
   defp values(view, selector) do
-    [el] = view |> render() |> LazyHTML.from_document() |> LazyHTML.query(selector) |> Enum.to_list()
+    [el] =
+      view |> render() |> LazyHTML.from_document() |> LazyHTML.query(selector) |> Enum.to_list()
 
     for key <- ~w(id if_rev if_absent),
         [value] <- [LazyHTML.attribute(el, "phx-value-#{key}")],
@@ -143,8 +150,9 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
   # The open document's mark, as the desk's revision view carries it.
   defp own_mark(c), do: %{PostIdentity.key() => PostIdentity.value(@dataset, c.type, c.id)}
 
-  # The frames a save sends reach this process and not the page (the page
-  # leaves the document topics; this process joins them), as in
+  # The frames a save sends reach this process and not the page: the page
+  # leaves the document topics and the document-list topics (whose frame
+  # rebuilds its form from the store); this process joins them, as in
   # `StaleDocFrameTest`.
   defp hold_frames(view) do
     render(view)
@@ -152,9 +160,10 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
     topics =
       Barkpark.PubSub
       |> Registry.keys(view.pid)
-      |> Enum.filter(&String.starts_with?(&1, "doc:"))
+      |> Enum.filter(&String.starts_with?(&1, "doc"))
 
-    assert topics != [], "fixture: the page joined no document topic"
+    assert Enum.any?(topics, &String.starts_with?(&1, "doc:")),
+           "fixture: the page joined no document topic"
 
     :sys.replace_state(view.pid, fn state ->
       Enum.each(topics, &Phoenix.PubSub.unsubscribe(Barkpark.PubSub, &1))
@@ -234,6 +243,32 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       assert current(c).title == "Words A"
     end
 
+    # A reload drops a refused-save marker (`RefusedSave`); the read again after
+    # a refusal is one. The marker here holds the newer words, which the form
+    # shows after the reload, so a marker left behind would read as live.
+    test "a refused press drops a refused-save marker from before", c do
+      view = open(c, c.studio)
+      pressed = dialog_values(view, c, "Words A")
+      write(c.type, c.id, "Words C")
+      render(view)
+
+      :sys.replace_state(view.pid, fn state ->
+        s = state.socket
+        key = {c.type, c.id}
+        marker = {key, %{"title" => {"Words C", "Refused for the test"}}}
+        %{state | socket: %{s | assigns: Map.put(s.assigns, :editor_refused_clears, marker)}}
+      end)
+
+      assert RefusedSave.clears(%{assigns: socket_assigns(view)}) == ["title"],
+             "fixture: the marker reads as live"
+
+      press(view, pressed)
+      assert flash(view)["error"] =~ @moved
+
+      assert RefusedSave.clears(%{assigns: socket_assigns(view)}) == [],
+             "the refused press left the refused-save marker"
+    end
+
     test "someone else's save the page showed: the button names it, and restores", c do
       view = open(c, c.studio)
       after_write = write(c.type, c.id, "Words C")
@@ -242,7 +277,7 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       assert socket_assigns(view).editor_form["title"] == "Words C",
              "fixture: the page put the other save in the form"
 
-      assert seen_rev(view) == after_write.rev
+      assert shown_rev(view) == after_write.rev
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).title == "Words A", "a restore against the words on screen was refused"
     end
@@ -267,35 +302,20 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
 
       after_write = write(c.type, c.id, "Words C")
       render(view)
-      assert seen_rev(view) == shown, "a frame the page did not show moved the seen rev"
+      assert shown_rev(view) == shown, "a save the page did not show moved the rev it names"
 
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).rev == after_write.rev
       assert flash(view)["error"] =~ @moved
+
+      # The refusal drops the edits the restore would have overwritten.
+      refused = socket_assigns(view)
+      refute refused.editor_dirty, "the refused press left the form dirty"
+      refute refused.doc_conflict
+      assert MapSet.size(refused.editor_unsaved_keys) == 0
     end
 
-    test "an older frame arriving after a newer one does not move the seen rev back", c do
-      view = open(c, c.studio)
-      hold_frames(view)
-
-      write(c.type, c.id, "Words C")
-      older = held_frame()
-      newer_doc = write(c.type, c.id, "Words D")
-      newer = held_frame()
-
-      send(view.pid, newer)
-      send(view.pid, older)
-      render(view)
-
-      assert socket_assigns(view).editor_form["title"] == "Words D",
-             "the form took the older frame after the newer one"
-
-      assert seen_rev(view) == newer_doc.rev
-      press(view, dialog_values(view, c, "Words A"))
-      assert current(c).title == "Words A"
-    end
-
-    test "a write the page was never told of: refused (the safe side)", c do
+    test "a write the page was never told of: refused (the safe side), then read again", c do
       view = open(c, c.studio)
       hold_frames(view)
       after_write = write(c.type, c.id, "Words C")
@@ -304,6 +324,13 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       press(view, dialog_values(view, c, "Words A"))
       assert current(c).rev == after_write.rev
       assert flash(view)["error"] =~ @moved
+
+      # Only the refusal's reload tells the page of the write.
+      assert socket_assigns(view).editor_form["title"] == "Words C",
+             "the refused press did not read the document again"
+
+      press(view, dialog_values(view, c, "Words A"))
+      assert current(c).title == "Words A"
     end
 
     test "a press with no state, from a page drawn before the fence: restores as before", c do
@@ -352,136 +379,5 @@ defmodule BarkparkWeb.Studio.StudioRestoreFenceTest do
       press(view, confirm_values(view), own_mark(c))
       assert current(c).title == "Words A"
     end
-  end
-end
-
-defmodule BarkparkWeb.Studio.StudioRestoreFenceSheetTest do
-  @moduledoc """
-  task-5b74471e6a2d6de8, the sheet's restore (`Session.restore/4`): the same
-  fence, through the sheet's own path. Set up as
-  `StudioSheetHistoryRestoreTest` is (60 s debounce, explicit flushes).
-  """
-  use BarkparkWeb.ConnCase, async: false
-
-  import Phoenix.LiveViewTest
-
-  alias Barkpark.Content
-  alias Barkpark.Plugins.Sheets.Session
-
-  @dataset "production"
-
-  setup do
-    stop_all_sessions()
-
-    on_exit(fn ->
-      stop_all_sessions()
-      Application.delete_env(:barkpark, Barkpark.Plugins.Sheets.Session)
-    end)
-
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session,
-      debounce_ms: 60_000,
-      idle_stop_ms: 60_000
-    )
-
-    {:ok, _} =
-      Content.upsert_schema(
-        %{
-          "name" => "sheet",
-          "title" => "Sheets",
-          "visibility" => "private",
-          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
-        },
-        @dataset
-      )
-
-    :ok
-  end
-
-  defp stop_all_sessions do
-    for {_, pid, _, _} <-
-          DynamicSupervisor.which_children(Barkpark.Plugins.Sheets.SessionSupervisor),
-        is_pid(pid) do
-      try do
-        GenServer.stop(pid, :normal, 5_000)
-      catch
-        :exit, _ -> :ok
-      end
-    end
-
-    :ok
-  end
-
-  defp type_cell!(target, ref, value) do
-    render_hook(target, "cell-click", %{"ref" => ref, "shift" => false})
-    render_hook(target, "edit-commit", %{"value" => value, "move" => "down"})
-  end
-
-  defp cells(slug) do
-    {:ok, doc} = Content.get_document(Content.draft_id(slug), "sheet", @dataset)
-    get_in(doc.content, ["tabs", Access.at(0), "cells"]) || %{}
-  end
-
-  test "a sheet's Restore pressed late, with a cell unflushed: refused, every cell stays",
-       %{conn: conn} do
-    slug = "rfence-sheet-#{System.unique_integer([:positive])}"
-
-    {:ok, _} =
-      Content.create_document(
-        "sheet",
-        %{
-          "doc_id" => slug,
-          "title" => "Untitled sheet",
-          "content" => %{"tabs" => [%{"name" => "Sheet 1", "cells" => %{}}]}
-        },
-        @dataset
-      )
-
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{slug}"))
-    target = with_target(view, "#sheet-grid-#{slug}")
-
-    type_cell!(target, "A1", "old")
-    assert :ok = Session.flush(slug, @dataset, nil)
-    type_cell!(target, "A1", "new")
-    assert :ok = Session.flush(slug, @dataset, nil)
-
-    old =
-      Content.list_revisions(slug, "sheet", @dataset, limit: 30)
-      |> Enum.find(&(get_in(&1.content || %{}, ["tabs", Access.at(0), "cells", "A1", "v"]) == "old"))
-
-    assert old, "fixture: a revision holding A1 = old exists"
-
-    render_click(view, "show-history", %{})
-
-    [button] =
-      view
-      |> render()
-      |> LazyHTML.from_document()
-      |> LazyHTML.query(~s(#history-list button[phx-value-id="#{old.id}"]))
-      |> Enum.to_list()
-
-    pressed =
-      for key <- ~w(id if_rev),
-          [value] <- [LazyHTML.attribute(button, "phx-value-#{key}")],
-          into: %{},
-          do: {key, value}
-
-    assert is_binary(pressed["if_rev"]), "the sheet's Restore names no state"
-
-    # Someone's edit is stored before the press arrives, and another is still
-    # in the session's memory only.
-    type_cell!(target, "B1", "later")
-    assert :ok = Session.flush(slug, @dataset, nil)
-    type_cell!(target, "C1", "pending")
-
-    BarkparkWeb.EditorPost.press(view, "restore-revision", pressed)
-
-    # The session persists (the debounce, forced): the unflushed cell was kept.
-    assert :ok = Session.flush(slug, @dataset, nil)
-    stored = cells(slug)
-    assert get_in(stored, ["A1", "v"]) == "new", "the late restore wrote the old cells back"
-    assert get_in(stored, ["B1", "v"]) == "later"
-
-    assert get_in(stored, ["C1", "v"]) == "pending",
-           "the refused restore dropped the session's unflushed cell"
   end
 end

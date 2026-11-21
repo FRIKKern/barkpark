@@ -39,7 +39,7 @@ defmodule Barkpark.PortableDoc.Bpml do
   and `<a href>` → a `link` node).
   """
 
-  alias Barkpark.PortableDoc.Bpml.{Parser, Printer}
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Parser, Printer}
 
   @type blocks :: [map()]
   @type errors :: [
@@ -56,11 +56,41 @@ defmodule Barkpark.PortableDoc.Bpml do
 
   @doc "BPML fragment → `{:ok, blocks}` | `{:error, errors}` (all reachable errors, teaching hints included)."
   @spec parse_blocks(String.t()) :: {:ok, blocks} | {:error, errors}
-  defdelegate parse_blocks(bpml), to: Parser
+  def parse_blocks(bpml) do
+    with {:ok, blocks} <- Parser.parse_blocks(bpml), do: CalloutBody.clean(blocks)
+  end
 
-  @doc "BPML `<paper>` document → `{:ok, paper_map}` | `{:error, errors}`."
+  @doc """
+  BPML `<paper>` document → `{:ok, paper_map}` | `{:error, errors}`. A `<kept>`
+  line is an error here; only a push reads it (`parse_copy/1`).
+  """
   @spec parse_paper(String.t()) :: {:ok, map()} | {:error, errors}
-  defdelegate parse_paper(bpml), to: Parser
+  def parse_paper(bpml) do
+    with {:ok, paper} <- Parser.parse_paper(bpml),
+         {:ok, blocks} <- CalloutBody.clean(paper["blocks"] || []) do
+      {:ok, paper |> Map.delete("print") |> Map.put("blocks", blocks)}
+    end
+  end
+
+  @doc """
+  A pulled working copy as a push reads it: `<paper print>` kept, inline
+  callouts marked and `<kept>` lines read as `"$kept"` blocks, for
+  `CalloutBody.resolve/4`. Nothing else may store what this returns.
+  """
+  @spec parse_copy(String.t()) :: {:ok, map()} | {:error, errors}
+  defdelegate parse_copy(bpml), to: Parser, as: :parse_paper
+
+  @doc "`parse_copy/1` for a fragment with no `<paper>`."
+  @spec parse_copy_blocks(String.t()) :: {:ok, blocks} | {:error, errors}
+  defdelegate parse_copy_blocks(bpml), to: Parser, as: :parse_blocks
+
+  @doc "A `parse_copy/1` paper as any other caller reads it (`parse_paper/1`)."
+  @spec clean_copy(map()) :: {:ok, map()} | {:error, errors}
+  def clean_copy(%{} = paper) do
+    with {:ok, blocks} <- CalloutBody.clean(paper["blocks"] || []) do
+      {:ok, paper |> Map.delete("print") |> Map.put("blocks", blocks)}
+    end
+  end
 
   @doc """
   The machine-readable BPML contract for `/v1/capabilities` (masterplan W0):
@@ -71,6 +101,11 @@ defmodule Barkpark.PortableDoc.Bpml do
   echo the digest to detect that their generated types have gone stale.
 
   ### Deliberate grammar moves (the digest moved here on purpose)
+
+    * A callout's body (task-4c27c15194ae9369): `<callout>` gains the
+      structured form `<content>` + `<slot name="body">`, `<paper>` gains
+      `print`, and `<kept>` is the pull's line for a block holding a callout
+      BPML cannot write. `content` now appears in this contract.
 
     * `<stat verdict>` (task-8bdef19b5acef8a8) — the stat VERDICT shipped in the
       render leg (`render/data_viz.ex` `stat_html/1` paints `.bp-stat__v--loss` /
@@ -119,6 +154,9 @@ defmodule Barkpark.PortableDoc.Bpml do
             # — a `<column>` missing here silently drops from /v1/capabilities
             # and a client generating types cannot spell a `columns` block.
             "column",
+            # a callout's own text in its structured form (task-4c27c15194ae9369);
+            # `slot` and `kept` are block tags, listed above.
+            "content",
             "item",
             "li",
             "tr",

@@ -12,11 +12,17 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   so a token seated there writes there. Any other number of seats is
   refused with the workspaces the token may name and the command that pins a
   token to one of them, since `bp paper push` and `pull` send no workspace.
+
+  The write rule (`may_write?/2`) is the one answer to "may this caller write
+  in workspace X", asked by the controller's door about a workspace the
+  request names and, through `write_check/1`, inside a Paper write's
+  transaction about the saved row's workspace. It judges only the request's
+  `Barkpark.Tenancy.WriteCaller` (the `:ingest` pipeline's `:write_caller`).
   """
 
   alias Barkpark.Content.{CallerContext, WriteScope}
   alias Barkpark.Tenancy
-  alias Barkpark.Tenancy.Workspace
+  alias Barkpark.Tenancy.{Workspace, WriteCaller}
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.Plugs.RequireWithinQuota
 
@@ -65,6 +71,35 @@ defmodule Barkpark.Plugins.Bulldocs.Web.WriteGate do
   end
 
   defp slugs(seats), do: Enum.map(seats, & &1.slug)
+
+  @doc """
+  May `caller` write in workspace `ws_id`. Its own permission must include
+  writing, and then: `ws_id` is its home, the seat rule lets it write there
+  (`may_write_in`), or it is an operator on an ARMED allowlist. False for
+  anything but a `WriteCaller` and a workspace id.
+  """
+  @spec may_write?(WriteCaller.t() | term(), term()) :: boolean()
+  def may_write?(%WriteCaller{may_write?: true, may_write_in: seat?} = caller, ws_id)
+      when is_binary(ws_id) and is_function(seat?, 1) do
+    ws_id == caller.home or caller.operator? == true or seat?.(ws_id) == true
+  end
+
+  def may_write?(_caller, _ws_id), do: false
+
+  @doc """
+  The `may_write:` predicate a Paper write runs inside its transaction on the
+  saved row's workspace (`Content.Papers.SavedCheck`), from the request's
+  assigns: `may_write?/2` for its `:write_caller`; a predicate refusing every
+  workspace for anything else assigned there, or for a token with no
+  `:write_caller`; nil with neither (the shared-secret producer).
+  """
+  @spec write_check(map()) :: (term() -> boolean()) | nil
+  def write_check(%{write_caller: %WriteCaller{} = caller}), do: &may_write?(caller, &1)
+  def write_check(%{write_caller: caller}) when not is_nil(caller), do: &refuse_all/1
+  def write_check(%{api_token: token}) when not is_nil(token), do: &refuse_all/1
+  def write_check(_assigns), do: nil
+
+  defp refuse_all(_ws_id), do: false
 
   @doc """
   Judge the workspace the gate approved: 409 `workspace_archived` when it is

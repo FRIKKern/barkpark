@@ -5,14 +5,17 @@
 
 // The states the showroom pins with data-pin (build/showroom.mjs pinStates). One may appear only on the element
 // the selector styles (its last compound, not inside :not(), :has() and the like), so data-pin on that element
-// shows it; never on a host, ancestor or sibling, where no pin can reach.
-export const PINNED = ['hover', 'active', 'focus-visible']
+// shows it; never on a host, ancestor or sibling, where no pin can reach. The check drives each one with real
+// input (check/states.mjs): the pointer for hover and active, a click for checked.
+export const PINNED = ['hover', 'active', 'focus-visible', 'checked']
 // Every other pseudo-class part.css may use, anywhere: structure and the element's own attributes, nothing that a
-// person's pointer, keys, typing or history sets. Anything else (:focus, :target, :checked, ...) is refused.
-// A pseudo-class a person changes by clicking or typing (:checked, :placeholder-shown, :enabled and the like) is
-// not here: it comes back as a state, driven and read like :hover, when a part first needs it.
+// person's pointer, keys, typing or history sets. Anything else (:focus, :target, :placeholder-shown, ...) is
+// refused until it joins PINNED with a way for the check to drive it: here when the browser reads the rule, and by
+// check/sheet-text.mjs when the browser drops the whole rule for a name it does not know. tests/selectors.test.mjs
+// pins this list whole, each name with its reason, so a name added or taken out is red until that reason is written
+// beside it.
 export const STATIC = ['not', 'is', 'where', 'has', 'defined', 'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child', 'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type']
-// The pseudo-elements the check reads (README "Read").
+// The pseudo-elements the check reads (docs/PARTS.md "Read").
 export const PSEUDO_ELEMENTS = ['before', 'after', 'marker', 'placeholder']
 
 /** One selector list read into complex selectors, each a list of compounds: { nest, pseudos: [{ name, element, depth }] }. */

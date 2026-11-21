@@ -78,6 +78,12 @@ defmodule Barkpark.Content.Document do
     # never persisted. See that module's docstring for the purity rationale.
     field :task_edges, :any, virtual: true
 
+    # The values the save wrote over (task-2f3af2d2f7f56811): the top-level
+    # fields a caller named (`Forms.upsert_draft/6`'s `:saved_over`), as the
+    # row the save merged onto held them, read under the document's lock.
+    # Set only on the document that save returns; never persisted.
+    field :saved_over, :any, virtual: true
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
     belongs_to :current_revision, Barkpark.Content.Revision, type: :binary_id

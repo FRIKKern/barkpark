@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
-  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, SeenRev, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       |> assign(
         editor_dirty: false,
         editor_unsaved_keys: MapSet.new(),
+        editor_refused_clears: nil,
         doc_conflict: false,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
@@ -93,9 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   #
   # A frame older than this tab's own last save is read as that save
   # (`fresher/2`): the save was written over it, so the store already holds
-  # what it carried. A frame older than the last one the form took
-  # (`SeenRev.stale?/2`) is dropped: the form already shows a newer state, and
-  # a Restore names that one (task-5b74471e6a2d6de8).
+  # what it carried.
   def doc_updated(%{sender: sender, doc: doc_data} = msg, socket) do
     doc_data = fresher(doc_data, socket.assigns[:editor_doc])
 
@@ -104,9 +103,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       other_project?(msg, socket) ->
-        {:noreply, socket}
-
-      SeenRev.stale?(msg, socket.assigns) ->
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
@@ -133,9 +129,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
-         )
-         # The form now shows this frame; a history Restore names it (`SeenRev`).
-         |> SeenRev.applied(msg)}
+         )}
     end
   end
 
@@ -281,8 +275,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         # off-the-wire markup that lands straight in `raw(@paper_html)`, so
         # leaving it unscrubbed would re-open on the broadcast exactly what the
         # mount-side clamp closes.
+        #
+        # `paper_doc` is re-read with the painted words, as the delta arm does:
+        # history's Restore names its rev (`History.seen_rev/1`), and a stale
+        # one refused the first press after another writer's save
+        # (task-5b74471e6a2d6de8). `paper_rev` stays the frame's.
         {:noreply,
          socket
+         |> Shared.sync_paper_edit_doc()
          |> assign(:paper_html, Shared.editor_body_html(html))
          |> assign(:paper_block_mode, false)
          |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}

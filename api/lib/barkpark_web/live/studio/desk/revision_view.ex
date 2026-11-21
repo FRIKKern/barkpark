@@ -229,7 +229,10 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
   attr :id, :string, required: true
   attr :revision, :map, required: true
   attr :menu_button, :string, required: true, doc: "the \"…\" button Confirm gives the focus to"
-  attr :seen_rev, :string, default: nil, doc: "the open document's rev; Confirm sends it as `if_rev`"
+
+  attr :seen_rev, :string,
+    default: nil,
+    doc: "the open document's rev; Confirm sends it as `if_rev`"
 
   @doc "The footer while a revision is shown: when it is from, and its revert."
   def footer(assigns) do
