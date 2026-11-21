@@ -178,7 +178,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-edit-footer { flex: none; box-sizing: border-box; min-height: 49px; display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; font-size: 13px; line-height: 19px; color: var(--dk-foot-meta); }
       .dk .dk-footer-status { flex: 1 1 0; min-width: 0; padding: 3px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk button.dk-footer-status { border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: default; }
-      .dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-save="Updated by another user"][data-desk-conflict]) .dk-edit-footer button.dk-footer-status .save-state { color: var(--dk-warn-fg); font-weight: 500; }
+      .dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-conflict]) .dk-edit-footer button.dk-footer-status .save-state { color: var(--dk-warn-fg); font-weight: 500; }
       .dk .dk-publish { display: inline-flex; align-items: center; gap: 2px; min-height: 25px; padding: 2px 8px 2px 2px; border: 0; border-radius: 3px; background: var(--dk-publish-bg); color: var(--dk-publish-fg); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
       .dk .dk-publish:disabled { background: var(--dk-publish-off-bg); color: var(--dk-publish-off-fg); cursor: default; }
       .dk .dk-publish svg { width: 21px; height: 21px; margin: 0; }

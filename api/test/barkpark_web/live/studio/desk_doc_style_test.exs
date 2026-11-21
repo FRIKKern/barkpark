@@ -119,7 +119,7 @@ defmodule BarkparkWeb.Studio.DeskDocStyleTest do
     html = render(view)
 
     assert html =~
-             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-save="Updated by another user"][data-desk-conflict]) .dk-edit-footer button.dk-footer-status .save-state { color: var(--dk-warn-fg); font-weight: 500; }|
+             ~S|.dk .dk-edit:is([data-desk-save="Save failed"], [data-desk-save="Save cancelled"], [data-desk-conflict]) .dk-edit-footer button.dk-footer-status .save-state { color: var(--dk-warn-fg); font-weight: 500; }|
 
     # Only the failed tokens: "Edited" and "Last published" keep the footer's colour.
     assert length(Regex.scan(~r/\.save-state[^{<"]*\{/, html)) == 1

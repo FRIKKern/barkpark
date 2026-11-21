@@ -15,8 +15,9 @@ defmodule BarkparkWeb.Studio.Desk.DocFooter do
     A save that did not land (the pane's `data-desk-save` "Save failed" or
     "Save cancelled") draws those words in TanStack's caution tone
     (`.save-state[data-state=refused]`: `--warn-fg`, 500), and so does
-    "Updated by another user" over edits not saved here (`data-desk-conflict`:
-    TanStack's clash, said in its footer as `refused`). Taken in by a form
+    "Updated by another user" over edits not saved here (keyed by the
+    pane's `data-desk-conflict`, not the words: TanStack's clash, said in its
+    footer as `refused`). Taken in by a form
     with nothing unsaved it keeps the footer's own colour, as do "Edited" and
     "Last published".
   - Publish sends the Studio's own `publish` event. It is greyed out when
