@@ -20,8 +20,10 @@
 //     wherever the host stands (tellRoots, below; the page cannot take it away);
 //   - the parser meets a declared root while it parses example.html: refused as the part is read (build/parts.mjs);
 //   - markup is written into the parsed document (document.write, writeln or open): refused by name (tellRoots);
-//   - another window attaches one with its own attachShadow: every frame in the page, and window.open, is refused
-//     by name.
+//   - another window attaches one with its own attachShadow: every frame in the page, window.open, and any other
+//     window the page opens (a link or a form with a target) is refused by name.
+//   Markup parsed into a host already in the page (setHTMLUnsafe, innerHTML) cannot give that host a root: a
+//   declared root at the top of the markup stays a plain template, and one deeper is on a new host, read on arrival.
 // - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
 //   reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and close.
 // A layer's box opens at once on its input: one not open once its input settles fails by name, so a box that opens
@@ -134,6 +136,7 @@ export const REFUSED = {
   'document.write': 'the page called document.write after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
   'document.writeln': 'the page called document.writeln after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
   'document.open': 'the page called document.open, which the check refuses: it starts the document again, and the check\'s watch with it',
+  window: 'the page opened another window (by a link or a form with a target), which the check refuses: another window, which the check does not watch',
 }
 /** How a selftest case's check run touched the top layer, by what it did, not by its name: its part names a layer,
     or the run says one of the top layer's fails (a box no layer names, open or not; a frame; a refused call).
@@ -256,6 +259,13 @@ export async function installCensus(page) {
     if (exceptionDetails) throw new Error(`the census: ${String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0]}`)
     return result.value
   }
+  // Another window the page opens by any way but window.open (a link or a form with a target, opener or not): its
+  // own attachShadow is not hooked, so it is closed at once and refused by name, once each.
+  let windows = 0
+  page.on('popup', (w) => {
+    windows++
+    w.close().catch(() => {})
+  })
   let ready = false
   return async (part) => {
     if (!ready && (id === null || !(await run('typeof __barkCensus === "function"').catch(() => false)))) {
@@ -263,7 +273,9 @@ export async function installCensus(page) {
       await run(code)
     }
     ready = true
-    return (await run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)).map(said)
+    const opened = Array.from({ length: windows }, () => REFUSED.window)
+    windows = 0
+    return [...opened, ...(await run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)).map(said)]
   }
 }
 

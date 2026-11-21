@@ -216,12 +216,13 @@ export const LAYER_CASES = [
   },
   // Its own run: were either call let through, it would take the page away and every other row with it.
   {
-    name: "top layer: the ways out of the census's sight are refused by name: another window (window.open), and markup written into the parsed page (document.write)",
+    name: "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), and markup written into the parsed page (document.write)",
     only: ['skins'],
     layers: true,
-    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { window.open(''); document.write('<p>Written late</p>') })"),
+    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; a.target = '_blank'; a.rel = 'opener'; document.body.append(a); a.click(); a.remove(); window.open(''); document.write('<p>Written late</p>') })"),
     expect: each({
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
+      'another window opened by a link with a target, refused by name': skinsSay(new RegExp(esc(REFUSED.window))),
       'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
     }),
   },
