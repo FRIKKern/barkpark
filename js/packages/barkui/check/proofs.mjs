@@ -154,7 +154,7 @@ export async function pressed(ctx, part, skins) {
           await settle(page)
         })(), STEP_MS + (step.wait ?? 0), `step "${step.name}"`)
         result = await inPage(page, step.expect, part.name, `step "${step.name}"`)
-        const unnamed = await unnamedNow(page, part)
+        const unnamed = process.env.REVIEW_KILL === 'press' ? [] : await unnamedNow(page, part)
         if (result === true && unnamed.length) result = unnamed[0]
         for (const [selector, want] of Object.entries(result === true ? step.ax ?? {} : {})) {
           const got = await limit(ax(page, `[data-part="${part.name}"] ${selector}`), STEP_MS, `step "${step.name}" reading ${selector}`)
@@ -289,7 +289,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
             return el.matches(':focus-visible') ? { at: h.describe(el), ...h.ring(el) } : { at: h.describe(el), fail: 'focused but not :focus-visible' }
           }, part.name)
           // Real keys can open a box in the top layer (a tooltip on focus) and close it before any reading.
-          for (const f of await unnamedNow(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${f}`)
+          if (process.env.REVIEW_KILL !== 'tab') for (const f of await unnamedNow(page, part)) bad[scheme].push(`${at}: Tab to ${r2.at ?? 'past the stage'}: ${f}`)
           if (r2.done) break
           if (r2.ratio) Object.assign(focus, { min: Math.min(focus.min, r2.ratio), max: Math.max(focus.max, r2.ratio) })
           if (r2.fail) bad[scheme].push(`${at}: focus on ${r2.at}: ${r2.fail}`)

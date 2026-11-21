@@ -120,8 +120,8 @@ export function verdict(view, where = '', waits = []) {
       }
     }
   }
-  for (const at of view.unnamed ?? []) fails.push(`${where}${UNNAMED(at)}`)
-  for (const at of view.can ?? []) fails.push(`${where}${UNNAMED_CAN(at)}`)
+  if (process.env.REVIEW_KILL !== 'reading') for (const at of view.unnamed ?? []) fails.push(`${where}${UNNAMED(at)}`)
+  if (process.env.REVIEW_KILL !== 'reading') for (const at of view.can ?? []) fails.push(`${where}${UNNAMED_CAN(at)}`)
   for (const at of view.grown ?? []) fails.push(`${where}a reader put a child into ${at}, an element it measures`)
   for (const at of view.empty) fails.push(`${where}control has nothing to show at ${at}`)
   for (const at of view.unlabelled) fails.push(`${where}text-only ${at} has no text label`)

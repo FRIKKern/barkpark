@@ -216,9 +216,13 @@ jobs:
       # them equal); the selftest stops, failing with its sentence, once it passes
       # its ceiling, under this limit.
       - name: "Each planted break turns its light off"
-        timeout-minutes: 10
+        timeout-minutes: 24
         working-directory: js/packages/barkui
-        run: node check/selftest.mjs
+        run: |
+          set +e
+          echo "=== RUN plain"; node check/selftest.mjs "top layer:"; node check/selftest.mjs "review plant R5"
+          for k in reading tab states press; do echo "=== RUN REVIEW_KILL=$k"; REVIEW_KILL=$k node check/selftest.mjs "top layer:"; done
+          exit 1
 
   barkui:
     name: "BarkUI showroom check"
