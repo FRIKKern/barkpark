@@ -114,6 +114,13 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
              end)
 
       assert status(a) == "Updated by another user"
+
+      # The footer's words, where its caution rule reaches them
+      # (task-d64e58f43f48de16).
+      footer =
+        ~s(#{@pane}[data-desk-save="Updated by another user"][data-desk-conflict] .dk-edit-footer button.dk-footer-status .save-state)
+
+      assert has_element?(a, footer, "Updated by another user")
     end
 
     test "over a form with nothing unsaved, the save is taken in with no conflict mark", c do
