@@ -1360,7 +1360,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <%= for v <- @violations do %>
             <li class={"bp-violation-item bp-violations-#{v["level"] || "error"}"}
                 data-test-id={"cross-violation-#{v["name"]}"}>
-              <span class="bp-violation-title"><%= v["title"] || v["name"] %></span>
+              <span class="bp-violation-title"><%= Barkpark.Content.CrossValidator.label(v) %></span>
               <%= if is_list(v["fields"]) and v["fields"] != [] do %>
                 <span class="bp-violation-fields">&nbsp;— <%= List.first(v["fields"]) %></span>
               <% end %>
