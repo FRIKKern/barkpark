@@ -10,6 +10,11 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
     error icon in its top right.
   - The result is a folding JSON tree in the syntax colours; a refused
     query turns the result column the critical tone.
+  - Params that are not a JSON object hold Fetch and Listen back
+    (`aria-disabled`), as TanStack's `.vision-actions` disabled buttons:
+    Fetch greys as a disabled Publish (`--dk-publish-off-bg`/`-fg`), Listen
+    keeps its ring with its word and icon in `--dk-chip-off-fg` and, under
+    the pointer, no fill (TanStack's `.btn:not(.danger):disabled:hover`).
   - Under 600 px one column, scrolled inside Vision: the selects, then the
     query, then the result. On a touch screen (`pointer: coarse`) the
     selects and buttons are 44 px, the result tree's rows too.
@@ -57,13 +62,14 @@ defmodule BarkparkWeb.Studio.Desk.VisionStyle do
       .dk .dk-vision-fetch:not(.dk-vision-listen):hover { background: color-mix(in srgb, var(--dk-selected) 88%, var(--dk-fg)); }
       .dk .dk-vision-fetch:focus-visible { outline: 2px solid var(--dk-focus-ring); outline-offset: 1px; }
       .dk .dk-vision-fetch[aria-disabled="true"] { cursor: default; }
-      .dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] { opacity: .5; }
+      .dk .dk-vision-fetch:not(.dk-vision-listen)[aria-disabled="true"] { background: var(--dk-publish-off-bg); color: var(--dk-publish-off-fg); }
       .dk .dk-vision-fetch svg { width: 21px; height: 21px; }
       .dk .dk-vision-fetch > span { display: inline-flex; }
       .dk .dk-vision-fetch > span[hidden] { display: none; }
       .dk .dk-vision-listen { background: var(--dk-bg-soft); box-shadow: inset 0 0 0 1px var(--dk-btn2-ring); color: var(--dk-btn2-fg); }
       .dk .dk-vision-listen svg { color: var(--dk-btn2-icon); }
       .dk .dk-vision-listen[aria-disabled="true"], .dk .dk-vision-listen[aria-disabled="true"] svg { color: var(--dk-chip-off-fg); }
+      .dk .dk-vision-listen[aria-disabled="true"]:hover { background: none; }
       .dk .dk-vision-listen:hover:not([aria-disabled="true"]) { background: var(--dk-btn2-hover-bg); box-shadow: inset 0 0 0 1px var(--dk-btn2-hover-ring); color: var(--dk-btn2-hover-fg); }
       .dk .dk-vision-listen:hover:not([aria-disabled="true"]) svg { color: var(--dk-btn2-hover-icon); }
       .dk .dk-vision-out > .dk-vision-hint { margin: 0; color: var(--dk-muted); font-size: 12px; line-height: 17px; }
