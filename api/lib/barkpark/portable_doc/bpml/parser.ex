@@ -8,6 +8,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   (validate-all spirit), not just the first one hit. Pure; no Repo, no I/O.
   """
 
+  alias Barkpark.PortableDoc.Bpml.ListItems
+  alias Barkpark.PortableDoc.Validate
+
   @block_attrs %{
     "paper" => ~w(slug title print),
     "section" => ~w(id title variant),
@@ -75,7 +78,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
-    "li" => ~w(checked),
+    "li" => ~w(id checked),
     "tr" => [],
     "th" => ~w(align),
     "td" => ~w(colspan rowspan align),
@@ -352,26 +355,81 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp build_block("ul", attrs, sc, cur) do
-    with {:ok, items, cur} <-
-           child_seq("ul", "li", sc, cur, fn li_attrs, sc, cur ->
-             case tag_inline("li", sc, cur) do
-               {:ok, nodes, cur} ->
-                 case List.keyfind(li_attrs, "checked", 0) do
-                   {"checked", v} -> {:ok, %{"content" => nodes, "checked" => v == "true"}, cur}
-                   nil -> {:ok, nodes, cur}
-                 end
+  defp build_block("ul", attrs, sc, cur), do: list_block(attrs, sc, cur, 1)
 
-               other ->
-                 other
-             end
-           end) do
+  # A <ul> inside an <li> is one level deeper; lists nest at most as deep as a
+  # stored Paper's blocks may (`Validate.max_depth/0`). Shapes: `ListItems`.
+  defp list_block(attrs, sc, cur, level) do
+    with {:ok, items, cur} <- child_seq("ul", "li", sc, cur, &li_item(&1, &2, &3, level)) do
       {:ok,
        %{"type" => "list", "items" => items}
        |> put_attr("id", attrs)
        |> put_bool_attr("ordered", attrs)
        |> put_int_attr("start", attrs)
        |> put_bool_attr("task", attrs), cur}
+    end
+  end
+
+  defp li_item(attrs, true, cur, _level), do: {:ok, ListItems.parsed(attrs, [], []), cur}
+
+  defp li_item(attrs, false, cur, level) do
+    case inline_seq(cur, [], [], "ul") do
+      {:ok, nodes, cur} ->
+        nodes = if peek(cur) == :tag, do: ListItems.before_list(nodes), else: nodes
+        li_rest(attrs, nodes, cur, level, [])
+
+      {:error, errors, cur} ->
+        {:skip, errors, consume_until_close("li", cur)}
+    end
+  end
+
+  defp li_rest(attrs, nodes, cur, level, lists) do
+    case {peek(cur), close_tag(cur)} do
+      {_, {:ok, "li", cur}} ->
+        {:ok, ListItems.parsed(attrs, nodes, Enum.reverse(lists)), cur}
+
+      {_, {:ok, other, cur2}} ->
+        message = "expected </li>, found </#{other}>"
+        hint = "close the <li> after its nested lists"
+        {:skip, [err("mismatched-close", message, line(cur), hint)], cur2}
+
+      {:tag, :not_close} ->
+        li_list(attrs, nodes, cur, level, lists)
+
+      {:eof, :not_close} ->
+        {:skip, [err("unclosed-tag", "<li> is never closed", line(cur), "add </li>")], cur}
+
+      {:text, :not_close} ->
+        e = err("text-after-list", "text after a nested <ul>", line(cur), "words go before it")
+        {:skip, [e], consume_until_close("li", cur)}
+    end
+  end
+
+  defp li_list(attrs, nodes, cur, level, lists) do
+    with {:ok, "ul", ul_attrs, sc, cur2} <- open_tag(cur),
+         [] <- check_attrs("ul", ul_attrs, line(cur)),
+         true <- level < Validate.max_depth() or :too_deep,
+         {:ok, list, cur3} <- list_block(ul_attrs, sc, cur2, level + 1) do
+      li_rest(attrs, nodes, skip_ws(cur3), level, [list | lists])
+    else
+      {:ok, tag, _attrs, _sc, _cur2} ->
+        hint = "an <li> holds words, then <ul>"
+        e = err("wrong-child", "<#{tag}> inside <li>", line(cur), hint)
+        {:skip, [e], consume_until_close("li", cur)}
+
+      :too_deep ->
+        message = "lists nest at most #{Validate.max_depth()} levels"
+        e = err("too-deep", message, line(cur), "move the deepest list up a level")
+        {:skip, [e], consume_until_close("li", cur)}
+
+      {:error, e} when is_map(e) ->
+        {:skip, [e], consume_until_close("li", cur)}
+
+      {kind, errors, cur3} when kind in [:skip, :error] ->
+        {:skip, errors, consume_until_close("li", cur3)}
+
+      errors when is_list(errors) ->
+        {:skip, errors, consume_until_close("li", cur)}
     end
   end
 
@@ -1130,12 +1188,16 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   # ── inline ──────────────────────────────────────────────────────────────────
 
-  defp inline_seq(cur, marks, acc) do
+  # `stop` is the block tag an unmarked run ends at (an <li>'s nested <ul>).
+  defp inline_seq(cur, marks, acc, stop \\ nil) do
     {text, cur} = raw_text(cur)
     acc = if text == "", do: acc, else: [text_node(text, marks) | acc]
 
     cond do
       peek(cur) == :close or peek(cur) == :eof ->
+        {:ok, Enum.reverse(acc), cur}
+
+      stop != nil and marks == [] and match?({:ok, ^stop, _, _, _}, open_tag(cur)) ->
         {:ok, Enum.reverse(acc), cur}
 
       true ->
@@ -1144,12 +1206,12 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
             {:error, [e], skip_to_next_tag(cur)}
 
           {:ok, tag, attrs, self_closed, cur2} ->
-            inline_element(tag, attrs, self_closed, cur, cur2, marks, acc)
+            inline_element(tag, attrs, self_closed, cur, cur2, {marks, stop}, acc)
         end
     end
   end
 
-  defp inline_element(tag, attrs, self_closed, cur, cur2, marks, acc) do
+  defp inline_element(tag, attrs, self_closed, cur, cur2, {marks, stop}, acc) do
     cond do
       Map.has_key?(@inline_marks, tag) and not self_closed ->
         mark = @inline_marks[tag]
@@ -1158,7 +1220,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           {:ok, inner, cur3} ->
             case close_tag(cur3) do
               {:ok, ^tag, cur4} ->
-                inline_seq(cur4, marks, Enum.reverse(inner) ++ acc)
+                inline_seq(cur4, marks, Enum.reverse(inner) ++ acc, stop)
 
               {:ok, other, cur4} ->
                 {:error,
@@ -1189,7 +1251,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
                 case close_tag(cur3) do
                   {:ok, "a", cur4} ->
                     node = %{"type" => "link", "children" => children} |> put_attr("href", attrs)
-                    inline_seq(cur4, marks, [node | acc])
+                    inline_seq(cur4, marks, [node | acc], stop)
 
                   _ ->
                     {:error, [err("unclosed-tag", "<a> is never closed", line(cur3), "add </a>")],

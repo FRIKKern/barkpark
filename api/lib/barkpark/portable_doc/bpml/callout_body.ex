@@ -26,8 +26,9 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       otherwise `bpml_inline_body`. A body is deleted only in the structured
       form: the slot left out stores no body, `<content>` left out stores no
       content.
-    * **`<kept>`.** A top-level block holding a callout BPML cannot write
-      prints as `<kept id type why/>` (the printer's `Unwritable`). It resolves
+    * **`<kept>`.** A top-level block holding a block BPML cannot write (a
+      callout here, a list item in `Bpml.ListItems`) prints as
+      `<kept id type why/>` (`Bpml.Unwritable`). It resolves
       to the stored block only at top level, when its id and type match a
       block the pull printed as `<kept>` and that id appears once. Anything
       else, including a `<kept>` removed, replaced or moved inside another
@@ -39,18 +40,6 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   """
 
   alias Barkpark.PortableDoc.Bpml.Printer
-
-  defmodule Unwritable do
-    @moduledoc """
-    Raised by the printer for a callout it cannot spell. Only the top-level
-    print catches it, turning the whole top-level block into `<kept>`.
-    """
-    defexception [:callout, :reason]
-
-    @impl true
-    def message(%{callout: nil, reason: reason}), do: "a callout: #{reason}"
-    def message(%{callout: id, reason: reason}), do: "callout #{id}: #{reason}"
-  end
 
   @form "$form"
   @kept "$kept"

@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
-  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff}
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems}
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
@@ -156,6 +156,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
   block that spells as the pull printed it was not edited, so an unedited push
   derives no op whatever the view hides. A callout's body and `<kept>` lines
   follow `Bpml.CalloutBody.resolve/4` first; its notes come back with the ops.
+  A list item with an id then gets back what BPML cannot spell
+  (`Bpml.ListItems.carry/2`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """
@@ -171,6 +173,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
          {:ok, _bpml, pulled} <- printed(paper, shown, fields),
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
+         {:ok, pushed} <- ListItems.carry(pushed, stored),
          {:ok, _blocks, ops} <- Diff.derive(stored, pushed, pulled) do
       {:ok, ops, notes}
     else
@@ -183,7 +186,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
   @doc """
   A pushed copy (`Bpml.parse_copy/1`) for a Paper that does not exist yet, as
   a create reads it: refused when its `<paper slug>` names another Paper, or
-  when it holds a `<kept>` line (it stands for no stored block).
+  when it holds a `<kept>` line (it stands for no stored block), or a list
+  item id twice.
   """
   @spec create_copy(map(), String.t()) :: {:ok, map()} | {:refused, map()}
   def create_copy(%{} = copy, slug) do
@@ -203,7 +207,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
     else
       case Bpml.clean_copy(copy) do
         {:ok, paper} ->
-          {:ok, paper}
+          with {:ok, _blocks} <- ListItems.carry(paper["blocks"] || [], []), do: {:ok, paper}
 
         {:error, errors} ->
           {:refused, %{code: "bpml", message: "the BPML document did not parse", errors: errors}}
@@ -238,7 +242,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
         with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
              {:ok, _bpml, pulled} <- printed(paper, shown, fields),
              pulled = BlockIds.ensure_block_ids(pulled),
-             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy) do
+             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
+             {:ok, blocks} <- ListItems.carry(blocks, stored) do
           {:ok, copy |> Map.delete("print") |> Map.put("blocks", blocks)}
         else
           {:refused, _body} = refused -> refused
