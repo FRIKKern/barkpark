@@ -1,8 +1,11 @@
 // The top layer's readings and census were one selftest run; they are two, so each stays under the selftest's
 // time for one case. These hold that every row of the one run is in exactly one of the two, so none was dropped
-// to make room, and the check that says so is red by the row's name.
+// to make room, and the check that says so is red by the row's name. And every top-layer case runs in the rest
+// job, by the runner's own pick, red by the case's name when one would run in the views job.
 import { describe, expect, it } from 'vitest'
-import { rowsMoved, TOP_LAYER_ROWS } from '../check/layer-cases.mjs'
+import { selftestPick } from '../check/jobs.mjs'
+import { LAYER_CASES, rowsMoved, TOP_LAYER_ROWS } from '../check/layer-cases.mjs'
+import { CASES } from '../check/selftest.mjs'
 
 // The rows of the one run, as it held them before it was split in two.
 const ONE_RUN = [
@@ -37,5 +40,24 @@ describe('the two top-layer runs', () => {
     expect(rowsMoved(ONE_RUN, { popover, census: census.filter((r) => r !== row) })).toEqual([`the row "${row}" is in neither top-layer run`])
     expect(rowsMoved(ONE_RUN, { popover: [...popover, row], census })).toEqual([`the row "${row}" is in both top-layer runs (popover, census)`])
     expect(rowsMoved(ONE_RUN, { popover, census: [...census, row] })).toEqual([`the row "${row}" is in the census run 2 times`])
+  })
+})
+
+/** Each top-layer case among `cases` that the rest job does not run, by name. */
+const notInRest = (cases) => {
+  const rest = new Set(selftestPick(cases, 'rest').map((c) => c.name))
+  return LAYER_CASES.filter((c) => !rest.has(c.name)).map((c) => `the top-layer case "${c.name}" is not in the rest job`)
+}
+
+describe('the top-layer cases', () => {
+  it('each run in the rest job, by the runner’s own pick', () => {
+    expect(notInRest(CASES)).toEqual([])
+  })
+
+  it('are red by the case’s name when one loses its `layers` flag', () => {
+    for (const c of LAYER_CASES.filter((x) => x.layers)) {
+      const planted = CASES.map((x) => (x === c ? { ...x, layers: undefined } : x))
+      expect(notInRest(planted)).toEqual([`the top-layer case "${c.name}" is not in the rest job`])
+    }
   })
 })
