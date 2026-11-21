@@ -7,9 +7,9 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
   a visible "no data" placeholder) when their content key was absent are covered
   by the `Slots.field_vocab/1` + `Slots.lossy_shape?/1` narrow rule:
 
-    * `callout` — its body comes from the legacy `content` inline array (or the
-      materialized `body` slot) via `callout_body_inline/1`, plus an optional
-      `title`. The production repair established prose under `text` as a
+    * `callout` — its first line comes from the `content` inline array via
+      `callout_head_inline/1`, its body from the `body` slot via
+      `callout_body_blocks/1`, plus an optional `title`. The production repair established prose under `text` as a
       deterministic legacy dialect, so readers consume it and write boundaries
       canonicalize it to `content` instead of rejecting or dropping it.
     * `pipeline` — its flow comes from `nodes: [%{kind,title,detail,files}]`.
@@ -97,7 +97,7 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
 
       refute Slots.lossy_shape?(callout)
 
-      assert Slots.callout_body_inline(callout) == [
+      assert Slots.callout_head_inline(callout) == [
                %{"type" => "text", "value" => "Legacy callout prose"}
              ]
     end

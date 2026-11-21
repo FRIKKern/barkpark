@@ -321,7 +321,7 @@
       ]
     },
     {
-      "row": "callout: body slot only",
+      "row": "callout: body slot only, no first line",
       "block": {
         "type": "callout",
         "tone": "note",
@@ -339,15 +339,10 @@
           ]
         }
       },
-      "inline": [
-        {
-          "type": "text",
-          "value": "from body"
-        }
-      ]
+      "inline": []
     },
     {
-      "row": "callout: body slot over content",
+      "row": "callout: content and body slot, the first line is content",
       "block": {
         "type": "callout",
         "tone": "note",
@@ -371,15 +366,10 @@
           ]
         }
       },
-      "inline": [
-        {
-          "type": "text",
-          "value": "from body"
-        }
-      ]
+      "inline": [{"type": "text", "value": "head"}]
     },
     {
-      "row": "callout: empty body slot, text shows, content does not",
+      "row": "callout: empty body slot, content shows over text",
       "block": {
         "type": "callout",
         "tone": "note",
@@ -394,12 +384,7 @@
           "body": []
         }
       },
-      "inline": [
-        {
-          "type": "text",
-          "value": "from text"
-        }
-      ]
+      "inline": [{"type": "text", "value": "head"}]
     },
     {
       "row": "callout: empty first body element, text shows",
