@@ -48,7 +48,8 @@
   box-sizing: border-box;
   height: calc(var(--ui-spacing) * 9);
   padding-inline: calc(var(--ui-spacing) * 3);
-  border: 0;
+  /* Every side without an edge is 0 wide and transparent, so its colour never follows the text on hover. */
+  border: 0 solid transparent;
   border-bottom: var(--bark-tabs-edge) solid var(--bark-tab-edge);
   background: transparent;
   color: var(--bark-tab-fg);
@@ -63,7 +64,7 @@
   }
 
   &[data-orientation="vertical"] {
-    border-bottom: 0;
+    border-bottom: 0 solid transparent;
     border-inline-start: var(--bark-tabs-edge) solid var(--bark-tab-edge);
   }
 
