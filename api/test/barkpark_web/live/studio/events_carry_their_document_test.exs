@@ -4,10 +4,10 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
   posting its form is written into the document it was pressed in, or not
   at all.
 
-  A list's Add, Remove and Move (`array_op`), Generate on a slug
-  (`slug-generate`), and the old pickers' `select-ref`, `clear-ref`,
-  `select-media`, `clear-image` and `upload-image` ran against whatever
-  document the socket held when they arrived. A press in document A that
+  A list's Add, Remove and Move (`array_op`) and Generate on a slug
+  (`slug-generate`) ran against whatever document the socket held when they
+  arrived (so did the old pickers' events, since removed,
+  task-c42545346b93cbb0). A press in document A that
   reached the server after the pane had opened document B changed B. Each
   now names its document (`PostIdentity.pressed/3`); the mark is the one
   the editor form on the page carries, read here from the rendered page.
@@ -145,13 +145,7 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
       {"array_op move", "array_op",
        %{"action" => "move_down", "field" => "tags", "path" => "", "index" => "0"},
        &Map.put(&1, "tags", Enum.reverse(&1["tags"]))},
-      {"slug-generate", "slug-generate", %{"field" => "slug"}, &Map.put(&1, "slug", slug_of(&1))},
-      {"select-ref", "select-ref", %{"field" => "author", "id" => c.p2},
-       &Map.put(&1, "author", c.p2)},
-      {"clear-ref", "clear-ref", %{"field" => "author"}, &Map.delete(&1, "author")},
-      {"select-media", "select-media", %{"field" => "cover", "url" => "/media/files/picked.png"},
-       &Map.put(&1, "cover", "/media/files/picked.png")},
-      {"clear-image", "clear-image", %{"field" => "cover"}, &Map.delete(&1, "cover")}
+      {"slug-generate", "slug-generate", %{"field" => "slug"}, &Map.put(&1, "slug", slug_of(&1))}
     ]
   end
 
@@ -176,8 +170,7 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
   for surface <- [:desk, :studio] do
     @surface surface
 
-    for {label, index} <- Enum.with_index(~w(add remove move slug select-ref clear-ref
-          select-media clear-image)) do
+    for {label, index} <- Enum.with_index(~w(add remove move slug)) do
       @label label
       @index index
 
@@ -253,38 +246,6 @@ defmodule BarkparkWeb.Studio.EventsCarryTheirDocumentTest do
 
       assert stored(c, c.a)["tags"] == ["one 1", "two 1", nil]
     end
-
-    test "#{surface}: a pick the page sent itself to save is not saved once B is open", c do
-      {view, _sel} = page = open(c, @surface, c.a)
-      form = :sys.get_state(view.pid).socket.assigns.editor_form
-
-      built_in_a =
-        {:own, PostIdentity.value(@dataset, c.type, c.a), Map.put(form, "author", c.p2)}
-
-      goes_to(page, c, @surface, c.b)
-      send(view.pid, {:autosave_form, built_in_a})
-      settle(view)
-
-      assert fields_of(stored(c, c.b)) == fields_of(untouched(c, 2))
-      assert fields_of(stored(c, c.a)) == fields_of(untouched(c, 1))
-    end
-  end
-
-  test "studio: an upload submitted in A that arrives after the pane opened B changes nothing",
-       c do
-    {view, _sel} = page = open(c, :studio, c.a)
-    of_a = EditorPost.marks(view)
-    render_click(view, "open-image-picker", %{"field" => "cover"})
-
-    png = %{name: "pick.png", content: <<137, 80, 78, 71, 13, 10, 26, 10>>, type: "image/png"}
-    view |> file_input("#upload-form", :image, [png]) |> render_upload("pick.png")
-
-    goes_to(page, c, :studio, c.b)
-    EditorPost.press(view, "upload-image", %{"field" => "cover"}, of_a)
-    settle(view)
-
-    assert fields_of(stored(c, c.b)) == fields_of(untouched(c, 2))
-    assert fields_of(stored(c, c.a)) == fields_of(untouched(c, 1))
   end
 
   test "a press's mark for a document whose id has quotes, <, &, é and spaces", c do

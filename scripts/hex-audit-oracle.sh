@@ -20,17 +20,25 @@
 #   DIFFERENT WORD from clean, on purpose (charter: a failed read must never be
 #   byte-identical to a zero).
 #
-# WHAT IT DOES NOT DO. It does not make anything blocking. Which oracle should
-#   gate a merge is criterion 1 of that row and is HELD FOR THE OWNER
-#   (owner-queue item 47). This script is wired into the ALREADY non-blocking
-#   `Dependency CVE audit (… non-blocking)` job as extra STEPS — no new job
-#   name, so no .github/required-checks.json row is needed and the required
-#   census cannot drift.
+# WHAT IT DECIDES, AND WHAT IT DOES NOT (task-eb4b9903a92011cd). Its exit is
+#   a gate step of the `Dependency CVE audit (… non-blocking)` job: the job's
+#   Decide step (scripts/main-red-breaker.sh) counts it, so an advisory at or
+#   above the floor that is not excepted or baselined reds that job by name.
+#   It does not make any merge wait: whether this job or `Security gate`
+#   blocks merges is the owner's decision (owner-queue item 47), and neither
+#   is a required context. Extra STEPS in an existing job, no new job name, so
+#   no .github/required-checks.json row is needed and the census cannot drift.
+#
+# THE FLOOR (--red-at, default HIGH). An advisory reds when its severity is at
+#   or above the floor: HIGH -> CRITICAL and HIGH; MEDIUM adds MEDIUM; LOW adds
+#   LOW. An advisory with NO severity (UNKNOWN) reds at every floor. Below the
+#   floor it is printed and counted as a notice. The same floor applies with
+#   and without --baseline, and to --from-file.
 #
 # EXIT CODES — three outcomes, never collapsed:
-#     0  every audited lock is readable and carries NO HIGH/CRITICAL advisory
-#        (LOW/MEDIUM advisories are still PRINTED and counted; they do not red)
-#     1  at least one HIGH or CRITICAL advisory — the visible red
+#     0  every audited lock is readable and carries no advisory at the floor
+#        (with --baseline: no unrecorded one); below the floor is PRINTED only
+#     1  at least one advisory at the floor (with --baseline: unrecorded)
 #     3  CANNOT READ: a lock is missing, or `mix hex.audit` failed without
 #        producing an advisory report (hex down, no network, no project).
 #        NEVER 0. A refused feed is not a clean feed.
@@ -42,6 +50,7 @@
 #                                                      # advisory id OR any aka
 #     scripts/hex-audit-oracle.sh --from-file F --label L   # parse a captured
 #                                                      # report instead of running
+#     scripts/hex-audit-oracle.sh --baseline F --red-at HIGH   # the CI step
 #     scripts/hex-audit-oracle.sh --selftest           # prove the parser can fail
 #
 # NOT PIPED, EVER. Read to EOF. `… | grep -q` under pipefail returns 141 on
@@ -58,6 +67,7 @@ FROM_FILE=""
 FROM_LABEL=""
 BASELINE=""
 SELFTEST=0
+RED_AT=HIGH
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -66,11 +76,35 @@ while [ $# -gt 0 ]; do
     --from-file) FROM_FILE="$2"; shift 2 ;;
     --label)     FROM_LABEL="$2"; shift 2 ;;
     --baseline)  BASELINE="$2"; shift 2 ;;
+    --red-at)    RED_AT="$2"; shift 2 ;;
     --selftest)  SELFTEST=1; shift ;;
     -h|--help)   sed -n '2,40p' "$0"; exit 0 ;;
     *) echo "hex-audit-oracle: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done
+
+case "$RED_AT" in
+  HIGH|MEDIUM|LOW) ;;
+  *) echo "hex-audit-oracle: --red-at takes HIGH, MEDIUM or LOW, not '$RED_AT'" >&2; exit 64 ;;
+esac
+
+# at_floor <severity>: 0 when an advisory of that severity reds at $RED_AT.
+# UNKNOWN (no severity written) is never downgraded: it reds at every floor.
+at_floor() {
+  local rank floor
+  case "$1" in CRITICAL) rank=4 ;; HIGH) rank=3 ;; MEDIUM) rank=2 ;; LOW) rank=1 ;; *) return 0 ;; esac
+  case "$RED_AT" in HIGH) floor=3 ;; MEDIUM) floor=2 ;; *) floor=1 ;; esac
+  [ "$rank" -ge "$floor" ]
+}
+
+# floor_count <file of "<id> <severity>" lines>: how many are at the floor.
+floor_count() {
+  local n=0 id sev
+  while read -r id sev; do
+    [ -n "$id" ] && at_floor "${sev:-UNKNOWN}" && n=$((n + 1))
+  done <"$1"
+  echo "$n"
+}
 
 # ── the parser ─────────────────────────────────────────────────────────────
 # A FILE, not an inline heredoc, so --selftest drives the very same code over
@@ -159,7 +193,8 @@ for e in kept:
 print(f"##RESULT {label} readable={int(readable)} total={len(kept)} high={high}")
 PY
 
-# summarise <report-file> <label> ; echoes the human report, returns via globals
+# summarise <report-file> <label> ; echoes the human report, returns via globals.
+# R_IDS is one "<id> <severity>" line per counted advisory.
 R_READABLE=0; R_TOTAL=0; R_HIGH=0; R_IDS=""
 summarise() {
   local file="$1" label="$2" out
@@ -170,7 +205,7 @@ summarise() {
     R_READABLE=0; R_TOTAL=0; R_HIGH=0; R_IDS=""
     return 0
   fi
-  R_IDS="$(echo "$out" | sed -n 's|^##ENTRY [A-Z]* \([^ ]*\) .*|\1|p')"
+  R_IDS="$(echo "$out" | sed -n 's|^##ENTRY \([A-Z]*\) \([^ ]*\) .*|\2 \1|p')"
   # print everything except the machine lines
   echo "$out" | grep -v '^##RESULT ' | grep -v '^##ENTRY '
   local m
@@ -211,20 +246,35 @@ baseline_ids() {
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' "$1" | awk 'NF {print $1}' | sort -u
 }
 
-# baseline_verdict <baseline-file> <seen-ids-file>; sets B_NEW / B_CLEARED counts
-B_NEW=0; B_CLEARED=0
+# baseline_verdict <baseline-file> <seen-file>; the seen file has one
+# "<id> [severity]" line per advisory (no severity reads as UNKNOWN). Sets
+# B_NEW (unrecorded, at the floor: the red), B_BELOW (unrecorded, below the
+# floor: a notice) and B_CLEARED.
+B_NEW=0; B_BELOW=0; B_CLEARED=0
 baseline_verdict() {
-  local bfile="$1" sfile="$2" known new cleared
+  local bfile="$1" sfile="$2" known ids new cleared id sev atf below
   known="$(baseline_ids "$bfile")"
-  new="$(comm -13 <(echo "$known") <(sort -u "$sfile"))"
-  cleared="$(comm -23 <(echo "$known") <(sort -u "$sfile"))"
-  B_NEW=$(echo "$new" | awk 'NF' | wc -l | tr -d ' ')
+  ids="$(awk 'NF {print $1}' "$sfile" | sort -u)"
+  new="$(comm -13 <(echo "$known") <(echo "$ids"))"
+  cleared="$(comm -23 <(echo "$known") <(echo "$ids"))"
+  atf=""; below=""
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    sev="$(awk -v i="$id" '$1 == i && NF > 1 {print $2; exit}' "$sfile")"
+    if at_floor "${sev:-UNKNOWN}"; then atf="$atf$id ${sev:-UNKNOWN}"$'\n'; else below="$below$id $sev"$'\n'; fi
+  done <<<"$new"
+  B_NEW=$(printf '%s' "$atf" | awk 'NF' | wc -l | tr -d ' ')
+  B_BELOW=$(printf '%s' "$below" | awk 'NF' | wc -l | tr -d ' ')
   B_CLEARED=$(echo "$cleared" | awk 'NF' | wc -l | tr -d ' ')
   if [ "$B_NEW" -gt 0 ]; then
-    echo "NEW ADVISORIES — not in $bfile ($B_NEW):"
-    echo "$new" | awk 'NF {print "  + " $0}'
+    echo "NEW ADVISORIES at or above the floor ($RED_AT) — not in $bfile ($B_NEW):"
+    printf '%s' "$atf" | awk 'NF {print "  + " $0}'
   else
-    echo "NEW ADVISORIES: none. Every reported id is in $bfile."
+    echo "NEW ADVISORIES at or above the floor ($RED_AT): none."
+  fi
+  if [ "$B_BELOW" -gt 0 ]; then
+    echo "NEW below the floor ($RED_AT) — a NOTICE, not a red ($B_BELOW):"
+    printf '%s' "$below" | awk 'NF {print "  ~ " $0}'
   fi
   if [ "$B_CLEARED" -gt 0 ]; then
     echo "CLEARED — in the baseline, no longer reported ($B_CLEARED). The world got"
@@ -343,6 +393,17 @@ FIX
   [ "$B_NEW" = 1 ] && ok "RATCHET MUTANT: one unrecorded id -> new=1 (this is the red)" || no "new-id gave new=$B_NEW"
   baseline_verdict "$T/base.txt" "$T/seen.fewer.txt" >/dev/null
   [ "$B_NEW" = 0 ] && [ "$B_CLEARED" = 1 ] && ok "RATCHET OTHER DIRECTION: a cleared id is a notice (new=0 cleared=1), never a red" || no "fewer gave new=$B_NEW cleared=$B_CLEARED"
+  # THE FLOOR (task-eb4b9903a92011cd), on the same ratchet code.
+  printf 'EEF-CVE-2099-80002 MEDIUM\n' >"$T/seen.medium.txt"
+  printf 'EEF-CVE-2099-80003 CRITICAL\n' >"$T/seen.critical.txt"
+  baseline_verdict "$T/base.txt" "$T/seen.medium.txt" >/dev/null
+  [ "$B_NEW" = 0 ] && [ "$B_BELOW" = 1 ] && ok "FLOOR HIGH: an unrecorded MEDIUM is a notice (new=0 below=1), not a red" || no "medium gave new=$B_NEW below=$B_BELOW"
+  RED_AT=MEDIUM baseline_verdict "$T/base.txt" "$T/seen.medium.txt" >/dev/null
+  [ "$B_NEW" = 1 ] && ok "FLOOR MUTANT: the same MEDIUM at floor MEDIUM is the red (new=1)" || no "medium at floor MEDIUM gave new=$B_NEW"
+  baseline_verdict "$T/base.txt" "$T/seen.critical.txt" >/dev/null
+  [ "$B_NEW" = 1 ] && ok "FLOOR HIGH: an unrecorded CRITICAL reds (new=1)" || no "critical gave new=$B_NEW"
+  baseline_verdict "$T/base.txt" "$T/seen.new.txt" >/dev/null
+  [ "$B_NEW" = 1 ] && ok "FLOOR HIGH: an unrecorded id with no severity reds (never downgraded)" || no "no-severity gave new=$B_NEW"
   if [ -f "$ROOT/.github/hex-audit-baseline.txt" ]; then
     # Since 2026-10-28 both locks carry no recorded advisory, so the committed
     # baseline is header comments only and every reported id is NEW, which is
@@ -386,6 +447,17 @@ STUB
   }
   e2e "ratchet, planted unrecorded HIGH id" 1 "$T/high.txt" --baseline "$T/e2e-base.txt"
   e2e "ratchet, plant removed (only the recorded id)" 0 "$T/lowonly.txt" --baseline "$T/e2e-base.txt"
+  cat >"$T/medium.txt" <<'FIX'
+Advisories:
+  planted 0.0.1 - EEF-CVE-2099-80002 (MEDIUM)
+    aka: CVE-2099-80002
+FIX
+  e2e "ratchet, floor HIGH: an unrecorded MEDIUM is GREEN (printed, not a red)" 0 "$T/medium.txt" --baseline "$T/e2e-base.txt" --red-at HIGH
+  e2e "ratchet, MUTANT floor LOW: the same MEDIUM reds" 1 "$T/medium.txt" --baseline "$T/e2e-base.txt" --red-at LOW
+  e2e "ratchet, no --red-at: the default floor is HIGH" 0 "$T/medium.txt" --baseline "$T/e2e-base.txt"
+  e2e "ratchet, an unrecorded advisory with no severity reds" 1 "$T/unknownsev.txt" --baseline "$T/e2e-base.txt" --red-at HIGH
+  e2e "absolute, floor MEDIUM: an unrecorded MEDIUM reds" 1 "$T/medium.txt" --red-at MEDIUM
+  e2e "a --red-at that is not a severity is refused" 64 "$T/medium.txt" --red-at SOME
   e2e "absolute, planted HIGH" 1 "$T/high.txt"
   e2e "absolute, plant removed" 0 "$T/lowonly.txt"
   e2e "an unreadable feed is CANNOT READ, never green" 3 "$T/unreadable.txt"
@@ -415,7 +487,9 @@ if [ -n "$FROM_FILE" ]; then
   fi
   summarise "$FROM_FILE" "${FROM_LABEL:-file}"
   [ "$R_READABLE" = 1 ] || { echo "CANNOT READ: '$FROM_FILE' is not a hex.audit report."; exit 3; }
-  [ "$R_HIGH" -eq 0 ] || exit 1
+  printf '%s\n' "$R_IDS" >"$PARSER.ids"
+  n="$(floor_count "$PARSER.ids")"; rm -f "$PARSER.ids"
+  [ "$n" -eq 0 ] || exit 1
   exit 0
 fi
 
@@ -473,20 +547,21 @@ for d in "${DIRS[@]}"; do
     continue
   fi
   grand_total=$((grand_total + R_TOTAL))
-  [ "$R_HIGH" -gt 0 ] && any_high=1
+  printf '%s\n' "$R_IDS" >"$WORK/$d.ids"
+  [ "$(floor_count "$WORK/$d.ids")" -gt 0 ] && any_high=1
   # Seen ids are keyed BY LOCK (`api:EEF-...`), not bare. bandit's two HIGHs sit
   # in BOTH locks; a bare-id baseline would let an advisory recorded against api/
   # arrive in cloud/ and never read as NEW.
-  echo "$R_IDS" | awk -v d="$d" 'NF {print d ":" $1}' >>"$SEEN"
+  # Each seen line carries its severity, so the ratchet can apply the floor.
+  echo "$R_IDS" | awk -v d="$d" 'NF {print d ":" $1, $2}' >>"$SEEN"
   echo
 done
 
 echo "══════════════════════════════════════════════════════════════════════"
-echo "VERDICT: locks=${#DIRS[@]} advisories(hex.audit)=$grand_total high_or_worse=$( [ $any_high = 1 ] && echo yes || echo no ) unreadable=$( [ $unreadable = 1 ] && echo yes || echo no )"
-echo "This oracle is ADVISORY. 'Security gate' is not a required context and"
-echo "this job is not on any merge path; a red here stops no merge. Which"
-echo "oracle should BLOCK is owner-queue item 47 / criterion 1 of"
-echo "cch-w12-bl-cve-gate-is-oracle-blind, deliberately not decided here."
+echo "VERDICT: locks=${#DIRS[@]} advisories(hex.audit)=$grand_total floor=$RED_AT at_floor=$( [ $any_high = 1 ] && echo yes || echo no ) unreadable=$( [ $unreadable = 1 ] && echo yes || echo no )"
+echo "This exit counts toward the CVE audit job's light. Neither that job nor"
+echo "'Security gate' is a required context; whether either blocks merges is"
+echo "the owner's decision (owner-queue item 47)."
 echo "══════════════════════════════════════════════════════════════════════"
 
 # UNREADABLE OUTRANKS EVERYTHING. A feed that refused to answer is not a clean
@@ -510,10 +585,10 @@ if [ -n "$BASELINE" ]; then
   baseline_verdict "$BASELINE" "$SEEN"
   rm -rf "$WORK"
   if [ "$B_NEW" -gt 0 ]; then
-    echo "RATCHET VERDICT: $B_NEW advisory id(s) not in the recorded baseline. Exit 1."
+    echo "RATCHET VERDICT: $B_NEW advisory id(s) at or above $RED_AT not in the recorded baseline. Exit 1."
     exit 1
   fi
-  echo "RATCHET VERDICT: no unrecorded advisory. Exit 0."
+  echo "RATCHET VERDICT: no unrecorded advisory at or above $RED_AT. Exit 0."
   exit 0
 fi
 

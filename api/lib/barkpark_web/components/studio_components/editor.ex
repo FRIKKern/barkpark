@@ -632,11 +632,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   `<.document_header>` directly. StudioLive is the only consumer today.
 
   Events bubble to StudioLive: save, autosave, show-history, delete-doc,
-  publish, unpublish, plus the studio_field_renderer phx-click events
-  (open-image-picker, clear-image). The reference field is now owned
-  client-side by `<bp-reference-picker>` (Task #12 WI2) and bridges
-  through autosave; open-ref-picker / clear-ref handlers in StudioLive
-  are orphaned-but-harmless until v2 cleanup.
+  publish, unpublish. The image and reference fields are owned
+  client-side by `<bp-media-picker>` / `<bp-reference-picker>` (Task #12)
+  and bridge through autosave.
 
   Slots:
     * `:extra_actions` — (optional) appended after Publish/Unpublish.

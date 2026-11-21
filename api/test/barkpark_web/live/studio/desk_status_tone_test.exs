@@ -127,10 +127,11 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       assert has_element?(a, footer, "Updated by another user")
     end
 
-    # #28139 review: a save through `{:autosave_form, …}` (a reference or an
-    # image pick) says "Saved" but leaves `doc_conflict` set; the mark follows
-    # the words, so "Saved" is not drawn as a refusal.
-    test "a pick's save during a conflict says Saved, with no conflict mark", c do
+    # #28139 review: a save that says "Saved" while `doc_conflict` is still
+    # set (the legacy pick's `{:autosave_form, …}` did, before it was removed,
+    # task-c42545346b93cbb0) is not drawn as a refusal: the mark follows the
+    # words.
+    test "Saved during a conflict carries no conflict mark", c do
       a = open(c.conn, c.path)
       b = open(c.conn, c.path)
 
@@ -152,7 +153,10 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       save_from(b, "From B")
       assert eventually(fn -> has_element?(a, "#{@pane}[data-desk-conflict]") end)
 
-      send(a.pid, {:autosave_form, %{"title" => "From B", "excerpt" => "Mine"}})
+      :sys.replace_state(a.pid, fn state ->
+        socket = state.socket
+        %{state | socket: %{socket | assigns: Map.put(socket.assigns, :save_status, "Saved")}}
+      end)
 
       assert eventually(fn -> has_element?(a, ~s(#{@pane}[data-desk-save="Saved"])) end)
       assert :sys.get_state(a.pid).socket.assigns.doc_conflict == true

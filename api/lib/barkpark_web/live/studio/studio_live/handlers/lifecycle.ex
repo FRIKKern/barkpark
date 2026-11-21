@@ -450,15 +450,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
     end
   end
 
-  # A form built in one document is not saved into the next one the pane
-  # opened before this message was read (`PostIdentity`).
-  def autosave_form(sent, socket) do
-    case BarkparkWeb.Studio.StudioLive.PostIdentity.own?(sent, socket) do
-      %{} = form -> {:noreply, Shared.do_autosave(socket, form, :autosave_form)}
-      _ -> {:noreply, socket}
-    end
-  end
-
   def paper_op(%{"op" => _} = op, socket) do
     {:noreply, Shared.paper_op(socket, op)}
   end

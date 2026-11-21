@@ -4,97 +4,6 @@ defmodule BarkparkWeb.StudioComponents.ModalsTest do
 
   alias BarkparkWeb.StudioComponents.Modals
 
-  describe "ref_picker_modal/1 — gate + filtering" do
-    test "renders nothing when ref_picker_field is nil (gate closed)" do
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: nil,
-          ref_search: "",
-          ref_candidates: [%{id: "doc-1", title: "Ignored"}]
-        })
-
-      refute html =~ "image-picker"
-      refute html =~ "Select reference"
-    end
-
-    test "renders modal when ref_picker_field is set" do
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: "author",
-          ref_search: "",
-          ref_candidates: []
-        })
-
-      assert html =~ "Select reference"
-      assert html =~ "close-ref-picker"
-    end
-
-    test "shows all candidates when ref_search is empty string" do
-      candidates = [
-        %{id: "doc-1", title: "Alpha"},
-        %{id: "doc-2", title: "Beta"}
-      ]
-
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: "author",
-          ref_search: "",
-          ref_candidates: candidates
-        })
-
-      assert html =~ "Alpha"
-      assert html =~ "Beta"
-    end
-
-    test "filters candidates by title (case-insensitive)" do
-      candidates = [
-        %{id: "doc-1", title: "Phoenix Framework"},
-        %{id: "doc-2", title: "Elixir Language"}
-      ]
-
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: "author",
-          ref_search: "elixir",
-          ref_candidates: candidates
-        })
-
-      assert html =~ "Elixir Language"
-      refute html =~ "Phoenix Framework"
-    end
-
-    test "filters candidates by id (case-insensitive)" do
-      candidates = [
-        %{id: "post-abc-123", title: "Unrelated Title"},
-        %{id: "doc-xyz-999", title: "Another Doc"}
-      ]
-
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: "ref",
-          ref_search: "ABC",
-          ref_candidates: candidates
-        })
-
-      assert html =~ "post-abc-123"
-      refute html =~ "doc-xyz-999"
-    end
-
-    test "shows 'No documents found' when filter yields empty result" do
-      candidates = [%{id: "doc-1", title: "Alpha"}]
-
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: "author",
-          ref_search: "zzz-no-match",
-          ref_candidates: candidates
-        })
-
-      assert html =~ "No documents found"
-      refute html =~ "Alpha"
-    end
-  end
-
   describe "delete_modal/1 — clean vs. ref-blocked paths" do
     test "renders nothing when show_delete is false" do
       html =
@@ -170,23 +79,6 @@ defmodule BarkparkWeb.StudioComponents.ModalsTest do
   end
 
   describe "dialog a11y semantics" do
-    test "ref_picker_modal exposes dialog role, labelled title, escape-close, and named close button" do
-      html =
-        render_component(&Modals.ref_picker_modal/1, %{
-          ref_picker_field: "author",
-          ref_search: "",
-          ref_candidates: []
-        })
-
-      assert html =~ ~s(role="dialog")
-      assert html =~ ~s(aria-modal="true")
-      assert html =~ ~s(aria-labelledby="ref-picker-title")
-      assert html =~ ~s(id="ref-picker-title")
-      assert html =~ ~s(phx-window-keydown="close-ref-picker")
-      assert html =~ ~s(phx-key="escape")
-      assert html =~ ~s(aria-label="Close")
-    end
-
     test "delete_modal exposes dialog role, labelled title, and escape-close" do
       html =
         render_component(&Modals.delete_modal/1, %{
