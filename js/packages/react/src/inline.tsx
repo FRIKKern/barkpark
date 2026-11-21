@@ -192,7 +192,7 @@ import {
 } from './status-vocab.gen'
 import type { RenderCtx } from './blocks/chrome'
 import { inlineObjectText } from './inline-object'
-import { cutInline, isInlineWrapper } from './inline-depth'
+import { MAX_WORD_DEPTH } from './inline-depth'
 export { inlineObjectText } from './inline-object'
 
 /** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
@@ -521,7 +521,8 @@ function isBlockWrapper(n: unknown): n is Record<string, unknown> {
 export function renderInline(node: Inline, depth = 0, insideLink = false): string {
   // A wrapper at the depth limit or past it keeps its words, then the notice
   // (inline-depth.ts); a leaf there is drawn as usual.
-  if (depth >= MAX_DEPTH && isInlineWrapper(node)) return escapeHtml(cutInline(node, depth, tooDeepNotice))
+  const cut = depth >= MAX_DEPTH && cutInline(node, depth)
+  if (cut) return escapeHtml(cut)
   if (typeof node === 'string') return escapeHtml(node)
   if (typeof node === 'number') return escapeHtml(String(node))
   // A bare ARRAY where an inline node was expected (`content: [[{text…}]]` —
@@ -544,9 +545,7 @@ export function renderInline(node: Inline, depth = 0, insideLink = false): strin
       const value = escapeHtml(textLeafValue(node))
       // The marks that fit under the depth limit are drawn; past them the word is
       // kept and the notice follows (inline-depth.ts).
-      const fit = Math.max(MAX_DEPTH - depth, 0)
-      if (marks.length > fit) return `<span>${applyMarks(value, marks.slice(0, fit))} ${escapeHtml(tooDeepNotice)}</span>`
-      return marks.length ? applyMarks(value, marks) : value
+      return cutMarks(value, marks, MAX_DEPTH - depth) || (marks.length ? applyMarks(value, marks) : value)
     }
     case 'strong':
     case 'bold':
@@ -634,6 +633,34 @@ export const MAX_DEPTH = 100
 
 let tooDeepNotice = 'Nested too deep to show'
 
+// A text with more marks than fit (`fit`, under the depth limit): the marks that
+// fit around the word, then the notice. '' when every mark fits.
+const cutMarks = (value: string, marks: unknown[], fit: number): string =>
+  marks.length > fit
+    ? `<span>${applyMarks(value, marks.slice(0, Math.max(fit, 0)))} ${escapeHtml(tooDeepNotice)}</span>`
+    : ''
+
+// A wrapper's children: a bare list itself, a node's `children` list (none when it
+// is not a list), or undefined for a leaf.
+const kidsOf = (n: unknown): unknown[] | undefined =>
+  Array.isArray(n) ? n : isMap(n) && 'children' in n ? asList(n.children) : undefined
+
+// A wrapper at inline depth `depth`, as plain text: the words under it, read with
+// a loop and none at or past MAX_WORD_DEPTH, then the notice. Undefined for a leaf.
+function cutInline(node: unknown, depth: number): string | undefined {
+  if (!kidsOf(node)) return
+  let words = ''
+  const stack: [unknown, number][] = [[node, depth]]
+  while (stack.length) {
+    const [n, d] = stack.pop()!
+    if (d >= MAX_WORD_DEPTH) continue
+    const kids = kidsOf(n)
+    if (kids) for (let i = kids.length; i--; ) stack.push([kids[i], d + 1])
+    else words += isMap(n) ? textLeafValue(n) : str(n)
+  }
+  return words ? words + ' ' + tooDeepNotice : tooDeepNotice
+}
+
 export function withTooDeepNotice<T>(notice: string, fn: () => T): T {
   const prev = tooDeepNotice
   tooDeepNotice = notice
@@ -698,9 +725,7 @@ export function renderCell(cell: unknown): string {
       if (str(n.type) === 'text') {
         const marks = asList(n.marks)
         const value = escapeHtml(textLeafValue(n))
-        if (marks.length > MAX_DEPTH)
-          return `<span>${applyMarks(value, marks.slice(0, MAX_DEPTH))} ${escapeHtml(tooDeepNotice)}</span>`
-        const inner = marks.length ? applyMarks(value, marks) : value
+        const inner = cutMarks(value, marks, MAX_DEPTH) || (marks.length ? applyMarks(value, marks) : value)
         // A mark that produced a wrapper element (bold/italic/code/link/…) is the
         // PdText span itself; only genuinely-bare text needs the base `<span>`.
         return inner.startsWith('<') ? inner : `<span>${inner}</span>`
