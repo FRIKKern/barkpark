@@ -156,7 +156,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
             width-bucket show-profile close-profile preview-profile save-profile
             jump-to-user backlinks-refresh open-backlink view-graph node-clicked
             close-delete close-discard close-unpublish-guard close-confirm-modal
-            close-history object-dialog-close close-image-picker close-ref-picker
+            close-history object-dialog-close
             close-secondary-picker close-secondary restore-revision)
 
   @doc "Whether `event` is refused because a revision is shown in the form's place."

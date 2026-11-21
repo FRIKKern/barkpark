@@ -4,7 +4,8 @@ defmodule BarkparkWeb.Studio.UntitledFallbackLocaleTest do
   read "Utgivelse uten tittel" and its tab "Uten tittel", but its header, the
   sr-only h1 under it, the reference picker and the "Open in new pane" picker
   printed a bare English "Untitled". The fallback is now the translated
-  "Untitled", so the four read "Uten tittel"; an English Studio reads as before.
+  "Untitled", so they read "Uten tittel"; an English Studio reads as before.
+  (The legacy reference picker modal is gone, task-c42545346b93cbb0.)
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -75,11 +76,6 @@ defmodule BarkparkWeb.Studio.UntitledFallbackLocaleTest do
     assert has_element?(view, "h1.sr-only", "Uten tittel")
     refute has_element?(view, ".pane-header-title", "Untitled")
 
-    render_click(view, "open-ref-picker", %{"field" => "related", "ref-type" => "utnote"})
-    assert has_element?(view, ".ref-candidate-title", "Uten tittel")
-    refute has_element?(view, ".ref-candidate-title", "Untitled")
-    render_click(view, "close-ref-picker", %{})
-
     render_click(view, "open-secondary-picker", %{})
     assert has_element?(view, ".bp-secondary-candidate strong", "Uten tittel")
     refute has_element?(view, ".bp-secondary-candidate strong", "Untitled")
@@ -90,8 +86,5 @@ defmodule BarkparkWeb.Studio.UntitledFallbackLocaleTest do
     view = open(conn, ws, proj)
 
     assert has_element?(view, ".pane-header-title", "Untitled")
-
-    render_click(view, "open-ref-picker", %{"field" => "related", "ref-type" => "utnote"})
-    assert has_element?(view, ".ref-candidate-title", "Untitled")
   end
 end

@@ -17,7 +17,8 @@ defmodule BarkparkWeb.StudioModalFocusTest do
   test "every role=dialog in the module mounts ModalFocus under a unique id" do
     # Each dialog's opening tag, from `role="dialog"` to its closing `>`.
     tags = Regex.scan(~r/role="dialog"[^>]*>/s, @source) |> Enum.map(&hd/1)
-    assert length(tags) == 10, "found #{length(tags)} dialogs; the count is the control"
+    # 8 since the image and reference picker modals went (task-c42545346b93cbb0).
+    assert length(tags) == 8, "found #{length(tags)} dialogs; the count is the control"
 
     for tag <- tags do
       assert tag =~ ~s(phx-hook="ModalFocus"), "dialog without the focus hook: #{tag}"
@@ -25,10 +26,6 @@ defmodule BarkparkWeb.StudioModalFocusTest do
 
     ids = Enum.map(tags, &(Regex.run(~r/\bid="([^"]+)"/, &1) |> List.last()))
     assert Enum.uniq(ids) == ids, "a LiveView hook needs a unique id: #{inspect(ids)}"
-  end
-
-  test "the reference picker opens on its search field" do
-    assert @source =~ ~r/<input[^>]*phx-keyup="ref-search"[^>]*data-modal-focus/
   end
 
   test "the share sheet opens on its recipient email field" do
