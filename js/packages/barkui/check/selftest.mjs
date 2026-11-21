@@ -108,6 +108,8 @@ const CASES = [
       '#button-more svg { fill: #ff0000; }',
       '[data-slot="button"][data-size="lg"]::before { content: "\\25CF  "; color: #ff0000; }',
       '#button-disabled { background-color: #ffffff; color: #eeeeee; }',
+      // The trace reads caret-color from style, never while the readings hide the caret with a sheet of their own.
+      '#button-save { caret-color: #ff0000; }',
     ].join('\n'),
     expect: each({
       'a frozen colour': skinsSay(/button#button-after .* is not one skin variable/),
@@ -117,6 +119,7 @@ const CASES = [
       'a right border colour': skinsSay(/button#button-destructive .*border-right-color is not one skin variable/),
       'an icon in its own fill': skinsSay(/svg .* fill is not one skin variable/),
       'a red ::before': skinsSay(/button "Large"::before color is not one skin variable/),
+      'a caret colour': skinsSay(/button#button-save .*caret-color is not one skin variable/),
       'a paint-free element with its own fill': skinsSay(/paint-free button#button-disabled .* carries its own background/),
       'text-only on controls that draw an edge': skinsSay(/text-only button.* draws its (edge|fill) at [\d.]+:1/),
     }),
@@ -216,6 +219,48 @@ const CASES = [
     expect: (p) => /cut off|clipped/.test(lights(p).noscript.detail),
   },
   // Pressed by real keys.
+  // A caret blinks while its field is focused, so a reading can catch it in one capture and not another. Two
+  // focused empty fields hold each half of that on purpose: each caret is held steady by the browser (no blink),
+  // and a sheet of the fixture's own turns it out, or back on, only while the reading has the glyphs unpainted.
+  {
+    name: 'a reading is the same whether or not the caret is drawn',
+    only: ['pressed'],
+    states: true,
+    green: true,
+    css: '#button-caret-drawn { caret-animation: manual; } #button-caret-glyphs { caret-animation: manual; caret-color: transparent; }',
+    plant: (d) => {
+      appendFileSync(join(d, 'example.html'), `
+<div data-demo-row>
+  <input id="button-caret-drawn" data-slot="input" placeholder="Spring reading list">
+  <input id="button-caret-glyphs" data-slot="input" placeholder="Spring reading list">
+</div>
+`)
+      // Each expect is sent to the page alone, so each step is written out whole, with nothing shared.
+      const step = (id, picture, caret) => `
+steps.push({
+  name: 'a focused empty field whose caret shows in the ${picture} picture only',
+  expect: (root) => {
+    const field = root.querySelector('#${id}')
+    field.focus()
+    const sheet = document.createElement('style')
+    sheet.textContent = '#${id} { caret-color: ${caret}; }'
+    new MutationObserver(() => {
+      const unpainted = getComputedStyle(field).webkitTextFillColor === 'rgba(0, 0, 0, 0)'
+      if (unpainted && !sheet.isConnected) document.head.append(sheet)
+      if (!unpainted && sheet.isConnected) sheet.remove()
+    }).observe(document.head, { childList: true })
+    return document.activeElement === field || 'the field lost focus'
+  },
+})
+`
+      appendFileSync(join(d, 'press.mjs'), step('button-caret-drawn', 'drawn', 'transparent') + step('button-caret-glyphs', 'glyph', 'auto'))
+    },
+    expect: each({
+      'both readings ran': (p) => ['drawn', 'glyph'].every((w) => (p.parts.button.steps ?? []).some((st) => st.name === `a focused empty field whose caret shows in the ${w} picture only`)),
+      'a focused empty field with a placeholder draws in full, its caret in the drawn picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the drawn picture only/.test(st.name) && st.pass),
+      'a focused empty field with a placeholder draws in full, its caret in the glyph picture only': (p) => (p.parts.button.steps ?? []).some((st) => /caret shows in the glyph picture only/.test(st.name) && st.pass),
+    }),
+  },
   {
     name: 'a press step that never settles fails by name within its time limit',
     only: ['pressed'],
