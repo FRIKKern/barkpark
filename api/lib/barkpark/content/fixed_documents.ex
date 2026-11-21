@@ -27,8 +27,8 @@ defmodule Barkpark.Content.FixedDocuments do
   `fixed_documents: :skip` and are unchanged.
   """
 
-  import Ecto.Changeset, only: [get_change: 2, add_error: 3, put_change: 3]
-
+  # No import: the module loads under plain `elixir` with DraftId alone, so the
+  # Studio's case table is answered by `answer/4` itself (see its doc).
   alias Barkpark.Content
   alias Barkpark.Content.DraftId
 
@@ -43,15 +43,11 @@ defmodule Barkpark.Content.FixedDocuments do
   @spec check_create(term(), term(), String.t(), keyword()) :: :ok | refusal()
   def check_create(type, attrs, dataset, opts) do
     with false <- Keyword.get(opts, :fixed_documents) == :skip,
-         ids when is_list(ids) <- fixed(type, dataset, opts) do
-      id = attrs_id(attrs)
-      base = is_binary(id) && DraftId.published_id(id)
-
-      cond do
-        is_binary(base) and base in ids -> :ok
-        is_binary(base) and exists?(base, type, dataset, opts) -> :ok
-        true -> {:error, {:fixed_document, :create, type, base || ""}}
-      end
+         ids when is_list(ids) <- fixed(type, dataset, opts),
+         id = attrs_id(attrs),
+         :refused <- answer(ids, :create, id, fn -> exists?(id, type, dataset, opts) end) do
+      {:error,
+       {:fixed_document, :create, type, if(is_binary(id), do: DraftId.published_id(id), else: "")}}
     else
       _ -> :ok
     end
@@ -59,18 +55,35 @@ defmodule Barkpark.Content.FixedDocuments do
 
   @doc "`:ok`, or the refusal, for deleting `doc_id` (either spelling) of `type`."
   @spec check_delete(term(), term(), String.t(), keyword()) :: :ok | refusal()
-  def check_delete(doc_id, type, dataset, opts) when is_binary(doc_id) do
+  def check_delete(doc_id, type, dataset, opts) do
     with false <- Keyword.get(opts, :fixed_documents) == :skip,
          ids when is_list(ids) <- fixed(type, dataset, opts),
-         base = DraftId.published_id(doc_id),
-         true <- base in ids do
-      {:error, {:fixed_document, :delete, type, base}}
+         :refused <- answer(ids, :delete, doc_id, fn -> true end) do
+      {:error, {:fixed_document, :delete, type, DraftId.published_id(doc_id)}}
     else
       _ -> :ok
     end
   end
 
-  def check_delete(_doc_id, _type, _dataset, _opts), do: :ok
+  @doc """
+  The rule alone: `:ok` or `:refused` for `action` (`:create` or `:delete`) on
+  `id` (either spelling) of a type whose list is `ids` (`nil` = no list).
+  `exists?` says whether a row of that id and type already exists; it is called
+  only for a create of an unlisted id. barkpark-studio's
+  `fixtures/fixed-document-cases.json` is answered by this function.
+  """
+  @spec answer([String.t()] | nil, :create | :delete, term(), (-> boolean())) :: :ok | :refused
+  def answer(nil, _action, _id, _exists?), do: :ok
+
+  def answer(ids, :create, id, exists?) when is_list(ids) and is_binary(id),
+    do: if(DraftId.published_id(id) in ids or exists?.(), do: :ok, else: :refused)
+
+  def answer(ids, :create, _id, _exists?) when is_list(ids), do: :refused
+
+  def answer(ids, :delete, id, _exists?) when is_list(ids) and is_binary(id),
+    do: if(DraftId.published_id(id) in ids, do: :refused, else: :ok)
+
+  def answer(_ids, :delete, _id, _exists?), do: :ok
 
   @doc "The 409 `fixed_document` envelope `Content.Errors` renders for a refusal."
   def envelope(action, type, id) do
@@ -112,13 +125,16 @@ defmodule Barkpark.Content.FixedDocuments do
   def validate(changeset) do
     with {:ok, raw} when is_list(raw) <- Map.fetch(changeset.params || %{}, "fixed_documents"),
          true <- Enum.all?(raw, &valid_id?/1) do
-      case get_change(changeset, :fixed_documents) do
-        ids when is_list(ids) -> put_change(changeset, :fixed_documents, Enum.uniq(ids))
-        _ -> changeset
+      case Ecto.Changeset.get_change(changeset, :fixed_documents) do
+        ids when is_list(ids) ->
+          Ecto.Changeset.put_change(changeset, :fixed_documents, Enum.uniq(ids))
+
+        _ ->
+          changeset
       end
     else
       false ->
-        add_error(
+        Ecto.Changeset.add_error(
           changeset,
           :fixed_documents,
           "must list document ids, without drafts. or versions."
@@ -145,7 +161,9 @@ defmodule Barkpark.Content.FixedDocuments do
 
   defp attrs_id(_attrs), do: nil
 
-  defp exists?(base, type, dataset, opts) do
+  defp exists?(id, type, dataset, opts) do
+    base = DraftId.published_id(id)
+
     Enum.any?([base, DraftId.draft_id(base)], fn id ->
       match?({:ok, _}, Content.get_document(id, type, dataset, opts))
     end)
