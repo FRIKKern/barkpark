@@ -483,6 +483,23 @@ steps.push({
     expect: refused(/ui-button:hover > \[data-slot="button"\]: :hover is on a host, ancestor or sibling/),
   },
   {
+    name: 'a list inside :is() in part.css is refused from the text, as a branch coverage cannot see',
+    only: ['pressed'],
+    plant: inCss('[data-slot="button"]:is([data-size="sm"], [data-size="huge"]) { --bark-button-text: 0.875rem; }'),
+    expect: refused(/:is\(\[data-size="sm"\], \[data-size="huge"\]\) holds a list of 2; coverage reads a rule branch by branch/),
+  },
+  // One arm the browser does not know: :is() and :where() drop it and keep the rule, so the text is read, not what
+  // the browser hands back. A list in them is refused from the text; a single unknown arm, or one in a nested rule,
+  // is read alone and refused by name; a plain list with one drops the whole rule.
+  ...[
+    ['a list in :is() with one unknown arm', '[data-slot="button"]:is([data-size="sm"], [data-size="sm"]:bark-made-up) { gap: 0px; }', /:is\(\[data-size="sm"\], \[data-size="sm"\]:bark-made-up\) holds a list of 2/],
+    ['a list in :where() with one unknown arm', '[data-slot="button"]:where([data-size="sm"], :bark-made-up) { gap: 0px; }', /:where\(\[data-size="sm"\], :bark-made-up\) holds a list of 2/],
+    ['an unknown arm alone in :is()', '[data-slot="button"]:is(:bark-made-up) { gap: 0px; }', /the arm :bark-made-up is one the browser drops/],
+    ['an unknown arm alone in :where()', '[data-slot="button"]:where(:bark-made-up) { gap: 0px; }', /the arm :bark-made-up is one the browser drops/],
+    ['an unknown arm in :is() in a nested rule', '[data-slot="button"] { &:is(:bark-made-up) { gap: 0px; } }', /&:is\(:bark-made-up\): the arm :bark-made-up is one the browser drops/],
+    ['an unknown arm in a plain list', '[data-slot="button"][data-size="sm"], [data-slot="button"]:bark-made-up { gap: 0px; }', /\[data-slot="button"\]:bark-made-up: the browser drops this rule/],
+  ].map(([what, css, re]) => ({ name: `part.css with ${what} is refused by name`, only: ['pressed'], plant: inCss(css), expect: refused(re) })),
+  {
     name: 'a rule the browser drops is refused by name, at the top of part.css and nested',
     only: ['pressed'],
     plant: all(
@@ -530,6 +547,38 @@ steps.push({
     },
   },
   {
+    name: 'an arm inside :is() or :where() that the browser drops in its place is refused by name, and one it keeps is not',
+    direct: async () => {
+      const browser = await chromium.launch()
+      const any = /the arm |inside :(is|where)\(\) in its place/
+      try {
+        const said = []
+        for (const [css, re, wanted] of [
+          ['[data-slot="button"]:is(::before) { gap: 0px; }', /^\[data-slot="button"\]:is\(::before\): the arm ::before is one the browser drops/, true],
+          ['[data-slot="button"] { &:is(> span) { gap: 0px; } }', /^&:is\(> span\): the arm > span is one the browser drops/, true],
+          ['[data-slot="button"], [data-slot="button"]:is(::before) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
+          ['[data-slot="button"]:not(:where(::after)) { gap: 0px; }', /the arm ::after is one the browser drops/, true],
+          ['[data-slot="button"]:is(:where(::before)) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
+          ['[data-slot="button"]:nth-child(1 of :where(::before)) { gap: 0px; }', /the arm ::before is one the browser drops/, true],
+          // Dropped where it stands in its compound, though it reads alone and inside :is() alone.
+          ['[data-slot="button"]::before:is(:hover) { gap: 0px; }', /::before:is\(:hover\): the arm :hover is one the browser drops/, true],
+          ['[data-slot="button"]::before:is([data-a]) { gap: 0px; }', /::before:is\(\[data-a\]\): the arm \[data-a\] is one the browser drops/, true],
+          ['[data-slot="button"]::before:where(:first-child) { gap: 0px; }', /::before:where\(:first-child\): the arm :first-child is one the browser drops/, true],
+          ['[data-slot="button"]::placeholder:is(:hover) { gap: 0px; }', /::placeholder:is\(:hover\): the arm :hover is one the browser drops/, true],
+          // Kept, though the browser writes it back in its own way.
+          ['[data-slot="button"]:is([data-size=sm]) { gap: 0px; }', any, false],
+          ['[data-slot="button"] { &:where(:HOVER) { gap: 0px; } }', any, false],
+          ['[data-slot="button"]:not([data-a], [data-b]):has(> span) { gap: 0px; }', any, false],
+          ['[data-slot="button"]:where([data-size=sm])::before { gap: 0px; }', any, false],
+        ]) said.push((await readPartCss(browser, css)).found.some((f) => re.test(f)) === wanted)
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.flatMap((ok, k) => (ok ? [] : [k + 1])).join(', ')}`)
+        return said.every(Boolean)
+      } finally {
+        await browser.close()
+      }
+    },
+  },
+  {
     name: 'an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed',
     only: ['skins', 'schemes'],
     plant: all(
@@ -554,6 +603,8 @@ steps.push({
       // A later control reached by structure alone, and a rule that applies to nothing.
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
+      // A dead branch beside one that applies at every reading.
+      inCss('[data-slot="button"], [data-slot="button"][data-variant="huge"] { --bark-button-text: 0.875rem; }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
       inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
     ),
@@ -572,6 +623,7 @@ steps.push({
       'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
       'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
       'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
+      'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
       'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
       'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     }),

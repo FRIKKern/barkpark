@@ -63,14 +63,14 @@ Done, in progress and open under each milestone, copied from the task board by `
 |---|---|---|---|---|
 | M0.5 | Proof round | 0 | 0 | 1 |
 | M1 | The map | 1 | 0 | 0 |
-| M2 | One skin everywhere | 8 | 1 | 10 |
-| Ready | The showroom and the first six parts | 0 | 1 | 1 |
+| M2 | One skin everywhere | 19 | 5 | 19 |
+| Ready | The showroom and the first six parts | 0 | 2 | 1 |
 | M3 | Editor menus and Barkdown's tree | 0 | 0 | 2 |
 | M4 | Blocks are parts | 0 | 0 | 1 |
 | M5 | Every app wears BarkUI | 0 | 0 | 1 |
 | M6 | Re-imagining | 0 | 0 | 1 |
-| Beside | Groundwork: every shared piece has one source | 1 | 1 | 2 |
+| Beside | Groundwork: every shared piece has one source | 1 | 0 | 3 |
 
-Read from the board; numbers last changed on 2026-11-20.
-<!-- stamp: cec2f6d6da9a0d1d -->
+Read from the board; numbers last changed on 2026-11-21.
+<!-- stamp: 13905b821a42cc33 -->
 <!-- board:end -->
