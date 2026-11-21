@@ -125,17 +125,12 @@ defmodule Barkpark.Content.FixedDocuments do
   def validate(changeset), do: changeset |> validate_ids() |> validate_singleton()
 
   # A singleton's one document has the type's name as its id: a list without
-  # it means that document can never be created (task-f235c9f16a976e57). Only
-  # a write that changes singleton, the list or the name is refused, so a
-  # schema already stored that way still saves unchanged.
+  # it means that document can never be created (task-f235c9f16a976e57).
   defp validate_singleton(changeset) do
     name = Ecto.Changeset.get_field(changeset, :name)
     ids = Ecto.Changeset.get_field(changeset, :fixed_documents)
 
-    touched? =
-      Enum.any?([:singleton, :fixed_documents, :name], &Ecto.Changeset.changed?(changeset, &1))
-
-    if touched? and Ecto.Changeset.get_field(changeset, :singleton) == true and is_list(ids) and
+    if Ecto.Changeset.get_field(changeset, :singleton) == true and is_list(ids) and
          is_binary(name) and name not in ids do
       Ecto.Changeset.add_error(
         changeset,

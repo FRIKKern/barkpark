@@ -2,9 +2,8 @@ defmodule BarkparkWeb.SchemaSingletonFixedDocumentsTest do
   @moduledoc """
   task-f235c9f16a976e57: a singleton's one document has the type's name as
   its id. With `fixedDocuments` set and that id not in the list, the document
-  could never be created, yet the schema saved. Now a write that makes that
-  shape is refused 422 on `fixed_documents`; a schema already stored that way
-  still saves when the write leaves singleton, the list and the name alone.
+  could never be created, yet the schema saved. Now every write of that shape
+  is refused 422 on `fixed_documents`, a re-save of one already stored too.
   """
 
   use BarkparkWeb.ConnCase, async: true
@@ -59,6 +58,7 @@ defmodule BarkparkWeb.SchemaSingletonFixedDocumentsTest do
 
     for extra <- [
           %{"singleton" => true, "fixedDocuments" => [name]},
+          %{"singleton" => true, "fixedDocuments" => ["side-om-oss", name]},
           %{"singleton" => true},
           %{"singleton" => true, "fixedDocuments" => nil},
           %{"singleton" => false, "fixedDocuments" => ["side-om-oss"]}
@@ -78,10 +78,8 @@ defmodule BarkparkWeb.SchemaSingletonFixedDocumentsTest do
     assert refused_on_fixed?(post_schema(%{"name" => name, "fixedDocuments" => ["side-om-oss"]}))
   end
 
-  test "a schema already stored that way still saves when the write leaves those keys alone", %{
-    name: name
-  } do
-    assert post_schema(schema(name, %{"singleton" => true})).status == 201
+  test "a schema already stored that way is refused on its next save too", %{name: name} do
+    assert saved?(post_schema(schema(name, %{"singleton" => true})))
 
     # As a schema saved before this check: put straight into the row.
     Barkpark.Content.SchemaDefinition
@@ -89,11 +87,8 @@ defmodule BarkparkWeb.SchemaSingletonFixedDocumentsTest do
     |> Ecto.Changeset.change(fixed_documents: ["side-om-oss"])
     |> Repo.update!()
 
-    resp =
-      post_schema(
-        schema(name, %{"singleton" => true, "fixedDocuments" => ["side-om-oss"], "title" => "Ny"})
-      )
+    assert refused_on_fixed?(post_schema(%{"name" => name, "title" => "Ny"}))
 
-    assert saved?(resp), resp.resp_body
+    assert saved?(post_schema(%{"name" => name, "fixedDocuments" => nil}))
   end
 end
