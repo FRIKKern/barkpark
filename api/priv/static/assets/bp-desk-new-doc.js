@@ -8,7 +8,8 @@
 //   accident; ArrowDown and ArrowUp light the next or previous shown way
 //   (aria-selected, aria-activedescendant), and Enter opens the lit one.
 // - The pointer lights the way under it, as Sanity's.
-// - A press in the list on anything but a control keeps the focus in the box.
+// - Focus that leaves the open list for nothing (a press on no control) or
+//   for outside it (Tab) closes the list and goes back to "+", as TanStack's.
 // - Each time the list opens it starts over: the box empty, every way shown,
 //   nothing lit, the focus in the box (the popover's autofocus).
 //
@@ -93,20 +94,40 @@
     if (box && !option.hidden) light(parts(box), option);
   };
 
-  // A press in the open list on anything but a control (the padding round
-  // the box, the "No results" note, the gaps between ways, the heading)
-  // would move the focus to the page body: the list stays open and the next
-  // keys go nowhere. It is held, so the focus stays in the box. A press on
-  // the list's scroll bar is the browser's.
-  var onPress = function (e) {
+  // TanStack's picker closes when the focus leaves it and hands the focus back
+  // to "+". Here a press on no control in the open list (the padding round the
+  // box, the "No results" note, the gaps between ways, outside the list) sends
+  // the focus to the page body, and Tab can carry it past the list, while the
+  // list stays open. Both close it and focus "+". A press on the list's scroll
+  // bar moves no focus, so a drag there keeps the list. The check waits a turn:
+  // a LiveView patch that moves the box blurs it and then puts the focus back,
+  // and a window that lost the focus (another app or tab) keeps the list.
+  var invoker = function () {
+    return document.querySelector('[popovertarget="' + PICKER + '"]:not([popovertargetaction])');
+  };
+  var closeIfLeft = function (box, leftFor) {
+    setTimeout(function () {
+      if (!box.isConnected || !box.matches(":popover-open") || !document.hasFocus()) return;
+      var now = document.activeElement;
+      if (box.contains(now) || !leftFor(now)) return;
+      box.hidePopover();
+      var plus = invoker();
+      if (plus) plus.focus();
+    }, 0);
+  };
+  var onLeave = function (e) {
     var box = picker(e.target);
-    if (!box || e.button !== 0) return;
-    if (e.target.closest("button, input, a, select, textarea, [tabindex]")) return;
-    var el = e.target;
-    if (el.clientWidth && e.offsetX >= el.clientWidth) return;
-    e.preventDefault();
-    var find = box.querySelector("[data-desk-new-doc-find]");
-    if (find && document.activeElement !== find) find.focus();
+    if (!box || e.relatedTarget) return;
+    closeIfLeft(box, function (now) {
+      return !now || now === document.body;
+    });
+  };
+  var onTab = function (e) {
+    var box = e.key === "Tab" ? picker(e.target) : null;
+    if (!box) return;
+    closeIfLeft(box, function () {
+      return true;
+    });
   };
 
   // The start-over is made in `beforetoggle`, which runs before the list is
@@ -132,7 +153,8 @@
   document.addEventListener("input", onInput);
   document.addEventListener("keydown", onKey);
   document.addEventListener("pointerover", onPointer);
-  document.addEventListener("mousedown", onPress);
+  document.addEventListener("focusout", onLeave);
+  document.addEventListener("keydown", onTab);
   document.addEventListener("beforetoggle", onBeforeToggle, true);
   document.addEventListener("toggle", onToggle, true);
 

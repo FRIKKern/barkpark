@@ -5,7 +5,9 @@
 // - typing keeps the ways whose title holds the text, any case;
 // - nothing is lit until an arrow key moves, and Enter opens the lit way;
 // - with nothing left, "No results for <text>" in place of the list;
-// - each open starts over: the box empty, every way shown, the focus in it.
+// - each open starts over: the box empty, every way shown, the focus in it;
+// - focus that leaves it for nothing (a press on no control) or for outside
+//   it (Tab) closes it and goes back to "+", as TanStack's.
 //
 // Runs the TRACKED static asset api/priv/static/assets/bp-desk-new-doc.js
 // under jsdom on a picker shaped like Desk.NewDocMenu.picker's render.
@@ -24,6 +26,8 @@ globalThis.document = window.document;
 const doc = window.document;
 const ways = ["Author", "New doc post", "Post by Alan Turing", "Category"];
 doc.body.innerHTML = `<div class="dk">
+  <button id="dk-new-doc-plus" type="button" popovertarget="dk-new-doc" aria-label="Create new document">+</button>
+  <button id="dk-new-doc-shut" type="button" popovertarget="dk-new-doc" popovertargetaction="hide">x</button>
   <div id="dk-new-doc" popover role="dialog" class="dk-menu dk-new-doc">
     <div class="dk-new-doc-find">
       <input id="dk-new-doc-find" type="text" role="combobox" aria-label="Search document types"
@@ -154,39 +158,73 @@ assert.deepEqual(shown(), ["Category"], "another popover opening leaves this one
 
 // Review of #27813: a press on a spot in the open list that is not a control
 // (the search row's padding, the No results note, the list's gaps) sent the
-// focus to BODY, so the next keys were lost and Escape left it there. It is
-// held: the focus stays in the box.
-const press = (el, extra = {}) => {
-  const e = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, ...extra });
-  el.dispatchEvent(e);
-  return e.defaultPrevented;
+// focus to BODY with the list still open, so the next keys went nowhere.
+// TanStack's picker closes when the focus leaves it and focuses "+": a press
+// on no control blurs the box to BODY, and so does it here.
+const plus = doc.getElementById("dk-new-doc-plus");
+const isOpen = () => picker.hasAttribute("data-open");
+picker.hidePopover = () => picker.removeAttribute("data-open");
+let windowFocused = true;
+doc.hasFocus = () => windowFocused;
+const turn = () => new Promise((r) => setTimeout(r, 5));
+const reopen = () => {
+  picker.removeAttribute("data-open");
+  open();
 };
-picker.removeAttribute("data-open");
-open();
+
+// Focus to nothing (a press on no control): closed, "+" focused.
+reopen();
 type("zebra");
-for (const [el, what] of [
-  [picker.querySelector(".dk-new-doc-find"), "the search row's padding"],
-  [empty, "the No results note"],
-  [empty.querySelector("strong"), "the No results text"],
-  [list, "the list's gap"],
-  [picker, "the dialog itself"],
-]) {
-  find.focus();
-  assert.equal(press(el), true, `a press on ${what} is held`);
-  assert.equal(doc.activeElement, find, `a press on ${what} keeps the focus in the box`);
-  doc.body.focus();
-  find.blur();
-  press(el);
-  assert.equal(doc.activeElement, find, `a press on ${what} brings the focus back to the box`);
-}
-// A control's press is its own: the box, a way, and a right press.
+find.blur();
+assert.equal(doc.activeElement, doc.body);
+await turn();
+assert.equal(isOpen(), false, "focus that leaves the list for nothing closes it");
+assert.equal(doc.activeElement, plus, "and goes back to +");
+
+// A LiveView patch that moves the box blurs it and puts the focus back: kept.
+reopen();
+find.blur();
 find.focus();
-assert.equal(press(find), false, "a press in the box is the browser's");
-assert.equal(press(options[0]), false, "a press on a way is the browser's");
-assert.equal(press(picker.querySelector(".dk-new-doc-find"), { button: 2 }), false, "a right press is the browser's");
-// Outside the list, nothing is held.
-const outside = doc.createElement("p");
-doc.body.appendChild(outside);
-assert.equal(press(outside), false, "a press outside the list is the browser's");
+await turn();
+assert.equal(isOpen(), true, "a blur the patch puts back keeps the list");
+assert.equal(doc.activeElement, find);
+
+// A window that lost the focus keeps the list (another app or tab).
+windowFocused = false;
+find.blur();
+await turn();
+assert.equal(isOpen(), true, "a window that lost the focus keeps the list");
+windowFocused = true;
+
+// A press on a control outside (a field) is the browser's light dismiss.
+reopen();
+const field = doc.createElement("input");
+doc.body.appendChild(field);
+field.focus();
+await turn();
+assert.equal(isOpen(), true, "focus to a control outside is left to the browser");
+assert.equal(doc.activeElement, field, "and stays on that control");
+
+// Tab past the list: closed, "+" focused.
+reopen();
+key("Tab");
+field.focus();
+await turn();
+assert.equal(isOpen(), false, "Tab out of the list closes it");
+assert.equal(doc.activeElement, plus, "and goes back to +");
+
+// A Tab that stays in the list keeps it.
+reopen();
+key("Tab");
+options[1].focus();
+await turn();
+assert.equal(isOpen(), true, "a Tab that stays in the list keeps it");
+
+// A closed list is not closed again, and "+" is not stolen.
+picker.removeAttribute("data-open");
+options[1].focus();
+options[1].blur();
+await turn();
+assert.equal(doc.activeElement, doc.body, "a closed list moves no focus");
 
 console.log("__desk_new_doc_search: ok");
