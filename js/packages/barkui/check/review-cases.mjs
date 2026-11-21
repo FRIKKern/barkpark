@@ -44,7 +44,8 @@ const JS = [
 // target=_blank. Its page reaches its opener and attaches a root on a host already in the stage with its own
 // window's attachShadow, holding a box shown at once and gone a task later. Two ways in: a blob: page (Pb), and a
 // javascript: link run in the new window (Pj). Every step reports to the page's console, so the log shows whether
-// the window opened, whether it reached the page, and why not.
+// the window opened, whether it reached the page, and why not. rel=opener: a target=_blank link is noopener by
+// default, and its page then has no opener to reach.
 const ATTACH = (t) => `opener.postMessage('P${t} alive', '*'); try { const d = opener.document, h = d.querySelector('#button-r6p-host-${t}'); const r = Element.prototype.attachShadow.call(h, { mode: 'open' }); const b = d.createElement('div'); b.id = 'button-r6p${t}'; b.textContent = 'Probe P${t}'; b.popover = 'manual'; r.append(b); b.showPopover(); opener.console.error('review r6: P${t} open ' + b.matches(':popover-open')); opener.setTimeout(() => b.remove(), 0) } catch (e) { opener.postMessage('P${t} err ' + e.name + ': ' + e.message, '*') } window.close()`
 const BLOB = '<script>' + ATTACH('b') + '</' + 'script>'
 const HTML_P = `
@@ -59,7 +60,7 @@ const HTML_P = `
 const lit = (s) => JSON.stringify(s).replace(/<\//g, '<\\/')
 const JS_P = [
   "addEventListener('message', (e) => console.error('review r6: P msg ' + e.data))",
-  "const link = (id, href) => { let done = false; root.querySelector(id).addEventListener('focus', () => { if (done) return; done = true; console.error('review r6: ' + id + ' activation ' + navigator.userActivation.isActive); const a = document.createElement('a'); a.href = href(); a.target = '_blank'; root.querySelector('#button-r6p-row').append(a); a.click(); a.remove(); console.error('review r6: ' + id + ' clicked') }) }",
+  "const link = (id, href) => { let done = false; root.querySelector(id).addEventListener('focus', () => { if (done) return; done = true; console.error('review r6: ' + id + ' activation ' + navigator.userActivation.isActive); const a = document.createElement('a'); a.href = href(); a.target = '_blank'; a.rel = 'opener'; root.querySelector('#button-r6p-row').append(a); a.click(); a.remove(); console.error('review r6: ' + id + ' clicked') }) }",
   `link('#button-r6pb-open', () => URL.createObjectURL(new Blob([${lit(BLOB)}], { type: 'text/html' })))`,
   `link('#button-r6pj-open', () => 'javascript:' + encodeURIComponent(${lit(ATTACH('j'))}))`,
 ].join('\n')
