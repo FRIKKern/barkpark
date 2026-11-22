@@ -8,7 +8,7 @@
    turns the edge to --ui-ring-border while the trigger has focus or its list is open. */
 
 /* The root holds no look of its own; it lays out as its trigger and list, with script and without. */
-[data-slot="select"] {
+ui-select {
   display: contents;
 }
 
@@ -26,7 +26,9 @@
   font-size: var(--bark-select-text);
   line-height: 1.25;
 
-  &:hover:not([data-disabled], [data-open]) {
+  /* Not while it has focus (UI SDK's data-focused): focus has the ring, and a list closed by Escape leaves the pointer
+     where its click opened it, so the edge does not hang on where the pointer was left. */
+  &:hover:not([data-disabled], [data-open], [data-focused]) {
     border-color: var(--bark-select-hover-edge);
   }
 }
