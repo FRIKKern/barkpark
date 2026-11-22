@@ -130,7 +130,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
     {response(conn, 200), rev}
   end
 
-  defp push(slug, bpml, rev),
+  defp sync_copy(slug, bpml, rev),
     do:
       build_conn()
       |> authed()
@@ -145,7 +145,10 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
       test "an old copy without a fingerprint: #{op} lands, and the callout keeps its body" do
         slug = paper!()
         {bpml, rev} = pull!(slug)
-        assert %{"ok" => true} = push(slug, edit(@op, old_text(bpml)), rev) |> json_response(200)
+
+        assert %{"ok" => true} =
+                 sync_copy(slug, edit(@op, old_text(bpml)), rev) |> json_response(200)
+
         assert stored_callout(slug) == callout()
       end
     else
@@ -154,7 +157,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
         before = stored(slug)
         {bpml, rev} = pull!(slug)
 
-        answer = push(slug, edit(@op, old_text(bpml)), rev) |> json_response(422)
+        answer = sync_copy(slug, edit(@op, old_text(bpml)), rev) |> json_response(422)
         assert answer["error"]["code"] == "bpml_stale_copy"
         assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
         assert answer["error"]["hint"] == @pull_hint
@@ -170,7 +173,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
       slug = paper!()
       {bpml, rev} = pull!(slug)
       assert bpml =~ ~s(print="2")
-      assert %{"ok" => true} = push(slug, edit(@op, bpml), rev) |> json_response(200)
+      assert %{"ok" => true} = sync_copy(slug, edit(@op, bpml), rev) |> json_response(200)
     end
   end
 

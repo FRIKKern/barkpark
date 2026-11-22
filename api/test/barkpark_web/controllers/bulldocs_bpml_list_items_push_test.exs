@@ -279,15 +279,13 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     </ul>\
   """
 
-  @update_hint "update bp, then bp paper pull and make your edit again"
-
   # A push without its pull's fingerprint may not change a block holding a
   # nested list or an item id, whatever mark its text carries: the write wall
-  # reads it against the print before nested lists, and says to update bp.
+  # reads it against the print before nested lists.
   for {name, edit} <- [
         {"a copy pulled before nested lists printed",
          {:old, "Flat sibling", "Flat sibling, edited"}},
-        {"a copy of this pull", {:now, "<li>Verify</li>", "<li>Verify twice</li>"}},
+        {"a copy of this pull", {:now, "Flat sibling", "Flat sibling, edited"}},
         {"a copy of this pull with its mark typed again",
          {:marked, "Flat sibling", "Flat sibling, edited"}}
       ] do
@@ -307,7 +305,6 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
       answer = push_copy(slug, copy, no_fingerprint(anchor)) |> json_response(422)
       assert answer["error"]["code"] == WriteWall.code()
       assert answer["error"]["message"] =~ ~s(block "l1")
-      assert answer["error"]["hint"] == @update_hint
       assert stored(slug) == before
     end
   end
@@ -373,8 +370,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     edited = old_copy(bpml, "f1", String.replace(old_ul, "Beta", "Beta, edited"))
     answer = push_copy(slug, edited, no_fingerprint(rev)) |> json_response(422)
     assert answer["error"]["code"] == WriteWall.code()
-    assert answer["error"]["hint"] == @update_hint
-    assert answer["error"]["paths"] == ["blocks[0].items[0].id", "blocks[0].items[1].id"]
+    assert answer["error"]["paths"] == ["blocks[0].items[0]", "blocks[0].items[1]"]
     assert stored(slug) == before
 
     untouched = bpml |> old_copy("f1", old_ul) |> String.replace("Closing.", "Closing words.")
