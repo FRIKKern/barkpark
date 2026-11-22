@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
+import { CASE_SECONDS, capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
 import { layerMisplaced, SELFTEST_JOBS, selftestPick } from './jobs.mjs'
 import { selftestReport } from './selftest-report.mjs'
@@ -25,8 +25,9 @@ import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
-import { topLayerTouch, UNNAMED } from './layers.mjs'
-import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES, esc } from './plants.mjs'
+import { STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
+import { topLayerTouch } from './layers.mjs'
+import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
 export const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
@@ -148,41 +149,13 @@ export const CASES = [
     plant: inCss('#button-after::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ui-primary); }'),
     expect: (p) => lights(p).skins.pass && lights(p).schemes.pass,
   },
-  // Waits on the sheet are bound to their view and pair; everything else is proved on every surface.
-  {
-    name: 'with every surface read, a label gone on raised, a second skin short on primary, and a waited pair measuring worse all turn the lights off; a placeholder is matched to a wait by its own colour',
-    only: ['skins', 'schemes'],
-    surfaces: true,
-    secs: 150,
-    // Fields in UI SDK's own look: a placeholder in the waited pair (muted text on the field's background) in an
-    // input and in a textarea, elements that draw no children, and one on another ground. fjord light's primary is
-    // planted worse above, so the waited ones are red there by design.
-    plant: (d) =>
-      edit(join(d, 'example.html'), (s) =>
-        `${s}\n<div data-demo-row>\n  <span data-demo-label>Fields</span>\n  <input id="button-ph-waited" data-slot="input" placeholder="Waited">\n  <input id="button-ph-other" data-slot="input" placeholder="Other ground">\n  <textarea id="button-ph-area" data-slot="textarea" placeholder="Waited, in a textarea"></textarea>\n</div>\n`),
-    css: [
-      '.sr-stage[data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }',
-      'html[data-skin="evergreen"][data-color-scheme="dark"] .sr-stage[data-surface="primary"] [data-demo-label] { color: var(--ui-border); }',
-      'html[data-skin="fjord"][data-color-scheme="light"] .sr-stage[data-surface="primary"] { --ui-muted-foreground: var(--ui-border); }',
-      '#button-ph-other { background: var(--ui-muted); }',
-    ].join('\n'),
-    expect: each({
-      'a label gone on raised': both(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)),
-      'a second skin short on primary': says('schemes', /evergreen dark on primary: drawn text [\d.]+:1 at span/),
-      'the waited pair worse than recorded': says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/),
-      'a placeholder on another ground stays red': says('skins', /on primary: drawn text [\d.]+:1 at input#button-ph-other ""::placeholder/),
-      'a placeholder in the waited pair is let through by its wait, in an input and in a textarea': (p) =>
-        !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /at (input#button-ph-waited|textarea#button-ph-area) ""::placeholder/.test(f) && !/fjord light/.test(f))),
-      'no reader puts a child into an element it measures': (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /a reader put a child into/.test(f))),
-    }),
-  },
+  ...SURFACE_CASES,
   // Phone width: read in full in every skin, scheme and surface. part.css may not change paint at phone width
   // (refused below), so these rules come from the selftest's own sheet, beyond that wall.
   {
     name: 'a label blanked, edges dropped, and a label and edge gone on raised only, at phone width, turn "phone" off, each by name',
     only: ['phone'],
     surfaces: true,
-    secs: 150,
     css: [
       '@media (max-width: 600px) { [data-slot="button"][data-size="lg"] { --bark-button-fg: var(--ui-background); } }',
       '@media (max-width: 600px) { [data-slot="button"]:not([data-variant]):not([data-size]) { --bark-button-edge: transparent; } }',
@@ -594,60 +567,13 @@ steps.push({
       'background-clip: text through a variable': skinsSay(/button#button-after "Duplicate" computes background-clip: text/),
     }),
   },
-  // Every rule on every control it can match, read at a moment it applies (states.mjs, coverage.mjs): all lights.
-  {
-    name: 'a state on any control of its kind, pending held or reached by the steps, and a rule nothing reads each fail by name',
-    only: ['pressed', 'skins', 'schemes', 'phone', 'noscript'],
-    states: true,
-    secs: 150,
-    plant: all(
-      // The review's: a second control of the secondary kind, and pending.
-      inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
-      inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }'),
-      // A later control reached by structure alone, and a rule that applies to nothing.
-      inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
-      inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
-      // A dead branch beside one that applies at every reading.
-      inCss('[data-slot="button"], [data-slot="button"][data-variant="huge"] { --bark-button-text: 0.875rem; }'),
-      // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
-      inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
-      // Two boxes no layer names, each open only after one kind of real input and closed before anything else
-      // looks: a tooltip while the pointer is on the Duplicate button (a driven state), and a box from Space on the
-      // primary button until the next key (a press step).
-      (d) => appendFileSync(join(d, 'example.html'), '\n<div data-demo-row><div id="button-hover-tip" popover="manual">Shown on hover</div><div id="button-press-tip" popover="manual">Shown on Space</div></div>\n'),
-      (d) => inDemo(d, "{ const b = root.querySelector('#button-after'), t = root.querySelector('#button-hover-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }\n{ const b = root.querySelector('#button-primary'), t = root.querySelector('#button-press-tip'); b.addEventListener('keydown', (e) => (e.key === ' ' ? t.matches(':popover-open') || t.showPopover() : t.matches(':popover-open') && t.hidePopover())) }"),
-    ),
-    css: [
-      // Beyond the walls (this sheet is the selftest's own, and never pinned): the round-8 review's two hover rules,
-      // the first kept off the save button, which the dark-only plant above needs proven and held.
-      '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled], #button-save) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
-      'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
-    ].join('\n'),
-    expect: each({
-      'a hover on a second control of its kind': skinsSay(/real hover on button#button-after "Duplicate": .*no pinned row shows this change/),
-      'a hover through :nth-child on a later control': skinsSay(/real hover on button "Medium": .*no pinned row shows this change/),
-      'the hover, drawn on every control it applies to': skinsSay(/hover held on every live control it applies to, .*: text does not draw at button#button-after "Duplicate"/),
-      'the pin unlike the real state on the control itself': skinsSay(/real hover on button#button-destructive "Delete": .* where the control pinned /),
-      'pending held at rest, in every view': drawnOff('button "Saving"'),
-      'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
-      'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
-      'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
-      'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
-      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
-      'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
-      // Each held only by the look after its own input: the state drive's, and the press step's (its result is the
-      // sentence alone; a reading after the step would say "drawn after this step, …" first).
-      'a tooltip open only while a driven state holds, named by no layer': skinsSay(new RegExp(`^real hover on button#button-after "Duplicate": ${esc(UNNAMED('div#button-hover-tip "Shown on hover"'))}$`)),
-      'a box open only after a press step, named by no layer': (p) => (p.parts.button.steps ?? []).some((st) => st.name === 'Space activates it' && st.detail === UNNAMED('div#button-press-tip "Shown on Space"')),
-    }),
-  },
+  ...STATE_CASES,
   // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
   // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
   {
     name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
     only: ['skins'],
     states: true,
-    secs: 120,
     plant: all(
       (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
       inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
@@ -738,7 +664,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, 'button'))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: !!c.surfaces, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {
@@ -746,7 +672,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       } catch {}
       // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
       const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, 'button', 'part.json'), 'utf8')).layers, proof))
-      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60) && !misplaced
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced
       if (pass) held.push(c.name)
       else failures++
       console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
