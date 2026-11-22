@@ -215,6 +215,38 @@ async function overTwoGrounds() {
   }
 }
 
+/** A named box hidden for the capture of what is behind it, then drawn again, under reduced motion: each way it
+    reads at its new opacity at once, in the same task, with no transition left running. */
+async function hiddenAndBack() {
+  const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
+  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  try {
+    const dir = join(scratch, 'parts')
+    cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
+    withPopover(join(dir, 'button'))
+    named(join(dir, 'button'))
+    const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true })
+    const page = await open({ browser, url: pathToFileURL(built.file).href, part: 'button', errors: [] })
+    await page.click('#button-pop-open')
+    const read = (on) =>
+      page.barkCheck((on) => {
+        const box = document.getElementById('button-pop')
+        window.__barkCheck.hideLayers(on)
+        return { opacity: getComputedStyle(box).opacity, running: box.getAnimations().length }
+      }, on)
+    const hidden = await read(true)
+    // Frames pass while the capture is taken.
+    await page.waitForTimeout(100)
+    const back = await read(false)
+    const held = hidden.opacity === '0' && hidden.running === 0 && back.opacity === '1' && back.running === 0
+    if (!held) console.log(`    hidden: ${JSON.stringify(hidden)}; drawn again: ${JSON.stringify(back)}`)
+    return held
+  } finally {
+    await browser.close()
+    rmSync(scratch, { recursive: true, force: true })
+  }
+}
+
 // Two runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
 // time for one case: the first reads named and unnamed boxes open, the second the boxes the census must name.
 const BOXES_CSS = [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n')
@@ -311,5 +343,9 @@ export const LAYER_CASES = [
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
     direct: overTwoGrounds,
+  },
+  {
+    name: 'top layer: a box hidden for the capture behind it and drawn again reads at its new opacity at once, with no transition running',
+    direct: hiddenAndBack,
   },
 ]
