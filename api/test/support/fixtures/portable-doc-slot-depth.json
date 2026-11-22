@@ -1,0 +1,67 @@
+{
+  "_comment": "The deepest shapes tabs, steps and list items reach, read by Go (internal/pdrender/limits_test.go) and Elixir (test/barkpark/portable_doc/render_slot_depth_test.exs) on this one file (task-11bbe4b4ae8c85f4). `bounds`: the shared depth limits, the JSON levels a block slot path takes, and the two JSON bounds written as their sums; Go, Elixir and the editor (__inline_depth_notice.test.mjs) each fail when one of their constants stops equalling its row here. `cases`: each doc uses the limits fixture's macros; `leaf` and `notice` say whether the word and the notice show. An `elixir` object on a case names where Elixir differs and the task that tracks it: for a list item one block past, Go shows the notice only through its map-item fallback (itemNodes), and Elixir shows neither the word nor a notice. Deepest: the block holding the word at block depth 99, the word at inline depth 999. One past: block depth 100, or the word at inline depth 1000.",
+  "bounds": {
+    "max_nest_depth": 100,
+    "max_word_depth": 1000,
+    "slot_path_levels": 4,
+    "go_max_json_depth": 2416,
+    "editor_max_carry_depth": 2216
+  },
+  "cases": [
+    {
+      "name": "tabs: deepest block, deepest word",
+      "leaf": true,
+      "notice": true,
+      "doc": {"$nest": 99, "wrap": {"type": "tabs", "tabs": [{"label": "t", "blocks": ["$hole"]}]}, "leaf": {"type": "paragraph", "content": [{"$nest": 999, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]}}
+    },
+    {
+      "name": "tabs: deepest block, one word past",
+      "leaf": false,
+      "notice": true,
+      "doc": {"$nest": 99, "wrap": {"type": "tabs", "tabs": [{"label": "t", "blocks": ["$hole"]}]}, "leaf": {"type": "paragraph", "content": [{"$nest": 1000, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]}}
+    },
+    {
+      "name": "tabs: one block past, deepest word",
+      "leaf": false,
+      "notice": true,
+      "doc": {"$nest": 100, "wrap": {"type": "tabs", "tabs": [{"label": "t", "blocks": ["$hole"]}]}, "leaf": {"type": "paragraph", "content": [{"$nest": 999, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]}}
+    },
+    {
+      "name": "steps: deepest block, deepest word",
+      "leaf": true,
+      "notice": true,
+      "doc": {"$nest": 99, "wrap": {"type": "steps", "steps": [{"title": "s", "blocks": ["$hole"]}]}, "leaf": {"type": "paragraph", "content": [{"$nest": 999, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]}}
+    },
+    {
+      "name": "steps: deepest block, one word past",
+      "leaf": false,
+      "notice": true,
+      "doc": {"$nest": 99, "wrap": {"type": "steps", "steps": [{"title": "s", "blocks": ["$hole"]}]}, "leaf": {"type": "paragraph", "content": [{"$nest": 1000, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]}}
+    },
+    {
+      "name": "steps: one block past, deepest word",
+      "leaf": false,
+      "notice": true,
+      "doc": {"$nest": 100, "wrap": {"type": "steps", "steps": [{"title": "s", "blocks": ["$hole"]}]}, "leaf": {"type": "paragraph", "content": [{"$nest": 999, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]}}
+    },
+    {
+      "name": "list: deepest block, deepest word",
+      "leaf": true,
+      "notice": true,
+      "doc": {"$nest": 99, "wrap": {"type": "list", "items": [{"children": ["$hole"]}]}, "leaf": {"type": "list", "items": [[{"$nest": 999, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]]}}
+    },
+    {
+      "name": "list: deepest block, one word past",
+      "leaf": false,
+      "notice": true,
+      "doc": {"$nest": 99, "wrap": {"type": "list", "items": [{"children": ["$hole"]}]}, "leaf": {"type": "list", "items": [[{"$nest": 1000, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]]}}
+    },
+    {
+      "name": "list: one block past, deepest word",
+      "leaf": false,
+      "notice": true,
+      "elixir": {"notice": false, "task": "task-a6a57717506de979"},
+      "doc": {"$nest": 100, "wrap": {"type": "list", "items": [{"children": ["$hole"]}]}, "leaf": {"type": "list", "items": [[{"$nest": 999, "wrap": {"type": "em", "children": ["$hole"]}, "leaf": {"type": "text", "value": "leaf"}}]]}}
+    }
+  ]
+}

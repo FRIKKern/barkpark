@@ -26,6 +26,8 @@ import { readerPaintClass, selectAtomNode } from "./embed-node.js";
 import { canEditObjectBlock, editObjectBlockAt, objectBlockFor, objectBlockValue } from "./inline-object.js";
 import { cardMoreButton, wireCardMenu } from "./card-menu.js";
 import { calloutReadonlyView } from "./callout-readonly-view.js";
+import { inlineDepthReadonlyView, inlineTooDeep } from "./inline-depth.js";
+import { isCanvasContentType, isProseType } from "./run-kinds.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -101,6 +103,11 @@ export const Opaque = Node.create({
     return ({ node, editor, view, getPos }) => {
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || block.type || "block";
+      // A prose block whose inline nests past the depth limit (inline-depth.js).
+      if ((isProseType(bpType) || isCanvasContentType(bpType)) &&
+          !declaredObjectKind(view && view.dom, bpType) && inlineTooDeep(block)) {
+        return inlineDepthReadonlyView(node, BP_OPAQUE_NODE_NAME);
+      }
       if (bpType === "note") return readonlyNoteView(node, editor);
       // A built-in callout carried because it holds a body (a declared callout
       // object keeps its card below).

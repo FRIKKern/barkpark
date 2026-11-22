@@ -769,6 +769,7 @@ defmodule BarkparkWeb.StudioLocale do
       "multi-language string" => gettext("multi-language string"),
       "multi-line value" => gettext("multi-line value"),
       "navigate" => gettext("navigate"),
+      "Nested too deep to show" => gettext("Nested too deep to show"),
       "No blocks match" => gettext("No blocks match"),
       "No commands match" => gettext("No commands match"),
       "No equation yet — type TeX below" => gettext("No equation yet — type TeX below"),
