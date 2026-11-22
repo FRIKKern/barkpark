@@ -53,9 +53,11 @@ export const SURFACE_CASES = [
 // holds; what the press steps reach; the rules nothing reads, which only a run of every light can say; and a run of
 // one light, which names none.
 const PENDING = inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }')
-// The rules nothing reads run on the tabs part: that run needs one part's whole stage read in every light, and the
-// button's whole stage reads over a case's share of the one limit (check/capacity.mjs), where tabs' reads under it. A
-// rule that applies to nothing, and a dead branch beside one that applies at every reading.
+// The rules nothing reads need one part's whole stage read in every light. On CI's runner the button's whole stage read
+// over a case's share (51.1 s, job 137055045043, head fd892b277d) and tabs' under it (36.6 s at most, jobs 137145922899,
+// 137147560280 and 137149623669, head 0f6c725778). The case names tabs by its key; another part's stage is read on
+// CI's runner before it takes tabs' place. A rule that applies to nothing, and a dead branch beside one that applies at
+// every reading.
 const DEAD = inCss('[data-slot="tabs-tab"][data-size="xl"] { gap: 0; }')
 const DEAD_BRANCH = inCss('[data-slot="tabs-tab"], [data-slot="tabs-tab"][data-variant="huge"] { padding-inline: 0.75rem; }')
 const stateRows = {
