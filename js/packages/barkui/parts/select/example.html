@@ -1,17 +1,17 @@
 <div data-demo-row inert>
   <span data-demo-label>Trigger: rest, focus, open</span>
-  <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" type="button" data-closed=""><span data-slot="select-value">Rest</span></button>
-  <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" type="button" data-closed="" data-pin="focus-visible"><span data-slot="select-value">Focus</span></button>
-  <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="true" type="button" data-open=""><span data-slot="select-value">Open</span></button>
+  <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" type="button" data-closed=""><span data-slot="select-value">Rest</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" type="button" data-closed="" data-pin="focus-visible"><span data-slot="select-value">Focus</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+  <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="true" type="button" data-open=""><span data-slot="select-value">Open</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
 </div>
 <div data-demo-row>
   <span data-demo-label>Disabled</span>
   <ui-field id="select-team-field" disabled="" data-slot="field" data-disabled="">
     <ui-field-label id="select-team-label" data-slot="field-label" for="select-team-trigger" data-disabled="">Team</ui-field-label>
     <ui-select id="select-team" default-value="design" disabled="" data-disabled="" data-closed="">
-      <ui-select-trigger><button id="select-team-trigger" type="button" data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" disabled="" data-closed="" data-disabled="" aria-labelledby="select-team-label"><ui-select-value data-slot="select-value" id="select-team-value"></ui-select-value></button></ui-select-trigger>
+      <ui-select-trigger><button id="select-team-trigger" type="button" data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" disabled="" data-closed="" data-disabled="" aria-labelledby="select-team-label"><ui-select-value data-slot="select-value" id="select-team-value"></ui-select-value><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></ui-select-trigger>
       <ui-select-content id="select-team-content" data-slot="select-content">
-        <ui-select-item id="select-team-design" value="design" data-slot="select-item" role="option" tabindex="-1" aria-selected="true" data-selected="">Design<ui-select-item-indicator data-slot="select-item-indicator" aria-hidden="true" data-selected=""></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-team-design" value="design" data-slot="select-item" role="option" tabindex="-1" aria-selected="true" data-selected="">Design<ui-select-item-indicator data-slot="select-item-indicator" aria-hidden="true" data-selected=""><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
       </ui-select-content>
     </ui-select>
   </ui-field>
@@ -21,22 +21,22 @@
   <ui-field id="select-status-field" data-slot="field">
     <ui-field-label id="select-status-label" data-slot="field-label" for="select-status-trigger">Status</ui-field-label>
     <ui-select id="select-status" placeholder="Pick a status" data-closed="">
-      <ui-select-trigger><button id="select-status-trigger" type="button" data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-placeholder="" data-closed="" aria-labelledby="select-status-label"><ui-select-value data-slot="select-value" id="select-status-value" data-placeholder=""></ui-select-value></button></ui-select-trigger>
+      <ui-select-trigger><button id="select-status-trigger" type="button" data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-placeholder="" data-closed="" aria-labelledby="select-status-label"><ui-select-value data-slot="select-value" id="select-status-value" data-placeholder=""></ui-select-value><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></ui-select-trigger>
       <ui-select-content id="select-status-content" data-slot="select-content">
-        <ui-select-item id="select-status-draft" value="draft" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Draft<ui-select-item-indicator hidden="" data-slot="select-item-indicator"></ui-select-item-indicator></ui-select-item>
-        <ui-select-item id="select-status-live" value="live" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Live<ui-select-item-indicator hidden="" data-slot="select-item-indicator"></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-status-draft" value="draft" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Draft<ui-select-item-indicator hidden="" data-slot="select-item-indicator"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-status-live" value="live" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Live<ui-select-item-indicator hidden="" data-slot="select-item-indicator"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
       </ui-select-content>
     </ui-select>
   </ui-field>
   <ui-field id="select-role-field" data-slot="field">
     <ui-field-label id="select-role-label" data-slot="field-label" for="select-role-trigger">Role</ui-field-label>
     <ui-select id="select-role" default-value="editor" data-closed="">
-      <ui-select-trigger><button id="select-role-trigger" type="button" data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-closed="" aria-labelledby="select-role-label"><ui-select-value data-slot="select-value" id="select-role-value"></ui-select-value></button></ui-select-trigger>
+      <ui-select-trigger><button id="select-role-trigger" type="button" data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" data-closed="" aria-labelledby="select-role-label"><ui-select-value data-slot="select-value" id="select-role-value"></ui-select-value><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></ui-select-trigger>
       <ui-select-content id="select-role-content" data-slot="select-content">
-        <ui-select-item id="select-role-viewer" value="viewer" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Viewer<ui-select-item-indicator hidden="" data-slot="select-item-indicator"></ui-select-item-indicator></ui-select-item>
-        <ui-select-item id="select-role-editor" value="editor" data-slot="select-item" role="option" tabindex="-1" aria-selected="true" data-selected="">Editor<ui-select-item-indicator data-slot="select-item-indicator" aria-hidden="true" data-selected=""></ui-select-item-indicator></ui-select-item>
-        <ui-select-item id="select-role-owner" value="owner" disabled="" data-slot="select-item" role="option" tabindex="-1" aria-selected="false" aria-disabled="true" data-disabled="">Owner<ui-select-item-indicator hidden="" data-slot="select-item-indicator"></ui-select-item-indicator></ui-select-item>
-        <ui-select-item id="select-role-admin" value="admin" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Admin<ui-select-item-indicator hidden="" data-slot="select-item-indicator"></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-role-viewer" value="viewer" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Viewer<ui-select-item-indicator hidden="" data-slot="select-item-indicator"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-role-editor" value="editor" data-slot="select-item" role="option" tabindex="-1" aria-selected="true" data-selected="">Editor<ui-select-item-indicator data-slot="select-item-indicator" aria-hidden="true" data-selected=""><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-role-owner" value="owner" disabled="" data-slot="select-item" role="option" tabindex="-1" aria-selected="false" aria-disabled="true" data-disabled="">Owner<ui-select-item-indicator hidden="" data-slot="select-item-indicator"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
+        <ui-select-item id="select-role-admin" value="admin" data-slot="select-item" role="option" tabindex="-1" aria-selected="false">Admin<ui-select-item-indicator hidden="" data-slot="select-item-indicator"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></ui-select-item-indicator></ui-select-item>
       </ui-select-content>
     </ui-select>
   </ui-field>
