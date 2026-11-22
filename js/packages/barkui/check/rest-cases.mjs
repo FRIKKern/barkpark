@@ -266,14 +266,18 @@ async function scroller(page, script = '') {
     document.body.append(box)
     if (s) new Function(s)()
   }, script)
-  await page.barkCheck(() => document.getElementById('bark-near').focus({ preventScroll: true }))
+  await page.barkCheck(() => {
+    document.getElementById('bark-s').scrollIntoView({ block: 'center', behavior: 'instant' })
+    document.getElementById('bark-near').focus({ preventScroll: true })
+  })
 }
-/** The far button's place in the next read, and again after the page has had 2.5 s to settle by itself. */
+/** The far button's place before the act, in the read after it, and after the page has had 2.5 s to settle. */
 async function sameAfter(page, act) {
   const top = () => page.barkCheck(() => Math.round(document.getElementById('bark-far').getBoundingClientRect().top))
+  const before = await top()
   const at = await act().then(top, (e) => String(e.message))
   await new Promise((r) => setTimeout(r, 2500))
-  return { at, settled: await top() }
+  return { before, at, settled: await top() }
 }
 // The checker's input (check/acts.mjs), or on a checker without it the bare input the checker made.
 const acts = await import('./acts.mjs').catch(() => ({
@@ -281,8 +285,8 @@ const acts = await import('./acts.mjs').catch(() => ({
   pointTo: (page, x, y) => page.mouse.move(x, y),
 }))
 const held = (what, got) => {
-  const ok = got.at === got.settled
-  if (!ok) console.log(`    ${what}: read at ${got.at}, at rest at ${got.settled}`)
+  const ok = got.at === got.settled && got.settled !== got.before
+  if (!ok) console.log(`    ${what}: before ${got.before}, read at ${got.at}, at rest at ${got.settled}`)
   return ok
 }
 
