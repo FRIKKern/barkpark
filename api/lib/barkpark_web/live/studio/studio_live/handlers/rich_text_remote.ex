@@ -26,12 +26,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     * The page reports, per editor, the number of the last value it shows
       (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post or a Save: a
       rich text whose number is older than a change the server logged for
-      it was written over theirs. Unchanged from what the page was shown,
-      theirs stands; changed, nothing is written over theirs: `hold/2` keeps
-      A's text in the form with the conflict banner, and acknowledges it
-      (`own: true`). Both changed it and A sees the banner: A's next post
-      saves A's over theirs ("type on to save yours over theirs"), as
-      TanStack's clash line says.
+      it was typed over a value A never saw. Unchanged from what A was
+      shown, theirs stands. Changed in other blocks than theirs, the two are
+      merged block by block (`PortableTextMerge`), saved, and the merge is
+      sent to show (#28349 r3 review, K5/K8/S5p: a hold here lost B's
+      paragraph). Changed in a block theirs changed too, a clash: theirs is
+      saved for that block, and `hold/2` keeps A's block in the form with
+      the conflict banner, theirs words in it, and sends A's view (A's
+      block, theirs elsewhere) as a logged change. A post typed before that
+      view showed is read against theirs again and held again; only typing
+      on what A was shown saves A's block over theirs ("type on to save
+      yours over theirs"), as TanStack's clash card says.
+    * `push_held/3`: another save during a hold is merged into A's held
+      value and sent as a new view, so A types on top of it too.
 
   A post with no `_bp_rt_seen` (a page loaded before this, or a change the
   server built) is read as before. Top-level rich text keeps its own path
