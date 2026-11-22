@@ -215,6 +215,18 @@ describe('@barkpark/react caps every nested block slot', () => {
       )
     expect(render(lists(99))).toContain('leaf')
     expect(render(lists(100))).not.toContain('leaf')
+    // task-a6a57717506de979: the item keeps the notice that stands in for the block.
+    expect(render(lists(100))).toContain('Nested too deep to show')
+  })
+
+  it.each(LISTS)('%s item still drops a stored child with "capped": true', (type) => {
+    const stored = JSON.parse(
+      JSON.stringify({
+        type,
+        items: [{ text: 'i', children: [{ type: 'paragraph', text: 'stored', capped: true }] }],
+      }),
+    )
+    expect(render(stored)).not.toContain('stored')
   })
 })
 
