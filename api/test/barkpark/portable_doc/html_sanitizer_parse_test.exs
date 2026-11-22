@@ -1,0 +1,163 @@
+defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
+  @moduledoc """
+  task-65430475d0552e36 (found while building task-b11051e39ebe3a30): the
+  regex scrub stripped an `on…=` handler only after whitespace. A browser
+  also starts an attribute after a `/` or right after a closing quote, so
+  `<img/onerror=…>` and `<img src="x"onerror=…>` came out unchanged.
+
+  The scrub now reads the markup with an HTML parser, as a browser does, and
+  keeps only allowed attributes. Each case below is judged by parsing the
+  output the same way: no handler, no script-bearing element and no script
+  address may be left. Markup with nothing to remove is returned as it came,
+  byte for byte.
+  """
+  use ExUnit.Case, async: true
+
+  alias Barkpark.PortableDoc.HtmlSanitizer, as: S
+
+  @bad_elements ~w(script style iframe object embed applet noscript template svg math form frame frameset link meta base title)
+  @url_attrs ~w(href src action formaction poster background xlink:href cite)
+
+  # What would run if a browser drew `html`: each element it builds that can
+  # run script, each `on…` attribute, and each script address.
+  defp executable(html) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> Enum.flat_map(&found/1)
+  end
+
+  defp found({tag, attrs, children}) when is_binary(tag) do
+    own =
+      if(tag in @bad_elements, do: [{:element, tag}], else: []) ++
+        for {name, value} <- attrs,
+            String.starts_with?(String.downcase(name), "on") or
+              (String.downcase(name) in @url_attrs and script_address?(value)),
+            do: {:attr, tag, name, value}
+
+    own ++ Enum.flat_map(children, &found/1)
+  end
+
+  defp found(_text_or_comment), do: []
+
+  defp script_address?(value) do
+    v = value |> String.replace(~r/[\x00-\x20]/, "") |> String.downcase()
+
+    String.starts_with?(v, ["javascript:", "vbscript:"]) or
+      (String.starts_with?(v, "data:") and not String.starts_with?(v, "data:image/"))
+  end
+
+  describe "a handler after any separator a browser reads" do
+    for payload <- [
+          ~s|<img/onerror=alert(1) src=x>|,
+          ~s|<img src="x"onerror="alert(1)">|,
+          ~s|<img src='x'onerror='alert(1)'>|,
+          ~s|<img src=x/onerror=alert(1)>|,
+          ~s|<a href="#x"/onclick=alert(1)>x</a>|,
+          ~s|<img src=x\fonerror=alert(1)>|,
+          ~s|<img src=x\nonerror=alert(1)>|,
+          ~s|<img src=x\tonerror=alert(1)>|,
+          ~s|<img src=x ONERROR=alert(1)>|,
+          ~s|<img src=x OnErRoR=alert(1)>|,
+          ~s|<img src=x onerror = alert(1)>|,
+          ~s|<p title=">"/onmouseover=alert(1)>x</p>|,
+          ~s|<!--x--!><img/onerror=alert(1) src=x>|,
+          ~s|<!--><img/onerror=alert(1) src=x>-->|
+        ] do
+      @payload payload
+      test "#{inspect(payload)} leaves no handler" do
+        assert executable(S.sanitize(@payload)) == []
+      end
+    end
+  end
+
+  describe "an entity in a handler's name" do
+    # A browser does not decode references in an attribute name, so these are
+    # names it never runs; the scrub drops them too, and makes no `onerror`.
+    for payload <- [
+          ~s|<img src=x &#111;nerror=alert(1)>|,
+          ~s|<img src=x on&#101;rror=alert(1)>|,
+          ~s|<img src=x &#x6f;nerror=alert(1)>|
+        ] do
+      @payload payload
+      test "#{inspect(payload)} leaves no handler" do
+        out = S.sanitize(@payload)
+        assert executable(out) == []
+        refute out =~ "&#"
+      end
+    end
+  end
+
+  describe "svg, math and elements a regex misreads" do
+    for payload <- [
+          ~s|<svg onload=alert(1)>|,
+          ~s|<svg/onload=alert(1)>|,
+          ~s|<svg><animate onbegin=alert(1) attributeName=x dur=1s>|,
+          ~s|<math><mi xlink:href="javascript:alert(1)">x</mi></math>|,
+          ~s|<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">|,
+          ~s|<noscript><p title="</noscript><img src=x onerror=alert(1)>"></noscript>|,
+          ~s|<xmp><img src=x onerror=alert(1)></xmp>|,
+          ~s|<noembed><img title="</noembed><img src=x onerror=alert(1)>"></noembed>|,
+          ~s|<form><button formaction=javascript:alert(1)>x</button></form>|
+        ] do
+      @payload payload
+      test "#{inspect(payload)} leaves nothing that runs" do
+        out = S.sanitize(@payload)
+        assert executable(out) == []
+        refute out =~ ~r/<(noscript|xmp|noembed)/i
+      end
+    end
+  end
+
+  describe "a script address in a link" do
+    for payload <- [
+          ~s|<a href=javascript:alert(1)>x</a>|,
+          ~s|<a href="  javascript:alert(1)">x</a>|,
+          ~s|<a href="java&#x09;script:alert(1)">x</a>|,
+          ~s|<a href="javascript&#58alert(1)">x</a>|,
+          ~s|<a href="&#x6A;avascript:alert(1)">x</a>|,
+          ~s|<a href='vbscript:msgbox(1)'>x</a>|,
+          ~s|<a href="data:text/html,<script>alert(1)</script>">x</a>|,
+          ~s|<a title=">" href="javascript:alert(1)">x</a>|
+        ] do
+      @payload payload
+      test "#{inspect(payload)} keeps its words and no script address" do
+        out = S.sanitize(@payload)
+        assert executable(out) == []
+        assert out |> LazyHTML.from_fragment() |> LazyHTML.text() == "x"
+      end
+    end
+  end
+
+  describe "markup with nothing to remove is returned as it came" do
+    # Every golden render the Papers reader can serve, except those holding an
+    # element the scrub removes (a chart's svg, an equation's math, a page's
+    # style and script), which the scrub changed before as well.
+    @root Path.expand("../../../priv/portable_doc/goldens", __DIR__)
+    @removed ~r/<(#{Enum.join(~w(script style iframe object embed applet noscript template svg math form frame frameset link meta base title), "|")})\b/i
+
+    test "each golden render is byte-identical" do
+      docs =
+        for f <- Path.wildcard(@root <> "/{blocks,limits}/*.golden.json"),
+            %{"expectedHtml" => html} when is_binary(html) <- [Jason.decode!(File.read!(f))],
+            not Regex.match?(@removed, html),
+            do: {Path.basename(f), html}
+
+      assert length(docs) > 100
+      changed = for {name, html} <- docs, S.sanitize(html) != html, do: name
+      assert changed == []
+    end
+
+    for {name, html} <- [
+          {"a table without tbody", "<table><tr><td>a</td></tr></table>"},
+          {"unquoted and single-quoted attributes", "<p class=lead id='x'>a &amp; b</p>"},
+          {"a void element written XHTML-style",
+           "<p>a<br/>b<img src=\"https://x/y.png\" alt=\"\"/></p>"},
+          {"upper-case tags", "<P CLASS=\"x\">A</P>"},
+          {"data and aria attributes",
+           ~s|<span data-wikilink="x" aria-label="y" role="note">z</span>|}
+        ] do
+      @html html
+      test "#{name} is byte-identical" do
+        assert S.sanitize(@html) == @html
+      end
+    end
+  end
+end

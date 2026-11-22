@@ -25,37 +25,62 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   STORE time so poisoned markup never reaches the database, complementing the
   reader's Content-Security-Policy backstop.
 
-  ## Strategy — conservative denylist over producer HTML
+  ## Strategy: parse it as a browser does, keep what is allowed
 
-  Legacy `body_html` is producer-rendered (Markdown/pdrender → HTML): headings,
-  paragraphs, lists, code, tables, images, links. None of the executable
-  constructs below appear in legitimate producer output, so removing them
-  cannot damage real content:
+  The markup is parsed with `LazyHTML` (lexbor, an HTML5 parser), so the
+  scrub sees the elements and attributes a browser builds: a handler after a
+  `/` or a closing quote (`<img/onerror=…>`, `<img src="x"onerror=…>`), a
+  comment closed by `--!>`, an attribute value holding `>` are read as a
+  browser reads them (task-65430475d0552e36; the regex scrub before it read
+  them as text).
 
-    * script-bearing / sandbox-escaping ELEMENTS removed with their content
-      (`script`, `style`, `iframe`, `object`, `embed`, `applet`, `noscript`,
-      `template`, `svg`, `math`, `form`, `frame`, `frameset`, `link`, `meta`,
-      `base`, `title`) — iterated to a fixpoint so split/nested tags
-      (`<scr<script>ipt>`) cannot survive a single pass;
-    * inline event-handler attributes (`on\*=`);
-    * dangerous URL schemes (`javascript:`, `vbscript:`, non-image `data:`,
-      `blob:`) in URL-bearing attributes, neutralised to `#` (`data:image/…`
-      inline images are preserved);
-    * HTML comments (IE conditional-comment script vector).
+    * script-bearing / sandbox-escaping ELEMENTS are removed with their
+      content (`script`, `style`, `iframe`, `object`, `embed`, `applet`,
+      `noscript`, `template`, `svg`, `math`, `form`, `frame`, `frameset`,
+      `link`, `meta`, `base`, `title`, and the raw-text `xmp`, `noembed`,
+      `noframes`, whose content a parser and a browser can read differently);
+    * comments are removed (IE conditional-comment script vector);
+    * only allowed ATTRIBUTES are kept: `@attributes`, and any `data-…` or
+      `aria-…`. So no `on…` handler, `srcdoc`, `formaction` or a name with a
+      character reference in it survives;
+    * a script address in a URL attribute (`javascript:`, `vbscript:`,
+      `blob:`, a `data:` that is not `data:image/…`) becomes `#`. The parser
+      has decoded the value's character references, as a browser does.
+
+  ## Clean markup keeps its bytes
+
+  When the parse finds nothing to remove, the input is returned unchanged:
+  the parser's tree is what a browser builds from those same bytes, so they
+  are safe as they are. Only markup that loses something is written back
+  from the tree, so a stored paper's clean `body_html` (and every render the
+  reader serves) is byte-identical to before.
 
   This is the first layer; the reader's `script-src 'self' 'nonce-…'` CSP is
-  the allowlist backstop that blocks any inline script/handler a denylist pass
-  might miss. Defense in depth — neither layer is trusted alone.
+  the backstop. Defense in depth — neither layer is trusted alone.
   """
 
-  # Elements removed WITH their inner content. script/style would leak raw
-  # text; the rest can host or become a script/handler execution context.
+  # Elements removed WITH their inner content.
   @dangerous_elements ~w(
     script style iframe object embed applet noscript template
     svg math form frame frameset link meta base title
+    xmp noembed noframes
   )
 
-  @max_passes 8
+  # The attributes producer HTML carries (Markdown/pdrender and the Paper
+  # renderer's own output), plus any `data-…` and `aria-…`.
+  @attributes ~w(
+    href src alt title class id style role name lang dir translate hidden
+    width height align valign colspan rowspan scope headers span start
+    reversed type value target rel download hreflang cellspacing cellpadding
+    border summary abbr cite datetime srcset sizes loading decoding srclang
+    kind label open tabindex charset media poster controls muted loop
+    autoplay playsinline preload frameborder nowrap bgcolor color face size
+    for checked disabled readonly placeholder rows cols maxlength minlength
+    min max step required multiple selected
+  )
+
+  # The URL-bearing attributes among them.
+  @url_attrs ~w(href src poster cite)
 
   @doc """
   Scrub untrusted HTML. Non-binary input is returned unchanged (a nil/absent
@@ -63,101 +88,52 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   """
   @spec sanitize(term()) :: term()
   def sanitize(html) when is_binary(html) do
-    html
-    |> strip_comments()
-    |> strip_dangerous_elements(@max_passes)
-    |> strip_event_handlers()
-    |> neutralize_dangerous_uris()
+    tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree()
+
+    case scrub(tree) do
+      ^tree -> html
+      clean -> clean |> LazyHTML.from_tree() |> LazyHTML.to_html()
+    end
   end
 
   def sanitize(other), do: other
 
-  # ── HTML comments (removes <!--[if IE]><script>…<![endif]--> vectors) ──────
-  defp strip_comments(html), do: Regex.replace(~r/<!--.*?-->/s, html, "")
+  defp scrub(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &scrub_node/1)
 
-  # ── Dangerous elements — iterate to a fixpoint ────────────────────────────
-  # A single regex pass over `<scr<script>ipt>alert(1)</script>` leaves a
-  # reconstituted `<script>` behind; re-running until the string stops changing
-  # (bounded by @max_passes) collapses these tag-splitting evasions.
-  defp strip_dangerous_elements(html, 0), do: html
+  defp scrub_node({:comment, _text}), do: []
 
-  defp strip_dangerous_elements(html, passes) do
-    scrubbed = Enum.reduce(@dangerous_elements, html, &strip_element/2)
-
-    if scrubbed == html do
-      html
-    else
-      strip_dangerous_elements(scrubbed, passes - 1)
+  defp scrub_node({tag, attrs, children}) when is_binary(tag) do
+    cond do
+      String.downcase(tag) in @dangerous_elements -> []
+      # A name no element has, such as `scr<script` from `<scr<script>ipt>`:
+      # its content stays, the tag goes.
+      not Regex.match?(~r/^[a-z][a-z0-9-]*$/i, tag) -> scrub(children)
+      true -> [{tag, Enum.flat_map(attrs, &scrub_attr/1), scrub(children)}]
     end
   end
 
-  defp strip_element(tag, html) do
-    # 1) paired `<tag …>…</tag>` (case-insensitive, dot-matches-newline);
-    # 2) any orphan open `<tag …>` / `<tag …/>`;
-    # 3) any orphan close `</tag>`.
-    paired = ~r/<#{tag}\b[^>]*>.*?<\/#{tag}\s*>/is
-    open = ~r/<#{tag}\b[^>]*\/?>/is
-    close = ~r/<\/#{tag}\s*>/is
+  defp scrub_node(text), do: [text]
 
-    html
-    |> then(&Regex.replace(paired, &1, ""))
-    |> then(&Regex.replace(open, &1, ""))
-    |> then(&Regex.replace(close, &1, ""))
+  defp scrub_attr({name, value}) do
+    key = String.downcase(name)
+
+    cond do
+      not allowed_attr?(key) -> []
+      key in @url_attrs and dangerous_url?(value) -> [{name, "#"}]
+      true -> [{name, value}]
+    end
   end
 
-  # ── Inline event handlers: on*="…" / on*='…' / on*=bare ───────────────────
-  defp strip_event_handlers(html) do
-    Regex.replace(~r/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, html, "")
-  end
-
-  # ── Dangerous URL schemes in URL-bearing attributes ───────────────────────
-  @url_attrs ~w(href src xlink:href action formaction poster background)
-
-  # Named HTML entities a browser decodes inside an attribute value that can
-  # forge or hide a dangerous URL scheme. The colon is the payload; tab/newline
-  # obfuscate the scheme token (a browser strips them before URL parsing).
-  @scheme_entities %{
-    "colon" => ":",
-    "tab" => "\t",
-    "newline" => "\n",
-    "sol" => "/",
-    "newl" => "\n"
-  }
-
-  # Capture the FULL attribute value (quoted or bare) and judge it the way a
-  # browser will: decode HTML entities and drop ASCII control/space from the
-  # scheme, THEN test the scheme. A raw-byte scheme test (the naive version)
-  # was defeated by an entity-encoded colon — `href="javascript&#58;alert(1)"`
-  # has no literal `:` after the scheme token, so it slipped through while the
-  # browser decoded `&#58;`→`:` and executed it. See the entity-bypass cases in
-  # html_sanitizer_test.exs.
-  defp neutralize_dangerous_uris(html) do
-    attr_alt = @url_attrs |> Enum.map(&Regex.escape/1) |> Enum.join("|")
-
-    Regex.replace(
-      ~r/\b(#{attr_alt})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i,
-      html,
-      fn full, attr, dq, sq, bare ->
-        # Exactly one of the three value groups is populated; the others are "".
-        value = dq <> sq <> bare
-
-        if dangerous_url?(value) do
-          ~s(#{attr}="#")
-        else
-          full
-        end
-      end
-    )
-  end
+  defp allowed_attr?(key),
+    do:
+      key in @attributes or
+        Regex.match?(~r/^(data|aria)-[a-z0-9_.:-]+$/, key)
 
   defp dangerous_url?(value) do
-    normalized =
-      value
-      |> decode_entities()
-      # A browser removes ASCII whitespace/control (incl. tab/newline/CR) while
-      # parsing the URL scheme; strip them so `jav\tascript:` reads as
-      # `javascript:`.
-      |> String.replace(~r/[\x00-\x20]/, "")
+    # A browser removes ASCII whitespace/control (incl. tab/newline/CR) while
+    # parsing the URL scheme; strip them so `jav\tascript:` reads as
+    # `javascript:`. The parser has already decoded character references.
+    normalized = String.replace(value, ~r/[\x00-\x20]/, "")
 
     case Regex.run(~r/^([a-z][a-z0-9\-.+]*):(.*)$/is, normalized) do
       [_, scheme, rest] -> dangerous_scheme?(scheme, rest)
@@ -171,37 +147,6 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     case String.downcase(scheme) do
       "data" -> not String.starts_with?(String.downcase(rest), "image/")
       s -> s in ~w(javascript vbscript blob)
-    end
-  end
-
-  # Decode the HTML entities a browser resolves in an attribute value: numeric
-  # decimal (`&#58;`), numeric hex (`&#x3a;`), and the scheme-relevant named
-  # set — with an OPTIONAL trailing `;` (browsers accept numeric refs without
-  # it). Over-decoding only risks neutralising a rare legit URL, never a false
-  # negative, so it fails safe for a denylist.
-  defp decode_entities(value) do
-    value
-    |> decode_numeric_entities()
-    |> decode_named_entities()
-  end
-
-  defp decode_numeric_entities(value) do
-    value = Regex.replace(~r/&#x([0-9a-f]+);?/i, value, fn _m, hex -> codepoint(hex, 16) end)
-    Regex.replace(~r/&#([0-9]+);?/, value, fn _m, dec -> codepoint(dec, 10) end)
-  end
-
-  defp decode_named_entities(value) do
-    Regex.replace(~r/&([a-z]+);/i, value, fn full, name ->
-      Map.get(@scheme_entities, String.downcase(name), full)
-    end)
-  end
-
-  defp codepoint(digits, base) do
-    case Integer.parse(digits, base) do
-      # Valid scalar values only — skip surrogates (invalid UTF-8) and
-      # out-of-range; a dropped char still can't reconstruct a live scheme.
-      {cp, ""} when cp in 0..0xD7FF or cp in 0xE000..0x10FFFF -> <<cp::utf8>>
-      _ -> ""
     end
   end
 end
