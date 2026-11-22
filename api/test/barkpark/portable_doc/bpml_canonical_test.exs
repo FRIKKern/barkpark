@@ -123,6 +123,24 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
 
   defp rename(m, _from, _to), do: m
 
+  # A plain-text body flattens to its string only when each run is exactly
+  # type and value (marks empty); a run holding any other key keeps its shape.
+  for {type, scope, _key, order, :plain} <- AliasKey.reads(), ak <- order do
+    test "#{type}: a run holding a key besides type, value and marks under #{inspect(ak)} is not flattened" do
+      scope = unquote(Macro.escape(scope))
+      plain = put_body(unquote(type), scope, unquote(ak), [t("words")])
+      keyed = put_body(unquote(type), scope, unquote(ak), [Map.put(t("words"), "_key", "k1")])
+
+      refute inspect(Canonical.normalize([plain])) =~ "\"type\" => \"text\""
+      assert inspect(Canonical.normalize([keyed])) =~ ~s("_key" => "k1")
+    end
+  end
+
+  defp put_body(type, :block, key, body), do: %{"type" => type, key => body}
+
+  defp put_body(type, {:each, list_key}, key, body),
+    do: %{"type" => type, list_key => [%{key => body}]}
+
   test "a block whose two names hold different bodies is not normalised away, and is unshown" do
     both = %{"type" => "paragraph", "content" => [t("shown")], "text" => "dropped by the print"}
     assert Canonical.normalize([both]) == [both]

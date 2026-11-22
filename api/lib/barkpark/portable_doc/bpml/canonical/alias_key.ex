@@ -97,7 +97,9 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical.AliasKey do
   defp shape(v, :raw), do: v
 
   # A plain-text position (`<code>`, `<h2>`, an attribute): an unmarked inline
-  # list flattens to its text, as the printer's `flatten_plain/1` does.
+  # list flattens to its text, as the printer's `flatten_plain/1` does. A run
+  # holding any other key (`_key`, a note) keeps its shape, so the print is
+  # seen to drop that key and the block stays protected.
   defp shape(v, :plain) when is_list(v) do
     if Enum.all?(v, &plain_run?/1),
       do: Enum.map_join(v, "", fn %{"value" => s} -> s end),
@@ -111,7 +113,7 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical.AliasKey do
   defp shape(v, :head_cells), do: v
 
   defp plain_run?(%{"type" => "text", "value" => v} = n) when is_binary(v),
-    do: Map.get(n, "marks", []) == []
+    do: Map.keys(n) -- ["type", "value", "marks"] == [] and Map.get(n, "marks", []) == []
 
   defp plain_run?(_), do: false
 

@@ -11,7 +11,7 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     3. `:unchecked_item` — a list item `%{"content" => c, "checked" => false}` and nothing else becomes the plain item `c`.
     4. `:heading_level` — a heading level written as a string (`"2"`) becomes the integer.
     5. `:text_merge` — adjacent text nodes with no marks merge into one.
-    6. `:alias_key` — a body the printer reads under an alias key moves whole to the key the parser writes (`Canonical.AliasKey`).
+    6. `:alias_key` — a body the printer reads under an alias key moves whole to the key the parser writes (`Canonical.AliasKey`); a plain-text body flattens to its string only when every run holds exactly type, value and no marks.
     7. `:empty_text` — a text node whose value is "" and whose marks are decorators only (no link or other annotation) is dropped.
     8. `:empty_step_body` — a step with no `blocks` (and no `children` or `content`) has `blocks: []`; no other absent list.
     9. `:empty_marks` — a text node's `marks: []` is dropped; the node carries no mark either way.

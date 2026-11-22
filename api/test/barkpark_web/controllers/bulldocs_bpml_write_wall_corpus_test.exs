@@ -104,10 +104,13 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallCorpusTest do
             assert resp.status == 200,
                    "#{slug}: adding a block answered #{resp.status} #{resp.resp_body}"
 
-            # Every write puts every block through the chokepoint's canonical
-            # shapes (`BlockOps.normalize_render_shapes/1`); nothing else moves.
+            # The sync write keeps each block it did not touch as stored
+            # (`Papers.KeepUntouched`): byte-equal when its id is its own, the
+            # chokepoint's shapes otherwise. Nothing else moves.
             assert Enum.take(stored_blocks(slug), length(before)) ==
-                     Barkpark.Content.Papers.BlockOps.normalize_render_shapes(before),
+                     Barkpark.Content.Papers.KeepUntouched.shapes(before, before,
+                       keep_untouched: true
+                     ),
                    "#{slug} (#{writer}): a stored block changed when another was added"
           else
             # The pull printed bytes its own parser refuses: nothing is written.

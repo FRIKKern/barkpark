@@ -357,9 +357,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
     * `bpmlView` is not the row's current view → 412; a push that changes what
       its pull did not show → 422 `bpml_unshown` (`Bpml.WriteWall`);
     * no changes → 200 `{ok, unchanged: true}`;
-    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the reader's
-      view of the Paper as saved, read back before commit: the bytes a pull
-      gives at that rev. The client overwrites its file with it.
+    * applied → 200 `{ok, rev, op_count, bpml, bpmlView}`: `bpml` is the view
+      of the Paper as saved, read back before commit (the bytes a pull gives
+      at that rev, which the client writes), `bpmlView` their fingerprint.
   """
   def sync(conn, %{"slug" => slug} = params) do
     bpml = params["bpml"]
@@ -450,7 +450,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
           true ->
             case Content.Papers.BpmlView.push(paper, parsed, dataset) do
               {:refused, body} ->
-                ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
+                ErrorResponse.emit_fields(conn, Content.Papers.BpmlView.status(body), body)
 
               {:error, :diff_verification_failed} ->
                 conn
@@ -465,7 +465,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
                 conn
                 |> put_resp_header("x-paper-rev", current_rev)
-                |> json(Content.Papers.BpmlView.with_notes(payload, notes))
+                |> json(Content.Papers.BpmlView.push_answer(payload, notes))
 
               {:ok, ops, notes} ->
                 sync_persist(assign(conn, :notes, notes), slug, ops, base_rev, dataset, scope)
@@ -479,7 +479,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
-    opts = scope ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
+    keep = [keep_untouched: true]
+    opts = scope ++ keep ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
 
     case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
       {:ok, result} ->
@@ -495,7 +496,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         conn
         |> put_resp_header("x-paper-rev", to_string(result.rev))
-        |> json(Content.Papers.BpmlView.with_notes(payload, conn.assigns.notes))
+        |> json(Content.Papers.BpmlView.push_answer(payload, conn.assigns.notes))
 
       {:error, {:view_refused, body}} ->
         ErrorResponse.emit_fields(conn, :unprocessable_entity, body)
@@ -663,7 +664,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
         conn
         |> put_resp_header("x-paper-rev", rev)
-        |> json(with_warnings(payload))
+        |> json(with_warnings(Content.Papers.BpmlView.push_answer(payload, [])))
 
       # The Paper as saved has no reader's view that prints: rolled back.
       {:error, {:view_refused, body}} ->

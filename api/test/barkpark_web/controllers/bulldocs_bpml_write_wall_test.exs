@@ -7,6 +7,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Content, LabelFixtures, Repo, Tenancy}
+  alias Barkpark.Content.Papers.BpmlView
 
   @ds "production"
   @token "barkpark-test-ingest-token"
@@ -140,6 +141,31 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     assert resp.status == 422
     assert [lede(), plain()] == stored_blocks(slug)
+  end
+
+  # The pull prints a list item's text and not its child blocks, so an edit of
+  # the list may not write it back without them.
+  test "editing a list whose item holds child blocks the pull never showed is refused; the children stay" do
+    slug = slug("item-children")
+
+    list = %{
+      "id" => "l",
+      "type" => "list",
+      "items" => [
+        %{
+          "content" => [t("parent")],
+          "children" => [
+            %{"type" => "list", "items" => [[t("NESTED")]]},
+            %{"type" => "paragraph", "content" => [t("CHILD PARAGRAPH")]}
+          ]
+        }
+      ]
+    }
+
+    paper!(slug, [list, plain()])
+
+    pushed(slug, &String.replace(&1, "parent", "parent, edited")) |> refused!(~s(block "l"))
+    assert [list, plain()] == stored_blocks(slug)
   end
 
   test "an id-less stored block holding an item child is refused, not lost" do
@@ -362,5 +388,108 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
     json_response(sync(slug, bpml, rev), 200)
 
     assert [%{"id" => "h", "text" => ""}, _] = stored_blocks(slug)
+  end
+
+  # ── what an answer may carry, and what the write keeps ─────────────────────
+
+  test "the answer to an applied push is the pull's view: no hidden text, and its fingerprint is of those bytes" do
+    nested_private!(true)
+    slug = slug("answer-view")
+    paper!(slug, [heading(), plain()])
+    {bpml, rev, view} = pull_view(slug)
+
+    answer =
+      sync_view(slug, String.replace(bpml, "Plain.", "One."), rev, view) |> json_response(200)
+
+    # The title attribute still carries the heading text, in the pull too
+    # (task-f08c1d1a0144b4a2, its own PR); the block itself is redacted.
+    refute answer["bpml"] =~ ~s(<h2 id="h">PRIVATE_HEADING)
+    assert answer["bpmlView"] == BpmlView.hash(answer["bpml"])
+    assert {answer["bpml"], answer["rev"], answer["bpmlView"]} == pull_view(slug)
+
+    again =
+      sync_view(
+        slug,
+        String.replace(answer["bpml"], "One.", "Two."),
+        answer["rev"],
+        answer["bpmlView"]
+      )
+
+    assert json_response(again, 200)["ok"] == true
+
+    assert [%{"text" => "PRIVATE_HEADING"}, %{"content" => [%{"value" => "Two."}]}] =
+             stored_blocks(slug)
+  end
+
+  test "the answer to a push that creates a Paper is the pull's view" do
+    # A full document (meta included) printed from another Paper, gone before
+    # the push so it is no near-duplicate, and before the field turns private.
+    source = slug("create-source")
+    paper!(source, [heading(), plain()])
+    {bpml, _rev} = pull(source)
+    Repo.delete!(Content.get_paper(source))
+    nested_private!(true)
+
+    slug = slug("create-view")
+    answer = sync(slug, String.replace(bpml, source, slug), "0") |> json_response(200)
+    assert answer["created"] == true
+    refute answer["bpml"] =~ ~s(<h2 id="h">PRIVATE_HEADING)
+    assert answer["bpmlView"] == BpmlView.hash(answer["bpml"])
+  end
+
+  test "a heading run holding a key besides type, value and marks is unshown, so editing it is refused" do
+    run = %{"type" => "text", "value" => "Head", "_key" => "k1"}
+    head = %{"id" => "h", "type" => "heading", "level" => 2, "content" => [run]}
+    slug = slug("plain-key")
+    paper!(slug, [head, plain()])
+
+    {bpml, rev} = pull(slug)
+    refused!(sync(slug, String.replace(bpml, ">Head<", ">Head edited<"), rev), ~s(block "h"))
+    assert hd(stored_blocks(slug)) == head
+  end
+
+  test "a code run holding an unknown key is unshown, so editing it is refused" do
+    code = %{
+      "id" => "c",
+      "type" => "code",
+      "code" => [%{"type" => "text", "value" => "x = 1", "note" => "KEEP"}]
+    }
+
+    slug = slug("plain-note")
+    paper!(slug, [code])
+
+    {bpml, rev} = pull(slug)
+    refused!(sync(slug, String.replace(bpml, "x = 1", "x = 2"), rev), ~s(block "c"))
+    assert stored_blocks(slug) == [code]
+  end
+
+  test "a protected block stored in an older shape keeps its bytes when a neighbour is edited" do
+    list = %{
+      "id" => "l",
+      "type" => "list",
+      "role" => "keep",
+      "items" => ["bare a", %{"text" => "text b"}]
+    }
+
+    slug = slug("reshape")
+    paper!(slug, [list, plain()])
+
+    {bpml, rev} = pull(slug)
+    json_response(sync(slug, String.replace(bpml, "Plain.", "Plain, edited."), rev), 200)
+
+    assert [^list, %{"id" => "p1", "content" => [%{"value" => "Plain, edited."}]}] =
+             stored_blocks(slug)
+  end
+
+  test "a stored repeated id is named as stored, not as pushed" do
+    a = %{"id" => "d", "type" => "paragraph", "content" => [t("A.")]}
+    b = %{"id" => "d", "type" => "paragraph", "content" => [t("B.")]}
+    slug = slug("stored-dup")
+    paper!(slug, [a, b])
+
+    {bpml, rev} = pull(slug)
+    error = json_response(sync(slug, String.replace(bpml, "B.", "B edited."), rev), 422)["error"]
+    assert error["message"] =~ "stored paper"
+    assert stored_blocks(slug) == [a, b]
   end
 end
