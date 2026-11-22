@@ -31,6 +31,7 @@
 // it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
 // closed shadow root, is not seen.
 import { limit } from './limit.mjs'
+import { HOLDER_UNREAD, HOLDERS_UNLISTED, placementSource, SHADOW_ABOVE } from './placement.mjs'
 import { source } from './probes.mjs'
 
 const STEP_MS = 5000
@@ -155,8 +156,10 @@ const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'call' ?
     in each open shadow root, as it arrives or gains popover, and watches each open root from the moment
     attachShadow makes it (told by tellRoots). It also notes every frame (another window), and each call tellRoots
     refuses. __barkCensus(part, boxes) tells, once per page, each one seen for that part or outside every stage that
-    none of the part's layers selects. */
-function census() {
+    none of the part's layers selects. `placement` (placement.mjs placementSource) watches each document and open
+    root the census watches; __barkPlacement(part) is its fails for the part. docs/PARTS.md "Placement" says what
+    is read and when. `script` is false on a page with no script. */
+function census(placement, script) {
   const CAN = 'dialog, [popover]'
   const FRAMES = 'iframe, frame, object, embed, fencedframe'
   const seen = new Map()
@@ -168,11 +171,17 @@ function census() {
     return null
   }
   const note = (el, from, kind) => seen.has(el) || seen.set(el, { of: owner(el.isConnected ? el : from), kind })
-  const mo = new MutationObserver((list) => {
+  const records = (list) => {
     for (const m of list) if (m.type === 'attributes') take(m.target)
     else for (const n of m.addedNodes) take(n, m.target)
-  })
-  const watch = (r) => mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['popover'] })
+  }
+  const mo = new MutationObserver(records)
+  const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
+  const placed = placement(script, owner, (part) => [...seen].filter(([el, v]) => v.kind === 'can' && (part === undefined || v.of === part)).map(([el]) => el), describe)
+  const watch = (r) => {
+    mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['popover'] })
+    placed.watch(r)
+  }
   function take(n, from = n) {
     if (n.nodeType !== 1) return
     for (const e of [n, ...n.querySelectorAll('*')]) {
@@ -191,7 +200,13 @@ function census() {
   addEventListener('barkui-census-root', (e) => take(e.composedPath()[0]), true)
   for (const at of ['window.open', 'document.write', 'document.writeln', 'document.open'])
     addEventListener(`barkui-census-${at}`, () => seen.has(at) || seen.set(at, { of: null, kind: 'call' }), true)
-  const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
+  globalThis.__barkPlacement = (part) => {
+    // Every box seen so far, even one given popover and gone again since the last delivery.
+    records(mo.takeRecords())
+    if (document.documentElement) take(document.documentElement)
+    return placed.look(part)
+  }
+  globalThis.__barkHolders = (part) => placed.holders(part)
   globalThis.__barkCensus = (part, boxes) => {
     if (document.documentElement) take(document.documentElement)
     const stage = document.querySelector(`[data-part="${CSS.escape(part)}"]`)
@@ -211,9 +226,14 @@ function census() {
     attachShadow tells the census each host the moment its root exists, by an event the census hears first. What
     would put a window or a document out of the census's sight is refused and told by name instead: window.open, and
     document.open, write and writeln once the document is parsed (while it is parsing, written markup is parsed like
-    the rest). The page cannot remove or replace any of these, and they call nothing it can change afterwards. */
+    the rest). removeAttribute and removeAttributeNS bring a style attribute up to date before they run: Chromium
+    writes a style set through el.style or attributeStyleMap into the attribute only when it is next read, and
+    removeAttribute does not read it first, so the record the placement log gets would hold the value before that
+    write, not the one the element held (placement.mjs). The page cannot remove or replace any of these, and they
+    call nothing it can change afterwards. */
 function tellRoots() {
   const [apply, define, send, Ev, doc] = [Reflect.apply, Object.defineProperty, EventTarget.prototype.dispatchEvent, Event, document]
+  const [getAttr, removeAttr, removeAttrNS] = [Element.prototype.getAttribute, Element.prototype.removeAttribute, Element.prototype.removeAttributeNS]
   const [attach, write, writeln, ready] = [Element.prototype.attachShadow, Document.prototype.write, Document.prototype.writeln, Object.getOwnPropertyDescriptor(Document.prototype, 'readyState').get]
   const tell = (target, type) => apply(send, target, [new Ev(type, { bubbles: true, composed: true })])
   const fix = (o, k, value) => define(o, k, { value, writable: false, enumerable: true, configurable: false })
@@ -221,6 +241,14 @@ function tellRoots() {
     const root = apply(attach, this, [init])
     tell(this, 'barkui-census-root')
     return root
+  })
+  fix(Element.prototype, 'removeAttribute', function removeAttribute(...a) {
+    apply(getAttr, this, ['style'])
+    return apply(removeAttr, this, a)
+  })
+  fix(Element.prototype, 'removeAttributeNS', function removeAttributeNS(...a) {
+    apply(getAttr, this, ['style'])
+    return apply(removeAttrNS, this, a)
   })
   fix(window, 'open', function open() {
     tell(window, 'barkui-census-window.open')
@@ -238,9 +266,10 @@ function tellRoots() {
 }
 
 /** The census world on `page`, set before the page opens its URL, so it watches from the first frame. Returns
-    look(part) → what census() names for the part. A page that runs no script of its own gets the census when first
-    asked: nothing on it can add a box later. */
-export async function installCensus(page) {
+    look(part) → what census() names for the part, and look.placement(name) → the placement fails for the part
+    (placement.mjs). A page that runs no script of its own (`script` false) gets the census when first asked:
+    nothing on it can add a box or write a style attribute later. */
+export async function installCensus(page, { script = true } = {}) {
   const cdp = await page.context().newCDPSession(page)
   const { frameTree } = await cdp.send('Page.getFrameTree')
   const frameId = frameTree.frame.id
@@ -251,8 +280,8 @@ export async function installCensus(page) {
   await cdp.send('Runtime.enable')
   // A script to evaluate on a new document runs only for a session with the Page domain on.
   await cdp.send('Page.enable')
-  const code = `(${source(census)})()`
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code, worldName: 'barkui-census' })
+  const code = (on) => `(${source(census)})(${placementSource(source)}, ${on})`
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: code(script), worldName: 'barkui-census' })
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${source(tellRoots)})()` })
   const run = async (expression) => {
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: id, returnByValue: true })
@@ -267,16 +296,58 @@ export async function installCensus(page) {
     w.close().catch(() => {})
   })
   let ready = false
-  return async (part) => {
+  const ensure = async () => {
     if (!ready && (id === null || !(await run('typeof __barkCensus === "function"').catch(() => false)))) {
       id = (await cdp.send('Page.createIsolatedWorld', { frameId, worldName: 'barkui-census-late' })).executionContextId
-      await run(code)
+      await run(code(script))
     }
     ready = true
+  }
+  const look = async (part) => {
+    await ensure()
     const opened = Array.from({ length: windows }, () => REFUSED.window)
     windows = 0
     return [...opened, ...(await run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)).map(said)]
   }
+  look.placement = async (name) => {
+    await ensure()
+    return [...(await run(`__barkPlacement(${JSON.stringify(name)})`)), ...(await shadowAbove(name))]
+  }
+  /** Each element that holds a stage of the part and hosts a shadow root, of any mode and however it was made: asked
+      of the browser's own tree, at the look, element by element. A holder the browser gives no answer for fails. */
+  const shadowAbove = async (name) => {
+    const objectGroup = 'barkui-holders'
+    const t0 = Date.now()
+    const ask = (method, params) => within(cdp.send(method, params), `${method} gave no answer in ${ASK_MS / 1000} s`)
+    const fails = []
+    try {
+      const { result, exceptionDetails } = await ask('Runtime.evaluate', { expression: `__barkHolders(${JSON.stringify(name)})`, contextId: id, objectGroup })
+      if (exceptionDetails || !result?.objectId) throw new Error('the census did not list them')
+      const { result: items } = await ask('Runtime.getProperties', { objectId: result.objectId, ownProperties: true })
+      const at = new Map(items.filter((p) => /^\d+$/.test(p.name)).map((p) => [Number(p.name), p.value]))
+      for (let i = 0; at.has(i); i += 2) {
+        const who = String(at.get(i + 1)?.value ?? `holder ${i / 2 + 1}`)
+        holderReads.holders++
+        try {
+          const objectId = at.get(i)?.objectId
+          if (!objectId) throw new Error('no element')
+          const { node } = await ask('DOM.describeNode', { objectId, depth: 0 })
+          if (!node) throw new Error('no node')
+          if (node.shadowRoots?.length) fails.push(SHADOW_ABOVE(who))
+        } catch (e) {
+          fails.push(HOLDER_UNREAD(who, e.message))
+        }
+      }
+    } catch (e) {
+      fails.push(HOLDERS_UNLISTED(name, e.message))
+    } finally {
+      await cdp.send('Runtime.releaseObjectGroup', { objectGroup }).catch(() => {})
+      holderReads.looks++
+      holderReads.ms += Date.now() - t0
+    }
+    return fails
+  }
+  return look
 }
 
 /** After real input (a Tab stop, a driven state, a press step, a layer's input), the fails for what no layer
@@ -294,6 +365,15 @@ export async function unnamedNow(page, part) {
 }
 /** How many of those looks this process made, and how long they took: the selftest prints what they cost. */
 export const looks = { n: 0, ms: 0 }
+/** What asking the browser about the holders of stages cost, over a process: looks, holders read, and ms. */
+export const holderReads = { looks: 0, holders: 0, ms: 0 }
+export const holderSentence = () => `placement: ${holderReads.looks} looks asked the browser about ${holderReads.holders} holders of a stage, in ${(holderReads.ms / 1000).toFixed(1)} s`
+// One answer from the browser, or a fail by name after ASK_MS.
+const ASK_MS = 5000
+const within = (p, why) => {
+  let timer
+  return Promise.race([p, new Promise((_, no) => (timer = setTimeout(() => no(new Error(why)), ASK_MS)))]).finally(() => clearTimeout(timer))
+}
 
 /** The fail for a layer whose box is not open once its "open" input settles. */
 export const LATE = (name) => `${name} is not open in the top layer once its "open" input settles: it opened later than the check waits, or not at all; a layer opens at once on its input`

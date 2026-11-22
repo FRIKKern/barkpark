@@ -25,8 +25,9 @@ import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
+import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
-import { topLayerTouch } from './layers.mjs'
+import { holderSentence, topLayerTouch } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
 export const CASES = [
@@ -309,11 +310,11 @@ steps.push({
     name: 'styling that waits until after the demo has run is caught after a press step',
     only: ['pressed'],
     plant: (d) => inDemo(d, "setTimeout(() => { root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000' }, 2500)"),
-    expect: failedSay(/after step .*button#button-after carries a style attribute/),
+    expect: failedSay(/after step .*button#button-after "Duplicate" was given color in a style attribute, which is not placement/),
   },
   // The run-time guard: what dodges the lint is caught once the demo has run.
   ...[
-    ['an inline style spelled to dodge the lint', "root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000'", /button#button-after carries a style attribute/],
+    ['an inline style spelled to dodge the lint', "root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000'", /button#button-after "Duplicate" was given color in a style attribute, which is not placement/],
     ['a <style> spelled to dodge the lint', "document.head.append(Object.assign(document.createElement('sty' + 'le'), { textContent: '#button-after::before { content: \"x\"; color: #ff0000 }' }))", /a stylesheet the build did not put there/],
     ['a rule slipped into the UI SDK sheet', "const s = [...document['style' + 'Sheets']].find((x) => !x.href); s['insert' + 'Rule']('#button-after { color: #ff0000 }')", /rules changed/],
     ['an adopted sheet', "const S = window['CSS' + 'StyleSheet']; const s = new S(); s['replace' + 'Sync']('#button-after { color: #ff0000 }'); document['adopted' + 'StyleSheets'] = [s]", /adopted/],
@@ -626,6 +627,7 @@ steps.push({
   },
   ...CEILING_CASES,
   ...LAYER_CASES,
+  ...PLACEMENT_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
@@ -733,6 +735,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
   }
   const count = { held: run.length - failures, of: run.length }
+  console.log(holderSentence())
   console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
   if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)
