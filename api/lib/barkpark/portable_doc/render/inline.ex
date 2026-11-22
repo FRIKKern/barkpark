@@ -49,12 +49,12 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   #     code-block source-key contract (`Compose.code_source/1` +
   #     test/support/fixtures/code-source-aliases.json).
   #
-  #   PLAIN TEXT · js/packages/react/src/toPlainText.ts reads inline content
-  #     with the same `inlineText` the React chip uses (first non-empty of
-  #     `value`, `text`, then `children`; a bare array recurses), so its words
-  #     are the words every renderer draws. Its old copy appended a leaf's
-  #     children and dropped a bare-array node; inline-code-source.json now
-  #     holds it to the same rows (task-b2e80c27cf61227f).
+  #   PLAIN TEXT · js/packages/react/src/toPlainText.ts reads inline
+  #     content with the `inlineText` in
+  #     js/packages/react/src/inline.tsx, in place of its own copy, which
+  #     appended a leaf's children and dropped a bare-array node;
+  #     inline-code-source.json now holds it to the chip's rows
+  #     (task-b2e80c27cf61227f).
 
   alias Barkpark.PortableDoc.Render.InlineDepth
 
