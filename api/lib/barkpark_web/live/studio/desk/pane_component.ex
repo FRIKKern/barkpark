@@ -86,7 +86,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign(
         Map.take(
           assigns,
-          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus bulk bulk_confirm choices)a
+          ~w(id pane index panes base dataset scope node follows orderings sorts default hint focus bulk bulk_confirm choices held)a
         )
       )
       |> assign_new(:bulk, fn -> nil end)
@@ -94,6 +94,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
       |> assign_new(:bulk_at, fn -> 1 end)
       |> assign_new(:sharers, fn -> [] end)
       |> assign_new(:hint, fn -> nil end)
+      |> assign_new(:held, fn -> nil end)
       |> assign_new(:focus, fn -> nil end)
       |> assign_new(:orderings, fn -> [] end)
       |> assign_new(:choices, fn -> [] end)
@@ -444,7 +445,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                 <BarkparkWeb.Icons.desk_icon :if={!entry[:media]} name={entry.icon} size={21} />
               </span>
               <span class="pane-item-label">
-                <span class="dk-row-title">{entry.title}</span>
+                <span class="dk-row-title">{row_title(entry, @held)}</span>
                 <%!-- A date-time in it is a marker: `PreviewDay` prints the day
                      in the workspace's zone and format (06.09.2026). --%>
                 <span :if={entry[:sub]} class="dk-row-sub"><PreviewDay.text text={entry.sub} /></span>
@@ -641,6 +642,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # A row with a tick (`Bulk`): a document's row in a plain document list.
   defp tick?(%{pane: pane, node: node}, entry),
     do: match?(%{next: %{kind: :doc}}, entry) and Bulk.selectable?(pane, node)
+
+  # The open document's row names the title this tab holds unsaved, as its
+  # header does (`PageTitle.held/1`, task-82becc4945d1ad1e); every other
+  # row, and every other tab, the stored one.
+  defp row_title(%{next: %{kind: :doc, id: id}} = entry, {held_id, title}) when is_binary(id) do
+    if Content.published_id(id) == held_id, do: title, else: entry.title
+  end
+
+  defp row_title(entry, _held), do: entry.title
 
   # Where the document `id` (published) sits among the rows drawn, 0-based,
   # dividers not counted (the script counts `a[data-desk-row]`).

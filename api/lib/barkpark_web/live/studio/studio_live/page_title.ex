@@ -41,15 +41,41 @@ defmodule BarkparkWeb.Studio.StudioLive.PageTitle do
 
   defp title_doc(socket) do
     with %{} = doc <- BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle.base_doc(socket) do
-      held = socket.assigns[:editor_unsaved_keys] || MapSet.new()
-
-      case socket.assigns[:editor_form] do
-        %{"title" => title} when is_binary(title) ->
-          if MapSet.member?(held, "title"), do: %{doc | title: title}, else: doc
-
-        _ ->
-          doc
+      case held_text(socket.assigns) do
+        title when is_binary(title) -> %{doc | title: title}
+        nil -> doc
       end
+    end
+  end
+
+  @doc """
+  The open document's row and the title it is named by while this tab holds
+  its title unsaved (a save that did not land, a refused one):
+  `{published id, page_title}`, else nil. The desk's list row names it so
+  (task-82becc4945d1ad1e), as TanStack's row reads the doc its cache
+  overlays with this editor's unsent values; one rule, so the row, the
+  header and the tab cannot drift apart.
+  """
+  def held(assigns) do
+    with title when is_binary(title) <- held_text(assigns),
+         %{doc_id: id} when is_binary(id) <- assigns[:editor_doc],
+         shown when is_binary(shown) <- assigns[:page_title] do
+      {Barkpark.Content.published_id(id), shown}
+    else
+      _ -> nil
+    end
+  end
+
+  # The title text this tab holds unsaved, else nil.
+  defp held_text(assigns) do
+    held = assigns[:editor_unsaved_keys] || MapSet.new()
+
+    case assigns[:editor_form] do
+      %{"title" => title} when is_binary(title) ->
+        if MapSet.member?(held, "title"), do: title
+
+      _ ->
+        nil
     end
   end
 

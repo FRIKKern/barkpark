@@ -678,6 +678,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         focus={FocusMode.of(assigns, view)}
         bulk={Bulk.of(assigns, view.id)}
         bulk_confirm={@desk_bulk_confirm && @desk_bulk_confirm.pane == view.id && @desk_bulk_confirm}
+        held={BarkparkWeb.Studio.StudioLive.PageTitle.held(assigns)}
       />
       <% end %>
     </div>
