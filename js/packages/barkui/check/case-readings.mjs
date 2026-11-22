@@ -85,6 +85,10 @@ export const CASE_READINGS = {
       // 45014740614, commit 2ee9c33320ba5ce178e38afb1df0eb3d00a7ae57).
       "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)": 20,
       "top layer: the part's context holds the check's own two pages and no other, known by identity": 1.5,
+      // The settled-read cases, added after the run above: from their PR's hosted run, job 137262649511 (run
+      // 45040123610, commit 946bc94f16f78a380dd75452634f00cbdb1e4ada).
+      "top layer: a box hidden for the capture behind it and drawn again reads at its new opacity at once, with no transition running": 0.5,
+      "top layer: a box held at opacity 0 by its own style, or still fading in by its own transition, reads so after the checker's hiding is undone, and is red": 2.6,
     },
   },
   views: {
