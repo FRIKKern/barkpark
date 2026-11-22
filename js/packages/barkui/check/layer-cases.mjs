@@ -143,21 +143,26 @@ async function ownTwoPages() {
       },
       'a script Control click on a link': (page) => page.evaluate(() => document.getElementById('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }))),
     }
-    for (const [way, act] of Object.entries(MAY)) {
-      const { context, page, ref } = await two()
-      const census = await installCensus(page, [page, ref])
-      await page.setContent('<!doctype html><a id="a" href="about:blank#a">A link</a>')
-      const made = []
-      context.on('page', (p) => made.push(p))
-      await act(page)
-      await page.waitForTimeout(700)
-      await Promise.all(made.map((p) => p.isClosed() || p.waitForEvent('close', { timeout: 5000 }).catch(() => {})))
-      const said = await census(part)
-      console.log(`    ${way}: made a page: ${made.length ? 'yes' : 'no'}`)
-      rows[`${way}: a page it makes is refused by name and closed, once`] = made.length
-        ? made.length === 1 && made[0].isClosed() && said.length === 1 && said[0] === REFUSED.page
-        : said.length === 0
-      await context.close()
+    // Side by side, each in a context of its own: the case waits once, not once per way.
+    const tried = await Promise.all(
+      Object.entries(MAY).map(async ([way, act]) => {
+        const { context, page, ref } = await two()
+        const census = await installCensus(page, [page, ref])
+        await page.setContent('<!doctype html><a id="a" href="about:blank#a">A link</a>')
+        const made = []
+        context.on('page', (p) => made.push(p))
+        await act(page)
+        await page.waitForTimeout(700)
+        await Promise.all(made.map((p) => p.isClosed() || p.waitForEvent('close', { timeout: 5000 }).catch(() => {})))
+        const said = await census(part)
+        const ok = made.length ? made.length === 1 && made[0].isClosed() && said.length === 1 && said[0] === REFUSED.page : said.length === 0
+        await context.close()
+        return [way, made.length > 0, ok]
+      }),
+    )
+    for (const [way, made, ok] of tried) {
+      console.log(`    ${way}: made a page: ${made ? 'yes' : 'no'}`)
+      rows[`${way}: a page it makes is refused by name and closed, once`] = ok
     }
     return each(Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, () => v])))()
   } finally {
