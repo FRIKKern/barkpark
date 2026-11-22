@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   require Logger
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @doc "Whether `msg` is another session's discard of the draft open in the editor."
@@ -62,11 +63,17 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   def reload(%{assigns: %{editing: {_dataset, type, id}}} = socket) do
     was = values(socket.assigns[:editor_form] || %{})
 
+    old_form = socket.assigns[:editor_form]
+
     socket =
       socket
       |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
       |> assign(:editor_refused_clears, nil)
       |> Shared.rebuild_panes()
+
+    # Someone else's discard: a rich text in an object takes the published
+    # text as it takes another editor's save (`RichTextRemote`).
+    socket = RichTextRemote.push(socket, old_form, socket.assigns[:editor_form])
 
     socket
     |> assign(:desk_discarded, %{

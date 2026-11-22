@@ -319,7 +319,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     b = open(c)
 
     b_saves_rt(b, c, "<p>one two B</p>", ["one two B"])
-    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => _}}, 2_000)
+    assert eventually(fn -> words(form(a)["meta"]["rt"]) == ["one two B"] end)
 
     send_post(a, "doc[meta].rt", %{
       "doc[meta].label" => "l0",
@@ -329,16 +329,125 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two A"] end)
   end
 
-  test "theirs past 20k is not sent: A's editor is told only that it changed", c do
+  # #28349 r2 review, S9: past 20k the page was told only that it changed,
+  # so an idle A never showed it and A's next post was held, then saved over
+  # it.
+  test "theirs past 20k is sent whole, in an event of its own", c do
     a = open(c)
     b = open(c)
     long = String.duplicate("word ", 5_000)
 
     b_saves_rt(b, c, "<p>#{long}</p>", [String.trim_trailing(long)])
 
-    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => told}}, 2_000)
-    assert told[:big] == true
-    refute Map.has_key?(told, :html)
+    assert_push_event(
+      a,
+      @event,
+      %{values: %{"doc[meta].rt" => %{seq: seq, html: html}} = told},
+      2_000
+    )
+
+    assert map_size(told) == 1
+    assert is_integer(seq) and byte_size(html) > 20_000 and html =~ "word word"
+  end
+
+  # #28349 r2 review, SV2: Reload took theirs into the form but the editor
+  # kept A's held words, and A's next word wrote them over B's, with no
+  # banner.
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    test "#{surface}: Reload sends the stored text to show at once; a post from an editor that never showed it is held",
+         c do
+      c = %{c | surface: @surface}
+      a = open(c)
+      b = open(c)
+      seq = held_over_b(a, b, c)
+
+      a |> element("[phx-click=reload-remote-doc]") |> render_click()
+
+      assert_push_event(
+        a,
+        @event,
+        %{values: %{"doc[meta].rt" => %{seq: shown, html: html, reload: true}}},
+        2_000
+      )
+
+      assert shown > seq and html =~ "B para"
+      assert words(form(a)["meta"]["rt"]) == ["one two", "B para"]
+
+      # An editor that still shows A's held words: held again, B's stays.
+      html =
+        send_post(a, "doc[meta].rt", %{
+          "doc[meta].label" => "l0",
+          "doc[meta].rt" => "<p>one two AZ</p>",
+          "_bp_rt_seen" => ["doc[meta].rt|#{shown - 1}"]
+        })
+
+      assert words(stored(c)["meta"]["rt"]) == ["one two", "B para"]
+      assert html =~ "Someone else rewrote"
+
+      # The editor showed it: A's word lands on B's text.
+      a |> element("[phx-click=reload-remote-doc]") |> render_click()
+
+      assert_push_event(
+        a,
+        @event,
+        %{values: %{"doc[meta].rt" => %{seq: again, reload: true}}},
+        2_000
+      )
+
+      send_post(a, "doc[meta].rt", %{
+        "doc[meta].label" => "l0",
+        "doc[meta].rt" => "<p>one two Z</p><p>B para</p>",
+        "_bp_rt_seen" => ["doc[meta].rt|#{again}"]
+      })
+
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two Z", "B para"] end)
+    end
+
+    # #28349 r2 review, V1: an explicit Save skipped the check and wrote A's
+    # stale text over B's.
+    test "#{surface}: a Save of a stale rich text is held as an autosave is", c do
+      c = %{c | surface: @surface}
+      a = open(c)
+      b = open(c)
+
+      b_saves_rt(b, c, "<p>one two</p><p>B para</p>", ["one two", "B para"])
+      assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seq}}}, 2_000)
+
+      html =
+        a
+        |> element("#editor-form")
+        |> render_submit(%{
+          "doc" => %{"title" => "T0"},
+          "doc[meta].label" => "l0 A",
+          "doc[meta].rt" => "<p>one two A</p>",
+          "_bp_rt_seen" => ["doc[meta].rt|#{seq - 1}"]
+        })
+
+      assert eventually(fn -> stored(c)["meta"]["label"] == "l0 A" end)
+      assert words(stored(c)["meta"]["rt"]) == ["one two", "B para"]
+      assert words(form(a)["meta"]["rt"]) == ["one two A"]
+      assert html =~ "Someone else rewrote"
+    end
+  end
+
+  # B adds a paragraph; A's editor, still showing "one two", posts a word:
+  # held with the banner. The number B's change was sent with.
+  defp held_over_b(a, b, c) do
+    b_saves_rt(b, c, "<p>one two</p><p>B para</p>", ["one two", "B para"])
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seq}}}, 2_000)
+
+    html =
+      send_post(a, "doc[meta].rt", %{
+        "doc[meta].label" => "l0",
+        "doc[meta].rt" => "<p>one two A</p>",
+        "_bp_rt_seen" => ["doc[meta].rt|#{seq - 1}"]
+      })
+
+    assert html =~ "Someone else rewrote"
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{own: true}}}, 2_000)
+    seq
   end
 
   test "theirs is sent as the first paint draws it: markup typed as text stays text", c do

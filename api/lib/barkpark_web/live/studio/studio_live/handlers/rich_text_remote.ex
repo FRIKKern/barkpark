@@ -11,23 +11,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   So the server tells the page, and never remounts:
 
-    * `push/3`, from `Lifecycle.doc_updated/2`: each rich text inside an
-      object or a row whose drawn value changed, compared with the keys set
-      aside (`drawn/1`, so A's own post, which comes back with new keys, is
-      no change), goes out on `bp:rt-remote` with a number and its HTML: the
-      same `PortableText.to_html/1` the first paint draws. bp-rt-remote.js
-      puts it into the editor through the editor's own first-paint path,
-      only while the editor has no focus, no composition and no recent input.
-      Past `@html_cap` bytes no HTML is sent (`big: true`): the editor keeps
-      its text, and its next post is held as below.
+    * `push/3`, from `Lifecycle.doc_updated/2` and someone else's discard:
+      each rich text inside an object or a row whose drawn value changed,
+      compared with the keys set aside (`drawn/1`, so A's own post, which
+      comes back with new keys, is no change), goes out on `bp:rt-remote`
+      with a number and its HTML: the same `PortableText.to_html/1` the first
+      paint draws. A value past `@html_cap` bytes goes in an event of its
+      own. bp-rt-remote.js puts it into the editor through the editor's own
+      first-paint path once A is idle: no input for 800 ms (so the last keys
+      are posted) and no IME composition. A focused editor takes it too, and
+      keeps its caret in a block whose text did not change.
+    * `repaint/2`, from Reload and a restore (presses of A's own): every one
+      is sent its stored value, shown at once.
     * The page reports, per editor, the number of the last value it shows
-      (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post: a rich text
-      whose number is older than a change the server logged for it was
-      written over theirs. Unchanged from what the page was shown, theirs
-      stands; changed, nothing is written over theirs: `hold/2` keeps A's
-      text in the form with the conflict banner, and acknowledges it
-      (`own: true`), so A's next post saves A's over theirs ("type on to
-      save yours over theirs").
+      (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post or a Save: a
+      rich text whose number is older than a change the server logged for
+      it was written over theirs. Unchanged from what the page was shown,
+      theirs stands; changed, nothing is written over theirs: `hold/2` keeps
+      A's text in the form with the conflict banner, and acknowledges it
+      (`own: true`). Both changed it and A sees the banner: A's next post
+      saves A's over theirs ("type on to save yours over theirs"), as
+      TanStack's clash line says.
 
   A post with no `_bp_rt_seen` (a page loaded before this, or a change the
   server built) is read as before. Top-level rich text keeps its own path
@@ -42,8 +46,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   @event "bp:rt-remote"
 
-  # #28256's size for a value told to the page: past it the page is told
-  # only that the value changed.
+  # #28256's size: a value past it goes to the page in an event of its own.
   @html_cap 20_000
 
   # Changes kept per input name. A post reporting a number older than all of
@@ -55,23 +58,62 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   editor's save changed between `old_form` and `new_form`, and logs it.
   """
   def push(socket, old_form, new_form) do
-    case changes(socket.assigns[:editor_schema], old_form || %{}, new_form || %{}) do
-      [] ->
-        socket
+    changed = changes(socket.assigns[:editor_schema], old_form || %{}, new_form || %{})
+    tell(socket, changed, %{})
+  end
 
-      changed ->
-        {socket, values} =
-          Enum.reduce(changed, {socket, %{}}, fn {path, was, now}, {s, values} ->
-            {s, seq} = next_seq(s)
-            name = input_name(path)
-            log = s.assigns[:editor_rt_log] || %{}
-            entries = Enum.take([{seq, was, now} | Map.get(log, name, [])], @log_cap)
-            s = assign(s, editor_rt_log: Map.put(log, name, entries))
-            {s, Map.put(values, name, told(seq, html(now)))}
-          end)
+  @doc """
+  After the form is read again from the store on a press of this tab's own
+  (Reload, a restore): every rich text inside an object or a row is sent its
+  stored value with a new number, to show at once (`reload: true`), whatever
+  the editor holds. The press drops the held words, so the editor must not
+  keep showing them: its next post would write them over theirs with no
+  banner (#28349 r2 review, SV2). Each one that changed from `old_form` is
+  logged as a change, so a post from an editor that never showed it is held
+  as any other.
+  """
+  def repaint(socket, old_form) do
+    schema = socket.assigns[:editor_schema]
+    form = socket.assigns[:editor_form] || %{}
+    was = Map.new(changes(schema, old_form || %{}, form), fn {path, was, _} -> {path, was} end)
 
-        push_event(socket, @event, %{values: values})
-    end
+    all =
+      for {path, _, now} <- paths(schema, form, form, :all),
+          do: {path, Map.get(was, path, :unchanged), now}
+
+    tell(socket, all, %{reload: true})
+  end
+
+  defp tell(socket, [], _flags), do: socket
+
+  defp tell(socket, entries, flags) do
+    {socket, values} =
+      Enum.reduce(entries, {socket, %{}}, fn {path, was, now}, {s, values} ->
+        {s, seq} = next_seq(s)
+        name = input_name(path)
+        s = if was == :unchanged, do: s, else: log(s, name, {seq, was, now})
+        {s, Map.put(values, name, Map.merge(%{seq: seq, html: html(now)}, flags))}
+      end)
+
+    send_values(socket, values)
+  end
+
+  defp log(socket, name, entry) do
+    log = socket.assigns[:editor_rt_log] || %{}
+    entries = Enum.take([entry | Map.get(log, name, [])], @log_cap)
+    assign(socket, editor_rt_log: Map.put(log, name, entries))
+  end
+
+  # One event for the values up to `@html_cap` bytes; each larger one rides
+  # an event of its own, so one long text never holds up the others' event
+  # and the page takes it the same way.
+  defp send_values(socket, values) do
+    {big, small} = Enum.split_with(values, fn {_name, v} -> byte_size(v.html) > @html_cap end)
+
+    socket =
+      if small == [], do: socket, else: push_event(socket, @event, %{values: Map.new(small)})
+
+    Enum.reduce(big, socket, fn {name, v}, s -> push_event(s, @event, %{values: %{name => v}}) end)
   end
 
   @doc """
@@ -123,7 +165,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     {socket, values} =
       Enum.reduce(held, {socket, %{}}, fn {name, _path, posted}, {s, values} ->
         {s, seq} = next_seq(s)
-        {s, Map.put(values, name, Map.put(told(seq, capped(posted)), :own, true))}
+        {s, Map.put(values, name, %{seq: seq, html: posted, own: true})}
       end)
 
     socket
@@ -136,7 +178,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       save_status: "Updated by another user",
       editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ keys)
     )
-    |> push_event(@event, %{values: values})
+    |> send_values(values)
   end
 
   @doc """
@@ -148,26 +190,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   @doc "Each rich text path inside an object or a row whose drawn value changed."
-  def changes(%{fields: fields}, old_form, new_form) when is_list(fields) do
+  def changes(schema, old_form, new_form), do: paths(schema, old_form, new_form, :changed)
+
+  # Every rich text path inside an object or a row (`:all`), or each one whose
+  # drawn value differs between the two forms (`:changed`).
+  defp paths(%{fields: fields}, old_form, new_form, mode) when is_list(fields) do
     Enum.flat_map(fields, fn
       %{"name" => key} = field when is_binary(key) ->
-        walk(field, [key], Map.get(old_form, key), Map.get(new_form, key), false)
+        walk(field, [key], Map.get(old_form, key), Map.get(new_form, key), {false, mode})
 
       _ ->
         []
     end)
   end
 
-  def changes(_schema, _old, _new), do: []
+  defp paths(_schema, _old, _new, _mode), do: []
 
   # `inside?`: a top-level rich text is not this module's.
-  defp walk(%{"type" => "richText"}, path, old, new, true) do
-    if drawable?(old) and drawable?(new) and drawn(old) != drawn(new),
+  defp walk(%{"type" => "richText"}, path, old, new, {true, mode}) do
+    if drawable?(old) and drawable?(new) and (mode == :all or drawn(old) != drawn(new)),
       do: [{path, old, new}],
       else: []
   end
 
-  defp walk(%{"type" => "arrayOf", "of" => of}, path, old, new, _inside?)
+  defp walk(%{"type" => "arrayOf", "of" => of}, path, old, new, {_inside?, mode})
        when is_list(of) and is_list(new) do
     old = if is_list(old), do: old, else: []
 
@@ -180,23 +226,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
            %{} <- was,
            true <- Map.get(row, "_key") == Map.get(was, "_key"),
            %{"fields" => [_ | _] = fields} <- member(of, row) do
-        fields(fields, path ++ [i], was, row)
+        fields(fields, path ++ [i], was, row, mode)
       else
         _ -> []
       end
     end)
   end
 
-  defp walk(%{"fields" => [_ | _] = fields}, path, old, new, _inside?)
+  defp walk(%{"fields" => [_ | _] = fields}, path, old, new, {_inside?, mode})
        when is_map(old) and is_map(new),
-       do: fields(fields, path, old, new)
+       do: fields(fields, path, old, new, mode)
 
   defp walk(_field, _path, _old, _new, _inside?), do: []
 
-  defp fields(fields, path, old, new) do
+  defp fields(fields, path, old, new, mode) do
     Enum.flat_map(fields, fn
       %{"name" => sub} = field when is_binary(sub) ->
-        walk(field, path ++ [sub], Map.get(old, sub), Map.get(new, sub), true)
+        walk(field, path ++ [sub], Map.get(old, sub), Map.get(new, sub), {true, mode})
 
       _ ->
         []
@@ -266,12 +312,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   defp html(value) do
     if PortableText.value?(value), do: PortableText.to_html(value), else: ""
   end
-
-  defp told(seq, html) when byte_size(html) > @html_cap, do: %{seq: seq, big: true}
-  defp told(seq, html), do: %{seq: seq, html: html}
-
-  defp capped(html) when byte_size(html) > @html_cap, do: nil
-  defp capped(html), do: html
 
   defp list(value) when is_list(value), do: value
   defp list(_value), do: []

@@ -266,8 +266,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} ->
+        # As an autosave: a rich text in an object written over another
+        # editor's change is not written over it (#28349 r2 review, V1).
+        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
-        do_save(doc, not_codes, socket)
+        {:noreply, socket} = do_save(doc, not_codes, socket)
+        {:noreply, RichTextRemote.hold(socket, held)}
 
       _ ->
         {:noreply, socket}
@@ -311,9 +315,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
   def reload_remote_doc(socket) do
+    was = socket.assigns[:editor_form]
+
     socket =
       socket
       |> Shared.rebuild_panes()
+      |> RichTextRemote.repaint(was)
       |> assign(
         editor_dirty: false,
         doc_conflict: false,

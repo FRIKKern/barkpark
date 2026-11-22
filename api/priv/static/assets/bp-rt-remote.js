@@ -7,17 +7,23 @@
 // server (Handlers.RichTextRemote) pushes `bp:rt-remote`:
 //
 //   {values: {"doc[meta].rt": {seq, html}}}       theirs, to show
-//   {values: {"doc[meta].rt": {seq, big: true}}}  theirs, too big to send
-//   {values: {"doc[meta].rt": {seq, own: true, html?}}}
+//   {values: {"doc[meta].rt": {seq, html, reload: true}}}
+//                                                 the stored text after this
+//                                                 page's own Reload or restore:
+//                                                 shown at once
+//   {values: {"doc[meta].rt": {seq, own: true, html}}}
 //                                                 the server held this page's
 //                                                 post over theirs: its text is
 //                                                 now the base of the next one
 //
-// Theirs goes in only while the editor is free: no focus inside its wrapper,
-// no IME composition, and no input for IDLE_MS (longer than the hidden
-// input's 500 ms debounce, so the last keys have been posted). It goes in
-// through the editor's own first-paint path (`value` -> `_paint`), never as
-// raw HTML of its own. Until then it waits, and a blur or the idle timer
+// Theirs goes in once this page is idle in that editor: no IME composition
+// and no input for IDLE_MS (longer than the hidden input's 500 ms debounce,
+// so the last keys have been posted). Focus does not hold it back: a caret
+// that just sits there would hold theirs back for ever, and the next word
+// typed would be written over a text A never saw (#28349 r2 review, S7b). A
+// focused editor keeps its caret in a block whose text did not change. It
+// goes in through the editor's own first-paint path (`value` -> `_paint`),
+// never as raw HTML of its own. Until then it waits, and the idle timer
 // tries again.
 //
 // Each editor reports the number of the last value it shows, in a hidden
@@ -38,7 +44,7 @@
 
   // The newest number any push carried.
   let last = 0;
-  // name -> {seq, html}: theirs, not shown yet. html is null when too big.
+  // name -> {seq, html}: theirs, not shown yet.
   const waiting = new Map();
   // editor -> time of its last input.
   const typedAt = new WeakMap();
@@ -72,15 +78,68 @@
     for (const input of document.querySelectorAll("input[data-bp-rt-seen]")) mark(input.closest(WRAP));
   };
 
-  const busy = (w, editor) =>
-    w.contains(document.activeElement) ||
-    composing.has(editor) ||
-    Date.now() - (typedAt.get(editor) || 0) < IDLE_MS;
+  const busy = (editor) =>
+    composing.has(editor) || Date.now() - (typedAt.get(editor) || 0) < IDLE_MS;
+
+  // The caret as its top-level block's index, text and offset in that text;
+  // a custom block also by its key.
+  const caretIn = (body) => {
+    const sel = window.getSelection();
+    if (!body || !sel || !sel.rangeCount || !body.contains(sel.anchorNode)) return null;
+    const r = sel.getRangeAt(0);
+    let block = r.startContainer;
+    while (block && block.parentNode !== body) block = block.parentNode;
+    if (!block) return null;
+    const before = document.createRange();
+    before.selectNodeContents(block);
+    before.setEnd(r.startContainer, r.startOffset);
+    return {
+      i: [...body.children].indexOf(block),
+      key: block.getAttribute && block.getAttribute("data-pt-block"),
+      text: block.textContent,
+      at: before.toString().length,
+    };
+  };
+
+  // The block of the same key, else of the same text nearest where it was
+  // (a paragraph theirs added above moves it down): the caret goes back to
+  // its offset. Its text changed: the caret goes to the end of the block now
+  // at its place.
+  const caretBack = (body, c) => {
+    const blocks = [...body.children];
+    if (!blocks.length) return;
+    let block = c.key ? blocks.find((b) => b.getAttribute("data-pt-block") === c.key) : null;
+    for (let d = 0; !block && d < blocks.length; d++) {
+      block = [blocks[c.i + d], blocks[c.i - d]].find((b) => b && b.textContent === c.text);
+    }
+    let at = c.at;
+    if (!block || block.textContent !== c.text) {
+      block = blocks[Math.min(Math.max(c.i, 0), blocks.length - 1)];
+      at = block.textContent.length;
+    }
+    const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let node = block, off = 0, t;
+    while ((t = walk.nextNode())) {
+      node = t;
+      off = Math.min(at, t.length);
+      if (at <= t.length) break;
+      at -= t.length;
+    }
+    const r = document.createRange();
+    r.setStart(node, off);
+    r.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  };
 
   // Through the editor's first-paint path, and into the hidden input the
   // form posts, so a later post of another field carries what is shown.
   const show = (w, editor, html) => {
+    const body = editor.querySelector(".bp-rte-body");
+    const caret = caretIn(body);
     editor.value = html;
+    if (caret && body) caretBack(body, caret);
     const id = editor.dataset.bridgeTarget;
     const input = id ? document.getElementById(id) : null;
     if (input) input.value = editor.value;
@@ -88,7 +147,7 @@
 
   const tryShow = (name) => {
     const theirs = waiting.get(name);
-    if (!theirs || theirs.html == null) return;
+    if (!theirs) return;
     const w = wrapOf(name);
     const editor = editorIn(w);
     // Not on the page: a later draw shows the server's value.
@@ -96,7 +155,7 @@
       waiting.delete(name);
       return;
     }
-    if (busy(w, editor)) return;
+    if (!theirs.reload && busy(editor)) return;
     show(w, editor, theirs.html);
     waiting.delete(name);
     mark(w);
@@ -105,7 +164,7 @@
   const tick = () => {
     timer = null;
     for (const name of [...waiting.keys()]) tryShow(name);
-    if ([...waiting.values()].some((t) => t.html != null)) timer = setTimeout(tick, IDLE_MS);
+    if (waiting.size) timer = setTimeout(tick, IDLE_MS);
   };
 
   const later = () => {
@@ -124,9 +183,10 @@
         const theirs = waiting.get(name);
         if (theirs && theirs.seq < v.seq) waiting.delete(name);
         const editor = editorIn(w);
-        if (editor && typeof v.html === "string" && !busy(w, editor)) show(w, editor, v.html);
-      } else {
-        waiting.set(name, {seq: v.seq, html: typeof v.html === "string" ? v.html : null});
+        if (editor && typeof v.html === "string" && !busy(editor)) show(w, editor, v.html);
+      } else if (typeof v.html === "string") {
+        const theirs = waiting.get(name);
+        if (!theirs || theirs.seq < v.seq) waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload});
         tryShow(name);
       }
       mark(w);
