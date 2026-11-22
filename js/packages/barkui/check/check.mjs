@@ -26,8 +26,8 @@ function variableNames() {
   return [...new Set([...text.matchAll(/(--(?:ui|bark)-[\w-]+)\s*:/g)].map((m) => m[1]))]
 }
 
-// `surfaces: false` skips measuring the four unproved surfaces, `motion: false` the reading with motion
-// allowed, and `states: false` the real states held to their pins (the selftest skips each, except in the cases
+// `surfaces: false` skips measuring the four unproved surfaces (a list of them measures base and those),
+// `motion: false` the reading with motion allowed, and `states: false` the real states held to their pins (the selftest skips each, except in the cases
 // that plant there);
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
 // (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
