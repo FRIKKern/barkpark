@@ -15,6 +15,7 @@
 // The states are driven in one skin, light, base surface, 1440px.
 import { waitsFor } from '../build/sheet-waits.mjs'
 import { readView, verdict } from './reading.mjs'
+import { cover } from './coverage.mjs'
 import { unnamedNow } from './layers.mjs'
 
 // Values resolved against the box's own size: a state may change them, but a longer label changes them too, so
@@ -138,6 +139,26 @@ function differ(real, pin) {
     }
   }
   return out
+}
+
+/** What the check reads on `page` for the part named `part`, by kind: each state drive, each pinned control and each
+    rule that applies at rest; and how many drives and pinned controls. A control's kind is the rules that apply to it at
+    rest (its variant, its size, its icon), so a drive is "<rule> <mode> on a <element> with <rules>". */
+export async function stageKinds(page, part, entries) {
+  const { pins, pairs } = await page.barkCheck(plan, [part, entries])
+  const { hits } = await page.barkCheck(cover, [part, entries])
+  const at = (el) => hits.filter((h) => h % 1e5 === el).map((h) => entries[Math.floor(h / 1e5)].label).sort().join(' and ')
+  return {
+    drives: pairs.reduce((n, p) => n + p.states.length, 0),
+    pins: pins.length,
+    kinds: [
+      ...new Set([
+        ...pairs.flatMap((p) => p.states.map((s) => `drive: ${entries[p.rule].label} ${MODES[s]} on a ${p.kind} with ${at(p.el)}`)),
+        ...pins.map((p) => `pin: ${p.states} on a control with ${at(p.el)}`),
+        ...hits.map((h) => `at rest: ${entries[Math.floor(h / 1e5)].label}`),
+      ]),
+    ].sort(),
+  }
 }
 
 /** Every way a real state differs from what the lights read, in plain words; `pairs` gets the pairs it drove. */

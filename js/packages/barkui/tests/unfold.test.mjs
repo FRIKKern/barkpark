@@ -57,6 +57,8 @@ describe('an unfolded case', () => {
     expect([...SURFACES].filter((s) => !read.has(s))).toEqual([])
     const lit = new Set(STATE_CASES.flatMap((c) => c.only))
     expect(LIGHT_NAMES.filter((l) => !lit.has(l))).toEqual([])
+    // The run that names unread rules goes through the same five lights the one case did, on its smaller stage.
+    expect([...STATE_CASES.find((c) => LIGHT_NAMES.every((l) => c.only?.includes(l))).only].sort()).toEqual([...LIGHT_NAMES].sort())
     expect(() => surfacesOf({ surfaces: ['raised', 'floor'] })).toThrow(/no such surface: floor/)
   })
 })
