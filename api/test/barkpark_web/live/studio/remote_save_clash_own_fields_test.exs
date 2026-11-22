@@ -194,6 +194,67 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
       refute has_element?(a, @banner)
     end
 
+    # task-881f16e32fffbe9a: words typed after text B cleared have nothing
+    # left to sit next to (TanStack's merge3 gives null): a clash, not A's
+    # words alone, kept quietly and saved over B's clear.
+    test "#{surface}: B clears a field A holds unsaved words in: a conflict, B's clear stored",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      unsaved!(a, %{"excerpt" => "First words, mine"})
+
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => ""})
+
+      assert eventually(fn -> assigns(a).doc_conflict == true end)
+      assert assigns(a).editor_form["excerpt"] == "First words, mine"
+      assert has_element?(a, @banner)
+      assert stored(c).content["excerpt"] in [nil, ""]
+    end
+
+    # TanStack's patch still places A's words: no false banner.
+    test "#{surface}: B deletes the sentence before A's unsaved words: they merge, no conflict",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => "One. Two three. Four five."})
+
+      assert eventually(fn ->
+               assigns(a).editor_form["excerpt"] == "One. Two three. Four five."
+             end)
+
+      unsaved!(a, %{"excerpt" => "One. Two three. Yes four five."})
+
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => "One. Four five."})
+
+      assert eventually(fn -> assigns(a).editor_form["excerpt"] == "One. Yes four five." end)
+      assert assigns(a).doc_conflict == false
+      refute has_element?(a, @banner)
+    end
+
+    # The clash check is not run past its bounds (TanStack's diff stops at
+    # a second): A's page answers at once, with the banner.
+    test "#{surface}: a long held rewrite under B's save: the banner, at once", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      body = String.duplicate("alpha beta gamma delta. ", 1_900)
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => body})
+      assert eventually(fn -> assigns(a).editor_form["excerpt"] == body end)
+      mid = div(byte_size(body), 2)
+
+      unsaved!(a, %{
+        "excerpt" =>
+          binary_part(body, 0, mid - 10_000) <>
+            String.duplicate("Q", 20_000) <> binary_part(body, mid + 10_000, mid - 10_000)
+      })
+
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => "B " <> body})
+      started = System.monotonic_time(:millisecond)
+
+      assert eventually(fn -> assigns(a).doc_conflict == true end)
+      assert System.monotonic_time(:millisecond) - started < 500
+      assert has_element?(a, @banner)
+    end
+
     test "#{surface}: A kept typing through the merge: its next save keeps B's words", c do
       a = open(c, @surface)
       b = open(c, @surface)

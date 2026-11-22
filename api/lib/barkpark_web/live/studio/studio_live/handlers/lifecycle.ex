@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `clash` (barkpark-studio edit-bases.ts, edits.ts) read it
   # (task-65543203e7b71c80): a field whose stored value did not move from
   # its base stays ours; a text field both changed merges (`TextRebase.
-  # merge3_both/3`, TanStack's `merge3`), and only a merge that cannot keep
+  # merge3_clash/3`, TanStack's `merge3`), and only a merge that cannot keep
   # both changes clashes; any other value stays ours. A save that rewrote
   # none of them is taken in quietly. A text field's base is the stored
   # value its words were typed on (`UnsavedBases`); with none known it
@@ -242,8 +242,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `merge3`, from the base its words were typed on (`{:ok, base}`): theirs
   # did not move from the base, ours stands (`:ours`); ours did not (or is
   # theirs), theirs stands (`:took`). A string both changed: free text
-  # merges (`TextRebase.merge3_both/3`, the splice merge a post gets), and a
-  # merge that cannot keep both is a clash; any other string (a choice, a
+  # merges (`TextRebase.merge3_clash/3`, the splice merge a post gets, where
+  # TanStack's patch places mine too), and a merge that cannot keep both is
+  # a clash; any other string (a choice, a
   # date) cannot keep both, so it clashes. A list or an object both changed
   # clashes too: TanStack's `mergeList3` keeps theirs only where it can place
   # mine, and an unplaced one kept ours unseen. Any other value (a number, a
@@ -276,7 +277,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:took, theirs}
 
       strings? and RemoteValues.free_text?(schema, key) ->
-        case Barkpark.Content.TextRebase.merge3_both(base, mine, theirs) do
+        case Barkpark.Content.TextRebase.merge3_clash(base, mine, theirs) do
           nil -> :clash
           merged -> {:took, merged}
         end
