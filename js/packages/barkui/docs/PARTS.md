@@ -290,8 +290,8 @@ where each may stand and what writes it:
   menu, on the box.
 - `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
 
-Values are not read, except transition's and the names anchor-name gives. Apart from the list, one more entry has
-its own reason: UI SDK switches motion off on a box while it measures where to put it, and `none` takes motion away
+Values are not read, except transition's, the names anchor-name gives, and the scroll lock's (below). Apart from
+the list, one more entry has its own reason: UI SDK switches motion off on a box while it measures where to put it, and `none` takes motion away
 and adds no look. UI SDK writes it when it first places a select or menu box and puts the old value back in the same
 task, so only a reader from the first frame sees it:
 
@@ -310,15 +310,26 @@ since the browser does not. On the stage with no script, any `style` attribute f
 Every element that holds a stage, up to and including the root element, is read the same way from the first frame,
 since a stage inherits from it. Nothing may stand there, with one closed list apart, in the same file, with its own
 reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It writes the lock on the
-root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar that takes room:
+root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar that takes room. The list
+is what UI SDK writes in the browser the check runs (where `scrollbar-gutter` is missing it writes `padding-right`
+instead, which is not on the list):
 
-- `overflow-x`, `overflow-y`, `scroll-behavior`, `scrollbar-gutter`, `--scrollbar-width`: only on the root element
-  or body, while a dialog box is open. UI SDK dialog, on the root element.
+- `overflow-x`, `overflow-y`: only as `hidden`, only on the root element or body, while a dialog box is open. UI SDK
+  dialog, on the root element.
+- `scroll-behavior`: only as `auto`, only on the root element or body, while a dialog box is open. UI SDK dialog, on
+  the root element.
+- `scrollbar-gutter`: only as `stable`, only on the root element or body, while a dialog box is open. UI SDK dialog,
+  on the root element.
+- `--scrollbar-width`: only as a `px` length, only on the root element or body, while a dialog box is open. UI SDK
+  dialog, on the root element.
 
-A dialog box is a box that is a `dialog`, or carries the role `dialog` or `alertdialog`, or holds one. Each write is
-judged by whether one is open when the browser hands the write over, and the writes waiting are taken at each
-`beforetoggle`, before a box opens or closes, so a lock written just before a dialog opens, or left after it closes,
-fails by name. Any other property on the root element or
+UI SDK writes the lock a frame after the box enters the top layer, and takes it away before the box leaves it, in
+the same task; with two dialogs open, the lock stays until the last one closes. A dialog box is a box that is a
+`dialog`, or carries the role `dialog` or `alertdialog`, or holds one. Each write is judged by whether one is open
+when the browser hands the write over, and the writes waiting are taken at each `beforetoggle`, before a box opens or
+closes, so a lock written before a dialog opens, or left after the last one closes, fails by name. `--scrollbar-width`
+reaches every stage, since a custom property inherits; no shipped sheet reads it, and part.css may not (it reads
+only `--ui-*` and `--bark-*`). Another value on a listed property, any other property on the root element or
 body, the lock while no dialog box is open, and any property on another element that holds a stage fail by name
 ("… holds a stage, which inherits from it: nothing may stand there"). The one limit: a value only inside a closed
 shadow root, or one an element held only between arriving in a stage and leaving it within one task, changed

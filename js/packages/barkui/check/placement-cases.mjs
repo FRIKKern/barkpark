@@ -10,7 +10,7 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { noscript } from './proofs.mjs'
-import { NO_DIALOG, NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_LOCK, NOT_PLACEMENT, NOT_VALUE, ON_ANCESTOR, TRANSITION } from './placement.mjs'
+import { LOCK_VALUE, NO_DIALOG, NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_LOCK, NOT_PLACEMENT, NOT_VALUE, ON_ANCESTOR, SCROLL_LOCK, TRANSITION } from './placement.mjs'
 import { all, edit, each, inDemo, lights } from './plants.mjs'
 
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
@@ -55,6 +55,25 @@ const ABOVE = [
   "document.body.setAttribute(S, 'overflow: hidden')",
   "root.parentElement.setAttribute(S, 'margin-top: 0px')",
 ].join('\n')
+
+// The lock's order, in one task as the page loads: two dialog boxes open; the lock on the root element; one closes and
+// the lock stays and grows while the other is open, then goes; body is given two values the lock never writes and
+// then the lock, left there as the last box closes.
+const TWO = `<div id="button-dlg-a" popover="manual" role="dialog">First</div>
+<div id="button-dlg-b" popover="manual" role="dialog">Second</div>`
+const ORDER = [
+  S,
+  "const a = root.querySelector('#button-dlg-a'), b = root.querySelector('#button-dlg-b'), h = document.documentElement, y = document.body",
+  'a.showPopover(); b.showPopover()',
+  "h.setAttribute(S, 'overflow: hidden; scroll-behavior: auto')",
+  'b.hidePopover()',
+  "h[S]['set' + 'Property']('scrollbar-gutter', 'stable')",
+  "y.setAttribute(S, 'scroll-behavior: smooth; --scrollbar-width: 1em')",
+  "y.setAttribute(S, 'overflow: hidden')",
+  'h.removeAttribute(S)',
+  'a.hidePopover()',
+].join('\n')
+const lock = (p) => SCROLL_LOCK.find((e) => e.property === p)
 
 // Each written as the page loads; the last is written while its box is open and taken away as it closes, in one task,
 // so no look ever finds it.
@@ -160,6 +179,17 @@ export const PLACEMENT_CASES = [
       'color on the root element fails by name': has(NOT_LOCK('html', 'color')),
       'the scroll lock on body with no dialog open fails by name': has(NO_DIALOG('body', 'overflow-y')),
       'margin-top on the wrapper between body and the stage fails by name': has(ON_ANCESTOR('section#part-button', 'margin-top')),
+    }),
+  },
+  {
+    name: 'placement: the scroll lock stays while one of two dialog boxes is still open, and fails by name when left after the last one closes or given a value it never writes',
+    only: ['pressed'],
+    plant: all((d) => row(d, TWO), (d) => inDemo(d, ORDER)),
+    expect: each({
+      'the lock on the root element, kept and grown while one of two boxes is open, passes': (p) => /body was given/.test(said(p)) && !/html was given/.test(said(p)),
+      'the lock left on body after the last box closed fails by name': has(NO_DIALOG('body', 'overflow-x')),
+      'scroll-behavior: smooth fails by name, with its value': has(LOCK_VALUE('body', 'scroll-behavior', 'smooth', lock('scroll-behavior'))),
+      '--scrollbar-width in em fails by name, with its value': has(LOCK_VALUE('body', '--scrollbar-width', '1em', lock('--scrollbar-width'))),
     }),
   },
   {

@@ -10,11 +10,11 @@
 // same list, and a unit row is red when the two differ.
 //
 // Every element that holds a stage, up to the root element, is read the same way, since a stage inherits from it:
-// nothing may stand there but the second list, SCROLL_LOCK, with its own reason, on the root element or body only
-// and only while a dialog box is open.
+// nothing may stand there but the second list, SCROLL_LOCK, with its own reason and its values, on the root element
+// or body only and only while a dialog box is open.
 //
-// What is read: the declarations the browser applies, by property name (values are not read, except transition's
-// and the names anchor-name gives), as the browser parses the attribute's text (a shorthand is judged by its
+// What is read: the declarations the browser applies, by property name (values are not read, except transition's,
+// the names anchor-name gives, and the scroll lock's), as the browser parses the attribute's text (a shorthand is judged by its
 // longhands, so `inset` is top, right, bottom and left, and `all` is its own name). Text the browser drops is not a
 // declaration. When it is read: every value the attribute holds, from the page's first frame (placementWorld,
 // below, in the census's world), so a property written while a box is open and taken away at close fails by name.
@@ -66,12 +66,21 @@ export const TRANSITION = {
 export const ALLOWED = [...PLACEMENT, TRANSITION]
 
 /** The second list, for the root element and body, which hold every stage, with its own reason: UI SDK stops the page
-    scrolling behind an open dialog by writing these on the root element (its scroller); scrollbar-gutter and
-    --scrollbar-width only when the page has a scrollbar that takes room. Allowed there only while a dialog box is
-    open. Any other element that holds a stage may carry nothing: a stage inherits from it. */
+    scrolling behind an open dialog by writing these on the root element (its scroller), each with the one value, or
+    the one kind of value, it writes; scrollbar-gutter and --scrollbar-width only when the page has a scrollbar that
+    takes room. It is what UI SDK writes in the browser the check runs: where scrollbar-gutter is missing it writes
+    padding-right instead, which is not here. UI SDK writes the lock a frame after the box enters the top layer and
+    takes it away before the box leaves, so it is allowed only while a dialog box is open. Any other element that
+    holds a stage may carry nothing: a stage inherits from it. */
 export const ROOT_REASON = 'UI SDK stops the page scrolling behind an open dialog; that is behaviour, not look'
 const LOCK = 'UI SDK dialog, on the root element (foundation/popups/modal.js)'
-export const SCROLL_LOCK = ['overflow-x', 'overflow-y', 'scroll-behavior', 'scrollbar-gutter', '--scrollbar-width'].map((property) => ({ property, on: 'root', writer: LOCK }))
+export const SCROLL_LOCK = [
+  { property: 'overflow-x', on: 'root', value: 'hidden', writer: LOCK },
+  { property: 'overflow-y', on: 'root', value: 'hidden', writer: LOCK },
+  { property: 'scroll-behavior', on: 'root', value: 'auto', writer: LOCK },
+  { property: 'scrollbar-gutter', on: 'root', value: 'stable', writer: LOCK },
+  { property: '--scrollbar-width', on: 'root', length: 'px', writer: LOCK },
+]
 
 /** The fail for a property that is not placement, on any element in a stage. */
 export const NOT_PLACEMENT = (at, prop) => `${at} was given ${prop} in a style attribute, which is not placement: the look belongs in part.css`
@@ -83,6 +92,8 @@ export const NOT_ANCHORED = (at, name) => `${at} was given anchor-name ${name} i
 export const NOT_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and ${entry.property} is allowed there only as "${entry.property}: ${entry.value}"`
 /** The fail for a property off the scroll lock on the root element or body. */
 export const NOT_LOCK = (at, prop) => `${at} was given ${prop} in a style attribute, and it holds every stage: only the scroll lock may stand there, while a dialog is open`
+/** The fail for a scroll lock property with a value the lock does not write. */
+export const LOCK_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and the scroll lock writes ${prop} there only as ${entry.length ? `a ${entry.length} length` : `"${entry.value}"`}`
 /** The fail for the scroll lock on the root element or body with no dialog open. */
 export const NO_DIALOG = (at, prop) => `${at} was given ${prop} in a style attribute while no dialog was open: the scroll lock stands there only while a dialog is open`
 /** The fail for any property on another element that holds a stage. */
@@ -100,6 +111,8 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
   const entries = new Map()
   for (const e of lists.allowed) for (const name of [e.property, ...(e.longhands ?? [])]) entries.set(name, e)
   const lock = new Map(lists.root.map((e) => [e.property, e]))
+  // A scroll lock value: the one value its entry gives, or a plain length in its unit.
+  const fits = (e, value) => (e.length ? new RegExp(`^\\d+(\\.\\d+)?${e.length}$`).test(value.trim()) : value.trim() === e.value)
   const pad = document.createElement('div')
   const parse = (text) => {
     pad.setAttribute('style', text)
@@ -198,6 +211,7 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
           if (at.part === undefined) {
             if (!at.root) fail(say.ON_ANCESTOR(who, prop))
             else if (!lock.has(prop)) fail(say.NOT_LOCK(who, prop))
+            else if (!fits(lock.get(prop), value)) fail(say.LOCK_VALUE(who, prop, value, lock.get(prop)))
             else if (!at.dialog) fail(say.NO_DIALOG(who, prop))
             continue
           }
@@ -216,7 +230,7 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
 /** placementWorld as code for the census's world, the list and the fails' wording in it: a function of
     (script, owner, boxes, describe). `source` is probes.mjs's. */
 export function placementSource(source) {
-  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT, NOT_LOCK, NO_DIALOG, ON_ANCESTOR }
+  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT, NOT_LOCK, LOCK_VALUE, NO_DIALOG, ON_ANCESTOR }
   const said = `{ ${Object.entries(say).map(([k, f]) => `${k}: ${source(f)}`).join(', ')} }`
   return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify({ allowed: ALLOWED, root: SCROLL_LOCK })}, script, ${said}, owner, boxes, describe))`
 }
