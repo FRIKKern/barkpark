@@ -94,7 +94,7 @@ defmodule BarkparkWeb.Studio.DeskCleanRemoteSaveTest do
     refute has_element?(a, ~s(#{@pane}[data-desk-save="#{@words}"]))
   end
 
-  test "control: over unsaved edits it is a conflict and keeps its words", c do
+  test "control: over unsaved edits it is a conflict and says so", c do
     a = open(c)
     b = open(c)
 
@@ -117,6 +117,10 @@ defmodule BarkparkWeb.Studio.DeskCleanRemoteSaveTest do
     b_saves(b)
 
     assert eventually(fn -> assigns(a).doc_conflict == true end)
-    assert text(a, "#{@pane} .dk-edit-footer .dk-footer-status") =~ @words
+    # TanStack's clash words, naming the field B rewrote (task-c0374ce0961cc1bf).
+    assert text(a, "#{@pane} .dk-edit-footer .dk-footer-status") =~
+             "Someone else rewrote Title meanwhile."
+
+    assert has_element?(a, ~s(#{@pane}[data-desk-save="#{@words}"][data-desk-conflict]))
   end
 end
