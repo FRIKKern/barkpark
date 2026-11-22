@@ -15,10 +15,9 @@
 // document itself, and nothing that holds it hosts a shadow root of any mode (read at every look, the root node here,
 // the shadow roots from the browser's own tree by layers.mjs), or either fails by name.
 //
-// What is read: the declarations the browser applies, by property name (values are not read, except transition's,
+// What is read: the declarations the browser applies, by property name (of the values, the check reads transition's,
 // the names anchor-name gives, and the scroll lock's), as the browser parses the attribute's text (a shorthand is judged by its
-// longhands, so `inset` is top, right, bottom and left, and `all` is its own name). Text the browser drops is not a
-// declaration. When it is read: every value the attribute holds, from the page's first frame (placementWorld,
+// longhands, so `inset` is top, right, bottom and left, and `all` is its own name). When it is read: every value the attribute holds, from the page's first frame (placementWorld,
 // below, in the census's world), so a property written while a box is open and taken away at close fails by name.
 // On a stage with no script, any style attribute fails: nothing there can write one.
 
