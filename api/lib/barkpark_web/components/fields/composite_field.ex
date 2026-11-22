@@ -56,6 +56,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # input is then `id="cta.kind"`, as Sanity's Studio names it. nil keeps
   # the `f-…` ids.
   attr :id_base, :string, default: nil
+  # The open document's form generation (`Shared.next_form_gen/2`): part of
+  # a rich text subfield's wrapper id, so a value the server replaced
+  # remounts its editor (task-47be2cdf59d0acd5).
+  attr :form_gen, :integer, default: 0
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -77,6 +81,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:on_reorder, "array_op")
       |> Map.put_new(:target, nil)
       |> Map.put_new(:id_base, nil)
+      |> Map.put_new(:form_gen, 0)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -92,7 +97,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
-            on_reorder={@on_reorder} target={@target} id_base={@id_base}
+            on_reorder={@on_reorder} target={@target} id_base={@id_base} form_gen={@form_gen}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -102,7 +107,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
-            on_reorder={@on_reorder} target={@target} id_base={@id_base}
+            on_reorder={@on_reorder} target={@target} id_base={@id_base} form_gen={@form_gen}
           />
         </details>
       <% true -> %>
@@ -113,7 +118,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
-            on_reorder={@on_reorder} target={@target} id_base={@id_base}
+            on_reorder={@on_reorder} target={@target} id_base={@id_base} form_gen={@form_gen}
           />
         </fieldset>
     <% end %>
@@ -167,6 +172,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :on_reorder, :string, default: "array_op"
   attr :target, :any, default: nil
   attr :id_base, :string, default: nil
+  attr :form_gen, :integer, default: 0
 
   defp composite_body(assigns) do
     ~H"""
@@ -242,7 +248,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         input_id: input_id,
         # Keyed by the item's `_key` too: a moved item or another document
         # remounts the ignored editor instead of keeping the old text.
-        wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
+        # And by the form generation, as a top-level editor's
+        # (`FieldInputs.doc_wrap_id/4`): another editor's save of this text
+        # remounts it with theirs; left out while it is 0.
+        wrap_id: gen_id("bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}", assigns[:form_gen]),
         html:
           if(value in [nil, "", []], do: "", else: Barkpark.Content.PortableText.to_html(value)),
         label: title_for(sub),
@@ -278,6 +287,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # Its toolbar offers the subfield's declared styles, lists and decorators;
   # with no dialog host it adds no annotation or inline object, and keeps the
   # stored ones.
+  defp gen_id(id, gen) when is_integer(gen) and gen > 0, do: "#{id}-g#{gen}"
+  defp gen_id(id, _gen), do: id
+
   defp rich_text_subfield_input(assigns) do
     ~H"""
     <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-pt-subfield={@input_name}>
@@ -316,7 +328,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       root: Map.get(assigns, :root),
       on_reorder: Map.get(assigns, :on_reorder) || "array_op",
       target: Map.get(assigns, :target),
-      id_base: child_id_base(assigns, sub.name)
+      id_base: child_id_base(assigns, sub.name),
+      form_gen: Map.get(assigns, :form_gen, 0)
     }
 
     composite_field(sub_assigns)
