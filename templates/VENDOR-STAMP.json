@@ -11,17 +11,17 @@
       "version": "1.0.0-preview.3",
       "source_digest": "sha256:fb042768e3bfa92e09063fdb9fb1b77589a48c18266cc3f70b4afd0e5a1998d0",
       "tarball_digest": "sha256:52ebfbbb67df598e0d9b5fbb003f5c5e64be9113b4404e078c327456855ed7f6",
-      "cut_at": "2026-11-21",
-      "cut_from_commit": "d2a2c666944c072d8eda72ece465261cf201c7e4"
+      "cut_at": "2026-11-22",
+      "cut_from_commit": "bc027d646a4c6a95a73cbf1f5ea71dd23f5389b6"
     },
     "@barkpark/react": {
       "source": "js/packages/react",
       "tarball": "barkpark-react.tgz",
       "version": "1.0.0-preview.1",
-      "source_digest": "sha256:cbd7355606331011a0190eabdf081fecce01c88b3a4ff4e7b6ce0534287ae6c9",
-      "tarball_digest": "sha256:246efb9c0a0c6ee11dd4d9f4ccff60188968fb999395e32dca69b2d91d9c34d0",
-      "cut_at": "2026-11-21",
-      "cut_from_commit": "d2a2c666944c072d8eda72ece465261cf201c7e4"
+      "source_digest": "sha256:bb202c3ce6b741b7e3ee7db3070b2f07e46f2a5f8ce13a358ee6202364781df8",
+      "tarball_digest": "sha256:93f9204b0d1fd92ad23a95bac1fda54955ecff43b95d1e82eb91485132cece90",
+      "cut_at": "2026-11-22",
+      "cut_from_commit": "bc027d646a4c6a95a73cbf1f5ea71dd23f5389b6"
     }
   }
 }
