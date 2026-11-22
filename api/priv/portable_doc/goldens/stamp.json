@@ -186,6 +186,6 @@
     "test/support/fixtures/portable-doc-limits.json"
   ],
   "inputs_sha256": "0648d300e378ecc17b34ddab73b0d52288793f4496e265688d12df3c17dcac07",
-  "render_version": "5b21a131bc7a5b31bd7407f3a8fb429dd387b47b0950d007c9fc195bc8342a62",
+  "render_version": "0589af33eee90ab62e7e59095da700b058aa9b911ebbbc31c995c7833e1a1af8",
   "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
 }

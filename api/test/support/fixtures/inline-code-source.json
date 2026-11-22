@@ -1,5 +1,5 @@
 {
-  "_comment": "THE INLINE `code` NODE source contract, as ONE file read by every engine that renders an inline code chip (api/test/barkpark/portable_doc/render/inline_code_source_parity_test.exs, js/packages/react/tests/inline-code-source.parity.test.ts, internal/pdrender/inline_code_source_parity_test.go). Sibling of code-source-aliases.json, which governs the BLOCK-level `code` node; this file governs the INLINE leaf and the two contracts are deliberately different. Law: the chip body is `value` when that is a NON-EMPTY string, else the flattened plain text of `children`. Precedence is FIRST NON-EMPTY, never first-non-blank: a `value` of \" \" WINS and keeps its space (an inline chip is a leaf whose authored value is verbatim). Flattening a child: a string/finite number is itself, a map is `value` || legacy `text` || (recursively) its own `children`, a nested array recurses; anything else contributes \"\". A non-array `children` contributes \"\". Hand-authored; regenerate nothing.",
+  "_comment": "THE INLINE `code` NODE source contract, as ONE file read by every engine that renders an inline code chip (api/test/barkpark/portable_doc/render/inline_code_source_parity_test.exs, js/packages/react/tests/inline-code-source.parity.test.ts, internal/pdrender/inline_code_source_parity_test.go). Sibling of code-source-aliases.json, which governs the BLOCK-level `code` node; this file governs the INLINE leaf and the two contracts are deliberately different. Law: the chip body is `value` when that is a NON-EMPTY string, else the flattened plain text of `children`. Precedence is FIRST NON-EMPTY, never first-non-blank: a `value` of \" \" WINS and keeps its space (an inline chip is a leaf whose authored value is verbatim). Flattening a child: a string/finite number is itself, a map is `value` || legacy `text` || (recursively) its own `children`, a nested array recurses; anything else contributes \"\". A non-array `children` contributes \"\". The React leg also holds toPlainText (js/packages/react/src/toPlainText.ts) to it: a paragraph whose content is the chip reads as `source`. Hand-authored; regenerate nothing.",
   "cases": [
     {
       "name": "value-only (the canonical shape every first-party producer writes)",
@@ -93,6 +93,21 @@
       "name": "a non-array `children` contributes nothing",
       "node": { "type": "code", "children": { "type": "text", "value": "not_an_array()" } },
       "source": ""
+    },
+    {
+      "name": "a child leaf with a value AND children: the value wins, the leaf's children are dropped",
+      "node": { "type": "code", "children": [{ "type": "text", "value": "kappa()", "children": [{ "type": "text", "value": "never_kappa()" }] }] },
+      "source": "kappa()"
+    },
+    {
+      "name": "a child leaf with an EMPTY value falls through to its legacy `text`",
+      "node": { "type": "code", "children": [{ "type": "text", "value": "", "text": "lambda()" }] },
+      "source": "lambda()"
+    },
+    {
+      "name": "a child leaf whose value is a whole number reads as its digits",
+      "node": { "type": "code", "children": [{ "type": "text", "value": 42 }] },
+      "source": "42"
     }
   ]
 }
