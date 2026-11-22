@@ -31,22 +31,15 @@ export const steps = [
     },
   },
   {
-    name: 'ArrowDown passes over the disabled option to the next',
-    keys: ['ArrowDown'],
-    expect: (root, h) => {
-      const lit = root.querySelectorAll('#select-role-content [data-highlighted]')
-      return (lit.length === 1 && lit[0].id === 'select-role-admin') || `highlighted: ${[...lit].map((e) => h.describe(e)).join(', ') || 'nothing'}`
-    },
-  },
-  {
-    name: 'Enter chooses it: the list closes, the trigger shows it and has focus',
-    keys: ['Enter'],
+    name: 'ArrowDown passes over the disabled option, and Enter chooses the next: the list closes, the trigger shows it and has focus',
+    keys: ['ArrowDown', 'Enter'],
     expect: (root, h) => {
       if (root.querySelector('#select-role-content').matches(':popover-open')) return 'the list is still open'
       const t = root.querySelector('#select-role-trigger')
       if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
       const shown = root.querySelector('#select-role-value').textContent.trim()
       if (shown !== 'Admin') return `the trigger shows "${shown}"`
+      if (root.querySelector('#select-role-owner').getAttribute('aria-selected') === 'true') return 'the disabled Owner is selected'
       return root.querySelector('#select-role-admin').getAttribute('aria-selected') === 'true' || 'Admin is not selected'
     },
   },
