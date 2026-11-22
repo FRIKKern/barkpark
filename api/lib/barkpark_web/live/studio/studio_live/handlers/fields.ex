@@ -484,21 +484,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
         based =
           socket
-          |> RemoteValues.put_bases(keys, params["_bp_seen"])
+          |> RemoteValues.put_bases(keys, params["_bp_seen"], path)
           |> RemoteValues.add_bases(built_bases)
 
         saved =
           based
           |> RefusedSave.target(keys, path)
           |> Shared.do_autosave(doc, :change)
-          |> RemoteValues.settle(socket, keys, doc)
+          |> RemoteValues.settle(socket, keys, doc, path)
 
         bases = based.assigns[:editor_field_bases] || %{}
 
         {:noreply,
          saved
          |> keep_unsaved_values(doc, keys)
-         |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"])
+         |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
          |> RefusedSave.not_codes(not_codes)
          |> settle_dirty(keys)}
 
@@ -1002,7 +1002,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       assign(socket,
         editor_dirty: dirty?,
         editor_unsaved_keys: held,
-        editor_unsaved_bases: Map.take(UnsavedBases.all(socket), MapSet.to_list(held)),
+        editor_unsaved_bases: UnsavedBases.only(UnsavedBases.all(socket), held),
         doc_conflict: false
       )
     else

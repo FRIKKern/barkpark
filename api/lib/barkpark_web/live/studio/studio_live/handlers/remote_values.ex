@@ -85,22 +85,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   editor's unsaved words, or the next version reads them as removed).
   """
   def push(socket, old_form, new_form, bases \\ %{}) do
-    changed =
-      for {key, new} <- new_form,
-          is_binary(key) and is_binary(new),
-          old = Map.get(old_form, key),
-          is_binary(old) and old != new,
-          do: {key, old, new}
+    changed = changes(socket.assigns[:editor_schema], old_form, new_form, [])
 
     if changed == [] do
       socket
     else
       {socket, values, seqs} =
         Enum.reduce(changed, {socket, %{}, %{}}, fn {key, old, new}, {s, values, seqs} ->
-          name = "doc[#{key}]"
+          name = input_name(key)
           values = Map.put(values, name, %{value: new, was: old})
 
-          if free_text?(s.assigns[:editor_schema], key) do
+          if free_text_at?(s.assigns[:editor_schema], key) do
             {was_base, base} = Map.get(bases, key, {old, new})
             {s, pair} = remember(s, key, was_base, base)
             {s, values, Map.put(seqs, name, pair)}
@@ -120,7 +115,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   value). `Forms.upsert_draft/6` merges the post onto the stored value from
   it (`Barkpark.Content.TextRebase.rebase/3`).
   """
-  def put_bases(socket, keys, seen) when is_binary(seen) do
+  def put_bases(socket, keys, seen, path \\ nil)
+
+  def put_bases(socket, keys, seen, path) when is_binary(seen) do
     seen = decode_seen(seen)
     history = history(socket)
     schema = socket.assigns[:editor_schema]
@@ -131,9 +128,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     drawn = if crossing?, do: drawn_numbers(seen), else: %{}
 
     bases =
-      for key <- keys,
-          free_text?(schema, key),
-          name <- ["doc[#{key}]"],
+      for key <- units(keys, text_path(schema, keys, path)),
+          free_text_at?(schema, key),
+          name <- [input_name(key)],
           # A generator, not `n = ...`: a nil filter would drop the field.
           n <- [Map.get(seen, name) || Map.get(drawn, name)],
           is_integer(n) or (is_nil(n) and crossing?),
@@ -144,7 +141,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     assign(socket, :editor_field_bases, bases)
   end
 
-  def put_bases(socket, _keys, _seen), do: assign(socket, :editor_field_bases, %{})
+  def put_bases(socket, _keys, _seen, _path), do: assign(socket, :editor_field_bases, %{})
 
   @doc """
   Whether a post with `seen` (the raw `_bp_seen`) names no number for `key`
@@ -154,7 +151,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   """
   def unnumbered?(socket, key, seen) when is_binary(seen) do
     seen = decode_seen(seen)
-    name = "doc[#{key}]"
+    name = input_name(key)
 
     Map.get(seen, "v") == @seen_version and is_nil(Map.get(seen, name)) and
       is_nil(Map.get(drawn_numbers(seen), name)) and Map.get(history(socket), key, []) == []
@@ -213,7 +210,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   store took a merged text instead, the page is told (`push/3`) and the form
   holds the stored text. Always clears the bases `put_bases/3` stored.
   """
-  def settle(socket, before, keys, posted) do
+  def settle(socket, before, keys, posted, path \\ nil) do
     socket = assign(socket, :editor_field_bases, %{})
     doc = socket.assigns[:editor_doc]
 
@@ -222,9 +219,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
       schema = socket.assigns[:editor_schema]
 
       sent =
-        for key <- keys,
-            free_text?(schema, key),
-            value = Map.get(posted, key),
+        for key <- units(keys, text_path(schema, keys, path)),
+            free_text_at?(schema, key),
+            value = value_at(posted, key),
             is_binary(value),
             into: %{},
             do: {key, value}
@@ -243,8 +240,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
         socket
       else
         socket
-        |> push(sent, moved)
-        |> assign(:editor_form, Map.merge(socket.assigns[:editor_form] || %{}, moved))
+        |> push(nest(sent), nest(moved))
+        |> assign(
+          :editor_form,
+          Enum.reduce(moved, socket.assigns[:editor_form] || %{}, &put_at/2)
+        )
       end
     else
       socket
@@ -270,7 +270,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     |> history()
     |> Enum.flat_map(fn {key, entries} ->
       case latest(entries) do
-        {seq, _value, _kind} -> [{"doc[#{key}]", seq}]
+        {seq, _value, _kind} -> [{input_name(key), seq}]
         nil -> []
       end
     end)
@@ -301,13 +301,118 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     end
   end
 
+  @doc """
+  `free_text?/2` for a field key, or for a path into an object
+  (task-71ff11d4e7374985): `["meta", "label"]` is free text when `meta` is a
+  `composite` field and `label` one of its subfields that is free text.
+  TanStack merges every pending path as text (edit-bases.ts `rebase`).
+  """
+  def free_text_at?(schema, key) when is_binary(key), do: free_text?(schema, key)
+  def free_text_at?(schema, [key]) when is_binary(key), do: free_text?(schema, key)
+
+  def free_text_at?(schema, [key | rest]) when is_binary(key) do
+    case field(schema, key) do
+      %{"type" => "composite", "fields" => subs} when is_list(subs) ->
+        match?([_ | _], rest) and sub_text?(%{fields: subs}, rest)
+
+      _ ->
+        false
+    end
+  end
+
+  def free_text_at?(_schema, _key), do: false
+
+  # A subfield is free text only when the object declares it.
+  defp sub_text?(schema, [sub]) when is_binary(sub),
+    do: field(schema, sub) != nil and free_text?(schema, sub)
+
+  defp sub_text?(schema, path), do: free_text_at?(schema, path)
+
+  @doc """
+  The text subfield a post is a change of (`path`, `Fields.target_path/2`),
+  when it sits inside an object field the post names (`keys`); else nil. A
+  top-level field is its key, as before.
+  """
+  def text_path(schema, [key], [key, _ | _] = path) do
+    if free_text_at?(schema, path), do: path
+  end
+
+  def text_path(_schema, _keys, _path), do: nil
+
+  @doc "The post's field keys, and the text subfield path it changed (or nil)."
+  def units(keys, nil), do: keys
+  def units(keys, path), do: keys ++ [path]
+
+  @doc "The input a field key, or a path into an object, is drawn as."
+  def input_name(key) when is_binary(key), do: "doc[#{key}]"
+  def input_name([key | rest]), do: Enum.join(["doc[#{key}]" | rest], ".")
+
+  @doc "The value at a field key, or at a path into an object, of a form map."
+  def value_at(map, key) when is_binary(key) and is_map(map), do: Map.get(map, key)
+  def value_at(map, [key]) when is_map(map), do: Map.get(map, key)
+
+  def value_at(map, [key | rest]) when is_map(map) do
+    case Map.get(map, key) do
+      %{} = inner when not is_struct(inner) -> value_at(inner, rest)
+      _ -> nil
+    end
+  end
+
+  def value_at(_map, _key), do: nil
+
+  @doc "`map` with `value` at a field key, or at a path into an object."
+  def put_at({key, value}, map), do: put_at(map, key, value)
+
+  def put_at(map, key, value) when is_binary(key), do: Map.put(map, key, value)
+  def put_at(map, [key], value), do: Map.put(map, key, value)
+
+  def put_at(map, [key | rest], value) do
+    inner =
+      case Map.get(map, key) do
+        %{} = inner when not is_struct(inner) -> inner
+        _ -> %{}
+      end
+
+    Map.put(map, key, put_at(inner, rest, value))
+  end
+
+  # Each text value that differs between two forms, with its key: a
+  # top-level field by its key, a subfield of a `composite` object by its
+  # path (task-71ff11d4e7374985), so the page is told the subfield it rests
+  # in too.
+  defp changes(schema, old_form, new_form, at) do
+    Enum.flat_map(new_form, fn
+      {key, new} when is_binary(key) and is_binary(new) ->
+        case Map.get(old_form, key) do
+          old when is_binary(old) and old != new -> [{unit(at, key), old, new}]
+          _ -> []
+        end
+
+      {key, %{} = new} when is_binary(key) and not is_struct(new) ->
+        with %{"type" => "composite", "fields" => subs} when is_list(subs) <- field(schema, key),
+             %{} = old when not is_struct(old) <- Map.get(old_form, key) do
+          changes(%{fields: subs}, old, new, at ++ [key])
+        else
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp unit([], key), do: key
+  defp unit(at, key), do: at ++ [key]
+
+  defp nest(values), do: Enum.reduce(values, %{}, &put_at/2)
+
   defp field(%{fields: fields}, key) when is_list(fields),
     do: Enum.find(fields, &(is_map(&1) and &1["name"] == key))
 
   defp field(_schema, _key), do: nil
 
   defp stored_value(doc, "title"), do: Map.get(doc, :title)
-  defp stored_value(doc, key), do: Map.get(Map.get(doc, :content) || %{}, key)
+  defp stored_value(doc, key), do: value_at(Map.get(doc, :content) || %{}, key)
 
   # Records `old` (unless it is the field's latest value) and `new`, each with
   # a fresh number; returns `[seq of old, seq of new]`.
