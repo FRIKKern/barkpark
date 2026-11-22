@@ -95,8 +95,8 @@ export const CEILING_CASES = [
   },
   {
     name: 'a selftest whose last case passes its ceiling stops there, failing, with the sentence',
-    // The case it runs is picked by a rule, not by a name that can go stale: the first case the rest job runs that
-    // opens a check run (not a direct one), so the ceiling of 0 s fires at that run's first wait.
+    // The case it runs is picked by a rule, not by a name that can go stale: the first case the rest job runs that is
+    // not direct.
     direct: async (cases) => {
       const c = selftestPick(cases, 'rest', '').find((x) => !x.direct)
       const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), '--job', 'rest', c.name], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })

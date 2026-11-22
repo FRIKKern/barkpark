@@ -49,12 +49,13 @@ export const SURFACE_CASES = [
   },
 ]
 
-// Real states held to their pins (states.mjs, coverage.mjs), in three runs: what the wide views draw while a state
-// holds; what the press steps reach; and the rules nothing reads, which only a run of every light can say.
+// Real states held to their pins (states.mjs, coverage.mjs), in four runs: what the wide views draw while a state
+// holds; what the press steps reach; the rules nothing reads, which only a run of every light can say; and a run of
+// one light, which names none.
 const PENDING = inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }')
-// The rules nothing reads run on the tabs part: that run needs one whole stage read in every light, and the tabs
-// stage is the one that fits the case limit. A rule that applies to nothing, and a dead branch beside one that applies
-// at every reading.
+// The rules nothing reads run on the tabs part: that run needs one part's whole stage read in every light, and the
+// button's whole stage reads over a case's share of the one limit (check/capacity.mjs), where tabs' reads under it. A
+// rule that applies to nothing, and a dead branch beside one that applies at every reading.
 const DEAD = inCss('[data-slot="tabs-tab"][data-size="xl"] { gap: 0; }')
 const DEAD_BRANCH = inCss('[data-slot="tabs-tab"], [data-slot="tabs-tab"][data-variant="huge"] { padding-inline: 0.75rem; }')
 const stateRows = {
@@ -77,17 +78,17 @@ const stateRows = {
     'a box open only after a press step, named by no layer': (p) => (p.parts.button.steps ?? []).some((st) => st.name === 'Space activates it' && st.detail === UNNAMED('div#button-press-tip "Shown on Space"')),
   },
   unread: {
-    'a rule nothing reads': (p) => (p.parts.tabs.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="tabs-tab"][data-size="xl"]')),
-    'a branch nothing reads, beside one that is read': (p) => (p.parts.tabs.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="tabs-tab"][data-variant="huge"], of ')),
+    'a rule nothing reads': (p) => (p.parts.tabs?.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="tabs-tab"][data-size="xl"]')),
+    'a branch nothing reads, beside one that is read': (p) => (p.parts.tabs?.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="tabs-tab"][data-variant="huge"], of ')),
     // Nothing else goes wrong in that run: no light goes off and no page errs (the part fails first for its first
     // unread line, check.mjs), every press step passes, and nothing but the two planted rules goes unread.
-    'every light passes but for the rules nothing reads': (p) => p.parts.tabs.failed === p.parts.tabs.unread?.[0] && p.parts.tabs.steps?.length > 0 && p.parts.tabs.steps.every((st) => st.pass),
-    'nothing else is unread': (p) => (p.parts.tabs.unread ?? []).length === 2,
+    'every light passes but for the rules nothing reads': (p) => p.parts.tabs?.failed === p.parts.tabs?.unread?.[0] && p.parts.tabs?.steps?.length > 0 && p.parts.tabs?.steps.every((st) => st.pass),
+    'nothing else is unread': (p) => (p.parts.tabs?.unread ?? []).length === 2,
   },
   oneLight: {
     // The other side of the rule the unread rows hold: a run without every light names no rule unread, not even
     // one that applies to nothing.
-    'a run without every light names no rule unread': (p) => !!p && !p.parts.tabs.unread,
+    'a run without every light names no rule unread': (p) => !!p?.parts.tabs && !p.parts.tabs.unread,
   },
 }
 export const STATE_CASES = [

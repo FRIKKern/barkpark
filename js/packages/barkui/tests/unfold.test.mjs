@@ -63,10 +63,11 @@ describe('an unfolded case', () => {
   })
 
   it('runs a case on a part the package has, and is red by the case’s name on any other', () => {
-    expect(partOf({ name: 'x' })).toBe('button')
-    expect(CASES.filter((c) => !c.direct).map((c) => partOf(c)).filter((n) => n !== 'button')).toEqual(['tabs', 'tabs'])
-    expect(() => partOf({ name: 'x', part: 'tab' })).toThrow('the case "x" runs on the part "tab", which is not one; the parts are button, tabs, text-field (parts/)')
-    expect(() => partOf({ name: 'x', part: undefined })).toThrow('the case "x" runs on the part null, which is not one')
+    const names = ['button', 'tabs']
+    expect(partOf({ name: 'x' }, names)).toBe('button')
+    expect(partOf({ name: 'x', part: 'tabs' }, names)).toBe('tabs')
+    expect(() => partOf({ name: 'x', part: 'tab' }, names)).toThrow('the case "x" runs on the part "tab", which is not one; the parts are button, tabs (parts/)')
+    expect(() => partOf({ name: 'x', part: undefined }, names)).toThrow('the case "x" runs on the part null, which is not one')
   })
 })
 
