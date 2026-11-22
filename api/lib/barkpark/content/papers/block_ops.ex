@@ -1740,6 +1740,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         case fenced_or_plain_paper_update(changeset, doc, opts) do
           {:ok, saved} ->
+            :ok = Papers.PushRevision.record(doc, dataset, opts)
             # Same actor stamp as the single-op frame (slice 4), same posture:
             # server-side, additive, ignorable.
             frame =
@@ -1757,11 +1758,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
             {:ok, new_blocks, rev, {saved, slug, frame}}
 
-          {:error, :precondition_failed} = err ->
+          {:error, _reason} = err ->
             err
-
-          {:error, changeset} ->
-            {:error, changeset}
         end
       end
     else
