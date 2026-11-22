@@ -194,7 +194,21 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
   for surface <- [:desk, :studio] do
     @surface surface
 
-    test "#{surface}: J and H: the held text posted again stays held; the view posted unchanged saves nothing; typing on saves A's",
+    test "#{surface}: H: the view posted unchanged with its number saves nothing over theirs; the banner stays",
+         c do
+      c = %{c | surface: @surface}
+      a = open(c)
+      b = open(c)
+      view = held_by_clash(a, b, c)
+      theirs = stored(c)["meta"]["rt"]
+
+      html = post_rt(a, "<p>one two A</p><p>B para</p>", view)
+      assert html =~ "Someone else rewrote"
+      assert stored(c)["meta"]["rt"] == theirs
+      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+    end
+
+    test "#{surface}: J: the held text posted again stays held; the view posted unchanged saves nothing; typing on saves A's",
          c do
       c = %{c | surface: @surface}
       a = open(c)
