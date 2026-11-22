@@ -96,7 +96,7 @@ const ownLook = () =>
           el.setAttribute('data-pin', 'active')
           document.getAnimations()
           try {
-            window.__barkCheck.restyle('a pin for the case', () => el.setAttribute('data-pin', 'hover'))
+            window.__barkCheck.restyle('pins set or taken off', () => el.setAttribute('data-pin', 'hover'))
             return { opacity: Number(getComputedStyle(el).opacity) }
           } catch (e) {
             return { error: String(e.message) }
@@ -212,6 +212,104 @@ const plants = () =>
       return RED.test(r)
     })])))()
 
+/** Motion declared anywhere but motion.mjs's PLACES is red by name before any light reads, and so is a shadow root
+    on the page: the check reads neither. */
+const OFF_LIST = {
+  '::placeholder': '#button-primary::placeholder { transition: color 200ms ease-out; }',
+  '::marker': '#button-primary::marker { transition: color 200ms ease-out; }',
+  '::file-selector-button': '#button-primary::file-selector-button { animation: bark-spin 1s; }',
+}
+const UNSEEN = /the check could not read \(not a fault of the part\): motion where the check cannot see it: /
+const unseen = () =>
+  each({
+    ...Object.fromEntries(Object.entries(OFF_LIST).map(([where, css]) => [`motion declared on ${where} is red by name`, async () => {
+      const got = await onPage(css, 'reduce', async () => 'opened').catch((e) => String(e.message))
+      const held = UNSEEN.test(got) && got.includes(where)
+      if (!held) console.log(`    ${where}: ${got.slice(0, 200)}`)
+      return held
+    }])),
+    'a shadow root on the page, of any mode, is red by name at the next reading': () =>
+      onPage('', 'reduce', async (page, part) => {
+        await page.barkCheck(() => {
+          const host = Object.assign(document.createElement('div'), { id: 'bark-host' })
+          document.body.append(host)
+          host.attachShadow({ mode: 'closed' }).append('inside')
+        })
+        const read = await readView(page, part).then(() => 'read', (e) => String(e.message))
+        const held = /the check could not read \(not a fault of the part\): unread: shadow root at div#bark-host/.test(read)
+        if (!held) console.log(`    shadow root: ${read.slice(0, 200)}`)
+        return held
+      }),
+  })()
+
+/** The checker's skin switch goes through restyle: a read straight after it reads the new skin on a sound page; on a
+    page still moving by its own rule, the switch waits inside the bound, then is red by name, never a silent read. */
+const skinSwitch = () =>
+  each({
+    'on a sound page, a read straight after the switch reads at rest': () =>
+      onPage(QUIET, 'no-preference', async (page) => {
+        const skins = ['ember', 'fjord']
+        const seen = []
+        for (const k of skins) {
+          await page.barkCheck((k) => window.__barkCheck.restyle('a skin and scheme set', () => document.documentElement.setAttribute('data-skin', k)), k)
+          seen.push(await page.barkCheck(() => {
+            const el = document.getElementById('button-primary')
+            try {
+              return { colour: getComputedStyle(el).backgroundColor, moving: window.__barkCheck.moving().length }
+            } catch (e) {
+              return { error: String(e.message) }
+            }
+          }))
+        }
+        const held = seen.every((s) => s.colour && s.moving === 0) && seen[0].colour !== seen[1].colour
+        if (!held) console.log(`    sound: ${JSON.stringify(seen)}`)
+        return held
+      }),
+    'on a page moving by its own 60 s rule, the switch is red by name': () =>
+      onPage(`${QUIET} #button-primary { transition: opacity 60s linear; }`, 'no-preference', async (page) => {
+        await page.barkCheck(() => (document.getElementById('button-primary').style.opacity = '0.5'))
+        const got = await page.barkCheck(() => window.__barkCheck.restyle('a skin and scheme set', () => document.documentElement.setAttribute('data-skin', 'fjord'))).then(() => 'switched', (e) => String(e.message))
+        const held = /the check could not read \(not a fault of the part\): read on a page not at rest: the checker's change "a skin and scheme set": button#button-primary /.test(got)
+        if (!held) console.log(`    moving: ${got.slice(0, 200)}`)
+        return held
+      }),
+  })()
+
+/** A capture is bracketed: with the page's own 150 ms fade started every 400 ms by a timer, each of 40 captures is
+    the page at rest, the same as one of the two captures taken with the timer stopped. */
+const bracket = () =>
+  onPage(`${QUIET} #button-primary { transition: opacity 150ms linear; } #button-primary[data-pin="hover"] { opacity: 0.4; }`, 'no-preference', async (page) => {
+    const clip = await page.barkCheck(() => {
+      const r = document.getElementById('button-primary').getBoundingClientRect()
+      return { x: Math.floor(r.left + scrollX), y: Math.floor(r.top + scrollY), w: Math.ceil(r.width) + 2, h: Math.ceil(r.height) + 2 }
+    })
+    const pin = (on) =>
+      page.barkCheck((on) => window.__barkCheck.restyle('pins set or taken off', () => {
+        const el = document.getElementById('button-primary')
+        if (on) el.setAttribute('data-pin', 'hover')
+        else el.removeAttribute('data-pin')
+      }), on)
+    await pin(false)
+    const off = await capture(page, page.barkCheck, clip)
+    await pin(true)
+    const on = await capture(page, page.barkCheck, clip)
+    await pin(false)
+    await page.barkCheck(() => {
+      const el = document.getElementById('button-primary')
+      window.__barkTimer = setInterval(() => (el.hasAttribute('data-pin') ? el.removeAttribute('data-pin') : el.setAttribute('data-pin', 'hover')), 400)
+    })
+    let mid = 0
+    let red = 0
+    for (let i = 0; i < 40; i++) {
+      const png = await capture(page, page.barkCheck, clip).catch(() => null)
+      if (png === null) red++
+      else if (png !== off && png !== on) mid++
+    }
+    await page.barkCheck(() => clearInterval(window.__barkTimer))
+    if (mid || red || off === on) console.log(`    captures mid-motion: ${mid}; red: ${red}; rest images differ: ${off !== on}`)
+    return !mid && !red && off !== on
+  })
+
 export const REST_CASES = [
   {
     name: 'at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation',
@@ -223,4 +321,7 @@ export const REST_CASES = [
   },
   { name: 'at rest: every way the checker reads a look is gated, and on a moving page each is red by name', direct: walk },
   { name: 'at rest: twelve ways to change a look outside restyle each leave the next read red by name, never mid-way', direct: plants },
+  { name: 'at rest: motion declared on ::placeholder, ::marker or ::file-selector-button, and a shadow root on the page, are red by name', direct: unseen },
+  { name: "at rest: the checker's skin switch reads at rest straight after on a sound page, and is red by name on a page moving by its own rule", direct: skinSwitch },
+  { name: 'at rest: a capture under a timer-driven fade is the page at rest every time, or taken again', direct: bracket },
 ]

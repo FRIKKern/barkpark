@@ -194,7 +194,9 @@ matches; a rule or a pair nobody judges fails the part by name.
 - Motion: a part defines no keyframes. It may name the shared ones in `css/base.css` (today one,
   `bark-spin`, which only turns its element; a test holds base.css to that), by name as the browser
   reads it. Transitions are free, because both ends are states the lights read anyway. Where motion is
-  read: "What part.css may condition on".
+  read: "What part.css may condition on". A sheet on a checked page may declare a transition or an
+  animation only on an element itself, its ::before, its ::after or its ::backdrop: the check reads
+  motion there and nowhere else, so motion declared anywhere else is red by name.
 - part.css keeps to a small vocabulary, `build/vocabulary.mjs`: layout, type, paint and motion
   properties, held both as written and as the browser expands them (each longhand a shorthand sets
   must belong to a property in the vocabulary, or be left at its initial value). A longhand the

@@ -9,6 +9,7 @@ import { installBoundary } from './boundary.mjs'
 import { installDrawn } from './drawn.mjs'
 import { eachLayer, installCensus, installLayers, unnamedNow } from './layers.mjs'
 import { installMatch } from './match.mjs'
+import { LISTS } from './motion.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
 import { realStates } from './states.mjs'
@@ -62,7 +63,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   // Every reading the lights rest on runs in an isolated world: page script (a demo) cannot see or
   // patch what the check calls. press.mjs runs in a second one, so it cannot reach the check either.
   page.barkCheck = await isolate(page, 'barkui-check')
-  await page.barkCheck(installHelpers)
+  await page.barkCheck(installHelpers, LISTS)
   await page.barkCheck(installBoundary)
   await page.barkCheck(installMatch)
   await page.barkCheck(installDrawn)
@@ -70,10 +71,15 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.barkCdp = await page.context().newCDPSession(page)
   page.barkScale = scale
   page.barkRef = { page: ref, world: await isolate(ref, 'barkui-ref') }
-  for (const install of [installHelpers, installBoundary, installMatch, installDrawn]) await page.barkRef.world(install)
+  await page.barkRef.world(installHelpers, LISTS)
+  for (const install of [installBoundary, installMatch, installDrawn]) await page.barkRef.world(install)
   installCover(page, ctx)
   page.barkPress = await isolate(page, 'barkui-press')
-  await page.barkPress(installHelpers)
+  await page.barkPress(installHelpers, LISTS)
+  // Motion may be declared only where the check reads it (motion.mjs): a sheet that declares it anywhere else is red
+  // by name before any light reads.
+  const off = await page.barkCheck(() => window.__barkCheck.motionOffList())
+  if (off.length) throw new Error(`the check could not read (not a fault of the part): motion where the check cannot see it: ${off.slice(0, 3).join('; ')}`)
   return page
 }
 
@@ -139,7 +145,7 @@ export async function pressed(ctx, part, skins) {
     if (drawn) await view(page, skins[0], 'light')
     if (setup) await inPage(page, setup, part.name, 'press.mjs setup')
     await page.clock.pauseAt(Date.now() + 1000)
-    await page.barkCheck((id) => window.__barkCheck.restyle('focus moved to the part title', () => document.getElementById(id).focus()), `part-${part.name}-title`)
+    await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
     for (const step of steps) {
       let result
       try {
@@ -289,7 +295,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
         }
         await surfaceTo('base')
         // Focus: Tab through the part with real keys and measure the ring on each stop.
-        await page.barkCheck((id) => window.__barkCheck.restyle('focus moved to the part title', () => document.getElementById(id).focus()), `part-${part.name}-title`)
+        await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
         for (let i = 0; i < 60; i++) {
           await page.keyboard.press('Tab')
           await limit(page.barkCheck(() => window.__barkCheck.frame()), STEP_MS, 'a frame')

@@ -19,6 +19,18 @@ export async function readView(page, part, waits = []) {
   // With a box of the part's layers open in the top layer, the capture covers that box too, and what the page draws
   // behind it is captured first with the open boxes hidden (layers.mjs).
   await world(() => window.__barkCheck.still('a reading'))
+  // A checked page holds no shadow root of its own (no part makes one): one found, of any mode, is red by name, as
+  // the check does not read inside it. The browser's own roots (an input's, a select's) are not the page's.
+  if (page.barkCdp) {
+    const { root } = await page.barkCdp.send('DOM.getDocument', { depth: -1, pierce: true })
+    const hosts = []
+    const walk = (n) => {
+      for (const s of n.shadowRoots ?? []) if (s.shadowRootType !== 'user-agent') hosts.push(`${n.localName}${n.attributes?.includes('id') ? `#${n.attributes[n.attributes.indexOf('id') + 1]}` : ''}`)
+      for (const c of [...(n.children ?? []), ...(n.shadowRoots ?? []), ...(n.contentDocument ? [n.contentDocument] : [])]) walk(c)
+    }
+    walk(root)
+    if (hosts.length) throw new Error(`the check could not read (not a fault of the part): unread: shadow root at ${hosts.slice(0, 3).join('; ')}`)
+  }
   const open = await world(([s, b]) => window.__barkCheck.layers(document.querySelector(s), b), [sel, (part.json.layers ?? []).map((l) => l.box)])
   const clip = await world(([s, boxes]) => {
     const r = document.querySelector(s).getBoundingClientRect()

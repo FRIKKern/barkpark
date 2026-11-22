@@ -1,6 +1,10 @@
 // In-page helpers for the check. installHelpers runs inside the page (it is
-// serialised), so it may not reach anything outside its own body.
-export function installHelpers() {
+// serialised), so it may not reach anything outside its own body: the lists it reads come in as its argument
+// (LISTS, motion.mjs).
+export function installHelpers(lists) {
+  if (!lists?.places?.length || !lists?.changes?.length) throw new Error('installHelpers needs the lists of check/motion.mjs')
+  const PLACES = lists.places
+  const CHANGES = new Set(lists.changes)
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = 1
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -299,9 +303,64 @@ export function installHelpers() {
     [...new Set(list.map((a) => `${describe(a.effect?.target ?? null)}${a.effect?.pseudoElement ?? ''} ${a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : a instanceof CSSAnimation ? `animation ${a.animationName}` : 'animation'}`))].slice(0, 3).join('; ')
   /** The check's own red, not a part's: a look is read only on a page at rest. */
   const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
+  /** Motion where the check cannot see it, by name: a mover anywhere but the places of PLACES. */
+  const UNSEEN = 'the check could not read (not a fault of the part): motion where the check cannot see it'
   const atRest = (who) => {
     const now = moving()
+    const off = now.filter((a) => !PLACES.includes(a.effect?.pseudoElement ?? ''))
+    if (off.length) throw new Error(`${UNSEEN}: ${who}: ${named(off)}`)
     if (now.length) throw new Error(`${AT_REST}: ${who}: ${named(now)}`)
+  }
+  /** The sheets' motion anywhere but PLACES, by selector: every sheet the page loads and every adopted one, every
+      rule in every block, nested rules read from their parent. A sheet the check cannot read is named too. */
+  const motionOffList = () => {
+    const off = []
+    const top = (sel) => {
+      const out = []
+      let depth = 0
+      let from = 0
+      for (let i = 0; i < sel.length; i++) {
+        if ('([{'.includes(sel[i])) depth++
+        else if (')]}'.includes(sel[i])) depth--
+        else if (sel[i] === ',' && !depth) {
+          out.push(sel.slice(from, i).trim())
+          from = i + 1
+        }
+      }
+      return [...out, sel.slice(from).trim()]
+    }
+    // The pseudo-element a selector's subject is, '' for the element itself.
+    const placeOf = (sel, parent) => {
+      const flat = sel.replace(/\([^()]*\)|\[[^\]]*\]/g, '')
+      const last = flat.split(/[\s>+~]+/).filter(Boolean).pop() ?? ''
+      const m = last.match(/::([\w-]+)|:(before|after|first-letter|first-line)\b/)
+      if (m) return `::${m[1] ?? m[2]}`
+      return last.includes('&') ? parent : ''
+    }
+    const moves = (style) => [...style].some((p) => /^(transition|animation)/.test(p))
+    const walk = (rules, parents) => {
+      for (const r of rules) {
+        let here = parents
+        if (r instanceof CSSStyleRule) {
+          here = top(r.selectorText).flatMap((s) => (parents.length ? parents.map((p) => ({ sel: s, place: placeOf(s, p.place) })) : [{ sel: s, place: placeOf(s, '') }]))
+          if (moves(r.style)) for (const s of here) if (!PLACES.includes(s.place)) off.push(s.sel)
+        } else if (typeof CSSNestedDeclarations === 'function' && r instanceof CSSNestedDeclarations) {
+          if (moves(r.style)) for (const s of parents) if (!PLACES.includes(s.place)) off.push(s.sel)
+        }
+        if (r.cssRules && !(r instanceof CSSKeyframesRule)) walk(r.cssRules, here)
+      }
+    }
+    for (const s of [...document.styleSheets, ...document.adoptedStyleSheets]) {
+      let rules
+      try {
+        rules = s.cssRules
+      } catch {
+        off.push(`a sheet the check cannot read: ${s.href}`)
+        continue
+      }
+      walk(rules, [])
+    }
+    return [...new Set(off)]
   }
   /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an
       animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
@@ -362,13 +421,17 @@ export function installHelpers() {
   const state = {}
   /** The one way the checker changes the page's look (a sheet of its own on or off, a pin set or taken off): `change`
       runs with transitions held off by a first-layer sheet of the checker's own, and style is brought up to date
-      before that sheet goes, so the change starts no transition. The checker adds no animation to the page. A
-      transition of the page's own that the sheet meets ends where it was going; a read never sees that moment
-      alone, since every read passes the door (still) and the gate first.
+      before that sheet goes, so the change starts no transition. The checker adds no animation to the page. The
+      sheet holds off exactly the places of PLACES, the only places a sheet may declare motion.
       `place` names the caller; state.restyled counts the calls by place. */
   let stillSheet = null
   const restyle = (place, change) => {
-    stillSheet ??= Object.assign(document.createElement('style'), { textContent: '@layer barkui-check { *, *::before, *::after, *::backdrop { transition: none !important; } }' })
+    if (!CHANGES.has(place)) throw new Error(`restyle was asked for a change that is not in check/motion.mjs's CHANGES: "${place}"`)
+    // The hold sheet would end a transition of the page's own: one still running now (each call first waits for
+    // rest inside the bound) is the page not at rest, red by name, never read silently at its end.
+    const cut = moving().filter((a) => a instanceof CSSTransition)
+    if (cut.length) throw new Error(`${AT_REST}: the checker's change "${place}": ${named(cut)}`)
+    stillSheet ??= Object.assign(document.createElement('style'), { textContent: `@layer barkui-check { ${PLACES.map((p) => `*${p}`).join(', ')} { transition: none !important; } }` })
     document.head.prepend(stillSheet)
     try {
       change()
@@ -380,7 +443,23 @@ export function installHelpers() {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, looks, AT_REST, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  /** Motion started on the page, counted as the browser reports it (each transition and animation tells when it
+      is made, in its delay too): a capture counts only if this stands still across it (capture.mjs). */
+  state.starts = 0
+  for (const e of ['transitionrun', 'animationstart']) document.addEventListener(e, () => state.starts++, true)
+  /** Before a capture: the page at rest, the browser's reports of earlier motion in, and the count to compare. */
+  const before = async (who) => {
+    await still(who)
+    await new Promise((r) => requestAnimationFrame(r))
+    atRest(who)
+    return state.starts
+  }
+  /** After a capture: true when the page is at rest and no motion started since `mark`. */
+  const after = async (mark) => {
+    await new Promise((r) => requestAnimationFrame(r))
+    return !moving().length && state.starts === mark
+  }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, before, after, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */
