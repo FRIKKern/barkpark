@@ -99,7 +99,18 @@ defmodule Barkpark.Content.Envelope do
 
     {user_fields, derived_from_body?} = promote_paper_blocks(user_fields, doc.type)
 
-    Map.merge(user_fields, %{
+    Map.merge(user_fields, system_keys(doc))
+    |> redact_by_field_visibility(schema, caller_context, doc_owner_id(doc))
+    |> maybe_drop_orphaned_promotion(derived_from_body?)
+  end
+
+  @doc """
+  The keys `render/3` puts over a stored row's content: `_id`, `_type`, `_rev`,
+  `_draft`, `_publishedId`, `_createdAt`, `_updatedAt`. A readOnly condition
+  reads them too (`Barkpark.Content.ReadOnlyFields`).
+  """
+  def system_keys(doc) do
+    %{
       "_id" => doc.doc_id,
       "_type" => doc.type,
       "_rev" => doc.rev,
@@ -107,9 +118,7 @@ defmodule Barkpark.Content.Envelope do
       "_publishedId" => Content.published_id(doc.doc_id),
       "_createdAt" => to_iso8601(doc.inserted_at),
       "_updatedAt" => to_iso8601(doc.updated_at)
-    })
-    |> redact_by_field_visibility(schema, caller_context, doc_owner_id(doc))
-    |> maybe_drop_orphaned_promotion(derived_from_body?)
+    }
   end
 
   defp promote_paper_blocks(fields, "paper") do
