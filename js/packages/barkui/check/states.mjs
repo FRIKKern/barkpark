@@ -13,6 +13,7 @@
 // (coverage.mjs), so each pair is judged as drawn while its rule applies. Two readings per state instead of one
 // per control: a reading costs about a second, a driven control a few frames.
 // The states are driven in one skin, light, base surface, 1440px.
+import { click, pointTo, pointerDown, pointerUp } from './acts.mjs'
 import { waitsFor } from '../build/sheet-waits.mjs'
 import { readView, verdict } from './reading.mjs'
 import { unnamedNow } from './layers.mjs'
@@ -134,7 +135,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
   const where = 'base'
   await show('light')
   const rest = async () => {
-    await page.mouse.move(0, 0)
+    await pointTo(page, 0, 0)
     await page.barkCheck((id) => {
       const el = document.getElementById(id)
       el.focus({ preventScroll: true })
@@ -177,12 +178,12 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
       }
       if (mode === 'checked') {
         // A real click, then the pointer away, so what is read is checked and nothing else.
-        await page.mouse.click(to.x, to.y)
-        await page.mouse.move(0, 0)
+        await click(page, to.x, to.y)
+        await pointTo(page, 0, 0)
       } else {
-        await page.mouse.move(to.x, to.y)
+        await pointTo(page, to.x, to.y)
         if (mode.includes('active')) {
-          await page.mouse.down()
+          await pointerDown(page)
           down = true
         }
       }
@@ -194,8 +195,8 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
         continue
       }
       const now = await page.barkCheck(snap, [part.name, el])
-      await page.mouse.move(0, 0)
-      if (down) await page.mouse.up()
+      await pointTo(page, 0, 0)
+      if (down) await pointerUp(page)
       down = false
       // A click changed what is checked; put every box and radio of the stage back as it was at rest.
       if (ticks) await page.barkCheck(checks, [part.name, ticks])
@@ -221,8 +222,8 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
         if (prop) fails.push(`${said}: ${u.at} ${prop} becomes ${moved[prop]}; a state may change nothing above the control, where no pin shows it`)
       })
     } finally {
-      await page.mouse.move(0, 0)
-      if (down) await page.mouse.up()
+      await pointTo(page, 0, 0)
+      if (down) await pointerUp(page)
       if (ticks) await page.barkCheck(checks, [part.name, ticks])
       // A drive is judged, not kept: what the check put back (what is checked) and nothing else may differ.
       await rest()

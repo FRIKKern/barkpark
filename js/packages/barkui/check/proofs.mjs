@@ -1,5 +1,6 @@
 // One function per proof light. Each opens its own page, so a light never
 // borrows state from another, and returns { pass, detail } (plus numbers).
+import { click, pointTo, press } from './acts.mjs'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SHEET_WAITS, waitsFor } from '../build/sheet-waits.mjs'
@@ -171,9 +172,9 @@ export async function pressed(ctx, part, skins) {
               return el === top || el.contains(top) ? { x, y } : { miss: `is not what a click at its centre reaches: ${window.__barkCheck.describe(top)} is on top` }
             }, [part.name, step.click])
             if (at.miss) throw new Error(`${step.click} ${at.miss}`)
-            await page.mouse.click(at.x, at.y)
+            await click(page, at.x, at.y)
           }
-          for (const key of step.keys ?? []) await page.keyboard.press(key)
+          for (const key of step.keys ?? []) await press(page, key)
           await page.clock.runFor(step.wait ?? 50)
           await settle(page)
         })(), STEP_MS + (step.wait ?? 0), `step "${step.name}"`)
@@ -257,7 +258,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
     await settle(page)
   }
   try {
-    await page.mouse.move(0, 0)
+    await pointTo(page, 0, 0)
     const names = await page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
     for (const scheme of ['light', 'dark']) {
       for (const skin of skins) {
@@ -308,7 +309,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
       el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
     }, `part-${part.name}-title`)
         for (let i = 0; i < 60; i++) {
-          await page.keyboard.press('Tab')
+          await press(page, 'Tab')
           await limit(page.barkCheck(() => window.__barkCheck.frame()), STEP_MS, 'a frame')
           const r2 = await page.barkCheck((n) => {
             const h = window.__barkCheck
@@ -416,7 +417,7 @@ async function motionFails(ctx, part, skin) {
   for (const [width, surfaces] of [[1440, surfacesOf(ctx)], [390, ['base']]]) {
     const page = await open(ctx, { scale: 2, width, height: width < 600 ? 844 : 1600, mobile: width < 600, motion: 'no-preference' })
     try {
-      await page.mouse.move(0, 0)
+      await pointTo(page, 0, 0)
       await view(page, skin, 'light')
       for (const surface of surfaces) {
         await page.barkCheck(([n, v]) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v)), [part.name, surface])

@@ -246,7 +246,7 @@ const unseen = () =>
     at PLACES, and at its still value under reduced motion unless it sits inside a no-preference query. */
 const EVERY_KIND = {
   'a scroll behavior declared on ::placeholder is red by name': ['#button-primary::placeholder { scroll-behavior: smooth; }', '::placeholder'],
-  'a smooth scroll behavior under reduced motion is red by name': ['#button-primary { scroll-behavior: smooth; }', 'button#button-primary "Publish" has scroll-behavior: smooth under reduced motion'],
+  'a smooth scroll behavior under reduced motion is red by name': ['#button-primary { scroll-behavior: smooth; }', '#button-primary declares scroll-behavior: smooth outside @media (prefers-reduced-motion: no-preference)'],
   'a smooth scroll behavior only where motion is allowed reads': ['@media (prefers-reduced-motion: no-preference) { #button-primary { scroll-behavior: smooth; } }', null],
 }
 const everyKind = () =>
@@ -256,6 +256,74 @@ const everyKind = () =>
     if (!held) console.log(`    ${what}: ${got.slice(0, 200)}`)
     return held
   }])))()
+
+/** A scroller beside the part: a button at its top, a far one 2000px down; `script` runs in the page's own world. */
+const SCROLLER = '#bark-s { overflow: auto; height: 100px; }'
+async function scroller(page, script = '') {
+  await page.evaluate((s) => {
+    const box = Object.assign(document.createElement('div'), { id: 'bark-s' })
+    box.innerHTML = '<button id="bark-near">near</button><div style="height: 2000px"></div><button id="bark-far">far</button>'
+    document.body.append(box)
+    if (s) new Function(s)()
+  }, script)
+  await page.barkCheck(() => document.getElementById('bark-near').focus({ preventScroll: true }))
+}
+/** The far button's place in the next read, and again after the page has had 2.5 s to settle by itself. */
+async function sameAfter(page, act) {
+  const top = () => page.barkCheck(() => Math.round(document.getElementById('bark-far').getBoundingClientRect().top))
+  const at = await act().then(top, (e) => String(e.message))
+  await new Promise((r) => setTimeout(r, 2500))
+  return { at, settled: await top() }
+}
+// The checker's input (check/acts.mjs), or on a checker without it the bare input the checker made.
+const acts = await import('./acts.mjs').catch(() => ({
+  press: (page, key) => page.keyboard.press(key),
+  pointTo: (page, x, y) => page.mouse.move(x, y),
+}))
+const held = (what, got) => {
+  const ok = got.at === got.settled
+  if (!ok) console.log(`    ${what}: read at ${got.at}, at rest at ${got.settled}`)
+  return ok
+}
+
+/** A key the checker presses moves focus into a scroller that scrolls smoothly: the next read is the page at rest. */
+const keyAct = () =>
+  each({
+    'outside reduced motion, a Tab into a scroller its sheet makes smooth': () =>
+      onPage(`${QUIET} ${SCROLLER} @media (prefers-reduced-motion: no-preference) { #bark-s:focus-within { scroll-behavior: smooth; } }`, 'no-preference', async (page) => {
+        await scroller(page)
+        return held('Tab, no-preference', await sameAfter(page, () => acts.press(page, 'Tab')))
+      }),
+    'under reduced motion, a Tab into a scroller the page makes smooth when focus arrives': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, "document.getElementById('bark-s').addEventListener('focusin', (e) => (e.currentTarget.style.scrollBehavior = 'smooth'))")
+        return held('Tab, reduce', await sameAfter(page, () => acts.press(page, 'Tab')))
+      }),
+  })()
+
+/** What the check reads about motion holds in every state the checker puts a page in: a rule that matches only in
+    one state is read as any other, and after an act the page is at rest by what it does then. */
+const everyState = () =>
+  each({
+    'under reduced motion, a smooth scroll declared for one state only is red by name at open': async () => {
+      const got = await onPage(`${SCROLLER} #bark-s:focus-within { scroll-behavior: smooth; }`, 'reduce', async () => 'opened').catch((e) => String(e.message))
+      const ok = UNSEEN.test(got) && got.includes('#bark-s:focus-within declares scroll-behavior: smooth')
+      if (!ok) console.log(`    one state, reduce: ${got.slice(0, 200)}`)
+      return ok
+    },
+    'outside reduced motion, the pointer over a scroller that scrolls itself smoothly on hover': () =>
+      onPage(`${QUIET} ${SCROLLER} @media (prefers-reduced-motion: no-preference) { #bark-s:hover { scroll-behavior: smooth; } }`, 'no-preference', async (page) => {
+        await scroller(page, "document.getElementById('bark-s').addEventListener('mouseenter', (e) => e.currentTarget.scrollTo({ top: 2000 }))")
+        const r = await page.barkCheck(() => document.getElementById('bark-s').getBoundingClientRect().toJSON())
+        return held('hover, no-preference', await sameAfter(page, () => acts.pointTo(page, r.x + 10, r.y + 10)))
+      }),
+    'under reduced motion, the pointer over a scroller the page makes smooth on hover': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, "document.getElementById('bark-s').addEventListener('mouseenter', (e) => { e.currentTarget.style.scrollBehavior = 'smooth'; e.currentTarget.scrollTo({ top: 2000 }) })")
+        const r = await page.barkCheck(() => document.getElementById('bark-s').getBoundingClientRect().toJSON())
+        return held('hover, reduce', await sameAfter(page, () => acts.pointTo(page, r.x + 10, r.y + 10)))
+      }),
+  })()
 
 /** The checker's skin switch goes through restyle: a read straight after it reads the new skin on a sound page; on a
     page still moving by its own rule, the switch waits inside the bound, then is red by name, never a silent read. */
@@ -304,4 +372,6 @@ export const REST_CASES = [
   { name: 'at rest: motion declared on ::placeholder, ::marker or ::file-selector-button, and a shadow root on the page, are red by name', direct: unseen },
   { name: "at rest: the checker's skin switch reads at rest straight after on a sound page, and is red by name on a page moving by its own rule", direct: skinSwitch },
   { name: 'at rest: every motion property of the vocabulary is read under its own rule, and is red by name where the check cannot see it', direct: everyKind },
+  { name: 'at rest: a key the checker presses leaves the page at rest before the next read, under reduced motion and outside it', direct: keyAct },
+  { name: 'at rest: what the check reads about motion holds in every state the checker puts a page in, under reduced motion and outside it', direct: everyState },
 ]

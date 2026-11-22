@@ -306,11 +306,18 @@ export function installHelpers(lists) {
   const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
   /** Motion where the check cannot see it, by name: a mover anywhere but the places of PLACES. */
   const UNSEEN = 'the check could not read (not a fault of the part): motion where the check cannot see it'
+  /** Scrolls under way, by what scrolls: from its first scroll event to its scrollend. */
+  const scrolls = new Set()
+  addEventListener('scroll', (e) => scrolls.add(e.target), { capture: true })
+  addEventListener('scrollend', (e) => scrolls.delete(e.target), { capture: true })
+  const scrolling = () => [...scrolls].filter((t) => t === document || t.isConnected)
   const atRest = (who) => {
     const now = moving()
     const off = now.filter((a) => !PLACES.includes(a.effect?.pseudoElement ?? ''))
     if (off.length) throw new Error(`${UNSEEN}: ${who}: ${named(off)}`)
     if (now.length) throw new Error(`${AT_REST}: ${who}: ${named(now)}`)
+    const going = scrolling()
+    if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
   }
   /** The sheets' motion anywhere but PLACES, by selector: every sheet the page loads and every adopted one, every
       rule in every block, nested rules read from their parent. `texts` ({ href: text }) are the sheets a page
@@ -341,16 +348,29 @@ export function installHelpers(lists) {
       return last.includes('&') ? parent : ''
     }
     const moves = (style) => [...style].some((p) => p in MOTION)
-    const walk = (rules, parents) => {
+    // A kind whose rule names a still value is declared at any other value only where motion is allowed, so it
+    // holds in every state a rule can match.
+    const fixed = Object.entries(MOTION).filter(([, r]) => r.still !== 'nothing running')
+    const unstill = (style, sels, free) => {
+      if (free) return
+      for (const [p, r] of fixed) {
+        const v = style.getPropertyValue(p).trim()
+        if (v && v !== r.still) for (const s of sels) off.push(`${s.sel} declares ${p}: ${v} outside @media (prefers-reduced-motion: no-preference)`)
+      }
+    }
+    const walk = (rules, parents, free) => {
       for (const r of rules) {
         let here = parents
         if (r instanceof CSSStyleRule) {
           here = top(r.selectorText).flatMap((s) => (parents.length ? parents.map((p) => ({ sel: s, place: placeOf(s, p.place) })) : [{ sel: s, place: placeOf(s, '') }]))
           if (moves(r.style)) for (const s of here) if (!PLACES.includes(s.place)) off.push(s.sel)
+          unstill(r.style, here, free)
         } else if (typeof CSSNestedDeclarations === 'function' && r instanceof CSSNestedDeclarations) {
           if (moves(r.style)) for (const s of parents) if (!PLACES.includes(s.place)) off.push(s.sel)
+          unstill(r.style, parents, free)
         }
-        if (r.cssRules && !(r instanceof CSSKeyframesRule)) walk(r.cssRules, here)
+        const allowed = free || (r instanceof CSSMediaRule && /\(\s*prefers-reduced-motion\s*:\s*no-preference\s*\)/.test(r.conditionText))
+        if (r.cssRules && !(r instanceof CSSKeyframesRule)) walk(r.cssRules, here, allowed)
       }
     }
     const files = []
@@ -371,23 +391,21 @@ export function installHelpers(lists) {
           continue
         }
       }
-      walk(rules, [])
+      walk(rules, [], false)
     }
-    // Under reduced motion, each kind whose rule names a still value computes it on every element.
-    const fixed = Object.entries(MOTION).filter(([, r]) => r.still !== 'nothing running')
-    if (fixed.length && raw.matchMedia('(prefers-reduced-motion: reduce)').matches)
-      for (const el of document.querySelectorAll('*'))
-        for (const [p, r] of fixed) {
-          const v = raw.getComputedStyle(el).getPropertyValue(p)
-          if (v !== r.still) off.push(`${describe(el)} has ${p}: ${v} under reduced motion`)
-        }
     return { off: [...new Set(off)], files }
   }
   /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an
       animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
   const toRest = async () => {
     const until = performance.now() + 2000
-    while (moving(true).length && performance.now() < until) await frame()
+    while ((moving(true).length || scrolling().length) && performance.now() < until) await frame()
+  }
+  /** The rest step after the checker's input on a page (check/acts.mjs): a frame is drawn, so what the input
+      started shows, then the page comes to rest inside the bound. The next read is red by name if it did not. */
+  const afterAct = async () => {
+    await frame()
+    await toRest()
   }
   /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
   const still = async (who) => {
@@ -464,7 +482,7 @@ export function installHelpers(lists) {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, afterAct, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

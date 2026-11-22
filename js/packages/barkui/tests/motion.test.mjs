@@ -33,16 +33,20 @@ describe("the checker's changes to a page's look", () => {
     const wrong = []
     for (const f of checker().filter((f) => f !== 'motion.mjs')) {
       const text = readFileSync(new URL(f, DIR), 'utf8')
-      for (const [k, { call, holds }] of Object.entries(ACTS))
-        for (const m of text.matchAll(call)) {
+      const line = (i) => text.slice(0, i).split('\n').length
+      for (const [k, { call, holds, raw, through }] of Object.entries(ACTS)) {
+        for (const m of through === f ? [] : text.matchAll(call)) {
           at[k]++
-          if (!holds.test(m[1])) wrong.push(`check/${f}:${text.slice(0, m.index).split('\n').length}: ${k} without its option (check/motion.mjs ACTS)`)
+          if (holds && !holds.test(m[1])) wrong.push(`check/${f}:${line(m.index)}: ${k} without its option (check/motion.mjs ACTS)`)
         }
+        if (raw && f !== through) for (const m of text.matchAll(raw)) wrong.push(`check/${f}:${line(m.index)}: ${k} outside check/${through}, without its rest step (check/motion.mjs ACTS)`)
+      }
     }
     console.log(`checker acts on a page: ${Object.values(at).filter(Boolean).length} kinds (${Object.entries(at).filter(([, n]) => n).map(([k, n]) => `${k} at ${n} places`).join(', ')}), each leaving the page at rest before the next read`)
     expect(wrong).toEqual([])
     expect(at['focus moved']).toBeGreaterThan(0)
     expect(at['a box scrolled into view']).toBeGreaterThan(0)
+    expect(at['a key or the pointer used']).toBeGreaterThan(0)
   })
 })
 

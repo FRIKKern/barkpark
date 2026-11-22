@@ -31,6 +31,7 @@
 // late (a tooltip with a delay) cannot pass as named. The one limit: a box the page never holds while the check has
 // it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
 // closed shadow root, is not seen.
+import { click, pointTo, press } from './acts.mjs'
 import { limit } from './limit.mjs'
 import { HOLDER_UNREAD, HOLDERS_UNLISTED, placementSource, SHADOW_ABOVE } from './placement.mjs'
 import { source } from './probes.mjs'
@@ -113,7 +114,7 @@ async function drive(page, part, step, what) {
       el?.focus({ preventScroll: true })
       el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
     }, [part.name, step.focus])
-  if (step.leave) await page.mouse.move(0, 0)
+  if (step.leave) await pointTo(page, 0, 0)
   for (const [how, sel] of [['click', step.click], ['hover', step.hover]]) {
     if (!sel) continue
     const at = await page.barkCheck(([n, s]) => {
@@ -126,10 +127,10 @@ async function drive(page, part, step, what) {
       return el === top || el.contains(top) ? { x, y } : { miss: `is not what a click at its centre reaches: ${window.__barkCheck.describe(top)} is on top` }
     }, [part.name, sel])
     if (at.miss) throw new Error(`${what}: ${sel} ${at.miss}`)
-    if (how === 'click') await page.mouse.click(at.x, at.y)
-    else await page.mouse.move(at.x, at.y)
+    if (how === 'click') await click(page, at.x, at.y)
+    else await pointTo(page, at.x, at.y)
   }
-  for (const key of step.keys ?? []) await page.keyboard.press(key)
+  for (const key of step.keys ?? []) await press(page, key)
   await page.barkCheck(() => window.__barkCheck.settle())
 }
 

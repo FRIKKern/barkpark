@@ -50,13 +50,16 @@ export function motionRead(props) {
 export const MOTION = motionRead([...MOTION_ONLY])
 if (MOTION.unread.length) throw new Error(MOTION.unread.join('; '))
 
-/** The checker's acts on a page, each a plain call made with the option that leaves the page at rest before the
-    next read (`holds`), which waits for rest first. A call of an act without it is red by name (a test). */
+/** The checker's acts on a page, each made so that the page is at rest before the next read. Focus and scrolls
+    are plain calls with the option that keeps them so (`holds`, read on the call's arguments). A key or the
+    pointer is used only through check/acts.mjs (`through`), whose every act is followed by its rest step; the
+    same input anywhere else is red. A test names each act without its option or its rest step, at file and line. */
 export const ACTS = {
   'focus moved': { call: /\.focus\(([^)]*)\)/g, holds: /preventScroll: true/ },
   'a box scrolled into view': { call: /\.scrollIntoView\(([^)]*)\)/g, holds: /behavior: 'instant'/ },
   'a box scrolled to a point': { call: /\.scroll(?:To|By)?\(([^)]*)\)/g, holds: /behavior: 'instant'/ },
   'a scroll position set': { call: /\.scroll(?:Top|Left)\s*(?:[-+]?=)(?!=)()/g, holds: /$^/ },
+  'a key or the pointer used': { call: /\b(?:press|click|pointTo|pointerDown|pointerUp)\(page\b()/g, raw: /\.(?:keyboard|mouse)\.\w+\(/g, through: 'acts.mjs' },
 }
 
 /** What installHelpers is given in each world. */
