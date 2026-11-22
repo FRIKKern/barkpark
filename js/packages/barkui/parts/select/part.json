@@ -7,5 +7,5 @@
   "layers": [
     { "box": "#select-role-content", "open": { "click": "#select-role-trigger" }, "close": { "keys": ["Escape"] } }
   ],
-  "textOnly": ["[data-slot=\"select-item\"]"]
+  "textOnly": ["[data-slot=\"select-item\"]:not([data-highlighted])"]
 }

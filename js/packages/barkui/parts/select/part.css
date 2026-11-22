@@ -2,9 +2,9 @@
    list it opens over the page in the top layer, each option a <ui-select-item>.
    The trigger has the text field's height and type, and UI SDK's --ui-input edge, so a form reads as one; the list takes the same edge,
    so it stands off the page at 3:1. The edge does not change on hover: the list's layer is opened by a click, which
-   leaves the pointer resting on the trigger. The rest of the list is UI SDK's: its ground and shadow, the
-   highlighted option on --ui-muted, a disabled option faded and passed over by the arrows, the chosen option
-   marked by UI SDK's check. With no script, each list is printed open under its trigger, so every option is read.
+   leaves the pointer resting on the trigger. The highlighted option is drawn on --ui-primary, so it stands at 3:1
+   like a filled button; every other option is text only. The rest of the list is UI SDK's: its ground and shadow,
+   a disabled option faded and passed over by the arrows, the chosen option marked by UI SDK's check. With no script, each list is printed open under its trigger, so every option is read.
    The look keys only on what UI SDK writes: data-open, data-placeholder, data-highlighted, data-selected and
    data-disabled. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also
    turns the edge to --ui-ring-border while the trigger has focus or its list is open. */
@@ -36,4 +36,9 @@ ui-select {
 
   font-size: var(--bark-select-text);
   line-height: 1.25;
+}
+
+[data-slot="select-item"][data-highlighted] {
+  background: var(--ui-primary);
+  color: var(--ui-primary-foreground);
 }
