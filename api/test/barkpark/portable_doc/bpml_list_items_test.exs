@@ -110,7 +110,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
                          "items" => [
                            %{
                              "id" => "build",
-                             "content" => text("Build"),
+                             "content" => [%{"type" => "text", "value" => "Build"}],
                              "children" => [%{"type" => "list", "items" => [verify]}]
                            },
                            ship
@@ -156,6 +156,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
 
     test "a line break that ends an item's words is kept; only the printer's own is not" do
       stored = [list("l1", [%{"id" => "a", "text" => "Words\n", "children" => [list(["x"])]}])]
+
       assert [%{"items" => [%{"content" => [%{"value" => "Words\n"}]}]}] =
                parse!(Bpml.print_blocks(stored))
     end
@@ -181,8 +182,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
           {"F2 an item without an id holding a child that is not a list",
            %{"text" => "A", "children" => [%{"type" => "paragraph", "text" => "Hidden"}]},
            "list l1: its item 1 holds children that are not lists"},
-          {"F3 a string item holding JSON inline nodes",
-           ~s([{"type":"text","value":"A"}]),
+          {"F3 a string item holding JSON inline nodes", ~s([{"type":"text","value":"A"}]),
            "list l1: its item 1 is a JSON string of inline nodes"}
         ] do
       @item item
@@ -196,7 +196,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
 
     test "F4 lists nested deeper than a stored Paper may nest them" do
       assert Bpml.print_blocks([nest(@max + 1)]) =~
-               ~s(<kept id="deep" type="list" why="list deep: its item 1 nests lists deeper)
+               ~s(<kept id="deep" type="list" why="a list: its item 1 nests lists deeper than #{@max} levels")
     end
 
     test "an item with an id prints its words whatever else it holds" do

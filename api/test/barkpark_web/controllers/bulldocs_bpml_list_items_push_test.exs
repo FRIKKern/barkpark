@@ -40,7 +40,11 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
             "type" => "list",
             "ordered" => true,
             "items" => [
-              %{"id" => "build", "content" => text("Build"), "children" => [list([text("Verify")])]},
+              %{
+                "id" => "build",
+                "content" => text("Build"),
+                "children" => [list([text("Verify")])]
+              },
               text("Ship")
             ]
           }
@@ -63,7 +67,10 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
         "children" => [
           %{
             "type" => "ordered-list",
-            "items" => [%{"id" => "build", "text" => "Build", "children" => [list(["Verify"])]}, "Ship"]
+            "items" => [
+              %{"id" => "build", "text" => "Build", "children" => [list(["Verify"])]},
+              "Ship"
+            ]
           }
         ]
       },
@@ -183,7 +190,9 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
          %{
            "id" => "a",
            "content" => [%{"type" => "text", "value" => "Parent words"}],
-           "children" => [%{"type" => "ordered-list", "items" => [[%{"type" => "text", "value" => "x"}]]}]
+           "children" => [
+             %{"type" => "ordered-list", "items" => [[%{"type" => "text", "value" => "x"}]]}
+           ]
          }, "Parent words", "Parent words, edited"},
         {"an item with a key BPML cannot spell",
          %{

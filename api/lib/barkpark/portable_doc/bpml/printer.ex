@@ -624,7 +624,11 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       what = e.type || to_string(e.kind)
 
       reraise Unwritable,
-              [block: "callout", id: id, reason: "its body holds a block BPML cannot write (#{what})"],
+              [
+                block: "callout",
+                id: id,
+                reason: "its body holds a block BPML cannot write (#{what})"
+              ],
               __STACKTRACE__
   end
 
@@ -634,7 +638,8 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp list_item_tag(item, n, list, d, level) do
     case ListItems.spell(item, n, level) do
       {:ok, attrs, words, []} ->
-        pad(d + 1) <> "<li" <> attr_str(attrs, ["id", "checked"]) <> ">" <> inline(words) <> "</li>"
+        pad(d + 1) <>
+          "<li" <> attr_str(attrs, ["id", "checked"]) <> ">" <> inline(words) <> "</li>"
 
       {:ok, attrs, words, lists} ->
         head = pad(d + 1) <> "<li" <> attr_str(attrs, ["id", "checked"]) <> ">" <> inline(words)

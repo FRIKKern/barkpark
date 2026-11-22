@@ -112,7 +112,6 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
     "limits/heatmap-number-past-what-a-float-holds" => "block:heatmap",
     "limits/heatmap-padding-past-the-stored-cells" => "block:heatmap",
     "limits/heatmap-padding-within-the-stored-cells" => "block:heatmap",
-    "limits/list-at-the-depth-limit" => "block:list",
     "limits/record-table-past-the-cap" => "head_cell:",
     "limits/sheet-merge-down-empty-rows" => "block:sheet",
     "limits/sheet-merge-past-the-cells-left" => "block:sheet",
@@ -127,7 +126,13 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   }
 
   # Document name => [{top-level block id, why}] for each block printed as <kept>.
-  @kept %{}
+  @kept %{
+    # The renderer's depth golden nests lists deeper than a stored Paper may
+    # (`Validate.max_depth/0`): fallback row F4 (task-0b448ea0847a6b4f).
+    "limits/list-at-the-depth-limit" => [
+      {"fixture-0", "a list: its item 1 nests lists deeper than 100 levels"}
+    ]
+  }
 
   # {block type, field} => why the printout may lack that field's words. Empty: the
   # one fixture whose callout has a `text` field (task-04de6fc749b11380) is refused
