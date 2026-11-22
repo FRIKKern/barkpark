@@ -100,6 +100,10 @@ export const CASE_READINGS = {
       "at rest: a box held at opacity 0 by its own style reads so and is red; a page still moving by its own rule is red by name as the check's own red": 5.8,
       "at rest: every way the checker reads a look is gated, and on a moving page each is red by name": 4.3,
       "at rest: twelve ways to change a look outside restyle each leave the next read red by name, never mid-way": 3.3,
+      // Two more at-rest cases, added after the run above: from their PR's hosted run, job 137307145173 (run
+      // 45054609251, commit c05b1f9a135c452f4b04e8ad1c508d872e04b80e).
+      "at rest: motion declared on ::placeholder, ::marker or ::file-selector-button, and a shadow root on the page, are red by name": 1.7,
+      "at rest: the checker's skin switch reads at rest straight after on a sound page, and is red by name on a page moving by its own rule": 2.9,
     },
   },
   views: {
