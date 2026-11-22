@@ -11,6 +11,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
   use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
+  alias Barkpark.Content.Papers.BpmlView
   alias Barkpark.LabelFixtures
   alias Barkpark.PortableDoc.Bpml.Canonical
   alias Barkpark.Repo
@@ -458,6 +459,73 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     answer = push_copy(slug, no_slot, rev) |> json_response(200)
     assert stored(slug) == before
     assert [_note] = answer["notes"]
+  end
+
+  # An old copy printed from `typed`: the blocks as the copy holds them, the
+  # print mark taken off.
+  defp typed_old_copy(slug, typed) do
+    paper = Content.get_paper(slug)
+    {:blocks, _shown, fields} = BpmlView.of(paper, paper.dataset, [], :published)
+    {:ok, bpml, _} = BpmlView.printed(paper, typed, fields)
+    Regex.replace(~r/ print="\d+"/, bpml, "")
+  end
+
+  defp bare_callout(id, words),
+    do: %{"id" => id, "type" => "callout", "tone" => "info", "content" => text(words)}
+
+  describe "an old copy that types into a block this pull prints as <kept>" do
+    test "a body typed into the callout is refused by the block's name, writing nothing" do
+      c1 = Map.put(bare_callout("c1", "Read this first."), "slots", %{})
+      stored = [p("p1", "Opening paragraph."), c1, p("p2", "Closing paragraph.")]
+      slug = with_blocks!(new_slug(), stored)
+      {bpml, rev} = pull!(slug)
+      assert bpml =~ ~s(<kept id="c1")
+      before = stored(slug)
+
+      typed = List.replace_at(stored, 1, Map.put(c1, "slots", %{"body" => [p("c1-t", "Typed.")]}))
+      copy = typed_old_copy(slug, typed)
+      assert copy =~ "Typed."
+
+      answer = push_copy(slug, copy, rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_unshown"
+      assert answer["error"]["message"] =~ ~s(block "c1")
+      assert stored(slug) == before
+    end
+
+    test "a nested list typed into a list in it is refused by the block's name, writing nothing" do
+      c9 = Map.put(bare_callout("c9", "Note."), "slots", %{})
+      l9 = %{"id" => "l9", "type" => "list", "items" => [%{"content" => text("Plan.")}]}
+      s9 = %{"id" => "s9", "type" => "section", "blocks" => [c9, l9]}
+      stored = [p("p1", "Opening paragraph."), s9, p("p2", "Closing paragraph.")]
+      slug = with_blocks!(new_slug(), stored)
+      {bpml, rev} = pull!(slug)
+      assert bpml =~ ~s(<kept id="s9")
+      before = stored(slug)
+
+      child = %{"type" => "list", "items" => [text("Typed step.")]}
+      typed_l9 = put_in(l9, ["items"], [%{"content" => text("Plan."), "children" => [child]}])
+      typed = List.replace_at(stored, 1, %{s9 | "blocks" => [Map.delete(c9, "slots"), typed_l9]})
+      copy = typed_old_copy(slug, typed)
+      assert copy =~ "Typed step."
+
+      answer = push_copy(slug, copy, rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_unshown"
+      assert answer["error"]["message"] =~ ~s(block "s9")
+      assert stored(slug) == before
+    end
+  end
+
+  test "an old copy over a Paper that already holds an id twice is refused by that id, writing nothing" do
+    slug =
+      with_blocks!(new_slug(), blocks() ++ [p("c1-a", "A second block under the body's id.")])
+
+    {bpml, rev} = pull!(slug)
+    before = stored(slug)
+
+    answer = push_copy(slug, old_copy(bpml), rev) |> json_response(422)
+    assert answer["error"]["code"] == "bpml_stale_copy"
+    assert answer["error"]["message"] =~ ~s(block "c1-a" is stored more than once)
+    assert stored(slug) == before
   end
 
   test "a new Paper pushed with a <kept> line is refused" do

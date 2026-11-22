@@ -254,7 +254,11 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   # (`PrintMark.believed/1`) is read as unshown: a block holding one that
   # spells as this pull or as the print before the form comes home as stored,
   # and any other is left to the write wall, which reads the push against the
-  # print before the form.
+  # print before the form. A block comes home as stored only when the pushed
+  # block, as typed, spells exactly as that print: anything typed into it that
+  # the print had no place for is refused by the block's name. A home holding
+  # an id the stored Paper holds more than once is refused by that id, never
+  # matched by a guess.
   defp old_copy(pushed, done, {view, stored, pulled}, copy) do
     n = PrintMark.read_number(copy)
     believed = PrintMark.believed(copy)
@@ -264,8 +268,10 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       inline_kept =
         for %{"type" => @kept, "id" => id} <- pulled, not MapSet.member?(done, id), do: id
 
-      with {:ok, pushed, notes} <- come_home(pushed, done, {view, stored}, {n, believed}),
-           {:ok, pushed} <- kept_old(pushed, inline_kept, {by_id(view), stored}, n) do
+      twice = twice(stored)
+
+      with {:ok, pushed, notes} <- come_home(pushed, done, {view, stored, twice}, {n, believed}),
+           {:ok, pushed} <- kept_old(pushed, inline_kept, {by_id(view), stored, twice}, n) do
         done = MapSet.union(done, MapSet.new(inline_kept))
         {:ok, each_old(pushed, done, by_id(view), by_id(stored), {n, believed}), notes}
       end
@@ -276,19 +282,49 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   # A block this pull printed as <kept> is one no copy can change. An old
   # copy shows it inline: it comes home once, at the top level, spelled as
-  # the old print, and is kept as stored; any other answer is refused by the
+  # typed exactly as the old print, and is kept as stored; any other answer,
+  # a body or a nested list typed into it among them, is refused by the
   # block's name.
-  defp kept_old(pushed, ids, {view_by_id, stored}, n) do
+  defp kept_old(pushed, ids, {view_by_id, stored, twice}, n) do
     Enum.reduce_while(ids, {:ok, pushed}, fn id, {:ok, acc} ->
       i = Enum.find_index(acc, &(&1["id"] == id))
       v = view_by_id[id]
 
-      if i != nil and v != nil and Enum.count(found(acc, []), &(&1["id"] == id)) == 1 and
-           spells_as?(PrintMark.before(Enum.at(acc, i), n), PrintMark.before(v, n)),
-         do: {:cont, {:ok, List.replace_at(acc, i, by_id(stored)[id])}},
-         else: {:halt, unwritable(id, stored)}
+      cond do
+        held = v && twice_in(v, twice) ->
+          {:halt, twice_refused(held)}
+
+        i != nil and v != nil and Enum.count(found(acc, []), &(&1["id"] == id)) == 1 and
+            spells_as?(Enum.at(acc, i), PrintMark.before(v, n)) ->
+          {:cont, {:ok, List.replace_at(acc, i, by_id(stored)[id])}}
+
+        true ->
+          {:halt, unwritable(id, stored)}
+      end
     end)
   end
+
+  # Every id the stored blocks hold more than once, at any depth.
+  defp twice(stored) do
+    found(stored, [])
+    |> Enum.frequencies_by(& &1["id"])
+    |> Enum.flat_map(fn {id, count} -> if count > 1, do: [id], else: [] end)
+    |> MapSet.new()
+  end
+
+  # The first id in `block`, itself included, that `twice` holds.
+  defp twice_in(block, twice) do
+    Enum.find_value(found([block], []), fn %{"id" => id} -> MapSet.member?(twice, id) && id end)
+  end
+
+  defp twice_refused(id),
+    do:
+      refuse(
+        "bpml_stale_copy",
+        ~s(block "#{id}" is stored more than once, so an old copy cannot be matched ) <>
+          "to it; nothing was written",
+        "bp paper pull, then make your edit again"
+      )
 
   defp unwritable(id, stored) do
     i = Enum.find_index(stored, &(is_map(&1) and &1["id"] == id))
@@ -304,7 +340,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
      }}
   end
 
-  defp come_home(pushed, done, {view, stored}, {n, believed}) do
+  defp come_home(pushed, done, {view, stored, twice}, {n, believed}) do
     found = found(pushed, [])
     stored_at = deep_by_id(stored, %{})
     view = Enum.reject(view, &MapSet.member?(done, &1["id"]))
@@ -320,11 +356,17 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     homes
     |> List.flatten()
     |> Enum.reduce_while({:ok, pushed, []}, fn {h, forms}, {:ok, acc, notes} ->
-      if home?(found, h, n),
-        do:
+      cond do
+        held = twice_in(h, twice) ->
+          {:halt, twice_refused(held)}
+
+        home?(found, h, n) ->
           {:cont,
-           {:ok, put_nested(acc, h["id"], stored_at[h["id"]] || h), notes ++ kept_notes(h)}},
-        else: {:halt, PrintMark.stale(h, stored, forms, &canonical/1)}
+           {:ok, put_nested(acc, h["id"], stored_at[h["id"]] || h), notes ++ kept_notes(h)}}
+
+        true ->
+          {:halt, PrintMark.stale(h, stored, forms, &canonical/1)}
+      end
     end)
     |> case do
       {:ok, acc, notes} ->
