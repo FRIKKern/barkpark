@@ -49,6 +49,7 @@ defmodule Barkpark.Content.LinkHrefFence do
 
   alias Barkpark.Content
   alias Barkpark.Content.LinkHref
+  alias Barkpark.Content.Schema
 
   @code :pt_link_href_refused
 
@@ -75,8 +76,10 @@ defmodule Barkpark.Content.LinkHrefFence do
         :ok
 
       true ->
-        content
-        |> rich_text_refused(fields(type, dataset, attrs, opts))
+        scope = scope(attrs, opts)
+
+        dataset
+        |> with_resolver(scope, &rich_text_refused(content, fields(type, dataset, scope), &1))
         |> drop_held(held(prev_doc))
         |> drop_twin_held(type, dataset, doc_id, opts)
         |> refusal()
@@ -87,8 +90,8 @@ defmodule Barkpark.Content.LinkHrefFence do
   defp restore?(_opts), do: false
 
   # The schema's fields, named types inlined; nil when the type has none.
-  defp fields(type, dataset, attrs, opts) do
-    case Content.get_schema(type, dataset, scope(attrs, opts)) do
+  defp fields(type, dataset, scope) do
+    case Content.get_schema(type, dataset, scope) do
       {:ok, %{fields: [_ | _] = fields}} -> stringify(fields)
       _ -> nil
     end
@@ -106,58 +109,120 @@ defmodule Barkpark.Content.LinkHrefFence do
     Keyword.merge(from_opts, stamped)
   end
 
-  defp rich_text_refused(content, nil), do: refused(content, "")
+  defp rich_text_refused(content, nil, _resolve), do: refused(content, "")
 
-  defp rich_text_refused(content, fields) when is_map(content),
-    do: walk_fields(fields, content, "")
+  defp rich_text_refused(%{} = content, fields, resolve),
+    do: walk_object(fields, content, "", resolve)
 
-  defp rich_text_refused(_content, _fields), do: []
+  defp rich_text_refused(content, _fields, _resolve), do: refused(content, "")
 
-  defp walk_fields(fields, %{} = value, path) do
-    Enum.flat_map(fields, fn
-      %{"name" => name} = field when is_binary(name) ->
-        walk(field, Map.get(value, name), "#{path}/#{escape(name)}")
+  # Fail closed (r3 ruling): a value is skipped only where the schema types it
+  # as `json`, or where it is a scalar, which holds no link. An object walks
+  # its declared fields and reads every other key whole; a named type is
+  # resolved as `get_schema` inlines one; a value the walk cannot type (an
+  # unknown type, an array row with no member, a mismatched shape such as a
+  # list in a `string` field) is read whole.
+  defp walk_object(fields, %{} = value, path, resolve) do
+    declared = for %{"name" => name} = f when is_binary(name) <- fields, into: %{}, do: {name, f}
 
-      _ ->
-        []
-    end)
+    own_defs(value, path) ++
+      Enum.flat_map(value, fn {k, v} ->
+        sub = "#{path}/#{escape(k)}"
+
+        case Map.fetch(declared, k) do
+          {:ok, field} -> walk(field, v, sub, resolve)
+          :error -> refused(v, sub)
+        end
+      end)
   end
 
-  defp walk(_field, nil, _path), do: []
+  defp walk(%{"type" => "json"}, _value, _path, _resolve), do: []
+  defp walk(_field, value, _path, _resolve) when not is_map(value) and not is_list(value), do: []
 
-  defp walk(%{"type" => type}, value, path) when type in ~w(richText portableText block),
-    do: refused(value, path)
+  defp walk(%{"fields" => [_ | _] = fields}, %{} = value, path, resolve),
+    do: walk_object(fields, value, path, resolve)
 
-  defp walk(%{"type" => "localizedText", "format" => "rich"}, %{} = value, path),
-    do: Enum.flat_map(value, fn {lang, v} -> refused(v, "#{path}/#{escape(lang)}") end)
-
-  defp walk(%{"fields" => [_ | _] = fields}, %{} = value, path),
-    do: walk_fields(fields, value, path)
-
-  defp walk(%{"of" => of}, value, path) when is_list(value) do
+  defp walk(%{"of" => of}, value, path, resolve) when is_list(value) do
     members = if is_list(of), do: of, else: [of]
 
     value
     |> Enum.with_index()
     |> Enum.flat_map(fn {item, i} ->
       case member(members, item) do
-        %{} = field -> walk(field, item, "#{path}/#{i}")
-        nil -> []
+        %{} = field -> walk(field, item, "#{path}/#{i}", resolve)
+        nil -> refused(item, "#{path}/#{i}")
       end
     end)
   end
 
-  defp walk(_field, _value, _path), do: []
+  defp walk(%{"type" => type} = field, value, path, resolve) when is_binary(type) do
+    if named?(field) do
+      case resolve.(type) do
+        {:ok, %{"fields" => [_ | _] = fields}} ->
+          walk(%{"fields" => fields}, value, path, resolve)
 
-  # An array row's member type: by its `_type`, else the only one.
-  defp member(members, item) do
-    type = if is_map(item), do: Map.get(item, "_type")
-
-    Enum.find(members, fn m -> is_map(m) and type != nil and type in [m["name"], m["type"]] end) ||
-      case members do
-        [%{} = only] -> only
-        _ -> nil
+        _ ->
+          refused(value, path)
       end
+    else
+      refused(value, path)
+    end
+  end
+
+  defp walk(_field, value, path, _resolve), do: refused(value, path)
+
+  # A field that names an object type, not inlined: an array member, or a
+  # type `get_schema`'s inliner left as a leaf because it is already on its
+  # walk (a recursive type).
+  defp named?(%{"type" => type} = field),
+    do: type not in Schema.builtin_field_types() and not is_map_key(field, "fields")
+
+  # An array row's member type: the one its `_type` names; with no `_type`,
+  # the only member. Anything else has none and is read whole.
+  defp member(members, item) do
+    case if(is_map(item), do: Map.get(item, "_type")) do
+      nil ->
+        case members do
+          [%{} = only] -> only
+          _ -> nil
+        end
+
+      type ->
+        Enum.find(members, fn m -> is_map(m) and type in [m["name"], m["type"]] end)
+    end
+  end
+
+  # The named object types this write reaches, each resolved once
+  # (`Schema.object_type_field/3`: the scope ladder and inliner `get_schema`
+  # uses). The walk recurses by the value's depth, so a recursive type ends
+  # where the value does.
+  defp with_resolver(dataset, scope, fun) do
+    key = {__MODULE__, make_ref()}
+
+    resolve = fn name ->
+      memo = Process.get(key, %{})
+
+      case Map.fetch(memo, name) do
+        {:ok, found} ->
+          found
+
+        :error ->
+          found =
+            case Schema.object_type_field(name, dataset, scope) do
+              {:ok, field} -> {:ok, stringify(field)}
+              :error -> :error
+            end
+
+          Process.put(key, Map.put(memo, name, found))
+          found
+      end
+    end
+
+    try do
+      fun.(resolve)
+    after
+      Process.delete(key)
+    end
   end
 
   defp stringify(%{} = map) when not is_struct(map),
@@ -172,13 +237,7 @@ defmodule Barkpark.Content.LinkHrefFence do
   """
   @spec refused(term(), String.t()) :: [{String.t(), String.t()}]
   def refused(%{} = map, path) when not is_struct(map) do
-    defs =
-      case Map.get(map, "markDefs") do
-        list when is_list(list) -> def_findings(list, path <> "/markDefs")
-        _ -> []
-      end
-
-    defs ++ Enum.flat_map(map, fn {k, v} -> refused(v, "#{path}/#{escape(k)}") end)
+    own_defs(map, path) ++ Enum.flat_map(map, fn {k, v} -> refused(v, "#{path}/#{escape(k)}") end)
   end
 
   def refused(list, path) when is_list(list) do
@@ -186,6 +245,13 @@ defmodule Barkpark.Content.LinkHrefFence do
   end
 
   def refused(_value, _path), do: []
+
+  defp own_defs(map, path) do
+    case Map.get(map, "markDefs") do
+      list when is_list(list) -> def_findings(list, path <> "/markDefs")
+      _ -> []
+    end
+  end
 
   defp def_findings(defs, path) do
     for {%{"_type" => type} = def, i} <- Enum.with_index(defs),
