@@ -118,6 +118,16 @@ defmodule Barkpark.Content.Forms.ObjectRebaseTest do
       assert rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"] == mine
     end
 
+    # #28349 r4 review, OR-a: a base older than what the post already holds
+    # read B's X as added by both, and wrote it twice.
+    test "both added the same block at one place: the post is written, never X twice" do
+      base = [blk("p", "P"), blk("q", "Q"), blk("r", "R")]
+      mine = [blk("p", "P"), blk("q", "Q A"), blk("x", "X"), blk("r", "R")]
+      theirs = [blk("p", "P"), blk("q", "Q"), blk("x2", "X"), blk("r", "R")]
+
+      assert rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"] == mine
+    end
+
     test "theirs unchanged from the base: the post is written as it is" do
       base = [blk("k1", "one two")]
       mine = [blk("k1", "one two X")]

@@ -55,7 +55,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         doc_conflict: false,
         editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
-        object_dialog: nil
+        object_dialog: nil,
+        editor_rt_held: %{},
+        editor_rt_clash: %{}
       )
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so

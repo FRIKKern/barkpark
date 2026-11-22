@@ -83,7 +83,7 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
        when is_list(base) and is_list(mine) and is_list(theirs) and theirs !== base do
     case PortableTextMerge.merge(base, mine, theirs) do
       {:ok, merged} -> merged
-      {:clash, _texts, _stored, _view} -> mine
+      {:clash, _texts, _view} -> mine
     end
   end
 

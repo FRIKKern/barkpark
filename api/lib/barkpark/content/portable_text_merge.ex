@@ -1,33 +1,39 @@
 defmodule Barkpark.Content.PortableTextMerge do
   @moduledoc """
   A three-way merge of two Portable Text values, block by block
-  (task-47be2cdf59d0acd5, #28349 r3 review K5/K8/S5p).
+  (task-47be2cdf59d0acd5, #28349 r3 review K5/K8/S5p, r4 review).
 
   `base` is the value an editor was given, `mine` what it posts, `theirs`
   what the store holds now. Each side's blocks are lined up with the base's
   by their words (a longest common subsequence of the blocks as drawn), not
   by `_key`: a save through the editor's HTML gives its blocks new keys, so
-  keys do not name a block from one save to the next. A base block a side
-  left out, where that side has a new block in its place, is that block
-  changed; one it left out with nothing in its place, deleted.
+  keys do not name a block from one save to the next. Between two blocks a
+  side kept, a gap: the base blocks it left out and the blocks it put there.
 
-    * A block only one side changed or deleted takes that side's version.
-    * Blocks a side added go in where it put them, theirs before mine when
-      both added at one place.
-    * A block both changed to the same words is one change.
-    * A block both changed (or one changed and the other deleted) is a
-      clash: TanStack's clash card. The letters inside one block are not
-      merged here (task-b655cb81bcb4b164).
+  It merges only when the line-up is certain, and never writes words nobody
+  typed (#28349 r4 review, cases 03-35):
+
+    * A gap that left blocks out and put a different number of blocks in
+      (a split, a join, a delete or an insert beside an edit) cannot be
+      lined up block by block: the whole value is a clash.
+    * Both sides added blocks at one place, or one side added blocks inside
+      a gap of the other's that spans several base blocks: a clash.
+    * A base block both sides changed, each in a gap of one block for one,
+      is a clash of that block. Both changed it to the same words: one
+      change. Any other block both touched (one deleted it, or one changed
+      it in a wider gap): the whole value is a clash.
     * Where the words can be lined up more than one way (two identical
-      paragraphs, empty ones, a block B moved) and the other side touched a
-      block whose place depends on the choice, the whole value is a clash:
-      the store keeps theirs, the editor keeps mine. Never a silent pick.
+      paragraphs, empty ones) and the other side touched a block whose
+      place depends on the choice: the whole value is a clash.
     * Past `@max_cells` (blocks of the base × blocks of a side) the merge is
-      not tried: a clash, as above.
+      not tried: a clash.
+    * Otherwise each base block takes the one side that changed or deleted
+      it, and blocks a side added go in where it put them.
 
-  TanStack's PortableTextInput applies another editor's block patches to the
-  focused editor, so a paragraph added in another block is never a clash
-  there either.
+  A clash returns only what the editor may show, never a value to store:
+  the caller keeps theirs stored (#28349 r4 review, rule 1). TanStack's
+  PortableTextInput applies another editor's block patches to the focused
+  editor, so a paragraph added in another block is never a clash there.
   """
 
   alias Barkpark.Content.PortableText
@@ -36,11 +42,11 @@ defmodule Barkpark.Content.PortableTextMerge do
   @max_cells 20_000
 
   @doc """
-  `{:ok, merged}` when no block clashed. Else `{:clash, texts, stored,
-  view}`: `stored` takes theirs for each clashed block and every other
-  change of both (what may be saved), `view` takes mine for each clashed
-  block (what the editor keeps showing), and `texts` are theirs words of the
-  clashed blocks, for the banner.
+  `{:ok, merged}` when the line-up is certain and no block clashed. Else
+  `{:clash, texts, view}`: `view` is what the editor keeps showing (mine for
+  each clashed block and theirs elsewhere; mine whole when the line-up is
+  not certain), and `texts` are theirs words the view does not show, for
+  the banner. A clash is never stored.
   """
   def merge(base, mine, theirs) do
     base = list(base)
@@ -49,39 +55,66 @@ defmodule Barkpark.Content.PortableTextMerge do
     if length(base) * max(length(mine), length(theirs)) > @max_cells do
       whole_clash(mine, theirs)
     else
-      {m_at, m_ins, m_unsure} = edits(base, mine)
-      {t_at, t_ins, t_unsure} = edits(base, theirs)
+      m = edits(base, mine)
+      t = edits(base, theirs)
 
-      if unsure?(m_unsure, t_at, t_ins) or unsure?(t_unsure, m_at, m_ins),
-        do: whole_clash(mine, theirs),
-        else: three_way(base, {m_at, m_ins}, {t_at, t_ins})
+      if certain?(m, t) and certain?(t, m) and not crossed?(m, t),
+        do: three_way(base, m, t),
+        else: whole_clash(mine, theirs)
     end
   end
 
-  defp three_way(base, {m_at, m_ins}, {t_at, t_ins}) do
+  # Nothing of `side`'s needs a guess next to what `other` did.
+  defp certain?(side, other) do
+    Enum.all?(side.gaps, fn {gone, new} ->
+      gone == [] or new == [] or length(gone) == length(new)
+    end) and
+      not unsure?(side.unsure, other.at, other.ins) and
+      Enum.all?(Map.keys(side.ins), fn p ->
+        not Map.has_key?(other.ins, p) and not inside?(p, other.gaps)
+      end)
+  end
+
+  # An insert after base index `p` falls between two blocks a gap left out.
+  defp inside?(p, gaps) do
+    Enum.any?(gaps, fn {gone, _new} -> gone != [] and hd(gone) <= p and p < List.last(gone) end)
+  end
+
+  # A base block both touched that is not one clear clash of one block.
+  defp crossed?(m, t) do
+    Enum.any?(Map.keys(m.at), fn i ->
+      case {Map.fetch(t.at, i), m.at[i]} do
+        {:error, _} ->
+          false
+
+        {{:ok, te}, me} ->
+          not same_edit?(me, te) and
+            not (match?({:changed, _}, me) and match?({:changed, _}, te) and
+                   MapSet.member?(m.one, i) and MapSet.member?(t.one, i))
+      end
+    end)
+  end
+
+  defp three_way(base, m, t) do
     at =
       base
       |> Enum.with_index()
       |> Enum.map(fn {block, i} ->
-        pick(block, Map.get(m_at, i, :same), Map.get(t_at, i, :same))
+        pick(block, Map.get(m.at, i, :same), Map.get(t.at, i, :same))
       end)
 
-    clashed = for {:clash, _, t} <- at, do: t
-
-    if clashed == [] do
-      {:ok, build(at, m_ins, t_ins, :theirs)}
-    else
-      texts = for {:changed, b} <- clashed, do: text(b)
-      {:clash, texts, build(at, m_ins, t_ins, :theirs), build(at, m_ins, t_ins, :mine)}
+    case for({:clash, _, {:changed, b}} <- at, do: text(b)) do
+      [] -> {:ok, build(at, m.ins, t.ins)}
+      texts -> {:clash, texts, build(at, m.ins, t.ins)}
     end
   end
 
-  # Theirs stored as it is, mine shown as it is; the banner shows theirs
-  # blocks that mine does not have.
+  # Mine shown as it is; the banner shows theirs blocks that mine does not
+  # have.
   defp whole_clash(mine, theirs) do
     have = MapSet.new(mine, &drawn/1)
     texts = for b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)
-    {:clash, Enum.take(texts, 5), theirs, mine}
+    {:clash, Enum.take(texts, 5), mine}
   end
 
   # A block whose place in one side's line-up is not certain, that the
@@ -94,7 +127,8 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []
 
-  # One base block: what each side did with it.
+  # One base block: what each side did with it. Both changed it otherwise
+  # only in one-block gaps (`crossed?/2`).
   defp pick(block, :same, :same), do: {:keep, block}
   defp pick(_block, m, :same), do: {:take, m}
   defp pick(_block, :same, t), do: {:take, t}
@@ -107,7 +141,9 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp same_edit?({:changed, a}, {:changed, b}), do: drawn(a) == drawn(b)
   defp same_edit?(_, _), do: false
 
-  defp build(at, m_ins, t_ins, wins) do
+  # Mine for a clashed block. Inserts at one place come from one side only
+  # (`certain?/2`).
+  defp build(at, m_ins, t_ins) do
     head = Map.get(t_ins, -1, []) ++ Map.get(m_ins, -1, [])
 
     body =
@@ -119,7 +155,7 @@ defmodule Barkpark.Content.PortableTextMerge do
             {:keep, b} -> [b]
             {:take, {:changed, b}} -> [b]
             {:take, :deleted} -> []
-            {:clash, m, t} -> side_block(if(wins == :mine, do: m, else: t))
+            {:clash, {:changed, b}, _t} -> [b]
           end
 
         block ++ Map.get(t_ins, i, []) ++ Map.get(m_ins, i, [])
@@ -128,54 +164,44 @@ defmodule Barkpark.Content.PortableTextMerge do
     unique_keys(head ++ body)
   end
 
-  defp side_block({:changed, b}), do: [b]
-  defp side_block(:deleted), do: []
-
-  # Each base index a side changed or deleted (`%{i => {:changed, block} |
-  # :deleted}`), and the blocks it added after each base index (`-1` for the
-  # start).
+  # What a side did, against the base:
+  #
+  #   * `at`: each base index it changed or deleted (`{:changed, block}` or
+  #     `:deleted`), and `one`, those changed in a gap of one block for one;
+  #   * `ins`: the blocks it added after each base index (`-1`, the start);
+  #   * `gaps`: each gap as `{base indexes left out, blocks put in}`;
+  #   * `unsure`: base indexes whose line-up can go more than one way.
   defp edits(base, side) do
     {a, b} = {Enum.map(base, &drawn/1), Enum.map(side, &drawn/1)}
     {pairs, unsure} = lcs(a, b)
-    {at, ins} = lined_up(base, side, pairs)
-    {at, ins, unsure}
-  end
-
-  defp lined_up(base, side, pairs) do
     anchors = [{-1, -1}] ++ pairs ++ [{length(base), length(side)}]
 
-    anchors
-    |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.reduce({%{}, %{}}, fn [{b0, s0}, {b1, s1}], {at, ins} ->
-      gone = Enum.to_list((b0 + 1)..(b1 - 1)//1)
-      # Start and count: a range ending at -1 would read as the last index.
-      new = Enum.slice(side, s0 + 1, s1 - s0 - 1)
-      {paired, rest_gone, rest_new} = pair(gone, new)
+    gaps =
+      anchors
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.map(fn [{b0, s0}, {b1, s1}] ->
+        # Start and count: a range ending at -1 would read as the last index.
+        {b0, Enum.to_list((b0 + 1)..(b1 - 1)//1), Enum.slice(side, s0 + 1, s1 - s0 - 1)}
+      end)
+      |> Enum.reject(fn {_b0, gone, new} -> gone == [] and new == [] end)
 
-      at = Enum.reduce(paired, at, fn {i, b}, at -> Map.put(at, i, {:changed, b}) end)
-      at = Enum.reduce(rest_gone, at, fn i, at -> Map.put(at, i, :deleted) end)
+    Enum.reduce(gaps, %{at: %{}, one: MapSet.new(), ins: %{}, gaps: [], unsure: unsure}, fn
+      {b0, [], new}, acc ->
+        %{acc | ins: Map.put(acc.ins, b0, new), gaps: [{[], new} | acc.gaps]}
 
-      after_i =
-        case paired do
-          [] -> b0
-          _ -> paired |> List.last() |> elem(0)
-        end
+      {_b0, gone, new}, acc when length(gone) == length(new) or new == [] ->
+        at =
+          if new == [],
+            do: Map.new(gone, &{&1, :deleted}),
+            else: Map.new(Enum.zip(gone, new), fn {i, bl} -> {i, {:changed, bl}} end)
 
-      ins =
-        if rest_new == [],
-          do: ins,
-          else: Map.update(ins, after_i, rest_new, &(&1 ++ rest_new))
+        one = if length(gone) == 1 and new != [], do: MapSet.put(acc.one, hd(gone)), else: acc.one
+        %{acc | at: Map.merge(acc.at, at), one: one, gaps: [{gone, new} | acc.gaps]}
 
-      {at, ins}
+      {_b0, gone, new}, acc ->
+        %{acc | gaps: [{gone, new} | acc.gaps]}
     end)
   end
-
-  defp pair([i | gone], [b | new]) do
-    {paired, g, n} = pair(gone, new)
-    {[{i, b} | paired], g, n}
-  end
-
-  defp pair(gone, new), do: {[], gone, new}
 
   # Index pairs of a longest common subsequence of `a` and `b`, in order,
   # and the indexes of `a` whose pairing differs between such subsequences.

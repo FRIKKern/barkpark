@@ -76,7 +76,10 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
 
     # Someone else's discard: a rich text in an object takes the published
     # text as it takes another editor's save (`RichTextRemote`).
-    socket = RichTextRemote.push(socket, old_form, socket.assigns[:editor_form])
+    socket =
+      socket
+      |> RichTextRemote.drop_holds()
+      |> RichTextRemote.push(old_form, socket.assigns[:editor_form])
 
     socket
     |> assign(:desk_discarded, %{

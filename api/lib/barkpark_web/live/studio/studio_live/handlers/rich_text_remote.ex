@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
           do: {path, Map.get(was, path, :unchanged), now}
 
     socket
-    |> assign(editor_rt_clash: %{})
+    |> drop_holds()
     |> tell(all, %{reload: true})
   end
 
@@ -128,30 +128,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   @doc """
   Reads the post `doc` against the numbers the page reported (`seen`, the
-  raw `_bp_rt_seen`). Returns `{doc, acts}` for `hold/2`. A rich text whose
-  number is older than a change the server logged for it was typed on the
-  value before that change (the oldest such entry's `was`):
+  raw `_bp_rt_seen`). Returns `{doc, acts}` for `hold/2`.
+
+  A rich text that is held (`editor_rt_held`: the view A was sent after a
+  clash, the base A typed on, theirs as stored) stays held until a post
+  carries the view's own number (#28349 r4 review, blocker 1: an IME commit
+  re-posts the held text with the number before the view). Before that, the
+  post is merged again against the base and theirs and held again, whatever
+  its text; once it shows, a post equal to the view saves nothing over
+  theirs and keeps the banner (review H), and a post that differs is A's
+  typing on what A was shown, saved as typed.
+
+  A rich text not held whose number is older than a change the server
+  logged for it was typed on the value before that change (the oldest such
+  entry's `was`):
 
     * unchanged from it: theirs stands;
-    * changed in blocks theirs left alone: the two merge block by block
-      (`PortableTextMerge`) and the merge is saved;
-    * changed in a block theirs changed too: a clash. Everything else of
-      both is saved, theirs for that block; the form keeps A's block, held,
-      with theirs in the banner.
+    * a certain merge (`PortableTextMerge`): the merge is saved;
+    * a clash: theirs stays stored exactly (review rule 1), and the form
+      holds A's view with theirs in the banner.
 
   A rich text whose number is current is A's to save as typed.
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
     log = socket.assigns[:editor_rt_log] || %{}
+    holds = socket.assigns[:editor_rt_held] || %{}
 
     Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
            path when path != [] <- Path.parse_path(name),
            posted when is_binary(posted) <- get(doc, path) do
-        case Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end) do
-          [] -> {doc, [{:current, name} | acts]}
-          later -> read_over(doc, acts, name, path, posted, later)
-        end
+        later = Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end)
+        read(doc, acts, {name, path, posted}, n, Map.get(holds, name), later)
       else
         _ -> {doc, acts}
       end
@@ -160,116 +168,151 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   def split(_socket, doc, _seen), do: {doc, []}
 
-  defp read_over(doc, acts, name, path, posted, later) do
+  # Held, the view not shown yet: held again.
+  defp read(doc, acts, at, n, %{seq: seq} = h, _later) when n < seq,
+    do: over(doc, acts, at, h.base, h.theirs, true)
+
+  # Held, the view shown: unchanged from it, nothing is saved over theirs.
+  defp read(doc, acts, {name, path, posted}, _n, %{} = h, _later) do
+    if drawn(PortableText.from_html(posted, list(h.view))) == drawn(h.view),
+      do: {put(doc, path, html(h.theirs)), [{:still, name, path} | acts]},
+      else: {doc, [{:current, name} | acts]}
+  end
+
+  defp read(doc, acts, {name, _path, _posted}, _n, nil, []), do: {doc, [{:current, name} | acts]}
+
+  defp read(doc, acts, at, _n, nil, later) do
     {_seq, was, _now} = List.last(later)
     {_seq, _was, theirs} = hd(later)
-    mine = PortableText.from_html(posted, list(was))
+    over(doc, acts, at, was, theirs, false)
+  end
 
-    cond do
-      drawn(mine) == drawn(was) ->
-        {put(doc, path, html(theirs)), acts}
+  defp over(doc, acts, {name, path, posted}, base, theirs, held?) do
+    mine = PortableText.from_html(posted, list(base))
+    stays = put(doc, path, html(theirs))
 
-      true ->
-        case PortableTextMerge.merge(list(was), mine, list(theirs)) do
-          {:ok, merged} ->
-            {put(doc, path, html(merged)), [{:merged, name, path, mine} | acts]}
+    if not held? and drawn(mine) == drawn(base) do
+      {stays, acts}
+    else
+      case PortableTextMerge.merge(list(base), mine, list(theirs)) do
+        {:ok, merged} when not held? ->
+          {put(doc, path, html(merged)), [{:merged, name, path, mine} | acts]}
 
-          {:clash, texts, stored, view} ->
-            {put(doc, path, html(stored)), [{:held, name, path, mine, view, texts} | acts]}
-        end
+        {:ok, merged} ->
+          {stays, [{:held, name, path, {base, theirs, merged, nil}} | acts]}
+
+        {:clash, texts, view} ->
+          {stays, [{:held, name, path, {base, theirs, view, texts}} | acts]}
+      end
     end
   end
 
   @doc """
-  After the save, for each act of `split/3`: the stored value is logged as a
-  change over what the page shows (A's post) and sent to show once A is idle.
-  A merge is that and nothing more. A clash puts A's block back in the form,
-  unsaved, with the conflict banner and theirs in it, and sends A's view
-  (theirs elsewhere, A's block) instead: until the page has shown it, a post
-  is read against theirs again and held, so only typing on what A was shown
-  saves A's block over theirs ("type on to save yours over theirs").
+  After the save, for each act of `split/3`. A merge is logged as a change
+  over what the page shows (A's post) and sent to show once A is idle. A
+  hold puts A's view in the form, unsaved, with the conflict banner and
+  theirs in it, logs it over the base A typed on, and sends it; a post
+  still on the shown view keeps all that and sends nothing.
   """
   def hold(socket, []), do: socket
 
   def hold(socket, acts) do
     Enum.reduce(Enum.reverse(acts), socket, fn
       {:current, name}, s ->
-        clash = s.assigns[:editor_rt_clash] || %{}
-
-        if Map.has_key?(clash, name),
-          do: assign(s, editor_rt_clash: Map.delete(clash, name)),
-          else: s
+        assign(s,
+          editor_rt_clash: Map.delete(s.assigns[:editor_rt_clash] || %{}, name),
+          editor_rt_held: Map.delete(s.assigns[:editor_rt_held] || %{}, name)
+        )
 
       {:merged, _name, path, mine}, s ->
         stored = get(s.assigns[:editor_form] || %{}, path)
         tell(s, [{path, mine, stored}], %{})
 
-      {:held, name, path, mine, view, texts}, s ->
-        form = s.assigns[:editor_form] || %{}
-        stored = get(form, path)
-        [key | _] = path
-        {s, seq} = next_seq(s)
-        s = log(s, name, {seq, mine, stored})
+      {:still, name, path}, s ->
+        case (s.assigns[:editor_rt_held] || %{})[name] do
+          %{view: view} -> keep_held(s, name, path, view, nil)
+          nil -> s
+        end
 
+      {:held, name, path, {base, theirs, view, texts}}, s ->
         s
-        |> assign(
-          editor_form: put(form, path, view),
-          editor_dirty: true,
-          editor_unsaved_keys: MapSet.put(s.assigns[:editor_unsaved_keys] || MapSet.new(), key),
-          doc_conflict: true,
-          save_status: "Updated by another user",
-          editor_clash_fields: Enum.uniq((s.assigns[:editor_clash_fields] || []) ++ [key]),
-          editor_rt_clash: Map.put(s.assigns[:editor_rt_clash] || %{}, name, texts)
-        )
-        |> send_values(%{name => %{seq: seq, html: html(view)}})
+        |> keep_held(name, path, view, texts)
+        |> send_view(name, {base, theirs, view})
     end)
   end
 
+  # The form shows A's view, unsaved, with the banner.
+  defp keep_held(socket, name, path, view, texts) do
+    [key | _] = path
+    clash = socket.assigns[:editor_rt_clash] || %{}
+
+    assign(socket,
+      editor_form: put(socket.assigns[:editor_form] || %{}, path, view),
+      editor_dirty: true,
+      editor_unsaved_keys: MapSet.put(socket.assigns[:editor_unsaved_keys] || MapSet.new(), key),
+      doc_conflict: true,
+      save_status: "Updated by another user",
+      editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ [key]),
+      editor_rt_clash: Map.put(clash, name, texts || Map.get(clash, name, []))
+    )
+  end
+
+  # A new number for the view; the hold, and the log, read a post against
+  # the base A typed on (never A's own earlier post: review blocker 1).
+  defp send_view(socket, name, {base, theirs, view}) do
+    {socket, seq} = next_seq(socket)
+    holds = socket.assigns[:editor_rt_held] || %{}
+    hold = %{seq: seq, base: base, theirs: theirs, view: view}
+
+    socket
+    |> log(name, {seq, base, theirs})
+    |> assign(editor_rt_held: Map.put(holds, name, hold))
+    |> send_values(%{name => %{seq: seq, html: html(view)}})
+  end
+
+  @doc "Ends every hold: the form was read again from the store."
+  def drop_holds(socket), do: assign(socket, editor_rt_held: %{}, editor_rt_clash: %{})
+
   @doc """
   While A's words in an object are held (`Lifecycle`'s unsaved branch keeps
-  the form's value), another save of the same rich text: merged into what A
-  holds as a post is (`split/3`), logged over it, and sent. Without it A's
-  next post, typed on the held view, would write over that save unseen.
-  `old` and `new` are the stored values before and after it.
+  the form's value), another save of the same rich text: merged into the
+  view A holds, held over the base A typed on, and sent as a new view.
+  Without it A's next post, typed on the old view, would write over that
+  save unseen. `old` and `new` are the stored values before and after it.
   """
   def push_held(socket, old, new) do
     form = socket.assigns[:editor_form] || %{}
+    holds = socket.assigns[:editor_rt_held] || %{}
 
     socket.assigns[:editor_schema]
     |> changes(old || %{}, new || %{})
     |> Enum.reduce(socket, fn {path, was, now}, s ->
       held = get(form, path)
+      name = input_name(path)
+      h = holds[name]
 
       # Not held here: the form took theirs (`push/3` told the page).
-      if drawn(held) in [drawn(was), drawn(now)] do
+      if is_nil(h) and drawn(held) in [drawn(was), drawn(now)] do
         s
       else
-        name = input_name(path)
+        base = if h, do: h.base, else: was
 
-        case PortableTextMerge.merge(list(was), list(held), list(now)) do
-          {:ok, merged} ->
-            s
-            |> assign(editor_form: put(s.assigns[:editor_form], path, merged))
-            |> tell_view(name, held, now, merged)
+        {view, texts} =
+          case PortableTextMerge.merge(list(was), list(held), list(now)) do
+            {:ok, merged} -> {merged, nil}
+            {:clash, texts, view} -> {view, texts}
+          end
 
-          {:clash, texts, _stored, view} ->
-            s
-            |> assign(
-              editor_form: put(s.assigns[:editor_form], path, view),
-              editor_rt_clash: Map.put(s.assigns[:editor_rt_clash] || %{}, name, texts)
-            )
-            |> tell_view(name, held, now, view)
-        end
+        clash = s.assigns[:editor_rt_clash] || %{}
+
+        s
+        |> assign(
+          editor_form: put(s.assigns[:editor_form], path, view),
+          editor_rt_clash: if(texts, do: Map.put(clash, name, texts), else: clash)
+        )
+        |> send_view(name, {base, now, view})
       end
     end)
-  end
-
-  defp tell_view(socket, name, shown, stored, view) do
-    {socket, seq} = next_seq(socket)
-
-    socket
-    |> log(name, {seq, shown, stored})
-    |> send_values(%{name => %{seq: seq, html: html(view)}})
   end
 
   @doc """

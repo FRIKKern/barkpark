@@ -32,7 +32,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
                ~r|<blockquote class="bp-doc-conflict-theirs"[^>]*>B one two</blockquote>|
 
       # A typed on before its editor showed the view: held again.
-      html = post_rt(a, "<p>one two AA</p>", view - 1)
+      html = post_rt(a, "<p>one two AA</p><p>B para</p>", view - 1)
       assert words(stored(c)["meta"]["rt"]) == ["B one two", "B para"]
       assert html =~ "Someone else rewrote"
       assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: view2}}}, 2_000)
@@ -174,7 +174,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
     b = open(c)
     view = held_by_clash(a, b, c)
 
-    html = post_rt(a, "<p>one two Aか漢</p>", view - 1)
+    html = post_rt(a, "<p>one two Aか漢</p><p>B para</p>", view - 1)
 
     assert words(stored(c)["meta"]["rt"]) == ["B one two", "B para"]
     assert words(form(a)["meta"]["rt"]) == ["one two Aか漢", "B para"]
@@ -183,5 +183,70 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
 
     post_rt(a, "<p>one two Aか漢 Q</p><p>B para</p>", view2)
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two Aか漢 Q", "B para"] end)
+  end
+
+  # #28349 r4 review, blocker 1 (J): an IME commit re-posts the held text
+  # with the number before the view; it read as "A changed nothing" and
+  # dropped the hold, and A's next key wrote A's block over B's unseen.
+  # Review H: a post of the view unchanged, with its number, saved A's block
+  # over theirs. A hold ends only on a post that carries the view's number
+  # and differs from the view.
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    test "#{surface}: J and H: the held text posted again stays held; the view posted unchanged saves nothing; typing on saves A's",
+         c do
+      c = %{c | surface: @surface}
+      a = open(c)
+      b = open(c)
+      view = held_by_clash(a, b, c)
+      theirs = stored(c)["meta"]["rt"]
+
+      html = post_rt(a, "<p>one two A</p><p>B para</p>", view - 1)
+      assert html =~ "Someone else rewrote"
+      assert stored(c)["meta"]["rt"] == theirs
+      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+      assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: view2}}}, 2_000)
+      assert view2 > view
+
+      html = post_rt(a, "<p>one two A</p><p>B para</p>", view2)
+      assert html =~ "Someone else rewrote"
+      assert stored(c)["meta"]["rt"] == theirs
+      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+
+      html = post_rt(a, "<p>one two AZ</p><p>B para</p>", view2)
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two AZ", "B para"] end)
+      refute html =~ "bp-doc-conflict-theirs"
+    end
+
+    # Review 06 and 33, end to end: a split of the block B edited, and both
+    # deleting a block while B edits the next one, wrote words nobody typed
+    # (06) or lost B's block (33). Neither can be lined up block by block:
+    # the store keeps B's value exactly, A keeps its own in the editor.
+    test "#{surface}: 06 and 33: a post that cannot be lined up leaves B's value stored as it is",
+         c do
+      c = %{c | surface: @surface}
+
+      for {b_html, a_html, banner} <- [
+            {"<p>P</p><p>Q one two B</p><p>R</p>", "<p>P</p><p>Q one</p><p> two</p><p>R</p>",
+             "Q one two B"},
+            {"<p>P</p><p>R B</p>", "<p>P</p><p>R</p>", "R B"}
+          ] do
+        a = open(c)
+        b = open(c)
+        b_saves_rt(b, c, "<p>P</p><p>Q one two</p><p>R</p>", ["P", "Q one two", "R"])
+        assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seen}}}, 2_000)
+        send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => b_html})
+        assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: _}}}, 2_000)
+        theirs = stored(c)["meta"]["rt"]
+
+        html = post_rt(a, a_html, seen)
+        assert html =~ "Someone else rewrote"
+        assert html =~ ~r|<blockquote class="bp-doc-conflict-theirs"[^>]*>#{banner}</blockquote>|
+        assert stored(c)["meta"]["rt"] == theirs
+        assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{html: shown}}}, 2_000)
+        assert shown == Barkpark.Content.PortableText.to_html(form(a)["meta"]["rt"])
+      end
+    end
   end
 end

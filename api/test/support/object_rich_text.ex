@@ -174,14 +174,17 @@ defmodule BarkparkWeb.ObjectRichText do
     })
   end
 
-  # B rewrites the first block and adds a paragraph; A's editor, still
-  # showing "one two", posts a word in that block: a clash, held with the
-  # banner. The number of the view A is sent (A's block, B's paragraph).
+  # B adds a paragraph, and A's editor shows it; then B rewrites the first
+  # block. A's editor, still showing "one two" there, posts a word in that
+  # block: a clash of that block, held with the banner. The number of the
+  # view A is sent (A's block, B's paragraph). The store keeps B's.
   def held_by_clash(a, b, c) do
+    b_saves_rt(b, c, "<p>one two</p><p>B para</p>", ["one two", "B para"])
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seen}}}, 2_000)
     b_saves_rt(b, c, "<p>B one two</p><p>B para</p>", ["B one two", "B para"])
     assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seq}}}, 2_000)
 
-    html = post_rt(a, "<p>one two A</p>", seq - 1)
+    html = post_rt(a, "<p>one two A</p><p>B para</p>", seen)
 
     assert html =~ "Someone else rewrote"
 
