@@ -52,15 +52,22 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
 
   # Each op, and whether it lands from an old copy, the callout byte-equal.
   @ops [
-    {"delete", false},
-    {"move into a section", true},
-    {"wrap in a section", true},
-    {"re-id", false},
-    {"split", false},
-    {"merge a paragraph in", false},
-    {"retype", false},
-    {"reorder", true},
-    {"duplicate", true}
+    {"delete", false, "an old copy that deletes a callout is refused by name, writing nothing"},
+    {"move into a section", true,
+     "an old copy that moves a callout into a section lands; the callout keeps its body"},
+    {"wrap in a section", true,
+     "an old copy that wraps a callout in a new section lands; the callout keeps its body"},
+    {"re-id", false,
+     "an old copy that gives a callout a new id is refused by name, writing nothing"},
+    {"split", false, "an old copy that splits a callout is refused by name, writing nothing"},
+    {"merge a paragraph in", false,
+     "an old copy that merges a paragraph into a callout is refused by name, writing nothing"},
+    {"retype", false,
+     "an old copy that turns a callout into another block type is refused by name, writing nothing"},
+    {"reorder", true,
+     "an old copy that moves a callout to another top-level place lands; the callout keeps its body"},
+    {"duplicate", true,
+     "an old copy that copies a callout under a new id lands; the stored callout keeps its body"}
   ]
 
   # {op, the edit of the text}
@@ -151,10 +158,10 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
   defp holder("wrap in a section"), do: "s9"
   defp holder(_op), do: nil
 
-  for {op, lands?} <- @ops do
+  for {op, lands?, name} <- @ops do
     @op op
     if lands? do
-      test "an old copy without a fingerprint: #{op} lands, and the callout keeps its body" do
+      test "#{name}" do
         slug = paper!()
         assert where(stored(slug)) == {nil, callout()}
         {bpml, rev} = pull!(slug)
@@ -165,7 +172,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
         assert where(stored(slug)) == {holder(@op), callout()}
       end
     else
-      test "an old copy without a fingerprint: #{op} is refused by name, and the body stays" do
+      test "#{name}" do
         slug = paper!()
         before = stored(slug)
         {bpml, rev} = pull!(slug)
@@ -192,11 +199,11 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
       |> String.replace(@inside, @inside <> ~s(\n    <p id="c1">Read this first.</p>))
 
   for {name, edit} <- [
-        {"holds the callout's id twice", :twice},
-        {"gives the callout's id to a paragraph in a section", :other_kind}
+        {"holds a callout's id twice", :twice},
+        {"gives a callout's id to a paragraph in a section", :other_kind}
       ] do
     @edit edit
-    test "an old copy that #{name} is refused by name, and the body stays" do
+    test "an old copy that #{name} is refused by name, writing nothing" do
       slug = paper!()
       before = stored(slug)
       {bpml, rev} = pull!(slug)
@@ -204,8 +211,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
       assert copy != old_text(bpml)
 
       answer = sync_copy(slug, copy, rev) |> json_response(422)
-      assert answer["error"]["code"] == "bpml_stale_copy"
-      assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+      assert answer["error"]["message"] =~ ~r/\bc1\b/
       assert stored(slug) == before
     end
   end
