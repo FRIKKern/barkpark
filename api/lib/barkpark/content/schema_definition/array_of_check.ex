@@ -4,9 +4,10 @@ defmodule Barkpark.Content.SchemaDefinition.ArrayOfCheck do
 
   `SchemaDefinition.parse/2` refuses an `arrayOf` whose `of` is missing, not
   a map or a list, an empty list, or a shape with no string `type`
-  (`array_missing_of`, `field_type_must_be_string`). Schema apply
-  (`Content.upsert_schema/3`, `/v1/schemas`) wrote such a schema anyway, and
-  then:
+  (`array_missing_of`, `field_type_must_be_string`). `/v1/schemas` runs it
+  before the write, but every other door writes through
+  `Content.upsert_schema/3` alone (workspace schema provisioning, the tag
+  registry, plugin bootstrap, seeds) and stored such a schema, and then:
 
     * `Content.Validation` could not parse it and fell back to the legacy
       validator, so every composite, arrayOf and localizedText check was off
