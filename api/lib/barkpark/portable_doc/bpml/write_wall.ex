@@ -21,17 +21,19 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
   `normalize` is the spelling equivalence: a stored spelling the print merely
   re-spells (an alias key, a string heading level) is shown. Each of its rules
-  fires on an exact key set and drops no key, and its property test holds that
-  it loses nothing, so a spelling it misses refuses an edit and never loses
-  content.
+  fires on an exact key set and drops only keys that hold nothing (nil, false
+  or empty) or repeat a body an alias keeps, and empty text nodes; its sweep
+  over every stored document holds that it loses nothing, so a spelling it
+  misses refuses an edit and never loses content.
 
   ## The rule
 
   A stored block that holds unshown content must come out of the push
   byte-equal to S: exactly one top-level block with its id, equal to the stored
-  block. So editing it, deleting it, moving it into a container, re-adding it
-  without its id, or pushing its id twice is refused with 422 `bpml_unshown`,
-  naming the block and the first unshown path. A stored block with no id, or
+  block. So editing it, deleting it, moving it into a container or re-adding
+  it without its id is refused with 422 `bpml_unshown`, naming the block and
+  the first unshown path; pushing any id twice is refused first, with 422
+  `bpml`. A stored block with no id, or
   one whose id S already repeats, cannot be matched, so any push that changes
   the document is refused when it holds unshown content. Blocks that hold
   none are written from the push as before.
