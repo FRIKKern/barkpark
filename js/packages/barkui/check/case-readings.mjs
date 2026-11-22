@@ -66,7 +66,6 @@ export const CASE_READINGS = {
       "a selftest whose last case passes its ceiling stops there, failing, with the sentence": 0.5,
       "top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name": 43.7,
       "top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load": 38.8,
-      "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)": 19.8,
       "the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent": 3.3,
       "one part more than one CI job holds is refused, with the sentence that says how many it holds": 0.1,
       "a part.json that names a property to allow is refused at discovery": 0,
@@ -82,6 +81,10 @@ export const CASE_READINGS = {
       "placement: a stage moved into a shadow root, with nothing styled around it, fails by name": 0.6,
       "placement: a stage moved into a new plain wrapper, with no shadow root anywhere, passes": 2.3,
       "placement: on the stage with no script any style attribute fails by name, a listed property on a box and an empty one alike": 0.3,
+      // The census's own two pages, added after the run above: from their PR's hosted run, job 137185081135 (run
+      // 45014740614, commit 2ee9c33320ba5ce178e38afb1df0eb3d00a7ae57).
+      "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)": 20,
+      "top layer: the part's context holds the check's own two pages and no other, known by identity": 1.5,
     },
   },
   views: {
