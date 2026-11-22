@@ -16,10 +16,14 @@ export async function readView(page, part, waits = []) {
   // own resets the emulated ratio to 1 for everything after it. Playwright is told to leave the caret alone, so it
   // adds no style of its own to the page: the check hides the caret itself, from its own world (caret in drawn.mjs).
   const capture = async (p, c) => (await p.screenshot({ clip: { x: c.x, y: c.y, width: c.w, height: c.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
-  const shoot = (clip) => capture(page, clip)
+  const shoot = async (clip) => {
+    await world(() => window.__barkCheck.still('a capture'))
+    return capture(page, clip)
+  }
   // The stage's box, widened to whole CSS pixels (so whole device pixels too): a capture's pixels are the page's own.
   // With a box of the part's layers open in the top layer, the capture covers that box too, and what the page draws
   // behind it is captured first with the open boxes hidden (layers.mjs).
+  await world(() => window.__barkCheck.still('a reading'))
   const open = await world(([s, b]) => window.__barkCheck.layers(document.querySelector(s), b), [sel, (part.json.layers ?? []).map((l) => l.box)])
   const clip = await world(([s, boxes]) => {
     const r = document.querySelector(s).getBoundingClientRect()

@@ -287,7 +287,8 @@ export function installHelpers() {
     return opacity < 0.1 ? `is ${opacity} opaque` : true
   }
 
-  /** Waits until every part's computed colours read the same on two frames 50ms apart (at most 2s).
+  /** Waits until what runs with an end has ended (at most 2s), then until every part's computed colours read the
+      same on two frames 50ms apart (at most 2s).
       Polled on animation frames: in a headless page, transitions advance only when a frame runs. */
   const settle = async () => {
     const read = () => [...document.querySelectorAll('[data-slot]')].map((el) => {
@@ -295,7 +296,8 @@ export function installHelpers() {
       return `${s.color}|${s.backgroundColor}|${s.borderTopColor}|${s.boxShadow}`
     }).join(';')
     await frame()
-    const running = document.getAnimations().filter((a) => a instanceof CSSTransition)
+    // Everything running that has an end: an endless animation never comes to rest; the motion light pauses it.
+    const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity)
     await Promise.race([Promise.all(running.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 2000))])
     await frame()
     let last = read()
@@ -309,29 +311,43 @@ export function installHelpers() {
   }
 
   const state = {}
-  /** The one way the checker changes the page's look and puts it back (a sheet of its own on or off, a pin set or
-      taken off): `change` runs, and the read after it is settled. Under reduced motion base.css gives every property
-      a 0.01ms transition, so each change starts transitions; those are the checker's own doing, and each is run to
-      its end at once. A transition the page had running by its own rule is not touched; one the change cut short is
-      put back where it stood, as an animation of the same keyframes and timing, so it still reads as it truly is.
+  /** What moves on the page now: every animation or transition that is running. One paused by the check (the motion
+      light holds them at one moment on purpose) is at rest. */
+  const moving = () =>
+    document.getAnimations().filter((a) => a.playState === 'running').map((a) => `${describe(a.effect?.target ?? document.body)}${a.effect?.pseudoElement ?? ''} ${a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : a instanceof CSSAnimation ? `animation ${a.animationName}` : 'animation'}`)
+  /** Red by name when the page is not at rest: a read (or a change of the checker's) never happens mid-way. */
+  const atRest = (who) => {
+    const now = moving()
+    if (now.length) throw new Error(`read on a page not at rest: ${who}: ${[...new Set(now)].slice(0, 3).join('; ')}`)
+  }
+  /** The door before a read: what runs with an end is waited for, inside settle's bound of 2s, a frame at a time;
+      then the page is at rest, or red by name. */
+  const still = async (who) => {
+    const until = performance.now() + 2000
+    const ends = () => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity)
+    while (ends().length && performance.now() < until) await frame()
+    atRest(who)
+  }
+  /** The one way the checker changes the page's look (a sheet of its own on or off, a pin set or taken off): `change`
+      runs with transitions held off by a first-layer sheet of the checker's own, and style is brought up to date
+      before that sheet goes, so the change starts no transition. The checker adds no animation to the page.
       `place` names the caller; state.restyled counts the calls by place. */
+  let stillSheet = null
   const restyle = (place, change) => {
-    const running = document.getAnimations().filter((a) => a instanceof CSSTransition && a.playState === 'running')
-    const was = running.map((a) => ({ a, target: a.effect.target, pseudoElement: a.effect.pseudoElement, frames: a.effect.getKeyframes(), timing: a.effect.getTiming(), at: a.currentTime, since: performance.now() }))
+    atRest(`the checker's change "${place}"`)
+    stillSheet ??= Object.assign(document.createElement('style'), { textContent: '@layer barkui-check { *, *::before, *::after, *::backdrop { transition: none !important; } }' })
+    document.head.prepend(stillSheet)
     try {
       change()
     } finally {
-      // getAnimations brings style up to date first: every transition the change starts is in the list.
-      for (const a of document.getAnimations()) if (a instanceof CSSTransition && !running.includes(a)) a.finish()
-      for (const w of was) {
-        if (w.a.playState !== 'idle' || !w.target?.isConnected) continue
-        const back = w.target.animate(w.frames, { ...w.timing, pseudoElement: w.pseudoElement ?? undefined })
-        back.currentTime = w.at + (performance.now() - w.since)
-      }
+      // getAnimations brings the whole document's style up to date with transitions off: the new style is then the
+      // starting point of any later change, and taking the sheet off starts nothing.
+      document.getAnimations()
+      stillSheet.remove()
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, still, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */
