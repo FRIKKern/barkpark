@@ -168,7 +168,7 @@ const censusRows = (m, n) => ({
 /** The rows of the two top-layer runs, by run, as their cases hold them. */
 export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), census: Object.keys(censusRows()) }
 // Each top-layer case is `layers`: it opens its boxes by real input (a click, a hover, a Tab) or holds a refusal,
-// and runs in the selftest's rest job by its one rule (check/jobs.mjs).
+// and runs in the selftest's layers job by its one rule (check/jobs.mjs).
 export const LAYER_CASES = [
   {
     name: 'top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name',

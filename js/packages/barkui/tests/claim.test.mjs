@@ -61,7 +61,7 @@ describe('how many parts the check holds', () => {
     const passage = raw.slice(a + c.MARKS[0].length, b).trim()
     expect(a >= 0 && b > a).toBe(true)
     expect(passage).toBe(c.capacityPassage())
-    for (const change of [{ HEADROOM: 1.4 }, { SELFTEST_MOST: 0.75 }, { STEP_MINUTES: 20 }, { AT_ONCE: 2 }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, views: { ...c.INPUT.READINGS.selftest.views, seconds: 300 } } } }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, rest: { ...c.INPUT.READINGS.selftest.rest, seconds: 100 } } } }, { READINGS: { ...c.INPUT.READINGS, check: c.INPUT.READINGS.check.map((r) => ({ ...r, folder: r.folder + 12 })) } }])
+    for (const change of [{ HEADROOM: 1.4 }, { SELFTEST_MOST: 0.75 }, { JOB_SHARE: 0.75 }, { STEP_MINUTES: 20 }, { AT_ONCE: 2 }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, views: { ...c.INPUT.READINGS.selftest.views, seconds: 300 } } } }, { READINGS: { ...c.INPUT.READINGS, selftest: { ...c.INPUT.READINGS.selftest, rest: { ...c.INPUT.READINGS.selftest.rest, seconds: 100 } } } }, { READINGS: { ...c.INPUT.READINGS, check: c.INPUT.READINGS.check.map((r) => ({ ...r, folder: r.folder + 12 })) } }])
       expect(c.capacityPassage(c.plan({ ...c.INPUT, ...change })), JSON.stringify(change)).not.toBe(passage)
   })
 

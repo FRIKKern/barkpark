@@ -16,34 +16,37 @@ import { readSelftestReports } from './selftest-report.mjs'
 export const AGGREGATE = 'BarkUI showroom check'
 // The jobs it reads, by their ids in barkui.yml, and the names they render. Every name here and every group
 // name the split can make has a row in .github/required-checks.json (a test holds that too).
-export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest' }
+export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest', selftestLayers: 'barkui-selftest-layers' }
 export const NAMES = {
   plan: 'BarkUI plan (does this change touch it, and which groups)',
   selftest: 'BarkUI selftest, views',
   selftestRest: 'BarkUI selftest, presses, states and refusals',
+  selftestLayers: 'BarkUI selftest, top layer',
   group: (k) => `BarkUI check, group ${k}`,
 }
 
-// The selftest runs as two jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
-// case is the one rule below, written here once: `views` runs the cases that read the wide or phone views and
-// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`, not `layers`); `rest` runs
-// every other case: presses, states, refusals, the no-script print, the direct readings, and the top layer's cases
-// (`layers`), each of which opens its boxes by real input or holds a refusal. A test holds that every case runs
-// in exactly one job and that the two together run every case (coverCases).
+// The selftest runs as the jobs below, side by side, each with its own ceiling (check/capacity.mjs). Which job
+// runs a case is the one rule below, written here once, by what kind of case it is: `layers` runs the top layer's
+// cases (`layers`), each of which opens its boxes by real input or holds a refusal; `views` runs the cases that read
+// the wide or phone views and drive no states (their `only` names skins, schemes or phone; no `states`, not
+// `direct`); `rest` runs every other case: presses, states, refusals, the no-script print and the direct readings.
+// A `layers` case goes to `layers` even when it would fit the views rule. A test holds that every case runs in
+// exactly one job and that the jobs together run every case (coverCases).
 export const SELFTEST_JOBS = [
   { key: 'views', id: JOBS.selftest, name: NAMES.selftest },
   { key: 'rest', id: JOBS.selftestRest, name: NAMES.selftestRest },
+  { key: 'layers', id: JOBS.selftestLayers, name: NAMES.selftestLayers },
 ]
 const VIEWS = ['skins', 'schemes', 'phone']
 /** The selftest job that runs a case, by its key. */
-export const selftestJob = (c) => (!c.direct && !c.states && !c.layers && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
+export const selftestJob = (c) => (c.layers ? 'layers' : !c.direct && !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest')
 /** Why case `c` sits in the wrong job, given how its run touched the top layer (`touch`, layers.mjs topLayerTouch):
-    a case that opens a layer or holds a layer refusal is a `layers` case and runs in the rest job, and a `layers`
-    case does one of the two. Empty when it sits where it belongs. The selftest runner asks this of every case it
+    a case that opens a layer or holds a layer refusal never runs in the views job (a `layers` case runs in the
+    layers job, any other such case in the rest job), and a `layers` case does one of the two. Empty when it sits where it belongs. The selftest runner asks this of every case it
     runs, so a new case that forgets the flag is caught by what it does, not by its name. */
 export const layerMisplaced = (c, touch) =>
   touch && selftestJob(c) === 'views'
-    ? `"${c.name}" runs in the views job, but ${touch}: a case that opens a layer or holds a layer refusal is a layers case and runs in the rest job (check/jobs.mjs)`
+    ? `"${c.name}" runs in the views job, but ${touch}: a case that opens a layer or holds a layer refusal is a layers case and runs in the layers job (check/jobs.mjs)`
     : c.layers && !touch
       ? `"${c.name}" is a layers case, but its run opens no layer and holds no layer refusal`
       : ''
@@ -60,7 +63,7 @@ export function coverCases(lists, cases) {
   for (const [key, list] of Object.entries(lists)) for (const c of list) runs.has(c) ? runs.get(c).push(key) : out.push(`the ${key} job runs "${c.name}", which is no selftest case`)
   for (const [c, keys] of runs) {
     if (!keys.length) out.push(`"${c.name}": no selftest job runs it`)
-    if (keys.length > 1) out.push(`"${c.name}": the ${keys.join(' and ')} jobs both run it`)
+    if (keys.length > 1) out.push(`"${c.name}": the ${keys.join(' and ')} jobs each run it`)
   }
   const total = Object.values(lists).reduce((n, l) => n + l.length, 0)
   if (total !== cases.length) out.push(`the selftest jobs run ${total} cases, and there are ${cases.length}`)
@@ -181,6 +184,8 @@ export function legGroup(k, given, dir = partsDir, env = process.env) {
 const said = { failure: 'is red', cancelled: 'was cancelled', missing: 'is missing from this run' }
 const named = { [JOBS.plan]: 'the plan job', [JOBS.check]: 'the check jobs', ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, `the selftest job "${j.name}"`])) }
 const LEGS = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
+/** The selftest jobs, counted from SELFTEST_JOBS, as the closing check's green rows say them. */
+export const SELFTEST_ALL = `the ${SELFTEST_JOBS.length} selftest jobs`
 
 /** The closing check. Trusts the jobs' results first and their reports second: a report cannot turn a job that
     failed or was cancelled green, and a report from another group, part list or commit counts as missing. */
@@ -194,7 +199,7 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   const rows = []
   if (run === 'false') {
     for (const id of LEGS) if (result(id) !== 'skipped') rows.push(`${named[id]} ${state(id)}, though the plan said BarkUI was not touched`)
-    return rows.length ? red(rows) : { ok: true, rows: ['green: the plan said BarkUI was not touched, and the check jobs and both selftest jobs were skipped'] }
+    return rows.length ? red(rows) : { ok: true, rows: [`green: the plan said BarkUI was not touched, and the check jobs and ${SELFTEST_ALL} were skipped`] }
   }
   if (run !== 'true') return red([`the plan job said run=${JSON.stringify(run)}, neither "true" nor "false"`])
   for (const id of LEGS) {
@@ -226,7 +231,7 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   const selftest = readSelftestReports(reports, { sha, jobs: SELFTEST_JOBS })
   rows.push(...selftest.rows)
   if (rows.length) return red(rows)
-  return { ok: true, rows: [`green: ${expected.length} group(s) of ${names.length} part(s), each checked once at ${sha}, and both selftest jobs passed, running each of ${selftest.cases} cases once`] }
+  return { ok: true, rows: [`green: ${expected.length} group(s) of ${names.length} part(s), each checked once at ${sha}, and ${SELFTEST_ALL} passed, running each of ${selftest.cases} cases once`] }
 }
 
 /** Every report file in a folder (each job uploads one), read or not. */
