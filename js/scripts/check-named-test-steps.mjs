@@ -35,6 +35,8 @@
 //   * a named step's whole run block is not one of the known whole forms, in
 //     which the file's own exit status is the step's exit status (see
 //     CAPTURED_FORM); any other block is refused, by step name;
+//   * a named step carries a key other than name and run (if and
+//     continue-on-error are compared with the Test step above);
 //   * a test file path appears anywhere else in the jobs (env, with, matrix);
 //   * NAMED_STEP_FILES is written in any shape but one literal array of
 //     strings passed to excludeUnlessNamed in the one known `exclude:` line,
@@ -96,11 +98,11 @@ export function parseWorkflow(text) {
   let step = null
   let run = false
   const stepKey = (key, value, n) => {
+    step.keys.push(key)
     if (key === 'run') {
       if (/^[|>][-+]?$/.test(value)) run = true
       else step.runLines.push({ n, text: value })
     } else if (key === 'if') step.if = value
-    else if (key === 'shell') step.shell = value
     else if (key === 'continue-on-error') step.coe = value
     else if (key === 'name') step.name = value.replace(/^"(.*)"$/, '$1')
     else if (value) other.push({ n, text: value })
@@ -128,7 +130,7 @@ export function parseWorkflow(text) {
       job[m[1] === 'continue-on-error' ? 'coe' : m[1]] = m[2].trim()
       step = null
     } else if (job && (m = /^ {6}- ([\w-]+):\s?(.*)$/.exec(raw))) {
-      step = { job, n, name: null, if: null, coe: null, shell: null, runLines: [] }
+      step = { job, n, name: null, if: null, coe: null, keys: [], runLines: [] }
       steps.push(step)
       stepKey(m[1], m[2].trim(), n)
     } else if (step && (m = /^ {8}([\w-]+):\s?(.*)$/.exec(raw))) {
@@ -160,6 +162,10 @@ const CAPTURED_FORM = [
   /^esac$/,
   /^exit "\$status"$/,
 ]
+
+// The only keys a named step may carry. `if` and `continue-on-error` are
+// compared with the Test step's own; any other key is refused.
+const NAMED_STEP_KEYS = ['name', 'run', 'if', 'continue-on-error']
 
 /** Which known whole form a named step's run block is, or null. */
 export function blockForm(texts) {
@@ -243,7 +249,12 @@ export function judge(workflowText, packages) {
   }
   for (const s of new Set(runs.map((r) => r.step))) {
     const name = `step "${s.name ?? '(unnamed)'}" (${WORKFLOW}:${s.n})`
-    if (s.shell) cannot.push(`${name}: runs by name under \`shell: ${s.shell}\`; refused`)
+    const extra = s.keys.filter((k) => !NAMED_STEP_KEYS.includes(k))
+    if (extra.length) {
+      cannot.push(
+        `${name}: a named step carries only ${NAMED_STEP_KEYS.join(', ')}; it also has ${extra.join(', ')}; refused`,
+      )
+    }
     if (!blockForm(s.runLines.map((l) => l.text))) {
       cannot.push(
         `${name}: its run block is not one of the known whole forms (the known line alone, or the captured form of the pd-golden mirror step); refused`,

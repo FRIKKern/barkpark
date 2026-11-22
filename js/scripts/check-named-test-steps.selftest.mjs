@@ -99,11 +99,22 @@ ${extra}      - name: Test
       ['step "Mirror"', 'not one of the known whole forms'],
     ],
     [
-      'the known line under a shell: key is refused',
+      'a named step with a shell key is refused',
       wf(MIRROR, `        shell: bash {0}\n${CONF}`),
       pkg(),
       2,
-      ['step "Conformance"', 'shell: bash {0}'],
+      ['step "Conformance"', 'it also has shell'],
+    ],
+    [
+      'a named step with another key is refused',
+      wf(MIRROR, `        working-directory: js/packages/react\n${CONF}`),
+      pkg(),
+      2,
+      [
+        'step "Conformance"',
+        'a named step carries only name, run',
+        'it also has working-directory',
+      ],
     ],
     ['the one-line exclude passes too', wf(MIRROR, CONF), pkg({ text: ONE_LINE }), 0, []],
     [
