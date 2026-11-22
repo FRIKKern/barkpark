@@ -77,6 +77,13 @@ defmodule BarkparkWeb.Studio.DeskRemoteTitleHeaderTest do
     |> String.trim()
   end
 
+  # The big title over the form and the page's sr-only h1 (`Editor`).
+  defp headings(view) do
+    for sel <- ["[data-pane-editing] .dk-big-title", "[data-pane-editing] h1.sr-only"] do
+      view |> element(sel) |> render() |> String.replace(~r/<[^>]+>/, "") |> String.trim()
+    end
+  end
+
   defp posts(view, key, value) do
     form = Map.take(assigns(view).editor_form, ~w(title notes))
 
@@ -144,5 +151,58 @@ defmodule BarkparkWeb.Studio.DeskRemoteTitleHeaderTest do
     {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
     assert doc.title == "Doc 7 B1"
     assert eventually(fn -> header(a) == "Doc 7 B1" end)
+  end
+
+  # #28322 review: the big title and the h1 named `editor_doc` too.
+  test "B saves a new title: A's big title and h1 show it", c do
+    a = open(c)
+    b = open(c)
+    assert headings(a) == ["Doc 7", "Doc 7"]
+
+    posts(b, "title", "Doc 7 B1")
+
+    assert eventually(fn -> headings(a) == ["Doc 7 B1", "Doc 7 B1"] end)
+    assert header(a) == "Doc 7 B1"
+  end
+
+  test "a restore names the restored title", c do
+    a = open(c)
+    [first | _] = Content.list_revisions(c.id, c.type, @dataset, limit: 30) |> Enum.reverse()
+    posts(a, "title", "Doc 7 A1")
+    assert eventually(fn -> header(a) == "Doc 7 A1" end)
+
+    BarkparkWeb.EditorPost.press(a, "restore-revision", %{"id" => first.id})
+
+    assert eventually(fn ->
+             {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+             doc.title == "Doc 7"
+           end)
+
+    assert eventually(fn -> header(a) == "Doc 7" end)
+    assert headings(a) == ["Doc 7", "Doc 7"]
+    assert assigns(a).page_title == "Doc 7"
+  end
+
+  # TanStack names its cached doc, which carries this editor's unsent values
+  # (edits.ts `overlay`): a refused title is A's own in the header, under
+  # B's save too.
+  @long "Doc 7 " <> String.duplicate("x", 300)
+
+  test "A's refused title is named, also after B's save", c do
+    a = open(c)
+    b = open(c)
+    posts(a, "title", @long)
+
+    assert eventually(fn ->
+             MapSet.member?(assigns(a).editor_unsaved_keys || MapSet.new(), "title")
+           end)
+
+    assert header(a) == @long
+    assert headings(a) == [@long, @long]
+
+    posts(b, "notes", "n0 B")
+    assert eventually(fn -> assigns(a).editor_form["notes"] == "n0 B" end)
+    assert header(a) == @long
+    assert assigns(a).page_title == @long
   end
 end

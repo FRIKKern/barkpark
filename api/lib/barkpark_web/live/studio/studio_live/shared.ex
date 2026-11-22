@@ -2818,12 +2818,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # the stored title, else the schema's derived preview title (a titleless
   # author is its name), else a singleton's schema title, else "Untitled".
   #
-  # `doc` is the row to name: the open document as this tab last saved or
-  # loaded it, or, after another editor's save, the newest stored version this
-  # tab has seen (`Lifecycle.doc_updated/2`, task-42a6f063263338f6).
-  def assign_page_title(socket, doc \\ nil) do
+  # The row named is the newest stored version this tab has seen
+  # (`Lifecycle.base_doc/1`): `editor_doc` stays this tab's own row after
+  # another editor's save (task-42a6f063263338f6). A title this tab holds
+  # unsaved (a save that did not land, a refused one) is named over it, as
+  # TanStack's DocumentPane names its cached doc, which carries this editor's
+  # unsent values (edits.ts `overlay`).
+  def assign_page_title(socket) do
     title =
-      case doc || socket.assigns[:editor_doc] do
+      case title_doc(socket) do
         %{} = doc ->
           BarkparkWeb.Studio.DocTitle.shown(Map.get(doc, :title)) ||
             derived_title(doc, socket.assigns[:editor_schema])
@@ -2833,6 +2836,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       end
 
     assign(socket, page_title: title)
+  end
+
+  defp title_doc(socket) do
+    with %{} = doc <- BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle.base_doc(socket) do
+      held = socket.assigns[:editor_unsaved_keys] || MapSet.new()
+
+      case socket.assigns[:editor_form] do
+        %{"title" => title} when is_binary(title) ->
+          if MapSet.member?(held, "title"), do: %{doc | title: title}, else: doc
+
+        _ ->
+          doc
+      end
+    end
   end
 
   defp derived_title(doc, schema) do

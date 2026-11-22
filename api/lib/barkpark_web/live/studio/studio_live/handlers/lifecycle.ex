@@ -167,7 +167,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # tab's own row (`post_base/1`), so naming it kept the old title after
   # another editor renamed the document (task-42a6f063263338f6). TanStack's
   # DocumentPane names the document it holds, which moves on every frame.
-  defp named_as_seen(socket), do: Shared.assign_page_title(socket, base_doc(socket))
+  defp named_as_seen(socket), do: Shared.assign_page_title(socket)
 
   # Two people save one field at once: B's save lands, then this tab's save
   # is written over it, and only then does B's frame reach this process (it
@@ -378,7 +378,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # The newest stored version of the open document this tab saw: its own
   # last save (`editor_doc`), or a remote save taken in since. TanStack moves
   # a field's base to theirs on every frame.
-  defp base_doc(socket) do
+  @doc """
+  The newest stored version of the open document this tab has seen: the
+  fresher of another editor's last frame (`editor_store_doc`) and this tab's
+  own row (`editor_doc`).
+  """
+  def base_doc(socket) do
     own = socket.assigns[:editor_doc]
 
     case socket.assigns[:editor_store_doc] do
