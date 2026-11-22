@@ -142,6 +142,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
          |> PostedEdits.remote(socket.assigns[:editor_form] || %{}, updated_form)
          |> assign(
            editor_store_doc: doc_data,
+           editor_doc: drawn(socket, doc_data),
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
@@ -222,6 +223,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         |> RemoteValues.push(local, form, bases)
         |> PostedEdits.remote(local, form)
         |> assign(
+          editor_doc: drawn(socket, doc_data),
           editor_form: form,
           editor_form_gen: Shared.next_form_gen(socket, changed?),
           editor_unsaved_bases: kept
@@ -291,6 +293,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:ours, mine}
     end
   end
+
+  # The open document as the form now draws it: this tab's last save with
+  # the remote save it took in over it. The next save reads its post against
+  # it (`Shared.autosave_write`), so a field set back to the value this tab
+  # saved before is a change, not "untouched" (task-1f6d4ed8c24a821b). The
+  # old Studio got the same from its pane rebuild; the desk keeps its panes.
+  # The rev stays this tab's own (`History.seen_rev/1`). A conflict that
+  # keeps the whole buffer (`keep_unsaved_fields/2`, no keys) does not draw
+  # theirs, so it leaves `editor_doc` as it is.
+  defp drawn(socket, doc_data),
+    do:
+      Map.merge(
+        socket.assigns.editor_doc,
+        Map.take(doc_data, [:content, :title, :status, :updated_at])
+      )
 
   # The newest stored version of the open document this tab saw: its own
   # last save (`editor_doc`), or a remote save taken in since. TanStack moves
