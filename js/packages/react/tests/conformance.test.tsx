@@ -299,3 +299,4 @@ describe('zz be73 probe', () => {
     console.log('BE73PROBE ' + JSON.stringify(out))
   })
 })
+// be73 probe reading 2
