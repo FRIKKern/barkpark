@@ -159,8 +159,7 @@ jobs:
           PARTS: ${{ matrix.parts }}
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node build/showroom.mjs
-          node probe-linux.mjs "$RUNNER_TEMP/probe"
+          node probe2.mjs
 
       - name: Upload the probe
         if: always()
