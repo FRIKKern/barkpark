@@ -87,7 +87,8 @@ const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
     by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
 // The census knows the check's own two pages by identity, and the list is closed both ways: a page the check's own
 // code opens after the census is refused like any other, and a census set before the reference page is open, or on
-// a context that holds a third page, is red by name.
+// a context that holds a third page, is red by name. The rows that always make a page keep the case from passing
+// by making none.
 async function ownTwoPages() {
   const browser = await chromium.launch()
   const part = { name: 'x', json: {} }
@@ -130,6 +131,32 @@ async function ownTwoPages() {
       const { context, page, ref } = await two()
       await context.newPage()
       rows['a census set on a context that holds a third page, red by name'] = await red(() => installCensus(page, [page, ref]))
+      await context.close()
+    }
+    // Ways that may make a page or not, by the machine (the modifier for a background tab is not the same on every
+    // system): each says whether it made one, and a page it made is refused by name and closed, once.
+    const MAY = {
+      'Control click on a link': (page) => page.click('#a', { modifiers: ['Control'] }),
+      'Control+Enter on a link': async (page) => {
+        await page.focus('#a')
+        await page.keyboard.press('Control+Enter')
+      },
+      'a script Control click on a link': (page) => page.evaluate(() => document.getElementById('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }))),
+    }
+    for (const [way, act] of Object.entries(MAY)) {
+      const { context, page, ref } = await two()
+      const census = await installCensus(page, [page, ref])
+      await page.setContent('<!doctype html><a id="a" href="about:blank#a">A link</a>')
+      const made = []
+      context.on('page', (p) => made.push(p))
+      await act(page)
+      await page.waitForTimeout(700)
+      await Promise.all(made.map((p) => p.waitForEvent('close', { timeout: 5000 }).catch(() => {})))
+      const said = await census(part)
+      console.log(`    ${way}: made a page: ${made.length ? 'yes' : 'no'}`)
+      rows[`${way}: a page it makes is refused by name and closed, once`] = made.length
+        ? made.length === 1 && made[0].isClosed() && said.length === 1 && said[0] === REFUSED.page
+        : said.length === 0
       await context.close()
     }
     return each(Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, () => v])))()
