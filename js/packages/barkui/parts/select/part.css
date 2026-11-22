@@ -44,12 +44,30 @@ ui-select {
   color: var(--ui-primary-foreground);
 }
 
-/* The chevron and the check are printed as inline SVG in currentColor. UI SDK draws its own only when a part has
-   none, as a masked box, and a mask on the page changes how the hosted browser draws text elsewhere on it. */
+/* No mask anywhere: UI SDK draws a part's chevron and check as masked boxes, and a mask on the page changes how
+   the hosted browser draws text elsewhere on it. The chevron is printed as an inline SVG in currentColor, which
+   UI SDK then leaves alone. The check is drawn here by two borders in currentColor: a hidden option's indicator
+   is printed empty, since a hidden element may not hold a graphic. */
 [data-slot="select-trigger"] > svg {
   color: var(--ui-muted-foreground);
 }
 
 [data-slot="select-trigger"][data-open] > svg {
   rotate: 180deg;
+}
+
+/* UI SDK masks the box with --ui-icon; none leaves no mask. */
+[data-slot="select-item-indicator"] {
+  --ui-icon: none;
+}
+
+[data-slot="select-item-indicator"]::before {
+  box-sizing: border-box;
+  width: calc(var(--ui-spacing) * 1.5);
+  height: calc(var(--ui-spacing) * 2.5);
+  margin: 0 calc(var(--ui-spacing) * 1.25) calc(var(--ui-spacing) * 0.5);
+  border: solid currentColor;
+  border-width: 0 calc(var(--ui-spacing) * 0.5) calc(var(--ui-spacing) * 0.5) 0;
+  background: none;
+  rotate: 45deg;
 }
