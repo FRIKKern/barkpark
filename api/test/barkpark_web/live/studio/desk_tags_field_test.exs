@@ -49,6 +49,27 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
               "ordered" => true,
               "of" => %{"type" => "string"}
             },
+            # Not arrays, though they carry the tags layout: not tags fields.
+            %{
+              "name" => "kicker",
+              "title" => "Kicker",
+              "type" => "string",
+              "options" => %{"layout" => "tags"}
+            },
+            %{
+              "name" => "lede",
+              "title" => "Lede",
+              "type" => "text",
+              "options" => %{"layout" => "tags"}
+            },
+            # A legacy Sanity `array` is shown read-only: not a tags field.
+            %{
+              "name" => "legacy",
+              "title" => "Legacy",
+              "type" => "array",
+              "of" => [%{"type" => "string"}],
+              "options" => %{"layout" => "tags"}
+            },
             # Texts with the tags layout are tags too, as TanStack's `Fields.tsx`
             # draws them; so is a member list of one text.
             %{
@@ -105,6 +126,9 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
           "title" => "Tagged",
           "tags" => ["fixture", "t0"],
           "highlights" => ["One", "Two"],
+          "kicker" => "K",
+          "lede" => "L",
+          "legacy" => ["old"],
           "notes" => ["n1"],
           "labels" => ["l1"],
           "links" => [%{"_key" => "l1", "label" => "One"}],
@@ -303,15 +327,22 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
 
   # task-2730627f7a19999a: a tags press is a tags field's only. A hand-made
   # one naming another array would store a bare string in it.
+  # task-d2365142f1795b6c: nor one naming a string, a text or a legacy
+  # `array` that carries the tags layout, on the desk or the old Studio.
   test "add_tag or remove_tag naming a field that is not a tags field stores nothing", c do
+    {:ok, studio, _html} = live(c.conn, c.studio)
     view = desk(c)
     before = stored(c)
 
-    for {field, action, value} <- [
+    for view <- [view, studio],
+        {field, action, value} <- [
           {"links", "add_tag", "bare"},
           {"highlights", "add_tag", "bare"},
           {"highlights", "remove_tag", "One"},
-          {"title", "add_tag", "bare"}
+          {"title", "add_tag", "bare"},
+          {"kicker", "add_tag", "bare"},
+          {"lede", "add_tag", "bare"},
+          {"legacy", "add_tag", "bare"}
         ] do
       EditorPost.press(view, "array_op", %{
         "action" => action,
@@ -323,9 +354,11 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
     end
 
     render(view)
+    render(studio)
     after_ = stored(c)
     assert after_["links"] == [%{"_key" => "l1", "label" => "One"}]
     assert after_["highlights"] == ["One", "Two"]
+    assert {after_["kicker"], after_["lede"], after_["legacy"]} == {"K", "L", ["old"]}
     assert stored_doc(c).title == "Tagged"
     assert after_ == before
 

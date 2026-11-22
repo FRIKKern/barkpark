@@ -154,7 +154,7 @@ describe('discoverParts', () => {
     expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
   })
 
-  it('takes a notCovered list of { name, why }, and refuses any other shape or a name given twice', () => {
+  it('takes a notCovered list of { name, why }, and refuses any other shape, null, or a name given twice in any case', () => {
     const root = scratch()
     const dir = plantPart(root, 'aa')
     const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
@@ -163,9 +163,28 @@ describe('discoverParts', () => {
       return () => discoverParts(root)
     }
     expect(withList([{ name: 'ui-badge', why: 'Not on the stage.' }])).not.toThrow()
-    for (const bad of ['ui-badge', [{ name: 'ui-badge' }], [{ name: 'ui-badge', why: 'x', more: 1 }], [{ name: ' ', why: 'x' }], [{ name: 'ui-badge', why: '' }]])
+    for (const bad of [null, 'ui-badge', [{ name: 'ui-badge' }], [{ name: 'ui-badge', why: 'x', more: 1 }], [{ name: ' ', why: 'x' }], [{ name: 'ui-badge', why: '' }]])
       expect(withList(bad), JSON.stringify(bad)).toThrow(/parts\/aa: part\.json "notCovered" must be a list of \{ name, why \}/)
     expect(withList([{ name: 'a', why: 'x' }, { name: 'a', why: 'y' }])).toThrow(/part\.json "notCovered" names "a" twice/)
+     expect(withList([{ name: 'ui-tabs-indicator', why: 'x' }, { name: 'UI-TABS-INDICATOR', why: 'y' }])).toThrow(/part\.json "notCovered" names "UI-TABS-INDICATOR" twice/)
+  })
+
+  it('excuses a sentence by a row only where the row’s name stands in it as whole words, in any case and across a line break', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+    const css = readFileSync(join(dir, 'part.css'), 'utf8')
+    const read = (name, note) => {
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, notCovered: [{ name, why: 'x' }] }))
+      writeFileSync(join(dir, 'part.css'), `${css}\n/* ${note} */\n`)
+      return () => discoverParts(root)
+    }
+    expect(read('ui-tabs', 'The ui-tabs-indicator is not styled.')).toThrow(/part\.css's notes says something is not covered/)
+    expect(read('rip', 'The ripple is not styled.')).toThrow(/part\.css's notes says something is not covered/)
+    expect(read('ui-tabs-indicator', 'The ui-tabs-indicator is not styled.')).not.toThrow()
+    expect(read('tabs indicator', 'The Tabs\n   Indicator is not styled.')).not.toThrow()
+    // The row's second limit (docs/PARTS.md): the name stands in the sentence; the row does not read what it is about.
+    expect(read('the', 'The ripple is not styled.')).not.toThrow()
   })
 
   it('reads exactly the words of NOT_COVERED_WORDS in the notes, in any case and across a line break, and not a sentence in other words', () => {
@@ -178,7 +197,7 @@ describe('discoverParts', () => {
     }
     for (const w of NOT_COVERED_WORDS) expect(notes(`The ripple is ${w}.`), w).toThrow(/part\.css's notes says something is not covered/)
     expect(notes('The ripple is NOT\n   STYLED.')).toThrow(/\("The ripple is NOT STYLED\."\)/)
-    // The row's one limit (docs/PARTS.md): other words are not read.
+    // The row's first limit (docs/PARTS.md): other words are not read.
     expect(notes('The ripple is left as UI SDK draws it.')).not.toThrow()
   })
 

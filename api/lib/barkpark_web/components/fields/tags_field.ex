@@ -37,11 +37,14 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
   def tags?(_assigns), do: false
 
   @doc """
-  Whether a schema field is a tags field: strings or texts, `options.layout:
-  "tags"`. As TanStack's `Fields.tsx`: `of` a `string` or a `text`, a list of
-  one member read as that member.
+  Whether a schema field is a tags field: an `arrayOf` of strings or texts,
+  `options.layout: "tags"`. As TanStack's `Fields.tsx`: `of` a `string` or a
+  `text`, a list of one member read as that member.
   """
-  def tags_field?(field), do: layout(field) == "tags" and string_items?(field)
+  def tags_field?(field),
+    do:
+      field_attr(field, :type) == "arrayOf" and layout(field) == "tags" and
+        string_items?(field)
 
   @doc """
   The list after a tags press, or `current` unchanged when it changes

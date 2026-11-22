@@ -16,7 +16,11 @@ parts/<name>/
                 printed under the part; a summary or part.css note that says something is not covered
                 must name a row of it: the build reads exactly the words in NOT_COVERED_WORDS
                 (build/parts.mjs), in any case and across line breaks, in the summary and part.css's
-                comments, and a sentence that says it in other words is not caught)
+                comments; a row names a sentence where its name stands in it as whole words, in any
+                case and across line breaks; null, another shape, an empty name or reason, and a name
+                given twice in any case are refused. Two limits: a sentence that says it in other words
+                is not caught, and the row reads that the name stands in the sentence, not that the
+                sentence is about that thing; the list is printed under the part, so a reader sees it)
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
