@@ -135,7 +135,11 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
   await show('light')
   const rest = async () => {
     await page.mouse.move(0, 0)
-    await page.barkCheck((id) => document.getElementById(id).focus(), title)
+    await page.barkCheck((id) => {
+      const el = document.getElementById(id)
+      el.focus({ preventScroll: true })
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    }, title)
     await settle(page)
   }
   await rest()
@@ -161,7 +165,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
       const to = await page.barkCheck(([n, k]) => {
         const root = document.querySelector(`[data-part="${n}"]`)
         const x = [root, ...root.querySelectorAll('*')][k]
-        x.scrollIntoView({ block: 'center', inline: 'center' })
+        x.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
         const r = x.getBoundingClientRect()
         const [cx, cy] = [r.left + r.width / 2, r.top + r.height / 2]
         const top = document.elementFromPoint(cx, cy)

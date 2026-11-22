@@ -242,6 +242,21 @@ const unseen = () =>
       }),
   })()
 
+/** Every motion property of the vocabulary is read under its own rule (check/motion.mjs MOTION_RULES): declared only
+    at PLACES, and at its still value under reduced motion unless it sits inside a no-preference query. */
+const EVERY_KIND = {
+  'a scroll behavior declared on ::placeholder is red by name': ['#button-primary::placeholder { scroll-behavior: smooth; }', '::placeholder'],
+  'a smooth scroll behavior under reduced motion is red by name': ['#button-primary { scroll-behavior: smooth; }', 'button#button-primary "Publish" has scroll-behavior: smooth under reduced motion'],
+  'a smooth scroll behavior only where motion is allowed reads': ['@media (prefers-reduced-motion: no-preference) { #button-primary { scroll-behavior: smooth; } }', null],
+}
+const everyKind = () =>
+  each(Object.fromEntries(Object.entries(EVERY_KIND).map(([what, [css, said]]) => [what, async () => {
+    const got = await onPage(css, 'reduce', async () => 'opened').catch((e) => String(e.message))
+    const held = said ? UNSEEN.test(got) && got.includes(said) : got === 'opened'
+    if (!held) console.log(`    ${what}: ${got.slice(0, 200)}`)
+    return held
+  }])))()
+
 /** The checker's skin switch goes through restyle: a read straight after it reads the new skin on a sound page; on a
     page still moving by its own rule, the switch waits inside the bound, then is red by name, never a silent read. */
 const skinSwitch = () =>
@@ -288,4 +303,5 @@ export const REST_CASES = [
   { name: 'at rest: twelve ways to change a look outside restyle each leave the next read red by name, never mid-way', direct: plants },
   { name: 'at rest: motion declared on ::placeholder, ::marker or ::file-selector-button, and a shadow root on the page, are red by name', direct: unseen },
   { name: "at rest: the checker's skin switch reads at rest straight after on a sound page, and is red by name on a page moving by its own rule", direct: skinSwitch },
+  { name: 'at rest: every motion property of the vocabulary is read under its own rule, and is red by name where the check cannot see it', direct: everyKind },
 ]

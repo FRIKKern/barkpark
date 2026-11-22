@@ -148,7 +148,11 @@ export async function pressed(ctx, part, skins) {
     if (drawn) await view(page, skins[0], 'light')
     if (setup) await inPage(page, setup, part.name, 'press.mjs setup')
     await page.clock.pauseAt(Date.now() + 1000)
-    await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
+    await page.barkCheck((id) => {
+      const el = document.getElementById(id)
+      el.focus({ preventScroll: true })
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    }, `part-${part.name}-title`)
     for (const step of steps) {
       let result
       try {
@@ -160,7 +164,7 @@ export async function pressed(ctx, part, skins) {
             const at = await page.barkCheck(([n, s]) => {
               const el = document.querySelector(`[data-part="${n}"] ${s}`)
               if (!el) return { miss: 'is not in the stage' }
-              el.scrollIntoView({ block: 'center', inline: 'center' })
+              el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
               const r = el.getBoundingClientRect()
               const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
               const top = document.elementFromPoint(x, y)
@@ -298,7 +302,11 @@ export async function skinsAndSchemes(ctx, part, skins) {
         }
         await surfaceTo('base')
         // Focus: Tab through the part with real keys and measure the ring on each stop.
-        await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
+        await page.barkCheck((id) => {
+      const el = document.getElementById(id)
+      el.focus({ preventScroll: true })
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    }, `part-${part.name}-title`)
         for (let i = 0; i < 60; i++) {
           await page.keyboard.press('Tab')
           await limit(page.barkCheck(() => window.__barkCheck.frame()), STEP_MS, 'a frame')

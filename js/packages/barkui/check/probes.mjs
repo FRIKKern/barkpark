@@ -2,8 +2,9 @@
 // serialised), so it may not reach anything outside its own body: the lists it reads come in as its argument
 // (LISTS, motion.mjs).
 export function installHelpers(lists) {
-  if (!lists?.places?.length || !lists?.changes?.length) throw new Error('installHelpers needs the lists of check/motion.mjs')
+  if (!lists?.places?.length || !lists?.changes?.length || !Object.keys(lists?.motion ?? {}).length) throw new Error('installHelpers needs the lists of check/motion.mjs')
   const PLACES = lists.places
+  const MOTION = lists.motion
   const CHANGES = new Set(lists.changes)
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = 1
@@ -339,7 +340,7 @@ export function installHelpers(lists) {
       if (m) return `::${m[1] ?? m[2]}`
       return last.includes('&') ? parent : ''
     }
-    const moves = (style) => [...style].some((p) => /^(transition|animation)/.test(p))
+    const moves = (style) => [...style].some((p) => p in MOTION)
     const walk = (rules, parents) => {
       for (const r of rules) {
         let here = parents
@@ -372,6 +373,14 @@ export function installHelpers(lists) {
       }
       walk(rules, [])
     }
+    // Under reduced motion, each kind whose rule names a still value computes it on every element.
+    const fixed = Object.entries(MOTION).filter(([, r]) => r.still !== 'nothing running')
+    if (fixed.length && raw.matchMedia('(prefers-reduced-motion: reduce)').matches)
+      for (const el of document.querySelectorAll('*'))
+        for (const [p, r] of fixed) {
+          const v = raw.getComputedStyle(el).getPropertyValue(p)
+          if (v !== r.still) off.push(`${describe(el)} has ${p}: ${v} under reduced motion`)
+        }
     return { off: [...new Set(off)], files }
   }
   /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an

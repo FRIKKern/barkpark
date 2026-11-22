@@ -2,7 +2,8 @@
 // sentence made from PLACES, and every restyle call names one of CHANGES, each of which has a caller.
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { ACTS, CHANGES, MOTION_SENTENCE } from '../check/motion.mjs'
+import { MOTION_ONLY } from '../build/vocabulary.mjs'
+import { ACTS, CHANGES, LISTS, MOTION, MOTION_SENTENCE, motionRead } from '../check/motion.mjs'
 
 const DIR = new URL('../check/', import.meta.url)
 const checker = () => readdirSync(DIR).filter((f) => f.endsWith('.mjs') && !/-cases\.mjs$|^selftest\.mjs$/.test(f))
@@ -27,13 +28,36 @@ describe("the checker's changes to a page's look", () => {
     expect(through).toEqual(CHANGES)
   })
 
-  it("are counted with the checker's acts, focus moved and a box scrolled into view, each a plain call", () => {
+  it("are counted with the checker's acts, each made with the option that leaves the page at rest, and an act without it is red by name", () => {
     const at = Object.fromEntries(Object.keys(ACTS).map((k) => [k, 0]))
-    for (const f of checker()) {
+    const wrong = []
+    for (const f of checker().filter((f) => f !== 'motion.mjs')) {
       const text = readFileSync(new URL(f, DIR), 'utf8')
-      for (const [k, re] of Object.entries(ACTS)) at[k] += [...text.matchAll(re)].length
+      for (const [k, { call, holds }] of Object.entries(ACTS))
+        for (const m of text.matchAll(call)) {
+          at[k]++
+          if (!holds.test(m[1])) wrong.push(`check/${f}:${text.slice(0, m.index).split('\n').length}: ${k} without its option (check/motion.mjs ACTS)`)
+        }
     }
-    console.log(`checker acts on a page: ${Object.keys(ACTS).length} kinds (${Object.entries(at).map(([k, n]) => `${k} at ${n} places`).join(', ')}); the next call waits for rest after each`)
-    for (const n of Object.values(at)) expect(n).toBeGreaterThan(0)
+    console.log(`checker acts on a page: ${Object.values(at).filter(Boolean).length} kinds (${Object.entries(at).filter(([, n]) => n).map(([k, n]) => `${k} at ${n} places`).join(', ')}), each leaving the page at rest before the next read`)
+    expect(wrong).toEqual([])
+    expect(at['focus moved']).toBeGreaterThan(0)
+    expect(at['a box scrolled into view']).toBeGreaterThan(0)
+  })
+})
+
+describe('the motion reader', () => {
+  it('reads every motion property of the vocabulary, each under a rule of its own kind', () => {
+    const vocabulary = [...MOTION_ONLY]
+    const read = Object.keys(LISTS.motion)
+    console.log(`motion properties in the vocabulary: ${vocabulary.length}; read by the motion reader: ${read.length}`)
+    expect(read).toEqual(vocabulary)
+    expect(MOTION.unread).toEqual([])
+  })
+
+  it('is red by name for a motion property it has no rule for', () => {
+    expect(motionRead(['transition-duration', 'view-transition-name']).unread).toEqual([
+      'the motion property view-transition-name (build/vocabulary.mjs MOTION) has no rule in the motion reader (check/motion.mjs MOTION_RULES)',
+    ])
   })
 })

@@ -3,6 +3,10 @@
 //   - PLACES: the CSS reader (motionOffList) is red at any sheet that declares a transition or an animation
 //     anywhere else; restyle's hold sheet holds exactly these off; the gate names a mover anywhere else.
 //   - CHANGES: restyle takes only these, by name; a test holds the list to restyle's callers and prints the count.
+//   - MOTION: every motion property part.css may write (build/vocabulary.mjs, read from there), each with the
+//     motion reader's rule for it; a property with no rule is red by name when this module loads.
+//   - ACTS: the checker's acts on a page, each made with the option that leaves the page at rest before a read.
+import { MOTION_ONLY } from '../build/vocabulary.mjs'
 
 /** Where a transition or an animation may be declared: an element itself, its ::before, ::after or ::backdrop. */
 export const PLACES = ['', '::before', '::after', '::backdrop']
@@ -28,8 +32,32 @@ export const CHANGES = [
   'the reference page laid out',
 ]
 
-/** The checker's acts on a page, made as plain calls: each is followed by a call that waits for rest first. */
-export const ACTS = { 'focus moved': /\.focus\(/g, 'a box scrolled into view': /\.scrollIntoView\(/g }
+/** The motion reader's rule for each kind of motion property. Every kind is declared only at PLACES. `still` is
+    what the page shows at rest under reduced motion: for a transition or an animation, nothing running (the gate
+    waits for it, then reads); for any other kind, that computed value on every element. */
+export const MOTION_RULES = {
+  transition: { still: 'nothing running' },
+  animation: { still: 'nothing running' },
+  'scroll-behavior': { still: 'auto' },
+}
+const kindOf = (p) => Object.keys(MOTION_RULES).find((k) => p === k || p.startsWith(`${k}-`))
+/** Each of `props` with the reader's rule for it, and a red by name for each the reader has no rule for. */
+export function motionRead(props) {
+  const read = Object.fromEntries(props.filter(kindOf).map((p) => [p, MOTION_RULES[kindOf(p)]]))
+  const unread = props.filter((p) => !kindOf(p)).map((p) => `the motion property ${p} (build/vocabulary.mjs MOTION) has no rule in the motion reader (check/motion.mjs MOTION_RULES)`)
+  return { read, unread }
+}
+export const MOTION = motionRead([...MOTION_ONLY])
+if (MOTION.unread.length) throw new Error(MOTION.unread.join('; '))
+
+/** The checker's acts on a page, each a plain call made with the option that leaves the page at rest before the
+    next read (`holds`), which waits for rest first. A call of an act without it is red by name (a test). */
+export const ACTS = {
+  'focus moved': { call: /\.focus\(([^)]*)\)/g, holds: /preventScroll: true/ },
+  'a box scrolled into view': { call: /\.scrollIntoView\(([^)]*)\)/g, holds: /behavior: 'instant'/ },
+  'a box scrolled to a point': { call: /\.scroll(?:To|By)?\(([^)]*)\)/g, holds: /behavior: 'instant'/ },
+  'a scroll position set': { call: /\.scroll(?:Top|Left)\s*(?:[-+]?=)(?!=)()/g, holds: /$^/ },
+}
 
 /** What installHelpers is given in each world. */
-export const LISTS = { places: PLACES, changes: CHANGES }
+export const LISTS = { places: PLACES, changes: CHANGES, motion: MOTION.read }

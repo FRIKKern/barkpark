@@ -42,10 +42,8 @@ export const INPUT = {
     // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
       views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
-      rest: { seconds: 222, job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
-      // The layers job's cases ran inside the rest job's run above (`within`) until it was split off; its own
-      // hosted reading replaces this one by measurement.
-      layers: { seconds: 222, within: 'rest', job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
+      rest: { seconds: 168, job: 137307145133, run: 45054609251, commit: 'c05b1f9a13' },
+      layers: { seconds: 145, job: 137307145173, run: 45054609251, commit: 'c05b1f9a13' },
     },
   },
 }
@@ -73,7 +71,7 @@ export const capacitySentence = (p = plan()) =>
 
 /** The sentence for one selftest job (`key`, as SELFTEST_JOBS in check/jobs.mjs names it). */
 export const selftestSentence = (key, p = plan()) =>
-  `On CI's hosted runner ${p.READINGS.selftest[key].within ? `the cases of the selftest's ${key} job ran inside the ${p.READINGS.selftest[key].within} job's run of ${p.READINGS.selftest[key].seconds} s, before they were split off` : `the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s`}; it may take at most ${p.HEADROOM} times that, ${p.SELFTEST_CEILINGS[key]} s, ${share(p.SELFTEST_CEILINGS[key], p.SELFTEST_STEP_MINUTES)}% of its ${p.SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`
+  `On CI's hosted runner the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s; it may take at most ${p.HEADROOM} times that, ${p.SELFTEST_CEILINGS[key]} s, ${share(p.SELFTEST_CEILINGS[key], p.SELFTEST_STEP_MINUTES)}% of its ${p.SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`
 
 export const MARKS = ['<!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->', '<!-- /capacity -->']
 

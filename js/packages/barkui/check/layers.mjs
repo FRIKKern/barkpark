@@ -107,14 +107,19 @@ export function installLayers() {
 /** Real input on the page: focus, the pointer moved away (`leave`), a click or the pointer at a control's centre
     (only once it is what is on top there), then keys. */
 async function drive(page, part, step, what) {
-  if (step.focus) await page.barkCheck(([n, s]) => document.querySelector(`[data-part="${n}"] ${s}`)?.focus(), [part.name, step.focus])
+  if (step.focus)
+    await page.barkCheck(([n, s]) => {
+      const el = document.querySelector(`[data-part="${n}"] ${s}`)
+      el?.focus({ preventScroll: true })
+      el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    }, [part.name, step.focus])
   if (step.leave) await page.mouse.move(0, 0)
   for (const [how, sel] of [['click', step.click], ['hover', step.hover]]) {
     if (!sel) continue
     const at = await page.barkCheck(([n, s]) => {
       const el = document.querySelector(`[data-part="${n}"] ${s}`)
       if (!el) return { miss: 'is not in the stage' }
-      el.scrollIntoView({ block: 'center', inline: 'center' })
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
       const r = el.getBoundingClientRect()
       const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
       const top = document.elementFromPoint(x, y)
