@@ -232,12 +232,17 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     defp depth(%{"items" => [%{"children" => [inner]}]}), do: 1 + depth(inner)
     defp depth(%{"items" => _}), do: 1
 
+    defp leaf(%{"items" => [%{"children" => [inner]}]}), do: leaf(inner)
+    defp leaf(%{"items" => [leaf]}), do: leaf
+
     test "lists at Validate's limit round-trip an edit at the deepest level" do
       {slug, bpml, rev} = pulled_with([nest(Validate.max_depth())])
+      assert bpml =~ "<li>leaf</li>"
       edited = String.replace(bpml, "<li>leaf</li>", "<li>deepest</li>")
 
       assert %{"ok" => true} = push_copy(slug, edited, rev) |> json_response(200)
       assert depth(stored_block(slug, "deep")) == Validate.max_depth()
+      assert leaf(stored_block(slug, "deep")) == text("deepest")
     end
 
     test "one level more is refused, writing nothing" do
