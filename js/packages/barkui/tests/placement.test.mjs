@@ -43,7 +43,7 @@ describe('the placement list', () => {
     expect(TRANSITION.value).toBe('none')
     expect(TRANSITION.reason).not.toBe(REASON)
     const text = PARTS().replace(/\n\s*/g, ' ')
-    expect(text).toContain("Values are not read, except transition's, the names anchor-name gives, and the scroll lock's (below).")
+    expect(text).toContain("Of the values, the check reads transition's, the names anchor-name gives, and the scroll lock's (below).")
     expect(text).toContain(TRANSITION.reason.replace('; none', ', and `none`'))
   })
   it('names the UI SDK control and the source file that write each entry', () => {

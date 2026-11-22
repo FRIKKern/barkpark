@@ -290,7 +290,7 @@ where each may stand and what writes it:
   menu, on the box.
 - `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
 
-Values are not read, except transition's, the names anchor-name gives, and the scroll lock's (below). Apart from
+Of the values, the check reads transition's, the names anchor-name gives, and the scroll lock's (below). Apart from
 the list, one more entry has its own reason: UI SDK switches motion off on a box while it measures where to put
 it, and `none` takes motion away and adds no look. UI SDK writes it when it first places a select or menu box and
 puts the old value back in the same task, so a reading taken now and then does not see it; the log below does:
@@ -300,8 +300,8 @@ puts the old value back in the same task, so a reading taken now and then does n
 Any other property, a box's property on an element that is not a box, an anchor name no box hangs from, and any
 other transition value fail by name ("… was given opacity in a style attribute, which is not placement: the look
 belongs in part.css"). What is read is each declaration the browser applies, by its name: a shorthand by its
-longhands (`inset` is `top`, `right`, `bottom` and `left`), and `all` by its own name. Text the browser drops is
-not a declaration. From the page's first frame, a log in the check's own world takes each change to a `style`
+longhands (`inset` is `top`, `right`, `bottom` and `left`), and `all` by its own name. From the page's first
+frame, a log in the check's own world takes each change to a `style`
 attribute in the document and in each open shadow root, however it is written (the attribute, `el.style`,
 `attributeStyleMap`), with where the element stood as the browser's record of the change shows it, and the values
 held in a stage are judged; so a property written while a box is open and taken away as it closes fails by name.
