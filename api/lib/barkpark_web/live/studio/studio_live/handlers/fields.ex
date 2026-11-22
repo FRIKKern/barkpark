@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
+  alias BarkparkWeb.Studio.StudioLive.Handlers.FreshRemove
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
@@ -375,10 +376,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     PostIdentity.pressed(Map.get(msg, :press), socket, fn _params, socket ->
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
-          form = picked_form(socket, path, code)
-          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1))
-          saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
-          {:noreply, settle_dirty(saved, Enum.take(path, 1))}
+          case remove_base(socket, path, code) do
+            # Someone else's value landed at the path unseen: theirs stays.
+            :moved ->
+              {:noreply, socket}
+
+            {:ok, base} ->
+              form = picked_form(socket, base, path, code)
+              socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1))
+              saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
+              {:noreply, settle_dirty(saved, Enum.take(path, 1))}
+          end
 
         _ ->
           {:noreply, socket}
@@ -391,11 +399,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # In the desk a Remove unsets the code, nested too, as TanStack does, by
   # the same rule as a cleared language (`unset_at/2`); the old Studio stores
   # "" at a nested path, as it did.
-  defp picked_form(%{assigns: %{desk_base: base}} = socket, path, "") when is_binary(base),
-    do: unset_at(base_form(socket), path)
+  defp picked_form(%{assigns: %{desk_base: desk}}, base, path, "") when is_binary(desk),
+    do: unset_at(base, path)
 
-  defp picked_form(socket, path, code),
-    do: StudioLive.Path.put_value_at(base_form(socket), path, code)
+  defp picked_form(_socket, base, path, code),
+    do: StudioLive.Path.put_value_at(base, path, code)
+
+  # A Remove is made onto the field as the store holds it now
+  # (`FreshRemove`); a pick is the editor's own new value, on its buffer.
+  defp remove_base(socket, path, ""), do: FreshRemove.base(socket, base_form(socket), path)
+  defp remove_base(socket, _path, _code), do: {:ok, base_form(socket)}
 
   @doc """
   The slug Generate derives from a title: Latin letters with accents or
