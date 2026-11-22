@@ -1,0 +1,35 @@
+/* Select: UI SDK's <ui-select>, a trigger (a native button showing the chosen value, or the placeholder) and the
+   list it opens over the page in the top layer, each option a <ui-select-item>.
+   The trigger has the text field's height, type and edge, so a form reads as one; the edge darkens on hover. The
+   list is UI SDK's: its ground, edge and shadow, the highlighted option on --ui-muted, a disabled option faded and
+   passed over by the arrows; the chosen option carries UI SDK's check.
+   The look keys only on what UI SDK writes: data-open, data-placeholder, data-highlighted, data-selected and
+   data-disabled, and on :hover. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also
+   turns the edge to --ui-ring-border while the trigger has focus or its list is open. */
+
+[data-slot="select-trigger"] {
+  --bark-select-text: 0.875rem;
+  --bark-select-edge: var(--ui-input);
+
+  box-sizing: border-box;
+  width: 100%;
+  min-width: calc(var(--ui-spacing) * 48);
+  height: calc(var(--ui-spacing) * 9);
+  padding-inline: calc(var(--ui-spacing) * 3);
+  border-color: var(--bark-select-edge);
+  font-size: var(--bark-select-text);
+  line-height: 1.25;
+  transition: border-color 120ms ease-out;
+
+  &:hover:not([data-disabled], [data-open]) {
+    --bark-select-edge: var(--ui-muted-foreground);
+  }
+}
+
+[data-slot="select-content"],
+[data-slot="select-item"] {
+  --bark-select-text: 0.875rem;
+
+  font-size: var(--bark-select-text);
+  line-height: 1.25;
+}
