@@ -3,8 +3,8 @@
 // to make room, and the check that says so is red by the row's name. And every top-layer case runs in the rest
 // job, by the runner's own pick, red by the case's name when one would run in the views job.
 import { describe, expect, it } from 'vitest'
-import { layerMisplaced, selftestPick } from '../check/jobs.mjs'
-import { LAYER_CASES, rowsMoved, TOP_LAYER_ROWS } from '../check/layer-cases.mjs'
+import { layerMisplaced, rowsMoved, selftestPick } from '../check/jobs.mjs'
+import { LAYER_CASES, TOP_LAYER_ROWS } from '../check/layer-cases.mjs'
 import { FRAME, REFUSED, topLayerTouch, UNNAMED, UNNAMED_CAN } from '../check/layers.mjs'
 import { CASES } from '../check/selftest.mjs'
 
@@ -32,15 +32,15 @@ const ONE_RUN = [
 
 describe('the two top-layer runs', () => {
   it('hold every row of the one run they replace, each in exactly one of them', () => {
-    expect(rowsMoved(ONE_RUN, TOP_LAYER_ROWS)).toEqual([])
+    expect(rowsMoved(ONE_RUN, TOP_LAYER_ROWS, 'top-layer')).toEqual([])
   })
 
   it('are red by the row’s name when a row is dropped or doubled', () => {
     const row = 'a frame in the page, refused by name'
     const { popover, census } = TOP_LAYER_ROWS
-    expect(rowsMoved(ONE_RUN, { popover, census: census.filter((r) => r !== row) })).toEqual([`the row "${row}" is in neither top-layer run`])
-    expect(rowsMoved(ONE_RUN, { popover: [...popover, row], census })).toEqual([`the row "${row}" is in both top-layer runs (popover, census)`])
-    expect(rowsMoved(ONE_RUN, { popover, census: [...census, row] })).toEqual([`the row "${row}" is in the census run 2 times`])
+    expect(rowsMoved(ONE_RUN, { popover, census: census.filter((r) => r !== row) }, 'top-layer')).toEqual([`the row "${row}" is in no top-layer run`])
+    expect(rowsMoved(ONE_RUN, { popover: [...popover, row], census }, 'top-layer')).toEqual([`the row "${row}" is in 2 top-layer runs (popover, census)`])
+    expect(rowsMoved(ONE_RUN, { popover, census: [...census, row] }, 'top-layer')).toEqual([`the row "${row}" is in the census top-layer run 2 times`])
   })
 })
 

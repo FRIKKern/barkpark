@@ -754,7 +754,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content" role="main">
         <.document_header
           dataset={@dataset}
-          title={BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}
+          title={doc_heading(@editor_doc, @editor_schema, @parent_assigns)}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -814,7 +814,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   as the TanStack Studio does (`Desk.DocStyle`). --%>
             <div class="editor-meta dk-form-head">
               <div class="dk-kind">{@editor_schema.title}</div>
-              <div class="dk-big-title">{BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}</div>
+              <div class="dk-big-title">{doc_heading(@editor_doc, @editor_schema, @parent_assigns)}</div>
             </div>
           <% end %>
           <%= if @editor_schema && !desk?(@parent_assigns) do %>
@@ -1462,6 +1462,28 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   end
 
   def title_on_tab?(_schema, _nav_group), do: true
+
+  # The document's heading (the sr-only h1 and the desk's big title): the
+  # page's title (`Shared.assign_page_title/2`), which names the newest stored
+  # row this tab has seen, or this tab's own held title
+  # (task-42a6f063263338f6). `editor_doc` stays this tab's own row after
+  # another editor's save, so naming it kept the old title. A published or
+  # revision view draws another row in `editor_doc` (`PublishedView`,
+  # `RevisionView`), and that row is the one to name.
+  defp doc_heading(doc, schema, parent) do
+    other_row? =
+      BarkparkWeb.Studio.Desk.PublishedView.active?(parent) or
+        BarkparkWeb.Studio.Desk.RevisionView.shown?(parent)
+
+    case parent[:page_title] do
+      title when is_binary(title) and not other_row? and is_map_key(parent, :editor_doc) ->
+        title
+
+      _ ->
+        BarkparkWeb.Studio.DocTitle.shown(doc.title) || preview_title(doc, schema) ||
+          singleton_title(schema) || gettext("Untitled")
+    end
+  end
 
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
