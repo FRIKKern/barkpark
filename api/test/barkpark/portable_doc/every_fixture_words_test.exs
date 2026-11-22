@@ -138,8 +138,9 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   @skip_hits %{}
 
   # Document name => [{word, in source, in printout}] the printout lacks. The
-  # nested-list golden's `text` the reader does not show (an item with an id
-  # carries it on push, task-0b448ea0847a6b4f) and its alias type name.
+  # nested-list golden's `text` the reader does not show (not printed; the
+  # write wall refuses an edit to its block, task-0b448ea0847a6b4f) and its
+  # alias type name.
   @lost %{
     "nested-list-carriers" => [
       {"Inactive", 1, 0},
