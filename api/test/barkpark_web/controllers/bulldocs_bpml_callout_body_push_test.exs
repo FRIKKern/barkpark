@@ -12,6 +12,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
 
   alias Barkpark.Content
   alias Barkpark.LabelFixtures
+  alias Barkpark.PortableDoc.Bpml.Canonical
   alias Barkpark.Repo
 
   @token "barkpark-test-ingest-token"
@@ -89,6 +90,20 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
 
   defp new_slug, do: "callout-body-#{System.unique_integer([:positive])}"
 
+  # A refusal path such as "blocks[1].blocks[0].slots", walked through the
+  # stored blocks in their canonical spelling, reaches a map.
+  defp resolves!(slug, path) do
+    at =
+      Regex.scan(~r/([^.\[\]]+)|\[(\d+)\]/, path)
+      |> Enum.reduce(%{"blocks" => Canonical.normalize(stored(slug))}, fn
+        [_, "", i], list when is_list(list) -> Enum.at(list, String.to_integer(i))
+        [_, key], map when is_map(map) -> Map.get(map, key)
+        _, _ -> nil
+      end)
+
+    assert is_map(at), "#{path} does not resolve in the stored blocks"
+  end
+
   test "the pull prints the body and marks the Paper" do
     {bpml, _rev} = pull!(with_blocks!(new_slug(), blocks()))
     assert bpml =~ ~s(print="2")
@@ -131,6 +146,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     assert answer["error"]["code"] == "bpml_stale_copy"
     assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
     assert answer["error"]["paths"] == ["blocks[1].slots"]
+    Enum.each(answer["error"]["paths"], &resolves!(slug, &1))
     assert stored(slug) == before
   end
 
@@ -154,6 +170,36 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     assert answer["error"]["code"] == "bpml_stale_copy"
     assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
     assert answer["error"]["paths"] == ["blocks[1].blocks[0].slots"]
+    Enum.each(answer["error"]["paths"], &resolves!(slug, &1))
+    assert stored(slug) == before
+  end
+
+  test "a callout inside a callout's body lies under the outer body's path" do
+    inner = callout("c2", "Inner.", [p("c2-a", "Inner body.")])
+    outer = callout("c1", "Read this first.", [p("c1-a", "The body paragraph."), inner])
+    slug = with_blocks!(new_slug(), [p("p1", "Opening paragraph."), outer])
+    {bpml, rev} = pull!(slug)
+    before = stored(slug)
+
+    edited =
+      bpml
+      |> String.replace(~s( print="2"), "")
+      |> String.replace(
+        ~r{<callout id="c1".*</callout>}s,
+        ~s(<callout id="c1" tone="info">Read this.</callout>)
+      )
+
+    answer = push_copy(slug, edited, rev) |> json_response(422)
+
+    assert answer["error"]["code"] == "bpml_stale_copy"
+
+    assert answer["error"]["message"] =~
+             "callout c1, callout c2 have a body your copy was pulled without"
+
+    assert answer["error"]["paths"] == ["blocks[1].slots"]
+    inner_body = "blocks[1].slots.body[1].slots"
+    resolves!(slug, inner_body)
+    assert String.starts_with?(inner_body, hd(answer["error"]["paths"]))
     assert stored(slug) == before
   end
 
