@@ -2,7 +2,7 @@
 // sentence made from PLACES, and every restyle call names one of CHANGES, each of which has a caller.
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { CHANGES, MOTION_SENTENCE } from '../check/motion.mjs'
+import { ACTS, CHANGES, MOTION_SENTENCE } from '../check/motion.mjs'
 
 const DIR = new URL('../check/', import.meta.url)
 const checker = () => readdirSync(DIR).filter((f) => f.endsWith('.mjs') && !/-cases\.mjs$|^selftest\.mjs$/.test(f))
@@ -25,5 +25,15 @@ describe("the checker's changes to a page's look", () => {
     console.log(`checker changes to a page's look: ${CHANGES.length}; through restyle: ${through.length}`)
     expect([...callers].filter((c) => !CHANGES.includes(c))).toEqual([])
     expect(through).toEqual(CHANGES)
+  })
+
+  it("are counted with the checker's acts, focus moved and a box scrolled into view, each a plain call", () => {
+    const at = Object.fromEntries(Object.keys(ACTS).map((k) => [k, 0]))
+    for (const f of checker()) {
+      const text = readFileSync(new URL(f, DIR), 'utf8')
+      for (const [k, re] of Object.entries(ACTS)) at[k] += [...text.matchAll(re)].length
+    }
+    console.log(`checker acts on a page: ${Object.keys(ACTS).length} kinds (${Object.entries(at).map(([k, n]) => `${k} at ${n} places`).join(', ')}); the next call waits for rest after each`)
+    for (const n of Object.values(at)) expect(n).toBeGreaterThan(0)
   })
 })

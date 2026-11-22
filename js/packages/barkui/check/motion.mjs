@@ -28,5 +28,8 @@ export const CHANGES = [
   'the reference page laid out',
 ]
 
+/** The checker's acts on a page, made as plain calls: each is followed by a call that waits for rest first. */
+export const ACTS = { 'focus moved': /\.focus\(/g, 'a box scrolled into view': /\.scrollIntoView\(/g }
+
 /** What installHelpers is given in each world. */
 export const LISTS = { places: PLACES, changes: CHANGES }

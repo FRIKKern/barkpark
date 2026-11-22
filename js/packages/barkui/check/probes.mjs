@@ -455,31 +455,7 @@ export function installHelpers(lists) {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  /** Motion started on the page, counted as the browser reports it (each transition and animation tells when it
-      is made, in its delay too): a capture counts only if this stands still across it (capture.mjs). */
-  state.starts = 0
-  for (const e of ['transitionrun', 'animationstart']) document.addEventListener(e, () => state.starts++, true)
-  /** Before a capture: the page at rest, the browser's reports of earlier motion in, and the count to compare. A
-      full-page capture sizes the page to its whole height and back, which would start transitions of the page's
-      frame: for the capture, the hold sheet of restyle holds transitions off at the places of PLACES, so a style
-      that changes while it is taken is drawn at its end, never part way. */
-  const holdSheet = Object.assign(document.createElement('style'), { textContent: `@layer barkui-check { ${PLACES.map((p) => `*${p}`).join(', ')} { transition: none !important; } }` })
-  const before = async (who) => {
-    await still(who)
-    document.head.prepend(holdSheet)
-    document.getAnimations()
-    return state.starts
-  }
-  /** After a capture: true when the page is at rest and no motion the browser has reported started since `mark`;
-      the hold sheet goes. With it on, no transition can start while the capture is taken; an animation that starts
-      then is still running here. */
-  const after = (mark) => {
-    const ok = !moving().length && state.starts === mark
-    document.getAnimations()
-    holdSheet.remove()
-    return ok
-  }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, before, after, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

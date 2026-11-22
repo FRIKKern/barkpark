@@ -43,6 +43,9 @@ export const INPUT = {
     selftest: {
       views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
       rest: { seconds: 222, job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
+      // The layers job's cases ran inside the rest job's run above (`within`) until it was split off; its own
+      // hosted reading replaces this one by measurement.
+      layers: { seconds: 222, within: 'rest', job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
     },
   },
 }
@@ -70,7 +73,7 @@ export const capacitySentence = (p = plan()) =>
 
 /** The sentence for one selftest job (`key`, as SELFTEST_JOBS in check/jobs.mjs names it). */
 export const selftestSentence = (key, p = plan()) =>
-  `On CI's hosted runner the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s; it may take at most ${p.HEADROOM} times that, ${p.SELFTEST_CEILINGS[key]} s, ${share(p.SELFTEST_CEILINGS[key], p.SELFTEST_STEP_MINUTES)}% of its ${p.SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`
+  `On CI's hosted runner ${p.READINGS.selftest[key].within ? `the cases of the selftest's ${key} job ran inside the ${p.READINGS.selftest[key].within} job's run of ${p.READINGS.selftest[key].seconds} s, before they were split off` : `the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s`}; it may take at most ${p.HEADROOM} times that, ${p.SELFTEST_CEILINGS[key]} s, ${share(p.SELFTEST_CEILINGS[key], p.SELFTEST_STEP_MINUTES)}% of its ${p.SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`
 
 export const MARKS = ['<!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->', '<!-- /capacity -->']
 
@@ -82,7 +85,7 @@ export function capacityPassage(p = plan()) {
     '',
     `In CI the check runs as jobs side by side. \`check/jobs.mjs\` splits the sorted part folders into the fewest groups of at most ${parts(p.PER_JOB)}, their sizes within one of each other, and the job matrix in \`barkui.yml\` reads that list; no list is written by hand. The plan, each job and the closing check compute the split again from the same checkout and must agree. Every job builds and loads the whole page, and the readings above were taken with at most ${parts(p.FOLDER_READ)} in the folder: with more, a job's ceiling stays where it is, so a page that makes it slower fails the job instead of stretching it. One closing check (its name is \`AGGREGATE\` in \`check/jobs.mjs\`) always runs and is red when the plan, any group or either selftest job is red, cancelled, missing, or skipped while the plan said BarkUI was touched.`,
     '',
-    `The selftest copies one part, so its time does not grow with the parts folder. It runs as ${Object.keys(p.READINGS.selftest).length} jobs side by side, and one rule in \`check/jobs.mjs\` (\`selftestJob\`) puts each case in exactly one: the \`views\` job runs the cases that read the wide or phone views and drive no states, the \`rest\` job every other case; a test holds that the two together run every case, each once. ${Object.keys(p.READINGS.selftest).map((k) => selftestSentence(k, p)).join(' ')} Each ceiling stays at or under ${pct(p.SELFTEST_MOST)} of its step; a job that outgrows that is split again, never given a longer step. Every case runs under one limit of ${p.CASE_SECONDS} s (\`CASE_SECONDS\`), and none carries its own; each case's reading on CI's hosted runner (\`check/case-readings.mjs\`) sits under ${pct(p.CASE_SHARE)} of it, ${p.CASE_SHARE * p.CASE_SECONDS} s, and a test names any case that does not. A case that outgrows that share is unfolded into runs, each of its rows in exactly one, never given a longer limit.`,
+    `The selftest copies one part, so its time does not grow with the parts folder. It runs as ${Object.keys(p.READINGS.selftest).length} jobs side by side, and one rule in \`check/jobs.mjs\` (\`selftestJob\`) puts each case in exactly one: the \`views\` job runs the cases that read the wide or phone views and drive no states, the \`layers\` job the direct readings and the top layer's cases, the \`rest\` job every other case; a test holds that the jobs together run every case, each once. ${Object.keys(p.READINGS.selftest).map((k) => selftestSentence(k, p)).join(' ')} Each ceiling stays at or under ${pct(p.SELFTEST_MOST)} of its step; a job that outgrows that is split again, never given a longer step. Every case runs under one limit of ${p.CASE_SECONDS} s (\`CASE_SECONDS\`), and none carries its own; each case's reading on CI's hosted runner (\`check/case-readings.mjs\`) sits under ${pct(p.CASE_SHARE)} of it, ${p.CASE_SHARE * p.CASE_SECONDS} s, and a test names any case that does not. A case that outgrows that share is unfolded into runs, each of its rows in exactly one, never given a longer limit.`,
   ].join('\n')
 }
 

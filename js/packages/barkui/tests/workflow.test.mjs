@@ -25,7 +25,7 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
     expect(on).not.toMatch(/paths/)
   })
 
-  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and both selftest jobs`, () => {
+  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and every selftest job`, () => {
     expect(wf.split('\n').filter((l) => l.includes(AGGREGATE))).toEqual([`    name: "${AGGREGATE}"`])
     const close = job('barkui')
     expect(close).toContain(`name: "${AGGREGATE}"`)
@@ -101,7 +101,7 @@ describe('every name barkui.yml can render has a row in .github/required-checks.
     expect(readme).toContain(`Past ${MOST_PARTS} parts the plan job refuses`)
   })
 
-  it('the plan, both selftest jobs, the closing check and the skipped-matrix template each have a row', () => {
+  it('the plan, every selftest job, the closing check and the skipped-matrix template each have a row', () => {
     expect(missing([NAMES.plan, ...SELFTEST_JOBS.map((j) => j.name), AGGREGATE, LEG_TEMPLATE])).toEqual([])
   })
 

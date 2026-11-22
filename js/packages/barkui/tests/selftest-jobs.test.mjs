@@ -29,7 +29,7 @@ describe('the selftest jobs', () => {
 
   it('are each named by what they run, and docs/PARTS.md names them as check/jobs.mjs does', () => {
     // No job keeps the bare name "BarkUI selftest": a green job of that name would read as the whole selftest.
-    expect(SELFTEST_JOBS.map((j) => j.name)).toEqual([NAMES.selftest, NAMES.selftestRest])
+    expect(SELFTEST_JOBS.map((j) => j.name)).toEqual([NAMES.selftest, NAMES.selftestRest, NAMES.selftestLayers])
     for (const j of SELFTEST_JOBS) expect(j.name, j.key).toMatch(/^BarkUI selftest, \S/)
     const doc = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
     for (const j of SELFTEST_JOBS) expect(doc, j.key).toContain(`"${j.name}" runs \`--job ${j.key}\``)

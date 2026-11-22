@@ -275,41 +275,6 @@ const skinSwitch = () =>
       }),
   })()
 
-/** A capture is bracketed: with the page's own 150 ms fade started every 400 ms by a timer, each of 40 captures is
-    the page at rest, the same as one of the two captures taken with the timer stopped. */
-const bracket = () =>
-  onPage(`${QUIET} #button-primary { transition: opacity 150ms linear; } #button-primary[data-pin="hover"] { opacity: 0.4; }`, 'no-preference', async (page) => {
-    const clip = await page.barkCheck(() => {
-      const r = document.getElementById('button-primary').getBoundingClientRect()
-      return { x: Math.floor(r.left + scrollX), y: Math.floor(r.top + scrollY), w: Math.ceil(r.width) + 2, h: Math.ceil(r.height) + 2 }
-    })
-    const pin = (on) =>
-      page.barkCheck((on) => window.__barkCheck.restyle('pins set or taken off', () => {
-        const el = document.getElementById('button-primary')
-        if (on) el.setAttribute('data-pin', 'hover')
-        else el.removeAttribute('data-pin')
-      }), on)
-    await pin(false)
-    const off = await capture(page, page.barkCheck, clip)
-    await pin(true)
-    const on = await capture(page, page.barkCheck, clip)
-    await pin(false)
-    await page.barkCheck(() => {
-      const el = document.getElementById('button-primary')
-      window.__barkTimer = setInterval(() => (el.hasAttribute('data-pin') ? el.removeAttribute('data-pin') : el.setAttribute('data-pin', 'hover')), 400)
-    })
-    let mid = 0
-    let red = 0
-    for (let i = 0; i < 40; i++) {
-      const png = await capture(page, page.barkCheck, clip).catch(() => null)
-      if (png === null) red++
-      else if (png !== off && png !== on) mid++
-    }
-    await page.barkCheck(() => clearInterval(window.__barkTimer))
-    if (mid || red || off === on) console.log(`    captures mid-motion: ${mid}; red: ${red}; rest images differ: ${off !== on}`)
-    return !mid && !red && off !== on
-  })
-
 export const REST_CASES = [
   {
     name: 'at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation',
@@ -323,5 +288,4 @@ export const REST_CASES = [
   { name: 'at rest: twelve ways to change a look outside restyle each leave the next read red by name, never mid-way', direct: plants },
   { name: 'at rest: motion declared on ::placeholder, ::marker or ::file-selector-button, and a shadow root on the page, are red by name', direct: unseen },
   { name: "at rest: the checker's skin switch reads at rest straight after on a sound page, and is red by name on a page moving by its own rule", direct: skinSwitch },
-  { name: 'at rest: a capture under a timer-driven fade is the page at rest every time, or taken again', direct: bracket },
 ]
