@@ -12,33 +12,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   So the server tells the page, and never remounts:
 
     * `push/3`, from `Lifecycle.doc_updated/2` and someone else's discard:
-      each rich text inside an object or a row whose drawn value changed,
-      compared with the keys set aside (`drawn/1`, so A's own post, which
-      comes back with new keys, is no change), goes out on `bp:rt-remote`
-      with a number and its HTML: the same `PortableText.to_html/1` the first
-      paint draws. A value past `@html_cap` bytes goes in an event of its
-      own. bp-rt-remote.js puts it into the editor through the editor's own
-      first-paint path once A is idle: no input for 800 ms (so the last keys
-      are posted) and no IME composition. A focused editor takes it too, and
-      keeps its caret in a block whose text did not change.
-    * `repaint/2`, from Reload and a restore (presses of A's own): every one
-      is sent its stored value, shown at once.
+      each rich text inside an object or a row whose drawn value changed
+      (keys set aside, `drawn/1`) goes out on `bp:rt-remote` with a number
+      and its HTML, as the first paint draws it; one past `@html_cap` bytes
+      in an event of its own. bp-rt-remote.js puts it into the editor once
+      A is idle (800 ms without input, no IME composition), keeping the
+      caret in a block whose text did not change.
+    * `repaint/2`, from Reload and a restore: every one is sent its stored
+      value, shown at once, and every hold ends.
     * The page reports, per editor, the number of the last value it shows
-      (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post or a Save: a
-      rich text whose number is older than a change the server logged for
-      it was typed over a value A never saw. Unchanged from what A was
-      shown, theirs stands. Changed in other blocks than theirs, the two are
-      merged block by block (`PortableTextMerge`), saved, and the merge is
-      sent to show (#28349 r3 review, K5/K8/S5p: a hold here lost B's
-      paragraph). Changed in a block theirs changed too, a clash: theirs is
-      saved for that block, and `hold/2` keeps A's block in the form with
-      the conflict banner, theirs words in it, and sends A's view (A's
-      block, theirs elsewhere) as a logged change. A post typed before that
-      view showed is read against theirs again and held again; only typing
-      on what A was shown saves A's block over theirs ("type on to save
-      yours over theirs"), as TanStack's clash card says.
-    * `push_held/3`: another save during a hold is merged into A's held
-      value and sent as a new view, so A types on top of it too.
+      (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post against it:
+      typed over a value A never saw, it is merged when the line-up is
+      certain (`PortableTextMerge`), else held. A hold keeps theirs stored
+      exactly, puts A's view in the form with the conflict banner, and
+      sends the view; it ends only on a post that carries the view's own
+      number and differs from it (#28349 r4 review: rules 1, 3 and 4).
+    * `push_held/3`: another save during a hold is merged into A's view and
+      sent as a new view of the same hold.
 
   A post with no `_bp_rt_seen` (a page loaded before this, or a change the
   server built) is read as before. Top-level rich text keeps its own path
@@ -50,6 +40,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
 
   @event "bp:rt-remote"
@@ -157,7 +148,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
            path when path != [] <- Path.parse_path(name),
-           posted when is_binary(posted) <- get(doc, path) do
+           posted when is_binary(posted) <- FormPath.get(doc, path) do
         later = Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end)
         read(doc, acts, {name, path, posted}, n, Map.get(holds, name), later)
       else
@@ -175,7 +166,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   # Held, the view shown: unchanged from it, nothing is saved over theirs.
   defp read(doc, acts, {name, path, posted}, _n, %{} = h, _later) do
     if drawn(PortableText.from_html(posted, list(h.view))) == drawn(h.view),
-      do: {put(doc, path, html(h.theirs)), [{:still, name, path} | acts]},
+      do: {FormPath.put(doc, path, html(h.theirs)), [{:still, name, path} | acts]},
       else: {doc, [{:current, name} | acts]}
   end
 
@@ -189,14 +180,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   defp over(doc, acts, {name, path, posted}, base, theirs, held?) do
     mine = PortableText.from_html(posted, list(base))
-    stays = put(doc, path, html(theirs))
+    stays = FormPath.put(doc, path, html(theirs))
 
     if not held? and drawn(mine) == drawn(base) do
       {stays, acts}
     else
       case PortableTextMerge.merge(list(base), mine, list(theirs)) do
         {:ok, merged} when not held? ->
-          {put(doc, path, html(merged)), [{:merged, name, path, mine} | acts]}
+          {FormPath.put(doc, path, html(merged)), [{:merged, name, path, mine} | acts]}
 
         {:ok, merged} ->
           {stays, [{:held, name, path, {base, theirs, merged, nil}} | acts]}
@@ -225,7 +216,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         )
 
       {:merged, _name, path, mine}, s ->
-        stored = get(s.assigns[:editor_form] || %{}, path)
+        stored = FormPath.get(s.assigns[:editor_form] || %{}, path)
         tell(s, [{path, mine, stored}], %{})
 
       {:still, name, path}, s ->
@@ -247,7 +238,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     clash = socket.assigns[:editor_rt_clash] || %{}
 
     assign(socket,
-      editor_form: put(socket.assigns[:editor_form] || %{}, path, view),
+      editor_form: FormPath.put(socket.assigns[:editor_form] || %{}, path, view),
       editor_dirty: true,
       editor_unsaved_keys: MapSet.put(socket.assigns[:editor_unsaved_keys] || MapSet.new(), key),
       doc_conflict: true,
@@ -287,7 +278,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     socket.assigns[:editor_schema]
     |> changes(old || %{}, new || %{})
     |> Enum.reduce(socket, fn {path, was, now}, s ->
-      held = get(form, path)
+      held = FormPath.get(form, path)
       name = input_name(path)
       h = holds[name]
 
@@ -307,7 +298,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
         s
         |> assign(
-          editor_form: put(s.assigns[:editor_form], path, view),
+          editor_form: FormPath.put(s.assigns[:editor_form], path, view),
           editor_rt_clash: if(texts, do: Map.put(clash, name, texts), else: clash)
         )
         |> send_view(name, {base, now, view})
@@ -478,34 +469,4 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       sub, acc -> acc <> "." <> sub
     end)
   end
-
-  # A post's rows can come as a list or as a map keyed "0", "1", ….
-  defp get(value, []), do: value
-  defp get(list, [i | rest]) when is_list(list) and is_integer(i), do: get(Enum.at(list, i), rest)
-
-  defp get(%{} = map, [seg | rest]) when not is_struct(map) do
-    case Map.fetch(map, seg) do
-      {:ok, v} -> get(v, rest)
-      :error -> if is_integer(seg), do: get(Map.get(map, Integer.to_string(seg)), rest)
-    end
-  end
-
-  defp get(_value, _path), do: nil
-
-  defp put(_value, [], new), do: new
-
-  defp put(list, [i | rest], new) when is_list(list) and is_integer(i) and i < length(list),
-    do: List.update_at(list, i, &put(&1, rest, new))
-
-  defp put(%{} = map, [seg | rest], new) when not is_struct(map) do
-    key =
-      if is_integer(seg) and not Map.has_key?(map, seg) and
-           Map.has_key?(map, Integer.to_string(seg)),
-         do: Integer.to_string(seg),
-         else: seg
-
-    if Map.has_key?(map, key), do: Map.put(map, key, put(Map.get(map, key), rest, new)), else: map
-  end
-
-  defp put(value, _path, _new), do: value
 end
