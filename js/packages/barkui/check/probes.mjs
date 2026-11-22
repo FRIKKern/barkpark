@@ -312,8 +312,10 @@ export function installHelpers(lists) {
     if (now.length) throw new Error(`${AT_REST}: ${who}: ${named(now)}`)
   }
   /** The sheets' motion anywhere but PLACES, by selector: every sheet the page loads and every adopted one, every
-      rule in every block, nested rules read from their parent. A sheet the check cannot read is named too. */
-  const motionOffList = () => {
+      rule in every block, nested rules read from their parent. `texts` ({ href: text }) are the sheets a page
+      loaded from a file, which the browser keeps from script: read from the same text. Any other sheet the check
+      cannot read is named. With no `texts`, the answer also names each file sheet to read (`files`). */
+  const motionOffList = (texts = null) => {
     const off = []
     const top = (sel) => {
       const out = []
@@ -350,17 +352,27 @@ export function installHelpers(lists) {
         if (r.cssRules && !(r instanceof CSSKeyframesRule)) walk(r.cssRules, here)
       }
     }
+    const files = []
     for (const s of [...document.styleSheets, ...document.adoptedStyleSheets]) {
       let rules
       try {
         rules = s.cssRules
       } catch {
-        off.push(`a sheet the check cannot read: ${s.href}`)
-        continue
+        if (s.href?.startsWith('file:') && texts && s.href in texts) {
+          const copy = new CSSStyleSheet()
+          copy.replaceSync(texts[s.href])
+          rules = copy.cssRules
+        } else if (s.href?.startsWith('file:') && !texts) {
+          files.push(s.href)
+          continue
+        } else {
+          off.push(`a sheet the check cannot read: ${s.href}`)
+          continue
+        }
       }
       walk(rules, [])
     }
-    return [...new Set(off)]
+    return { off: [...new Set(off)], files }
   }
   /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an
       animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
@@ -447,17 +459,26 @@ export function installHelpers(lists) {
       is made, in its delay too): a capture counts only if this stands still across it (capture.mjs). */
   state.starts = 0
   for (const e of ['transitionrun', 'animationstart']) document.addEventListener(e, () => state.starts++, true)
-  /** Before a capture: the page at rest, the browser's reports of earlier motion in, and the count to compare. */
+  /** Before a capture: the page at rest, the browser's reports of earlier motion in, and the count to compare. A
+      full-page capture sizes the page to its whole height and back, which would start transitions of the page's
+      frame: for the capture, the hold sheet of restyle holds transitions off at the places of PLACES, so a style
+      that changes while it is taken is drawn at its end, never part way. */
+  const holdSheet = Object.assign(document.createElement('style'), { textContent: `@layer barkui-check { ${PLACES.map((p) => `*${p}`).join(', ')} { transition: none !important; } }` })
   const before = async (who) => {
     await still(who)
     await new Promise((r) => requestAnimationFrame(r))
     atRest(who)
+    document.head.prepend(holdSheet)
+    document.getAnimations()
     return state.starts
   }
-  /** After a capture: true when the page is at rest and no motion started since `mark`. */
+  /** After a capture: true when the page is at rest and no motion started since `mark`; the hold sheet goes. */
   const after = async (mark) => {
     await new Promise((r) => requestAnimationFrame(r))
-    return !moving().length && state.starts === mark
+    const ok = !moving().length && state.starts === mark
+    document.getAnimations()
+    holdSheet.remove()
+    return ok
   }
   window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, before, after, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }

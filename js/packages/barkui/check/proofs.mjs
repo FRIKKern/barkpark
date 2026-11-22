@@ -1,6 +1,7 @@
 // One function per proof light. Each opens its own page, so a light never
 // borrows state from another, and returns { pass, detail } (plus numbers).
-import { pathToFileURL } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SHEET_WAITS, waitsFor } from '../build/sheet-waits.mjs'
 import { SURFACES } from '../build/page.mjs'
 import { assertStyles, isolate, styleReader } from './guard.mjs'
@@ -78,7 +79,9 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   await page.barkPress(installHelpers, LISTS)
   // Motion may be declared only where the check reads it (motion.mjs): a sheet that declares it anywhere else is red
   // by name before any light reads.
-  const off = await page.barkCheck(() => window.__barkCheck.motionOffList())
+  const first = await page.barkCheck(() => window.__barkCheck.motionOffList())
+  const texts = Object.fromEntries(first.files.map((href) => [href, readFileSync(fileURLToPath(href), 'utf8')]))
+  const { off } = first.files.length ? await page.barkCheck((t) => window.__barkCheck.motionOffList(t), texts) : first
   if (off.length) throw new Error(`the check could not read (not a fault of the part): motion where the check cannot see it: ${off.slice(0, 3).join('; ')}`)
   return page
 }

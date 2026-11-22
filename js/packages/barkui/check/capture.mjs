@@ -13,8 +13,14 @@ export async function capture(page, world, clip) {
   const until = Date.now() + BOUND_MS
   for (;;) {
     const mark = await world(() => window.__barkCheck.before('a capture'))
-    const png = await page.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })
-    if (await world((m) => window.__barkCheck.after(m), mark)) return png.toString('base64')
+    let png
+    let ok = false
+    try {
+      png = await page.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })
+    } finally {
+      ok = await world((m) => window.__barkCheck.after(m), mark)
+    }
+    if (ok) return png.toString('base64')
     if (Date.now() > until) throw new Error('the check could not read (not a fault of the part): read on a page not at rest: a capture: motion started while it was taken, every time inside the bound')
   }
 }
