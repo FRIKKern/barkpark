@@ -305,19 +305,62 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   carries that editor's fields at their old values, and they stay dropped
   (`PostedEdits`, task-a4ded0be5c8ec3cb). The rev and `updated_at` stay
   this tab's own.
+
+  Inside an object only the input changed (`editor_post_path`, `meta.code`)
+  is taken from the newest version: its sibling subfields ride the post as
+  the page drew them, so they too are read against this tab's own row
+  (task-04e50efa8405b956).
   """
   def post_base(socket) do
     own = socket.assigns[:editor_doc]
     seen = base_doc(socket)
+    path = socket.assigns[:editor_post_path]
 
     case List.wrap(socket.assigns[:editor_post_target]) do
       [_ | _] = keys when is_map(own) and is_map(seen) and seen != own ->
-        Enum.reduce(keys, own, &take_seen(&2, seen, &1))
+        Enum.reduce(keys, own, &take_seen(&2, seen, &1, path))
 
       _ ->
         own
     end
   end
+
+  defp take_seen(doc, seen, key, [key, sub | _] = path)
+       when is_binary(sub) and key not in ["title", "status"] do
+    own = doc.content || %{}
+    theirs = seen.content || %{}
+
+    case object_path(path, own, theirs) do
+      [_, _ | _] = keys -> %{doc | content: put_seen(own, theirs, keys)}
+      _ -> take_seen(doc, seen, key)
+    end
+  end
+
+  defp take_seen(doc, seen, key, _path), do: take_seen(doc, seen, key)
+
+  # The longest prefix of `path` whose parents are objects in both rows: the
+  # subfield taken. A list index ends it, so a list row is taken whole, as
+  # the field was.
+  defp object_path([key | rest], own, seen) do
+    case {Map.get(own, key), Map.get(seen, key), rest} do
+      {%{} = o, %{} = s, [sub | _]}
+      when is_binary(sub) and not is_struct(o) and not is_struct(s) ->
+        [key | object_path(rest, o, s)]
+
+      _ ->
+        [key]
+    end
+  end
+
+  defp put_seen(own, seen, [key]) do
+    case Map.fetch(seen, key) do
+      {:ok, value} -> Map.put(own, key, value)
+      :error -> Map.delete(own, key)
+    end
+  end
+
+  defp put_seen(own, seen, [key | rest]),
+    do: Map.put(own, key, put_seen(Map.fetch!(own, key), Map.fetch!(seen, key), rest))
 
   defp take_seen(doc, seen, key) when key in ["title", "status"] do
     atom = String.to_existing_atom(key)
