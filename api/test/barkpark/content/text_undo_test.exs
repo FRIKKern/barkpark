@@ -52,6 +52,112 @@ defmodule Barkpark.Content.TextUndoTest do
       assert TextRebase.merge3("Hello world", "Hello there", "Hello wOrld") == "Hello there"
     end
 
+    # The conflict decision gives nil where TanStack's merge3 does: ours made
+    # a diff-match-patch patch that has nowhere to go in theirs
+    # (task-881f16e32fffbe9a). Undo keeps merge3_both.
+    test "merge3_clash: nil where TanStack's merge3 is null, else merge3_both" do
+      for {base, ours, theirs} <- [
+            {"First words here", "First words here mine", ""},
+            {"First words here", "First words here mine", "First"},
+            {"First words", "First words!", "First Rewritten"},
+            {"First words here today", "First words Xhere today", "First today"}
+          ] do
+        assert TextRebase.merge3_clash(base, ours, theirs) == nil, inspect({base, ours, theirs})
+      end
+
+      # Where TanStack's patch still places ours: the same merge as merge3_both.
+      for {base, ours, theirs, merged} <- [
+            {"aaa bbb", "aaaX bbb", "aa bbb", "aaX bbb"},
+            {"I am heree. Next", "I am heree, yes. Next", "I am here. Next",
+             "I am here, yes. Next"},
+            {"Hello world ", "Hello world X", "Hello world", "Hello worldX"},
+            {"One. Two three. Four five six.", "One. Two three. Yes four five six.",
+             "One. Four five six.", "One. Yes four five six."},
+            {"First words here today", "First Xwords here today", "First today", "First Xtoday"},
+            {"Old text", "Old text and more", "Brand new", "Brand new and more"},
+            {"Hello world", "Hello world!", "Hello", "Hello!"},
+            {"First words here", "First words here mine", "words here", "words here mine"}
+          ] do
+        assert TextRebase.merge3_clash(base, ours, theirs) == merged
+        assert TextRebase.merge3_both(base, ours, theirs) == merged
+      end
+
+      # merge3_both and the save path's merge3 still merge the cleared case.
+      assert TextRebase.merge3_both("First words here", "First words here mine", "") == " mine"
+      assert TextRebase.merge3("First words here", "First words here mine", "") == " mine"
+    end
+
+    # The port's diff has no deadline: past its bounds it is not run, and
+    # the answer is a clash, at once.
+    test "merge3_clash: a 50 KB text, or a long rewrite, is a clash at once" do
+      body = String.duplicate("alpha beta gamma delta. ", 2_000)
+      mid = div(byte_size(body), 2)
+      rewrite = String.duplicate("Q", 20_000)
+
+      ours =
+        binary_part(body, 0, mid - 10_000) <>
+          rewrite <> binary_part(body, mid + 10_000, mid - 10_000)
+
+      small = binary_part(body, 0, 30_000)
+      small_ours = binary_part(small, 0, 15_000) <> "!" <> binary_part(small, 15_000, 15_000)
+      # Under the unit limit, a 2,000-character rewrite.
+      short = binary_part(body, 0, 15_000)
+
+      short_ours =
+        binary_part(short, 0, 6_500) <>
+          String.duplicate("Q", 2_000) <> binary_part(short, 8_500, 6_500)
+
+      for {base, ours, theirs} <- [
+            {body, ours, "B " <> body},
+            {small, small_ours, "B " <> small},
+            {short, short_ours, "B " <> short}
+          ] do
+        assert TextRebase.merge3_both(base, ours, theirs) != nil
+        {micros, result} = :timer.tc(fn -> TextRebase.merge3_clash(base, ours, theirs) end)
+        assert result == nil
+        assert micros < 500_000, "took #{div(micros, 1000)} ms"
+      end
+    end
+
+    # Short repeated structure makes many diff parts: the clash check stays
+    # under half a second on it, at the caps and past them.
+    test "merge3_clash: repeated text, a table, a rewrite at the caps: an answer at once" do
+      cat = String.duplicate("the cat sat. ", 1_531) |> String.slice(0, 19_900)
+
+      table =
+        Enum.map_join(1..1_100, "", fn i -> "| #{i} | item | ok |\n" end)
+        |> String.slice(0, 13_900)
+
+      prose = String.duplicate("alpha beta gamma delta epsilon zeta ", 40)
+
+      splice = fn text, from, n ->
+        String.slice(text, 0, from) <>
+          String.slice(prose, 0, n) <> String.slice(text, from + n, String.length(text))
+      end
+
+      for {text, n} <- [
+            {cat, 999},
+            {table, 999},
+            {cat, 250},
+            {table, 250},
+            {cat, 700},
+            {table, 700}
+          ] do
+        ours = splice.(text, 9_000, n)
+        {micros, _result} = :timer.tc(fn -> TextRebase.merge3_clash(text, ours, "B " <> text) end)
+        assert micros < 500_000, "#{n} took #{div(micros, 1000)} ms"
+      end
+    end
+
+    test "undo takes A's words back out after B deleted the sentence before them" do
+      assert TextUndo.revert(
+               "One. Two three. Yes four.",
+               "One. Two three. four.",
+               "One. Yes four."
+             ) ==
+               "One. four."
+    end
+
     test "nil over the size bound" do
       big = String.duplicate("x", TextRebase.max_bytes() + 1)
       assert TextRebase.merge3_both(big, big <> "a", "b" <> big) == nil
