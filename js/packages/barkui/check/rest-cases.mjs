@@ -57,6 +57,8 @@ async function hiddenAndBack(page) {
   const back = await look(false)
   return { hidden, back }
 }
+/** The part's spinner turns for ever with motion allowed: held still, so what moves is only each row's own plant. */
+const QUIET = '[data-slot="spinner"] { animation: none; }'
 const NOT_AT_REST = /read on a page not at rest: .*div#button-pop /
 /** Under reduced motion every property has a 0.01ms transition: hidden and drawn again, the box reads at its new
     opacity at once, in the same task; the change starts no transition and the checker adds no animation. */
@@ -79,26 +81,26 @@ const ownLook = () =>
         if (back.opacity !== 0 || !fails.length) console.log(`    drawn again: ${JSON.stringify(back)}; fails: ${JSON.stringify(fails)}`)
         return back.opacity === 0 && fails.length > 0
       }),
-    'a box still fading in by its own 60 s transition is not at rest: hiding it and reading it are red by name': () =>
-      onPage('#button-pop { transition: opacity 60s linear; } @starting-style { #button-pop:popover-open { opacity: 0; } }', 'no-preference', async (page, part) => {
-        const { hidden } = await hiddenAndBack(page)
+    'a box still fading in by its own 60 s transition is not at rest: its reading is red by name': () =>
+      onPage(`${QUIET} #button-pop { transition: opacity 60s linear; } @starting-style { #button-pop:popover-open { opacity: 0; } }`, 'no-preference', async (page, part) => {
+        await page.click('#button-pop-open')
         const read = await readView(page, part).then(() => 'read', (e) => String(e.message))
-        const held = NOT_AT_REST.test(hidden.error ?? '') && NOT_AT_REST.test(read)
-        if (!held) console.log(`    hiding: ${JSON.stringify(hidden)}; reading: ${read.slice(0, 200)}`)
+        const held = NOT_AT_REST.test(read)
+        if (!held) console.log(`    reading: ${read.slice(0, 200)}`)
         return held
       }),
     "a control fading by its own 2 s rule when the checker pins a state reads the pinned state or is red by name, never between": () =>
-      onPage('#button-pop-open { transition: opacity 2s linear; } #button-pop-open[data-pin="active"] { opacity: 0.2; } #button-pop-open[data-pin="hover"] { opacity: 1; }', 'no-preference', async (page) => {
+      onPage(`${QUIET} #button-pop-open { transition: opacity 2s linear; } #button-pop-open[data-pin="active"] { opacity: 0.2; } #button-pop-open[data-pin="hover"] { opacity: 1; }`, 'no-preference', async (page) => {
         const got = await page.barkCheck(() => {
           const el = document.getElementById('button-pop-open')
           el.setAttribute('data-pin', 'active')
           document.getAnimations()
           try {
             window.__barkCheck.restyle('a pin for the case', () => el.setAttribute('data-pin', 'hover'))
+            return { opacity: Number(getComputedStyle(el).opacity) }
           } catch (e) {
             return { error: String(e.message) }
           }
-          return { opacity: Number(getComputedStyle(el).opacity) }
         })
         const held = got.opacity === 1 || /read on a page not at rest: .*button#button-pop-open /.test(got.error ?? '')
         if (!held) console.log(`    pinned: ${JSON.stringify(got)}`)
@@ -140,7 +142,7 @@ const CALLS = {
 }
 
 /** A 60 s fade of the page's own on #button-primary, started by the check's world with no restyle and no frame. */
-const SLOW = '#button-primary { transition: opacity 60s linear; } #button-primary[data-pin="hover"], #button-primary.bark-slow, #button-primary[aria-pressed="true"] { opacity: 0.5; }'
+const SLOW = QUIET + ' #button-primary { transition: opacity 60s linear; } #button-primary[data-pin="hover"], #button-primary.bark-slow, #button-primary[aria-pressed="true"] { opacity: 0.5; }'
 const walk = () =>
   onPage(SLOW, 'no-preference', async (page) => {
     const calls = Object.fromEntries(Object.entries(CALLS).map(([k, f]) => [k, f.toString()]))

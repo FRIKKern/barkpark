@@ -135,7 +135,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
   await show('light')
   const rest = async () => {
     await page.mouse.move(0, 0)
-    await page.barkCheck((id) => document.getElementById(id).focus(), title)
+    await page.barkCheck((id) => window.__barkCheck.restyle('focus moved to the part title', () => document.getElementById(id).focus()), title)
     await settle(page)
   }
   await rest()

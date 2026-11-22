@@ -181,6 +181,12 @@ export function installDrawn() {
   let sheet = null
   /** In the reference tab: lay out each thing alone on its own ground, at the top of the document; returns the box. */
   const alone = (list) => {
+    // Laid out through restyle, so the cells' sizes, set after a first measure, start no transition.
+    let at = null
+    h.restyle('the reference page laid out', () => (at = layOut(list)))
+    return at
+  }
+  const layOut = (list) => {
     sheet?.remove()
     sheet = document.createElement('div')
     sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; display: block; background: #fff; color: #000;')

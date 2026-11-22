@@ -58,6 +58,7 @@ export function installHelpers() {
     const raw = getComputedStyle(within).getPropertyValue(name).trim()
     if (!raw) return getComputedStyle(within).color
     const probe = document.createElement('span')
+    probe.style.setProperty('transition', 'none', 'important')
     // The sheet's colours are light-dark() pairs: the probe takes the element's own scheme, so a surface that
     // flips it resolves as it does at the element.
     probe.style.colorScheme = getComputedStyle(within).colorScheme
@@ -158,6 +159,8 @@ export function installHelpers() {
   /** Names that hold a colour (an invalid colour falls back to the parent's, whatever it is). */
   const colourVars = (names) => {
     const host = document.createElement('div')
+    // The check's own probe: its colour changes below start no transition of its own.
+    host.style.setProperty('transition', 'none', 'important')
     document.body.append(host)
     const keep = names.filter((n) => {
       const seen = ['rgb(1, 2, 3)', 'rgb(4, 5, 6)'].map((c) => {
@@ -359,11 +362,12 @@ export function installHelpers() {
   const state = {}
   /** The one way the checker changes the page's look (a sheet of its own on or off, a pin set or taken off): `change`
       runs with transitions held off by a first-layer sheet of the checker's own, and style is brought up to date
-      before that sheet goes, so the change starts no transition. The checker adds no animation to the page.
+      before that sheet goes, so the change starts no transition. The checker adds no animation to the page. A
+      transition of the page's own that the sheet meets ends where it was going; a read never sees that moment
+      alone, since every read passes the door (still) and the gate first.
       `place` names the caller; state.restyled counts the calls by place. */
   let stillSheet = null
   const restyle = (place, change) => {
-    atRest(`the checker's change "${place}"`)
     stillSheet ??= Object.assign(document.createElement('style'), { textContent: '@layer barkui-check { *, *::before, *::after, *::backdrop { transition: none !important; } }' })
     document.head.prepend(stillSheet)
     try {
@@ -376,7 +380,7 @@ export function installHelpers() {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, still, looks, AT_REST, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, looks, AT_REST, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */
