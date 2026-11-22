@@ -31,7 +31,7 @@
 // it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
 // closed shadow root, is not seen.
 import { limit } from './limit.mjs'
-import { placementSource, SHADOW_ABOVE } from './placement.mjs'
+import { HOLDER_UNREAD, HOLDERS_UNLISTED, placementSource, SHADOW_ABOVE } from './placement.mjs'
 import { source } from './probes.mjs'
 
 const STEP_MS = 5000
@@ -313,25 +313,39 @@ export async function installCensus(page, { script = true } = {}) {
     await ensure()
     return [...(await run(`__barkPlacement(${JSON.stringify(name)})`)), ...(await shadowAbove(name))]
   }
-  /** Each element that holds a stage of the part and hosts a shadow root, of any mode and however it was made
-      (attachShadow, or a declared root in markup): asked of the browser's own tree, at the look, element by element. */
+  /** Each element that holds a stage of the part and hosts a shadow root, of any mode and however it was made: asked
+      of the browser's own tree, at the look, element by element. A holder the browser gives no answer for fails. */
   const shadowAbove = async (name) => {
     const objectGroup = 'barkui-holders'
+    const t0 = Date.now()
+    const ask = (method, params) => within(cdp.send(method, params), `${method} gave no answer in ${ASK_MS / 1000} s`)
+    const fails = []
     try {
-      const { result } = await cdp.send('Runtime.evaluate', { expression: `__barkHolders(${JSON.stringify(name)})`, contextId: id, objectGroup })
-      const { result: items } = await cdp.send('Runtime.getProperties', { objectId: result.objectId, ownProperties: true })
-      const fails = []
-      for (const { name: i, value } of items) {
-        if (!/^\d+$/.test(i) || !value?.objectId) continue
-        const { node } = await cdp.send('DOM.describeNode', { objectId: value.objectId, depth: 0 })
-        const at = node.attributes ?? []
-        const elId = at.find((v, k) => k % 2 === 1 && at[k - 1] === 'id')
-        if (node.shadowRoots?.length) fails.push(SHADOW_ABOVE(`${node.localName}${elId ? '#' + elId : ''}`))
+      const { result, exceptionDetails } = await ask('Runtime.evaluate', { expression: `__barkHolders(${JSON.stringify(name)})`, contextId: id, objectGroup })
+      if (exceptionDetails || !result?.objectId) throw new Error('the census did not list them')
+      const { result: items } = await ask('Runtime.getProperties', { objectId: result.objectId, ownProperties: true })
+      const at = new Map(items.filter((p) => /^\d+$/.test(p.name)).map((p) => [Number(p.name), p.value]))
+      for (let i = 0; at.has(i); i += 2) {
+        const who = String(at.get(i + 1)?.value ?? `holder ${i / 2 + 1}`)
+        holderReads.holders++
+        try {
+          const objectId = at.get(i)?.objectId
+          if (!objectId) throw new Error('no element')
+          const { node } = await ask('DOM.describeNode', { objectId, depth: 0 })
+          if (!node) throw new Error('no node')
+          if (node.shadowRoots?.length) fails.push(SHADOW_ABOVE(who))
+        } catch (e) {
+          fails.push(HOLDER_UNREAD(who, e.message))
+        }
       }
-      return fails
+    } catch (e) {
+      fails.push(HOLDERS_UNLISTED(name, e.message))
     } finally {
       await cdp.send('Runtime.releaseObjectGroup', { objectGroup }).catch(() => {})
+      holderReads.looks++
+      holderReads.ms += Date.now() - t0
     }
+    return fails
   }
   return look
 }
@@ -351,6 +365,15 @@ export async function unnamedNow(page, part) {
 }
 /** How many of those looks this process made, and how long they took: the selftest prints what they cost. */
 export const looks = { n: 0, ms: 0 }
+/** What asking the browser about the holders of stages cost, over a process: looks, holders read, and ms. */
+export const holderReads = { looks: 0, holders: 0, ms: 0 }
+export const holderSentence = () => `placement: ${holderReads.looks} looks asked the browser about ${holderReads.holders} holders of a stage, in ${(holderReads.ms / 1000).toFixed(1)} s`
+// One answer from the browser, or a fail by name after ASK_MS.
+const ASK_MS = 5000
+const within = (p, why) => {
+  let timer
+  return Promise.race([p, new Promise((_, no) => (timer = setTimeout(() => no(new Error(why)), ASK_MS)))]).finally(() => clearTimeout(timer))
+}
 
 /** The fail for a layer whose box is not open once its "open" input settles. */
 export const LATE = (name) => `${name} is not open in the top layer once its "open" input settles: it opened later than the check waits, or not at all; a layer opens at once on its input`

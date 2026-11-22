@@ -13,6 +13,7 @@ import { capacitySentence, ceilingFor } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
 import { runCheck } from './check.mjs'
 import { folderNames, legGroup, materialize, partsDir } from './jobs.mjs'
+import { holderSentence } from './layers.mjs'
 
 const { values: args } = parseArgs({ options: { group: { type: 'string' }, parts: { type: 'string' }, report: { type: 'string' } } })
 let group = null
@@ -35,5 +36,6 @@ enforceCeiling(
 )
 if (group) console.log(`check: group ${group.group} of ${group.of}: ${names.join(', ')}${dir === partsDir ? '' : ` (from ${dir})`}`)
 const { ok } = await runCheck({ dir, names })
+console.log(holderSentence())
 if (args.report) writeFileSync(args.report, JSON.stringify({ group: group?.group ?? null, of: group?.of ?? null, parts: names, sha: process.env.GITHUB_SHA ?? '', ok }) + '\n')
 process.exit(ok ? 0 : 1)

@@ -94,6 +94,9 @@ const INTO_ROOT = [
   "host.id = 'button-sh4'; root.before(host); host.attachShadow({ mode: 'open' }).append(root)",
 ].join('\n')
 const STAGE = 'div[data-part="button"]'
+// The control: the stage moved into a new plain wrapper, no shadow root anywhere.
+const PLAIN = "const w = document.createElement('div'); w.id = 'button-plain-wrap'; root.before(w); w.append(root)"
+const ROOT_FAIL = /hosts a shadow root above a stage|outside the document itself|gave no answer on whether it hosts/
 
 // Each written as the page loads; the last is written while its box is open and taken away as it closes, in one task,
 // so no look ever finds it.
@@ -228,6 +231,16 @@ export const PLACEMENT_CASES = [
     only: ['pressed'],
     plant: all((d) => inDemo(d, INTO_ROOT)),
     expect: each({ 'the stage is outside the document itself': has(OUT_OF_DOCUMENT(STAGE)) }),
+  },
+  {
+    name: 'placement: a stage moved into a new plain wrapper, with no shadow root anywhere, passes',
+    only: ['pressed'],
+    green: true,
+    plant: all((d) => inDemo(d, PLAIN)),
+    expect: each({
+      'every press step passed': (p) => lights(p).pressed?.pass === true,
+      'no fail names a shadow root, the document or an unread holder': (p) => !ROOT_FAIL.test(said(p)),
+    }),
   },
   {
     name: 'placement: on the stage with no script any style attribute fails by name, a listed property on a box and an empty one alike',

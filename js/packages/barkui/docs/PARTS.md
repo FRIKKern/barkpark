@@ -291,9 +291,9 @@ where each may stand and what writes it:
 - `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
 
 Values are not read, except transition's, the names anchor-name gives, and the scroll lock's (below). Apart from
-the list, one more entry has its own reason: UI SDK switches motion off on a box while it measures where to put it, and `none` takes motion away
-and adds no look. UI SDK writes it when it first places a select or menu box and puts the old value back in the same
-task, so only a reader from the first frame sees it:
+the list, one more entry has its own reason: UI SDK switches motion off on a box while it measures where to put
+it, and `none` takes motion away and adds no look. UI SDK writes it when it first places a select or menu box and
+puts the old value back in the same task, so only a reader from the first frame sees it:
 
 - `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
 
@@ -307,11 +307,13 @@ a `style` attribute in a stage holds is read, from the page's first frame, howev
 name; a hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first,
 since the browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
 
-A stage stands in the document itself, never in a shadow root, and no element that holds a stage hosts a shadow root
-of any mode, however it was made (the check asks the browser's own tree, element by element); both are read at every
-look, so the order of attaching and moving cannot matter, and either fails by name. So what a stage inherits from is exactly the
-elements that hold it. Every element that holds a stage, up to and including the root element, is read the same way
-from the first frame, since a stage inherits from it. Nothing may stand there, with one closed list apart, in the same file, with its own
+The rule reads the `style` attribute on every element that holds a stage too, up to and including the root element,
+the same way from the first frame, since a stage inherits from it. Two more rules are read at every look, so the
+order in which the page attaches and moves things cannot matter: a stage whose root node is not the document fails
+by name, and so does an element that holds a stage and hosts a shadow root of any mode. For that, the check asks the
+browser's own tree, element by element, and an element it gets no answer for fails by name too.
+
+On an element that holds a stage nothing may stand, with one closed list apart, in the same file, with its own
 reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It writes the lock on the
 root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar that takes room. The list
 is what UI SDK writes in the browser the check runs (where `scrollbar-gutter` is missing it writes `padding-right`
@@ -334,9 +336,9 @@ closes, so a lock written before a dialog opens, or left after the last one clos
 reaches every stage, since a custom property inherits; no shipped sheet reads it, and part.css may not (it reads
 only `--ui-*` and `--bark-*`). Another value on a listed property, any other property on the root element or
 body, the lock while no dialog box is open, and any property on another element that holds a stage fail by name
-("… holds a stage, which inherits from it: nothing may stand there"). The one limit: a value only inside a closed
-shadow root in a stage, or one an element held only between arriving in a stage and leaving it within one task, changed
-after it left, is not seen.
+("… holds a stage, which inherits from it: nothing may stand there"). The one limit of this rule: a value only
+inside a closed shadow root in a stage, or one an element held only between arriving in a stage and leaving it
+within one task, changed after it left, is not seen.
 
 ## What part.css may condition on
 

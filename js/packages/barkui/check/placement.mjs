@@ -104,6 +104,10 @@ export const ON_ANCESTOR = (at, prop) => `${at} was given ${prop} in a style att
 export const OUT_OF_DOCUMENT = (at) => `${at} is a stage outside the document itself: a stage stands in the document, never in a shadow root`
 /** The fail for an element that holds a stage and hosts a shadow root, of any mode. */
 export const SHADOW_ABOVE = (at) => `${at} hosts a shadow root above a stage: nothing that holds a stage may host one`
+/** The fail for an element that holds a stage when the browser gives no answer on whether it hosts a shadow root. */
+export const HOLDER_UNREAD = (at, why) => `${at} holds a stage, and the browser gave no answer on whether it hosts a shadow root (${why}): one the check cannot read fails`
+/** The fail for a part whose stage's holders the check could not list for the browser. */
+export const HOLDERS_UNLISTED = (part, why) => `the check could not list what holds the stage of ${part} for the browser (${why}): a holder it cannot read fails`
 /** The fail for any style attribute on a stage with no script. */
 export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage with no script, where nothing may write one`
 
@@ -240,11 +244,12 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
       }
     return fails
   }
+  // Each element that holds a stage of the part, then its name: [el, name, el, name, …].
   const holders = (part) => {
     const out = new Set()
     for (const e of document.querySelectorAll('[data-part]')) stage(e)
     for (const s of stages.get(part) ?? []) if (s.getRootNode() === document) for (let e = s.parentElement; e; e = e.parentElement) out.add(e)
-    return [...out]
+    return [...out].flatMap((e) => [e, named(e)])
   }
   return { watch, look, holders }
 }

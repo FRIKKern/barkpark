@@ -26,7 +26,7 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
-import { topLayerTouch, UNNAMED } from './layers.mjs'
+import { holderSentence, topLayerTouch, UNNAMED } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES, esc } from './plants.mjs'
 
 export const CASES = [
@@ -759,6 +759,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
   }
   const count = { held: run.length - failures, of: run.length }
+  console.log(holderSentence())
   console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
   if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)
