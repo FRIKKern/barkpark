@@ -43,12 +43,11 @@ export const INPUT = {
       { parts: 5, folder: 14, seconds: 567, run: 44662694458, commit: 'd9d277ad73' },
     ],
     // One reading per selftest job (check/jobs.mjs, SELFTEST_JOBS): that job's whole run, as it printed it
-    // ("selftest: N of N cases held, in S s"), with the job it came from. A job that has not yet run on CI's hosted
-    // runner reads the sum of its cases' hosted readings in that run (`cases: true`) until it has.
+    // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
       views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
-      rest: { seconds: 222, job: 136964690746, run: 44943101274, commit: 'e626da72b8' },
-      layers: { seconds: 107.7, run: 45002097199, commit: '0f6c725778', cases: true },
+      rest: { seconds: 192, job: 137190375300, run: 45016622154, commit: 'f5cb9eacc6' },
+      layers: { seconds: 98, job: 137190375294, run: 45016622154, commit: 'f5cb9eacc6' },
     },
   },
 }
@@ -77,13 +76,13 @@ export const capacitySentence = (p = plan()) =>
 
 /** The sentence for one selftest job (`key`, as SELFTEST_JOBS in check/jobs.mjs names it). */
 export const selftestSentence = (key, p = plan()) =>
-  `On CI's hosted runner ${p.READINGS.selftest[key].cases ? `the cases of the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s together` : `the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s`}; it may take at most ${p.HEADROOM} times that, ${p.SELFTEST_CEILINGS[key]} s, ${share(p.SELFTEST_CEILINGS[key], p.SELFTEST_STEP_MINUTES)}% of its ${p.SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`
+  `On CI's hosted runner the selftest's ${key} job took ${p.READINGS.selftest[key].seconds} s; it may take at most ${p.HEADROOM} times that, ${p.SELFTEST_CEILINGS[key]} s, ${share(p.SELFTEST_CEILINGS[key], p.SELFTEST_STEP_MINUTES)}% of its ${p.SELFTEST_STEP_MINUTES}-minute step in CI, and stops, failing, once it passes that.`
 
 export const MARKS = ['<!-- capacity: made by check/capacity.mjs; run `node check/capacity.mjs` to write it -->', '<!-- /capacity -->']
 
 /** docs/PARTS.md's whole passage on capacity (and the PR's), every number from `p`. */
 export function capacityPassage(p = plan()) {
-  const read = (r) => `${r.cases ? "its cases' readings summed, " : ''}${r.job ? `job ${r.job} of ` : ''}run ${r.run} at ${r.commit}`
+  const read = (r) => `${r.job ? `job ${r.job} of ` : ''}run ${r.run} at ${r.commit}`
   return [
     `${capacitySentence(p)} The ceilings are made from readings (\`check/capacity.mjs\`): each is one job's whole run on CI's hosted runner, and each ceiling is ${p.HEADROOM} times the slowest reading for its number of parts. The readings: the check, ${p.READINGS.check.map((r) => `${parts(r.parts)} of ${r.folder} in ${r.seconds} s (${read(r)})`).join('; ')}; the selftest, ${Object.entries(p.READINGS.selftest).map(([k, r]) => `its ${k} job in ${r.seconds} s (${read(r)})`).join(' and ')}. A job checks ${p.AT_ONCE} parts at a time. A run stops, failing with its sentence, the moment it passes its ceiling, wherever it is then (\`check/ceiling.mjs\`, one timer for the check and the selftest; \`BARKUI_CEILING_SECONDS\` can lower a ceiling, down to 0 s, for a test, never raise it). Given more than ${parts(p.PER_JOB)}, a job refuses to run, naming that sentence, before any light is read. When a part lands, its hosted reading goes into \`check/capacity.mjs\` and the numbers move by measurement; a test holds the steps' minutes to \`barkui.yml\`, the ceiling of ${parts(p.PER_JOB)} under the check step and of one more over it, and this passage word for word.`,
     '',
