@@ -127,7 +127,7 @@
     "limits/heatmap-padding-within-the-stored-cells.golden.json": "d189590a03ce00fee21d4c47562d9698241c821bf71b5e17ab13950d9a64845a",
     "limits/link-at-the-depth-limit.golden.json": "22c95b979f09b87942c8175692fc09e77a12a668efa170628669d78186faba58",
     "limits/link-one-level-above-the-depth-limit.golden.json": "5c7c9286c4ed280f3dd843d8683bd3de9fd804ded681865c7a317fbf6df5ba25",
-    "limits/list-at-the-depth-limit.golden.json": "4a1ad19e17844c446e0381c7d4b337b1150c6c80eb9350175c3ed4be09d4beb5",
+    "limits/list-at-the-depth-limit.golden.json": "fbd1a9dd4bbf471d7bb7c195601f136ee406cd5fe5eaa92f45222a01daa03859",
     "limits/list-one-level-above-the-depth-limit.golden.json": "89a47ef4acc76f3688af62c8f26d30abb7ae0c4d340ed64aa647f4584dcbeea1",
     "limits/marks-at-the-depth-limit.golden.json": "bbb1e9602f886bd20ec2a528385db9ca75f1ffb7b0093adc1a0ae1f1accbf666",
     "limits/marks-one-level-above-the-depth-limit.golden.json": "3370f7f1ed01f98930c2b2a230155f69289434c5fda910b9009ef43c47d4ab0d",
@@ -186,6 +186,6 @@
     "test/support/fixtures/portable-doc-limits.json"
   ],
   "inputs_sha256": "0648d300e378ecc17b34ddab73b0d52288793f4496e265688d12df3c17dcac07",
-  "render_version": "0589af33eee90ab62e7e59095da700b058aa9b911ebbbc31c995c7833e1a1af8",
+  "render_version": "e0ab3b1a131fcf757eeffcc150e7e3a753f3094786ceec5d317f58696401bdbf",
   "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
 }
