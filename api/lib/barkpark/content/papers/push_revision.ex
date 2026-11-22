@@ -64,7 +64,7 @@ defmodule Barkpark.Content.Papers.PushRevision do
     end
   end
 
-  defp save(doc, action, dataset, opts) do
+  defp save(%Document{} = doc, action, dataset, opts) do
     case Broadcast.save_revision(
            %Document{doc | id: nil},
            "paper",
