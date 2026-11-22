@@ -17,12 +17,21 @@ defmodule BarkparkWeb.Studio.UntypedArrayOfTest do
 
   @dataset "production"
 
+  # A schema stored before schema writes refused an `arrayOf` with a missing
+  # or untyped `of` (task-33f3ce6c95c48851): its fields are written past the
+  # changeset, as such a row already sits in a live database.
+  defp stored_before_the_check(attrs, dataset) do
+    {:ok, row} = Content.upsert_schema(Map.put(attrs, "fields", []), dataset)
+    {:ok, row} = row |> Ecto.Changeset.change(fields: attrs["fields"]) |> Barkpark.Repo.update()
+    {:ok, row}
+  end
+
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
     type = "untyped_of_#{n}"
 
     {:ok, _} =
-      Content.upsert_schema(
+      stored_before_the_check(
         %{
           "name" => type,
           "title" => "Untyped of",

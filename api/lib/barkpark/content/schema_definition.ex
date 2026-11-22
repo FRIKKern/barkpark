@@ -132,6 +132,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_no_bare_required()
+    |> validate_array_of()
     |> validate_rich_text_formats()
     |> validate_inline_field_names()
     |> validate_visible_when_scopes()
@@ -199,6 +200,21 @@ defmodule Barkpark.Content.SchemaDefinition do
                 "`\"validation\": {\"required\": true}` (validation.required)"
             )
         end
+
+      _ ->
+        changeset
+    end
+  end
+
+  # An `arrayOf` must name its items' type (`ArrayOfCheck`,
+  # task-33f3ce6c95c48851). Only a CHANGED `fields` list is checked, so an
+  # unrelated update to an old row is never blocked.
+  defp validate_array_of(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        fields
+        |> Barkpark.Content.SchemaDefinition.ArrayOfCheck.problems()
+        |> Enum.reduce(changeset, fn msg, cs -> add_error(cs, :fields, msg) end)
 
       _ ->
         changeset
