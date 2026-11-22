@@ -186,7 +186,12 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
       "items" => [
         %{
           "content" => [t("parent")],
-          "children" => [%{"type" => "list", "items" => [[t("CHILD")]]}]
+          "children" => [
+            %{
+              "type" => "list",
+              "items" => [%{"id" => "child", "content" => [t("CHILD")], "audit" => true}]
+            }
+          ]
         }
       ]
     }
