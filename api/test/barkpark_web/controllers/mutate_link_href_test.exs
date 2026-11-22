@@ -117,15 +117,17 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
 
   for {label, href} <- [
         {"javascript:", "javascript:alert(1)"},
-        {"upper case", "JavaScript:alert(1)"},
-        {"leading space", "  javascript:alert(1)"},
-        {"a tab inside", "jav\tascript:alert(1)"},
-        {"a control character first", "\u0001javascript:alert(1)"},
+        {"in upper case", "JavaScript:alert(1)"},
+        {"after spaces", "  javascript:alert(1)"},
+        {"split by a tab", "jav\tascript:alert(1)"},
+        {"after a control character", "\u0001javascript:alert(1)"},
         {"data:", "data:text/html,<script>alert(1)</script>"},
         {"vbscript:", "vbscript:msgbox(1)"},
         {"protocol-relative", "//evil.example/x"}
       ] do
-    test "a create with a #{label} link address is refused, and nothing is written", %{conn: conn} do
+    test "a create whose link address is #{label} is refused, and nothing is written", %{
+      conn: conn
+    } do
       id = id()
       refused!(create(conn, id, link(unquote(href))), "/meta/rt/0/markDefs/0/href")
       assert stored(id) == nil
