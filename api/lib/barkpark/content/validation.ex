@@ -151,6 +151,7 @@ defmodule Barkpark.Content.Validation do
     pt_shape pt_type_missing pt_key_missing pt_key_duplicate pt_span_text
     pt_mark_undeclared pt_style_undeclared pt_list_undeclared pt_level_shape
     pt_block_type_undeclared pt_inline_type_undeclared pt_annotation_undeclared
+    pt_link_href_refused
   )a
 
   @doc "The fixed set of codes `check_findings/3` can ever emit. See the moduledoc."
