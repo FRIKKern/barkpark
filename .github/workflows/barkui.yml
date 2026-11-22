@@ -159,7 +159,7 @@ jobs:
           PARTS: ${{ matrix.parts }}
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
+          node probe3.mjs
 
       - name: Upload this group's report
         if: always()
