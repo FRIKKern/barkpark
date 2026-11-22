@@ -181,10 +181,59 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   def array_field(assigns) do
     cond do
+      untyped?(assigns.field) -> read_only_list(assigns)
       # `options.layout: "tags"` in the desk: one input, Enter adds (`TagsField`).
       TagsField.tags?(assigns) -> TagsField.tags_field(assigns)
       select_list?(assigns.field) -> select_list(assigns)
       true -> row_list(assigns)
+    end
+  end
+
+  # An array whose `of` names no type (`of: {"name": "w"}`, or not a map):
+  # what an item is cannot be told, so the stored items are drawn as they
+  # are, read-only, one chip each, as TanStack's `Fields.tsx` draws them
+  # (task-04004b6d634dd535). Nothing is posted for it, so a save keeps what
+  # the store holds.
+  defp untyped?(field) do
+    case subfield_attr(field, :raw) do
+      %{"of" => of} when not is_nil(of) and not is_list(of) ->
+        not (is_map(of) and is_binary(Map.get(of, "type") || Map.get(of, :type)))
+
+      _ ->
+        false
+    end
+  end
+
+  defp read_only_list(assigns) do
+    path = Map.get(assigns, :path, "")
+
+    assigns =
+      assigns
+      |> Map.put_new(:id_base, nil)
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
+      |> Map.put(:dom_id, "bp-array-" <> sanitize_id("#{assigns.field.name}#{path}"))
+      |> Map.put(:items, assigns[:value] |> ticked() |> Enum.map(&item_text/1))
+
+    ~H"""
+    <fieldset class="bp-field bp-field-array bp-array-read-only" data-field-type="arrayOf"
+              data-array-kind="read-only" id={@dom_id} data-field-name={@field.name}>
+      <legend class="bp-field-title"><%= @title %></legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
+      <div id={@id_base} class="bp-array-read-only-items" aria-readonly="true">
+        <span :for={item <- @items} class="tag"><%= item %></span>
+      </div>
+      <p class="bp-field-hint"><%= gettext("Read-only") %></p>
+    </fieldset>
+    """
+  end
+
+  defp item_text(value) when is_binary(value), do: value
+
+  defp item_text(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      _ -> inspect(value)
     end
   end
 
