@@ -2463,8 +2463,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       when type in ["list", "ordered-list", "numbered_list"] or type in @unordered_list_aliases ->
         if is_list(items), do: [compose_block(child, style)], else: []
 
-      _ ->
-        []
+      child ->
+        Barkpark.PortableDoc.Render.BlockDepth.keep(child, &compose_block(&1, style))
     end)
   end
 

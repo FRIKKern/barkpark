@@ -40,7 +40,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       assert covered ==
                Enum.sort(~w(
-                   render.ex slots.ex
+                   render.ex slots.ex render/block_depth.ex
                    render/callout.ex render/cards_email.ex render/chrome.ex render/components.ex render/compose.ex
                    render/data_viz.ex render/figures.ex render/fleet_email.ex
                    render/forms.ex render/inline.ex render/inline_depth.ex render/math.ex render/palettes.ex
