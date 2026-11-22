@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.Components.Fields.TagsField do
   @moduledoc """
-  An array of strings with `options.layout: "tags"`, in the desk: the
+  An array of strings (or texts) with `options.layout: "tags"`, in the desk: the
   TanStack Studio's tags input (barkpark-studio `ArrayInputs.tsx`,
   `TagsInput`), after Sanity's.
 
@@ -36,7 +36,11 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
 
   def tags?(_assigns), do: false
 
-  @doc "Whether a schema field is a tags field: strings, `options.layout: \"tags\"`."
+  @doc """
+  Whether a schema field is a tags field: strings or texts, `options.layout:
+  "tags"`. As TanStack's `Fields.tsx`: `of` a `string` or a `text`, a list of
+  one member read as that member.
+  """
   def tags_field?(field), do: layout(field) == "tags" and string_items?(field)
 
   @doc """
@@ -180,11 +184,14 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
 
   defp string_items?(field) do
     case field_attr(field, :of) do
-      %{} = of -> field_attr(of, :type) in ["string", nil]
+      [%{} = of] -> text_type?(of)
+      %{} = of -> text_type?(of)
       nil -> true
       _other -> false
     end
   end
+
+  defp text_type?(of), do: field_attr(of, :type) in ["string", "text", nil]
 
   defp field_attr(%{} = f, key), do: Map.get(f, key) || Map.get(f, Atom.to_string(key))
   defp field_attr(_f, _key), do: nil
