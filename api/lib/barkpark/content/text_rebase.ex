@@ -20,6 +20,9 @@ defmodule Barkpark.Content.TextRebase do
   accent or an emoji in half.
   """
 
+  alias Barkpark.Content.DiffMatchPatch
+  alias Barkpark.Content.DiffMatchPatch.Make
+
   @doc """
   The text with both changes. `ours` when `theirs` did not change `base`,
   `theirs` when `ours` did not.
@@ -82,12 +85,7 @@ defmodule Barkpark.Content.TextRebase do
 
   @doc """
   `merge3/3` that gives nil, not `ours`, where the two changes cannot both
-  apply (they overlap, or a value is over the size bound), or where `ours`
-  sits right at the edge of text `theirs` removed. TanStack's `merge3`
-  (barkpark-studio merge.ts) places `ours` by the text around it, and with
-  that text gone the patch has nowhere to go: words typed after a sentence
-  someone else cleared or rewrote are a clash, not kept on their own
-  (task-881f16e32fffbe9a). The desk's undo
+  apply (they overlap, or a value is over the size bound). The desk's undo
   (`BarkparkWeb.Studio.Desk.DocUndo`) takes one of this editor's changes
   back out of the stored text with it, and leaves the text as it is rather
   than take another editor's words with it.
@@ -106,19 +104,40 @@ defmodule Barkpark.Content.TextRebase do
         nil
 
       true ->
-        base = String.graphemes(base)
-        ours = String.graphemes(ours)
-        theirs = String.graphemes(theirs)
-        if lost_context?(base, ours, theirs), do: nil, else: merge_splices(base, ours, theirs)
+        merge_splices(String.graphemes(base), String.graphemes(ours), String.graphemes(theirs))
     end
   end
 
-  # `theirs` removed base text that ends where `ours`' splice starts, or
-  # starts where it ends: the text `ours` was written next to is gone.
-  defp lost_context?(base, ours, theirs) do
-    {os, oe, _oins} = splice(base, ours)
-    {ts, te, _tins} = splice(base, theirs)
-    te > ts and (te == os or ts == oe)
+  @doc """
+  The conflict decision for words not yet saved under another editor's save
+  (`Handlers.Lifecycle`): `merge3_both/3`, and nil also where TanStack's
+  `merge3` (barkpark-studio merge.ts) gives null. That one makes `ours` into
+  a diff-match-patch patch and applies it to `theirs`, placing each hunk by
+  the text around it; a hunk with nowhere to go (the text it was typed next
+  to was cleared or rewritten) is a clash, not words kept on their own
+  (task-881f16e32fffbe9a). The desk's undo keeps `merge3_both/3`.
+  """
+  @spec merge3_clash(String.t(), String.t(), String.t()) :: String.t() | nil
+  def merge3_clash(base, ours, theirs)
+      when is_binary(base) and is_binary(ours) and is_binary(theirs) do
+    with merged when is_binary(merged) <- merge3_both(base, ours, theirs) do
+      if places?(base, ours, theirs), do: merged
+    end
+  end
+
+  defp places?(base, ours, theirs) when ours == base or ours == theirs or theirs == base,
+    do: true
+
+  defp places?(base, ours, theirs) do
+    case DiffMatchPatch.apply(Make.text(units(base), units(ours)), theirs) do
+      {:ok, _text, applied} -> Enum.all?(applied)
+      _other -> true
+    end
+  end
+
+  defp units(string) do
+    bin = :unicode.characters_to_binary(string, :utf8, {:utf16, :big})
+    for <<u::16 <- bin>>, do: u
   end
 
   # The merged text, or nil when the two splices overlap (the caller keeps

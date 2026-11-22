@@ -211,6 +211,26 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
       assert stored(c).content["excerpt"] in [nil, ""]
     end
 
+    # TanStack's patch still places A's words: no false banner.
+    test "#{surface}: B deletes the sentence before A's unsaved words: they merge, no conflict",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => "One. Two three. Four five."})
+
+      assert eventually(fn ->
+               assigns(a).editor_form["excerpt"] == "One. Two three. Four five."
+             end)
+
+      unsaved!(a, %{"excerpt" => "One. Two three. Yes four five."})
+
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => "One. Four five."})
+
+      assert eventually(fn -> assigns(a).editor_form["excerpt"] == "One. Yes four five." end)
+      assert assigns(a).doc_conflict == false
+      refute has_element?(a, @banner)
+    end
+
     test "#{surface}: A kept typing through the merge: its next save keeps B's words", c do
       a = open(c, @surface)
       b = open(c, @surface)
