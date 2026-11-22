@@ -3,7 +3,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
   A nested list survives BPML (task-0b448ea0847a6b4f): every level, every item
   id and the reader's words print, and read back. What the printer cannot
   round-trip prints the whole top-level block as `<kept>` (`ListItems`'
-  fallback rows). The push rows, with the database, are in
+  fallback rows). The push rows, with the database and the write wall, are in
   `bulldocs_bpml_list_items_push_test.exs`.
   """
   use ExUnit.Case, async: true
@@ -134,8 +134,9 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
       assert fallback == text("Fallback parent")
     end
 
-    # Missing: the `text` the reader does not show (carried by id on push, not
-    # printed), and the word "ordered" of the alias type name `ordered-list`.
+    # Missing: the `text` the reader does not show (not printed; the write wall
+    # refuses an edit to its block), and the word "ordered" of the alias type
+    # name `ordered-list`.
     test "every word the reader shows is in the parsed printout" do
       missing = [{"Inactive", 1, 0}, {"fallback", 2, 1}, {"ordered", 1, 0}, {"parent", 2, 1}]
       assert %{missing: ^missing, kept: []} = BpmlWords.check([carriers()], %{})
@@ -198,7 +199,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
                ~s(<kept id="deep" type="list" why="list deep: its item 1 nests lists deeper)
     end
 
-    test "an item with an id needs no fallback for keys the carry brings back" do
+    test "an item with an id prints its words whatever else it holds" do
       item = %{"id" => "a", "text" => "A", "audit" => 1, "children" => ["x", list(["y"])]}
       assert Bpml.print_blocks([list("l1", [item])]) =~ ~s(<li id="a">A\n)
     end

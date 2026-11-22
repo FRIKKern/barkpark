@@ -5,12 +5,19 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   scratch slug the test writes; the blocks go straight to the row, as the
   paper editor stores them. The print and parse rows are in
   `bpml_list_items_test.exs`.
+
+  A list in the shape a push writes (items as inline arrays, or maps of
+  `content` with `id`, `checked` and child lists) takes an edit at any level.
+  A list holding a shape the print re-spells or cannot spell (a bare-string
+  item, an item with words only in `text`, an alias list type, a key BPML
+  cannot write) is refused on edit by `Bpml.WriteWall`, and keeps its bytes.
   """
   use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.LabelFixtures
-  alias Barkpark.PortableDoc.{Render, Validate}
+  alias Barkpark.PortableDoc.Bpml.WriteWall
+  alias Barkpark.PortableDoc.Validate
   alias Barkpark.Repo
 
   @token "barkpark-test-ingest-token"
@@ -21,8 +28,32 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   defp list(items), do: %{"type" => "list", "items" => items}
   defp list(id, items), do: %{"id" => id, "type" => "list", "items" => items}
 
-  # Three levels; `plan` holds a key and a text BPML cannot spell.
+  # Three levels in the shape a push writes: ids, a checked item, an ordered
+  # child list.
   defp nested do
+    list("l1", [
+      %{
+        "id" => "plan",
+        "content" => text("Plan"),
+        "children" => [
+          %{
+            "type" => "list",
+            "ordered" => true,
+            "items" => [
+              %{"id" => "build", "content" => text("Build"), "children" => [list([text("Verify")])]},
+              text("Ship")
+            ]
+          }
+        ]
+      },
+      text("Flat sibling"),
+      %{"id" => "done", "content" => text("Done"), "checked" => true}
+    ])
+  end
+
+  # The same three levels in older stored shapes and with a key BPML cannot
+  # spell (the nested-list-carriers fixture's shapes).
+  defp older do
     list("l1", [
       %{
         "id" => "plan",
@@ -31,12 +62,8 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
         "audit" => %{"keep" => true},
         "children" => [
           %{
-            "type" => "list",
-            "ordered" => true,
-            "items" => [
-              %{"id" => "build", "text" => "Build", "children" => [list(["Verify"])]},
-              "Ship"
-            ]
+            "type" => "ordered-list",
+            "items" => [%{"id" => "build", "text" => "Build", "children" => [list(["Verify"])]}, "Ship"]
           }
         ]
       },
@@ -44,8 +71,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     ])
   end
 
-  defp blocks, do: [p("p1", "Opening."), nested(), p("p2", "Closing.")]
-  defp alias_list, do: %{"type" => "ordered-list", "items" => ["x"]}
+  defp blocks(list), do: [p("p1", "Opening."), list, p("p2", "Closing.")]
 
   defp authed(conn) do
     conn
@@ -96,49 +122,39 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     {slug, bpml, rev}
   end
 
-  test "an edit at the third level stores every level, the ids and what BPML cannot spell" do
-    {slug, bpml, rev} = pulled_with(blocks())
+  test "an edit at the third level stores every level and every item id" do
+    {slug, bpml, rev} = pulled_with(blocks(nested()))
     assert bpml =~ ~s(<li id="build">Build\n)
 
     edited = String.replace(bpml, "<li>Verify</li>", "<li>Verify twice</li>")
     assert %{"ok" => true} = push_copy(slug, edited, rev) |> json_response(200)
 
-    assert stored_block(slug, "l1") ==
-             list("l1", [
-               %{
-                 "id" => "plan",
-                 "content" => text("Plan"),
-                 "text" => "Inactive words",
-                 "audit" => %{"keep" => true},
-                 "children" => [
-                   %{
-                     "type" => "list",
-                     "ordered" => true,
-                     "items" => [
-                       %{
-                         "id" => "build",
-                         "content" => text("Build"),
-                         "children" => [list([text("Verify twice")])]
-                       },
-                       text("Ship")
-                     ]
-                   }
-                 ]
-               },
-               text("Flat sibling")
-             ])
+    expected =
+      update_in(
+        nested(),
+        ["items", Access.at(0), "children", Access.at(0), "items", Access.at(0), "children"],
+        fn _ -> [list([text("Verify twice")])] end
+      )
+
+    assert stored_block(slug, "l1") == expected
   end
 
-  test "an unedited push of the three-level list stores the same bytes" do
-    {slug, bpml, rev} = pulled_with(blocks())
-    before = stored(slug)
+  for {name, list} <- [{"the shape a push writes", :nested}, {"older shapes", :older}] do
+    @list list
+    test "an unedited push of the three-level list in #{name} stores the same bytes" do
+      {slug, bpml, rev} = pulled_with(blocks(fixture(@list)))
+      before = stored(slug)
 
-    assert %{"unchanged" => true} = push_copy(slug, bpml, rev) |> json_response(200)
-    assert stored(slug) == before
+      assert %{"unchanged" => true} = push_copy(slug, bpml, rev) |> json_response(200)
+      assert stored(slug) == before
+    end
   end
 
-  test "an edit elsewhere leaves the list byte for byte" do
-    {slug, bpml, rev} = pulled_with(blocks())
+  defp fixture(:nested), do: nested()
+  defp fixture(:older), do: older()
+
+  test "an edit elsewhere leaves a list in older shapes byte for byte" do
+    {slug, bpml, rev} = pulled_with(blocks(older()))
     before = stored_block(slug, "l1")
 
     edited = String.replace(bpml, "Closing.", "Closing words.")
@@ -156,44 +172,43 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     assert stored_block(slug, "k1") == kept
   end
 
-  test "an edited item renders as the stored list did, aliases and strings normalized" do
-    stored =
-      list("l1", [
-        %{"id" => "a", "text" => "A", "children" => [alias_list()]},
-        "Ship"
-      ])
+  # Each older shape, and a key BPML cannot spell, prints; an edit to its own
+  # words is refused by the write wall, naming the block, and the row keeps
+  # its bytes.
+  for {name, item, from, to} <- [
+        {"a bare-string item", "Bare words", "Bare words", "Bare words, edited"},
+        {"an item with its words only in text", %{"id" => "a", "text" => "Text words"},
+         "Text words", "Text words, edited"},
+        {"an item whose child list has an alias type",
+         %{
+           "id" => "a",
+           "content" => [%{"type" => "text", "value" => "Parent words"}],
+           "children" => [%{"type" => "ordered-list", "items" => [[%{"type" => "text", "value" => "x"}]]}]
+         }, "Parent words", "Parent words, edited"},
+        {"an item with a key BPML cannot spell",
+         %{
+           "id" => "a",
+           "content" => [%{"type" => "text", "value" => "Audited words"}],
+           "audit" => %{"keep" => true}
+         }, "Audited words", "Audited words, edited"}
+      ] do
+    @item item
+    @from from
+    @to to
+    test "editing #{name} is refused; the list keeps its bytes" do
+      {slug, bpml, rev} = pulled_with([list("l1", [@item]), p("p2", "Closing.")])
+      before = stored(slug)
+      assert bpml =~ @from
 
-    {slug, bpml, rev} = pulled_with([stored])
-    edited = String.replace(bpml, "<li>Ship</li>", "<li>Ship it</li>")
-    assert %{"ok" => true} = push_copy(slug, edited, rev) |> json_response(200)
-
-    expected = put_in(stored, ["items", Access.at(1)], "Ship it")
-    html = &Render.render_blocks(&1, %{style: :article})
-    assert html.([stored_block(slug, "l1")]) == html.([expected])
-  end
-
-  test "a new item id carries nothing; an id carries only within its own block" do
-    other = list("l2", ["Other"])
-    {slug, bpml, rev} = pulled_with([nested(), other])
-
-    # `plan` leaves l1 (its whole <li>, at the pull's top-list indent) for l2.
-    moved = ~s(<li id="plan">Moved</li><li id="new">New</li>)
-
-    edited =
-      bpml
-      |> String.replace(~r/\n    <li id="plan">.*?\n    <\/li>/s, "")
-      |> String.replace("<li>Other</li>", moved)
-
-    assert %{"ok" => true} = push_copy(slug, edited, rev) |> json_response(200)
-
-    assert stored_block(slug, "l2")["items"] == [
-             %{"id" => "plan", "content" => text("Moved")},
-             %{"id" => "new", "content" => text("New")}
-           ]
+      answer = push_copy(slug, String.replace(bpml, @from, @to), rev) |> json_response(422)
+      assert answer["error"]["code"] == WriteWall.code()
+      assert answer["error"]["message"] =~ ~s(block "l1")
+      assert stored(slug) == before
+    end
   end
 
   test "a second item with an id already in the block is refused by that id" do
-    {slug, bpml, rev} = pulled_with(blocks())
+    {slug, bpml, rev} = pulled_with(blocks(nested()))
     before = stored(slug)
     copy = String.replace(bpml, "<li>Ship</li>", ~s(<li>Ship</li><li id="build">Again</li>))
 
@@ -206,9 +221,10 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   end
 
   describe "depth" do
+    # `levels` lists, each the only child of the one item above it.
     defp nest(levels) do
-      Enum.reduce(2..levels//1, list(["leaf"]), fn _, inner ->
-        list([%{"children" => [inner]}])
+      Enum.reduce(2..levels//1, list([text("leaf")]), fn _, inner ->
+        list([%{"content" => [], "children" => [inner]}])
       end)
       |> Map.put("id", "deep")
     end

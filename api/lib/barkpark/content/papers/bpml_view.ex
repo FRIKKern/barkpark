@@ -169,12 +169,12 @@ defmodule Barkpark.Content.Papers.BpmlView do
   block that spells as the pull printed it was not edited, so an unedited push
   derives no op whatever the view hides. A callout's body and `<kept>` lines
   follow `Bpml.CalloutBody.resolve/4` first; its notes come back with the ops.
-  A list item with an id then gets back what BPML cannot spell
-  (`Bpml.ListItems.carry/2`).
   `Bpml.WriteWall` refuses, before that, a copy pulled from another view (its
   `bpmlView` fingerprint, 412) and a hidden label field it sets (422
   `bpml_unshown`), and after it, an id pushed twice (422 `bpml`) and blocks
-  that change what the pull did not show (422 `bpml_unshown`).
+  that change what the pull did not show (422 `bpml_unshown`). Between the
+  two, a list item id pushed twice in one block is refused (422 `bpml`,
+  `Bpml.ListItems.check_ids/2`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """
@@ -192,7 +192,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
          :ok <- WriteWall.check_fields(paper.content || %{}, fields, copy),
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
-         {:ok, pushed} <- ListItems.carry(pushed, stored),
+         :ok <- ListItems.check_ids(pushed, stored),
          {:ok, target} <- WriteWall.target(stored, pulled, pushed),
          {:ok, _blocks, ops} <- Diff.derive_target(stored, target) do
       {:ok, ops, notes}
@@ -227,7 +227,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
     else
       case Bpml.clean_copy(copy) do
         {:ok, paper} ->
-          with {:ok, _blocks} <- ListItems.carry(paper["blocks"] || [], []), do: {:ok, paper}
+          with :ok <- ListItems.check_ids(paper["blocks"] || [], []), do: {:ok, paper}
 
         {:error, errors} ->
           {:refused, %{code: "bpml", message: "the BPML document did not parse", errors: errors}}
@@ -263,7 +263,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
              {:ok, _bpml, pulled} <- printed(paper, shown, fields),
              pulled = BlockIds.ensure_block_ids(pulled),
              {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
-             {:ok, blocks} <- ListItems.carry(blocks, stored) do
+             :ok <- ListItems.check_ids(blocks, stored) do
           {:ok, copy |> Map.delete("print") |> Map.put("blocks", blocks)}
         else
           {:refused, _body} = refused -> refused

@@ -24,13 +24,11 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   block prints as one `<kept>` line (`Bpml.Unwritable`). The shapes that do so
   are `@fallbacks`, here and nowhere else.
 
-  An item with an id needs no fallback for what the printer cannot spell.
-  `carry/2` brings it back on push from the stored item with that id: its
-  other keys, a `text` the reader does not show, a `checked` that is not
-  `true`, and `children` entries that are not lists, in their places. It
-  looks only in the stored top-level block with the pushed block's id. An id
-  that matches no stored item carries nothing, and a push that adds a second
-  item with an id already in the block is refused by that id.
+  An item with an id prints what the printer can spell, even when it holds
+  more: the pull shows its words, and `Bpml.WriteWall` refuses an edit to its
+  block (422 `bpml_unshown`), so what BPML cannot spell keeps its stored bytes.
+  A push that adds a second item with an id already in the block is refused
+  by that id (`check_ids/2`).
 
   Read back, a plain item is an inline array, as before; an item with an id,
   `checked` or nested lists is a map of `content` and those keys.
@@ -230,28 +228,25 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   # ── the push's side ─────────────────────────────────────────────────────────
 
   @doc """
-  `pushed` with each item that has an id given back what the printer could
-  not spell, from the stored item with that id in the stored top-level block
-  with the same id: `{:ok, blocks}`, or `{:refused, body}` when a pushed
-  block holds an item id more often than its stored block does.
+  `:ok`, or `{:refused, body}` when a pushed top-level block holds a list item
+  id more often than the stored top-level block with its id does.
   """
-  @spec carry([map()], [map()]) :: {:ok, [map()]} | {:refused, map()}
-  def carry(pushed, stored) do
+  @spec check_ids([map()], [map()]) :: :ok | {:refused, map()}
+  def check_ids(pushed, stored) do
     stored_by_id = for %{"id" => id} = b <- stored, is_binary(id), into: %{}, do: {id, b}
 
-    Enum.reduce_while(pushed, {:ok, []}, fn block, {:ok, acc} ->
-      s = Map.get(stored_by_id, block["id"])
-      index = s |> item_ids() |> Enum.reverse() |> Map.new()
+    Enum.find_value(pushed, :ok, fn
+      %{} = block ->
+        s = Map.get(stored_by_id, block["id"])
 
-      case added_twice(block, s) do
-        nil -> {:cont, {:ok, [walk(block, index) | acc]}}
-        id -> {:halt, twice(id, block)}
-      end
+        case added_twice(block, s) do
+          nil -> nil
+          id -> twice(id, block)
+        end
+
+      _other ->
+        nil
     end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      refused -> refused
-    end
   end
 
   defp added_twice(block, stored) do
@@ -276,8 +271,7 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
      }}
   end
 
-  # Every `{id, item}` of the lists in `value`, at any depth, in order; the
-  # first of a repeated stored id wins (the reversed list is put last-first).
+  # Every `{id, item}` of the lists in `value`, at any depth, in order.
   defp item_ids(value), do: value |> collect([]) |> Enum.reverse()
 
   defp collect(%{"type" => t, "items" => items} = list, acc) when t in @list_types do
@@ -299,75 +293,4 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   end
 
   defp collect_item(_item, acc), do: acc
-
-  defp walk(%{"type" => t, "items" => items} = list, index)
-       when t in @list_types and is_list(items) do
-    list
-    |> Map.new(fn {k, v} -> {k, if(k == "items", do: v, else: walk(v, index))} end)
-    |> Map.put("items", Enum.map(items, &carry_item(&1, index)))
-  end
-
-  defp walk(%{} = map, index), do: Map.new(map, fn {k, v} -> {k, walk(v, index)} end)
-  defp walk(list, index) when is_list(list), do: Enum.map(list, &walk(&1, index))
-  defp walk(other, _index), do: other
-
-  defp carry_item(%{} = item, index) do
-    item = Map.update(item, "children", nil, &walk(&1, index)) |> drop_nil("children")
-
-    case Map.fetch(index, id(item)) do
-      {:ok, stored} -> merge(item, stored)
-      :error -> item
-    end
-  end
-
-  defp carry_item(item, _index), do: item
-
-  defp merge(item, stored) do
-    item = Map.merge(Map.drop(stored, @spelled), item)
-
-    item = if unshown_text?(stored), do: Map.put(item, "text", stored["text"]), else: item
-
-    item =
-      if Map.has_key?(stored, "checked") and stored["checked"] != true and
-           not Map.has_key?(item, "checked"),
-         do: Map.put(item, "checked", stored["checked"]),
-         else: item
-
-    merge_children(item, stored)
-  end
-
-  # Stored children entries that are not lists stay in their places; the
-  # pushed lists fill the list places in order, and any more come after.
-  defp merge_children(item, stored) do
-    case Map.fetch(stored, "children") do
-      {:ok, children} when is_list(children) ->
-        if Enum.all?(children, &list?/1),
-          do: item,
-          else: Map.put(item, "children", interleave(children, item))
-
-      {:ok, children} ->
-        if Map.has_key?(item, "children"), do: item, else: Map.put(item, "children", children)
-
-      :error ->
-        item
-    end
-  end
-
-  defp interleave(stored_children, item) do
-    lists = item |> Map.get("children", []) |> Enum.filter(&list?/1)
-
-    {placed, rest} =
-      Enum.flat_map_reduce(stored_children, lists, fn
-        entry, rest ->
-          cond do
-            not list?(entry) -> {[entry], rest}
-            rest == [] -> {[], []}
-            true -> {[hd(rest)], tl(rest)}
-          end
-      end)
-
-    placed ++ rest
-  end
-
-  defp drop_nil(map, key), do: if(map[key] == nil, do: Map.delete(map, key), else: map)
 end

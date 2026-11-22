@@ -159,6 +159,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
       "type" => "list",
       "items" => [
         %{
+          "id" => "i1",
           "content" => [t("parent")],
           "children" => [
             %{"type" => "list", "items" => [[t("NESTED")]]},
@@ -172,7 +173,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     pushed(slug, &String.replace(&1, "parent", "parent, edited"))
     |> refused!(~s(block "l"))
-    |> at_path!("blocks[0].items[0]")
+    |> at_path!("blocks[0].items[0].children[1]")
 
     assert [list, plain()] == stored_blocks(slug)
   end
