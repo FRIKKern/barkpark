@@ -264,6 +264,25 @@ defmodule BarkparkWeb.Studio.DeskRemoteTitleHeaderTest do
     agree!(a, c)
   end
 
+  # task-38498e7e9fd76ede: B discards through its own page, so A's form is
+  # reloaded by the discard's frame (`Desk.Discarded.reload/1`), not by a
+  # Reload press. The header, the h1, the big title and the tab kept the dead
+  # draft's title.
+  test "B discards the draft it renamed through its own page: A names the published title", c do
+    a = b_renamed_draft(c)
+    b = open(c)
+
+    press(b, "discard-draft")
+    press(b, "confirm-discard")
+
+    assert eventually(fn ->
+             {:error, :not_found} == Content.get_document("drafts." <> c.id, c.type, @dataset)
+           end)
+
+    assert eventually(fn -> assigns(a).editor_form["title"] == "Doc 7" end)
+    agree!(a, c)
+  end
+
   test "publish after B renamed the draft names the published title", c do
     a = b_renamed_draft(c)
     press(a, "publish")

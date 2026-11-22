@@ -542,6 +542,11 @@ defmodule Barkpark.Content.PortableText do
     |> elem(0)
   end
 
+  # The fields the editor draws, as TanStack's pt-value.ts `MANAGED`: an
+  # edited block takes them from the editor and keeps every other stored
+  # field (`mergeText`, task-9e958e1739c7ce9b).
+  @managed ~w(_type _key children markDefs style listItem level)
+
   # An edited block read against the stored block it replaces
   # (task-74ef03a381b961ce). It takes the stored `_key`, and each span the
   # `_key` of the stored span it matches (`match_spans/2`), so only a span the
@@ -579,8 +584,29 @@ defmodule Barkpark.Content.PortableText do
           {child, used}
       end)
 
-    %{block | "_key" => key, "children" => children}
+    old
+    |> Map.drop(@managed)
+    |> Map.merge(%{block | "_key" => key, "children" => children})
+    |> keep_list(old)
   end
+
+  # A list item the editor draws as stored keeps the stored `listItem` and
+  # `level`: a custom kind (`check`) is drawn as a bullet, and a missing level
+  # as 1, so the editor's own reading is not a change.
+  defp keep_list(%{"listItem" => _} = block, %{"listItem" => _} = old) do
+    block =
+      if list_kind(block) == list_kind(old),
+        do: Map.put(block, "listItem", old["listItem"]),
+        else: block
+
+    cond do
+      item_level(block) != item_level(old) -> block
+      Map.has_key?(old, "level") -> Map.put(block, "level", old["level"])
+      true -> Map.delete(block, "level")
+    end
+  end
+
+  defp keep_list(block, _old), do: block
 
   defp keep_span(span, stored) do
     marks =
