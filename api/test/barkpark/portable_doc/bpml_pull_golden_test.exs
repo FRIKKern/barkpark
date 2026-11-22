@@ -20,8 +20,8 @@ defmodule Barkpark.PortableDoc.BpmlPullGoldenTest do
   the printer's output changed. A copy pulled before this change carries the
   old view's fingerprint (`bpmlView`) and now answers 412: pull again. When the
   print shows a form it did not show before, add the form as a row of
-  `Bpml.PrintMark`, so a copy pulled before it is read as old by its print
-  mark too; then regenerate this golden (BPML_PULL_GOLDEN_WRITE=1).
+  `Bpml.PrintMark`, so a push that does not prove it saw the form keeps the
+  form's blocks as stored; then regenerate this golden (BPML_PULL_GOLDEN_WRITE=1).
   """
 
   defp cases do

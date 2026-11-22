@@ -149,8 +149,8 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
     assert [lede(), plain()] == stored_blocks(slug)
   end
 
-  # The pull prints a list item's text and not its child blocks, so an edit of
-  # the list may not write it back without them.
+  # The pull prints a list item's words and child lists but not a child
+  # paragraph, so an edit of the list may not write it back without it.
   test "editing a list whose item holds child blocks the pull never showed is refused; the children stay" do
     slug = slug("item-children")
 

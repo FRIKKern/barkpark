@@ -23,6 +23,12 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       (`PrintMark.before/2`); otherwise the push is refused with
       `bpml_stale_copy`, naming what the block holds, with the stored paths
       of what the copy lacks in `paths`.
+    * **A form newer than the mark is believed for** (`PrintMark.believed/1`:
+      a push without its pull's fingerprint). A block holding one is kept as
+      stored when it spells as this pull printed it or as the print before
+      the form; any other is left to `Bpml.WriteWall`, which reads the push
+      against the print before the form, so the block comes home byte-equal
+      and in place or the push is refused.
     * **The inline form never deletes a body**, in a marked copy too. An
       inline callout whose stored callout has `slots` keeps the stored body
       when its text is unchanged, and the answer says so in one note;
@@ -118,8 +124,9 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     pushed = Map.get(copy, "blocks") || []
 
     with :ok <- no_nested_kept(pushed),
-         n = PrintMark.copy_number(copy),
-         {:ok, pushed, done} <- resolve_kept(pushed, pulled, stored, n),
+         n = PrintMark.read_number(copy),
+         {:ok, pushed, done} <-
+           resolve_kept(pushed, pulled, stored, {n, PrintMark.believed(copy)}),
          {:ok, pushed, notes} <- old_copy(pushed, done, view, stored, copy),
          {:ok, pushed, more} <- inline_form(pushed, done, view, stored) do
       {:ok, strip_forms(pushed), notes ++ more}
@@ -145,7 +152,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     end)
   end
 
-  defp resolve_kept(pushed, pulled, stored, n) do
+  defp resolve_kept(pushed, pulled, stored, read) do
     stored_by_id = by_id(stored)
     printed = for %{"type" => @kept, "id" => id, "of" => of} <- pulled, into: %{}, do: {id, of}
     counts = Enum.frequencies_by(pushed, & &1["id"])
@@ -163,7 +170,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       end)
 
     with {:ok, rev} <- resolved,
-         :ok <- every_kept_back(printed, pushed, stored, n) do
+         :ok <- every_kept_back(printed, pushed, stored, read) do
       {:ok, Enum.reverse(rev), MapSet.new(Map.keys(printed))}
     end
   end
@@ -171,12 +178,12 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   # A copy older than a form the kept block holds was pulled before that
   # block printed as <kept>, so it never had the line: it is stale, not an
   # edit of the line.
-  defp every_kept_back(printed, pushed, stored, n) do
+  defp every_kept_back(printed, pushed, stored, {n, believed}) do
     kept_ids = for %{"type" => @kept, "id" => id} <- pushed, into: MapSet.new(), do: id
     stored_by_id = by_id(stored)
 
     Enum.find_value(printed, :ok, fn {id, of} ->
-      forms = PrintMark.newer(stored_by_id[id], n)
+      {forms, _unproven} = split(PrintMark.newer(stored_by_id[id], n), believed)
 
       cond do
         MapSet.member?(kept_ids, id) ->
@@ -206,34 +213,74 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   # ── old copy ────────────────────────────────────────────────────────────────
 
+  # A top-level block holding a form newer than the copy's mark comes home as
+  # one top-level block with its id, spelled as the print before the form, and
+  # is kept as stored; any other answer is refused by name. A form newer than
+  # the mark is believed for (`PrintMark.believed/1`) is read as unshown: a
+  # block holding one that spells as this pull or as the print before the form
+  # comes home as stored, and any other is left to the write wall, which reads
+  # the push against the print before the form.
   defp old_copy(pushed, done, view, stored, copy) do
-    n = PrintMark.copy_number(copy)
+    n = PrintMark.read_number(copy)
+    believed = PrintMark.believed(copy)
 
     if PrintMark.newer(view, n) != [] do
       view_by_id = by_id(view)
       stored_by_id = by_id(stored)
 
-      Enum.reduce_while(pushed, {:ok, [], []}, fn block, {:ok, acc, notes} ->
-        id = block["id"]
-        v = Map.get(view_by_id, id)
-        forms = if v == nil, do: [], else: PrintMark.newer(v, n)
-
-        cond do
-          MapSet.member?(done, id) or forms == [] ->
-            {:cont, {:ok, [block | acc], notes}}
-
-          spells_as?(block, PrintMark.before(v, n)) ->
-            {:cont, {:ok, [stored_by_id[id] | acc], notes ++ kept_notes(v)}}
-
-          true ->
-            {:halt, PrintMark.stale(v, stored, id, forms, &canonical/1)}
-        end
-      end)
-      |> reversed()
+      case not_home(pushed, done, view, n, believed) do
+        {v, forms} -> PrintMark.stale(v, stored, v["id"], forms, &canonical/1)
+        nil -> each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed})
+      end
     else
       {:ok, pushed, []}
     end
   end
+
+  # The first view block holding a believed form newer than `n` whose id is
+  # not among the pushed top-level blocks, with those forms.
+  defp not_home(pushed, done, view, n, believed) do
+    ids = MapSet.new(pushed, & &1["id"])
+
+    Enum.find_value(view, fn v ->
+      id = v["id"]
+      {forms, _} = split(PrintMark.newer(v, n), believed)
+
+      if id != nil and forms != [] and not MapSet.member?(done, id) and
+           not MapSet.member?(ids, id),
+         do: {v, forms}
+    end)
+  end
+
+  defp each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed}) do
+    Enum.reduce_while(pushed, {:ok, [], []}, fn block, {:ok, acc, notes} ->
+      id = block["id"]
+      v = Map.get(view_by_id, id)
+      {forms, unproven} = if v == nil, do: {[], []}, else: split(PrintMark.newer(v, n), believed)
+
+      cond do
+        MapSet.member?(done, id) or (forms == [] and unproven == []) ->
+          {:cont, {:ok, [block | acc], notes}}
+
+        forms != [] and spells_as?(block, PrintMark.before(v, n)) ->
+          {:cont, {:ok, [stored_by_id[id] | acc], notes ++ kept_notes(v)}}
+
+        forms != [] ->
+          {:halt, PrintMark.stale(v, stored, id, forms, &canonical/1)}
+
+        spells_as?(block, v) or spells_as?(block, PrintMark.before(v, believed)) ->
+          {:cont, {:ok, [stored_by_id[id] | acc], notes}}
+
+        true ->
+          {:cont, {:ok, [block | acc], notes}}
+      end
+    end)
+    |> reversed()
+  end
+
+  # The forms the mark is believed for, and the newer ones.
+  defp split(forms, believed),
+    do: Enum.split_with(forms, fn {since, _mod} -> since <= believed end)
 
   # `paths` names each outermost body in the stored block's canonical
   # spelling, in the write wall's shape.

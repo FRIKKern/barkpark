@@ -12,6 +12,14 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
   one is refused with `bpml_stale_copy`, naming the block, with the stored
   paths of what the copy lacks, writing nothing.
 
+  The mark is the copy's own claim. A push that brings back the fingerprint
+  its pull served (`bpmlView`, checked first by `Bpml.WriteWall.same_view/2`)
+  is proven to come from the current view, so its mark is believed. A push
+  without one is believed up to print 2: forms up to that number are
+  read from the mark as before, and a newer form is read as unshown to it
+  (`believed/1`), so a block holding one comes home byte-equal and in place
+  or the push is refused by the write wall.
+
   A form is one row: its print number and the module that answers for it
   (`marked?/1`: the form is in a value at any depth; `before_print/1`: the
   value as the printer before the form spelled it; `stale_words/1`: what the
@@ -57,6 +65,25 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
       _ -> 1
     end
   end
+
+  # The newest print number a mark is believed for without a fingerprint.
+  @unproven 2
+
+  @doc """
+  The newest print number `copy`'s mark is believed for: every one when the
+  push brings its pull's fingerprint, else 2.
+  """
+  @spec believed(map()) :: pos_integer()
+  def believed(copy) do
+    case Map.get(copy, "bpmlView") do
+      view when is_binary(view) and view != "" -> @forms |> Enum.map(&elem(&1, 0)) |> Enum.max()
+      _ -> @unproven
+    end
+  end
+
+  @doc "The print number a push reads `copy` at: its mark, no newer than `believed/1`."
+  @spec read_number(map()) :: pos_integer()
+  def read_number(copy), do: min(copy_number(copy), believed(copy))
 
   @doc "The forms in `value` newer than print number `n`: `[{print number, module}]`."
   @spec newer(term(), pos_integer()) :: [{pos_integer(), module()}]

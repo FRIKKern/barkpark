@@ -28,7 +28,11 @@ defmodule Barkpark.Content.Papers.BpmlView do
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
-  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems, WriteWall}
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems, PrintMark, WriteWall}
+
+  # A block holding a form a fingerprint-less push may not change: only a bp
+  # that sends its pull's fingerprint back can change it.
+  @update_hint "update bp, then bp paper pull and make your edit again"
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
@@ -193,13 +197,34 @@ defmodule Barkpark.Content.Papers.BpmlView do
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
          :ok <- ListItems.check_ids(pushed, stored),
-         {:ok, target} <- WriteWall.target(stored, pulled, pushed),
+         {:ok, target} <- wall(paper, {stored, shown, fields}, pulled, pushed, copy),
          {:ok, _blocks, ops} <- Diff.derive_target(stored, target) do
       {:ok, ops, notes}
     else
       {:error, :diff_verification_failed} = failed -> failed
       {:refused, _body} = refused -> refused
       view -> {:refused, refusal(view)}
+    end
+  end
+
+  # The write wall's target. A push without its pull's fingerprint is believed
+  # up to `PrintMark.believed/1`; a form the view holds past that is unshown to
+  # it, so the wall reads the push against the view as the printer before
+  # that form printed it, and its refusal says to update bp.
+  defp wall(paper, {stored, shown, fields}, pulled, pushed, copy) do
+    believed = PrintMark.believed(copy)
+
+    with {:ok, target} <- WriteWall.target(stored, pulled, pushed) do
+      if PrintMark.newer(shown, believed) == [] do
+        {:ok, target}
+      else
+        with {:ok, _bpml, before} <- printed(paper, PrintMark.before(shown, believed), fields) do
+          case WriteWall.target(stored, BlockIds.ensure_block_ids(before), pushed) do
+            {:refused, %{code: "bpml_unshown"} = body} -> {:refused, %{body | hint: @update_hint}}
+            other -> other
+          end
+        end
+      end
     end
   end
 

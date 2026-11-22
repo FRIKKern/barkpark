@@ -100,17 +100,26 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     slug
   end
 
+  # The pull, with the rev it anchors on and the fingerprint it served; a push
+  # that sends the fingerprint back is a current copy (`Bpml.PrintMark`).
   defp pull!(slug) do
     conn = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(conn, "x-paper-rev")
-    {response(conn, 200), rev}
+    [view] = get_resp_header(conn, "x-bpml-view")
+    {response(conn, 200), {rev, view}}
   end
 
-  defp push_copy(slug, bpml, rev) do
-    build_conn()
-    |> authed()
-    |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
-  end
+  # `anchor` is `{rev, view}` for a current copy, a bare rev for a copy whose
+  # push brings no fingerprint (every bp before it sent one).
+  defp push_copy(slug, bpml, {rev, view}),
+    do: sync(slug, %{"bpml" => bpml, "baseRev" => rev, "bpmlView" => view})
+
+  defp push_copy(slug, bpml, rev), do: sync(slug, %{"bpml" => bpml, "baseRev" => rev})
+
+  defp sync(slug, params),
+    do: build_conn() |> authed() |> post("#{@ingest_path}/#{slug}/sync", params)
+
+  defp no_fingerprint({rev, _view}), do: rev
 
   defp check(bpml) do
     build_conn()
@@ -144,6 +153,42 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
       )
 
     assert stored_block(slug, "l1") == expected
+  end
+
+  test "a current copy edits every level, and every item id and check stays" do
+    {slug, bpml, anchor} = pulled_with(blocks(nested()))
+
+    edited =
+      Enum.reduce(~w(Plan Build Verify Ship Done), bpml, fn word, acc ->
+        String.replace(acc, ">#{word}", ">#{word}, edited", global: false)
+      end)
+      |> String.replace("Flat sibling", "Flat sibling, edited")
+
+    assert %{"ok" => true} = push_copy(slug, edited, anchor) |> json_response(200)
+
+    assert stored_block(slug, "l1") ==
+             list("l1", [
+               %{
+                 "id" => "plan",
+                 "content" => text("Plan, edited"),
+                 "children" => [
+                   %{
+                     "type" => "list",
+                     "ordered" => true,
+                     "items" => [
+                       %{
+                         "id" => "build",
+                         "content" => text("Build, edited"),
+                         "children" => [list([text("Verify, edited")])]
+                       },
+                       text("Ship, edited")
+                     ]
+                   }
+                 ]
+               },
+               text("Flat sibling, edited"),
+               %{"id" => "done", "content" => text("Done, edited"), "checked" => true}
+             ])
   end
 
   for {name, list} <- [{"the shape a push writes", :nested}, {"older shapes", :older}] do
@@ -234,15 +279,62 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     </ul>\
   """
 
-  test "an old copy that edits a nested list is refused by name, writing nothing" do
-    {slug, bpml, rev} = pulled_with(blocks(nested()))
+  @update_hint "update bp, then bp paper pull and make your edit again"
+
+  # A push without its pull's fingerprint may not change a block holding a
+  # nested list or an item id, whatever mark its text carries: the write wall
+  # reads it against the print before nested lists, and says to update bp.
+  for {name, edit} <- [
+        {"a copy pulled before nested lists printed",
+         {:old, "Flat sibling", "Flat sibling, edited"}},
+        {"a copy of this pull", {:now, "<li>Verify</li>", "<li>Verify twice</li>"}},
+        {"a copy of this pull with its mark typed again",
+         {:marked, "Flat sibling", "Flat sibling, edited"}}
+      ] do
+    @edit edit
+    test "#{name}, pushed without the pull's fingerprint, may not edit a nested list" do
+      {slug, bpml, anchor} = pulled_with(blocks(nested()))
+      before = stored(slug)
+      {form, from, to} = @edit
+
+      copy =
+        case form do
+          :old -> bpml |> old_copy("l1", @old_nested) |> String.replace(from, to)
+          :now -> String.replace(bpml, from, to)
+          :marked -> bpml |> old_copy("l1", @old_nested) |> mark() |> String.replace(from, to)
+        end
+
+      answer = push_copy(slug, copy, no_fingerprint(anchor)) |> json_response(422)
+      assert answer["error"]["code"] == WriteWall.code()
+      assert answer["error"]["message"] =~ ~s(block "l1")
+      assert answer["error"]["hint"] == @update_hint
+      assert stored(slug) == before
+    end
+  end
+
+  defp mark(bpml), do: String.replace(bpml, "<paper ", ~s(<paper print="3" ), global: false)
+
+  test "a copy of this pull without the fingerprint that leaves the nested list and edits another block lands" do
+    {slug, bpml, anchor} = pulled_with(blocks(nested()))
+    before = stored_block(slug, "l1")
+    copy = String.replace(bpml, "Closing.", "Closing words.")
+
+    assert %{"ok" => true} =
+             push_copy(slug, copy, no_fingerprint(anchor)) |> json_response(200)
+
+    assert stored_block(slug, "l1") == before
+    assert stored_block(slug, "p2")["content"] == text("Closing words.")
+  end
+
+  test "a current copy whose print mark was taken out is read as old: its nested list edit is refused by name" do
+    {slug, bpml, anchor} = pulled_with(blocks(nested()))
     assert bpml =~ ~s(print="3")
     before = stored(slug)
 
     copy =
       old_copy(bpml, "l1", String.replace(@old_nested, "Flat sibling", "Flat sibling, edited"))
 
-    answer = push_copy(slug, copy, rev) |> json_response(422)
+    answer = push_copy(slug, copy, anchor) |> json_response(422)
     assert answer["error"]["code"] == "bpml_stale_copy"
 
     assert answer["error"]["message"] ==
@@ -261,12 +353,12 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     before = stored_block(slug, "l1")
     copy = bpml |> old_copy("l1", @old_nested) |> String.replace("Closing.", "Closing words.")
 
-    assert %{"ok" => true} = push_copy(slug, copy, rev) |> json_response(200)
+    assert %{"ok" => true} = push_copy(slug, copy, no_fingerprint(rev)) |> json_response(200)
     assert stored_block(slug, "l1") == before
     assert stored_block(slug, "p2")["content"] == text("Closing words.")
   end
 
-  test "an old copy of a flat list with item ids: untouched it lands, edited it is refused" do
+  test "a copy without the fingerprint of a flat list with item ids: untouched it lands, edited it is refused" do
     flat =
       list("f1", [
         %{"id" => "a", "content" => text("Alpha")},
@@ -279,13 +371,14 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     before = stored(slug)
 
     edited = old_copy(bpml, "f1", String.replace(old_ul, "Beta", "Beta, edited"))
-    answer = push_copy(slug, edited, rev) |> json_response(422)
-    assert answer["error"]["code"] == "bpml_stale_copy"
+    answer = push_copy(slug, edited, no_fingerprint(rev)) |> json_response(422)
+    assert answer["error"]["code"] == WriteWall.code()
+    assert answer["error"]["hint"] == @update_hint
     assert answer["error"]["paths"] == ["blocks[0].items[0].id", "blocks[0].items[1].id"]
     assert stored(slug) == before
 
     untouched = bpml |> old_copy("f1", old_ul) |> String.replace("Closing.", "Closing words.")
-    assert %{"ok" => true} = push_copy(slug, untouched, rev) |> json_response(200)
+    assert %{"ok" => true} = push_copy(slug, untouched, no_fingerprint(rev)) |> json_response(200)
     assert stored_block(slug, "f1") == flat
   end
 

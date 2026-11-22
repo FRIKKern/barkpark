@@ -1865,7 +1865,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert blocks["expandable"] == ["id", "summary", "open"]
       assert blocks["paper"] == ["slug", "title", "print"]
       # `id` last, by the same rule (task-0b448ea0847a6b4f): a list item's id
-      # carries back on push what BPML cannot spell.
+      # prints, so an edit keeps it.
       assert blocks["li"] == ["checked", "id"]
       # aliases ride the table — <strong> teaches nothing new
       assert inline["b"] == "strong"

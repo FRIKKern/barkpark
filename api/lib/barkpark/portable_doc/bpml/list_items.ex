@@ -1,7 +1,7 @@
 defmodule Barkpark.PortableDoc.Bpml.ListItems do
   @moduledoc """
-  A list item in BPML (task-0b448ea0847a6b4f): how the printer spells it, how
-  the parser shapes it, and what a push carries back by its id.
+  A list item in BPML (task-0b448ea0847a6b4f): how the printer spells it and
+  how the parser shapes it.
 
   An item prints as `<li id checked>` with the reader's words (its `content`
   when that is a non-empty list, else its `text`), then each child list as a

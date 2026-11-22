@@ -78,7 +78,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
-    # `id` last (task-0b448ea0847a6b4f): a list item's id carries what BPML cannot spell.
+    # `id` last (task-0b448ea0847a6b4f): a list item's id prints, so an edit keeps it.
     "li" => ~w(checked id),
     "tr" => [],
     "th" => ~w(align),
