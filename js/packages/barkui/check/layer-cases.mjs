@@ -215,9 +215,9 @@ async function overTwoGrounds() {
   }
 }
 
-/** A named box hidden for the capture of what is behind it, then drawn again, under reduced motion: each way it
-    reads at its new opacity at once, in the same task, with no transition left running. */
-async function hiddenAndBack() {
+/** The named "Details" popover, opened by its click, with `css` planted and motion `motion`: it is hidden for the
+    capture of what is behind it and drawn again, as a reading does, and `read` reports what the next read sees. */
+async function hiddenAndBack(css, motion, read) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
   try {
@@ -225,27 +225,52 @@ async function hiddenAndBack() {
     cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
     withPopover(join(dir, 'button'))
     named(join(dir, 'button'))
-    const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true })
-    const page = await open({ browser, url: pathToFileURL(built.file).href, part: 'button', errors: [] })
+    const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
+    const part = built.parts.find((x) => x.name === 'button')
+    const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { motion })
     await page.click('#button-pop-open')
-    const read = (on) =>
+    const look = (on) =>
       page.barkCheck((on) => {
         const box = document.getElementById('button-pop')
         window.__barkCheck.hideLayers(on)
-        return { opacity: getComputedStyle(box).opacity, running: box.getAnimations().length }
+        return { opacity: Number(getComputedStyle(box).opacity), running: box.getAnimations().length }
       }, on)
-    const hidden = await read(true)
+    const hidden = await look(true)
     // Frames pass while the capture is taken.
     await page.waitForTimeout(100)
-    const back = await read(false)
-    const held = hidden.opacity === '0' && hidden.running === 0 && back.opacity === '1' && back.running === 0
-    if (!held) console.log(`    hidden: ${JSON.stringify(hidden)}; drawn again: ${JSON.stringify(back)}`)
-    return held
+    const back = await look(false)
+    return await read({ page, part, hidden, back })
   } finally {
     await browser.close()
     rmSync(scratch, { recursive: true, force: true })
   }
 }
+/** Under reduced motion every property has a 0.01ms transition: hidden and drawn again, the box reads at its new
+    opacity at once, in the same task, with no transition of the checker's own left running. */
+const undone = () =>
+  hiddenAndBack('', 'reduce', ({ hidden, back }) => {
+    const held = hidden.opacity === 0 && hidden.running === 0 && back.opacity === 1 && back.running === 0
+    if (!held) console.log(`    hidden: ${JSON.stringify(hidden)}; drawn again: ${JSON.stringify(back)}`)
+    return held
+  })
+/** What the box does by its own rule is never undone by the checker: held at opacity 0 by its own style, or still
+    fading in by its own long transition, it reads so after the checker's hiding is undone, and the reading is red. */
+const ownLook = () =>
+  each({
+    'a box its own style holds at opacity 0 reads at 0 when drawn again, and the reading is red at it': () =>
+      hiddenAndBack('#button-pop { opacity: 0; }', 'reduce', async ({ page, part, back }) => {
+        const fails = verdict(await readView(page, part)).fails.filter((f) => f.includes('div#button-pop '))
+        if (back.opacity !== 0 || !fails.length) console.log(`    drawn again: ${JSON.stringify(back)}; fails: ${JSON.stringify(fails)}`)
+        return back.opacity === 0 && fails.length > 0
+      }),
+    'a box still fading in by its own 60 s transition reads mid-fade when drawn again, and the reading is red at it': () =>
+      hiddenAndBack('#button-pop { transition: opacity 60s linear; } @starting-style { #button-pop:popover-open { opacity: 0; } }', 'no-preference', async ({ page, part, back }) => {
+        const fails = verdict(await readView(page, part)).fails.filter((f) => f.includes('div#button-pop '))
+        const held = back.opacity < 0.1 && back.running > 0 && fails.length > 0
+        if (!held) console.log(`    drawn again: ${JSON.stringify(back)}; fails: ${JSON.stringify(fails)}`)
+        return held
+      }),
+  })()
 
 // Two runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
 // time for one case: the first reads named and unnamed boxes open, the second the boxes the census must name.
@@ -346,6 +371,10 @@ export const LAYER_CASES = [
   },
   {
     name: 'top layer: a box hidden for the capture behind it and drawn again reads at its new opacity at once, with no transition running',
-    direct: hiddenAndBack,
+    direct: undone,
+  },
+  {
+    name: "top layer: a box held at opacity 0 by its own style, or still fading in by its own transition, reads so after the checker's hiding is undone, and is red",
+    direct: ownLook,
   },
 ]

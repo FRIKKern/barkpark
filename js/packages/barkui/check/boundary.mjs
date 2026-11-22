@@ -49,21 +49,17 @@ export function installBoundary() {
   }
   const best = (seen) => seen.reduce((b, x) => (x[1] > b[1] ? x : b))
 
-  /** A control at rest: its showroom pin (hover, active, focus-visible) let go while it is read, with transitions
-      held off so the reading is the rest state, not the first frame of a fade towards it. */
+  /** A control at rest: its showroom pin (hover, active, focus-visible) let go while it is read, and set again after.
+      Both go through restyle (probes.mjs), so the reading is the rest state, not the first frame of a change
+      towards it, and the pin is back in full before the next read. */
   const atRest = (el, read) => {
     const pin = el.getAttribute('data-pin')
     if (pin === null) return read(el)
-    const still = document.createElement('style')
-    still.textContent = '@layer barkui-check { * { transition: none !important; } }'
-    document.head.prepend(still)
-    el.removeAttribute('data-pin')
+    h.restyle('a pin let go for a reading at rest', () => el.removeAttribute('data-pin'))
     try {
       return read(el)
     } finally {
-      el.setAttribute('data-pin', pin)
-      getComputedStyle(el).backgroundColor
-      still.remove()
+      h.restyle('a pin let go for a reading at rest', () => el.setAttribute('data-pin', pin))
     }
   }
 

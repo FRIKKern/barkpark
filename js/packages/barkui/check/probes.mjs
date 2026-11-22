@@ -309,7 +309,29 @@ export function installHelpers() {
   }
 
   const state = {}
-  window.__barkCheck = { TOP, settle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  /** The one way the checker changes the page's look and puts it back (a sheet of its own on or off, a pin set or
+      taken off): `change` runs, and the read after it is settled. Under reduced motion base.css gives every property
+      a 0.01ms transition, so each change starts transitions; those are the checker's own doing, and each is run to
+      its end at once. A transition the page had running by its own rule is not touched; one the change cut short is
+      put back where it stood, as an animation of the same keyframes and timing, so it still reads as it truly is.
+      `place` names the caller; state.restyled counts the calls by place. */
+  const restyle = (place, change) => {
+    const running = document.getAnimations().filter((a) => a instanceof CSSTransition && a.playState === 'running')
+    const was = running.map((a) => ({ a, target: a.effect.target, pseudoElement: a.effect.pseudoElement, frames: a.effect.getKeyframes(), timing: a.effect.getTiming(), at: a.currentTime, since: performance.now() }))
+    try {
+      change()
+    } finally {
+      // getAnimations brings style up to date first: every transition the change starts is in the list.
+      for (const a of document.getAnimations()) if (a instanceof CSSTransition && !running.includes(a)) a.finish()
+      for (const w of was) {
+        if (w.a.playState !== 'idle' || !w.target?.isConnected) continue
+        const back = w.target.animate(w.frames, { ...w.timing, pseudoElement: w.pseudoElement ?? undefined })
+        back.currentTime = w.at + (performance.now() - w.since)
+      }
+      ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
+    }
+  }
+  window.__barkCheck = { TOP, settle, restyle, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

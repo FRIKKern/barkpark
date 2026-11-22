@@ -64,24 +64,18 @@ export function installLayers() {
     return open.some((b) => meets(r, page(b.getBoundingClientRect())))
   }
   // The open boxes and their backdrops, hidden (true) or drawn again (false), by a first-layer sheet of the check's
-  // own: the capture taken so is what the page draws behind them. Both ways hold transitions off: with reduced
-  // motion base.css gives every property a 0.01ms transition, and a reading made before the next frame would see
-  // the box still at its old opacity. So the sheet lets go in two steps: first it holds only the transitions off
-  // while the box's own style is read again, then it goes, and nothing is left to change.
+  // own: the capture taken so is what the page draws behind them. Both ways go through restyle (probes.mjs), so a
+  // read after either sees the boxes as they now are, with no transition of the checker's own still running.
   let hide = null
-  const still = () => `:is(${h.TOP}), :is(${h.TOP})::backdrop { transition: none !important; }`
-  const hideLayers = (on) => {
-    if (hide && !on) {
-      hide.textContent = `@layer barkui-check { ${still()} }`
-      for (const b of document.querySelectorAll(h.TOP)) getComputedStyle(b).opacity, getComputedStyle(b, '::backdrop').backgroundColor
-    }
-    hide?.remove()
-    hide = null
-    if (!on) return
-    hide = document.createElement('style')
-    hide.textContent = `@layer barkui-check { ${still()} :is(${h.TOP}) { opacity: 0 !important; } :is(${h.TOP})::backdrop { background: transparent !important; } }`
-    document.head.prepend(hide)
-  }
+  const hideLayers = (on) =>
+    h.restyle('the open boxes hidden or drawn again', () => {
+      hide?.remove()
+      hide = null
+      if (!on) return
+      hide = document.createElement('style')
+      hide.textContent = `@layer barkui-check { :is(${h.TOP}) { opacity: 0 !important; } :is(${h.TOP})::backdrop { background: transparent !important; } }`
+      document.head.prepend(hide)
+    })
   /** Keeps the page as drawn behind the open boxes; state.under(el) is then its colour where el stands (the middle
       of the samples across its box), and null outside the capture. `null` forgets it. */
   const under = async (png, clip, scale) => {

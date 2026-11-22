@@ -41,19 +41,17 @@ function plan([n, entries]) {
   return { pins, pairs }
 }
 
-/** Runs in the check's world: sets data-pin on stage elements (`pin` a value, or null to take it off), running
-    the transitions this starts to their end, as a reading after a real state waits for them. */
+/** Runs in the check's world: sets data-pin on stage elements (`pin` a value, or null to take it off), through
+    restyle (probes.mjs): the transitions this starts run to their end, as a reading after a real state waits for them. */
 function setPins([n, list, pin]) {
   const root = document.querySelector(`[data-part="${n}"]`)
   const els = [root, ...root.querySelectorAll('*')]
-  for (const i of list) {
-    if (pin === null) els[i].removeAttribute('data-pin')
-    else els[i].setAttribute('data-pin', pin)
-  }
-  for (const i of list) {
-    getComputedStyle(els[i]).color
-    for (const a of els[i].getAnimations({ subtree: true })) if (a instanceof CSSTransition) a.finish()
-  }
+  window.__barkCheck.restyle('pins set or taken off', () => {
+    for (const i of list) {
+      if (pin === null) els[i].removeAttribute('data-pin')
+      else els[i].setAttribute('data-pin', pin)
+    }
+  })
 }
 
 /** Runs in the check's world: computed styles of one stage element, its ::before and ::after, everything inside it
@@ -63,15 +61,12 @@ function snap([n, i, pin]) {
   const el = [root, ...root.querySelectorAll('*')][i]
   const read = (s) => Object.fromEntries([...s].map((p) => [p, s.getPropertyValue(p)]))
   const was = el.getAttribute('data-pin')
-  const land = () => {
-    getComputedStyle(el).color
-    for (const a of el.getAnimations({ subtree: true })) if (a instanceof CSSTransition) a.finish()
-  }
-  if (pin !== undefined) {
-    if (pin === null) el.removeAttribute('data-pin')
-    else el.setAttribute('data-pin', pin)
-    land()
-  }
+  const put = (value) =>
+    window.__barkCheck.restyle('a pin set for one snapshot and put back', () => {
+      if (value === null) el.removeAttribute('data-pin')
+      else el.setAttribute('data-pin', value)
+    })
+  if (pin !== undefined) put(pin)
   try {
     const h = window.__barkCheck
     const up = []
@@ -79,11 +74,7 @@ function snap([n, i, pin]) {
     const down = [...el.querySelectorAll('*')].map((x) => ({ at: h.describe(x), style: read(getComputedStyle(x)) }))
     return { self: read(getComputedStyle(el)), before: read(getComputedStyle(el, '::before')), after: read(getComputedStyle(el, '::after')), up, down }
   } finally {
-    if (pin !== undefined) {
-      if (was === null) el.removeAttribute('data-pin')
-      else el.setAttribute('data-pin', was)
-      land()
-    }
+    if (pin !== undefined) put(was)
   }
 }
 
