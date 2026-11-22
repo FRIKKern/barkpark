@@ -319,6 +319,9 @@ defmodule Barkpark.Content.Revisions do
       }
 
       InsertOnly.seam!(:restore_after_state_check)
+      # It puts back what was stored: the link-href fence does not re-check
+      # it (`LinkHrefFence`, task-b923a915151d2038 r2).
+      opts = Keyword.put(opts, :restore_revision, true)
       Content.upsert_document(type, attrs, dataset, write_opts(opts))
     end
   end
