@@ -230,3 +230,72 @@ describe('the shared conformance normaliser', () => {
     expect(settle(report, { path, strict: true })).toEqual(['strict: t is fail'])
   })
 })
+
+// THROWAWAY probe (task-be73a6bf40c63e87): where the CLI row's time goes. Never merged.
+describe('zz be73 probe', () => {
+  it('prints timings', { timeout: 120_000 }, async () => {
+    const os = await import('node:os')
+    const { execFileSync } = await import('node:child_process')
+    const now = () => performance.now()
+    const r = (x: number) => Math.round(x)
+    const out: Record<string, unknown> = { cpus: os.cpus().length, load0: os.loadavg()[0] }
+    let t = now()
+    const { cases } = loadPack()
+    out.loadPack = r(now() - t)
+    out.cases = cases.length
+    t = now()
+    execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' })
+    out.gitRevParse = r(now() - t)
+    let render = 0, parse = 0, shape = 0, windows = 0
+    for (const c of cases as Array<{ type: string; input: unknown; expectedHtml: string }>) {
+      if (!KNOWN.has(c.type)) continue
+      let s = now()
+      const html = renderToStaticMarkup(createElement(PortableDoc, { value: [c.input], blocks: OPT_IN } as never))
+      render += now() - s
+      s = now()
+      const a = nodesOf(html)
+      const sa = shapeOf(a)
+      const g = nodesOf(c.expectedHtml)
+      const sg = shapeOf(g)
+      parse += now() - s
+      windows += 2
+      s = now()
+      diffShapes(sa, sg)
+      shape += now() - s
+    }
+    out.judgeRender = r(render)
+    out.judgeParseAndShape = r(parse)
+    out.judgeDiff = r(shape)
+    out.windows = windows
+    t = now()
+    for (let i = 0; i < windows; i++) new Window()
+    out.newWindowOnly = r(now() - t)
+    const one = new Window().document
+    t = now()
+    for (const c of cases as Array<{ expectedHtml: string }>) {
+      one.body.innerHTML = c.expectedHtml
+      shapeOf(one.body.childNodes as unknown as NodeList)
+    }
+    out.parseOneWindowGoldensOnly = r(now() - t)
+    const before = process.exitCode
+    const env = { ...process.env }
+    delete process.env.CONFORMANCE_WRITE
+    delete process.env.CONFORMANCE_STRICT
+    try {
+      t = now()
+      await cli({ renderer: 'react', compare: 'dom', judge, pack: '/nonexistent-pack' })
+      out.cliNoPack = r(now() - t)
+      t = now()
+      await cli({ renderer: 'conformance-uncommitted', compare: 'dom', judge })
+      out.cliUncommitted = r(now() - t)
+      t = now()
+      await cli({ renderer: 'react', compare: 'dom', judge })
+      out.cliClean = r(now() - t)
+    } finally {
+      process.exitCode = before
+      Object.assign(process.env, env)
+    }
+    out.load1 = os.loadavg()[0]
+    console.log('BE73PROBE ' + JSON.stringify(out))
+  })
+})
