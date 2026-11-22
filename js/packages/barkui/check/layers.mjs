@@ -21,7 +21,8 @@
 //   - the parser meets a declared root while it parses example.html: refused as the part is read (build/parts.mjs);
 //   - markup is written into the parsed document (document.write, writeln or open): refused by name (tellRoots);
 //   - another window attaches one with its own attachShadow: every frame in the page and window.open are refused
-//     by name, and the part's context holds the check's own pages only: any other page is refused by name.
+//     by name, and the part's context holds the check's own two pages and no other: any other page is refused by
+//     name.
 //   Markup parsed into a host already in the page (setHTMLUnsafe, innerHTML) cannot give that host a root: a
 //   declared root at the top of the markup stays a plain template, and one deeper is on a new host, read on arrival.
 // - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
@@ -136,8 +137,10 @@ export const REFUSED = {
   'document.write': 'the page called document.write after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
   'document.writeln': 'the page called document.writeln after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
   'document.open': 'the page called document.open, which the check refuses: it starts the document again, and the check\'s watch with it',
-  page: 'a page the check did not open came into the part\'s context, which the check refuses: the check watches the part\'s page alone',
+  page: 'another page came into the part\'s context, which the check refuses: the context holds the check\'s own two pages and no other',
 }
+/** The fail for a census set on a context that does not hold exactly the check's own two pages. */
+export const NOT_OWN = 'the census is set on a context that does not hold exactly the check\'s own two pages (the part\'s page and the reference page, both opened before the census): the context holds the check\'s own two pages and no other'
 /** How a selftest case's check run touched the top layer, by what it did, not by its name: its part names a layer,
     or the run says one of the top layer's fails (a box no layer names, open or not; a frame; a refused call).
     Empty when it did neither. */
@@ -237,10 +240,13 @@ function tellRoots() {
     })
 }
 
-/** The census world on `page`, set before the page opens its URL, so it watches from the first frame. Returns
-    look(part) → what census() names for the part. A page that runs no script of its own gets the census when first
-    asked: nothing on it can add a box later. */
-export async function installCensus(page) {
+/** The census world on `page`, set before the page opens its URL, so it watches from the first frame. `own` is the
+    check's own two pages, by identity: `page` and the blank reference page, both opened before the census is set.
+    Returns look(part) → what census() names for the part. A page that runs no script of its own gets the census
+    when first asked: nothing on it can add a box later. */
+export async function installCensus(page, own) {
+  const held = page.context().pages()
+  if (own?.length !== 2 || own[0] === own[1] || !own.includes(page) || held.length !== 2 || held.some((p) => !own.includes(p))) throw new Error(NOT_OWN)
   const cdp = await page.context().newCDPSession(page)
   const { frameTree } = await cdp.send('Page.getFrameTree')
   const frameId = frameTree.frame.id
@@ -259,13 +265,11 @@ export async function installCensus(page) {
     if (exceptionDetails) throw new Error(`the census: ${String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0]}`)
     return result.value
   }
-  // The part's context holds the check's own pages only, from the first frame to the last look: the pages it holds
-  // when the census is set (the part's page, and the blank page drawn.mjs draws on). Any other page, however it came
-  // to be, is closed at once and refused by name, once each.
-  const own = new Set(page.context().pages())
+  // From the first frame to the last look, the part's context holds the check's own two pages and no other. Any
+  // other page, however it came to be, is closed at once and refused by name, once each.
   let others = 0
   page.context().on('page', (p) => {
-    if (own.has(p)) return
+    if (own.includes(p)) return
     others++
     p.close().catch(() => {})
   })

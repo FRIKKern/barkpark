@@ -46,11 +46,11 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
   if (clock) await page.clock.install()
   // A blank page in the same context, where things are drawn alone for reference (see drawn.mjs). It is opened
-  // before the census is set: the census refuses every page it did not find there.
+  // before the census is set, which knows the check's own two pages by identity and refuses any other.
   const ref = await context.newPage()
   await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   // What can enter the top layer is watched from the first frame (layers.mjs census).
-  page.barkCensus = await installCensus(page)
+  page.barkCensus = await installCensus(page, [page, ref])
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })
   if (js && ctx.styles) {

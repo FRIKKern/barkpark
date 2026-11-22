@@ -11,7 +11,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
 import { all, both, each, edit, esc, inDemo, reasons, skinsSay } from './plants.mjs'
-import { FRAME, LATE, looks, REFUSED, UNNAMED_CAN } from './layers.mjs'
+import { FRAME, installCensus, LATE, looks, NOT_OWN, REFUSED, UNNAMED_CAN } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -85,6 +85,59 @@ const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
 /** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
     it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
     by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
+// The census knows the check's own two pages by identity, and the list is closed both ways: a page the check's own
+// code opens after the census is refused like any other, and a census set before the reference page is open, or on
+// a context that holds a third page, is red by name.
+async function ownTwoPages() {
+  const browser = await chromium.launch()
+  const part = { name: 'x', json: {} }
+  const two = async () => {
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    const ref = await context.newPage()
+    return { context, page, ref }
+  }
+  const look = async (page, own) => {
+    const census = await installCensus(page, own)
+    await page.setContent('<!doctype html><p>A page</p>')
+    return census
+  }
+  const red = async (run) => run().then(() => false, (e) => e.message === NOT_OWN)
+  try {
+    const rows = {}
+    {
+      const { context, page, ref } = await two()
+      rows["the check's own two pages, opened before the census, are not refused"] = (await (await look(page, [page, ref]))(part)).length === 0
+      await context.close()
+    }
+    {
+      const { context, page, ref } = await two()
+      const census = await look(page, [page, ref])
+      const third = await context.newPage()
+      await third.waitForEvent('close', { timeout: 5000 }).catch(() => {})
+      const said = await census(part)
+      rows["a third page the check's own code opens after the census, refused by name and closed"] = third.isClosed() && said.length === 1 && said[0] === REFUSED.page
+      await context.close()
+    }
+    {
+      const context = await browser.newContext()
+      const page = await context.newPage()
+      rows['the reference page opened after the census: a census set on the part\'s page alone is red by name'] = await red(() => installCensus(page, [page]))
+      rows['a list that names one page twice, red by name'] = await red(() => installCensus(page, [page, page]))
+      await context.close()
+    }
+    {
+      const { context, page, ref } = await two()
+      await context.newPage()
+      rows['a census set on a context that holds a third page, red by name'] = await red(() => installCensus(page, [page, ref]))
+      await context.close()
+    }
+    return each(Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, () => v])))()
+  } finally {
+    await browser.close()
+  }
+}
+
 async function overTwoGrounds() {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
@@ -218,6 +271,10 @@ export const LAYER_CASES = [
       },
       'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
     }),
+  },
+  {
+    name: "top layer: the part's context holds the check's own two pages and no other, known by identity",
+    direct: ownTwoPages,
   },
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
