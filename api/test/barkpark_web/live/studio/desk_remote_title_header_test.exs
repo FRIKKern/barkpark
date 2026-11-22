@@ -248,6 +248,22 @@ defmodule BarkparkWeb.Studio.DeskRemoteTitleHeaderTest do
     agree!(a, c)
   end
 
+  # task-e82f6c625819d4f5: the row A reads back is older than B's last frame
+  # and of the other variant (B's draft is gone), so the frame must not name
+  # the page because it is newer: it counts only over the row it arrived on
+  # (`Lifecycle.base_doc/1`, `editor_store_over`). Comparing times alone named
+  # the dead draft's title.
+  test "B discards the draft it renamed, A reloads: the published title is named", c do
+    a = b_renamed_draft(c)
+    assert {:ok, _} = Content.discard_draft(c.id, c.type, @dataset)
+    assert {:error, :not_found} == Content.get_document("drafts." <> c.id, c.type, @dataset)
+
+    press(a, "reload-remote-doc")
+
+    assert eventually(fn -> assigns(a).editor_form["title"] == "Doc 7" end)
+    agree!(a, c)
+  end
+
   test "publish after B renamed the draft names the published title", c do
     a = b_renamed_draft(c)
     press(a, "publish")
