@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
+import { CLOSED_ROOT_CASES } from './closed-root-cases.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
 import { all, both, each, edit, esc, inDemo, skinsSay } from './plants.mjs'
@@ -230,4 +231,5 @@ export const LAYER_CASES = [
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
     direct: overTwoGrounds,
   },
+  ...CLOSED_ROOT_CASES,
 ]
