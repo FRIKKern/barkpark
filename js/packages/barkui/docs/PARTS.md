@@ -208,7 +208,10 @@ matches; a rule or a pair nobody judges fails the part by name.
   file, a property with the exact values it may take, today one row: `filter` may be `none`. A row comes
   with a selftest plant showing the lights still see the property misused. `content` may only be `""`
   or `none`, so words live in `example.html`, and the `text-decoration` shorthand may not set a
-  thickness.
+  thickness. A mask from anywhere on the page, UI SDK's own icon boxes masked by `--ui-icon`
+  included, changes how the hosted browser draws text elsewhere on the page, and the check reads
+  that text as not drawn as itself; so today a part prints its icons as inline SVG in
+  `currentColor`, or sets `--ui-icon: none`, and leaves no mask on the page.
 - Read where the page cannot reach: every reading the lights rest on (computed styles, boxes, text,
   pseudo-elements, the paint trace, contrast, focus, the phone width) runs in an isolated world over
   CDP. It shares the DOM with the page but none of its script, so a demo that patches
