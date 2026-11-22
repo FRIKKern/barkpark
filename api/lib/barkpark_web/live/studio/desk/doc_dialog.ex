@@ -19,6 +19,8 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
   listed. The handler's own list (`Content.Graph.reverse_referencers/2`,
   the edge index, which has no row for such a draft) is not drawn; what a
   confirm disconnects is the handler's business, read again when it runs.
+  As the panel, at most `IncomingRefs.cap/0` rows are drawn and a line under
+  them says how many there are; the count above says them all.
   `EditorHost` calls `follow/1` after every Studio event and owns the
   `desk_used_in` assign: `nil` while no dialog is open.
 
@@ -174,11 +176,20 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
     default: false,
     doc: "say the type and the field that refers under each title"
 
-  @doc "The documents that refer to the open one, each a link that opens it in a new tab."
+  @doc """
+  The documents that refer to the open one, each a link that opens it in a
+  new tab: the first `IncomingRefs.cap/0`, and a line for the rest.
+  """
   def used_in(assigns) do
+    assigns =
+      assign(assigns,
+        shown: Enum.take(assigns.rows, IncomingRefs.cap()),
+        total: length(assigns.rows)
+      )
+
     ~H"""
     <ul class={["used-in dk-used-in", !@field && "compact"]}>
-      <li :for={row <- @rows}>
+      <li :for={row <- @shown}>
         <a
           class="preview"
           href={path(row, @base)}
@@ -197,6 +208,9 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
         </a>
       </li>
     </ul>
+    <p :if={@total > length(@shown)} class="dk-used-in-more" data-desk-used-in-more>
+      {gettext("Showing the first %{shown} of %{total}.", shown: length(@shown), total: @total)}
+    </p>
     """
   end
 
@@ -238,6 +252,7 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
       .dk .dk-used-in .text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
       .dk .dk-used-in .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-used-in .s { color: var(--dk-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dk .dk-dialog-body .dk-used-in-more { margin-top: -4px; color: var(--dk-muted); }
       .dk .dk-dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
       .dk .dk-dialog-btn { box-sizing: border-box; min-height: 33px; padding: 6px 12px; border: 0; border-radius: 3px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: inset 0 0 0 1px var(--dk-border); font: inherit; font-weight: 500; cursor: pointer; }
       .dk .dk-dialog-btn:hover { background: var(--dk-card-hover); }

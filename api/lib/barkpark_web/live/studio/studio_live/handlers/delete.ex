@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Content.Edges
   alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.PaneBuilder
@@ -73,8 +74,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
+    disconnect? = doc && type && params["disconnect"] == "true"
+
+    # What the disconnect is about to rewrite, read first: a field in each
+    # stored row, a referring draft's included (the edge index has none), so
+    # the sentence counts the references it removed.
+    removed =
+      if disconnect?,
+        do: socket |> references_held(doc) |> Enum.map(&length(&1.fields)) |> Enum.sum(),
+        else: 0
+
     disconnect =
-      if doc && type && params["disconnect"] == "true",
+      if disconnect?,
         do:
           Content.disconnect_references(
             doc.doc_id,
@@ -91,11 +102,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
          |> put_flash(:error, Shared.outside_grant_disconnect_message(denied, "deleted"))}
 
       _ ->
-        do_confirm_delete(params, socket, doc, type)
+        do_confirm_delete(params, socket, doc, type, removed)
     end
   end
 
-  defp do_confirm_delete(params, socket, doc, type) do
+  defp references_held(socket, doc),
+    do:
+      Edges.referencing_fields(
+        doc.doc_id,
+        socket.assigns.dataset,
+        ScopeHelpers.scope_opts(socket)
+      )
+
+  defp do_confirm_delete(params, socket, doc, type, removed) do
     if doc && type do
       case delete_open_doc(socket, doc, type) do
         {:error, {:halted, reason}} ->
@@ -106,12 +125,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
 
         {:ok, _} ->
           new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
-          refs = length(socket.assigns[:delete_refs] || [])
 
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
-           |> put_flash(:info, deleted_sentence(doc, params["disconnect"] == "true", refs))
+           |> put_flash(:info, deleted_sentence(doc, params["disconnect"] == "true", removed))
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))
            |> focus_after_delete(doc, type)}
 
