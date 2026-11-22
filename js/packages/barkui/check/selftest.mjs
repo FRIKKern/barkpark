@@ -683,7 +683,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     now = c.name
     if (c.direct) {
       const t0 = Date.now()
-      const ok = await c.direct()
+      // A direct case gets the selftest's cases, for one that picks a case by a rule.
+      const ok = await c.direct(CASES)
       if (ok) held.push(c.name)
       else failures++
       console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
