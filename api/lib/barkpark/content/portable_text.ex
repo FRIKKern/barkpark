@@ -66,6 +66,8 @@ defmodule Barkpark.Content.PortableText do
   `_key` of the stored block at its position.
   """
 
+  alias Barkpark.Content.LinkHref
+
   @decorators %{
     "strong" => "strong",
     "b" => "strong",
@@ -808,13 +810,24 @@ defmodule Barkpark.Content.PortableText do
 
     extra = link_extra(attrs)
 
+    # An address the allowlist refuses (`LinkHref`) is not linked: the words
+    # stay, without the mark (task-e1584dc1f1516991).
     mark =
-      case attr(attrs, "data-pt-def") do
-        nil -> {:link, href, extra}
-        key -> {:link_def, key, href, extra}
-      end
+      if drawable_href?(href),
+        do: link_mark(attrs, href, extra),
+        else: {:link, :refused, nil}
 
     %{state | marks: state.marks ++ [mark]}
+  end
+
+  # An empty address is drawn and read as before.
+  defp drawable_href?(href), do: href == "" or LinkHref.allowed?(href)
+
+  defp link_mark(attrs, href, extra) do
+    case attr(attrs, "data-pt-def") do
+      nil -> {:link, href, extra}
+      key -> {:link_def, key, href, extra}
+    end
   end
 
   # A `data-pt-mark` span is a stored decorator, a `data-pt-def` span a stored
@@ -986,6 +999,9 @@ defmodule Barkpark.Content.PortableText do
         {span, j}, defs ->
           {marks, defs} =
             Enum.map_reduce(span.marks, defs, fn
+              {:link, :refused, _extra}, defs ->
+                {nil, defs}
+
               {:link, href, extra}, defs ->
                 new_link(key, href, extra, defs, link_type, annotations)
 
@@ -1406,13 +1422,22 @@ defmodule Barkpark.Content.PortableText do
 
   defp wrap(key, acc, defs) when is_binary(key) do
     case defs[key] do
+      # A link whose address is refused (`LinkHref`: a `javascript:`, `data:`
+      # or `vbscript:` address the API, an import or another client wrote) is
+      # drawn as its words, as TanStack's field draws it, and its stored def
+      # rides back by key (`{:def, k}`) unchanged (task-e1584dc1f1516991).
       %{"_type" => "link", "href" => href} when is_binary(href) ->
-        ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>)
+        if drawable_href?(href),
+          do: ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>),
+          else: ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
 
       %{"_type" => "linkAnnotation"} = def ->
         case link_def_href(def) do
           href when is_binary(href) ->
-            ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}"#{link_extra_attrs(def)}>#{acc}</a>)
+            if drawable_href?(href),
+              do:
+                ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}"#{link_extra_attrs(def)}>#{acc}</a>),
+              else: ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
 
           nil ->
             ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
