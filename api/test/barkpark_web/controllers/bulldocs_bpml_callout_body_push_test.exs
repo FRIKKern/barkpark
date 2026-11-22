@@ -130,6 +130,30 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
 
     assert answer["error"]["code"] == "bpml_stale_copy"
     assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+    assert answer["error"]["paths"] == ["blocks[1].slots"]
+    assert stored(slug) == before
+  end
+
+  test "an old copy that edits a callout inside a container is refused with the body's stored path" do
+    callout = callout("c1", "Read this first.", [p("c1-a", "The body paragraph.")])
+    box = %{"id" => "x1", "type" => "expandable", "summary" => "More", "children" => [callout]}
+    slug = with_blocks!(new_slug(), [p("p1", "Opening paragraph."), box])
+    {bpml, rev} = pull!(slug)
+    before = stored(slug)
+
+    structured =
+      ~r{<callout id="c1" tone="info">\s*<content>Read this first\.</content>\s*<slot name="body">.*?</slot>\s*</callout>}s
+
+    edited =
+      bpml
+      |> String.replace(~s( print="2"), "")
+      |> String.replace(structured, ~s(<callout id="c1" tone="info">Read this.</callout>))
+
+    answer = push_copy(slug, edited, rev) |> json_response(422)
+
+    assert answer["error"]["code"] == "bpml_stale_copy"
+    assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+    assert answer["error"]["paths"] == ["blocks[1].children[0].slots"]
     assert stored(slug) == before
   end
 
