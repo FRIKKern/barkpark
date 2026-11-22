@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
         <%!-- The row's label names the hidden input, so the editor body
               is named here: "<field> (<lang>)" (task-05710d91d03d7fc9). --%>
         <bp-rich-text-editor
-          value={@value}
+          value={Barkpark.Content.LegacyRichHtml.for_editor(@value)}
           data-bridge-target={@id}
           data-lang={@lang}
           data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}
