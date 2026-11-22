@@ -36,8 +36,11 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
 
   def tags?(_assigns), do: false
 
-  @doc "Whether a schema field is a tags field: strings, `options.layout: \"tags\"`."
-  def tags_field?(field), do: layout(field) == "tags" and string_items?(field)
+  @doc "Whether a schema field is a tags field: an array of strings, `options.layout: \"tags\"`."
+  def tags_field?(field),
+    do:
+      field_attr(field, :type) in ["arrayOf", "array"] and layout(field) == "tags" and
+        string_items?(field)
 
   @doc """
   The list after a tags press, or `current` unchanged when it changes
