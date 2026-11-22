@@ -263,7 +263,7 @@ refused by name: a script calls `attachShadow` (a hook the check sets in the pag
 tells it at once, wherever the host stands); the parser meets a declared root in `example.html` (refused,
 "a declared shadow root"); markup is written into the parsed page (`document.write`, `writeln`, `open`:
 refused by name); another window attaches one (every frame in the page and `window.open`, refused by
-name; the part's context holds the check's own pages only, and any other page is refused by name). Markup parsed into a host
+name; the part's context holds the check's own two pages and no other: any other page is refused by name). Markup parsed into a host
 already in the page (`setHTMLUnsafe`, `innerHTML`) cannot give that host a root: a declared root at the
 top of the markup stays a plain `template`, and one deeper is on a new host, read on arrival. One no layer names fails by name, once per page ("… can open in the top layer (a
 dialog, or it carries popover), and no layer in part.json names it"), at the first reading or look after

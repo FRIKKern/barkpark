@@ -294,8 +294,8 @@ export async function installCensus(page, own, { script = true } = {}) {
     if (exceptionDetails) throw new Error(`the census: ${String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0]}`)
     return result.value
   }
-  // From the first frame to the last look, the part's context holds the check's own two pages and no other. Any
-  // other page, however it came to be, is closed at once and refused by name, once each.
+  // A page the context makes that is not one of `own` is closed and counted; the next look refuses it by name, once
+  // each (docs/PARTS.md "The top layer").
   let others = 0
   page.context().on('page', (p) => {
     if (own.includes(p)) return

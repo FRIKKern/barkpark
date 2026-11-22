@@ -45,8 +45,8 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.on('console', (m) => m.type() === 'error' && ctx.errors.push(`${where}: console: ${m.text().slice(0, 200)}`))
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
   if (clock) await page.clock.install()
-  // A blank page in the same context, where things are drawn alone for reference (see drawn.mjs). It is opened
-  // before the census is set, which knows the check's own two pages by identity and refuses any other.
+  // A blank page in the same context, where things are drawn alone for reference (see drawn.mjs). It opens before the
+  // census is set, which is given both pages (docs/PARTS.md "The top layer").
   const ref = await context.newPage()
   await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   // What can enter the top layer is watched from the first frame (layers.mjs census).

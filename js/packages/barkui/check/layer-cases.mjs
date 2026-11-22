@@ -82,9 +82,6 @@ const faint = (id, top) => `#${id} { position: absolute; inset: auto; left: 8px;
 const UNNAMED_AT = (box) => `${box} is open in the top layer during the reading, and no layer in part.json names it`
 const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
 
-/** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
-    it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
-    by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
 // The census knows the check's own two pages by identity, and the list is closed both ways: a page the check's own
 // code opens after the census is refused like any other, and a census set before the reference page is open, or on
 // a context that holds a third page, is red by name. The rows that always make a page keep the case from passing
@@ -170,6 +167,9 @@ async function ownTwoPages() {
   }
 }
 
+/** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
+    it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
+    by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
 async function overTwoGrounds() {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
