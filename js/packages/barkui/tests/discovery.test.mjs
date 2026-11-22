@@ -2,7 +2,7 @@ import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { discoverParts, REQUIRED_FILES } from '../build/parts.mjs'
+import { discoverParts, NOT_COVERED_WORDS, REQUIRED_FILES } from '../build/parts.mjs'
 
 const realParts = join(import.meta.dirname, '..', 'parts')
 let dirs = []
@@ -152,6 +152,34 @@ describe('discoverParts', () => {
     const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
     writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, textOnly: '[data-variant="ghost"]' }))
     expect(() => discoverParts(root)).toThrow(/parts\/aa: part\.json "textOnly" must be a list of selectors/)
+  })
+
+  it('takes a notCovered list of { name, why }, and refuses any other shape or a name given twice', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+    const withList = (notCovered) => {
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, notCovered }))
+      return () => discoverParts(root)
+    }
+    expect(withList([{ name: 'ui-badge', why: 'Not on the stage.' }])).not.toThrow()
+    for (const bad of ['ui-badge', [{ name: 'ui-badge' }], [{ name: 'ui-badge', why: 'x', more: 1 }], [{ name: ' ', why: 'x' }], [{ name: 'ui-badge', why: '' }]])
+      expect(withList(bad), JSON.stringify(bad)).toThrow(/parts\/aa: part\.json "notCovered" must be a list of \{ name, why \}/)
+    expect(withList([{ name: 'a', why: 'x' }, { name: 'a', why: 'y' }])).toThrow(/part\.json "notCovered" names "a" twice/)
+  })
+
+  it('reads exactly the words of NOT_COVERED_WORDS in the notes, in any case and across a line break, and not a sentence in other words', () => {
+    const root = scratch()
+    const dir = plantPart(root, 'aa')
+    const css = readFileSync(join(dir, 'part.css'), 'utf8')
+    const notes = (n) => {
+      writeFileSync(join(dir, 'part.css'), `${css}\n/* ${n} */\n`)
+      return () => discoverParts(root)
+    }
+    for (const w of NOT_COVERED_WORDS) expect(notes(`The ripple is ${w}.`), w).toThrow(/part\.css's notes says something is not covered/)
+    expect(notes('The ripple is NOT\n   STYLED.')).toThrow(/\("The ripple is NOT STYLED\."\)/)
+    // The row's one limit (docs/PARTS.md): other words are not read.
+    expect(notes('The ripple is left as UI SDK draws it.')).not.toThrow()
   })
 
   it('takes a part.json layer with its box and real input, and refuses one without them', () => {
