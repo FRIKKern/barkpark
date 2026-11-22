@@ -205,4 +205,81 @@ defmodule BarkparkWeb.Studio.DeskRemoteTitleHeaderTest do
     assert header(a) == @long
     assert assigns(a).page_title == @long
   end
+
+  # #28322 review, round 2: every place names the stored title the field
+  # shows, after a reload of the row through `handle_params` or a publish.
+  defp agree!(view, c) do
+    {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+
+    assert eventually(fn ->
+             header(view) == doc.title and headings(view) == [doc.title, doc.title] and
+               assigns(view).page_title == doc.title and
+               assigns(view).editor_form["title"] == doc.title
+           end),
+           "#{inspect({header(view), headings(view), assigns(view).editor_form["title"], doc.title})}"
+  end
+
+  defp press(view, event), do: BarkparkWeb.EditorPost.press(view, event, %{})
+
+  # A publishes and edits the title; B renames the draft; A's page has B's
+  # draft frame.
+  defp b_renamed_draft(c) do
+    a = open(c)
+    press(a, "publish")
+
+    assert eventually(fn ->
+             match?({:ok, _}, Content.get_document(c.id, c.type, @dataset))
+           end)
+
+    posts(a, "title", "A draft")
+    b = open(c)
+    posts(b, "title", "B draft")
+    assert eventually(fn -> header(a) == "B draft" end)
+    a
+  end
+
+  test "discard after B renamed the draft names the published title", c do
+    a = b_renamed_draft(c)
+
+    press(a, "discard-draft")
+    press(a, "confirm-discard")
+
+    assert eventually(fn -> assigns(a).editor_form["title"] == "Doc 7" end)
+    agree!(a, c)
+  end
+
+  test "publish after B renamed the draft names the published title", c do
+    a = b_renamed_draft(c)
+    press(a, "publish")
+
+    assert eventually(fn ->
+             {:error, :not_found} == Content.get_document("drafts." <> c.id, c.type, @dataset)
+           end)
+
+    agree!(a, c)
+  end
+
+  test "unpublish after B renamed the draft names the draft's title", c do
+    a = b_renamed_draft(c)
+    press(a, "unpublish")
+    press(a, "confirm-unpublish")
+    assert eventually(fn -> match?({:error, _}, Content.get_document(c.id, c.type, @dataset)) end)
+    agree!(a, c)
+  end
+
+  test "moving to another document after B's rename names that document", c do
+    other = c.id <> "-other"
+
+    {:ok, _} =
+      Content.create_document(c.type, %{"doc_id" => other, "title" => "Other"}, @dataset)
+
+    a = open(c)
+    b = open(c)
+    posts(b, "title", "Doc 7 B1")
+    assert eventually(fn -> header(a) == "Doc 7 B1" end)
+
+    render_patch(a, String.replace(c.path, ";" <> c.id, ";" <> other))
+    agree!(a, %{c | id: other})
+    assert header(a) == "Other"
+  end
 end

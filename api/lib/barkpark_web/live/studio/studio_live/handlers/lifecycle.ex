@@ -36,7 +36,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> Shared.maybe_open_shares(params)
       |> Shared.rebuild_panes()
-      |> Shared.assign_page_title()
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
       # Navigating (re)loads the editor from the DB, so the buffer is clean:
@@ -52,6 +51,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
       )
+      # Named after the reset: another editor's last frame is older than the
+      # row just read, and may be of a draft that is gone (a Discard), so
+      # it must not name the page (#28322 review, round 2).
+      |> Shared.assign_page_title()
       # A dialog a document action opened goes with its document.
       |> BarkparkWeb.Studio.StudioLive.PostIdentity.leave(shown)
       |> BarkparkWeb.Studio.StudioLive.DocSwap.start(shown)
@@ -136,7 +139,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
               )
           end
 
-        {:noreply, socket |> assign(:editor_store_doc, doc_data) |> named_as_seen()}
+        {:noreply, socket |> took_frame(doc_data) |> named_as_seen()}
 
       true ->
         schema = socket.assigns[:editor_schema]
@@ -151,8 +154,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
          socket
          |> RemoteValues.push(socket.assigns[:editor_form] || %{}, updated_form)
          |> PostedEdits.remote(socket.assigns[:editor_form] || %{}, updated_form)
+         |> took_frame(doc_data)
          |> assign(
-           editor_store_doc: doc_data,
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
@@ -161,6 +164,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
          |> named_as_seen()}
     end
   end
+
+  # Another editor's frame, and the row of this tab's it arrived over
+  # (`base_doc/1`).
+  defp took_frame(socket, frame),
+    do:
+      assign(socket,
+        editor_store_doc: frame,
+        editor_store_over: row_key(socket.assigns[:editor_doc])
+      )
+
+  defp row_key(%{doc_id: id} = doc), do: {id, Map.get(doc, :updated_at), Map.get(doc, :rev)}
+  defp row_key(_doc), do: nil
 
   # The pane header and the tab name the newest stored version this tab has
   # seen, as the title field and the list row do: `editor_doc` stays this
@@ -382,15 +397,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   The newest stored version of the open document this tab has seen: the
   fresher of another editor's last frame (`editor_store_doc`) and this tab's
   own row (`editor_doc`).
+
+  A frame counts only over the row it arrived on (`editor_store_over`): any
+  change of `editor_doc` since is a read or a write of this tab's that is
+  newer than the frame, or a row of another variant (a Discard drops the
+  draft the frame was of, a Publish or Unpublish swaps the row). Comparing
+  times alone named a discarded draft (#28322 review, round 2).
   """
   def base_doc(socket) do
     own = socket.assigns[:editor_doc]
 
     case socket.assigns[:editor_store_doc] do
       %{doc_id: id} = seen when is_map(own) ->
-        if Content.published_id(id) == Content.published_id(own.doc_id),
-          do: fresher(seen, own),
-          else: own
+        if Content.published_id(id) == Content.published_id(own.doc_id) and
+             socket.assigns[:editor_store_over] == row_key(own),
+           do: fresher(seen, own),
+           else: own
 
       _ ->
         own
