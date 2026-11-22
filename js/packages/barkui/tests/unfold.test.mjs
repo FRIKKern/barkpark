@@ -10,7 +10,7 @@ import { CASE_READINGS } from '../check/case-readings.mjs'
 import { LIGHT_NAMES } from '../check/check.mjs'
 import { rowsMoved } from '../check/jobs.mjs'
 import { surfacesOf } from '../check/proofs.mjs'
-import { CASES } from '../check/selftest.mjs'
+import { CASES, partOf } from '../check/selftest.mjs'
 import { STATE_CASES, SURFACE_CASES, UNFOLDED_ROWS } from '../check/unfolded-cases.mjs'
 
 // The rows of each case, as it held them before it was unfolded.
@@ -57,9 +57,16 @@ describe('an unfolded case', () => {
     expect([...SURFACES].filter((s) => !read.has(s))).toEqual([])
     const lit = new Set(STATE_CASES.flatMap((c) => c.only))
     expect(LIGHT_NAMES.filter((l) => !lit.has(l))).toEqual([])
-    // The run that names unread rules goes through the same five lights the one case did, on its smaller stage.
+    // The run that names unread rules goes through the same five lights the one case did.
     expect([...STATE_CASES.find((c) => LIGHT_NAMES.every((l) => c.only?.includes(l))).only].sort()).toEqual([...LIGHT_NAMES].sort())
     expect(() => surfacesOf({ surfaces: ['raised', 'floor'] })).toThrow(/no such surface: floor/)
+  })
+
+  it('runs a case on a part the package has, and is red by the case’s name on any other', () => {
+    expect(partOf({ name: 'x' })).toBe('button')
+    expect(CASES.filter((c) => !c.direct).map((c) => partOf(c)).filter((n) => n !== 'button')).toEqual(['tabs', 'tabs'])
+    expect(() => partOf({ name: 'x', part: 'tab' })).toThrow('the case "x" runs on the part "tab", which is not one; the parts are button, tabs, text-field (parts/)')
+    expect(() => partOf({ name: 'x', part: undefined })).toThrow('the case "x" runs on the part null, which is not one')
   })
 })
 

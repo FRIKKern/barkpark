@@ -653,6 +653,14 @@ steps.push({
   },
 ]
 
+/** The part a case runs on: `part` names one of the package's parts (build/parts.mjs, discoverParts); a case
+    without the key runs on the button. A name that is not a part, or a key with no name, fails the case by its name. */
+export function partOf(c, names = discoverParts().map((p) => p.name)) {
+  if (!Object.hasOwn(c, 'part')) return 'button'
+  if (typeof c.part === 'string' && names.includes(c.part)) return c.part
+  throw new Error(`the case "${c.name}" runs on the part ${JSON.stringify(c.part ?? null)}, which is not one; the parts are ${names.join(', ')} (parts/)`)
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let failures = 0
   // node check/selftest.mjs --job <key> [words]: the cases that job runs (check/jobs.mjs, selftestJob), under its
@@ -694,8 +702,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     try {
       const dir = join(scratch, 'parts')
       const out = join(scratch, 'out')
-      cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
-      c.plant?.(join(dir, 'button'))
+      let name
+      try {
+        name = partOf(c)
+      } catch (e) {
+        failures++
+        console.log(`FAIL ${e.message}`)
+        continue
+      }
+      cpSync(join(partsDir, name), join(dir, name), { recursive: true })
+      c.plant?.(join(dir, name))
       const t0 = Date.now()
       const logs = []
       const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
@@ -705,7 +721,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         html = readFileSync(join(out, 'index.html'), 'utf8')
       } catch {}
       // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
-      const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, 'button', 'part.json'), 'utf8')).layers, proof))
+      const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, name, 'part.json'), 'utf8')).layers, proof))
       const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced
       if (pass) held.push(c.name)
       else failures++
