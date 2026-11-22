@@ -102,10 +102,11 @@ const inPage = (page, fn, name, what, ms) => inWorld(page.barkPress, fn, name, w
 const inCheck = (page, fn, name, what, ms) => inWorld(page.barkCheck, fn, name, what, ms)
 const settle = (page) => limit(page.barkCheck(() => window.__barkCheck.settle()), STEP_MS, 'settling the page')
 const view = (page, skin, scheme) =>
-  page.barkCheck(([k, s]) => {
-    document.documentElement.setAttribute('data-skin', k)
-    document.documentElement.setAttribute('data-color-scheme', s)
-  }, [skin, scheme])
+  page.barkCheck(([k, s]) =>
+    window.__barkCheck.restyle('a skin and scheme set', () => {
+      document.documentElement.setAttribute('data-skin', k)
+      document.documentElement.setAttribute('data-color-scheme', s)
+    }), [skin, scheme])
 
 /** What the browser hands a screen reader for one element (role, name, states). */
 async function ax(page, selector) {
@@ -138,7 +139,7 @@ export async function pressed(ctx, part, skins) {
     if (drawn) await view(page, skins[0], 'light')
     if (setup) await inPage(page, setup, part.name, 'press.mjs setup')
     await page.clock.pauseAt(Date.now() + 1000)
-    await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
+    await page.barkCheck((id) => window.__barkCheck.restyle('focus moved to the part title', () => document.getElementById(id).focus()), `part-${part.name}-title`)
     for (const step of steps) {
       let result
       try {
@@ -239,7 +240,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
   // What reading the part's layers open costs: each opened by its input, read, and closed again (layers.mjs).
   const layered = { readings: 0, ms: 0 }
   const surfaceTo = async (x) => {
-    await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, x])
+    await page.barkCheck(([n, v]) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v)), [part.name, x])
     await settle(page)
   }
   try {
@@ -288,7 +289,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
         }
         await surfaceTo('base')
         // Focus: Tab through the part with real keys and measure the ring on each stop.
-        await page.barkCheck((id) => document.getElementById(id).focus(), `part-${part.name}-title`)
+        await page.barkCheck((id) => window.__barkCheck.restyle('focus moved to the part title', () => document.getElementById(id).focus()), `part-${part.name}-title`)
         for (let i = 0; i < 60; i++) {
           await page.keyboard.press('Tab')
           await limit(page.barkCheck(() => window.__barkCheck.frame()), STEP_MS, 'a frame')
@@ -401,7 +402,7 @@ async function motionFails(ctx, part, skin) {
       await page.mouse.move(0, 0)
       await view(page, skin, 'light')
       for (const surface of surfaces) {
-        await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, surface])
+        await page.barkCheck(([n, v]) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v)), [part.name, surface])
         await settle(page)
         for (const when of ['finished', 'halfway']) {
           await hold(page, when)
@@ -439,7 +440,7 @@ export async function phone(ctx, part, skins) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
         for (const surface of surfacesOf(ctx)) {
-          await page.barkCheck(([n, v]) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v), [part.name, surface])
+          await page.barkCheck(([n, v]) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v)), [part.name, surface])
           await settle(page)
           const where = `${at} on ${surface}`
           const r = await sideways()
@@ -460,7 +461,7 @@ export async function phone(ctx, part, skins) {
           const open = await eachLayer(page, part, async (layer) => (await readOne(`${where} with ${layer.box} open`), []))
           fails.push(...open.map((f) => `${where}: ${f}`))
         }
-        await page.barkCheck((n) => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', 'base'), part.name)
+        await page.barkCheck((n) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', 'base')), part.name)
       }
     }
     await stillStyled(ctx, page, 'phone')

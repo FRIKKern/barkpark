@@ -1,6 +1,7 @@
 // One full reading of a part's stage in the view the page is in: every control's
 // boundary, and every text run and graphic read from pixels (see drawn.mjs and
 // boundary.mjs). All of it goes through the check's own isolated world and CDP.
+import { capture } from './capture.mjs'
 import { UNNAMED } from './layers.mjs'
 const fmt = (n) => n.toFixed(2)
 
@@ -12,14 +13,12 @@ export async function readView(page, part, waits = []) {
   const world = page.barkCheck
   const scale = page.barkScale
   const frame = () => world(() => window.__barkCheck.frame())
-  // Captures go through Playwright, which keeps the page's pixel ratio: a capture from a CDP session of our
-  // own resets the emulated ratio to 1 for everything after it. Playwright is told to leave the caret alone, so it
-  // adds no style of its own to the page: the check hides the caret itself, from its own world (caret in drawn.mjs).
-  const capture = async (p, c) => (await p.screenshot({ clip: { x: c.x, y: c.y, width: c.w, height: c.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
-  const shoot = (clip) => capture(page, clip)
+  // Every capture goes through capture.mjs: the page at rest, or red by name.
+  const shoot = (clip) => capture(page, world, clip)
   // The stage's box, widened to whole CSS pixels (so whole device pixels too): a capture's pixels are the page's own.
   // With a box of the part's layers open in the top layer, the capture covers that box too, and what the page draws
   // behind it is captured first with the open boxes hidden (layers.mjs).
+  await world(() => window.__barkCheck.still('a reading'))
   const open = await world(([s, b]) => window.__barkCheck.layers(document.querySelector(s), b), [sel, (part.json.layers ?? []).map((l) => l.box)])
   const clip = await world(([s, boxes]) => {
     const r = document.querySelector(s).getBoundingClientRect()
@@ -41,13 +40,13 @@ export async function readView(page, part, waits = []) {
   }
   try {
     const can = page.barkCensus ? await page.barkCensus(part) : []
-    return { ...(await readNow(page, part, waits, { sel, world, scale, frame, capture, shoot, clip })), unnamed: open.unnamed, can }
+    return { ...(await readNow(page, part, waits, { sel, world, scale, frame, shoot, clip })), unnamed: open.unnamed, can }
   } finally {
     if (open.boxes.length) await world(() => window.__barkCheck.under(null))
   }
 }
 
-async function readNow(page, part, waits, { sel, world, scale, frame, capture, shoot, clip }) {
+async function readNow(page, part, waits, { sel, world, scale, frame, shoot, clip }) {
   const bounds = await world(([s, t]) => window.__barkCheck.boundaries(document.querySelector(s), t), [sel, part.json.textOnly ?? []])
   // The things of the view and, for any not yet drawn alone, their references, drawn and measured in the
   // reference tab (see drawn.mjs) so the page under test is never laid out differently.
@@ -57,7 +56,7 @@ async function readNow(page, part, waits, { sel, world, scale, frame, capture, s
     const ref = page.barkRef
     const at = await ref.world((list) => window.__barkCheck.alone(list), specs)
     await ref.world(() => window.__barkCheck.frame())
-    const png = await capture(ref.page, at)
+    const png = await capture(ref.page, ref.world, at)
     await world((list) => window.__barkCheck.keep(list), await ref.world(([p, c, k]) => window.__barkCheck.measureAlone(p, c, k), [png, at, scale]))
   }
   // A caret blinks, so it could be in one capture and not another by chance: every capture is taken without it.

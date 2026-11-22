@@ -85,6 +85,12 @@ export const CASE_READINGS = {
       // 45014740614, commit 2ee9c33320ba5ce178e38afb1df0eb3d00a7ae57).
       "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)": 20,
       "top layer: the part's context holds the check's own two pages and no other, known by identity": 1.5,
+      // The at-rest cases, added after the run above: from their PR's hosted run, job 137283499010 (run
+      // 45046885470, commit e7e4f6728928a85db841d5223b2085794a965bf3).
+      "at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation": 0.6,
+      "at rest: a box held at opacity 0 by its own style reads so and is red; a page still moving by its own rule is red by name as the check's own red": 5.8,
+      "at rest: every way the checker reads a look is gated, and on a moving page each is red by name": 4.3,
+      "at rest: twelve ways to change a look outside restyle each leave the next read red by name, never mid-way": 3.3,
     },
   },
   views: {
