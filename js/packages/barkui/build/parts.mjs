@@ -83,24 +83,32 @@ function readPart(dir, name) {
 
 // What of its library element a part does not style or prove is a row of part.json "notCovered": { name, why },
 // the name of that thing (an element, a feature) and why. The showroom prints the list in one place under the
-// part (build/page.mjs). A sentence of the summary or of part.css's notes that says something is not covered
-// names a row of the list, so the list is the one place a reader looks.
+// part (build/page.mjs), so a reader sees it. A sentence of the summary or of part.css's notes that says something
+// is not covered names a row of the list, so the list is the one place a reader looks.
 // The words that row reads, exactly these and no others, in any case and across line breaks: the ways the parts
-// have said "not covered" so far. A sentence that says it in other words is not caught; that is the row's one
-// limit, written in docs/PARTS.md.
+// have said "not covered" so far. Its two limits, written in docs/PARTS.md: a sentence that says it in other words
+// is not caught; and a row excuses a sentence where its name stands in it as whole words (any case, across line
+// breaks, not inside a longer word or name), which says the name is there, not that the sentence is about it.
 export const NOT_COVERED_WORDS = ['not styled', 'not covered', 'not proved', 'not judged', 'not on the stage', 'does not style', 'does not cover', 'does not prove', 'do not style', 'do not cover', 'do not prove', 'unstyled', 'unjudged', 'unproved']
 const NOT_COVERED = new RegExp(`\\b(${NOT_COVERED_WORDS.map((w) => w.split(' ').join('\\s+')).join('|')})\\b`, 'i')
+// A word here is letters, digits, "_" and "-", so "ui-tabs" does not stand inside "ui-tabs-indicator".
+const IN_WORD = '[\\p{L}\\p{N}_-]'
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** Whether `name` stands in `sentence` as whole words, in any case and across line breaks. */
+const standsIn = (name, sentence) => new RegExp(`(?<!${IN_WORD})${name.trim().split(/\s+/).map(escape).join('\\s+')}(?!${IN_WORD})`, 'iu').test(sentence)
 /** What is wrong with a part's "notCovered" and the prose beside it, in one sentence; empty when nothing is. */
 export function notCoveredWrong(json, css) {
-  const list = json.notCovered ?? []
+  const list = json.notCovered === undefined ? [] : json.notCovered
   if (!(Array.isArray(list) && list.every((x) => x && typeof x === 'object' && Object.keys(x).every((k) => k === 'name' || k === 'why') && [x.name, x.why].every((v) => typeof v === 'string' && v.trim()))))
     return 'part.json "notCovered" must be a list of { name, why }: what of its library element the part does not style or prove, and why'
-  const twice = list.map((x) => x.name).find((n, i, all) => all.indexOf(n) !== i)
+  // Two names are one when they differ only in case or spacing.
+  const same = (n) => n.trim().split(/\s+/).join(' ').toLowerCase()
+  const twice = list.map((x) => x.name).find((n, i, all) => all.findIndex((m) => same(m) === same(n)) !== i)
   if (twice) return `part.json "notCovered" names "${twice}" twice`
   const notes = [...css.matchAll(/\/\*([\s\S]*?)\*\//g)].map((m) => m[1]).join(' ')
   for (const [where, prose] of [['part.json "summary"', json.summary ?? ''], ["part.css's notes", notes]]) {
     for (const sentence of prose.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/)) {
-      if (NOT_COVERED.test(sentence) && !list.some((x) => sentence.toLowerCase().includes(x.name.toLowerCase())))
+      if (NOT_COVERED.test(sentence) && !list.some((x) => standsIn(x.name, sentence)))
         return `${where} says something is not covered ("${sentence.trim()}"), and part.json "notCovered" names none of it: what a part does not cover is a row of "notCovered", printed under the part`
     }
   }
