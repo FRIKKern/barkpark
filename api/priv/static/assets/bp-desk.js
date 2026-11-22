@@ -1409,8 +1409,29 @@
         if (!form) return false;
         var pane = form.closest("[data-pane-editing]");
         return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
-          (!!pane && pane.getAttribute("data-desk-save") === "Save failed");
+          (!!pane && (pane.getAttribute("data-desk-save") === "Save failed" || pane.hasAttribute("data-desk-held")));
       };
+      // A held field (`Desk.LeaveGuard`, task-33cbb6269c8823ad): a link to a
+      // path without this document asks first, and Cancel stays. Capture on
+      // the document, so LiveView's own link handler (on window) never sees
+      // a cancelled click. A path that still holds the document (its own
+      // panes, a query) does not ask.
+      hook._onLeave = function (e) {
+        var pane = root.querySelector("[data-pane-editing][data-desk-held]");
+        var link = pane && e.target.closest ? e.target.closest("a[href]") : null;
+        if (!link || !plainClick(e) || link.target === "_blank") return;
+        var to = new URL(link.href, window.location.href);
+        if (to.origin !== window.location.origin || to.pathname === window.location.pathname) return;
+        var id = pane.getAttribute("data-desk-held-doc");
+        var keeps = to.pathname.split("/").some(function (seg) {
+          try { seg = decodeURIComponent(seg); } catch (_e) { return false; }
+          return seg.split(/[;,]/).indexOf(id) !== -1;
+        });
+        if (keeps || window.confirm(pane.getAttribute("data-desk-held"))) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      };
+      root.ownerDocument.addEventListener("click", hook._onLeave, true);
       // The TanStack Studio's e2e probe (its lib/edits.ts; the rig waits on
       // it before it resets its documents): an edit still on its way, typed
       // and not yet sent or any event not yet answered. Not a failed save,
@@ -1893,6 +1914,7 @@
       this._sending.disconnect();
       root.removeEventListener("input", this._onTyped, true);
       window.removeEventListener("beforeunload", this._onUnload);
+      root.ownerDocument.removeEventListener("click", this._onLeave, true);
       if (window.__savesPending === this._savesPending) delete window.__savesPending;
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
