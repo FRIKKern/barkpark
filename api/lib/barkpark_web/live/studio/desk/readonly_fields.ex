@@ -27,7 +27,15 @@ defmodule BarkparkWeb.Studio.Desk.ReadonlyFields do
     assigns = assign(assigns, :readonly, readonly?(parent))
 
     ~H"""
-    <fieldset class="dk-readonly-fields" disabled={@readonly} data-desk-readonly-fields={@readonly}>
+    <%!-- A stable id: the conflict banner drawn above it on a hold must not
+         make the patch take this fieldset out and put it back, which blurs
+         the editor in it and ends an IME composition (#28349 r3, K6). --%>
+    <fieldset
+      id="dk-readonly-fields"
+      class="dk-readonly-fields"
+      disabled={@readonly}
+      data-desk-readonly-fields={@readonly}
+    >
       {render_slot(@inner_block)}
     </fieldset>
     """

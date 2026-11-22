@@ -74,9 +74,8 @@ class BpRichTextEditor extends HTMLElement {
     this._editor.setAttribute("role", "textbox");
     this._editor.setAttribute("aria-multiline", "true");
     if (this.dataset.label) this._editor.setAttribute("aria-label", this.dataset.label);
-    this._editor.innerHTML = initial;
     this.appendChild(this._editor);
-    this._decorateBlocks();
+    this._paint(initial);
 
     this._onInput = () => this._emit();
 
@@ -126,6 +125,13 @@ class BpRichTextEditor extends HTMLElement {
       queueMicrotask(() => { this._blurredAt = null; });
     };
     this._listen();
+  }
+
+  // The one way a value gets into the text: the first paint, and a value
+  // the server sends later (bp-rt-remote.js) take the same steps.
+  _paint(html) {
+    this._editor.innerHTML = html;
+    this._decorateBlocks();
     this._loadLinkTitles();
   }
 
@@ -1154,11 +1160,19 @@ class BpRichTextEditor extends HTMLElement {
   }
 
   set value(v) {
-    if (this._editor && this._html() !== v) {
-      this._editor.innerHTML = v;
-      this._loadLinkTitles();
-    }
+    if (this._editor && this._html() !== v) this._paint(v);
   }
 }
 
 customElements.define("bp-rich-text-editor", BpRichTextEditor);
+
+// Another editor's save of a rich text in an object, put into this page's
+// editor in place: bp-rt-remote.js, served next to this file.
+(() => {
+  const self = document.currentScript;
+  if (!self || !self.src || document.querySelector("script[data-bp-rt-remote]")) return;
+  const s = document.createElement("script");
+  s.src = new URL("bp-rt-remote.js", self.src).href;
+  s.dataset.bpRtRemote = "";
+  (document.body || document.head).appendChild(s);
+})();

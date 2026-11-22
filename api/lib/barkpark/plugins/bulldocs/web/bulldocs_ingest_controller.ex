@@ -479,7 +479,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
-    keep = [keep_untouched: true]
+    keep = [keep_untouched: true, before_revision: Content.Papers.PushRevision.action()]
     opts = scope ++ keep ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
 
     case Content.apply_paper_block_ops(slug, ops, dataset, opts) do

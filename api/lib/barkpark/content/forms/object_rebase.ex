@@ -12,7 +12,16 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
 
   `mine` is the post after `Forms.edits/3`: an untouched subfield there is
   exactly the base's value (`restore_untouched`), so the test is `===`.
+
+  A `richText` subfield that both the post and the store changed since
+  `base` is merged block by block (`PortableTextMerge`, #28349 r4 SV1): a
+  post can reach the server before its tab is told of another editor's save
+  of the same text, so the tab could not hold it. A clash inside one block
+  is written as posted, as before; the tab's hold (`RichTextRemote`) covers
+  the case it was told of.
   """
+
+  alias Barkpark.Content.PortableTextMerge
 
   @doc """
   `params` with each object field rebased onto `theirs`. Only a field the
@@ -44,11 +53,15 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   defp object(field, mine, base, theirs) do
     subs = if is_list(field["fields"]), do: field["fields"], else: []
 
+    rich = for %{"name" => n, "type" => "richText"} <- subs, into: MapSet.new(), do: n
+
     kept =
       Enum.reduce(mine, theirs, fn {key, value}, acc ->
-        if Map.has_key?(base, key) and value === Map.fetch!(base, key),
-          do: acc,
-          else: Map.put(acc, key, value)
+        cond do
+          Map.has_key?(base, key) and value === Map.fetch!(base, key) -> acc
+          MapSet.member?(rich, key) -> Map.put(acc, key, rich_text(base[key], value, theirs[key]))
+          true -> Map.put(acc, key, value)
+        end
       end)
 
     # A subfield the post took off that nobody else changed goes; one
@@ -65,4 +78,14 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
     # untouched one is theirs already, and rebasing it changes nothing.
     rebase(subs, kept, base, theirs)
   end
+
+  defp rich_text(base, mine, theirs)
+       when is_list(base) and is_list(mine) and is_list(theirs) and theirs !== base do
+    case PortableTextMerge.merge(base, mine, theirs) do
+      {:ok, merged} -> merged
+      {:clash, _texts, _view} -> mine
+    end
+  end
+
+  defp rich_text(_base, mine, _theirs), do: mine
 end
