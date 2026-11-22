@@ -247,8 +247,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # not a list (one string, from an old bug) is drawn as a list of that one
   # value; nothing is written until the editor ticks.
   defp select_list(assigns) do
-    item = element_field(assigns.field)
-    options = Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options))
+    options = choices(assigns.field)
     values = assigns[:value] |> ticked() |> Enum.map(&leaf_display/1)
     known = Enum.map(options, & &1.value)
     path = Map.get(assigns, :path, "")
@@ -317,10 +316,37 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp list_name(path), do: path <> "[]"
 
   defp select_list?(field) do
+    case element_field(field) |> subfield_attr(:type) do
+      "select" ->
+        choices(field) != []
+
+      # A missing `of` reads as strings here (`element_field/1`), not in TanStack.
+      "string" ->
+        subfield_attr(subfield_attr(field, :raw) || field, :of) != nil and
+          is_list(string_list(field))
+
+      _ ->
+        false
+    end
+  end
+
+  # The options of a checkbox list: an array of `select` values reads its
+  # item's options; an array of strings reads `options.list` on the array,
+  # as TanStack's `Fields.tsx` and Sanity draw it (task-5935f433650841be).
+  defp choices(field) do
     item = element_field(field)
 
-    subfield_attr(item, :type) == "select" and
-      Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options)) != []
+    case subfield_attr(item, :type) do
+      "select" -> Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options))
+      _string -> Barkpark.Content.SelectOptions.normalize(string_list(field))
+    end
+  end
+
+  defp string_list(field) do
+    case subfield_attr(field, :raw) || field do
+      %{"options" => %{"list" => list}} -> list
+      _ -> nil
+    end
   end
 
   # Sanity's `options.layout` on the array ("grid" draws the options in columns).
