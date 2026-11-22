@@ -24,14 +24,29 @@ jobs:
     steps:
       - name: Mirror
         run: |
-          set +e
-          ${mirror}
+${mirror}
       - name: Conformance
 ${conf}
 ${extra}      - name: Test
         run: pnpm exec turbo run test \${{ steps.scope.outputs.filter }}
 `
-  const MIRROR = 'out="$(pnpm --filter @fix/react exec vitest run tests/b.test.ts 2>&1)"'
+  // The mirror step's captured block, as js-tests.yml writes it.
+  const MIRROR_LINES = [
+    'set +e',
+    'out="$(pnpm --filter @fix/react exec vitest run tests/b.test.ts 2>&1)"',
+    'status=$?',
+    'set -e',
+    'echo "$out"',
+    'case "$out" in',
+    '  *"No projects matched the filters"*)',
+    '    echo "mirror gate FAILED: pnpm --filter matched ZERO packages" >&2',
+    '    exit 1',
+    '    ;;',
+    'esac',
+    'exit "$status"',
+  ]
+  const block = (lines) => lines.map((l) => `          ${l}`).join('\n')
+  const MIRROR = block(MIRROR_LINES)
   const CONF = '        run: pnpm --filter @fix/react exec vitest run tests/a.test.tsx'
   const cfg = (items) =>
     `import { configDefaults, defineConfig } from 'vitest/config'\nimport { excludeUnlessNamed } from '../../test-utils/named-step-files.mjs'\n\nconst NAMED_STEP_FILES = [${items}]\n\nexport default defineConfig({\n  test: {\n    exclude: [\n      ...configDefaults.exclude,\n      ...excludeUnlessNamed(NAMED_STEP_FILES, process.argv, import.meta.dirname),\n    ],\n  },\n})\n`
@@ -59,6 +74,37 @@ ${extra}      - name: Test
   ]
   const cases = [
     ['the good shape passes', wf(MIRROR, CONF), pkg(), 0, []],
+    [
+      'the known line in a block that ends 0 is refused',
+      wf(
+        MIRROR,
+        '        run: |\n          set +e\n          pnpm --filter @fix/react exec vitest run tests/a.test.tsx\n          exit 0',
+      ),
+      pkg(),
+      2,
+      ['step "Conformance"', 'not one of the known whole forms'],
+    ],
+    [
+      'the captured block without its last line is refused',
+      wf(block(MIRROR_LINES.slice(0, -1)), CONF),
+      pkg(),
+      2,
+      ['step "Mirror"', 'not one of the known whole forms'],
+    ],
+    [
+      'the captured block with a line after its last is refused',
+      wf(block([...MIRROR_LINES, 'exit 0']), CONF),
+      pkg(),
+      2,
+      ['step "Mirror"', 'not one of the known whole forms'],
+    ],
+    [
+      'the known line under a shell: key is refused',
+      wf(MIRROR, `        shell: bash {0}\n${CONF}`),
+      pkg(),
+      2,
+      ['step "Conformance"', 'shell: bash {0}'],
+    ],
     ['the one-line exclude passes too', wf(MIRROR, CONF), pkg({ text: ONE_LINE }), 0, []],
     [
       'old setup: both named files still run by the Test step',
@@ -231,7 +277,7 @@ ${extra}      - name: Test
     ],
     [
       'nothing to read is cannot-read',
-      wf('echo none', '        run: echo none'),
+      wf(block(['echo none']), '        run: echo none'),
       pkg({ text: 'export default {}\n' }),
       2,
       ['nothing to read'],

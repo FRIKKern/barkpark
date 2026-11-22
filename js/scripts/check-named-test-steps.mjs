@@ -32,6 +32,9 @@
 //     optionally wrapped as  out="$(<that> 2>&1)"
 //     (npx, a cd, a backslash continuation, a matrix value, a partial filter,
 //     jest or `node --test` on a test file are all "cannot read");
+//   * a named step's whole run block is not one of the known whole forms, in
+//     which the file's own exit status is the step's exit status (see
+//     CAPTURED_FORM); any other block is refused, by step name;
 //   * a test file path appears anywhere else in the jobs (env, with, matrix);
 //   * NAMED_STEP_FILES is written in any shape but one literal array of
 //     strings passed to excludeUnlessNamed in the one known `exclude:` line,
@@ -97,6 +100,7 @@ export function parseWorkflow(text) {
       if (/^[|>][-+]?$/.test(value)) run = true
       else step.runLines.push({ n, text: value })
     } else if (key === 'if') step.if = value
+    else if (key === 'shell') step.shell = value
     else if (key === 'continue-on-error') step.coe = value
     else if (key === 'name') step.name = value.replace(/^"(.*)"$/, '$1')
     else if (value) other.push({ n, text: value })
@@ -124,7 +128,7 @@ export function parseWorkflow(text) {
       job[m[1] === 'continue-on-error' ? 'coe' : m[1]] = m[2].trim()
       step = null
     } else if (job && (m = /^ {6}- ([\w-]+):\s?(.*)$/.exec(raw))) {
-      step = { job, n, name: null, if: null, coe: null, runLines: [] }
+      step = { job, n, name: null, if: null, coe: null, shell: null, runLines: [] }
       steps.push(step)
       stepKey(m[1], m[2].trim(), n)
     } else if (step && (m = /^ {8}([\w-]+):\s?(.*)$/.exec(raw))) {
@@ -136,6 +140,37 @@ export function parseWorkflow(text) {
     }
   }
   return { steps, other, cannot }
+}
+
+// The whole run block of a named step must be one of these forms, each one
+// ending with the named file's own exit status as the step's exit status.
+// (a) the known line alone; (b) the captured form the pd-golden mirror step
+// uses. A comment or blank line inside the block is not read.
+const CAPTURED_FORM = [
+  /^set \+e$/,
+  /^out="\$\(pnpm .* 2>&1\)"$/,
+  /^status=\$\?$/,
+  /^set -e$/,
+  /^echo "\$out"$/,
+  /^case "\$out" in$/,
+  /^\*"No projects matched the filters"\*\)$/,
+  /^echo "[^"$`\\]*" >&2$/,
+  /^exit 1$/,
+  /^;;$/,
+  /^esac$/,
+  /^exit "\$status"$/,
+]
+
+/** Which known whole form a named step's run block is, or null. */
+export function blockForm(texts) {
+  if (texts.length === 1 && !texts[0].startsWith('out=') && matchNamedRun(texts[0])) return 'line'
+  if (
+    texts.length === CAPTURED_FORM.length &&
+    CAPTURED_FORM.every((re, i) => re.test(texts[i])) &&
+    matchNamedRun(texts[1])
+  )
+    return 'captured'
+  return null
 }
 
 /** The one known shape of a named run, or null. */
@@ -204,6 +239,15 @@ export function judge(workflowText, packages) {
           `${WORKFLOW}:${l.n}: starts a test runner in a shape this script cannot read (the one known shape is \`pnpm --filter <package> exec vitest run <file> …\`): ${l.text}`,
         )
       }
+    }
+  }
+  for (const s of new Set(runs.map((r) => r.step))) {
+    const name = `step "${s.name ?? '(unnamed)'}" (${WORKFLOW}:${s.n})`
+    if (s.shell) cannot.push(`${name}: runs by name under \`shell: ${s.shell}\`; refused`)
+    if (!blockForm(s.runLines.map((l) => l.text))) {
+      cannot.push(
+        `${name}: its run block is not one of the known whole forms (the known line alone, or the captured form of the pd-golden mirror step); refused`,
+      )
     }
   }
   for (const l of other) {

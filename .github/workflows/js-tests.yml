@@ -214,6 +214,7 @@ jobs:
       # all-packages Test step leaves it out. This row reads this workflow and the
       # vitest configs and fails when a named file still runs in the Test step, is
       # run by no step or by two, or sits behind a condition the Test step lacks.
+      # A named step's run block is one of the known whole forms; any other is refused.
       # A shape it does not know is exit 2, never a skip. Reads only; seconds.
       - name: "Named test steps selftest (proves the rule can still lose)"
         run: node scripts/check-named-test-steps.selftest.mjs
