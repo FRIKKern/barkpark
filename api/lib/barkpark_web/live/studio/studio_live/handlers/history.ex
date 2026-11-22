@@ -112,6 +112,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
           |> assign(show_history: false, revisions: [])
           |> put_flash(:info, gettext("Restored from history"))
           |> Shared.rebuild_panes()
+          # The header names the restored title (task-42a6f063263338f6).
+          |> Shared.assign_page_title()
 
         # The restore rewrote the draft's blocks and revision behind the open
         # Beta editors (task-494fc7f91abd01bd).
@@ -141,6 +143,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
             gettext("The document changed since you loaded it — reload and retry.")
           )
           |> Shared.rebuild_panes()
+          |> Shared.assign_page_title()
 
         {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
 

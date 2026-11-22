@@ -72,6 +72,16 @@ export const CASE_READINGS = {
       "a part.json that names a property to allow is refused at discovery": 0,
       "a <style> in example.html fails the run": 0,
       "a part folder without press.mjs fails the run": 0,
+      // The placement cases, added after the run above: from their PR's hosted run, job 137168681329 (run 45009518037, commit 5fa079b4311e3a943b9c9bf7b591889683efa49a).
+      "placement: a UI SDK select opened by a click and closed by Escape writes only placement, and an empty style attribute holds nothing; both pass": 2.7,
+      "placement: what is not placement fails by name: an unlisted property beside a listed one, a box property off a box, an anchor name no box hangs from, a property held only while a box was open, a transition other than none on a box or none off one, and a value removed by a method from another window": 0.6,
+      "placement: a UI SDK dialog opened by a click and closed by Escape writes its scroll lock on the root element while it is open, and that passes": 2.7,
+      "placement: on an element that holds a stage, a property off the scroll lock on the root element, the scroll lock on body with no dialog open, and any property on a wrapper fail by name": 0.6,
+      "placement: the scroll lock stays while one of two dialog boxes is still open, and fails by name when left after the last one closes or given a value it never writes": 0.6,
+      "placement: an element that holds a stage and hosts a shadow root fails by name, whatever its mode, however it was made, and whether it was made before or after the stage moved in": 0.6,
+      "placement: a stage moved into a shadow root, with nothing styled around it, fails by name": 0.6,
+      "placement: a stage moved into a new plain wrapper, with no shadow root anywhere, passes": 2.3,
+      "placement: on the stage with no script any style attribute fails by name, a listed property on a box and an empty one alike": 0.3,
     },
   },
   views: {

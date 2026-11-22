@@ -291,6 +291,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> saved_flash()
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+          |> Shared.assign_page_title()
           |> clear_touched()
 
         {:noreply, socket}
@@ -318,6 +319,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil
       )
+      |> Shared.assign_page_title()
       |> clear_touched()
 
     {:noreply, socket}
@@ -987,6 +989,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # it said was kept is now saved (#25880 review).
   @doc false
   def settle_dirty(socket, keys) do
+    # The header names a title held unsaved, and the stored one once it lands.
+    socket |> settled_dirty(keys) |> Shared.assign_page_title()
+  end
+
+  defp settled_dirty(socket, keys) do
     if socket.assigns[:save_status] == "Saved" do
       # A field the store refused earlier is still not saved (`RefusedSave`).
       held = MapSet.new(RefusedSave.keys(socket))
