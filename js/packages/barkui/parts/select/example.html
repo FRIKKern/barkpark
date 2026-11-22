@@ -5,15 +5,6 @@
   <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" type="button" data-closed="" data-pin="focus-visible"><span data-slot="select-value">Focus</span></button>
   <button data-slot="select-trigger" role="combobox" aria-haspopup="listbox" aria-expanded="true" type="button" data-open=""><span data-slot="select-value">Open</span></button>
 </div>
-<div data-demo-row inert>
-  <span data-demo-label>The list: highlighted, chosen, disabled</span>
-  <div data-slot="select-content" role="listbox" aria-label="The list">
-    <div data-slot="select-item" role="option" aria-selected="false" data-highlighted="">Highlighted<span data-slot="select-item-indicator" hidden=""></span></div>
-    <div data-slot="select-item" role="option" aria-selected="true" data-selected="">Chosen<span data-slot="select-item-indicator" aria-hidden="true" data-selected=""></span></div>
-    <div data-slot="select-item" role="option" aria-selected="false" aria-disabled="true" data-disabled="">Disabled<span data-slot="select-item-indicator" hidden=""></span></div>
-    <div data-slot="select-item" role="option" aria-selected="false">Rest<span data-slot="select-item-indicator" hidden=""></span></div>
-  </div>
-</div>
 <div data-demo-row>
   <span data-demo-label>Disabled</span>
   <ui-field id="select-team-field" disabled="" data-slot="field" data-disabled="">

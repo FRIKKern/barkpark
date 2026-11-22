@@ -2,7 +2,9 @@
 // its script) with the part's example element and a copy of the check's helpers (`h`). Each function is sent
 // alone, so it may not reach anything else in this file. An expect returns true or a reason. Keys go through the
 // browser's own input pipeline, one key per entry, on a US layout. The check focuses the part's heading first;
-// the first Tab lands on the Role trigger. Only the Role list is opened: it is the one layer in part.json.
+// the first Tab lands on the Role trigger. Only the Role list is opened: it is the one layer in part.json. The
+// check reads the stage after each step and closes an open list to do so, so a step that chooses opens the list
+// itself.
 
 export function setup() {}
 
@@ -31,8 +33,8 @@ export const steps = [
     },
   },
   {
-    name: 'ArrowDown passes over the disabled option, and Enter chooses the next: the list closes, the trigger shows it and has focus',
-    keys: ['ArrowDown', 'Enter'],
+    name: 'Enter opens the list again, ArrowDown passes over the disabled option, and Enter chooses the next: the list closes, the trigger shows it and has focus',
+    keys: ['Enter', 'ArrowDown', 'Enter'],
     expect: (root, h) => {
       if (root.querySelector('#select-role-content').matches(':popover-open')) return 'the list is still open'
       const t = root.querySelector('#select-role-trigger')

@@ -2,10 +2,15 @@
    list it opens over the page in the top layer, each option a <ui-select-item>.
    The trigger has the text field's height, type and edge, so a form reads as one; the edge darkens on hover. With no script, a list is printed open under its trigger, so every option can be read. The
    list is UI SDK's: its ground, edge and shadow, the highlighted option on --ui-muted, a disabled option faded and
-   passed over by the arrows; the chosen option carries UI SDK's check.
+   passed over by the arrows; the chosen option carries UI SDK's check. The list is read open, by its layer.
    The look keys only on what UI SDK writes: data-open, data-placeholder, data-highlighted, data-selected and
    data-disabled, and on :hover. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also
    turns the edge to --ui-ring-border while the trigger has focus or its list is open. */
+
+/* The root holds no look of its own; it lays out as its trigger and list, with script and without. */
+[data-slot="select"] {
+  display: contents;
+}
 
 [data-slot="select-trigger"] {
   --bark-select-text: 0.875rem;
@@ -21,7 +26,7 @@
   font-size: var(--bark-select-text);
   line-height: 1.25;
 
-  &:hover:not([data-disabled], [data-open], :focus-visible) {
+  &:hover:not([data-disabled], [data-open]) {
     border-color: var(--bark-select-hover-edge);
   }
 }
