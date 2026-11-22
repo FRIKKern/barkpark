@@ -198,4 +198,89 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
     assert set_fields(conn, id, %{"title" => "T2"}).status == 200
     assert stored(id)["meta"]["rt"] == link("javascript:alert(1)")
   end
+
+  # The kernel door an import or a plugin writes through, and the upsert the
+  # Studio's form save makes (`Forms` -> `Content.upsert_document/4`).
+  describe "behind the HTTP door" do
+    setup do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      {_ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "hrefpost",
+            "title" => "HrefPost",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{
+                "name" => "meta",
+                "type" => "composite",
+                "fields" => [%{"name" => "rt", "type" => "richText"}]
+              }
+            ]
+          },
+          @dataset,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      :ok
+    end
+
+    test "Content.create_document refuses a new one" do
+      assert {:error, {:schema_validation_failed, _errors, [finding]}} =
+               Content.create_document(
+                 "hrefpost",
+                 %{
+                   "doc_id" => id(),
+                   "title" => "T",
+                   "content" => %{"meta" => %{"rt" => link("javascript:x")}}
+                 },
+                 @dataset
+               )
+
+      assert finding.code == :pt_link_href_refused
+      assert finding.path == "/meta/rt/0/markDefs/0/href"
+    end
+
+    test "an upsert that keeps the stored one writes; one that swaps it in is refused" do
+      id = id()
+
+      {:ok, _} =
+        Content.create_document(
+          "hrefpost",
+          %{
+            "doc_id" => id,
+            "title" => "T",
+            "content" => %{"meta" => %{"rt" => link("https://x.example")}}
+          },
+          @dataset
+        )
+
+      store_raw!("drafts." <> id, link("javascript:x"))
+
+      assert {:ok, _} =
+               Content.upsert_document(
+                 "hrefpost",
+                 %{
+                   "doc_id" => id,
+                   "title" => "T2",
+                   "content" => %{"meta" => %{"rt" => link("javascript:x")}}
+                 },
+                 @dataset
+               )
+
+      assert {:error, {:schema_validation_failed, _, [_]}} =
+               Content.upsert_document(
+                 "hrefpost",
+                 %{
+                   "doc_id" => id,
+                   "title" => "T3",
+                   "content" => %{"meta" => %{"rt" => link("vbscript:y")}}
+                 },
+                 @dataset
+               )
+    end
+  end
 end
