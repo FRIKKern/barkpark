@@ -11,7 +11,9 @@
 //
 // Every element that holds a stage, up to the root element, is read the same way, since a stage inherits from it:
 // nothing may stand there but the second list, SCROLL_LOCK, with its own reason and its values, on the root element
-// or body only and only while a dialog box is open.
+// or body only and only while a dialog box is open. That is all a stage inherits from: a stage stands in the
+// document itself, and nothing that holds it hosts a shadow root of any mode (read at every look, the root node here,
+// the shadow roots from the browser's own tree by layers.mjs), or either fails by name.
 //
 // What is read: the declarations the browser applies, by property name (values are not read, except transition's,
 // the names anchor-name gives, and the scroll lock's), as the browser parses the attribute's text (a shorthand is judged by its
@@ -98,6 +100,10 @@ export const LOCK_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: 
 export const NO_DIALOG = (at, prop) => `${at} was given ${prop} in a style attribute while no dialog was open: the scroll lock stands there only while a dialog is open`
 /** The fail for any property on another element that holds a stage. */
 export const ON_ANCESTOR = (at, prop) => `${at} was given ${prop} in a style attribute, and it holds a stage, which inherits from it: nothing may stand there`
+/** The fail for a stage whose root node is not the document: one moved into a shadow root, or taken out. */
+export const OUT_OF_DOCUMENT = (at) => `${at} is a stage outside the document itself: a stage stands in the document, never in a shadow root`
+/** The fail for an element that holds a stage and hosts a shadow root, of any mode. */
+export const SHADOW_ABOVE = (at) => `${at} hosts a shadow root above a stage: nothing that holds a stage may host one`
 /** The fail for any style attribute on a stage with no script. */
 export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage with no script, where nothing may write one`
 
@@ -106,7 +112,8 @@ export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage w
     SCROLL_LOCK }; `script` is false on a page with no script; `say` holds the fails' wording; `owner(el)` names the
     part whose stage holds el (null outside every stage); `boxes(part)` the elements the census has seen can open in
     the top layer for that part, and boxes() all of them; `describe(el)` names an element. Returns { watch(root): observe a document or an open
-    shadow root from now on, look(part): the fails for that part, in the order first seen }. */
+    shadow root from now on, look(part): the fails for that part, in the order first seen, holders(part): each
+    element that holds a stage of the part, for the check to ask the browser whether it hosts a shadow root }. */
 export function placementWorld(lists, script, say, owner, boxes, describe) {
   const entries = new Map()
   for (const e of lists.allowed) for (const name of [e.property, ...(e.longhands ?? [])]) entries.set(name, e)
@@ -156,10 +163,15 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
     const p = place(node)
     return p?.parts ? p : null
   }
+  // Every stage seen, by part: each element that carried data-part as it arrived, or at a look.
+  const stages = new Map()
+  const stage = (e) => e.dataset?.part !== undefined && (stages.get(e.dataset.part) ?? stages.set(e.dataset.part, new Set()).get(e.dataset.part)).add(e)
+  const named = (el) => `${el.localName}${el.id ? '#' + el.id : ''}${el.dataset?.part !== undefined ? `[data-part="${el.dataset.part}"]` : ''}`
   // An element as it arrives, with all under it and inside each open shadow root it carries.
   const arrive = (n, i, gone) => {
     if (n.nodeType !== 1) return
     for (const e of [n, ...n.querySelectorAll('*')]) {
+      stage(e)
       if (e.hasAttribute('style')) hold(e, e.getAttribute('style'), where(e, i, gone))
       if (e.shadowRoot) for (const c of e.shadowRoot.children) arrive(c, i, gone)
     }
@@ -188,6 +200,7 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
   const look = (part) => {
     take(so.takeRecords())
     for (const e of document.querySelectorAll('[style]')) hold(e, e.getAttribute('style'), place(e))
+    for (const e of document.querySelectorAll('[data-part]')) stage(e)
     const mine = new Set(boxes(part))
     // The anchor names the part's boxes hang from: every position-anchor a box held, or holds from part.css.
     const anchors = new Set()
@@ -197,6 +210,9 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
     }
     const fails = []
     const fail = (s) => fails.includes(s) || fails.push(s)
+    // Read now, so the order of attaching, moving and adding cannot matter: each stage of the part stands in the
+    // document itself. (Whether anything that holds it hosts a shadow root, the check asks the browser: holders.)
+    for (const s of stages.get(part) ?? []) if (s.getRootNode() !== document) fail(say.OUT_OF_DOCUMENT(named(s)))
     for (const [el, texts] of held)
       for (const { text, at } of texts.values()) {
         if (at.part !== undefined ? at.part !== part : !at.parts.includes(part)) continue
@@ -224,13 +240,19 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
       }
     return fails
   }
-  return { watch, look }
+  const holders = (part) => {
+    const out = new Set()
+    for (const e of document.querySelectorAll('[data-part]')) stage(e)
+    for (const s of stages.get(part) ?? []) if (s.getRootNode() === document) for (let e = s.parentElement; e; e = e.parentElement) out.add(e)
+    return [...out]
+  }
+  return { watch, look, holders }
 }
 
 /** placementWorld as code for the census's world, the list and the fails' wording in it: a function of
     (script, owner, boxes, describe). `source` is probes.mjs's. */
 export function placementSource(source) {
-  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT, NOT_LOCK, LOCK_VALUE, NO_DIALOG, ON_ANCESTOR }
+  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT, NOT_LOCK, LOCK_VALUE, NO_DIALOG, ON_ANCESTOR, OUT_OF_DOCUMENT, SHADOW_ABOVE }
   const said = `{ ${Object.entries(say).map(([k, f]) => `${k}: ${source(f)}`).join(', ')} }`
   return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify({ allowed: ALLOWED, root: SCROLL_LOCK })}, script, ${said}, owner, boxes, describe))`
 }

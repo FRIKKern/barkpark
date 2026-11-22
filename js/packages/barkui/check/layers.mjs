@@ -31,7 +31,7 @@
 // it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
 // closed shadow root, is not seen.
 import { limit } from './limit.mjs'
-import { placementSource } from './placement.mjs'
+import { placementSource, SHADOW_ABOVE } from './placement.mjs'
 import { source } from './probes.mjs'
 
 const STEP_MS = 5000
@@ -206,6 +206,7 @@ function census(placement, script) {
     if (document.documentElement) take(document.documentElement)
     return placed.look(part)
   }
+  globalThis.__barkHolders = (part) => placed.holders(part)
   globalThis.__barkCensus = (part, boxes) => {
     if (document.documentElement) take(document.documentElement)
     const stage = document.querySelector(`[data-part="${CSS.escape(part)}"]`)
@@ -310,7 +311,27 @@ export async function installCensus(page, { script = true } = {}) {
   }
   look.placement = async (name) => {
     await ensure()
-    return run(`__barkPlacement(${JSON.stringify(name)})`)
+    return [...(await run(`__barkPlacement(${JSON.stringify(name)})`)), ...(await shadowAbove(name))]
+  }
+  /** Each element that holds a stage of the part and hosts a shadow root, of any mode and however it was made
+      (attachShadow, or a declared root in markup): asked of the browser's own tree, at the look, element by element. */
+  const shadowAbove = async (name) => {
+    const objectGroup = 'barkui-holders'
+    try {
+      const { result } = await cdp.send('Runtime.evaluate', { expression: `__barkHolders(${JSON.stringify(name)})`, contextId: id, objectGroup })
+      const { result: items } = await cdp.send('Runtime.getProperties', { objectId: result.objectId, ownProperties: true })
+      const fails = []
+      for (const { name: i, value } of items) {
+        if (!/^\d+$/.test(i) || !value?.objectId) continue
+        const { node } = await cdp.send('DOM.describeNode', { objectId: value.objectId, depth: 0 })
+        const at = node.attributes ?? []
+        const elId = at.find((v, k) => k % 2 === 1 && at[k - 1] === 'id')
+        if (node.shadowRoots?.length) fails.push(SHADOW_ABOVE(`${node.localName}${elId ? '#' + elId : ''}`))
+      }
+      return fails
+    } finally {
+      await cdp.send('Runtime.releaseObjectGroup', { objectGroup }).catch(() => {})
+    }
   }
   return look
 }

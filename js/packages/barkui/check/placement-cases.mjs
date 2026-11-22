@@ -10,7 +10,7 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { noscript } from './proofs.mjs'
-import { LOCK_VALUE, NO_DIALOG, NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_LOCK, NOT_PLACEMENT, NOT_VALUE, ON_ANCESTOR, SCROLL_LOCK, TRANSITION } from './placement.mjs'
+import { LOCK_VALUE, NO_DIALOG, NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_LOCK, NOT_PLACEMENT, NOT_VALUE, ON_ANCESTOR, OUT_OF_DOCUMENT, SCROLL_LOCK, SHADOW_ABOVE, TRANSITION } from './placement.mjs'
 import { all, edit, each, inDemo, lights } from './plants.mjs'
 
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
@@ -74,6 +74,26 @@ const ORDER = [
   'a.hidePopover()',
 ].join('\n')
 const lock = (p) => SCROLL_LOCK.find((e) => e.property === p)
+
+// Shadow roots above the stage, as the page loads: an open one attached first and the stage moved in after; a closed
+// one declared in markup (no attachShadow); a closed one attached after the stage is already inside its host; an open
+// one on the section that already holds the stage. Each slots the stage on.
+const SLOT = "'<div><slot></slot></div>'"
+const ABOVE_ROOTS = [
+  S,
+  "const sec = root.parentElement, one = document.createElement('div'), two = document.createElement('div')",
+  "const made = document.createElement('div'); made.setHTMLUnsafe('<div id=\"button-sh3\"><template shadowrootmode=\"closed\"><b><slot></slot></b></template></div>'); const three = made.firstChild",
+  "one.id = 'button-sh1'; two.id = 'button-sh2'; root.before(two); two.append(three); three.append(one)",
+  `const r1 = one.attachShadow({ mode: 'open' }); r1.innerHTML = ${SLOT}; r1.firstChild[S].letterSpacing = '6px'; one.append(root)`,
+  `const r2 = two.attachShadow({ mode: 'closed' }); r2.innerHTML = ${SLOT}; r2.firstChild[S].letterSpacing = '6px'`,
+  `const r3 = sec.attachShadow({ mode: 'open' }); r3.innerHTML = ${SLOT}; r3.firstChild[S].letterSpacing = '6px'`,
+].join('\n')
+// The stage moved into an open shadow root, with nothing styled around it.
+const INTO_ROOT = [
+  "const host = document.createElement('div')",
+  "host.id = 'button-sh4'; root.before(host); host.attachShadow({ mode: 'open' }).append(root)",
+].join('\n')
+const STAGE = 'div[data-part="button"]'
 
 // Each written as the page loads; the last is written while its box is open and taken away as it closes, in one task,
 // so no look ever finds it.
@@ -191,6 +211,23 @@ export const PLACEMENT_CASES = [
       'scroll-behavior: smooth fails by name, with its value': has(LOCK_VALUE('body', 'scroll-behavior', 'smooth', lock('scroll-behavior'))),
       '--scrollbar-width in em fails by name, with its value': has(LOCK_VALUE('body', '--scrollbar-width', '1em', lock('--scrollbar-width'))),
     }),
+  },
+  {
+    name: 'placement: an element that holds a stage and hosts a shadow root fails by name, whatever its mode, however it was made, and whether it was made before or after the stage moved in',
+    only: ['pressed'],
+    plant: all((d) => inDemo(d, ABOVE_ROOTS)),
+    expect: each({
+      'an open root attached first, the stage moved in after': has(SHADOW_ABOVE('div#button-sh1')),
+      'a closed root attached after the stage was inside its host': has(SHADOW_ABOVE('div#button-sh2')),
+      'a closed root declared in markup, made by no attachShadow': has(SHADOW_ABOVE('div#button-sh3')),
+      'an open root on the section that already holds the stage': has(SHADOW_ABOVE('section#part-button')),
+    }),
+  },
+  {
+    name: 'placement: a stage moved into a shadow root, with nothing styled around it, fails by name',
+    only: ['pressed'],
+    plant: all((d) => inDemo(d, INTO_ROOT)),
+    expect: each({ 'the stage is outside the document itself': has(OUT_OF_DOCUMENT(STAGE)) }),
   },
   {
     name: 'placement: on the stage with no script any style attribute fails by name, a listed property on a box and an empty one alike',

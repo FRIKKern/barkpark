@@ -307,8 +307,11 @@ a `style` attribute in a stage holds is read, from the page's first frame, howev
 name; a hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first,
 since the browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
 
-Every element that holds a stage, up to and including the root element, is read the same way from the first frame,
-since a stage inherits from it. Nothing may stand there, with one closed list apart, in the same file, with its own
+A stage stands in the document itself, never in a shadow root, and no element that holds a stage hosts a shadow root
+of any mode, however it was made (the check asks the browser's own tree, element by element); both are read at every
+look, so the order of attaching and moving cannot matter, and either fails by name. So what a stage inherits from is exactly the
+elements that hold it. Every element that holds a stage, up to and including the root element, is read the same way
+from the first frame, since a stage inherits from it. Nothing may stand there, with one closed list apart, in the same file, with its own
 reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It writes the lock on the
 root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar that takes room. The list
 is what UI SDK writes in the browser the check runs (where `scrollbar-gutter` is missing it writes `padding-right`
@@ -332,7 +335,7 @@ reaches every stage, since a custom property inherits; no shipped sheet reads it
 only `--ui-*` and `--bark-*`). Another value on a listed property, any other property on the root element or
 body, the lock while no dialog box is open, and any property on another element that holds a stage fail by name
 ("… holds a stage, which inherits from it: nothing may stand there"). The one limit: a value only inside a closed
-shadow root, or one an element held only between arriving in a stage and leaving it within one task, changed
+shadow root in a stage, or one an element held only between arriving in a stage and leaving it within one task, changed
 after it left, is not seen.
 
 ## What part.css may condition on

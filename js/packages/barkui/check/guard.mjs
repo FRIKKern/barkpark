@@ -65,9 +65,10 @@ export function styleChange(base, now) {
 }
 
 /** Throws, naming what changed, when the page's styling differs from the baseline, or a style attribute in the
-    stage has held more than placement (every such fail, in one line). */
+    stage has held more than placement, or a stage stands where it may not (each placement fail too, in one line). */
 export async function assertStyles(page, base, when) {
   const placed = page.barkPlacement ? await page.barkPlacement() : []
-  const change = styleChange(base, await page.barkStyles()) ?? (placed.length ? placed.join('; ') : null)
+  // The placement fails first: a sheet's rule text may run over lines.
+  const change = [...placed, styleChange(base, await page.barkStyles())].filter(Boolean).join('; ')
   if (change) throw new Error(`styled outside part.css ${when}: ${change}`)
 }
