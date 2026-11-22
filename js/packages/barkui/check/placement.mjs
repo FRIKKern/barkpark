@@ -55,7 +55,7 @@ export const TRANSITION = {
   value: 'none',
   on: 'box',
   reason: 'UI SDK switches motion off on a box while it measures where to put it; none takes motion away and adds no look',
-  writer: 'UI SDK select and menu, on the box, in the task in which it first places it (foundation/platform/position.js)',
+  writer: 'UI SDK select and menu, on the box (foundation/platform/position.js)',
 }
 /** Every entry the judge allows: the list, then transition. */
 export const ALLOWED = [...PLACEMENT, TRANSITION]
