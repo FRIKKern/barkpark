@@ -58,6 +58,7 @@ defmodule BarkparkWeb.Studio.DeskHeldTitleRowTest do
     {:ok,
      conn: Plug.Test.init_test_session(conn, %{"api_token" => raw}),
      path: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/_desk/#{type};#{id}",
+     type: type,
      id: id,
      other: other}
   end
@@ -136,6 +137,42 @@ defmodule BarkparkWeb.Studio.DeskHeldTitleRowTest do
 
     assert eventually(fn -> rows(a)[c.id] == "Doc 7 A1" end)
     assert header(a) == "Doc 7 A1"
+  end
+
+  # #28334 review: a document is one id of one type. A reference chain puts
+  # a list of type X beside the editor of a type-Y document with the same
+  # id; X's row is another document and keeps its stored title.
+  test "a row of another type with the same id keeps its stored title", c do
+    twin = c.type <> "_y"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => twin,
+          "title" => "Held twins",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset
+      )
+
+    {:ok, _} = Content.create_document(twin, %{"doc_id" => c.id, "title" => "Y twin"}, @dataset)
+
+    path = c.path <> ";" <> c.id <> ",type=" <> twin
+    {:ok, a, _html} = live(c.conn, path)
+    render_async(a, 5_000)
+    assert eventually(fn -> assigns(a).editor_type == twin end)
+    assert eventually(fn -> rows(a)[c.id] == "Doc 7" end)
+
+    view = a
+    form = Map.take(assigns(view).editor_form, ~w(title))
+
+    view
+    |> element("[data-pane-editing] #editor-form")
+    |> render_change(%{"_target" => ["doc", "title"], "doc" => Map.put(form, "title", @long)})
+
+    assert eventually(fn -> header(a) == @long end)
+    assert rows(a)[c.id] == "Doc 7"
   end
 
   # Control (passes on main): nothing held, the row is the stored title.

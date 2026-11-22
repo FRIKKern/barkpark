@@ -644,9 +644,10 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     do: match?(%{next: %{kind: :doc}}, entry) and Bulk.selectable?(pane, node)
 
   # The open document's row names the title this tab holds unsaved, as its
-  # header does (`PageTitle.held/1`, task-82becc4945d1ad1e); every other
+  # header does (`PageTitle.held/2`, task-82becc4945d1ad1e); every other
   # row, and every other tab, the stored one.
-  defp row_title(%{next: %{kind: :doc, id: id}} = entry, {held_id, title}) when is_binary(id) do
+  defp row_title(%{next: %{kind: :doc, id: id, type: type}} = entry, {held_id, type, title})
+       when is_binary(id) do
     if Content.published_id(id) == held_id, do: title, else: entry.title
   end
 
