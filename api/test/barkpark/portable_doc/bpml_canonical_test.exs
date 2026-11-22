@@ -289,9 +289,25 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
   # ── the property, over every stored-document fixture ────────────────────────
 
   test "no character, no mark on a character, no link, no checked state, no block, no item child, no slot" do
-    for {file, blocks} <- BpmlStoredDocuments.all(), {block, i} <- Enum.with_index(blocks) do
-      lossless!(block, "#{file} blocks[#{i}]")
-    end
+    {files, blocks} = sweep!(BpmlStoredDocuments.all())
+    IO.puts("fixtures read: #{files}; blocks: #{blocks}")
+  end
+
+  test "the sweep fails when it reads no fixture or no block" do
+    assert_raise ExUnit.AssertionError, ~r/read no stored-document fixture/, fn -> sweep!([]) end
+    assert_raise ExUnit.AssertionError, ~r/read no block/, fn -> sweep!([{"empty.json", []}]) end
+  end
+
+  defp sweep!(documents) do
+    assert documents != [], "the sweep read no stored-document fixture"
+
+    checked =
+      for {file, blocks} <- documents, {block, i} <- Enum.with_index(blocks) do
+        lossless!(block, "#{file} blocks[#{i}]")
+      end
+
+    assert checked != [], "the sweep read no block"
+    {length(documents), length(checked)}
   end
 
   defp lossless!(block, where \\ "the case") do

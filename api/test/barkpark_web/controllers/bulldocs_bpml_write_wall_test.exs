@@ -104,6 +104,11 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
     body
   end
 
+  defp at_path!(body, path) do
+    assert body["error"]["message"] =~ path, inspect(body["error"])
+    assert path in body["error"]["paths"], inspect(body["error"]["paths"])
+  end
+
   test "editing a block that holds unshown content is refused; the block stays" do
     slug = slug("edit")
     paper!(slug, [lede(), plain()])
@@ -120,6 +125,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     pushed(slug, &String.replace(&1, ~s(<p id="lede">Lede.</p>), ""))
     |> refused!(~s(block "lede"))
+    |> at_path!("blocks[0].role")
 
     assert [lede(), plain()] == stored_blocks(slug)
   end
@@ -164,7 +170,10 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     paper!(slug, [list, plain()])
 
-    pushed(slug, &String.replace(&1, "parent", "parent, edited")) |> refused!(~s(block "l"))
+    pushed(slug, &String.replace(&1, "parent", "parent, edited"))
+    |> refused!(~s(block "l"))
+    |> at_path!("blocks[0].items[0]")
+
     assert [list, plain()] == stored_blocks(slug)
   end
 
