@@ -466,15 +466,14 @@ export function installHelpers(lists) {
   const holdSheet = Object.assign(document.createElement('style'), { textContent: `@layer barkui-check { ${PLACES.map((p) => `*${p}`).join(', ')} { transition: none !important; } }` })
   const before = async (who) => {
     await still(who)
-    await new Promise((r) => requestAnimationFrame(r))
-    atRest(who)
     document.head.prepend(holdSheet)
     document.getAnimations()
     return state.starts
   }
-  /** After a capture: true when the page is at rest and no motion started since `mark`; the hold sheet goes. */
-  const after = async (mark) => {
-    await new Promise((r) => requestAnimationFrame(r))
+  /** After a capture: true when the page is at rest and no motion the browser has reported started since `mark`;
+      the hold sheet goes. With it on, no transition can start while the capture is taken; an animation that starts
+      then is still running here. */
+  const after = (mark) => {
     const ok = !moving().length && state.starts === mark
     document.getAnimations()
     holdSheet.remove()
