@@ -227,6 +227,10 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
 
   defp item_before_print(item), do: item
 
+  @doc "The blocks in `block` an old copy must bring home: the block, when it holds this form."
+  @spec homes(map()) :: [map()]
+  def homes(block), do: if(marked?(block), do: [block], else: [])
+
   @doc "What an old copy's refusal says block `v` holds."
   @spec stale_words(map()) :: String.t()
   def stale_words(v), do: "#{v["type"]} #{v["id"]} has nested lists or item ids"

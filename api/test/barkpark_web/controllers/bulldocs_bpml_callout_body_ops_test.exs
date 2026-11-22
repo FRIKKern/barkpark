@@ -5,10 +5,16 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
   calls without a fingerprint, as every released bp pushes.
 
   A copy pulled before callouts printed their body (no print mark, the callout
-  inline) brings the callout home once under its id, at any depth, spelled as
-  it was pulled; it is kept as stored where it stands. Any other answer is
-  refused by name (422 `bpml_stale_copy`), writing nothing. A copy that
-  showed the body makes each edit.
+  inline) brings the callout home once under its own id, at any depth and
+  whatever happened to its section, spelled as it was pulled; it is kept as
+  stored there. Any other answer is refused by name (422 `bpml_stale_copy`),
+  writing nothing. A body that holds nothing has nothing to keep, so every
+  push lands; slots with no key print the block as `<kept>`, which comes home
+  as pulled or is refused by the block's name (422 `bpml_unshown`). A copy
+  that showed the body makes each edit.
+
+  The rows are one per answer class of the product table in the PR body: op,
+  where the callout stands, what its body holds, what happens to its section.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -122,11 +128,11 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
     |> put_req_header("content-type", "application/json")
   end
 
-  defp paper! do
+  defp paper!(blocks \\ stored_blocks()) do
     slug = "callout-ops-#{System.unique_integer([:positive])}"
     seed = [p("seed", "Seed.")]
     {:ok, paper} = Content.upsert_paper(LabelFixtures.paper_attrs(%{slug: slug, blocks: seed}))
-    content = paper.content |> Map.put("blocks", stored_blocks()) |> Map.delete("body_html")
+    content = paper.content |> Map.put("blocks", blocks) |> Map.delete("body_html")
     paper |> Ecto.Changeset.change(content: content) |> Repo.update!()
     slug
   end
@@ -227,6 +233,127 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
 
       if holder(@op), do: assert(where(stored(slug)) == {holder(@op), callout()})
     end
+  end
+
+  # The callout inside section s0, and a callout whose body holds nothing.
+  defp nested_blocks,
+    do: [
+      p("p1", "Opening."),
+      %{"id" => "s0", "type" => "section", "blocks" => [p("s0p", "Inside."), callout()]},
+      p("p2", "Closing.")
+    ]
+
+  defp with_slots(slots),
+    do: [p("p1", "Opening."), Map.put(callout(), "slots", slots), p("p2", "Closing.")]
+
+  defp section(t), do: hd(Regex.run(~r{  <section id="s0">.*?\n  </section>}s, t))
+
+  defp into_s0(t, line),
+    do: t |> cut(seg(t)) |> String.replace(@inside, @inside <> "\n  " <> line, global: false)
+
+  test "an old copy that gives a section holding a callout a new id lands; the callout keeps its body" do
+    slug = paper!(nested_blocks())
+    {bpml, rev} = pull!(slug)
+    copy = String.replace(old_text(bpml), ~s(<section id="s0">), ~s(<section id="s0x">))
+
+    assert %{"ok" => true} = sync_copy(slug, copy, rev) |> json_response(200)
+    assert where(stored(slug)) == {"s0x", callout()}
+  end
+
+  test "an old copy that deletes a section holding a callout is refused by name, writing nothing" do
+    slug = paper!(nested_blocks())
+    before = stored(slug)
+    {bpml, rev} = pull!(slug)
+    old = old_text(bpml)
+
+    answer = sync_copy(slug, cut(old, section(old)), rev) |> json_response(422)
+    assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+    assert answer["error"]["paths"] == ["blocks[1].blocks[1].slots"]
+    assert stored(slug) == before
+  end
+
+  for {name, line} <- [
+        {"moves a callout into a section under a new id",
+         String.replace(@inline, ~s(id="c1"), ~s(id="c1x"))},
+        {"moves a callout into a section and changes its words",
+         String.replace(@inline, "first.", "first!")}
+      ] do
+    @line String.trim(line)
+    test "an old copy that #{name} is refused by name, writing nothing" do
+      slug = paper!()
+      before = stored(slug)
+      {bpml, rev} = pull!(slug)
+
+      answer = sync_copy(slug, into_s0(old_text(bpml), @line), rev) |> json_response(422)
+      assert answer["error"]["message"] =~ ~r/\bc1\b/
+      assert stored(slug) == before
+    end
+  end
+
+  # A body that holds nothing has nothing to keep.
+  defp empty_edit(:delete, t), do: cut(t, @inline)
+  defp empty_edit(:new_id, t), do: String.replace(t, ~s(<callout id="c1"), ~s(<callout id="c1x"))
+  defp empty_edit(:words, t), do: String.replace(t, "first.", "first!")
+
+  defp empty_after(:delete), do: nil
+  defp empty_after(:new_id), do: nil
+
+  defp empty_after(:words),
+    do:
+      {nil,
+       Map.merge(callout(), %{"content" => text("Read this first!"), "slots" => %{"body" => []}})}
+
+  for {name, e} <- [
+        {"deletes a callout with an empty body", :delete},
+        {"gives a callout with an empty body a new id", :new_id},
+        {"changes the words of a callout with an empty body", :words}
+      ] do
+    @e e
+    test "an old copy that #{name} lands" do
+      slug = paper!(with_slots(%{"body" => []}))
+      {bpml, rev} = pull!(slug)
+      copy = empty_edit(@e, old_text(bpml))
+      assert copy != old_text(bpml)
+
+      assert %{"ok" => true} = sync_copy(slug, copy, rev) |> json_response(200)
+      assert where(stored(slug)) == empty_after(@e)
+    end
+  end
+
+  # Slots that hold no body print as <kept>: the block BPML cannot write.
+  defp kept_old(t),
+    do:
+      t
+      |> String.replace(~s( print="2"), "")
+      |> String.replace(~r{  <kept id="c1"[^\n]*>}, @inline)
+
+  test "an old copy that brings a callout whose slots hold nothing home as pulled lands; its bytes stay" do
+    slug = paper!(with_slots(%{}))
+    before = stored(slug)
+    {bpml, rev} = pull!(slug)
+    copy = kept_old(bpml)
+    assert copy =~ @inline
+
+    assert %{"ok" => true} =
+             sync_copy(slug, String.replace(copy, "Closing.", "Closing!"), rev)
+             |> json_response(200)
+
+    assert Enum.at(stored(slug), 1) == Enum.at(before, 1)
+  end
+
+  test "an old copy that changes a callout whose slots hold nothing is refused by the block's name, writing nothing" do
+    slug = paper!(with_slots(%{}))
+    before = stored(slug)
+    {bpml, rev} = pull!(slug)
+
+    answer =
+      sync_copy(slug, String.replace(kept_old(bpml), "first.", "first!"), rev)
+      |> json_response(422)
+
+    assert answer["error"]["code"] == "bpml_unshown"
+    assert answer["error"]["message"] =~ ~s(block "c1")
+    refute answer["error"]["message"] =~ "body"
+    assert stored(slug) == before
   end
 
   defp edit(op, bpml) do

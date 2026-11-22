@@ -320,7 +320,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       assert stored(ctx.slug) == ctx.before
     end
 
-    test "an old copy, pulled before <kept> lines, is stale: untouched or edited elsewhere",
+    test "an old copy, pulled before <kept> lines, lands untouched or edited elsewhere; each body keeps its bytes",
          ctx do
       old =
         ctx.bpml
@@ -338,11 +338,24 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       edited = String.replace(old, "Opening paragraph.", "Opening words.")
 
       for copy <- [old, edited] do
-        answer = push_copy(ctx.slug, copy, ctx.rev) |> json_response(422)
-        assert answer["error"]["code"] == "bpml_stale_copy"
-        assert answer["error"]["hint"] == "bp paper pull, then make your edit again"
-        assert stored(ctx.slug) == ctx.before
+        assert %{"ok" => true} = push_copy(ctx.slug, copy, ctx.rev) |> json_response(200)
+        assert tl(stored(ctx.slug)) == tl(ctx.before)
       end
+
+      assert hd(stored(ctx.slug))["content"] == text("Opening words.")
+    end
+
+    test "an old copy, pulled before <kept> lines, that deletes the callout is refused by name",
+         ctx do
+      old =
+        ctx.bpml
+        |> String.replace(~s( print="2"), "")
+        |> String.replace(@kept_line, "")
+
+      answer = push_copy(ctx.slug, old, ctx.rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_stale_copy"
+      assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+      assert stored(ctx.slug) == ctx.before
     end
 
     test "bp paper push --check passes the pulled copy, and fails an edited <kept> by name",

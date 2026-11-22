@@ -18,12 +18,16 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
     * **Old copy** (the view holds a form of `Bpml.PrintMark` newer than the
       copy's believed mark: a callout body here, a nested list item in
-      `Bpml.ListItems`). Each block holding such a form comes home once under
-      its id, at any depth, and is kept as stored where it stands when it
-      spells as the old printer spelled it (`PrintMark.before/2`); otherwise
-      (missing, found twice, or spelled otherwise) the push is refused with
-      `bpml_stale_copy`, naming what the block holds, with the stored paths
-      of what the copy lacks in `paths`.
+      `Bpml.ListItems`). What the push would lose decides it. Each block
+      holding content of such a form (`PrintMark.homes/2`: a callout whose
+      body holds something) comes home once under its own id, at any depth
+      and whatever happened to the blocks around it, and is kept as stored
+      there when it spells as the old printer spelled it
+      (`PrintMark.before/2`); otherwise (missing, found twice, or spelled
+      otherwise) the push is refused with `bpml_stale_copy`, naming the
+      block, with the stored paths of what the copy lacks in `paths`. A body
+      that holds nothing (`"body" => []`, or `slots` with no key) has nothing
+      to keep and never causes this refusal.
     * **A form past the believed mark** (`PrintMark.believed/1`: a push
       without its pull's fingerprint). A block holding one is kept as stored
       when it spells as this pull printed it or as the print before the form;
@@ -32,8 +36,9 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       or the push is refused.
     * **The inline form never deletes a body**, in a marked copy too. An
       inline callout whose stored callout has `slots` keeps the stored body
-      when its text is unchanged, and the answer says so in one note;
-      otherwise `bpml_inline_body`. A body is deleted only in the structured
+      when its text is unchanged, and the answer says so in one note; when
+      the body holds nothing, the words change and the slots stay; otherwise
+      `bpml_inline_body`. A body is deleted only in the structured
       form: the slot left out stores no body, `<content>` left out stores no
       content.
     * **`<kept>`.** A top-level block holding a block BPML cannot write (a
@@ -77,6 +82,29 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   @doc false
   def stale_words(v), do: "#{callout_names(v)} #{has_have(v)} a body"
+
+  @doc false
+  # The blocks in `value` an old copy must bring home: each outermost callout
+  # whose body holds something.
+  def homes(%{"type" => "callout", "slots" => slots} = c),
+    do: if(holds?(slots), do: [c], else: homes(Map.delete(c, "slots")))
+
+  def homes(%{} = map), do: map |> Enum.sort() |> Enum.flat_map(fn {_k, v} -> homes(v) end)
+  def homes(list) when is_list(list), do: Enum.flat_map(list, &homes/1)
+  def homes(_other), do: []
+
+  # Each callout in `value` with a `slots` key that holds nothing, outside
+  # the bodies of the others.
+  defp empties(%{"type" => "callout", "slots" => slots} = c) do
+    if holds?(slots), do: [], else: [c | empties(Map.delete(c, "slots"))]
+  end
+
+  defp empties(%{} = map), do: map |> Map.values() |> Enum.flat_map(&empties/1)
+  defp empties(list) when is_list(list), do: Enum.flat_map(list, &empties/1)
+  defp empties(_other), do: []
+
+  defp holds?(%{} = slots), do: Enum.any?(Map.values(slots), &(&1 not in [nil, [], ""]))
+  defp holds?(other), do: other not in [nil, [], ""]
 
   @doc false
   # The path of every callout's `slots` key; a callout inside a body is under
@@ -171,34 +199,35 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       end)
 
     with {:ok, rev} <- resolved,
-         :ok <- every_kept_back(printed, pushed, stored, read) do
-      {:ok, Enum.reverse(rev), MapSet.new(Map.keys(printed))}
+         {:ok, old} <- every_kept_back(printed, pushed, stored, read) do
+      {:ok, Enum.reverse(rev), MapSet.new(Map.keys(printed) -- old)}
     end
   end
 
   # A copy older than a form the kept block holds was pulled before that
-  # block printed as <kept>, so it never had the line: it is stale, not an
-  # edit of the line.
+  # block printed as <kept>, so it never had the line: the block is read as
+  # the old copy's (`old_copy/5`), not as an edit of the line.
   defp every_kept_back(printed, pushed, stored, {n, believed}) do
     kept_ids = for %{"type" => @kept, "id" => id} <- pushed, into: MapSet.new(), do: id
     stored_by_id = by_id(stored)
 
-    Enum.find_value(printed, :ok, fn {id, of} ->
+    Enum.reduce_while(printed, {:ok, []}, fn {id, of}, {:ok, old} ->
       {forms, _unproven} = split(PrintMark.newer(stored_by_id[id], n), believed)
 
       cond do
         MapSet.member?(kept_ids, id) ->
-          false
+          {:cont, {:ok, old}}
 
         forms != [] ->
-          PrintMark.stale(stored_by_id[id], stored, id, forms, &canonical/1)
+          {:cont, {:ok, [id | old]}}
 
         true ->
-          refuse(
-            "bpml_kept",
-            "#{of} #{id} was pulled as <kept> and your copy removed or replaced it",
-            "BPML cannot change this block: keep its <kept> line as pulled and edit it in Studio"
-          )
+          {:halt,
+           refuse(
+             "bpml_kept",
+             "#{of} #{id} was pulled as <kept> and your copy removed or replaced it",
+             "BPML cannot change this block: keep its <kept> line as pulled and edit it in Studio"
+           )}
       end
     end)
   end
@@ -214,72 +243,104 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   # ── old copy ────────────────────────────────────────────────────────────────
 
-  # A block holding a form newer than the copy's mark comes home once under
-  # its id, at any depth, spelled as the print before the form, and is kept as
-  # stored where it stands; any other answer is refused by name. A form newer than
-  # the mark is believed for (`PrintMark.believed/1`) is read as unshown: a
-  # block holding one that spells as this pull or as the print before the form
-  # comes home as stored, and any other is left to the write wall, which reads
-  # the push against the print before the form.
+  # What a push from a copy older than a believed form would lose decides it.
+  # Each block holding content of that form (`PrintMark.homes/2`: a callout
+  # whose body holds something, at any depth) comes home once under its own
+  # id, wherever it stands and whatever happened to the blocks around it,
+  # spelled as the print before the form, and is kept as stored there; any
+  # other answer is refused by name. A callout whose body holds nothing has
+  # nothing to keep: pulled as it was, it comes home as stored, and otherwise
+  # stands as pushed. A form newer than the mark is believed for
+  # (`PrintMark.believed/1`) is read as unshown: a block holding one that
+  # spells as this pull or as the print before the form comes home as stored,
+  # and any other is left to the write wall, which reads the push against the
+  # print before the form.
   defp old_copy(pushed, done, view, stored, copy) do
     n = PrintMark.read_number(copy)
     believed = PrintMark.believed(copy)
 
     if PrintMark.newer(view, n) != [] do
-      view_by_id = by_id(view)
-      stored_by_id = by_id(stored)
-
-      with {:ok, pushed} <- come_home(pushed, done, {view, stored}, {n, believed}) do
-        each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed})
+      with {:ok, pushed, notes} <- come_home(pushed, done, {view, stored}, {n, believed}) do
+        {:ok, each_old(pushed, done, by_id(view), by_id(stored), {n, believed}), notes}
       end
     else
       {:ok, pushed, []}
     end
   end
 
-  # Each view block holding a believed form newer than `n` must come home
-  # exactly once, at any depth, under its id. A nested one that spells as the
-  # pull served it (the print before the form) is kept as stored where it
-  # stands; top-level ones are read by `each_old/4`. Missing, found twice, or
-  # nested and spelled otherwise: refused by name.
   defp come_home(pushed, done, {view, stored}, {n, believed}) do
-    found = found(pushed, :top, [])
-    stored_by_id = by_id(stored)
+    found = found(pushed, [])
+    stored_at = deep_by_id(stored, %{})
+    view = Enum.reject(view, &MapSet.member?(done, &1["id"]))
 
-    view
-    |> Enum.flat_map(fn v ->
-      {forms, _} = split(PrintMark.newer(v, n), believed)
+    {homes, empties} =
+      view
+      |> Enum.map(fn v ->
+        {forms, _} = split(PrintMark.newer(v, n), believed)
+        if forms == [], do: {[], []}, else: {PrintMark.homes(v, forms), empties(v)}
+      end)
+      |> Enum.unzip()
 
-      if v["id"] != nil and forms != [] and not MapSet.member?(done, v["id"]),
-        do: [{v, forms}],
-        else: []
+    homes
+    |> List.flatten()
+    |> Enum.reduce_while({:ok, pushed, []}, fn {h, forms}, {:ok, acc, notes} ->
+      if home?(found, h, n),
+        do:
+          {:cont,
+           {:ok, put_nested(acc, h["id"], stored_at[h["id"]] || h), notes ++ kept_notes(h)}},
+        else: {:halt, PrintMark.stale(h, stored, forms, &canonical/1)}
     end)
-    |> Enum.reduce_while({:ok, pushed}, fn {v, forms}, {:ok, acc} ->
-      case Enum.filter(found, &(elem(&1, 0)["id"] == v["id"])) do
-        [{_block, :top}] ->
-          {:cont, {:ok, acc}}
+    |> case do
+      {:ok, acc, notes} ->
+        acc =
+          empties
+          |> List.flatten()
+          |> Enum.reduce(acc, fn e, acc ->
+            if home?(found, e, n),
+              do: put_nested(acc, e["id"], stored_at[e["id"]] || e),
+              else: acc
+          end)
 
-        [{block, :nested}] ->
-          if spells_as?(block, PrintMark.before(v, n)),
-            do: {:cont, {:ok, put_nested(acc, v["id"], stored_by_id[v["id"]])}},
-            else: {:halt, PrintMark.stale(v, stored, v["id"], forms, &canonical/1)}
+        {:ok, acc, notes}
 
-        _none_or_twice ->
-          {:halt, PrintMark.stale(v, stored, v["id"], forms, &canonical/1)}
-      end
-    end)
+      refused ->
+        refused
+    end
   end
 
-  # Every block with an id in `term`, tagged :top for a pushed top-level block.
-  defp found(list, depth, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &found(&1, depth, &2))
-
-  defp found(%{} = map, depth, acc) do
-    acc = if is_binary(map["id"]) and is_binary(map["type"]), do: [{map, depth} | acc], else: acc
-    map |> Map.values() |> Enum.reduce(acc, &found(&1, :nested, &2))
+  # `block` is pushed once under its id, at any depth, spelled as the print
+  # before the form.
+  defp home?(found, block, n) do
+    case Enum.filter(found, &(&1["id"] == block["id"])) do
+      [pushed] -> spells_as?(pushed, PrintMark.before(block, n))
+      _none_or_twice -> false
+    end
   end
 
-  defp found(_other, _depth, acc), do: acc
+  # Every map with an id and a type in `term`, at any depth.
+  defp found(list, acc) when is_list(list), do: Enum.reduce(list, acc, &found/2)
+
+  defp found(%{} = map, acc) do
+    acc = if is_binary(map["id"]) and is_binary(map["type"]), do: [map | acc], else: acc
+    map |> Map.values() |> Enum.reduce(acc, &found/2)
+  end
+
+  defp found(_other, acc), do: acc
+
+  # Every block with an id and a type in `term`, at any depth, the outermost
+  # first.
+  defp deep_by_id(list, acc) when is_list(list), do: Enum.reduce(list, acc, &deep_by_id/2)
+
+  defp deep_by_id(%{} = map, acc) do
+    acc =
+      if is_binary(map["id"]) and is_binary(map["type"]),
+        do: Map.put_new(acc, map["id"], map),
+        else: acc
+
+    map |> Map.values() |> Enum.reduce(acc, &deep_by_id/2)
+  end
+
+  defp deep_by_id(_other, acc), do: acc
 
   # `term` with the nested block `id` replaced by `stored`.
   defp put_nested(list, id, stored) when is_list(list),
@@ -292,30 +353,20 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   defp put_nested(other, _id, _stored), do: other
 
-  defp each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed}) do
-    Enum.reduce_while(pushed, {:ok, [], []}, fn block, {:ok, acc, notes} ->
+  # A top-level block holding a newer form that spells as this pull printed it
+  # (its homes back as stored) or as the print before the forms past the
+  # believed mark is kept as stored; any other stands as pushed, for the
+  # write wall to read.
+  defp each_old(pushed, done, view_by_id, stored_by_id, {n, believed}) do
+    Enum.map(pushed, fn block ->
       id = block["id"]
       v = Map.get(view_by_id, id)
-      {forms, unproven} = if v == nil, do: {[], []}, else: split(PrintMark.newer(v, n), believed)
 
-      cond do
-        MapSet.member?(done, id) or (forms == [] and unproven == []) ->
-          {:cont, {:ok, [block | acc], notes}}
-
-        forms != [] and spells_as?(block, PrintMark.before(v, n)) ->
-          {:cont, {:ok, [stored_by_id[id] | acc], notes ++ kept_notes(v)}}
-
-        forms != [] ->
-          {:halt, PrintMark.stale(v, stored, id, forms, &canonical/1)}
-
-        spells_as?(block, v) or spells_as?(block, PrintMark.before(v, believed)) ->
-          {:cont, {:ok, [stored_by_id[id] | acc], notes}}
-
-        true ->
-          {:cont, {:ok, [block | acc], notes}}
-      end
+      if v != nil and not MapSet.member?(done, id) and PrintMark.newer(v, n) != [] and
+           (spells_as?(block, v) or spells_as?(block, PrintMark.before(v, believed))),
+         do: stored_by_id[id],
+         else: block
     end)
-    |> reversed()
   end
 
   # The forms the mark is believed for, and the newer ones.
@@ -324,8 +375,11 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   # `paths` names each outermost body in the stored block's canonical
   # spelling, in the write wall's shape.
-  defp slot_paths(%{"type" => "callout"} = c, path) when is_map_key(c, "slots"),
-    do: ["#{path}.slots" | slot_paths(Map.delete(c, "slots"), path)]
+  defp slot_paths(%{"type" => "callout", "slots" => slots} = c, path) do
+    if holds?(slots),
+      do: ["#{path}.slots"],
+      else: slot_paths(Map.delete(c, "slots"), path)
+  end
 
   defp slot_paths(%{} = map, path),
     do: map |> Enum.sort() |> Enum.flat_map(fn {k, v} -> slot_paths(v, "#{path}.#{k}") end)
@@ -361,24 +415,30 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
        when not is_map_key(c, "slots") do
     case Map.fetch(shown, c["id"]) do
       {:ok, v} ->
-        if spells_as?(content_only(c), content_only(v)) do
-          s = Map.get(kept, c["id"], v)
+        s = Map.get(kept, c["id"], v)
 
-          # The stored callout's own content: no content key stays no key.
-          block =
-            c
-            |> Map.delete("content")
-            |> Map.merge(Map.take(s, ["content"]))
-            |> Map.put("slots", s["slots"])
+        cond do
+          spells_as?(content_only(c), content_only(v)) ->
+            # The stored callout's own content: no content key stays no key.
+            block =
+              c
+              |> Map.delete("content")
+              |> Map.merge(Map.take(s, ["content"]))
+              |> Map.put("slots", s["slots"])
 
-          {:ok, block, notes ++ [kept_note(c["id"])]}
-        else
-          refuse(
-            "bpml_inline_body",
-            "callout #{c["id"]} has a body, and the inline form cannot change it",
-            "write it as <callout><content>…</content><slot name=\"body\">…</slot></callout>; " <>
-              "leave the slot out to delete the body"
-          )
+            {:ok, block, if(holds?(s["slots"]), do: notes ++ [kept_note(c["id"])], else: notes)}
+
+          # A body that holds nothing has nothing to keep: the words change.
+          not holds?(s["slots"]) ->
+            {:ok, Map.put(c, "slots", s["slots"]), notes}
+
+          true ->
+            refuse(
+              "bpml_inline_body",
+              "callout #{c["id"]} has a body, and the inline form cannot change it",
+              "write it as <callout><content>…</content><slot name=\"body\">…</slot></callout>; " <>
+                "leave the slot out to delete the body"
+            )
         end
 
       :error ->
@@ -415,7 +475,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   # ── notes and helpers ───────────────────────────────────────────────────────
 
   defp kept_notes(v),
-    do: v |> callouts_with_slots() |> Map.keys() |> Enum.sort() |> Enum.map(&kept_note/1)
+    do: v |> homes() |> Enum.map(& &1["id"]) |> Enum.sort() |> Enum.map(&kept_note/1)
 
   defp kept_note(id),
     do:
@@ -435,12 +495,19 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   defp callouts_with_slots(_other, acc), do: acc
 
-  defp callout_names(v) do
-    ids = v |> callouts_with_slots() |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
-    Enum.map_join(ids, ", ", &"callout #{&1}")
-  end
+  # Every callout in `v` whose body holds something, inside a body too.
+  defp holding_ids(v),
+    do:
+      for(
+        {id, c} <- callouts_with_slots(v),
+        holds?(c["slots"]),
+        do: to_string(id)
+      )
+      |> Enum.sort()
 
-  defp has_have(v), do: if(map_size(callouts_with_slots(v)) == 1, do: "has", else: "have")
+  defp callout_names(v), do: Enum.map_join(holding_ids(v), ", ", &"callout #{&1}")
+
+  defp has_have(v), do: if(length(holding_ids(v)) == 1, do: "has", else: "have")
 
   defp find_kept(%{"type" => @kept} = k), do: k
   defp find_kept(%{} = map), do: Enum.find_value(Map.values(map), &find_kept/1)

@@ -11,11 +11,13 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
   `Bpml.WriteWall.same_view/2`) comes from the current view, so its mark is
   believed in full. A push without one is believed up to print 2.
 
-  For a form newer than a believed mark (`Bpml.CalloutBody.resolve/4`), each
-  block holding the form comes home once under its id, at any depth, spelled
-  as the printer before the form spelled it, and is kept as stored where it
-  stands. Any other push is refused with `bpml_stale_copy`, naming the block,
-  with the stored paths of what the copy lacks, writing nothing.
+  For a form newer than a believed mark (`Bpml.CalloutBody.resolve/4`), what
+  the push would lose decides it. Each block holding content of the form
+  (`homes/2`) comes home once under its own id, at any depth and whatever
+  happened to the blocks around it, spelled as the printer before the form
+  spelled it, and is kept as stored there. Any other push is refused with
+  `bpml_stale_copy`, naming the block, with the stored paths of what the copy
+  lacks, writing nothing. A form that holds nothing has nothing to keep.
 
   For a form newer than the mark is believed for, `Bpml.WriteWall` reads the
   push against the print before that form: a block holding the form comes
@@ -24,9 +26,9 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
 
   A form is one row: its print number and the module that answers for it
   (`marked?/1`: the form is in a value at any depth; `before_print/1`: the
-  value as the printer before the form spelled it; `stale_words/1`: what the
-  refusal says a block holds; `stale_paths/2`: the stored paths of the form
-  in a block).
+  value as the printer before the form spelled it; `homes/1`: the blocks in a
+  value holding content of the form; `stale_words/1`: what the refusal says
+  a block holds; `stale_paths/2`: the stored paths of the form in a block).
   """
 
   alias Barkpark.PortableDoc.Bpml.{CalloutBody, ListItems}
@@ -101,30 +103,64 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
   end
 
   @doc """
-  The refusal for an old copy that changed the top-level block `id` (`v` the
-  view's block) holding `forms` (from `newer/2`): its words name what the
-  block holds, and `paths` are the stored paths of each form, in the stored
-  block's canonical spelling.
+  What a copy read at print number `n` must bring home from the view's
+  top-level block `v`, for its `forms` (from `newer/2`): `[{home, forms}]`.
+  Each home is a block holding content of a form (each form's `homes/1`):
+  `v` itself for a nested list, each outermost callout whose body holds
+  something for a callout body. A form that holds nothing gives no home.
   """
-  @spec stale(map(), [map()], String.t(), [{pos_integer(), module()}], (map() -> map())) ::
-          {:refused, map()}
-  def stale(v, stored, id, forms, canonical) do
-    i = Enum.find_index(stored, &(is_map(&1) and &1["id"] == id))
-    block = if i, do: canonical.(Enum.at(stored, i))
+  @spec homes(map(), [{pos_integer(), module()}]) :: [{map(), [{pos_integer(), module()}]}]
+  def homes(v, forms) do
+    pairs =
+      for {_n, mod} = form <- forms, home <- mod.homes(v), is_binary(home["id"]), do: {home, form}
+
+    if Enum.any?(pairs, fn {home, _form} -> home["id"] == v["id"] end),
+      do: [{v, pairs |> Enum.map(&elem(&1, 1)) |> Enum.uniq()}],
+      else:
+        pairs
+        |> Enum.uniq_by(&elem(&1, 0)["id"])
+        |> Enum.map(fn {home, form} -> {home, [form]} end)
+  end
+
+  @doc """
+  The refusal for an old copy that did not bring `home` (from `homes/2`)
+  home: its words name what the block holds, and `paths` are the stored
+  paths of each form in it, at any depth, in the stored block's canonical
+  spelling.
+  """
+  @spec stale(map(), [map()], [{pos_integer(), module()}], (map() -> map())) :: {:refused, map()}
+  def stale(home, stored, forms, canonical) do
+    id = home["id"]
+    i = Enum.find_index(stored, &(locate(&1, id, "") != nil))
+    located = if i, do: locate(canonical.(Enum.at(stored, i)), id, "blocks[#{i}]")
 
     {:refused,
      %{
        code: "bpml_stale_copy",
        message:
          Enum.map_join(forms, "; ", fn {_n, mod} ->
-           mod.stale_words(v) <> " your copy was pulled without"
+           mod.stale_words(home) <> " your copy was pulled without"
          end) <> "; nothing was written",
        hint: "bp paper pull, then make your edit again",
        paths:
-         if(i,
-           do: Enum.flat_map(forms, fn {_n, mod} -> mod.stale_paths(block, "blocks[#{i}]") end),
-           else: []
-         )
+         case located do
+           {block, path} -> Enum.flat_map(forms, fn {_n, mod} -> mod.stale_paths(block, path) end)
+           nil -> []
+         end
      }}
   end
+
+  # The block with `id` in `term` and its path, the outermost first.
+  defp locate(%{"id" => id} = block, id, path), do: {block, path}
+
+  defp locate(%{} = map, id, path),
+    do: map |> Enum.sort() |> Enum.find_value(fn {k, v} -> locate(v, id, "#{path}.#{k}") end)
+
+  defp locate(list, id, path) when is_list(list),
+    do:
+      list
+      |> Enum.with_index()
+      |> Enum.find_value(fn {v, j} -> locate(v, id, "#{path}[#{j}]") end)
+
+  defp locate(_other, _id, _path), do: nil
 end
