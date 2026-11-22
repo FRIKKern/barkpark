@@ -33,6 +33,8 @@
 //     Test step's job, or that job or the workflow differs from the known
 //     frame (its keys, the job's `defaults:` block);
 //   * a line at workflow or job level is not a plain `key:` line;
+//   * the file is not valid UTF-8, or holds a character other than LF,
+//     U+0020-U+007E and the three listed in named-test-steps-workflow.mjs;
 //   * a step names GITHUB_ENV or GITHUB_PATH;
 //   * a test file path appears anywhere else in the jobs (env, with, matrix);
 //   * NAMED_STEP_FILES is written in any shape but one literal array of
@@ -225,7 +227,7 @@ function report({ cannot, problems, named }) {
 function main(argv) {
   let result
   try {
-    const workflowText = readFileSync(resolve(JS_ROOT, '..', WORKFLOW), 'utf8')
+    const workflowText = readFileSync(resolve(JS_ROOT, '..', WORKFLOW))
     result = judge(workflowText, packagesFromDisk(JS_ROOT))
   } catch (err) {
     if (!(err instanceof DerivationError) && err?.code !== 'ENOENT') throw err

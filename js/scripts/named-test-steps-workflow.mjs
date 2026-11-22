@@ -16,13 +16,15 @@
 export const WORKFLOW = '.github/workflows/js-tests.yml'
 export const TEST_FILE = /[\w@./-]*\.(?:test|spec)\.[cm]?[jt]sx?\b/
 export const FILE_ARG = /^(?!\.{0,2}\/)(?!.*\/\.\.?\/)[\w@-][\w@./-]*\.(?:test|spec)\.[cm]?[jt]sx?$/
-const VITEST_CMD = /(?:^|[\s/;&|(`"'])vitest(?:\s|$|[;&|)`"'])/
+const VITEST_CMD = /(?:^|[ /;&|(`"'])vitest(?: |$|[;&|)`"'])/
 const PKG_ARG = /^(?:@[\w.-]+\/)?[\w.-]+$/
 const KEY = '[A-Za-z_][\\w-]*'
+// The characters js-tests.yml may hold: LF, U+0020-U+007E, and these three.
+const EXTRA_CHARS = ['\u2500', '\u2014', '\u2192']
 
 const WORKFLOW_KEYS = ['concurrency', 'jobs', 'name', 'on']
 const JOB_KEYS = ['defaults', 'name', 'runs-on', 'steps', 'timeout-minutes']
-const JOB_DEFAULTS = ['run:', 'working-directory: js']
+const JOB_DEFAULTS = ['      run:', '        working-directory: js']
 const STEP_KEYS = ['name', 'run']
 
 const PROOF_FLAGS = ' --reporter=default --reporter=json --outputFile.json="$report"'
@@ -60,7 +62,10 @@ const FORMS = [
   ],
 ]
 
-const indentOf = (s) => s.length - s.trimStart().length
+// Indent and trim count the ASCII space only, as YAML indentation and the
+// shell's word splitting of these lines do.
+const indentOf = (s) => /^ */.exec(s)[0].length
+const spaceTrim = (s) => s.replace(/^ +| +$/g, '')
 const sorted = (a) => [...a].sort().join(',')
 
 /** The one known shape of a named run line, or null. */
@@ -95,6 +100,45 @@ export function blockForm(texts) {
   return null
 }
 
+/** Decode the workflow as strict UTF-8, naming each line that is not. */
+export function decodeWorkflow(input) {
+  if (typeof input === 'string') return { text: input, cannot: [] }
+  const bytes = new Uint8Array(input)
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const lines = []
+  const cannot = []
+  for (let start = 0; start <= bytes.length;) {
+    let end = bytes.indexOf(0x0a, start)
+    if (end < 0) end = bytes.length
+    try {
+      lines.push(decoder.decode(bytes.subarray(start, end)))
+    } catch {
+      cannot.push(`${WORKFLOW}:${lines.length + 1}: not valid UTF-8`)
+      lines.push('')
+    }
+    start = end + 1
+  }
+  return { text: lines.join('\n'), cannot }
+}
+
+/** Every character outside LF, U+0020-U+007E and EXTRA_CHARS, by line. */
+export function strayChars(text) {
+  const out = []
+  text.split('\n').forEach((line, i) => {
+    let col = 0
+    for (const ch of line) {
+      col++
+      const c = ch.codePointAt(0)
+      if ((c >= 0x20 && c <= 0x7e) || EXTRA_CHARS.includes(ch)) continue
+      const hex = c.toString(16).toUpperCase().padStart(4, '0')
+      out.push(
+        `${WORKFLOW}:${i + 1}: character U+${hex} at column ${col} is not one this file may hold`,
+      )
+    }
+  })
+  return out
+}
+
 /** Top-level keys, jobs and steps of a workflow, by text. */
 export function parseWorkflow(text) {
   const lines = text.split('\n')
@@ -121,7 +165,7 @@ export function parseWorkflow(text) {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]
     const n = i + 1
-    const t = raw.trim()
+    const t = spaceTrim(raw)
     const ind = indentOf(raw)
     if (t !== '' && !t.startsWith('#') && /\bGITHUB_(?:ENV|PATH)\b/.test(t)) {
       envWrites.push({ n, step })
@@ -175,14 +219,14 @@ export function parseWorkflow(text) {
       if (!m) place(n, t)
       jobKey = m?.[1] ?? null
       if (m) job.keys.push(m[1])
-      if (m?.[2] && jobKey === 'defaults') job.defaults.push(m[2])
+      if (m?.[2] && jobKey === 'defaults') job.defaults.push(raw)
       else if (m?.[2]) other.push({ n, text: m[2] })
       continue
     }
     if (ind < 4 || !jobKey) {
       place(n, t)
     } else if (jobKey === 'defaults') {
-      job.defaults.push(t)
+      job.defaults.push(raw)
     } else if (jobKey !== 'steps') {
       other.push({ n, text: t })
     } else {
@@ -204,8 +248,10 @@ export function parseWorkflow(text) {
  * The workflow side of the rule. Returns { cannot, runs }, where runs are the
  * named run lines ({ pkg, files, step, n }) of steps whose block is readable.
  */
-export function readWorkflow(text) {
-  const { cannot, topKeys, steps, other, envWrites } = parseWorkflow(text)
+export function readWorkflow(input) {
+  const decoded = decodeWorkflow(input)
+  const { cannot, topKeys, steps, other, envWrites } = parseWorkflow(decoded.text)
+  cannot.unshift(...decoded.cannot, ...strayChars(decoded.text))
   const stepName = (s) => `step "${s.name ?? '(unnamed)'}" (${WORKFLOW}:${s.n})`
   if (sorted(topKeys) !== sorted(WORKFLOW_KEYS)) {
     cannot.push(
@@ -219,7 +265,7 @@ export function readWorkflow(text) {
   }
   const testSteps = steps.filter((s) =>
     s.runLines.some(
-      (l) => /^pnpm exec turbo run test(\s|$)/.test(l.text) && !l.text.includes('--dry-run'),
+      (l) => /^pnpm exec turbo run test( |$)/.test(l.text) && !l.text.includes('--dry-run'),
     ),
   )
   if (testSteps.length !== 1) {
