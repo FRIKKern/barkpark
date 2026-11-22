@@ -25,12 +25,16 @@
 //     name.
 //   Markup parsed into a host already in the page (setHTMLUnsafe, innerHTML) cannot give that host a root: a
 //   declared root at the top of the markup stays a plain template, and one deeper is on a new host, read on arrival.
+//   Inside a closed root the check cannot read, so a part's page holds none: at every look the census reads the
+//   browser's own tree, pierced, and each closed root in it fails by name, naming its host, however it came; the
+//   hook names one made by attachShadow at the call.
 // - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
 //   reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and close.
 // A layer's box opens at once on its input: one not open once its input settles fails by name, so a box that opens
 // late (a tooltip with a delay) cannot pass as named. The one limit: a box the page never holds while the check has
-// it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
-// closed shadow root, is not seen.
+// it open, up to the check's last look (one made only after an input the check never gives), is not seen; and a
+// closed root made by the parser (not by attachShadow) and gone again before the next look is not seen, since it is
+// never there at a moment the check judges.
 import { limit } from './limit.mjs'
 import { HOLDER_UNREAD, HOLDERS_UNLISTED, placementSource, SHADOW_ABOVE } from './placement.mjs'
 import { source } from './probes.mjs'

@@ -265,14 +265,19 @@ tells it at once, wherever the host stands); the parser meets a declared root in
 refused by name); another window attaches one (every frame in the page and `window.open`, refused by
 name; the part's context holds the check's own two pages and no other: any other page is refused by name). Markup parsed into a host
 already in the page (`setHTMLUnsafe`, `innerHTML`) cannot give that host a root: a declared root at the
-top of the markup stays a plain `template`, and one deeper is on a new host, read on arrival. One no layer names fails by name, once per page ("… can open in the top layer (a
+top of the markup stays a plain `template`, and one deeper is on a new host, read on arrival. Inside a closed
+shadow root the check cannot read, so a part's page holds none: at every look the check reads the browser's own
+tree, pierced, and each closed root in it fails by name, naming its host, however it came ("… hosts a closed shadow
+root, which the check cannot read inside; a part's page holds none"); the hook on `attachShadow` names one made
+that way at the call. One no layer names fails by name, once per page ("… can open in the top layer (a
 dialog, or it carries popover), and no layer in part.json names it"), at the first reading or look after
 real input that follows. A box open in the top layer that no layer names also fails by name ("… is open in
 the top layer during the reading, and no layer in part.json names it") at every moment the check judges or
 drives the part: each reading, each Tab stop of the focus walk, each press step, each driven state, and
 each layer's open and close input. The one limit: a box the page never holds while the check has it open,
-up to the check's last look (one made only after an input the check never gives), or one only inside a
-closed shadow root, is not seen.
+up to the check's last look (one made only after an input the check never gives), is not seen; and a closed
+shadow root made by the parser (not by `attachShadow`) and gone again before the next look is not seen, since it
+is never there at a moment the check judges.
 
 A layer's box opens at once on its input. One that is not open once its input settles fails by name ("… is
 not open in the top layer once its "open" input settles: it opened later than the check waits, or not at
