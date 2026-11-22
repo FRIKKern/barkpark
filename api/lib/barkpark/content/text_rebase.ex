@@ -47,6 +47,7 @@ defmodule Barkpark.Content.TextRebase do
   # (last post wins, as before this module): a merge of a 1 MB field took 2 s
   # inside the document's patch lock (#25908 review).
   @max_bytes 65_536
+  @max_changed_units 1_000
 
   @doc """
   Rebases each posted text field named in `bases` onto the stored value.
@@ -115,7 +116,8 @@ defmodule Barkpark.Content.TextRebase do
   a diff-match-patch patch and applies it to `theirs`, placing each hunk by
   the text around it; a hunk with nowhere to go (the text it was typed next
   to was cleared or rewritten) is a clash, not words kept on their own
-  (task-881f16e32fffbe9a). The desk's undo keeps `merge3_both/3`.
+  (task-881f16e32fffbe9a). A text too big to decide in a fraction of a
+  second is a clash too. The desk's undo keeps `merge3_both/3`.
   """
   @spec merge3_clash(String.t(), String.t(), String.t()) :: String.t() | nil
   def merge3_clash(base, ours, theirs)
@@ -128,11 +130,32 @@ defmodule Barkpark.Content.TextRebase do
   defp places?(base, ours, theirs) when ours == base or ours == theirs or theirs == base,
     do: true
 
+  # Too big to decide quickly is not placed: a clash, the banner. The port's
+  # diff has no deadline (TanStack's stops at a second), so a text over
+  # `apply/2`'s unit limit, or a change from `base` to `ours` over
+  # `@max_changed_units` (about 0.2 s of diff), is not run. A refusal by
+  # `apply/2` is not placed either.
   defp places?(base, ours, theirs) do
-    case DiffMatchPatch.apply(Make.text(units(base), units(ours)), theirs) do
-      {:ok, _text, applied} -> Enum.all?(applied)
-      _other -> true
+    {base, ours} = {units(base), units(ours)}
+    limit = DiffMatchPatch.limits().text_units
+
+    if Enum.any?([base, ours, units(theirs)], &(length(&1) > limit)) or
+         changed_units(base, ours) > @max_changed_units do
+      false
+    else
+      case DiffMatchPatch.apply(Make.text(base, ours), theirs) do
+        {:ok, _text, applied} -> Enum.all?(applied)
+        _refused -> false
+      end
     end
+  end
+
+  # The units between the common prefix and the common suffix.
+  defp changed_units(a, b) do
+    prefix = common_prefix(a, b, 0)
+    {a, b} = {Enum.drop(a, prefix), Enum.drop(b, prefix)}
+    suffix = common_prefix(Enum.reverse(a), Enum.reverse(b), 0)
+    max(length(a), length(b)) - suffix
   end
 
   defp units(string) do

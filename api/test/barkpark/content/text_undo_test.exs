@@ -87,6 +87,38 @@ defmodule Barkpark.Content.TextUndoTest do
       assert TextRebase.merge3("First words here", "First words here mine", "") == " mine"
     end
 
+    # The port's diff has no deadline: past its bounds it is not run, and
+    # the answer is a clash, at once.
+    test "merge3_clash: a 50 KB text, or a long rewrite, is a clash at once" do
+      body = String.duplicate("alpha beta gamma delta. ", 2_000)
+      mid = div(byte_size(body), 2)
+      rewrite = String.duplicate("Q", 20_000)
+
+      ours =
+        binary_part(body, 0, mid - 10_000) <>
+          rewrite <> binary_part(body, mid + 10_000, mid - 10_000)
+
+      small = binary_part(body, 0, 30_000)
+      small_ours = binary_part(small, 0, 15_000) <> "!" <> binary_part(small, 15_000, 15_000)
+      # Under the unit limit, a 2,000-character rewrite.
+      short = binary_part(body, 0, 15_000)
+
+      short_ours =
+        binary_part(short, 0, 6_500) <>
+          String.duplicate("Q", 2_000) <> binary_part(short, 8_500, 6_500)
+
+      for {base, ours, theirs} <- [
+            {body, ours, "B " <> body},
+            {small, small_ours, "B " <> small},
+            {short, short_ours, "B " <> short}
+          ] do
+        assert TextRebase.merge3_both(base, ours, theirs) != nil
+        {micros, result} = :timer.tc(fn -> TextRebase.merge3_clash(base, ours, theirs) end)
+        assert result == nil
+        assert micros < 500_000, "took #{div(micros, 1000)} ms"
+      end
+    end
+
     test "undo takes A's words back out after B deleted the sentence before them" do
       assert TextUndo.revert(
                "One. Two three. Yes four.",

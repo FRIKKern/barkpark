@@ -231,6 +231,30 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
       refute has_element?(a, @banner)
     end
 
+    # The clash check is not run past its bounds (TanStack's diff stops at
+    # a second): A's page answers at once, with the banner.
+    test "#{surface}: a long held rewrite under B's save: the banner, at once", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      body = String.duplicate("alpha beta gamma delta. ", 1_900)
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => body})
+      assert eventually(fn -> assigns(a).editor_form["excerpt"] == body end)
+      mid = div(byte_size(body), 2)
+
+      unsaved!(a, %{
+        "excerpt" =>
+          binary_part(body, 0, mid - 10_000) <>
+            String.duplicate("Q", 20_000) <> binary_part(body, mid + 10_000, mid - 10_000)
+      })
+
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => "B " <> body})
+      started = System.monotonic_time(:millisecond)
+
+      assert eventually(fn -> assigns(a).doc_conflict == true end)
+      assert System.monotonic_time(:millisecond) - started < 500
+      assert has_element?(a, @banner)
+    end
+
     test "#{surface}: A kept typing through the merge: its next save keeps B's words", c do
       a = open(c, @surface)
       b = open(c, @surface)
