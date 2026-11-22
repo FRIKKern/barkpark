@@ -85,7 +85,11 @@ function readPart(dir, name) {
 // the name of that thing (an element, a feature) and why. The showroom prints the list in one place under the
 // part (build/page.mjs). A sentence of the summary or of part.css's notes that says something is not covered
 // names a row of the list, so the list is the one place a reader looks.
-const NOT_COVERED = /\bnot (styled|covered|proved|judged|on the stage)\b|\bdo(es)? not (style|cover|prove)\b|\b(unstyled|unjudged|unproved)\b/i
+// The words that row reads, exactly these and no others, in any case and across line breaks: the ways the parts
+// have said "not covered" so far. A sentence that says it in other words is not caught; that is the row's one
+// limit, written in docs/PARTS.md.
+export const NOT_COVERED_WORDS = ['not styled', 'not covered', 'not proved', 'not judged', 'not on the stage', 'does not style', 'does not cover', 'does not prove', 'do not style', 'do not cover', 'do not prove', 'unstyled', 'unjudged', 'unproved']
+const NOT_COVERED = new RegExp(`\\b(${NOT_COVERED_WORDS.map((w) => w.split(' ').join('\\s+')).join('|')})\\b`, 'i')
 /** What is wrong with a part's "notCovered" and the prose beside it, in one sentence; empty when nothing is. */
 export function notCoveredWrong(json, css) {
   const list = json.notCovered ?? []
