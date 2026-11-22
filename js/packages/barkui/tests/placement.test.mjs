@@ -37,7 +37,7 @@ describe('the placement list', () => {
     expect(doc).not.toBeNull()
     expect(doc).toEqual(listed())
   })
-  it('keeps transition apart from the list, with its own reason, as the one entry whose value is read', () => {
+  it("keeps transition apart from the list, with its own reason; of the values, the check reads transition's", () => {
     expect(PLACEMENT.map((e) => e.property)).not.toContain('transition')
     expect(PLACEMENT.every((e) => e.value === undefined)).toBe(true)
     expect(TRANSITION.value).toBe('none')
