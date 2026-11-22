@@ -20,23 +20,20 @@
 //   * a NAMED_STEP_FILES entry is run by no step (so nothing runs it at all);
 //   * a file is run by name by more than one step;
 //   * a named or listed file does not exist;
-//   * a named step, or its job, carries a condition the Test step lacks
-//     (`if:`, `needs:`, `continue-on-error:`): a named step must run on every
-//     run where the Test step runs, and fail the job when its file fails.
-//     js-tests.yml has one `on:` path filter for every step, so no path filter
-//     can skip one step and not the other.
-// Exit 2, "cannot read", never a skip, when:
+// Exit 2, "cannot read", never a skip, when the workflow side does not read
+// as the known frame (named-test-steps-workflow.mjs):
 //   * a run line starts a test runner on a named file, or runs vitest, in any
-//     shape but the one this script knows:
-//         pnpm --filter <package> exec vitest run <file> [<file> ...]
-//     optionally wrapped as  out="$(<that> 2>&1)"
-//     (npx, a cd, a backslash continuation, a matrix value, a partial filter,
-//     jest or `node --test` on a test file are all "cannot read");
-//   * a named step's whole run block is not one of the known whole forms, in
-//     which the file's own exit status is the step's exit status (see
-//     CAPTURED_FORM); any other block is refused, by step name;
-//   * a named step carries a key other than name and run (if and
-//     continue-on-error are compared with the Test step above);
+//     shape but the known line:
+//         pnpm --filter <package> exec vitest run <file> [<file> ...] \
+//           --reporter=default --reporter=json --outputFile.json="$report"
+//   * a named step's whole run block is not one of the two known forms, in
+//     both of which the step ends 0 only when vitest's JSON report shows each
+//     named file ran at least one test and every test in it passed;
+//   * a named step carries anything but `name` and `run`, sits outside the
+//     Test step's job, or that job or the workflow differs from the known
+//     frame (its keys, the job's `defaults:` block);
+//   * a line at workflow or job level is not a plain `key:` line;
+//   * a step names GITHUB_ENV or GITHUB_PATH;
 //   * a test file path appears anywhere else in the jobs (env, with, matrix);
 //   * NAMED_STEP_FILES is written in any shape but one literal array of
 //     strings passed to excludeUnlessNamed in the one known `exclude:` line,
@@ -62,15 +59,10 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { FILE_ARG, WORKFLOW, readWorkflow } from './named-test-steps-workflow.mjs'
 import { DerivationError, workspacePackages } from './workspace-packages.mjs'
 
 const JS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const WORKFLOW = '.github/workflows/js-tests.yml'
-
-const TEST_FILE = /[\w@./-]*\.(?:test|spec)\.[cm]?[jt]sx?\b/
-const VITEST_CMD = /(?:^|[\s/;&|(`"'])vitest(?:\s|$|[;&|)`"'])/
-const FILE_ARG = /^(?!\.{0,2}\/)(?!.*\/\.\.?\/)[\w@-][\w@./-]*\.(?:test|spec)\.[cm]?[jt]sx?$/
-const PKG_ARG = /^(?:@[\w.-]+\/)?[\w.-]+$/
 const CONFIG_FILE = /^vitest(?:\.[\w-]+)?\.config\.[cm]?[jt]s$/
 const DEFAULT_CONFIGS = [
   'vitest.config.ts',
@@ -83,119 +75,6 @@ const DEFAULT_CONFIGS = [
 const LIST_DECL = /^(?:export )?const NAMED_STEP_FILES = \[([^\]]*)\]/m
 const LIST_USE =
   /exclude: \[\s*\.\.\.configDefaults\.exclude,\s*\.\.\.excludeUnlessNamed\(NAMED_STEP_FILES, process\.argv, import\.meta\.dirname\),?\s*\]/
-
-const indentOf = (s) => s.length - s.trimStart().length
-
-/** Steps of every job in a workflow, by text: no YAML dependency. */
-export function parseWorkflow(text) {
-  const lines = text.split('\n')
-  const jobsAt = lines.findIndex((l) => /^jobs:\s*$/.test(l))
-  const steps = []
-  const other = []
-  const cannot = []
-  if (jobsAt < 0) return { steps, other, cannot: [`${WORKFLOW}: no top-level \`jobs:\` key`] }
-  let job = null
-  let step = null
-  let run = false
-  const stepKey = (key, value, n) => {
-    step.keys.push(key)
-    if (key === 'run') {
-      if (/^[|>][-+]?$/.test(value)) run = true
-      else step.runLines.push({ n, text: value })
-    } else if (key === 'if') step.if = value
-    else if (key === 'continue-on-error') step.coe = value
-    else if (key === 'name') step.name = value.replace(/^"(.*)"$/, '$1')
-    else if (value) other.push({ n, text: value })
-  }
-  for (let i = jobsAt + 1; i < lines.length; i++) {
-    const raw = lines[i]
-    const n = i + 1
-    const t = raw.trim()
-    if (run) {
-      if (t === '' || indentOf(raw) > 8) {
-        if (t !== '' && !t.startsWith('#')) step.runLines.push({ n, text: t })
-        continue
-      }
-      run = false
-    }
-    if (t === '' || t.startsWith('#')) continue
-    let m
-    if ((m = /^ {2}([\w-]+):\s*$/.exec(raw))) {
-      job = { id: m[1], if: null, needs: null, coe: null }
-      step = null
-    } else if (/^\S/.test(raw)) {
-      job = step = null
-      other.push({ n, text: t })
-    } else if (job && (m = /^ {4}(if|needs|continue-on-error):\s*(.*)$/.exec(raw))) {
-      job[m[1] === 'continue-on-error' ? 'coe' : m[1]] = m[2].trim()
-      step = null
-    } else if (job && (m = /^ {6}- ([\w-]+):\s?(.*)$/.exec(raw))) {
-      step = { job, n, name: null, if: null, coe: null, keys: [], runLines: [] }
-      steps.push(step)
-      stepKey(m[1], m[2].trim(), n)
-    } else if (step && (m = /^ {8}([\w-]+):\s?(.*)$/.exec(raw))) {
-      stepKey(m[1], m[2].trim(), n)
-    } else if (/^ {6}- /.test(raw)) {
-      cannot.push(`${WORKFLOW}:${n}: a step item this script cannot read: ${t}`)
-    } else {
-      other.push({ n, text: t })
-    }
-  }
-  return { steps, other, cannot }
-}
-
-// The whole run block of a named step must be one of these forms, each one
-// ending with the named file's own exit status as the step's exit status.
-// (a) the known line alone; (b) the captured form the pd-golden mirror step
-// uses. A comment or blank line inside the block is not read.
-const CAPTURED_FORM = [
-  /^set \+e$/,
-  /^out="\$\(pnpm .* 2>&1\)"$/,
-  /^status=\$\?$/,
-  /^set -e$/,
-  /^echo "\$out"$/,
-  /^case "\$out" in$/,
-  /^\*"No projects matched the filters"\*\)$/,
-  /^echo "[^"$`\\]*" >&2$/,
-  /^exit 1$/,
-  /^;;$/,
-  /^esac$/,
-  /^exit "\$status"$/,
-]
-
-// The only keys a named step may carry. `if` and `continue-on-error` are
-// compared with the Test step's own; any other key is refused.
-const NAMED_STEP_KEYS = ['name', 'run', 'if', 'continue-on-error']
-
-/** Which known whole form a named step's run block is, or null. */
-export function blockForm(texts) {
-  if (texts.length === 1 && !texts[0].startsWith('out=') && matchNamedRun(texts[0])) return 'line'
-  if (
-    texts.length === CAPTURED_FORM.length &&
-    CAPTURED_FORM.every((re, i) => re.test(texts[i])) &&
-    matchNamedRun(texts[1])
-  )
-    return 'captured'
-  return null
-}
-
-/** The one known shape of a named run, or null. */
-export function matchNamedRun(text) {
-  const wrapped = /^out="\$\((.*) 2>&1\)"$/.exec(text)
-  const words = (wrapped ? wrapped[1] : text).split(' ')
-  const [pnpm, filter, pkg, exec, vitest, runWord, ...files] = words
-  if (
-    pnpm !== 'pnpm' ||
-    filter !== '--filter' ||
-    exec !== 'exec' ||
-    vitest !== 'vitest' ||
-    runWord !== 'run'
-  )
-    return null
-  if (!PKG_ARG.test(pkg ?? '') || files.length === 0 || !files.every((f) => FILE_ARG.test(f)))
-    return null
-  return { pkg, files }
-}
 
 function readList(pkg, config) {
   const where = `${pkg.dir}/${config.file}`
@@ -230,48 +109,8 @@ function readList(pkg, config) {
  * Returns { cannot: string[], problems: string[], named: string[] }.
  */
 export function judge(workflowText, packages) {
-  const { steps, other, cannot } = parseWorkflow(workflowText)
+  const { cannot, runs } = readWorkflow(workflowText)
   const problems = []
-  const runs = []
-  const testSteps = []
-  for (const s of steps) {
-    for (const l of s.runLines) {
-      if (/^pnpm exec turbo run test(\s|$)/.test(l.text) && !l.text.includes('--dry-run'))
-        testSteps.push(s)
-      const known = matchNamedRun(l.text)
-      if (known) runs.push({ ...known, step: s, n: l.n })
-      else if (TEST_FILE.test(l.text) || VITEST_CMD.test(l.text)) {
-        cannot.push(
-          `${WORKFLOW}:${l.n}: starts a test runner in a shape this script cannot read (the one known shape is \`pnpm --filter <package> exec vitest run <file> …\`): ${l.text}`,
-        )
-      }
-    }
-  }
-  for (const s of new Set(runs.map((r) => r.step))) {
-    const name = `step "${s.name ?? '(unnamed)'}" (${WORKFLOW}:${s.n})`
-    const extra = s.keys.filter((k) => !NAMED_STEP_KEYS.includes(k))
-    if (extra.length) {
-      cannot.push(
-        `${name}: a named step carries only ${NAMED_STEP_KEYS.join(', ')}; it also has ${extra.join(', ')}; refused`,
-      )
-    }
-    if (!blockForm(s.runLines.map((l) => l.text))) {
-      cannot.push(
-        `${name}: its run block is not one of the known whole forms (the known line alone, or the captured form of the pd-golden mirror step); refused`,
-      )
-    }
-  }
-  for (const l of other) {
-    if (TEST_FILE.test(l.text))
-      cannot.push(
-        `${WORKFLOW}:${l.n}: a test file path outside a run line this script can read: ${l.text}`,
-      )
-  }
-  if (testSteps.length !== 1) {
-    cannot.push(
-      `${WORKFLOW}: expected exactly one all-packages Test step (\`pnpm exec turbo run test …\`), found ${testSteps.length}`,
-    )
-  }
 
   const lists = new Map()
   for (const pkg of packages) {
@@ -315,26 +154,6 @@ export function judge(workflowText, packages) {
         problems.push(
           `${key}: run by name in ${at}, and the all-packages Test step runs it again. List it in NAMED_STEP_FILES in ${entry?.where ?? `${pkg.dir}'s vitest config`}`,
         )
-      }
-    }
-    const t = testSteps[0]
-    if (t) {
-      const differs = (a, b) => (a ?? null) !== (b ?? null)
-      if (differs(r.step.if, t.if))
-        problems.push(
-          `${at} has \`if: ${r.step.if}\`; the Test step has ${t.if ? `\`if: ${t.if}\`` : 'none'}, so the named step can skip a run the Test step makes`,
-        )
-      if (r.step.coe && r.step.coe !== 'false')
-        problems.push(
-          `${at} has \`continue-on-error: ${r.step.coe}\`; its file could fail without failing the job`,
-        )
-      for (const k of ['if', 'needs', 'coe']) {
-        if (differs(r.step.job[k], t.job[k])) {
-          const label = k === 'coe' ? 'continue-on-error' : k
-          problems.push(
-            `${at}: its job "${r.step.job.id}" has \`${label}: ${r.step.job[k] ?? '(none)'}\`; the Test step's job "${t.job.id}" has \`${label}: ${t.job[k] ?? '(none)'}\``,
-          )
-        }
       }
     }
   }
