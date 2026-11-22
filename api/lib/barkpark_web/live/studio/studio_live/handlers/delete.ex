@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   alias Barkpark.Content.Edges
   alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Desk.PaneComponent
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -177,6 +178,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   # <body> (task-bad96a2a1c3da132). Tell the client where the document sat in
   # its list, so it can focus the row that takes its place — or the pane's New
   # button when none is left.
+  #
+  # On the desk the rows are the list pane's own (`PaneComponent`), not the
+  # Studio's `:items` panes, which the desk has not got: the list pane that
+  # drew the document is asked, and it tells the page (task-3904bae587276669).
+  # The index only steers the focus; the delete above was of `editor_doc`.
+  defp focus_after_delete(%{assigns: %{desk_base: base}} = socket, doc, type)
+       when is_binary(base) do
+    published = Content.published_id(doc.doc_id)
+
+    case desk_list(socket, type) do
+      nil ->
+        push_event(socket, "bp:focus-after-delete", %{type: type, id: published})
+
+      pane ->
+        send_update(PaneComponent, id: pane, focus_after_delete: %{type: type, id: published})
+        socket
+    end
+  end
+
   defp focus_after_delete(socket, doc, type) do
     published = Content.published_id(doc.doc_id)
 
@@ -200,5 +220,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
       id: published,
       index: index || 0
     })
+  end
+
+  # The desk's last list pane of `type` before the editor: the one the
+  # document was opened from.
+  defp desk_list(socket, type) do
+    active = socket.assigns[:active]
+
+    (socket.assigns[:desk_panes] || [])
+    |> Enum.filter(fn view ->
+      view.index != active and match?(%{kind: :list}, view.pane) and view.pane[:type] == type
+    end)
+    |> List.last()
+    |> case do
+      %{id: id} -> id
+      nil -> nil
+    end
   end
 end

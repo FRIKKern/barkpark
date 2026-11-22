@@ -65,6 +65,15 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     end
   end
 
+  # A document of this list was deleted from the editor (`Handlers.Delete`):
+  # the page is told where its row sat among the rows drawn, so the desk's
+  # script can focus the row that takes its place (#28243). nil when the
+  # list did not draw it.
+  def update(%{focus_after_delete: %{type: type, id: id}}, socket) do
+    {:ok,
+     push_event(socket, "bp:focus-after-delete", %{type: type, id: id, index: row_at(socket, id)})}
+  end
+
   # A bulk action under way says how far it is (`Bulk`).
   def update(%{bulk_at: at}, socket), do: {:ok, assign(socket, :bulk_at, at)}
 
@@ -632,6 +641,21 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   # A row with a tick (`Bulk`): a document's row in a plain document list.
   defp tick?(%{pane: pane, node: node}, entry),
     do: match?(%{next: %{kind: :doc}}, entry) and Bulk.selectable?(pane, node)
+
+  # Where the document `id` (published) sits among the rows drawn, 0-based,
+  # dividers not counted (the script counts `a[data-desk-row]`).
+  defp row_at(%{assigns: %{data: %{ok?: true, result: %{entries: entries}}}}, id)
+       when is_list(entries) do
+    entries
+    |> Enum.reject(&match?(:divider, &1))
+    |> Enum.reject(&match?({:divider, _}, &1))
+    |> Enum.find_index(fn
+      %{next: %{kind: :doc, id: row}} when is_binary(row) -> Content.published_id(row) == id
+      _ -> false
+    end)
+  end
+
+  defp row_at(_socket, _id), do: nil
 
   # Each row with its place among the rows (a divider has none).
   defp placed(entries) do
