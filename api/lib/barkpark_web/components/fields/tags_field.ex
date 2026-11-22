@@ -39,7 +39,7 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
   @doc "Whether a schema field is a tags field: an array of strings, `options.layout: \"tags\"`."
   def tags_field?(field),
     do:
-      field_attr(field, :type) in ["arrayOf", "array"] and layout(field) == "tags" and
+      field_attr(field, :type) == "arrayOf" and layout(field) == "tags" and
         string_items?(field)
 
   @doc """

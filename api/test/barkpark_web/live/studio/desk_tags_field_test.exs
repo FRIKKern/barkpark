@@ -62,6 +62,14 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
               "type" => "text",
               "options" => %{"layout" => "tags"}
             },
+            # A legacy Sanity `array` is shown read-only: not a tags field.
+            %{
+              "name" => "legacy",
+              "title" => "Legacy",
+              "type" => "array",
+              "of" => [%{"type" => "string"}],
+              "options" => %{"layout" => "tags"}
+            },
             # An array of objects, even with the tags layout, is not a tags field.
             %{
               "name" => "links",
@@ -104,6 +112,7 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
           "highlights" => ["One", "Two"],
           "kicker" => "K",
           "lede" => "L",
+          "legacy" => ["old"],
           "links" => [%{"_key" => "l1", "label" => "One"}],
           "seo" => %{"metaTitle" => "Meta", "keywords" => ["k1"]}
         },
@@ -284,8 +293,8 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
 
   # task-2730627f7a19999a: a tags press is a tags field's only. A hand-made
   # one naming another array would store a bare string in it.
-  # task-d2365142f1795b6c: nor one naming a string or a text that carries the
-  # tags layout, on the desk or the old Studio.
+  # task-d2365142f1795b6c: nor one naming a string, a text or a legacy
+  # `array` that carries the tags layout, on the desk or the old Studio.
   test "add_tag or remove_tag naming a field that is not a tags field stores nothing", c do
     {:ok, studio, _html} = live(c.conn, c.studio)
     view = desk(c)
@@ -298,7 +307,8 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
           {"highlights", "remove_tag", "One"},
           {"title", "add_tag", "bare"},
           {"kicker", "add_tag", "bare"},
-          {"lede", "add_tag", "bare"}
+          {"lede", "add_tag", "bare"},
+          {"legacy", "add_tag", "bare"}
         ] do
       EditorPost.press(view, "array_op", %{
         "action" => action,
@@ -314,7 +324,7 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
     after_ = stored(c)
     assert after_["links"] == [%{"_key" => "l1", "label" => "One"}]
     assert after_["highlights"] == ["One", "Two"]
-    assert {after_["kicker"], after_["lede"]} == {"K", "L"}
+    assert {after_["kicker"], after_["lede"], after_["legacy"]} == {"K", "L", ["old"]}
     assert stored_doc(c).title == "Tagged"
     assert after_ == before
 
