@@ -20,6 +20,7 @@ const VITEST_CMD = /(?:^|[ /;&|(`"'])vitest(?: |$|[;&|)`"'])/
 const PKG_ARG = /^(?:@[\w.-]+\/)?[\w.-]+$/
 const KEY = '[A-Za-z_][\\w-]*'
 // The characters js-tests.yml may hold: LF, U+0020-U+007E, and these three.
+// Any other character is refused.
 const EXTRA_CHARS = ['\u2500', '\u2014', '\u2192']
 
 const WORKFLOW_KEYS = ['concurrency', 'jobs', 'name', 'on']
@@ -100,11 +101,13 @@ export function blockForm(texts) {
   return null
 }
 
-/** Decode the workflow as strict UTF-8, naming each line that is not. */
-export function decodeWorkflow(input) {
-  if (typeof input === 'string') return { text: input, cannot: [] }
-  const bytes = new Uint8Array(input)
-  const decoder = new TextDecoder('utf-8', { fatal: true })
+/**
+ * Decode the workflow's bytes as strict UTF-8, line by line, naming each line
+ * that is not. Every character is kept, a U+FEFF too, so the list sees it.
+ */
+export function decodeWorkflow(bytes) {
+  if (!(bytes instanceof Uint8Array)) throw new TypeError('decodeWorkflow takes bytes only')
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
   const lines = []
   const cannot = []
   for (let start = 0; start <= bytes.length;) {

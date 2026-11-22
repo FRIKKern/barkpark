@@ -3,7 +3,8 @@
 // Copyright 2026 Barkpark contributors
 //
 // Selftest for check-named-test-steps.mjs: proves the rule can still lose.
-// Each row feeds judge() a workflow and a package config in memory and
+// Each row feeds judge() a workflow, as the UTF-8 bytes main() reads, and a
+// package config in memory, and
 // requires the exit it must give (0 pass, 1 fail by name, 2 cannot read) and
 // the words that name the cause. The last rows hold excludeUnlessNamed: a file
 // is named plain, as ./…, or absolute; nothing else counts.
@@ -14,7 +15,6 @@ import { excludeUnlessNamed } from '../test-utils/named-step-files.mjs'
 import { judge } from './check-named-test-steps.mjs'
 import { jqLine } from './named-test-steps-workflow.mjs'
 import {
-  FLAGS,
   named,
   MIRROR_LINES,
   CONF_LINES,
@@ -32,6 +32,7 @@ import {
   PROOF,
   LINE,
   ARGV_CASES,
+  CHAR_CASES,
   ARGV_DIR,
   ARGV_FILES,
 } from './named-test-steps.fixtures.mjs'
@@ -249,77 +250,7 @@ function selftest() {
       2,
       ['step "Env"', 'step "Path"', 'names GITHUB_ENV or GITHUB_PATH'],
     ],
-    // The file holds LF, U+0020-U+007E and three listed characters, as UTF-8.
-    [
-      'the three listed characters pass',
-      GOOD_WF.replace('      - name: Mirror', '      # a — b ─ c → d\n      - name: Mirror — gate'),
-      pkg(),
-      0,
-      [],
-    ],
-    [
-      'a no-break space before # in a block line',
-      wf(MIRROR, `${CONF}\n           # note`),
-      pkg(),
-      2,
-      ['character U+00A0'],
-    ],
-    [
-      'a lone CR in a block comment',
-      wf(MIRROR, `${CONF}\n          # note\rexit 0`),
-      pkg(),
-      2,
-      ['character U+000D'],
-    ],
-    [
-      'a tab in the defaults block',
-      GOOD_WF.replace('working-directory: js\n', 'working-directory: js\t\n'),
-      pkg(),
-      2,
-      ['character U+0009'],
-    ],
-    ['a U+FEFF at the start of the file', `﻿${GOOD_WF}`, pkg(), 2, ['character U+FEFF']],
-    // A listed character before # on a block line is a run line, not a comment.
-    ...['─', '—', '→'].map((ch) => [
-      `U+${ch.codePointAt(0).toString(16).toUpperCase()} before # on a block line`,
-      wf(MIRROR, `${CONF}\n          ${ch}# note`),
-      pkg(),
-      2,
-      ['step "Conformance"', PROOF],
-    ]),
-    [
-      'a dedented defaults line',
-      GOOD_WF.replace('        working-directory: js\n', '      working-directory: js\n'),
-      pkg(),
-      2,
-      ['defaults block other than'],
-    ],
-    [
-      'a visible character off the list',
-      GOOD_WF.replace('      - name: Mirror', '      # done ✓\n      - name: Mirror'),
-      pkg(),
-      2,
-      ['character U+2713'],
-    ],
-    [
-      'a bad UTF-8 sequence',
-      Buffer.concat([
-        Buffer.from(
-          GOOD_WF.replace('      - name: Mirror', '      # x\n      - name: Mirror').split(
-            '# x',
-          )[0] + '# ',
-        ),
-        Buffer.from([0xff, 0xfe]),
-        Buffer.from(
-          GOOD_WF.replace('      - name: Mirror', '      # x\n      - name: Mirror').split(
-            '# x',
-          )[1],
-        ),
-      ]),
-      pkg(),
-      2,
-      ['not valid UTF-8'],
-    ],
+    ...CHAR_CASES,
     // Any other run line that starts a test runner on a named file.
     [
       'npx is cannot-read',
@@ -441,7 +372,7 @@ function selftest() {
     let got
     let out
     try {
-      const r = judge(text, pkgs)
+      const r = judge(Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8'), pkgs)
       got = r.cannot.length ? 2 : r.problems.length ? 1 : 0
       out = [...r.cannot, ...r.problems].join('\n')
     } catch (err) {
@@ -455,6 +386,14 @@ function selftest() {
       `got exit ${got}; missing ${JSON.stringify(missing)}\n${out}`,
     )
   }
+  // One path: the reader takes bytes only.
+  let door = 'no throw'
+  try {
+    judge(GOOD_WF, pkg())
+  } catch (err) {
+    door = err instanceof TypeError ? '' : String(err)
+  }
+  say(door === '', 'a string is a thrown error', door)
   // excludeUnlessNamed: a file is named plain, as ./…, or absolute; nothing else counts.
   for (const [label, args, cwd, want] of ARGV_CASES) {
     const got = excludeUnlessNamed(ARGV_FILES, ['node', 'vitest', 'run', ...args], ARGV_DIR, cwd)
@@ -464,7 +403,7 @@ function selftest() {
       `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`,
     )
   }
-  const total = cases.length + ARGV_CASES.length
+  const total = cases.length + 1 + ARGV_CASES.length
   if (failed) {
     console.error(`check-named-test-steps --selftest: ${failed} of ${total} rows FAILED`)
     return 1

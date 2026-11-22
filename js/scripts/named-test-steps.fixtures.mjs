@@ -125,3 +125,121 @@ export const ARGV_CASES = [
   ],
   ['an option value does not', ['--exclude=tests/a.test.tsx', '--dir'], ARGV_DIR, ARGV_FILES],
 ]
+
+// The character rows. judge() reads each as the UTF-8 bytes main() reads.
+export const CHAR_CASES = [
+  // The file holds LF, U+0020-U+007E and three listed characters, as UTF-8.
+  [
+    'the three listed characters pass',
+    GOOD_WF.replace(
+      '      - name: Mirror',
+      '      # a \u2014 b \u2500 c \u2192 d\n      - name: Mirror \u2014 gate',
+    ),
+    pkg(),
+    0,
+    [],
+  ],
+  [
+    'a no-break space before # in a block line',
+    wf(MIRROR, `${CONF}\n          \u00a0# note`),
+    pkg(),
+    2,
+    ['character U+00A0'],
+  ],
+  [
+    'a lone CR in a block comment',
+    wf(MIRROR, `${CONF}\n          # note\rexit 0`),
+    pkg(),
+    2,
+    ['character U+000D'],
+  ],
+  [
+    'a tab in the defaults block',
+    GOOD_WF.replace('working-directory: js\n', 'working-directory: js\t\n'),
+    pkg(),
+    2,
+    ['character U+0009'],
+  ],
+  // A U+FEFF is kept wherever it stands, the start of the file included.
+  [
+    'a U+FEFF at the start of the file',
+    `\ufeff${GOOD_WF}`,
+    pkg(),
+    2,
+    ['1: character U+FEFF at column 1'],
+  ],
+  [
+    'a U+FEFF at the start of a block line',
+    wf(MIRROR, `${CONF}\n\ufeff          # note`),
+    pkg(),
+    2,
+    ['character U+FEFF at column 1'],
+  ],
+  [
+    'a doubled U+FEFF at the start of a block line',
+    wf(MIRROR, `${CONF}\n\ufeff\ufeff          # note`),
+    pkg(),
+    2,
+    ['character U+FEFF at column 1', 'character U+FEFF at column 2'],
+  ],
+  [
+    'a U+FEFF mid-line',
+    wf(MIRROR, `${CONF}\n          # no\ufeffte`),
+    pkg(),
+    2,
+    ['character U+FEFF at column 15'],
+  ],
+  ['CRLF line ends', GOOD_WF.replace(/\n/g, '\r\n'), pkg(), 2, ['character U+000D']],
+  [
+    'a last line with no LF',
+    `${GOOD_WF.replace(/\n+$/, '')}\n# \u2713`,
+    pkg(),
+    2,
+    ['character U+2713'],
+  ],
+  // A listed character before # on a block line is a run line, not a comment.
+  ...['\u2500', '\u2014', '\u2192'].map((ch) => [
+    `U+${ch.codePointAt(0).toString(16).toUpperCase()} before # on a block line`,
+    wf(MIRROR, `${CONF}\n          ${ch}# note`),
+    pkg(),
+    2,
+    ['step "Conformance"', PROOF],
+  ]),
+  [
+    'a dedented defaults line',
+    GOOD_WF.replace('        working-directory: js\n', '      working-directory: js\n'),
+    pkg(),
+    2,
+    ['defaults block other than'],
+  ],
+  [
+    'a visible character off the list',
+    GOOD_WF.replace('      - name: Mirror', '      # done \u2713\n      - name: Mirror'),
+    pkg(),
+    2,
+    ['character U+2713'],
+  ],
+  [
+    'a bad UTF-8 sequence',
+    Buffer.concat([
+      Buffer.from(
+        GOOD_WF.replace('      - name: Mirror', '      # x\n      - name: Mirror').split('# x')[0] +
+          '# ',
+      ),
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from(
+        GOOD_WF.replace('      - name: Mirror', '      # x\n      - name: Mirror').split('# x')[1],
+      ),
+    ]),
+    pkg(),
+    2,
+    ['not valid UTF-8'],
+  ],
+  [
+    'a surrogate encoded in UTF-8 bytes',
+    Buffer.concat([Buffer.from(GOOD_WF), Buffer.from([0x23, 0x20, 0xed, 0xa0, 0x80, 0x0a])]),
+    pkg(),
+    2,
+    ['not valid UTF-8'],
+  ],
+]

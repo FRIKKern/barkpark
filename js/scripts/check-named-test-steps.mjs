@@ -107,11 +107,11 @@ function readList(pkg, config) {
 }
 
 /**
- * Hold the rule. packages: [{ name, dir, testScript, configs: [{ file, isDefault, text }], has(file) }].
+ * Hold the rule on the workflow's bytes. packages: [{ name, dir, testScript, configs: [{ file, isDefault, text }], has(file) }].
  * Returns { cannot: string[], problems: string[], named: string[] }.
  */
-export function judge(workflowText, packages) {
-  const { cannot, runs } = readWorkflow(workflowText)
+export function judge(workflowBytes, packages) {
+  const { cannot, runs } = readWorkflow(workflowBytes)
   const problems = []
 
   const lists = new Map()
@@ -227,8 +227,8 @@ function report({ cannot, problems, named }) {
 function main(argv) {
   let result
   try {
-    const workflowText = readFileSync(resolve(JS_ROOT, '..', WORKFLOW))
-    result = judge(workflowText, packagesFromDisk(JS_ROOT))
+    const workflowBytes = readFileSync(resolve(JS_ROOT, '..', WORKFLOW))
+    result = judge(workflowBytes, packagesFromDisk(JS_ROOT))
   } catch (err) {
     if (!(err instanceof DerivationError) && err?.code !== 'ENOENT') throw err
     console.error(`check-named-test-steps: CANNOT READ — ${err.message}`)
