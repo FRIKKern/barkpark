@@ -412,7 +412,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   change of `editor_doc` since is a read or a write of this tab's that is
   newer than the frame, or a row of another variant (a Discard drops the
   draft the frame was of, a Publish or Unpublish swaps the row). Comparing
-  times alone named a discarded draft (#28322 review, round 2).
+  times alone named a discarded draft (#28322 review, round 2): another tab
+  discards the draft it renamed, and this tab's Reload reads the published
+  row, older than that draft's frame (task-e82f6c625819d4f5, pinned in
+  `desk_remote_title_header_test.exs`).
   """
   def base_doc(socket) do
     own = socket.assigns[:editor_doc]
