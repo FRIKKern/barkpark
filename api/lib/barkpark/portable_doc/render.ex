@@ -71,9 +71,9 @@ defmodule Barkpark.PortableDoc.Render do
                         ] ++
                           Enum.map(
                             ~w(
-                              callout.ex cards_email.ex chrome.ex components.ex compose.ex data_viz.ex
-                              figures.ex
-                              fleet_email.ex forms.ex inline.ex math.ex palettes.ex
+                              block_depth.ex callout.ex cards_email.ex chrome.ex components.ex compose.ex
+                              data_viz.ex figures.ex
+                              fleet_email.ex forms.ex inline.ex inline_depth.ex math.ex palettes.ex
                               panels_email.ex section_layout.ex status_vocab.ex stylesheet.ex tokens_gen.ex
                               util.ex walk.ex
                             ),
@@ -373,10 +373,7 @@ defmodule Barkpark.PortableDoc.Render do
 
   defp cap_depth(block, depth) when is_map(block) do
     if depth >= Barkpark.PortableDoc.Validate.max_depth() do
-      %{
-        "type" => "paragraph",
-        "text" => Barkpark.PortableDoc.Render.Chrome.t("Nested too deep to show")
-      }
+      Barkpark.PortableDoc.Render.BlockDepth.notice_block()
     else
       @block_slots
       |> Map.get(Map.get(block, "type"), [])

@@ -35,7 +35,10 @@ pnpm test --project=node               # single package (core, node env)
 pnpm test --project=core-workerd       # workerd parity
 pnpm test --project=react-browser      # DOM tests
 pnpm --filter @barkpark/core test:all  # core: node + workerd + browser
+pnpm test:named-steps                  # the files js-tests runs in steps of their own
 ```
+
+A plain `pnpm test` no longer runs a test file that a js-tests step runs by name (in @barkpark/react: `tests/conformance.test.tsx` and `tests/pd-golden-mirror-parity.test.ts`); `pnpm test:named-steps` runs them.
 
 ## Bundle budget
 

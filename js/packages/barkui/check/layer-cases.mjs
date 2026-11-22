@@ -167,18 +167,6 @@ const censusRows = (m, n) => ({
 })
 /** The rows of the two top-layer runs, by run, as their cases hold them. */
 export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), census: Object.keys(censusRows()) }
-/** What is wrong with `runs` ({ run: rows }) against the rows of one run they replace, in plain words; empty when
-    each old row is in exactly one run. */
-export function rowsMoved(old, runs) {
-  const wrong = []
-  for (const row of old) {
-    const in_ = Object.keys(runs).filter((r) => runs[r].filter((x) => x === row).length)
-    const times = Object.values(runs).reduce((k, rows) => k + rows.filter((x) => x === row).length, 0)
-    if (times === 0) wrong.push(`the row "${row}" is in neither top-layer run`)
-    else if (times > 1) wrong.push(`the row "${row}" is in ${in_.length > 1 ? `both top-layer runs (${in_.join(', ')})` : `the ${in_[0]} run ${times} times`}`)
-  }
-  return wrong
-}
 // Each top-layer case is `layers`: it opens its boxes by real input (a click, a hover, a Tab) or holds a refusal,
 // and runs in the selftest's rest job by its one rule (check/jobs.mjs).
 export const LAYER_CASES = [

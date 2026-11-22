@@ -261,3 +261,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1)
   }
 }
+
+/** What is wrong with `runs` ({ run: rows }) against the rows of the one case they replace, in plain words; empty
+    when each old row is in exactly one run. `kind` names the runs (top-layer, states, …). A case unfolded into runs
+    keeps every row it held, so none is dropped to make room. */
+export function rowsMoved(old, runs, kind) {
+  const wrong = []
+  for (const row of old) {
+    const in_ = Object.keys(runs).filter((r) => runs[r].includes(row))
+    const times = Object.values(runs).reduce((k, rows) => k + rows.filter((x) => x === row).length, 0)
+    if (times === 0) wrong.push(`the row "${row}" is in no ${kind} run`)
+    else if (in_.length > 1) wrong.push(`the row "${row}" is in ${in_.length} ${kind} runs (${in_.join(', ')})`)
+    else if (times > 1) wrong.push(`the row "${row}" is in the ${in_[0]} ${kind} run ${times} times`)
+  }
+  return wrong
+}

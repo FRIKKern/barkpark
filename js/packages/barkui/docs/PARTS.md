@@ -11,7 +11,16 @@ parts/<name>/
                 per property: a wrong entry turns "every skin" off, and with none the trace still holds every
                 colour to one skin variable); optional textOnly (selectors of controls that draw no
                 boundary, such as a ghost button); optional layers (each box the part opens in the top
-                layer, with the real input that opens and closes it: see "The top layer")
+                layer, with the real input that opens and closes it: see "The top layer"); optional
+                notCovered ({ name, why } for each thing of its element the part does not style or prove,
+                printed under the part; a summary or part.css note that says something is not covered
+                must name a row of it: the build reads exactly the words in NOT_COVERED_WORDS
+                (build/parts.mjs), in any case and across line breaks, in the summary and part.css's
+                comments; a row names a sentence where its name stands in it as whole words, in any
+                case and across line breaks; null, another shape, an empty name or reason, and a name
+                given twice in any case are refused. Two limits: a sentence that says it in other words
+                is not caught, and the row reads that the name stands in the sentence, not that the
+                sentence is about that thing; the list is printed under the part, so a reader sees it)
   part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
                 color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
@@ -389,7 +398,7 @@ On CI's hosted runner one job of the check took 570 s for 5 parts, with 14 parts
 
 In CI the check runs as jobs side by side. `check/jobs.mjs` splits the sorted part folders into the fewest groups of at most 5 parts, their sizes within one of each other, and the job matrix in `barkui.yml` reads that list; no list is written by hand. The plan, each job and the closing check compute the split again from the same checkout and must agree. Every job builds and loads the whole page, and the readings above were taken with at most 14 parts in the folder: with more, a job's ceiling stays where it is, so a page that makes it slower fails the job instead of stretching it. One closing check (its name is `AGGREGATE` in `check/jobs.mjs`) always runs and is red when the plan, any group or either selftest job is red, cancelled, missing, or skipped while the plan said BarkUI was touched.
 
-The selftest copies one part, so its time does not grow with the parts folder. It runs as 2 jobs side by side, and one rule in `check/jobs.mjs` (`selftestJob`) puts each case in exactly one: the `views` job runs the cases that read the wide or phone views and drive no states, the `rest` job every other case; a test holds that the two together run every case, each once. On CI's hosted runner the selftest's views job took 210 s; it may take at most 1.5 times that, 315 s, 53% of its 10-minute step in CI, and stops, failing, once it passes that. On CI's hosted runner the selftest's rest job took 222 s; it may take at most 1.5 times that, 333 s, 56% of its 10-minute step in CI, and stops, failing, once it passes that. Each ceiling stays at or under 80% of its step; a job that outgrows that is split again, never given a longer step.
+The selftest copies one part, so its time does not grow with the parts folder. It runs as 2 jobs side by side, and one rule in `check/jobs.mjs` (`selftestJob`) puts each case in exactly one: the `views` job runs the cases that read the wide or phone views and drive no states, the `rest` job every other case; a test holds that the two together run every case, each once. On CI's hosted runner the selftest's views job took 210 s; it may take at most 1.5 times that, 315 s, 53% of its 10-minute step in CI, and stops, failing, once it passes that. On CI's hosted runner the selftest's rest job took 222 s; it may take at most 1.5 times that, 333 s, 56% of its 10-minute step in CI, and stops, failing, once it passes that. Each ceiling stays at or under 80% of its step; a job that outgrows that is split again, never given a longer step. Every case runs under one limit of 60 s (`CASE_SECONDS`), and none carries its own; each case's reading on CI's hosted runner (`check/case-readings.mjs`) sits under 80% of it, 48 s, and a test names any case that does not. A case that outgrows that share is unfolded into runs, each of its rows in exactly one, never given a longer limit.
 <!-- /capacity -->
 
 The check runs at most 8 groups (`MOST_GROUPS` in `check/jobs.mjs`), so at most 40 parts, and

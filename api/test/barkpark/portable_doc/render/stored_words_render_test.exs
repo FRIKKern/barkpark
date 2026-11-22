@@ -93,6 +93,7 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
     {"inline-*.json", "inline run cases"},
     {"merge_gate_*.json", "merge gate wording rows"},
     {"portable-doc-limits.json", "limit cases"},
+    {"portable-doc-slot-depth.json", "slot depth cases, expanded by Limits.expand"},
     {"preview-parity.json", "preview parity rows"},
     {"sdk-capabilities-parity.json", "SDK route rows"},
     {"section-boundary-rules.json", "section boundary cases"},

@@ -94,8 +94,8 @@ func blockWrapperContent(n any) []any {
 // within a link so a nested link can flatten (the model keeps links
 // non-recursive).
 func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool, depth int) string {
-	if depth >= maxNestDepth {
-		return nestedTooDeep
+	if depth >= maxNestDepth && isInlineWrapper(n) {
+		return cutInline(n, depth)
 	}
 	switch v := n.(type) {
 	case string:
@@ -142,8 +142,13 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool,
 		if len(marks) == 0 {
 			return value
 		}
-		if depth+len(marks) >= maxNestDepth {
-			return nestedTooDeep
+		// The marks that fit under the depth limit are drawn; past them, the word
+		// is kept and the notice follows (inline_depth.go).
+		if fit := max(maxNestDepth-depth, 0); len(marks) > fit {
+			if fit == 0 {
+				return value + " " + nestedTooDeep
+			}
+			return ir.applyMarks(value, marks[:fit], ctx, insideLink) + " " + nestedTooDeep
 		}
 		return ir.applyMarks(value, marks, ctx, insideLink)
 

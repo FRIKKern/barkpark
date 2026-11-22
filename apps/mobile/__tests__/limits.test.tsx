@@ -169,8 +169,24 @@ describe('block nesting', () => {
 
   it.each(slots)('%s %j keeps depth 99 and replaces depth 100', (type, path) => {
     expect(leafAt(model.capDepth(chain(type, path, 99), NOTICE), path, 99)).toEqual({ type: 'paragraph', text: 'leaf' })
-    expect(leafAt(model.capDepth(chain(type, path, 100), NOTICE), path, 100)).toEqual({ type: 'paragraph', text: NOTICE })
+    expect(leafAt(model.capDepth(chain(type, path, 100), NOTICE), path, 100)).toEqual({
+      type: 'paragraph',
+      text: NOTICE,
+      [model.CAPPED]: true,
+    })
   })
+
+  // task-a6a57717506de979: a list item keeps the notice that stands in for the block.
+  it.each(['list', 'ordered-list', 'numbered_list', 'bulletList', 'bullet_list', 'bulleted-list', 'bulleted_list'])(
+    '%s item shows the notice past the depth, and still drops a stored child with "capped": true',
+    (type) => {
+      expect(render(chain(type, ['items', '*', 'children', '*'], 100))).toContain(NOTICE)
+      const stored = JSON.parse(
+        JSON.stringify({ type, items: [{ text: 'i', children: [{ type: 'paragraph', text: 'stored', capped: true }] }] }),
+      )
+      expect(render(stored)).not.toContain('stored')
+    },
+  )
 
   it('leaves a block outside the slot table alone', () => {
     const deep = chain('section', ['blocks', '*'], 100)
@@ -199,10 +215,18 @@ describe('inline nesting', () => {
     ['unknown', (inner: unknown) => ({ type: 'mystery', children: [inner] })],
     ['typeless', (inner: unknown) => ({ children: [inner] })],
     ['underline', (inner: unknown) => ({ type: 'underline', children: [inner] })],
-  ])('%s at depth 99 shows the leaf, at 100 the notice', (_name, node) => {
-    expect(paragraph(nest(99, node))).toContain('leaf')
-    expect(paragraph(nest(100, node))).toContain(NOTICE)
-    expect(paragraph(nest(100, node))).not.toContain('leaf')
+  ])('%s keeps the leaf at depth 100 and writes the notice after it past 100', (_name, node) => {
+    // task-11bbe4b4ae8c85f4: the word stays; the notice follows it.
+    expect(paragraph(nest(100, node))).toContain('leaf')
+    expect(paragraph(nest(100, node))).not.toContain(NOTICE)
+    expect(paragraph(nest(101, node))).toContain('leaf ' + NOTICE)
+    expect(paragraph(nest(500, node))).toContain('leaf ' + NOTICE)
+  })
+
+  it('reads words no deeper than the word bound, and still shows the notice', () => {
+    const text = paragraph(nest(5000, (inner) => ({ type: 'em', children: [inner] })))
+    expect(text).toContain(NOTICE)
+    expect(text).not.toContain('leaf')
   })
 
   it('counts marks into the depth', () => {
@@ -212,13 +236,14 @@ describe('inline nesting', () => {
       for (let i = 0; i < 50; i++) inline = { type: 'em', children: [inline] }
       return inline
     }
-    expect(paragraph(deep(49))).toContain('leaf')
-    expect(paragraph(deep(50))).toContain(NOTICE)
+    expect(paragraph(deep(50))).toContain('leaf')
+    expect(paragraph(deep(50))).not.toContain(NOTICE)
+    expect(paragraph(deep(51)).replace(/\s+/g, ' ')).toContain('leaf ' + NOTICE)
   })
 
   it('says it in the workspace language', () => {
-    expect(paragraph(nest(100, (inner) => ({ type: 'em', children: [inner] })), 'nb-NO')).toContain(
-      'For dypt nestet til å vises',
+    expect(paragraph(nest(101, (inner) => ({ type: 'em', children: [inner] })), 'nb-NO')).toContain(
+      'leaf For dypt nestet til å vises',
     )
   })
 })

@@ -1782,15 +1782,15 @@ defmodule Barkpark.Content.Mutations do
   # resolved; a create (or a `createOrReplace` with no draft) compares against
   # the published row instead, read only when the check applies. Who is refused
   # and what counts as a change: `Barkpark.Content.ReadOnlyFields`.
-  defp ensure_read_only_unchanged(type, %{content: content}, merged, _id, dataset, opts),
-    do: ReadOnlyFields.check(type, content || %{}, merged, dataset, opts)
+  defp ensure_read_only_unchanged(type, %{content: _} = existing, merged, _id, dataset, opts),
+    do: ReadOnlyFields.check(type, existing, merged, dataset, opts)
 
   defp ensure_read_only_unchanged(type, _existing, merged, id, dataset, opts) do
     base = fn ->
       with true <- is_binary(id) and is_binary(type),
            {:ok, published} <-
              Content.get_document(DraftId.published_id(id), type, dataset, opts) do
-        published.content || %{}
+        published
       else
         _ -> %{}
       end

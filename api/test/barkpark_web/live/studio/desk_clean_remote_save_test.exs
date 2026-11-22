@@ -94,18 +94,20 @@ defmodule BarkparkWeb.Studio.DeskCleanRemoteSaveTest do
     refute has_element?(a, ~s(#{@pane}[data-desk-save="#{@words}"]))
   end
 
-  test "control: over unsaved edits it is a conflict and keeps its words", c do
+  test "control: over unsaved edits it is a conflict and says so", c do
     a = open(c)
     b = open(c)
 
     :sys.replace_state(a.pid, fn state ->
       socket = state.socket
-      form = Map.put(socket.assigns.editor_form, "excerpt", "Mine, unsent")
+      # The title, the field B's save rewrites: a conflict only where the
+      # remote save rewrote this page's own field (task-65543203e7b71c80).
+      form = Map.put(socket.assigns.editor_form, "title", "Mine, unsent")
 
       assigns =
         Map.merge(socket.assigns, %{
           editor_dirty: true,
-          editor_unsaved_keys: MapSet.new(["excerpt"]),
+          editor_unsaved_keys: MapSet.new(["title"]),
           editor_form: form
         })
 
@@ -115,6 +117,10 @@ defmodule BarkparkWeb.Studio.DeskCleanRemoteSaveTest do
     b_saves(b)
 
     assert eventually(fn -> assigns(a).doc_conflict == true end)
-    assert text(a, "#{@pane} .dk-edit-footer .dk-footer-status") =~ @words
+    # TanStack's clash words, naming the field B rewrote (task-c0374ce0961cc1bf).
+    assert text(a, "#{@pane} .dk-edit-footer .dk-footer-status") =~
+             "Someone else rewrote Title meanwhile."
+
+    assert has_element?(a, ~s(#{@pane}[data-desk-save="#{@words}"][data-desk-conflict]))
   end
 end

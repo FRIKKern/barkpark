@@ -23,8 +23,15 @@ const drawsAll = (w) => `${w.label.at ? `lowest label ${w.label.match.toFixed(3)
 /** The least of two weakest readings (verdict). */
 const least = (a, b) => ({ share: Math.min(a.share, b.share), label: b.label.match < a.label.match ? b.label : a.label })
 const NONE = { share: 1, label: { match: Infinity, at: '' } }
-/** The surfaces a run proves its lights on: every one, unless the selftest asked for base alone. */
-export const surfacesOf = (ctx) => (ctx.surfaces === false ? ['base'] : SURFACES)
+/** The surfaces a run proves its lights on: every one, unless the selftest asked for base alone (false) or for base
+    and a list of others, in their page order. A name that is no surface is refused. */
+export function surfacesOf(ctx) {
+  if (ctx.surfaces === false) return ['base']
+  if (!Array.isArray(ctx.surfaces)) return SURFACES
+  const unknown = ctx.surfaces.filter((s) => !SURFACES.includes(s))
+  if (unknown.length) throw new Error(`no such surface: ${unknown.join(', ')}; the surfaces are ${SURFACES.join(', ')}`)
+  return SURFACES.filter((s) => s === 'base' || ctx.surfaces.includes(s))
+}
 
 // `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
 // `motion`: the reduced-motion setting the page opens with; the lights are read under both (see motionFails).

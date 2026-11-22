@@ -25,9 +25,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
+  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, PostPath, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @doc false
@@ -574,7 +574,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   defp sanity_asset_ids(_doc, _schema), do: []
 
   defp autosave_write(socket, params, trigger) do
-    doc = socket.assigns[:editor_doc]
+    # This tab's row, the post's own field as the store last showed it.
+    doc = Lifecycle.post_base(socket)
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
@@ -597,6 +598,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         socket.assigns.dataset,
         ScopeHelpers.scope_opts(socket)
       )
+
+    # A change inside an object posts only that subfield: its siblings are
+    # what the page drew (`PostPath`, task-04e50efa8405b956).
+    params = PostPath.only_changed(params, socket, doc)
+    raw_params = PostPath.only_changed(raw_params, socket, doc)
 
     changed? = autosave_changes_something?(doc, schema, params)
 

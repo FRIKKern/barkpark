@@ -63,6 +63,8 @@ on:
       - "web/components/**"
       - "web/app/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/portable-doc-limits.json"
+      - "api/test/support/fixtures/portable-doc-slot-depth.json"
       - "api/test/support/fixtures/paper-editor/**"
       - "api/test/support/fixtures/pd-parity/**"
       - "api/test/support/fixtures/bpml/**"
@@ -103,6 +105,8 @@ on:
       - "web/components/**"
       - "web/app/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/portable-doc-limits.json"
+      - "api/test/support/fixtures/portable-doc-slot-depth.json"
       - "api/test/support/fixtures/paper-editor/**"
       - "api/test/support/fixtures/pd-parity/**"
       - "api/test/support/fixtures/bpml/**"
@@ -193,6 +197,7 @@ jobs:
           node ../paper-editor-host-tests/__desk_lang_tabs_keys.test.mjs
           node ../paper-editor-host-tests/__desk_navbar_menu_keys.test.mjs
           node ../paper-editor-host-tests/__desk_field_actions.test.mjs
+          node ../paper-editor-host-tests/__desk_focus_after_delete.test.mjs
           node ../paper-editor-host-tests/__desk_focus_keep.test.mjs
           node ../paper-editor-host-tests/__desk_focus_mode.test.mjs
           node ../paper-editor-host-tests/__desk_host_tests_listed.test.mjs

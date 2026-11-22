@@ -62,6 +62,14 @@ function radios(name, label, values, checked) {
   return `<fieldset class="sr-group"><legend>${label}</legend>${items.join('')}</fieldset>`
 }
 
+/** What the part does not cover (part.json "notCovered"), in its one place under the summary; nothing when the
+    part covers all of its element. */
+function notCovered(json) {
+  if (!json.notCovered?.length) return ''
+  const items = json.notCovered.map((x) => `<li><code>${esc(x.name)}</code>: ${esc(x.why)}</li>`)
+  return `<div class="sr-not-covered"><p>Not covered</p><ul>${items.join('')}</ul></div>`
+}
+
 function partSection(part, ctx) {
   const { name, json } = part
   return `<section class="sr-part" id="part-${name}" aria-labelledby="part-${name}-title">
@@ -69,6 +77,7 @@ function partSection(part, ctx) {
     <h2 id="part-${name}-title" tabindex="-1">${esc(name)}</h2>
     <p class="sr-meta">${esc(json.family)} · <code>&lt;${esc(json.element)}&gt;</code></p>
     <p class="sr-summary">${esc(json.summary)}</p>
+    ${notCovered(json)}
     ${lights(part, ctx)}
     ${waits(part, ctx.proof)}
   </header>
