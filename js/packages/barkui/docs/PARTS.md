@@ -223,9 +223,10 @@ matches; a rule or a pair nobody judges fails the part by name.
   not declare, naming the line. (Patching the page's globals is not refused: the check never reads
   through them.) At run time a guard, reading from
   an isolated world the page cannot touch, compares the page with the same build run without any demo:
-  after the demo has run, after every press step and at the end of each light's run, no element in a
-  stage may carry a `style` attribute, the stylesheets, their rules and the adopted sheets must be the
-  build's own, and no animation may run from script. A failure names what changed.
+  after the demo has run, after every press step and at the end of each light's run, every value a
+  `style` attribute in a stage has held holds placement only (see "Placement"), the stylesheets, their
+  rules and the adopted sheets must be the build's own, and no animation may run from script. A failure
+  names what changed.
 
 ## Surfaces
 
@@ -281,6 +282,73 @@ a Tab stop or a driven state opens it as well, it is not read again there. A par
 focus or hover names that input as the layer's `open` (`focus`, or `hover` with the pointer at the control's
 centre), and as its `close` the input that moves away (`keys: ["Tab"]`, or `leave: true`, the pointer taken
 off the page).
+
+## Placement
+
+UI SDK places a popup by writing where it sits into the box's own `style` attribute, and names the control it
+hangs from in that control's. That is all a `style` attribute in a stage may hold: placement is where a box sits,
+never how it looks. A box is an element the check has seen can open in the top layer in the part's stage (a
+`dialog`, or an element that carries `popover`; see "The top layer"). The list, in `check/placement.mjs`, with
+where each may stand and what writes it:
+
+- `anchor-name`: only on an element whose anchor name a box's `position-anchor` names. UI SDK select and menu, on
+  the trigger.
+- `position-anchor`, `position`, `top`, `right`, `bottom`, `left`, `margin-top`, `margin-right`, `margin-bottom`,
+  `margin-left`, `position-try-fallbacks`, `position-visibility`, `--available-height`, `--available-width`,
+  `--anchor-width`, `--anchor-height`, `--transform-origin`, `--arrow-offset`: only on a box. UI SDK select and
+  menu, on the box.
+- `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
+
+Of the values, the check reads transition's, the names anchor-name gives, and the scroll lock's (below). Apart from
+the list, one more entry has its own reason: UI SDK switches motion off on a box while it measures where to put
+it, and `none` takes motion away and adds no look. UI SDK writes it when it first places a select or menu box and
+puts the old value back in the same task, so a reading taken now and then does not see it; the log below does:
+
+- `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
+
+Any other property, a box's property on an element that is not a box, an anchor name no box hangs from, and any
+other transition value fail by name ("… was given opacity in a style attribute, which is not placement: the look
+belongs in part.css"). What is read is each declaration the browser applies, by its name: a shorthand by its
+longhands (`inset` is `top`, `right`, `bottom` and `left`), and `all` by its own name. From the page's first
+frame, a log in the check's own world takes each change to a `style`
+attribute in the document and in each open shadow root, however it is written (the attribute, `el.style`,
+`attributeStyleMap`), with where the element stood as the browser's record of the change shows it, and the values
+held in a stage are judged; so a property written while a box is open and taken away as it closes fails by name.
+A hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first, since the
+browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
+
+The values the same log holds for an element that holds a stage, up to and including the root element, are judged
+too, since a stage inherits from it. Two more rules are read at every look, so the
+order in which the page attaches and moves things cannot matter: a stage whose root node is not the document fails
+by name, and so does an element that holds a stage and hosts a shadow root of any mode. For that, the check asks the
+browser's own tree, element by element, and an element it gets no answer for fails by name too.
+
+In the style attribute of an element that holds a stage nothing may stand, with one closed list apart, in the same
+file, with its own reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It
+writes the lock on the root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar
+that takes room. The list is what UI SDK writes in the browser the check runs (where `scrollbar-gutter` is missing
+it writes `padding-right` instead, which is not on the list):
+
+- `overflow-x`, `overflow-y`: only as `hidden`, only on the root element or body, while a dialog box is open. UI SDK
+  dialog, on the root element.
+- `scroll-behavior`: only as `auto`, only on the root element or body, while a dialog box is open. UI SDK dialog, on
+  the root element.
+- `scrollbar-gutter`: only as `stable`, only on the root element or body, while a dialog box is open. UI SDK dialog,
+  on the root element.
+- `--scrollbar-width`: only as a `px` length, only on the root element or body, while a dialog box is open. UI SDK
+  dialog, on the root element.
+
+UI SDK writes the lock a frame after the box enters the top layer, and takes it away before the box leaves it, in
+the same task; with two dialogs open, the lock stays until the last one closes. A dialog box is a box that is a
+`dialog`, or carries the role `dialog` or `alertdialog`, or holds one. Each write is judged by whether one is open
+when the browser hands the write over, and the writes waiting are taken at each `beforetoggle`, before a box opens or
+closes, so a lock written before a dialog opens, or left after the last one closes, fails by name. `--scrollbar-width`
+reaches every stage, since a custom property inherits; no shipped sheet reads it, and part.css may not (it reads
+only `--ui-*` and `--bark-*`). Another value on a listed property, any other property on the root element or
+body, the lock while no dialog box is open, and any property on another element that holds a stage fail by name
+("… holds a stage, which inherits from it: nothing may stand there"). What is read, and when: the log of `style`
+attributes, kept from the first frame and judged at each look, and the two rules on a stage's root node and the
+shadow roots above it, read at each look.
 
 ## What part.css may condition on
 

@@ -34,33 +34,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases do
   the post was merged from (`field_bases`) or, for a field the page never
   had a number for, the value the form held before it. Any other posted
   field loses its base.
+
+  A post of a text subfield of an object (`path`, `["meta", "label"]`) keeps
+  its base by that path, as TanStack keeps one per pending path
+  (task-71ff11d4e7374985). The object's other subfields keep theirs while
+  it stays unsaved; a post of the object that landed drops them all.
   """
-  def record(saved, before, keys, field_bases, seen) do
+  def record(saved, before, keys, field_bases, seen, path \\ nil) do
     schema = saved.assigns[:editor_schema]
     form = saved.assigns[:editor_form] || %{}
 
     kept =
       if saved.assigns[:save_status] in @held, do: keys -- RefusedSave.clears(saved), else: []
 
+    sub = RemoteValues.text_path(schema, keys, path)
+
     bases =
-      Enum.reduce(keys, all(saved), fn key, acc ->
-        with true <- key in kept and RemoteValues.free_text?(schema, key),
+      Enum.reduce(RemoteValues.units(keys, sub), all(saved), fn key, acc ->
+        with true <- top(key) in kept and RemoteValues.free_text_at?(schema, key),
              {:ok, base} <- typed_on(before, key, field_bases, seen) do
-          Map.put(acc, key, {base, Map.get(form, key)})
+          Map.put(acc, key, {base, RemoteValues.value_at(form, key)})
         else
-          _ -> Map.delete(acc, key)
+          _ when is_binary(key) ->
+            if key in kept, do: Map.delete(acc, key), else: drop_inside(acc, key)
+
+          _ ->
+            Map.delete(acc, key)
         end
       end)
 
     assign(saved, :editor_unsaved_bases, bases)
   end
 
+  # The field and every path into it.
+  defp drop_inside(bases, key),
+    do: Map.reject(bases, fn {k, _} -> k == key or match?([^key | _], k) end)
+
+  defp top([key | _]), do: key
+  defp top(key), do: key
+
   @doc """
   `{:ok, base}` when the form's value of `key` is the text a base was kept
   for, else `:error`.
   """
   def fetch(socket, key) do
-    value = Map.get(socket.assigns[:editor_form] || %{}, key)
+    value = RemoteValues.value_at(socket.assigns[:editor_form] || %{}, key)
 
     case Map.fetch(all(socket), key) do
       {:ok, {base, ^value}} -> {:ok, base}
@@ -70,6 +88,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases do
 
   @doc "Keeps `base` for `value`, the text `key` now holds."
   def put(bases, key, base, value), do: Map.put(bases, key, {base, value})
+
+  @doc "The kept bases of the fields in `held`, and of the paths into them."
+  def only(bases, held), do: Map.filter(bases, fn {key, _} -> MapSet.member?(held, top(key)) end)
 
   @doc "Every kept `{base, text}`, by field."
   def all(socket), do: socket.assigns[:editor_unsaved_bases] || %{}
@@ -90,11 +111,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases do
           not RemoteValues.unnumbered?(before, key, seen) ->
             :error
 
-          MapSet.member?(before.assigns[:editor_unsaved_keys] || MapSet.new(), key) ->
+          MapSet.member?(before.assigns[:editor_unsaved_keys] || MapSet.new(), top(key)) ->
             fetch(before, key)
 
           true ->
-            {:ok, Map.get(before.assigns[:editor_form] || %{}, key)}
+            {:ok, RemoteValues.value_at(before.assigns[:editor_form] || %{}, key)}
         end
     end
   end

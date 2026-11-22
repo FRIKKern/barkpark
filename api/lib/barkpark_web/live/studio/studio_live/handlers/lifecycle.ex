@@ -13,7 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, PostPath, Shared}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases, UnsavedObjects}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -216,23 +216,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       {mine, clashed, kept} =
         Enum.reduce(keys, {%{}, [], UnsavedBases.all(socket)}, fn key, {mine, clashed, kept} ->
           theirs_value = Map.get(theirs, key)
+          {b, m} = {Map.get(base, key), Map.get(local, key)}
 
-          case clash(
-                 typed[key],
-                 Map.get(base, key),
-                 Map.get(local, key),
-                 theirs_value,
-                 schema,
-                 key
-               ) do
-            {:ours, value} ->
-              {Map.put(mine, key, value), clashed, kept}
+          case UnsavedObjects.subfields(schema, key, b, m, theirs_value) do
+            nil ->
+              field_clash(typed[key], b, m, theirs_value, schema, key, {mine, clashed, kept})
 
-            {:took, value} ->
-              {Map.put(mine, key, value), clashed, took(kept, schema, key, theirs_value, value)}
+            # An object: subfield by subfield, a text subfield by its path
+            # (task-71ff11d4e7374985).
+            subs ->
+              {value, clashed?, kept} =
+                UnsavedObjects.merge(socket, subs, [key], b, m, theirs_value, kept, &clash/6)
 
-            :clash ->
-              {Map.put(mine, key, Map.get(local, key)), [key | clashed], kept}
+              {Map.put(mine, key, value), if(clashed?, do: [key | clashed], else: clashed), kept}
           end
         end)
 
@@ -251,6 +247,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
           {key, {was_base, Map.get(theirs, key)}}
         end)
+        |> Map.merge(UnsavedObjects.push_bases(socket, MapSet.to_list(keys), base, theirs))
 
       socket =
         socket
@@ -263,6 +260,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         )
 
       {socket, clashed}
+    end
+  end
+
+  defp field_clash(typed, base, mine_value, theirs_value, schema, key, {mine, clashed, kept}) do
+    case clash(typed, base, mine_value, theirs_value, schema, key) do
+      {:ours, value} ->
+        {Map.put(mine, key, value), clashed, kept}
+
+      {:took, value} ->
+        {Map.put(mine, key, value), clashed, took(kept, schema, key, theirs_value, value)}
+
+      :clash ->
+        {Map.put(mine, key, mine_value), [key | clashed], kept}
     end
   end
 

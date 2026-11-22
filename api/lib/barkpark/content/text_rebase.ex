@@ -66,13 +66,16 @@ defmodule Barkpark.Content.TextRebase do
   #{@max_bytes} bytes, is left alone.
   """
   @spec rebase(map(), map(), map()) :: map()
+  #
+  # A key may be a path into an object (`["meta", "label"]`,
+  # task-71ff11d4e7374985): the subfield is merged as a top-level field is.
   def rebase(params, bases, current) when is_map(params) and is_map(bases) do
     Enum.reduce(bases, params, fn {key, base}, acc ->
-      with posted when is_binary(posted) <- Map.get(acc, key),
-           stored when is_binary(stored) <- Map.get(current, key),
+      with posted when is_binary(posted) <- at(acc, key),
+           stored when is_binary(stored) <- at(current, key),
            true <- is_binary(base) and stored != base and posted != stored,
            true <- Enum.all?([base, posted, stored], &(byte_size(&1) <= @max_bytes)) do
-        Map.put(acc, key, merge3(base, posted, stored))
+        put(acc, key, merge3(base, posted, stored))
       else
         _ -> acc
       end
@@ -80,6 +83,26 @@ defmodule Barkpark.Content.TextRebase do
   end
 
   def rebase(params, _bases, _current), do: params
+
+  defp at(map, [key]) when is_map(map), do: Map.get(map, key)
+
+  defp at(map, [key | rest]) when is_map(map) do
+    case Map.get(map, key) do
+      %{} = inner when not is_struct(inner) -> at(inner, rest)
+      _ -> nil
+    end
+  end
+
+  defp at(map, key) when is_map(map), do: Map.get(map, key)
+  defp at(_map, _key), do: nil
+
+  # Only called where `at/2` found a string, so every map on the path is there.
+  defp put(map, [key], value), do: Map.put(map, key, value)
+
+  defp put(map, [key | rest], value),
+    do: Map.put(map, key, put(Map.fetch!(map, key), rest, value))
+
+  defp put(map, key, value), do: Map.put(map, key, value)
 
   @doc false
   def max_bytes, do: @max_bytes
