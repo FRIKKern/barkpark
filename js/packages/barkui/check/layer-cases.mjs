@@ -216,16 +216,14 @@ export const LAYER_CASES = [
   },
   // Its own run: were either call let through, it would take the page away and every other row with it.
   {
-    name: "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), markup written into the parsed page (document.write), and a closed shadow root (attachShadow, or a closed declared root in markup)",
+    name: "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), and markup written into the parsed page (document.write)",
     only: ['skins'],
     layers: true,
-    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; a.target = '_blank'; a.rel = 'opener'; document.body.append(a); a.click(); a.remove(); window.open(''); document.write('<p>Written late</p>') })\nroot.querySelector('#button-secondary').addEventListener('focus', () => { const h = document.createElement('span'), g = document.createElement('span'); root.querySelector('#button-after').after(h, g); h.attachShadow({ mode: 'closed' }); g.setHTMLUnsafe('<span><template shadowrootmode=\"clos&#101;d\"><b>Hidden</b></template></span>') })"),
+    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; a.target = '_blank'; a.rel = 'opener'; document.body.append(a); a.click(); a.remove(); window.open(''); document.write('<p>Written late</p>') })"),
     expect: each({
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
       'another window opened by a link with a target, refused by name': skinsSay(new RegExp(esc(REFUSED.window))),
       'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
-      'attachShadow with mode closed, refused by name': skinsSay(new RegExp(esc(REFUSED['attachShadow.closed']))),
-      'a closed declared root in markup given to setHTMLUnsafe, its mode spelled with a character reference, refused by name': skinsSay(new RegExp(esc(REFUSED['markup.closed']))),
     }),
   },
   {

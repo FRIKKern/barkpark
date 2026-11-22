@@ -27,10 +27,9 @@
 // - A box open in the top layer that no layer names fails at every moment the check judges or drives the part: each
 //   reading, each Tab stop of the focus walk, each press step, each driven state, and each layer's open and close.
 // A layer's box opens at once on its input: one not open once its input settles fails by name, so a box that opens
-// late (a tooltip with a delay) cannot pass as named. A closed shadow root, which no world of the check can read
-// into, is refused by name however the page makes it (tellRoots). The one limit: a box the page never holds while
-// the check has it open, up to the check's last look (one made only after an input the check never gives), is not
-// seen.
+// late (a tooltip with a delay) cannot pass as named. The one limit: a box the page never holds while the check has
+// it open, up to the check's last look (one made only after an input the check never gives), or one only inside a
+// closed shadow root, is not seen.
 import { limit } from './limit.mjs'
 import { placementSource } from './placement.mjs'
 import { source } from './probes.mjs'
@@ -139,8 +138,6 @@ export const REFUSED = {
   'document.writeln': 'the page called document.writeln after it was parsed, which the check refuses: it starts the document again, and the check\'s watch with it',
   'document.open': 'the page called document.open, which the check refuses: it starts the document again, and the check\'s watch with it',
   window: 'the page opened another window (by a link or a form with a target), which the check refuses: another window, which the check does not watch',
-  'attachShadow.closed': 'the page called attachShadow with mode "closed", which the check refuses: a closed shadow root, which no reading can see into',
-  'markup.closed': 'the page gave markup with a closed declared shadow root to setHTMLUnsafe, setHTML, parseHTMLUnsafe or parseHTML, which the check refuses: a closed shadow root, which no reading can see into',
 }
 /** How a selftest case's check run touched the top layer, by what it did, not by its name: its part names a layer,
     or the run says one of the top layer's fails (a box no layer names, open or not; a frame; a refused call).
@@ -201,7 +198,7 @@ function census(placement, script) {
   if (document.documentElement) take(document.documentElement)
   // The host, at once inside attachShadow, before the page can put anything in its new root.
   addEventListener('barkui-census-root', (e) => take(e.composedPath()[0]), true)
-  for (const at of ['window.open', 'document.write', 'document.writeln', 'document.open', 'attachShadow.closed', 'markup.closed'])
+  for (const at of ['window.open', 'document.write', 'document.writeln', 'document.open'])
     addEventListener(`barkui-census-${at}`, () => seen.has(at) || seen.set(at, { of: null, kind: 'call' }), true)
   globalThis.__barkPlacement = (part) => {
     // Every box seen so far, even one given popover and gone again since the last delivery.
@@ -228,7 +225,7 @@ function census(placement, script) {
     attachShadow tells the census each host the moment its root exists, by an event the census hears first. What
     would put a window or a document out of the census's sight is refused and told by name instead: window.open, and
     document.open, write and writeln once the document is parsed (while it is parsing, written markup is parsed like
-    the rest), and a closed shadow root, made by attachShadow or by markup. removeAttribute and removeAttributeNS bring a style attribute up to date before they run: Chromium
+    the rest). removeAttribute and removeAttributeNS bring a style attribute up to date before they run: Chromium
     writes a style set through el.style or attributeStyleMap into the attribute only when it is next read, and
     removeAttribute does not read it first, so the record the placement log gets would hold the value before that
     write, not the one the element held (placement.mjs). The page cannot remove or replace any of these, and they
@@ -239,54 +236,11 @@ function tellRoots() {
   const [attach, write, writeln, ready] = [Element.prototype.attachShadow, Document.prototype.write, Document.prototype.writeln, Object.getOwnPropertyDescriptor(Document.prototype, 'readyState').get]
   const tell = (target, type) => apply(send, target, [new Ev(type, { bubbles: true, composed: true })])
   const fix = (o, k, value) => define(o, k, { value, writable: false, enumerable: true, configurable: false })
-  // A closed shadow root is one no world of the check can read into, so every way the page has of making one is
-  // refused by name and not done: attachShadow with mode "closed" (the init is read once, here, and that copy is what
-  // the browser gets), and markup holding a closed declared root given to setHTMLUnsafe, setHTML, parseHTMLUnsafe or
-  // parseHTML (the markup is read once as text; a copy parsed by DOMParser, which attaches no root, shows each
-  // declared root's mode as the parser decodes it). innerHTML, insertAdjacentHTML, createContextualFragment and
-  // DOMParser attach no declared root.
-  const [parse, qsa, item, count, mode, content] = [
-    DOMParser.prototype.parseFromString,
-    Document.prototype.querySelectorAll,
-    NodeList.prototype.item,
-    Object.getOwnPropertyDescriptor(NodeList.prototype, 'length').get,
-    Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype, 'shadowRootMode').get,
-    Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype, 'content').get,
-  ]
-  const fragQsa = DocumentFragment.prototype.querySelectorAll
-  const Parser = DOMParser
-  const closedIn = (node, find) => {
-    const list = apply(find, node, ['template'])
-    for (let i = 0, n = apply(count, list, []); i < n; i++) {
-      const t = apply(item, list, [i])
-      if (apply(mode, t, []) === 'closed' || closedIn(apply(content, t, []), fragQsa)) return true
-    }
-    return false
-  }
-  const closedMarkup = (text) => closedIn(apply(parse, new Parser(), [text, 'text/html']), qsa)
   fix(Element.prototype, 'attachShadow', function attachShadow(init) {
-    let copy = init
-    if (init !== null && typeof init === 'object') {
-      copy = {}
-      for (const k of ['mode', 'delegatesFocus', 'slotAssignment', 'clonable', 'serializable', 'customElementRegistry']) {
-        const v = init[k]
-        if (v !== undefined) copy[k] = k === 'mode' ? String(v) : v
-      }
-      if (copy.mode === 'closed') return void tell(window, 'barkui-census-attachShadow.closed')
-    }
-    const root = apply(attach, this, [copy])
+    const root = apply(attach, this, [init])
     tell(this, 'barkui-census-root')
     return root
   })
-  for (const [o, k] of [[Element.prototype, 'setHTMLUnsafe'], [ShadowRoot.prototype, 'setHTMLUnsafe'], [Element.prototype, 'setHTML'], [ShadowRoot.prototype, 'setHTML'], [Document, 'parseHTMLUnsafe'], [Document, 'parseHTML']]) {
-    const f = o[k]
-    if (typeof f !== 'function') continue
-    fix(o, k, function (html, ...rest) {
-      const text = String(html)
-      if (closedMarkup(text)) return void tell(window, 'barkui-census-markup.closed')
-      return apply(f, this, [text, ...rest])
-    })
-  }
   fix(Element.prototype, 'removeAttribute', function removeAttribute(...a) {
     apply(getAttr, this, ['style'])
     return apply(removeAttr, this, a)
