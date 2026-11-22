@@ -104,14 +104,11 @@ function leftChanged(before, after) {
 }
 
 /** Runs in the check's world: which checkboxes and radios of the stage are checked; given that list, puts them back
-    so and settles their transitions. The check's own housekeeping after a real click, not a state it reads. */
+    so, through restyle, so putting them back starts no transition. The check's own housekeeping after a real click. */
 function checks([n, put]) {
   const root = document.querySelector(`[data-part="${n}"]`)
   const boxes = [...root.querySelectorAll('input[type="checkbox"], input[type="radio"]')]
-  if (put) {
-    boxes.forEach((b, i) => (b.checked = put[i]))
-    for (const b of boxes) for (const a of b.getAnimations({ subtree: true })) if (a instanceof CSSTransition) a.finish()
-  }
+  if (put) window.__barkCheck.restyle('checkboxes and radios put back', () => boxes.forEach((b, i) => (b.checked = put[i])))
   return boxes.map((b) => b.checked)
 }
 

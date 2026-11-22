@@ -287,18 +287,39 @@ export function installHelpers() {
     return opacity < 0.1 ? `is ${opacity} opaque` : true
   }
 
-  /** Waits until what runs with an end has ended (at most 2s), then until every part's computed colours read the
-      same on two frames 50ms apart (at most 2s).
-      Polled on animation frames: in a headless page, transitions advance only when a frame runs. */
+  /** What moves on the page now: the one meaning of "at rest" in the check, used by settle and by the gate. A
+      transition or animation that is running moves, in its delay too; a paused one (the motion light holds them at
+      one moment on purpose) shows what the page truly shows, and is at rest. `ends`: only those that have an end. */
+  const moving = (ends = false) =>
+    document.getAnimations().filter((a) => a.playState === 'running' && (!ends || a.effect?.getComputedTiming().endTime !== Infinity))
+  const named = (list) =>
+    [...new Set(list.map((a) => `${describe(a.effect?.target ?? null)}${a.effect?.pseudoElement ?? ''} ${a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : a instanceof CSSAnimation ? `animation ${a.animationName}` : 'animation'}`))].slice(0, 3).join('; ')
+  /** The check's own red, not a part's: a look is read only on a page at rest. */
+  const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
+  const atRest = (who) => {
+    const now = moving()
+    if (now.length) throw new Error(`${AT_REST}: ${who}: ${named(now)}`)
+  }
+  /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an
+      animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
+  const toRest = async () => {
+    const until = performance.now() + 2000
+    while (moving(true).length && performance.now() < until) await frame()
+  }
+  /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
+  const still = async (who) => {
+    await toRest()
+    atRest(who)
+  }
+  /** Waits until the page is at rest (inside the bound), then until every part's computed colours read the same on
+      two frames 50ms apart (at most 2s). */
   const settle = async () => {
     const read = () => [...document.querySelectorAll('[data-slot]')].map((el) => {
-      const s = getComputedStyle(el)
+      const s = raw.getComputedStyle(el)
       return `${s.color}|${s.backgroundColor}|${s.borderTopColor}|${s.boxShadow}`
     }).join(';')
     await frame()
-    // Everything running that has an end: an endless animation never comes to rest; the motion light pauses it.
-    const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity)
-    await Promise.race([Promise.all(running.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 2000))])
+    await toRest()
     await frame()
     let last = read()
     for (let i = 0; i < 40; i++) {
@@ -310,24 +331,32 @@ export function installHelpers() {
     }
   }
 
+  /** Every way the check learns a look in this world: each reads only a page at rest, or is red by name. The
+      world is isolated, so the page cannot reach these or undo them. `raw` keeps the ungated ones for the gate's own
+      waiting (settle compares colours while the page comes to rest). */
+  const raw = {}
+  const LOOKS = [
+    [window, 'getComputedStyle'], [window, 'matchMedia'],
+    [Element.prototype, 'getBoundingClientRect'], [Element.prototype, 'getClientRects'], [Element.prototype, 'checkVisibility'], [Element.prototype, 'computedStyleMap'],
+    [Range.prototype, 'getBoundingClientRect'], [Range.prototype, 'getClientRects'],
+    [Document.prototype, 'elementFromPoint'], [Document.prototype, 'elementsFromPoint'], [Document.prototype, 'caretPositionFromPoint'], [Document.prototype, 'caretRangeFromPoint'],
+    ...['offsetWidth', 'offsetHeight', 'offsetTop', 'offsetLeft', 'offsetParent'].map((k) => [HTMLElement.prototype, k, 'get']),
+    ...['clientWidth', 'clientHeight', 'clientTop', 'clientLeft', 'scrollWidth', 'scrollHeight', 'scrollTop', 'scrollLeft'].map((k) => [Element.prototype, k, 'get']),
+  ]
+  const gated = []
+  for (const [on, key, get] of LOOKS) {
+    const name = `${on === window ? 'window' : on.constructor.name}.${key}`
+    const d = Object.getOwnPropertyDescriptor(on, key)
+    const fn = get ? d?.get : d?.value
+    if (typeof fn !== 'function') continue
+    if (on === window) raw[key] = fn.bind(window)
+    const wrapped = { [key](...a) { atRest(name); return fn.apply(this, a) } }[key]
+    Object.defineProperty(on, key, get ? { ...d, get: wrapped } : { ...d, value: wrapped })
+    gated.push(name)
+  }
+  const looks = { ways: LOOKS.length, gated }
+
   const state = {}
-  /** What moves on the page now: every animation or transition that is running. One paused by the check (the motion
-      light holds them at one moment on purpose) is at rest. */
-  const moving = () =>
-    document.getAnimations().filter((a) => a.playState === 'running').map((a) => `${describe(a.effect?.target ?? document.body)}${a.effect?.pseudoElement ?? ''} ${a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : a instanceof CSSAnimation ? `animation ${a.animationName}` : 'animation'}`)
-  /** Red by name when the page is not at rest: a read (or a change of the checker's) never happens mid-way. */
-  const atRest = (who) => {
-    const now = moving()
-    if (now.length) throw new Error(`read on a page not at rest: ${who}: ${[...new Set(now)].slice(0, 3).join('; ')}`)
-  }
-  /** The door before a read: what runs with an end is waited for, inside settle's bound of 2s, a frame at a time;
-      then the page is at rest, or red by name. */
-  const still = async (who) => {
-    const until = performance.now() + 2000
-    const ends = () => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity)
-    while (ends().length && performance.now() < until) await frame()
-    atRest(who)
-  }
   /** The one way the checker changes the page's look (a sheet of its own on or off, a pin set or taken off): `change`
       runs with transitions held off by a first-layer sheet of the checker's own, and style is brought up to date
       before that sheet goes, so the change starts no transition. The checker adds no animation to the page.
@@ -347,7 +376,7 @@ export function installHelpers() {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, still, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, still, looks, AT_REST, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

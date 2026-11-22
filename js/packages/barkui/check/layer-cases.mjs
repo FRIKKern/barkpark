@@ -74,9 +74,9 @@ const CENSUS_JS = [
 const HINT = { box: '#button-hint', open: { hover: '#button-hint-open' }, close: { leave: true } }
 const SLOW = { box: '#button-slow', open: { hover: '#button-slow-open' }, close: { leave: true } }
 const since = { n: 0, ms: 0 }
-const withPopover = (d) => appendFileSync(join(d, 'example.html'), POPOVER)
+export const withPopover = (d) => appendFileSync(join(d, 'example.html'), POPOVER)
 const LAYER = { box: '#button-pop', open: { click: '#button-pop-open' }, close: { keys: ['Escape'] } }
-const named = (d, layers = [LAYER]) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers }, null, 2))
+export const named = (d, layers = [LAYER]) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), layers }, null, 2))
 /** Faint text in a white box drawn in the top layer at the page's left edge, `top` px down: outside the stage. */
 const faint = (id, top) => `#${id} { position: absolute; inset: auto; left: 8px; top: ${top}px; margin: 0; padding: 8px 12px; border: 0; background-color: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif; }`
 const UNNAMED_AT = (box) => `${box} is open in the top layer during the reading, and no layer in part.json names it`
@@ -215,98 +215,6 @@ async function overTwoGrounds() {
   }
 }
 
-/** The button part with the named "Details" popover, `css` planted, opened with motion `motion`; `go` gets the page
-    and the part, and its answer is the case's. */
-async function onPage(css, motion, go) {
-  const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
-  try {
-    const dir = join(scratch, 'parts')
-    cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
-    withPopover(join(dir, 'button'))
-    named(join(dir, 'button'))
-    const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
-    const part = built.parts.find((x) => x.name === 'button')
-    const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { motion })
-    return await go(page, part)
-  } finally {
-    await browser.close()
-    rmSync(scratch, { recursive: true, force: true })
-  }
-}
-/** The popover opened by its click, hidden for the capture of what is behind it and drawn again, as a reading does:
-    what the read straight after each sees, or the error that refused it. `made`: animations on the page that are no
-    transition or animation of a stylesheet's, so ones the checker would have made. */
-async function hiddenAndBack(page) {
-  await page.click('#button-pop-open')
-  // The click's own hover and focus changes run their course first, as they would before any reading.
-  await page.waitForTimeout(100)
-  const look = (on) =>
-    page.barkCheck((on) => {
-      const box = document.getElementById('button-pop')
-      try {
-        window.__barkCheck.hideLayers(on)
-      } catch (e) {
-        return { error: String(e.message) }
-      }
-      const made = document.getAnimations().filter((a) => !(a instanceof CSSTransition || a instanceof CSSAnimation)).length
-      return { opacity: Number(getComputedStyle(box).opacity), running: box.getAnimations().length, made }
-    }, on)
-  const hidden = await look(true)
-  // Frames pass while the capture is taken.
-  await page.waitForTimeout(100)
-  const back = await look(false)
-  return { hidden, back }
-}
-const NOT_AT_REST = /read on a page not at rest: .*div#button-pop /
-/** Under reduced motion every property has a 0.01ms transition: hidden and drawn again, the box reads at its new
-    opacity at once, in the same task; the change starts no transition and the checker adds no animation. */
-const undone = () =>
-  onPage('', 'reduce', async (page) => {
-    const { hidden, back } = await hiddenAndBack(page)
-    const held = hidden.opacity === 0 && hidden.running === 0 && hidden.made === 0 && back.opacity === 1 && back.running === 0 && back.made === 0
-    if (!held) console.log(`    hidden: ${JSON.stringify(hidden)}; drawn again: ${JSON.stringify(back)}`)
-    return held
-  })
-/** What the page does by its own rule is never undone by the checker. Held at opacity 0 by its own style, the box
-    reads 0 and red. Still moving by its own rule when the checker would hide it or pin a state, the page is not at
-    rest: the reading waits inside settle's bound, then is red by name; it never reads a number in between. */
-const ownLook = () =>
-  each({
-    'a box its own style holds at opacity 0 reads at 0 when drawn again, and the reading is red at it': () =>
-      onPage('#button-pop { opacity: 0; }', 'reduce', async (page, part) => {
-        const { back } = await hiddenAndBack(page)
-        const fails = verdict(await readView(page, part)).fails.filter((f) => f.includes('div#button-pop '))
-        if (back.opacity !== 0 || !fails.length) console.log(`    drawn again: ${JSON.stringify(back)}; fails: ${JSON.stringify(fails)}`)
-        return back.opacity === 0 && fails.length > 0
-      }),
-    'a box still fading in by its own 60 s transition is not at rest: hiding it and reading it are red by name': () =>
-      onPage('#button-pop { transition: opacity 60s linear; } @starting-style { #button-pop:popover-open { opacity: 0; } }', 'no-preference', async (page, part) => {
-        const { hidden } = await hiddenAndBack(page)
-        const read = await readView(page, part).then(() => 'read', (e) => String(e.message))
-        const held = NOT_AT_REST.test(hidden.error ?? '') && NOT_AT_REST.test(read)
-        if (!held) console.log(`    hiding: ${JSON.stringify(hidden)}; reading: ${read.slice(0, 200)}`)
-        return held
-      }),
-    "a control fading by its own 2 s rule when the checker pins a state reads the pinned state or is red by name, never between": () =>
-      onPage('#button-pop-open { transition: opacity 2s linear; } #button-pop-open[data-pin="active"] { opacity: 0.2; } #button-pop-open[data-pin="hover"] { opacity: 1; }', 'no-preference', async (page) => {
-        const got = await page.barkCheck(() => {
-          const el = document.getElementById('button-pop-open')
-          el.setAttribute('data-pin', 'active')
-          document.getAnimations()
-          try {
-            window.__barkCheck.restyle('a pin for the case', () => el.setAttribute('data-pin', 'hover'))
-          } catch (e) {
-            return { error: String(e.message) }
-          }
-          return { opacity: Number(getComputedStyle(el).opacity) }
-        })
-        const held = got.opacity === 1 || /read on a page not at rest: .*button#button-pop-open /.test(got.error ?? '')
-        if (!held) console.log(`    pinned: ${JSON.stringify(got)}`)
-        return held
-      }),
-  })()
-
 // Two runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
 // time for one case: the first reads named and unnamed boxes open, the second the boxes the census must name.
 const BOXES_CSS = [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n')
@@ -403,13 +311,5 @@ export const LAYER_CASES = [
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
     direct: overTwoGrounds,
-  },
-  {
-    name: 'top layer: a box hidden for the capture behind it and drawn again reads at its new opacity at once, with no transition running',
-    direct: undone,
-  },
-  {
-    name: "top layer: a box held at opacity 0 by its own style reads so and is red; a page still moving by its own rule is red by name as not at rest",
-    direct: ownLook,
   },
 ]
