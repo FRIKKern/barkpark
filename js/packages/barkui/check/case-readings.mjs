@@ -66,7 +66,7 @@ export const CASE_READINGS = {
       "a selftest whose last case passes its ceiling stops there, failing, with the sentence": 0.5,
       "top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name": 43.7,
       "top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load": 38.8,
-      "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), and markup written into the parsed page (document.write)": 19.8,
+      "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)": 19.8,
       "the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent": 3.3,
       "one part more than one CI job holds is refused, with the sentence that says how many it holds": 0.1,
       "a part.json that names a property to allow is refused at discovery": 0,

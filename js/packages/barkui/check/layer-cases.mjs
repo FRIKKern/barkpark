@@ -10,7 +10,7 @@ import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
-import { all, both, each, edit, esc, inDemo, skinsSay } from './plants.mjs'
+import { all, both, each, edit, esc, inDemo, reasons, skinsSay } from './plants.mjs'
 import { FRAME, LATE, looks, REFUSED, UNNAMED_CAN } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
@@ -202,15 +202,20 @@ export const LAYER_CASES = [
       return each(censusRows(m, n))(p, ...rest)
     },
   },
-  // Its own run: were either call let through, it would take the page away and every other row with it.
+  // Its own run: were either call let through, it would take the page away and every other row with it. The first
+  // focus makes three pages the check did not open, in three ways, and calls window.open: each page is refused, once.
   {
-    name: "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), and markup written into the parsed page (document.write)",
+    name: "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)",
     only: ['skins'],
     layers: true,
-    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; a.target = '_blank'; a.rel = 'opener'; document.body.append(a); a.click(); a.remove(); window.open(''); document.write('<p>Written late</p>') })"),
+    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; document.body.append(a); a.target = '_blank'; a.rel = 'opener'; a.click(); a.removeAttribute('target'); a.removeAttribute('rel'); for (const init of [{ shiftKey: true }, { button: 1 }]) a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init })); a.remove(); window.open(''); document.write('<p>Written late</p>') }, { once: true })"),
     expect: each({
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
-      'another window opened by a link with a target, refused by name': skinsSay(new RegExp(esc(REFUSED.window))),
+      'every page the check did not open, refused by name, once each': (p) => {
+        const n = (s) => reasons(p, 'skins').filter((f) => f.includes(s)).length
+        console.log(`    pages the check did not open, refused: ${n(REFUSED.page)} of the 3 made`)
+        return n(REFUSED.page) === 3
+      },
       'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
     }),
   },

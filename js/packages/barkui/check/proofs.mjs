@@ -45,6 +45,10 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.on('console', (m) => m.type() === 'error' && ctx.errors.push(`${where}: console: ${m.text().slice(0, 200)}`))
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
   if (clock) await page.clock.install()
+  // A blank page in the same context, where things are drawn alone for reference (see drawn.mjs). It is opened
+  // before the census is set: the census refuses every page it did not find there.
+  const ref = await context.newPage()
+  await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   // What can enter the top layer is watched from the first frame (layers.mjs census).
   page.barkCensus = await installCensus(page)
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
@@ -63,9 +67,6 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   await page.barkCheck(installLayers)
   page.barkCdp = await page.context().newCDPSession(page)
   page.barkScale = scale
-  // A blank tab in the same context, where things are drawn alone for reference (see drawn.mjs).
-  const ref = await page.context().newPage()
-  await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   page.barkRef = { page: ref, world: await isolate(ref, 'barkui-ref') }
   for (const install of [installHelpers, installBoundary, installMatch, installDrawn]) await page.barkRef.world(install)
   installCover(page, ctx)
