@@ -20,6 +20,7 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
+  alias Barkpark.Content.Forms.ObjectRebase
   alias Barkpark.Content.Forms.Unset
 
   alias Barkpark.Content.{
@@ -1138,7 +1139,13 @@ defmodule Barkpark.Content.Forms do
     snapshot = Map.get(base_doc, :content) || %{}
     base_content = Map.get(current_doc, :content) || %{}
 
-    params = params |> edits(snapshot, schema) |> Map.merge(whole)
+    # An object field writes only the subfields the post changed
+    # (`ObjectRebase`), onto what the store holds now.
+    params =
+      params
+      |> edits(snapshot, schema)
+      |> ObjectRebase.onto(snapshot, base_content, schema)
+      |> Map.merge(whole)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->

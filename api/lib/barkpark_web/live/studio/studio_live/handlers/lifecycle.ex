@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
-  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, PostPath, Shared}
   alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
@@ -317,19 +317,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   carries that editor's fields at their old values, and they stay dropped
   (`PostedEdits`, task-a4ded0be5c8ec3cb). The rev and `updated_at` stay
   this tab's own.
+
+  Inside an object only the subfield changed (`editor_post_path`,
+  `meta.code`) is taken from the newest version (`PostPath`): its siblings
+  are read against this tab's own row, as other fields are
+  (task-04e50efa8405b956).
   """
   def post_base(socket) do
     own = socket.assigns[:editor_doc]
     seen = base_doc(socket)
+    path = {socket.assigns[:editor_post_path], PostPath.shapes(socket)}
 
     case List.wrap(socket.assigns[:editor_post_target]) do
       [_ | _] = keys when is_map(own) and is_map(seen) and seen != own ->
-        Enum.reduce(keys, own, &take_seen(&2, seen, &1))
+        Enum.reduce(keys, own, &take_seen(&2, seen, &1, path))
 
       _ ->
         own
     end
   end
+
+  defp take_seen(doc, seen, key, {[key, sub | _] = path, shapes})
+       when is_binary(sub) and key not in ["title", "status"] do
+    own = doc.content || %{}
+    theirs = seen.content || %{}
+
+    case PostPath.unit(path, shapes, own, theirs) do
+      [_, _ | _] = at -> %{doc | content: PostPath.put(own, theirs, at)}
+      _ -> take_seen(doc, seen, key)
+    end
+  end
+
+  defp take_seen(doc, seen, key, _path), do: take_seen(doc, seen, key)
 
   defp take_seen(doc, seen, key) when key in ["title", "status"] do
     atom = String.to_existing_atom(key)

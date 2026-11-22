@@ -65,8 +65,12 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   @failed ["Save failed", "Save cancelled"]
   @reason_max 300
 
-  @doc "Names the top-level fields the next `write/4` is a change of."
-  def target(socket, keys) when is_list(keys), do: assign(socket, :editor_save_target, keys)
+  @doc """
+  Names the top-level fields the next `write/4` is a change of, and `path`,
+  the input changed inside one of them (`["meta", "code"]`), when known.
+  """
+  def target(socket, keys, path \\ nil) when is_list(keys),
+    do: assign(socket, editor_save_target: keys, editor_save_path: path)
 
   @doc """
   Codelist fields whose post was not a code (`Forms.CodelistShape.split/2`)
@@ -123,8 +127,11 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     socket =
       assign(socket,
         editor_save_target: nil,
-        # The field this write is a change of, for `PostedEdits`.
+        editor_save_path: nil,
+        # The field this write is a change of, for `PostedEdits`, and the
+        # input inside it (`Lifecycle.post_base/1`).
         editor_post_target: keys,
+        editor_post_path: socket.assigns[:editor_save_path],
         editor_save_error: nil,
         editor_save_error_fields: nil
       )

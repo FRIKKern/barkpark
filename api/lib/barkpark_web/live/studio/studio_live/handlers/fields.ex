@@ -377,7 +377,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
           form = picked_form(socket, path, code)
-          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1))
+          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1), path)
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
           {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
@@ -477,6 +477,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
+        path = target_path(params, keys)
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
         based =
@@ -486,7 +487,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
         saved =
           based
-          |> RefusedSave.target(keys)
+          |> RefusedSave.target(keys, path)
           |> Shared.do_autosave(doc, :change)
           |> RemoteValues.settle(socket, keys, doc)
 
@@ -1050,4 +1051,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   defp target_key(_params, _schema), do: []
+
+  # The changed input's path under its top-level field: `doc[meta].code`
+  # is `["meta", "code"]`. nil when it is not under the one target field.
+  defp target_path(params, [key]) do
+    path =
+      case params do
+        %{"_target" => ["doc", _ | rest]} -> [key | rest]
+        %{"_target" => [name]} when is_binary(name) -> StudioLive.parse_path(name)
+        _ -> []
+      end
+
+    if match?([^key | _], path), do: path
+  end
+
+  defp target_path(_params, _keys), do: nil
 end
