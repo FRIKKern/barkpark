@@ -830,11 +830,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <% end %>
 
           <.cross_violations_banner violations={@cross_violations} />
-          <.doc_conflict_banner
-            conflict={@doc_conflict}
-            disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
-            theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
-          />
+          <%!-- An always-drawn slot (no box of its own): a banner that came
+                and went changed the children here, and morphdom moved the
+                fields below to put it in, which blurred the editor and ended
+                an IME composition (#28349 r3 review, K6). --%>
+          <div id="doc-conflict-slot" style="display: contents;">
+            <.doc_conflict_banner
+              conflict={@doc_conflict}
+              disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
+              theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
+            />
+          </div>
           <.paper_halt_banner reason={@paper_halt} />
 
           <%= if @show_diff do %>

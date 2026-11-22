@@ -73,14 +73,23 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
   # #28349 r3 review, K6: the hold drew the banner above an id-less
   # fieldset; the patch took the fieldset out and put it back, which blurred
   # the editor and ended A's IME composition.
-  test "desk: the fields' fieldset keeps one id through a hold, so the patch keeps it in place",
+  # The id alone was not enough in Chrome: morphdom met the new banner where
+  # the fieldset was and moved the fieldset to put it in. The banner has an
+  # always-drawn slot, so the children around the fields never change.
+  test "desk: a hold draws the banner inside its slot, the fields' fieldset keeps its place",
        c do
     a = open(c)
     b = open(c)
-    assert render(a) =~ ~s(<fieldset id="dk-readonly-fields")
+    before = render(a)
+    assert before =~ ~s(<div id="doc-conflict-slot")
+    assert before =~ ~s(<fieldset id="dk-readonly-fields")
     _ = held_by_clash(a, b, c)
-    assert render(a) =~ "bp-doc-conflict"
-    assert render(a) =~ ~s(<fieldset id="dk-readonly-fields")
+    html = render(a)
+
+    assert html =~
+             ~r|<div id="doc-conflict-slot"[^>]*>\s*<div class="bp-violations bp-doc-conflict"|
+
+    assert html =~ ~s(<fieldset id="dk-readonly-fields")
   end
 
   # #28349 r2 review, SV2: Reload took theirs into the form but the editor
