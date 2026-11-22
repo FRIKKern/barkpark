@@ -161,6 +161,41 @@ defmodule BarkparkWeb.SchemaArrayOfRefusalTest do
     assert resp.status == 201, resp.resp_body
   end
 
+  # `parse/2` reads `fields` only on a composite, image or file, and `of`
+  # only on an arrayOf: a bare arrayOf anywhere else is not a field it
+  # parses, and the changeset agrees with it.
+  for {label, field} <- [
+        {"an object's fields",
+         %{
+           "name" => "box",
+           "type" => "object",
+           "fields" => [%{"name" => "inner", "type" => "arrayOf"}]
+         }},
+        {"a legacy array's of",
+         %{
+           "name" => "rows",
+           "type" => "array",
+           "of" => [%{"name" => "inner", "type" => "arrayOf"}]
+         }},
+        {"a string's stray fields",
+         %{
+           "name" => "word",
+           "type" => "string",
+           "fields" => [%{"name" => "inner", "type" => "arrayOf"}]
+         }}
+      ] do
+    @field field
+    @slug label |> String.replace(~r/[^a-z]+/, "_") |> String.trim("_")
+
+    test "a bare arrayOf in #{label} applies through /v1/schemas and the changeset alike",
+         %{conn: conn} do
+      resp = apply_schema(conn, [@field], "aof_http_" <> @slug)
+      assert resp.status == 201, resp.resp_body
+
+      assert {:ok, _} = write([@field], "aof_cs_" <> @slug)
+    end
+  end
+
   test "an unrelated update to a stored row with an untyped `of` is not blocked" do
     {:ok, row} =
       Content.upsert_schema(

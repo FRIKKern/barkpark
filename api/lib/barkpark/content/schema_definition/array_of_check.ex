@@ -16,11 +16,15 @@ defmodule Barkpark.Content.SchemaDefinition.ArrayOfCheck do
       untyped `of`, task-04004b6d634dd535).
 
   `problems/1` names each such array by its path (`seo.links`,
-  `rows[].tags`), at any depth: inside a composite's `fields`, inside an
-  `of` shape, inside each member of an `of` list. The changeset runs it only
+  `rows[].tags`), at any depth, in exactly the places `parse/2` parses:
+  a composite's, image's or file's `fields`, an `arrayOf`'s `of` shape and
+  each member of an `of` list. The changeset runs it only
   on a changed `fields` list, so an unrelated update to a stored row is
   never blocked.
   """
+
+  # The types whose `fields` `SchemaDefinition.parse/2` parses as fields.
+  @with_fields ~w(composite image file)
 
   @doc "One message per `arrayOf` whose `of` names no item type, by path."
   @spec problems([map()]) :: [String.t()]
@@ -50,19 +54,28 @@ defmodule Barkpark.Content.SchemaDefinition.ArrayOfCheck do
     path = Enum.join(at, ".")
     item = List.update_at(at, -1, &(&1 <> "[]"))
 
-    own =
-      if get(field, "type") == "arrayOf",
-        do: Enum.map(of_problems(get(field, "of")), &{path, &1}),
-        else: []
+    case get(field, "type") do
+      "arrayOf" ->
+        own = Enum.map(of_problems(get(field, "of")), &{path, &1})
 
-    shapes =
-      case get(field, "of") do
-        %{} = shape -> field_paths(shape, item)
-        list when is_list(list) -> Enum.flat_map(list, &member_paths(&1, item))
-        _ -> []
-      end
+        shapes =
+          case get(field, "of") do
+            %{} = shape -> field_paths(shape, item)
+            list when is_list(list) -> Enum.flat_map(list, &member_paths(&1, item))
+            _ -> []
+          end
 
-    own ++ paths(get(field, "fields"), at) ++ shapes
+        own ++ shapes
+
+      type when type in @with_fields ->
+        paths(get(field, "fields"), at)
+
+      # Any other type's `fields` or `of` is not parsed (`parse_field_type`),
+      # so it is not read here either: an `object` or a legacy `array` passes
+      # `/v1/schemas` and this check alike.
+      _ ->
+        []
+    end
   end
 
   defp member_paths(%{} = member, item), do: field_paths(member, item)
