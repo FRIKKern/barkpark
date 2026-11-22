@@ -1,9 +1,7 @@
 /* Tabs: UI SDK's <ui-tabs>, a list of tabs, each a native button, and the panel of the selected one.
    The selected tab is marked by its own edge, a border under it (across) or beside it (down), in
    --ui-primary; the other tabs keep the same border in transparent, so nothing moves, and are text only.
-   The edge is a border, not a box-shadow, so base.css's focus ring (a box-shadow) cannot replace it. BarkUI's tabs do not style UI SDK's <ui-tabs-indicator> and the
-   stage holds none: it writes the selected tab's measures into a style attribute, which the check refuses on a
-   stage, so an indicator here would go unjudged.
+   The edge is a border, not a box-shadow, so base.css's focus ring (a box-shadow) cannot replace it.
    The look keys only on what UI SDK writes: data-selected, data-disabled and data-orientation, and on :hover.
    A disabled tab takes focus from the arrow keys but is never selected; it is drawn faded.
    The focus ring is base.css's, drawn once for every part. */
