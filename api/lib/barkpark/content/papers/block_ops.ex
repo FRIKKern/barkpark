@@ -1758,11 +1758,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
             {:ok, new_blocks, rev, {saved, slug, frame}}
 
-          {:error, :precondition_failed} = err ->
+          {:error, _reason} = err ->
             err
-
-          {:error, changeset} ->
-            {:error, changeset}
         end
       end
     else

@@ -17,9 +17,19 @@ defmodule Barkpark.Content.Papers.PushRevision do
   batch the fence or the caller's `before_commit` check refuses leaves none. A
   batch that writes nothing leaves none either. Like the batch's other history
   rows it is best-effort: a failed insert is logged and the write stands.
+
+  The "unchanged since ifRev" checks in `BlockOps` and `Mutations` do not use
+  the row: `Revisions.get_revision_by_rev/3` does not return it, so a write
+  anchored on the rev a push started from is refused as stale.
   """
 
   alias Barkpark.Content.{Broadcast, CallerContext, Document}
+
+  @action "bpml-push"
+
+  @doc "The action a BPML push records its before-state under."
+  @spec action() :: String.t()
+  def action, do: @action
 
   @spec record(Document.t(), String.t(), keyword()) :: :ok
   def record(%Document{} = before, dataset, opts) do

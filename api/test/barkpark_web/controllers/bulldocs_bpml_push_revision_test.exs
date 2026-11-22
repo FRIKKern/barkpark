@@ -33,13 +33,13 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevisionTest do
   end
 
   defp pull(slug) do
-    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(resp, "x-paper-rev")
     {response(resp, 200), rev}
   end
 
   defp sync(slug, bpml, rev) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
     |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
@@ -113,6 +113,9 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevisionTest do
     assert Content.list_revisions(slug, "paper", "other-dataset") == []
     assert {:ok, %Revision{}} = Content.get_revision(pushed.id, @ds)
     assert {:error, :not_found} = Content.get_revision(pushed.id, "other-dataset")
+    # The lookup by `_rev` never answers with it.
+    pushed_id = pushed.id
+    refute match?({:ok, %Revision{id: ^pushed_id}}, Content.get_revision_by_rev(pushed.rev, @ds))
 
     assert {:ok, restored} = Content.restore_revision(pushed.id, "paper", @ds)
     assert restored.content["blocks"] == before.content["blocks"]

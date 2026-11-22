@@ -1,9 +1,9 @@
 defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
   @moduledoc """
-  A write that names a BPML push's starting rev as its `ifRev` is fenced by the
-  three-way rule on the push's revision: it lands when every block (field batch,
-  `fence: :blocks`) or field (patch, `"fence": "fields"`) it touches reads the
-  same at that rev and now, and is refused with nothing written when one changed.
+  A write that names a BPML push's starting rev as its `ifRev` is refused as
+  stale, with nothing written: a field batch (`fence: :blocks`), a patch
+  (`"fence": "fields"`) and a `diffMatchPatch`, whether or not what it touches
+  changed since. The push's revision is not a snapshot those checks read.
 
   Each Paper is pushed once before the push under test, so its starting rev is
   one that only a push wrote. The field-batch rows give the Paper schema a
@@ -14,7 +14,7 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
   import Ecto.Query
 
   alias Barkpark.{Content, LabelFixtures, Repo}
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{DiffMatchPatch, Document}
 
   @ds "production"
   @token "barkpark-test-ingest-token"
@@ -36,10 +36,10 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
   end
 
   defp bpml_push!(slug, from, to) do
-    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(resp, "x-paper-rev")
 
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
     |> post("#{@ingest_path}/#{slug}/sync", %{
@@ -73,8 +73,6 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
 
   defp draft(slug),
     do: Repo.one!(from d in Document, where: d.doc_id == ^"drafts.#{slug}" and d.type == "paper")
-
-  defp texts(blocks), do: Enum.map(blocks, &hd(&1["content"])["value"])
 
   defp patch_block(id, text),
     do: %{"op" => "patch-block", "id" => id, "patch" => %{"content" => [t(text)]}}
@@ -133,20 +131,17 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
       assert stored(slug) == before
     end
 
-    test "lands when every block it touches is unchanged, and keeps the change made since",
+    test "is refused when every block it touches is unchanged too, and nothing is written",
          %{slug: slug, start: start} do
-      paper_row = Enum.find(stored(slug), &(elem(&1, 0) == slug))
+      before = stored(slug)
 
-      assert {:ok, _} =
+      assert {:error, {:rev_mismatch, %{expected: ^start}}} =
                field_batch("drafts." <> slug, [patch_block("a2", "two by me")],
                  if_rev: start,
                  fence: :blocks
                )
 
-      saved = draft(slug)
-      assert texts(saved.content["aside"]["blocks"]) == ["one by them", "two by me"]
-      assert texts(saved.content["blocks"]) == ["Plain, two."]
-      assert Enum.find(stored(slug), &(elem(&1, 0) == slug)) == paper_row
+      assert stored(slug) == before
     end
   end
 
@@ -180,22 +175,53 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
       assert stored(slug) == before
     end
 
-    test "lands when its Paper's blocks and every field it sets are unchanged, and keeps the change made since",
+    test "is refused when its Paper's blocks and every field it sets are unchanged too, and nothing is written",
          %{slug: slug, start: start} do
       bpml_push!(slug, "Plain, two.", "Plain, one.")
       {:ok, _} = mutate(slug, %{"source_doc" => "theirs"})
-      paper_row = Enum.find(stored(slug), &(elem(&1, 0) == slug))
+      before = stored(slug)
 
-      assert {:ok, _} =
+      assert {:error, {:rev_mismatch, %{expected: ^start}}} =
                mutate(slug, %{"description" => "mine"}, %{
                  "ifRevisionID" => start,
                  "fence" => "fields"
                })
 
-      saved = draft(slug)
-      assert {saved.content["source_doc"], saved.content["description"]} == {"theirs", "mine"}
-      assert texts(saved.content["blocks"]) == ["Plain, one."]
-      assert Enum.find(stored(slug), &(elem(&1, 0) == slug)) == paper_row
+      assert stored(slug) == before
     end
+  end
+
+  # A diffMatchPatch path is left out of the fields compare: it merges into the
+  # text as it is now. From a push's starting rev it is refused, so a hunk made
+  # against that rev cannot delete words another writer changed since.
+  test "a diffMatchPatch from a push's starting rev is refused, and the change made since stays" do
+    base = "The quick brown fox jumps over the lazy dog."
+    theirs = "The quick brawn fox jumps over the lazy dog."
+    slug = paper!(%{"description" => base})
+    start = start_rev!(slug)
+    bpml_push!(slug, "Plain, two.", "Plain, one.")
+    {:ok, _} = mutate(slug, %{"description" => theirs})
+    before = stored(slug)
+    hunk = DiffMatchPatch.Make.text(~c"#{base}", ~c"The fox jumps over the lazy dog.")
+
+    assert {:error, {:rev_mismatch, %{expected: ^start}}} =
+             Content.apply_mutations(
+               [
+                 %{
+                   "patch" => %{
+                     "id" => slug,
+                     "type" => "paper",
+                     "diffMatchPatch" => %{"description" => hunk},
+                     "ifRevisionID" => start,
+                     "fence" => "fields"
+                   }
+                 }
+               ],
+               @ds,
+               []
+             )
+
+    assert stored(slug) == before
+    assert draft(slug).content["description"] == theirs
   end
 end
