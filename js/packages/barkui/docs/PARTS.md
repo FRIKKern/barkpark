@@ -293,31 +293,32 @@ where each may stand and what writes it:
 Values are not read, except transition's, the names anchor-name gives, and the scroll lock's (below). Apart from
 the list, one more entry has its own reason: UI SDK switches motion off on a box while it measures where to put
 it, and `none` takes motion away and adds no look. UI SDK writes it when it first places a select or menu box and
-puts the old value back in the same task, so only a reader from the first frame sees it:
+puts the old value back in the same task, so a reading taken now and then does not see it; the log below does:
 
 - `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
 
 Any other property, a box's property on an element that is not a box, an anchor name no box hangs from, and any
 other transition value fail by name ("… was given opacity in a style attribute, which is not placement: the look
-belongs in part.css"). What is
-read is each declaration the browser applies, by its name: a shorthand by its longhands (`inset` is `top`,
-`right`, `bottom` and `left`), and `all` by its own name. Text the browser drops is not a declaration. Every value
-a `style` attribute in a stage holds is read, from the page's first frame, however it is written (the attribute,
-`el.style`, `attributeStyleMap`), so a property written while a box is open and taken away as it closes fails by
-name; a hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first,
-since the browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
+belongs in part.css"). What is read is each declaration the browser applies, by its name: a shorthand by its
+longhands (`inset` is `top`, `right`, `bottom` and `left`), and `all` by its own name. Text the browser drops is
+not a declaration. From the page's first frame, a log in the check's own world takes each change to a `style`
+attribute in the document and in each open shadow root, however it is written (the attribute, `el.style`,
+`attributeStyleMap`), with where the element stood as the browser's record of the change shows it, and the values
+held in a stage are judged; so a property written while a box is open and taken away as it closes fails by name.
+A hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first, since the
+browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
 
-The rule reads the `style` attribute on every element that holds a stage too, up to and including the root element,
-the same way from the first frame, since a stage inherits from it. Two more rules are read at every look, so the
+The values the same log holds for an element that holds a stage, up to and including the root element, are judged
+too, since a stage inherits from it. Two more rules are read at every look, so the
 order in which the page attaches and moves things cannot matter: a stage whose root node is not the document fails
 by name, and so does an element that holds a stage and hosts a shadow root of any mode. For that, the check asks the
 browser's own tree, element by element, and an element it gets no answer for fails by name too.
 
-On an element that holds a stage nothing may stand, with one closed list apart, in the same file, with its own
-reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It writes the lock on the
-root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar that takes room. The list
-is what UI SDK writes in the browser the check runs (where `scrollbar-gutter` is missing it writes `padding-right`
-instead, which is not on the list):
+In the style attribute of an element that holds a stage nothing may stand, with one closed list apart, in the same
+file, with its own reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It
+writes the lock on the root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar
+that takes room. The list is what UI SDK writes in the browser the check runs (where `scrollbar-gutter` is missing
+it writes `padding-right` instead, which is not on the list):
 
 - `overflow-x`, `overflow-y`: only as `hidden`, only on the root element or body, while a dialog box is open. UI SDK
   dialog, on the root element.
@@ -336,9 +337,9 @@ closes, so a lock written before a dialog opens, or left after the last one clos
 reaches every stage, since a custom property inherits; no shipped sheet reads it, and part.css may not (it reads
 only `--ui-*` and `--bark-*`). Another value on a listed property, any other property on the root element or
 body, the lock while no dialog box is open, and any property on another element that holds a stage fail by name
-("… holds a stage, which inherits from it: nothing may stand there"). The one limit of this rule: a value only
-inside a closed shadow root in a stage, or one an element held only between arriving in a stage and leaving it
-within one task, changed after it left, is not seen.
+("… holds a stage, which inherits from it: nothing may stand there"). What is read, and when: the log of `style`
+attributes, kept from the first frame and judged at each look, and the two rules on a stage's root node and the
+shadow roots above it, read at each look.
 
 ## What part.css may condition on
 
