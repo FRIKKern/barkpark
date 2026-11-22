@@ -131,8 +131,9 @@ const CALLS = {
   'Document.elementsFromPoint': () => document.elementsFromPoint(1, 1).length,
   'Document.caretPositionFromPoint': () => document.caretPositionFromPoint(1, 1),
   'Document.caretRangeFromPoint': () => document.caretRangeFromPoint(1, 1),
-  ...Object.fromEntries(['offsetWidth', 'offsetHeight', 'offsetTop', 'offsetLeft', 'offsetParent'].map((k) => [`HTMLElement.${k}`, (el) => el[k]])),
-  ...Object.fromEntries(['clientWidth', 'clientHeight', 'clientTop', 'clientLeft', 'scrollWidth', 'scrollHeight', 'scrollTop', 'scrollLeft'].map((k) => [`Element.${k}`, (el) => el[k]])),
+  // A getter's call is made from its name, so its source names the property (a call runs in the page from source).
+  ...Object.fromEntries(['offsetWidth', 'offsetHeight', 'offsetTop', 'offsetLeft', 'offsetParent'].map((k) => [`HTMLElement.${k}`, new Function('el', `return el.${k}`)])),
+  ...Object.fromEntries(['clientWidth', 'clientHeight', 'clientTop', 'clientLeft', 'scrollWidth', 'scrollHeight', 'scrollTop', 'scrollLeft'].map((k) => [`Element.${k}`, new Function('el', `return el.${k}`)])),
   // The probe makers read through the same ways: what they would read on a moving page is caught there too.
   'resolve (a probe on body)': () => window.__barkCheck.resolve('--ui-primary'),
   'colourVars (a probe on body)': () => window.__barkCheck.colourVars(['--ui-primary']),
@@ -147,7 +148,7 @@ const walk = () =>
       const h = window.__barkCheck
       const el = document.getElementById('button-primary')
       el.style.opacity = '0.5'
-      const out = { ways: h.looks.ways, gated: h.looks.gated, reads: {} }
+      const out = { ways: h.looks?.ways ?? 0, gated: h.looks?.gated ?? [], reads: {} }
       for (const [k, src] of Object.entries(calls)) {
         try {
           out.reads[k] = `read ${JSON.stringify((0, eval)(`(${src})`)(el))}`.slice(0, 60)
