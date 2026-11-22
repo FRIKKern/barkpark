@@ -32,15 +32,19 @@ defmodule Barkpark.Content.LinkHrefFence do
   (`Revisions.restore_revision/4`, opt `:restore_revision`) puts back what
   was stored and is not checked (review, blocker 2).
 
-  ## What is read
+  ## What is read: fail closed (r3)
 
-  Only values the schema types as rich text (`richText`, `portableText`, a
-  `localizedText` of format `rich`), found through objects (`fields`) and
-  arrays (`of`); inside one, every `markDefs` list (blocks, custom blocks,
-  inline objects): a `link`'s `href`, a `linkAnnotation`'s `url`, `href` and
-  `damFileUrl`. A `json` field holding the same shape is not rich text and
-  is written untouched. A type with no schema is read whole. Content keyed by
-  atoms (an Elixir caller) is read as JSON is.
+  Every `markDefs` list in the content (blocks, custom blocks, inline
+  objects): a `link`'s `href`, a `linkAnnotation`'s `url`, `href` and
+  `damFileUrl`. The schema only decides what is skipped: a `json` field
+  (any value) and a scalar value, which holds no link. An object walks its
+  declared fields and reads every other key whole. A named object type is
+  resolved at any depth, the way `get_schema` inlines one, including an
+  array's member and a recursive type's leaf; the walk goes as deep as the
+  value does. A value the walk cannot type (an unknown type, an array row
+  with no matching member, a list or map in a `string` or `number` field)
+  is read whole, and so is a type with no schema (#28393 review of r2).
+  Content keyed by atoms (an Elixir caller) is read as JSON is.
 
   The refusal is the mutate door's `validation_failed` (422), with one
   finding per address under the code `pt_link_href_refused`. Nothing is
