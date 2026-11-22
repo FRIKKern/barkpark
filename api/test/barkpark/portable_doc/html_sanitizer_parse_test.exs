@@ -106,6 +106,29 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
     end
   end
 
+  describe "a handler inside a tag name (#28402 review, B1)" do
+    # The regex scrub removed elements first and handlers after, so taking
+    # `onx=""` out of `<me onx=""ta …>` joined `<meta …>` back together. A
+    # parser reads the element a browser reads: `me`, with attributes.
+    for {payload, tag} <- [
+          {~s|<me onx=""ta http-equiv="refresh" content="0;url=https://evil.example">|, "meta"},
+          {~s|<ifr onx=""ame srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;" style="position:fixed;inset:0">|,
+           "iframe"},
+          {~s|<ba onx=""se href="https://evil.example/">|, "base"},
+          {~s|<fo onx=""rm action="https://evil.example"><input name="q"></form>|, "form"},
+          {~s|<obj onx=""ect data="https://evil.example/x.swf">|, "object"}
+        ] do
+      @payload payload
+      @tag_name tag
+      test "#{inspect(payload)} builds no #{tag}" do
+        out = S.sanitize(@payload)
+        assert executable(out) == []
+        assert out |> LazyHTML.from_fragment() |> LazyHTML.query(@tag_name) |> Enum.count() == 0
+        refute out =~ ~r/http-equiv|srcdoc/i
+      end
+    end
+  end
+
   describe "a script address in a link" do
     for payload <- [
           ~s|<a href=javascript:alert(1)>x</a>|,
