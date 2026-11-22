@@ -266,6 +266,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           editor_form_gen: Shared.next_form_gen(socket, changed?),
           editor_unsaved_bases: kept
         )
+        |> RichTextRemote.push_held(base, theirs)
 
       {socket, clashed}
     end

@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   import Phoenix.LiveView, only: [push_event: 3]
 
   alias Barkpark.Content.PortableText
+  alias Barkpark.Content.PortableTextMerge
   alias BarkparkWeb.Studio.StudioLive.Path
 
   @event "bp:rt-remote"
@@ -81,7 +82,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       for {path, _, now} <- paths(schema, form, form, :all),
           do: {path, Map.get(was, path, :unchanged), now}
 
-    tell(socket, all, %{reload: true})
+    socket
+    |> assign(editor_rt_clash: %{})
+    |> tell(all, %{reload: true})
   end
 
   defp tell(socket, [], _flags), do: socket
@@ -118,68 +121,148 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   @doc """
   Reads the post `doc` against the numbers the page reported (`seen`, the
-  raw `_bp_rt_seen`). Returns `{doc, held}`: each rich text written over a
-  later change of theirs takes theirs in `doc`, and `held` lists those A had
-  changed, `{name, path, posted_html}`, for `hold/2`.
+  raw `_bp_rt_seen`). Returns `{doc, acts}` for `hold/2`. A rich text whose
+  number is older than a change the server logged for it was typed on the
+  value before that change (the oldest such entry's `was`):
+
+    * unchanged from it: theirs stands;
+    * changed in blocks theirs left alone: the two merge block by block
+      (`PortableTextMerge`) and the merge is saved;
+    * changed in a block theirs changed too: a clash. Everything else of
+      both is saved, theirs for that block; the form keeps A's block, held,
+      with theirs in the banner.
+
+  A rich text whose number is current is A's to save as typed.
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
     log = socket.assigns[:editor_rt_log] || %{}
 
-    Enum.reduce(seen, {doc, []}, fn entry, {doc, held} ->
+    Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
-           [_ | _] = later <- Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end),
            path when path != [] <- Path.parse_path(name),
            posted when is_binary(posted) <- get(doc, path) do
-        # Read against the oldest change the page missed; theirs is the
-        # newest, from the log: the form holds A's words while A is held.
-        {_seq, was, _now} = List.last(later)
-        {_seq, _was, theirs} = hd(later)
-        doc = put(doc, path, html(theirs))
-
-        if drawn(PortableText.from_html(posted, list(was))) == drawn(was),
-          do: {doc, held},
-          else: {doc, [{name, path, posted} | held]}
+        case Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end) do
+          [] -> {doc, [{:current, name} | acts]}
+          later -> read_over(doc, acts, name, path, posted, later)
+        end
       else
-        _ -> {doc, held}
+        _ -> {doc, acts}
       end
     end)
   end
 
   def split(_socket, doc, _seen), do: {doc, []}
 
+  defp read_over(doc, acts, name, path, posted, later) do
+    {_seq, was, _now} = List.last(later)
+    {_seq, _was, theirs} = hd(later)
+    mine = PortableText.from_html(posted, list(was))
+
+    cond do
+      drawn(mine) == drawn(was) ->
+        {put(doc, path, html(theirs)), acts}
+
+      true ->
+        case PortableTextMerge.merge(list(was), mine, list(theirs)) do
+          {:ok, merged} ->
+            {put(doc, path, html(merged)), [{:merged, name, path, mine} | acts]}
+
+          {:clash, texts, stored, view} ->
+            {put(doc, path, html(stored)), [{:held, name, path, mine, view, texts} | acts]}
+        end
+    end
+  end
+
   @doc """
-  After the save: each held rich text is A's again in the form, unsaved,
-  with the conflict banner, and the page is told its text is the base of
-  its next post.
+  After the save, for each act of `split/3`: the stored value is logged as a
+  change over what the page shows (A's post) and sent to show once A is idle.
+  A merge is that and nothing more. A clash puts A's block back in the form,
+  unsaved, with the conflict banner and theirs in it, and sends A's view
+  (theirs elsewhere, A's block) instead: until the page has shown it, a post
+  is read against theirs again and held, so only typing on what A was shown
+  saves A's block over theirs ("type on to save yours over theirs").
   """
   def hold(socket, []), do: socket
 
-  def hold(socket, held) do
-    form = socket.assigns[:editor_form] || %{}
-    keys = held |> Enum.map(fn {_name, [key | _], _posted} -> key end) |> Enum.uniq()
+  def hold(socket, acts) do
+    Enum.reduce(Enum.reverse(acts), socket, fn
+      {:current, name}, s ->
+        clash = s.assigns[:editor_rt_clash] || %{}
 
-    form =
-      Enum.reduce(held, form, fn {_name, path, posted}, form ->
-        put(form, path, PortableText.from_html(posted, list(get(form, path))))
-      end)
+        if Map.has_key?(clash, name),
+          do: assign(s, editor_rt_clash: Map.delete(clash, name)),
+          else: s
 
-    {socket, values} =
-      Enum.reduce(held, {socket, %{}}, fn {name, _path, posted}, {s, values} ->
+      {:merged, _name, path, mine}, s ->
+        stored = get(s.assigns[:editor_form] || %{}, path)
+        tell(s, [{path, mine, stored}], %{})
+
+      {:held, name, path, mine, view, texts}, s ->
+        form = s.assigns[:editor_form] || %{}
+        stored = get(form, path)
+        [key | _] = path
         {s, seq} = next_seq(s)
-        {s, Map.put(values, name, %{seq: seq, html: posted, own: true})}
-      end)
+        s = log(s, name, {seq, mine, stored})
+
+        s
+        |> assign(
+          editor_form: put(form, path, view),
+          editor_dirty: true,
+          editor_unsaved_keys: MapSet.put(s.assigns[:editor_unsaved_keys] || MapSet.new(), key),
+          doc_conflict: true,
+          save_status: "Updated by another user",
+          editor_clash_fields: Enum.uniq((s.assigns[:editor_clash_fields] || []) ++ [key]),
+          editor_rt_clash: Map.put(s.assigns[:editor_rt_clash] || %{}, name, texts)
+        )
+        |> send_values(%{name => %{seq: seq, html: html(view)}})
+    end)
+  end
+
+  @doc """
+  While A's words in an object are held (`Lifecycle`'s unsaved branch keeps
+  the form's value), another save of the same rich text: merged into what A
+  holds as a post is (`split/3`), logged over it, and sent. Without it A's
+  next post, typed on the held view, would write over that save unseen.
+  `old` and `new` are the stored values before and after it.
+  """
+  def push_held(socket, old, new) do
+    form = socket.assigns[:editor_form] || %{}
+
+    socket.assigns[:editor_schema]
+    |> changes(old || %{}, new || %{})
+    |> Enum.reduce(socket, fn {path, was, now}, s ->
+      held = get(form, path)
+
+      # Not held here: the form took theirs (`push/3` told the page).
+      if drawn(held) in [drawn(was), drawn(now)] do
+        s
+      else
+        name = input_name(path)
+
+        case PortableTextMerge.merge(list(was), list(held), list(now)) do
+          {:ok, merged} ->
+            s
+            |> assign(editor_form: put(s.assigns[:editor_form], path, merged))
+            |> tell_view(name, held, now, merged)
+
+          {:clash, texts, _stored, view} ->
+            s
+            |> assign(
+              editor_form: put(s.assigns[:editor_form], path, view),
+              editor_rt_clash: Map.put(s.assigns[:editor_rt_clash] || %{}, name, texts)
+            )
+            |> tell_view(name, held, now, view)
+        end
+      end
+    end)
+  end
+
+  defp tell_view(socket, name, shown, stored, view) do
+    {socket, seq} = next_seq(socket)
 
     socket
-    |> assign(
-      editor_form: form,
-      editor_dirty: true,
-      editor_unsaved_keys:
-        MapSet.union(socket.assigns[:editor_unsaved_keys] || MapSet.new(), MapSet.new(keys)),
-      doc_conflict: true,
-      save_status: "Updated by another user",
-      editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ keys)
-    )
-    |> send_values(values)
+    |> log(name, {seq, shown, stored})
+    |> send_values(%{name => %{seq: seq, html: html(view)}})
   end
 
   @doc """

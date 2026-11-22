@@ -6,36 +6,33 @@
 // throw away typing not yet posted, the caret and an IME composition. The
 // server (Handlers.RichTextRemote) pushes `bp:rt-remote`:
 //
-//   {values: {"doc[meta].rt": {seq, html}}}       theirs, to show
+//   {values: {"doc[meta].rt": {seq, html}}}       a value to show: another
+//                                                 editor's save, the merge of
+//                                                 it with this page's post, or,
+//                                                 on a clash, this page's
+//                                                 block over theirs elsewhere
 //   {values: {"doc[meta].rt": {seq, html, reload: true}}}
 //                                                 the stored text after this
 //                                                 page's own Reload or restore:
 //                                                 shown at once
-//   {values: {"doc[meta].rt": {seq, own: true, html}}}
-//                                                 the server held this page's
-//                                                 post over theirs: its text is
-//                                                 now the base of the next one
 //
-// Theirs goes in once this page is idle in that editor: no IME composition
+// A value goes in once this page is idle in that editor: no IME composition
 // and no input for IDLE_MS (longer than the hidden input's 500 ms debounce,
 // so the last keys have been posted). Focus does not hold it back: a caret
-// that just sits there would hold theirs back for ever, and the next word
-// typed would be written over a text A never saw (#28349 r2 review, S7b). A
-// focused editor keeps its caret in a block whose text did not change. It
+// that just sits there would hold it back for ever (#28349 r2 review, S7b).
+// A focused editor keeps its caret in a block whose text did not change. It
 // goes in through the editor's own first-paint path (`value` -> `_paint`),
 // never as raw HTML of its own. Until then it waits, and the idle timer
 // tries again.
 //
 // Each editor reports the number of the last value it shows, in a hidden
 // `_bp_rt_seen[]` input inside its wrapper (`name|number`): the newest
-// number this page was pushed, or, while theirs waits, one less than
-// theirs. A post typed over theirs then carries an older number, and the
-// server holds it instead of writing it over theirs: also when theirs is
-// still on its way, since this page reports the numbers it has, 0 before
-// any. When the server holds this page's post (`own`), typing or an IME
-// composition already under way keeps reporting the old number until it
-// ends, so only input begun after the banner showed saves over theirs. A
-// page without this file reports nothing, and its posts are read as before.
+// number this page was pushed, or, while a value waits, one less than it.
+// The server reads a post against the value its number names: a post typed
+// before this page showed a value is merged with it, or held, never written
+// over it, and that holds for a commit of a composition begun earlier too.
+// A page without this file reports nothing, and its posts are read as
+// before.
 
 (() => {
   if (window.__bpRtRemote) return;
@@ -59,13 +56,7 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  // name -> the number to keep reporting while typing or a composition that
-  // began before the server held this page's post goes on: its commit is not
-  // "typing on" (#28349 r3, S6b). Only input after it may save over theirs.
-  const stale = new Map();
-
-  const seenOf = (name) =>
-    stale.has(name) ? stale.get(name) : waiting.has(name) ? waiting.get(name).seq - 1 : last;
+  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).seq - 1 : last);
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
   // ignored by LiveView's patch, so the input stays.
@@ -166,24 +157,13 @@
     if (!theirs.reload && busy(editor)) return;
     show(w, editor, theirs.html);
     waiting.delete(name);
-    stale.delete(name);
     mark(w);
-  };
-
-  // The typing or composition the hold met has ended: the next input is new.
-  const settle = (name) => {
-    const w = wrapOf(name);
-    const editor = editorIn(w);
-    if (editor && busy(editor)) return;
-    stale.delete(name);
-    if (w) mark(w);
   };
 
   const tick = () => {
     timer = null;
     for (const name of [...waiting.keys()]) tryShow(name);
-    for (const name of [...stale.keys()]) settle(name);
-    if (waiting.size || stale.size) timer = setTimeout(tick, IDLE_MS);
+    if (waiting.size) timer = setTimeout(tick, IDLE_MS);
   };
 
   const later = () => {
@@ -194,20 +174,9 @@
     const values = (e.detail && e.detail.values) || {};
     for (const [name, v] of Object.entries(values)) {
       if (!v || typeof v.seq !== "number") continue;
-      const before = seenOf(name);
       last = Math.max(last, v.seq);
       const w = wrapOf(name);
-      if (v.own) {
-        // This page's text, held over theirs: nothing of theirs waits any
-        // more, and the text comes back if theirs was shown meanwhile. Input
-        // under way as the hold arrives began before the banner: it keeps
-        // the old number, so its posts are held too, until it ends.
-        const theirs = waiting.get(name);
-        if (theirs && theirs.seq < v.seq) waiting.delete(name);
-        const editor = editorIn(w);
-        if (editor && busy(editor)) stale.set(name, before);
-        else if (editor && typeof v.html === "string") show(w, editor, v.html);
-      } else if (typeof v.html === "string") {
+      if (typeof v.html === "string") {
         const theirs = waiting.get(name);
         if (!theirs || theirs.seq < v.seq) waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload});
         tryShow(name);
