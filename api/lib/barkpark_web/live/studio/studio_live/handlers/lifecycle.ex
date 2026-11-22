@@ -293,6 +293,49 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
     end
   end
 
+  @doc """
+  The row a post is read against (`Shared.autosave_write`): this tab's own
+  last save (`editor_doc`), with the field the post is a change of
+  (`editor_post_target`) as the newest stored version this tab saw.
+
+  So a choice set back to this tab's earlier value after another editor's
+  save is an edit, as TanStack sends the field typed in
+  (task-1f6d4ed8c24a821b). Every other field is still read against this
+  tab's own row: a post that left the page before another editor's save
+  carries that editor's fields at their old values, and they stay dropped
+  (`PostedEdits`, task-a4ded0be5c8ec3cb). The rev and `updated_at` stay
+  this tab's own.
+  """
+  def post_base(socket) do
+    own = socket.assigns[:editor_doc]
+    seen = base_doc(socket)
+
+    case List.wrap(socket.assigns[:editor_post_target]) do
+      [_ | _] = keys when is_map(own) and is_map(seen) and seen != own ->
+        Enum.reduce(keys, own, &take_seen(&2, seen, &1))
+
+      _ ->
+        own
+    end
+  end
+
+  defp take_seen(doc, seen, key) when key in ["title", "status"] do
+    atom = String.to_existing_atom(key)
+    Map.put(doc, atom, Map.get(seen, atom))
+  end
+
+  defp take_seen(doc, seen, key) do
+    own = doc.content || %{}
+
+    content =
+      case Map.fetch(seen.content || %{}, key) do
+        {:ok, value} -> Map.put(own, key, value)
+        :error -> Map.delete(own, key)
+      end
+
+    %{doc | content: content}
+  end
+
   # The newest stored version of the open document this tab saw: its own
   # last save (`editor_doc`), or a remote save taken in since. TanStack moves
   # a field's base to theirs on every frame.
