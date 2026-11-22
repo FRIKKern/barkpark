@@ -16,6 +16,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:named-steps": "node scripts/check-named-test-steps.mjs --run",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "size": "turbo run size",
