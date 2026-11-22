@@ -342,13 +342,10 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
         }
 
       "arrayOf" ->
-        of_raw = Map.get(raw, "of") || %{"type" => "string", "name" => "#{name}[item]"}
-        of_raw = of_raw |> stringify() |> Map.put_new("name", "#{name}[item]")
-
         %Field{
           base
           | ordered: !!Map.get(raw, "ordered", false),
-            of: to_field_struct(of_raw)
+            of: item_struct(Map.get(raw, "of"), name)
         }
 
       "codelist" ->
@@ -370,6 +367,22 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
         base
     end
   end
+
+  # The item of a single-shape array. No `of` is an array of strings. An
+  # `of` that names no type (`of: {"name": "w"}`) has no item to draw: nil,
+  # and `ArrayField` draws the stored items read-only, as TanStack does. It
+  # crashed the editor before (task-04004b6d634dd535).
+  defp item_struct(nil, name),
+    do: to_field_struct(%{"type" => "string", "name" => "#{name}[item]"})
+
+  defp item_struct(%{} = of, name) do
+    case of |> stringify() |> Map.put_new("name", "#{name}[item]") do
+      %{"type" => type} = of when is_binary(type) -> to_field_struct(of)
+      _untyped -> nil
+    end
+  end
+
+  defp item_struct(_other, _name), do: nil
 
   defp to_field_struct_or_nil(%{"type" => _, "name" => _} = raw), do: to_field_struct(raw)
 

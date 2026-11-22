@@ -156,7 +156,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
             width-bucket show-profile close-profile preview-profile save-profile
             jump-to-user backlinks-refresh open-backlink view-graph node-clicked
             close-delete close-discard close-unpublish-guard close-confirm-modal
-            close-history object-dialog-close close-image-picker close-ref-picker
+            close-history object-dialog-close
             close-secondary-picker close-secondary restore-revision)
 
   @doc "Whether `event` is refused because a revision is shown in the form's place."
@@ -230,6 +230,10 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
   attr :revision, :map, required: true
   attr :menu_button, :string, required: true, doc: "the \"…\" button Confirm gives the focus to"
 
+  attr :seen_rev, :string,
+    default: nil,
+    doc: "the open document's rev; Confirm sends it as `if_rev`"
+
   @doc "The footer while a revision is shown: when it is from, and its revert."
   def footer(assigns) do
     ~H"""
@@ -272,7 +276,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
               type="button"
               class="btn danger"
               phx-click={
-                JS.push("restore-revision", value: %{id: @revision.id})
+                JS.push("restore-revision", value: revert_value(@revision.id, @seen_rev))
                 |> JS.focus(to: ~s([id="#{@menu_button}"]))
               }
               popovertarget={"#{@id}-confirm"}
@@ -299,6 +303,10 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
     """
   end
 
+  # The state the Confirm was drawn against (task-5b74471e6a2d6de8).
+  defp revert_value(id, rev) when is_binary(rev), do: %{id: id, if_rev: rev}
+  defp revert_value(id, _rev), do: %{id: id}
+
   attr :doc, :string, default: nil, doc: "the open document's mark (`PostIdentity.of/1`)"
   attr :revision, :string, default: nil, doc: "`desk_gone_latest`"
 
@@ -315,6 +323,7 @@ defmodule BarkparkWeb.Studio.Desk.RevisionView do
       class="btn"
       phx-click="restore-revision"
       phx-value-id={@revision}
+      phx-value-if_absent="true"
       data-desk-restore-latest
     >
       {gettext("Restore most recent revision")}

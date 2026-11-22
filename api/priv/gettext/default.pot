@@ -749,6 +749,11 @@ msgstr ""
 msgid "%{names} are editing"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/doc_status.ex:242
+#, elixir-autogen, elixir-format
+msgid "%{count} others are editing: %{names}"
+msgstr ""
+
 #: lib/barkpark_web/components/studio_components/editor.ex:939
 #, elixir-autogen, elixir-format
 msgid "%{name} is editing"
@@ -4621,6 +4626,21 @@ msgstr ""
 msgid "None"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:781
+#, elixir-autogen, elixir-format
+msgid "Not saved: block %{number} is shown as JSON, and source mode does not edit it."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:786
+#, elixir-autogen, elixir-format
+msgid "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:791
+#, elixir-autogen, elixir-format
+msgid "Not saved: source mode could not read this change. Your text is kept."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4631
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
@@ -6310,6 +6330,16 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:673
 #, elixir-autogen, elixir-format
 msgid "source"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:834
+#, elixir-autogen, elixir-format
+msgid "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:831
+#, elixir-autogen, elixir-format
+msgid "Read only: this callout has a body, which the editor cannot edit yet."
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:674
@@ -11553,6 +11583,7 @@ msgid "Table too large to show"
 msgstr ""
 
 #: lib/barkpark/portable_doc/render/chrome.ex:104
+#: lib/barkpark_web/studio_locale.ex:772
 #, elixir-autogen, elixir-format
 msgid "Nested too deep to show"
 msgstr ""
@@ -15503,4 +15534,421 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/validation_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Username/password not allowed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Perspective"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/perspective_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Drafts"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/nav_drawer.ex
+#, elixir-autogen, elixir-format
+msgid "Close menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/navbar.ex
+#, elixir-autogen, elixir-format
+msgid "Vision"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "No perspective (raw)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Copy to clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Fetch"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Execution: %{time}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "n/a"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "End-to-end: %{time}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Save result as"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "1 item"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "%{count} items"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "1 property"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgctxt "json tree"
+msgid "%{count} properties"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Show %{count} more"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Write a GROQ query, like *[_type == \"post\"][0...10]"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The query is too long to send: its URL is over 32,753 bytes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query failed: %{error}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query error: %{error}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "1 result in %{ms} ms"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} results in %{ms} ms"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Query done in %{ms} ms"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The URL is copied to the clipboard"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The URL could not be copied"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "API version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Custom API version"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Parameters are not valid JSON: %{detail}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Params must be a JSON object, like {\"title\": \"post\"}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Param $%{name} referenced, but not provided"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has text"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "%{lang} (primary)"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid "No %{primary} text: readers get the %{fallback} text instead."
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_tabs.ex
+#, elixir-autogen, elixir-format
+msgid ", has an error"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Active Document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "To Do"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Go to previous task"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Go to next task"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Deadline"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Worker"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Criteria"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Task id"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Open the task to edit it"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Open a document to see its task"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks on your active document will be shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "This document doesn't have any tasks yet"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Once a document has connected tasks, they will be shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "No tasks"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks in this workspace and dataset will be shown here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgctxt "task status"
+msgid "Open"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "In progress"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Cancelled"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Considering"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Researching"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "Worker: %{worker}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "%{met} of %{total} met"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/tasks_panel.ex
+#, elixir-autogen, elixir-format
+msgid "1 more task to do is not shown"
+msgid_plural "%{count} more tasks to do are not shown"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:39
+#, elixir-autogen, elixir-format
+msgid "Global presence"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:40
+#, elixir-autogen, elixir-format
+msgid "Who is here"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:56
+#, elixir-autogen, elixir-format
+msgid "No one else is here"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:57
+#, elixir-autogen, elixir-format
+msgid "Invite people to the project to see their online status."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/who_menu.ex:69
+#, elixir-autogen, elixir-format
+msgid "Not in a document"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Listen"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Stop"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "Listening for changes…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "The listener closed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} changes not shown: more than %{max} a second"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Listen can only follow a dataset this page lists for you"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Listen follows the document types a query names: add a _type filter, like _type == \"post\""
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Write a query to listen to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "The query cannot be listened to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "The query string could not be read"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/vision_listen.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown perspective: %{value}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Search document types"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No results for"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/refused_save.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs."
 msgstr ""

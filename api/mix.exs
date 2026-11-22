@@ -26,9 +26,6 @@ defmodule Barkpark.MixProject do
       "EEF-CVE-2026-95105",
       # cloak_ecto 1.3.0, no fix. Barkpark has no Cloak.Ecto.PBKDF2 field.
       "EEF-CVE-2026-94206",
-      # cowlib 2.21.0, no fix. Bandit serves HTTP; no cowboy listener runs
-      # and nothing calls cow_http_struct_hd.
-      "EEF-CVE-2026-43966",
       # esaml 4.6.0, no fix for any of the four. Barkpark.Sso.Saml decodes
       # SAMLResponse and SAMLRequest itself, refuses any DOCTYPE and parses
       # with entities off. It never calls esaml_binding:decode_response or
@@ -71,9 +68,8 @@ defmodule Barkpark.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      # Floored to 1.8.6: 1.8.5 carries GHSA-628h-q48j-jr6q (long-poll NDJSON
-      # body-splitting DoS); 1.8.6 is the first patched 1.8.x.
-      {:phoenix, "~> 1.8.6"},
+      # Floored to 1.8.17: the first 1.8.x fixing the Presence-key and serializer DoS advisories.
+      {:phoenix, "~> 1.8.17"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
@@ -128,6 +124,10 @@ defmodule Barkpark.MixProject do
       # image_dep/0 (vix has no Windows prebuilt NIF). macOS/Linux/Docker keep it.
       # WI2: json schema validator dep
       {:ex_json_schema, "~> 0.10"},
+      # IANA time zones for the "$today" token (a workspace's date in its own
+      # zone). Data compiled in, no runtime download; passed explicitly to
+      # DateTime.shift_zone/3, so the global :time_zone_database stays UTC-only.
+      {:tz, "~> 0.28"},
       # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
       {:lazy_html, ">= 0.1.0", only: :test},
       # Phase 7 WI3: in-process HTTP mock for Bokbasen client tests

@@ -49,6 +49,54 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
               "ordered" => true,
               "of" => %{"type" => "string"}
             },
+            # Not arrays, though they carry the tags layout: not tags fields.
+            %{
+              "name" => "kicker",
+              "title" => "Kicker",
+              "type" => "string",
+              "options" => %{"layout" => "tags"}
+            },
+            %{
+              "name" => "lede",
+              "title" => "Lede",
+              "type" => "text",
+              "options" => %{"layout" => "tags"}
+            },
+            # A legacy Sanity `array` is shown read-only: not a tags field.
+            %{
+              "name" => "legacy",
+              "title" => "Legacy",
+              "type" => "array",
+              "of" => [%{"type" => "string"}],
+              "options" => %{"layout" => "tags"}
+            },
+            # Texts with the tags layout are tags too, as TanStack's `Fields.tsx`
+            # draws them; so is a member list of one text.
+            %{
+              "name" => "notes",
+              "title" => "Notes",
+              "type" => "arrayOf",
+              "options" => %{"layout" => "tags"},
+              "of" => %{"type" => "text"}
+            },
+            %{
+              "name" => "labels",
+              "title" => "Labels",
+              "type" => "arrayOf",
+              "options" => %{"layout" => "tags"},
+              "of" => [%{"type" => "text"}]
+            },
+            # An array of objects, even with the tags layout, is not a tags field.
+            %{
+              "name" => "links",
+              "title" => "Links",
+              "type" => "arrayOf",
+              "options" => %{"layout" => "tags"},
+              "of" => %{
+                "type" => "object",
+                "fields" => [%{"name" => "label", "type" => "string"}]
+              }
+            },
             %{
               "name" => "seo",
               "title" => "SEO",
@@ -78,6 +126,12 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
           "title" => "Tagged",
           "tags" => ["fixture", "t0"],
           "highlights" => ["One", "Two"],
+          "kicker" => "K",
+          "lede" => "L",
+          "legacy" => ["old"],
+          "notes" => ["n1"],
+          "labels" => ["l1"],
+          "links" => [%{"_key" => "l1", "label" => "One"}],
           "seo" => %{"metaTitle" => "Meta", "keywords" => ["k1"]}
         },
         @dataset
@@ -223,6 +277,22 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
     assert stored(c)["seo"] == %{"metaTitle" => "Meta", "keywords" => []}
   end
 
+  test "an array of texts with the tags layout draws and saves as tags, a member list of one too",
+       c do
+    view = desk(c)
+
+    for {field, had, typed} <- [{"notes", "n1", "n2"}, {"labels", "l1", "l2"}] do
+      assert has_element?(view, ~s(#{@form} .field .tags-box input.tags-input[id="#{field}"]))
+      refute has_element?(view, ~s(#{@form} ol[id="#{field}"]))
+      add = element(view, ~s(#{@form} [data-tags-add][phx-value-field="#{field}"]))
+      render_click(add, Map.merge(EditorPost.mark(view), %{"value" => " #{typed} "}))
+      assert stored(c)[field] == [had, typed]
+
+      EditorPost.press_on(view, element(view, ~s(#{@form} button[aria-label="Remove #{had}"])))
+      assert stored(c)[field] == [typed]
+    end
+  end
+
   test "a press for another document writes nothing", c do
     view = desk(c)
     other = Jason.encode!([@dataset, c.type, "someone-else"])
@@ -253,5 +323,47 @@ defmodule BarkparkWeb.Studio.DeskTagsFieldTest do
     {:ok, studio, _html} = live(c.conn, c.studio)
     refute has_element?(studio, ".tags-box")
     assert has_element?(studio, ~s(button.bp-array-btn-remove[phx-value-field="tags"]))
+  end
+
+  # task-2730627f7a19999a: a tags press is a tags field's only. A hand-made
+  # one naming another array would store a bare string in it.
+  # task-d2365142f1795b6c: nor one naming a string, a text or a legacy
+  # `array` that carries the tags layout, on the desk or the old Studio.
+  test "add_tag or remove_tag naming a field that is not a tags field stores nothing", c do
+    {:ok, studio, _html} = live(c.conn, c.studio)
+    view = desk(c)
+    before = stored(c)
+
+    for view <- [view, studio],
+        {field, action, value} <- [
+          {"links", "add_tag", "bare"},
+          {"highlights", "add_tag", "bare"},
+          {"highlights", "remove_tag", "One"},
+          {"title", "add_tag", "bare"},
+          {"kicker", "add_tag", "bare"},
+          {"lede", "add_tag", "bare"},
+          {"legacy", "add_tag", "bare"}
+        ] do
+      EditorPost.press(view, "array_op", %{
+        "action" => action,
+        "field" => field,
+        "path" => "doc[#{field}]",
+        "index" => "0",
+        "value" => value
+      })
+    end
+
+    render(view)
+    render(studio)
+    after_ = stored(c)
+    assert after_["links"] == [%{"_key" => "l1", "label" => "One"}]
+    assert after_["highlights"] == ["One", "Two"]
+    assert {after_["kicker"], after_["lede"], after_["legacy"]} == {"K", "L", ["old"]}
+    assert stored_doc(c).title == "Tagged"
+    assert after_ == before
+
+    # Control: the same press on the tags field lands.
+    enter(view, "x")
+    assert eventually(fn -> stored(c)["tags"] == ["fixture", "t0", "x"] end)
   end
 end

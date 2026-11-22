@@ -1,0 +1,54 @@
+<div data-demo-row>
+  <span data-demo-label>Variants</span>
+  <ui-button><button id="button-primary" data-slot="button" data-variant="solid" type="button">Publish</button></ui-button>
+  <ui-button><button id="button-secondary" data-slot="button" type="button">Save draft</button></ui-button>
+  <ui-button><button id="button-quiet" data-slot="button" data-variant="ghost" type="button">Cancel</button></ui-button>
+  <ui-button><button id="button-destructive" data-slot="button" data-variant="destructive" type="button">Delete</button></ui-button>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Disabled</span>
+  <ui-button disabled><button id="button-disabled" data-slot="button" data-disabled="" disabled type="button">Unavailable</button></ui-button>
+  <ui-button disabled><button id="button-quiet-disabled" data-slot="button" data-variant="ghost" data-disabled="" disabled type="button">Not now</button></ui-button>
+  <ui-button><button id="button-after" data-slot="button" type="button">Duplicate</button></ui-button>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Pending</span>
+  <ui-button data-demo-wait="2500" pending-announcement="Saving"><button id="button-save" data-slot="button" data-variant="solid" type="button"><span data-slot="spinner" data-show="pending" aria-hidden="true"></span><svg data-show="idle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>Save changes</button></ui-button>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Sizes</span>
+  <ui-button><button data-slot="button" data-size="sm" type="button">Small</button></ui-button>
+  <ui-button><button data-slot="button" type="button">Medium</button></ui-button>
+  <ui-button><button data-slot="button" data-size="lg" type="button">Large</button></ui-button>
+  <ui-button><button data-slot="button" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New page</button></ui-button>
+  <ui-button><button id="button-more" data-slot="button" aria-label="More actions" type="button"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="19" cy="12" r="1.75"/></svg></button></ui-button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Primary: rest, hover, pressed, focus</span>
+  <button data-slot="button" data-variant="solid" type="button">Rest</button>
+  <button data-slot="button" data-variant="solid" data-pin="hover" type="button">Hover</button>
+  <button data-slot="button" data-variant="solid" data-pin="hover active" type="button">Pressed</button>
+  <button data-slot="button" data-variant="solid" data-pin="focus-visible" type="button">Focus</button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Secondary: rest, hover, pressed, focus</span>
+  <button data-slot="button" type="button">Rest</button>
+  <button data-slot="button" data-pin="hover" type="button">Hover</button>
+  <button data-slot="button" data-pin="hover active" type="button">Pressed</button>
+  <button data-slot="button" data-pin="focus-visible" type="button">Focus</button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Quiet and destructive: rest, hover, pressed, focus</span>
+  <button data-slot="button" data-variant="ghost" type="button">Rest</button>
+  <button data-slot="button" data-variant="ghost" data-pin="hover" type="button">Hover</button>
+  <button data-slot="button" data-variant="ghost" data-pin="hover active" type="button">Pressed</button>
+  <button data-slot="button" data-variant="destructive" type="button">Rest</button>
+  <button data-slot="button" data-variant="destructive" data-pin="hover" type="button">Hover</button>
+  <button data-slot="button" data-variant="destructive" data-pin="hover active" type="button">Pressed</button>
+  <button data-slot="button" data-variant="destructive" data-pin="focus-visible" type="button">Focus</button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Pending, held</span>
+  <button data-slot="button" data-variant="solid" data-pending="" aria-busy="true" type="button"><span data-slot="spinner" data-show="pending" aria-hidden="true"></span><svg data-show="idle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>Saving</button>
+  <button data-slot="button" data-pending="" aria-busy="true" type="button"><span data-slot="spinner" data-show="pending" aria-hidden="true"></span><svg data-show="idle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>Saving</button>
+</div>

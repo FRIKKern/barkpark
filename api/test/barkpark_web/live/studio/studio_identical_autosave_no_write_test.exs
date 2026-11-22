@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
   WHAT THIS SUITE PINS. `Shared.do_autosave/2` — the ONE chokepoint every
   Classic-editor write funnels through (`Fields.autosave/2` from
   `phx-change="autosave"`, `Fields.save/2`, the slug-derive and array-op arms,
-  and `Lifecycle.autosave_form/2` from the `{:autosave_form, …}` handle_info) —
+  and `Fields.tree_codelist_pick/2` from the `{:tree_codelist_pick, …}` handle_info) —
   must write NOTHING when the posted form carries nothing the stored document
   does not already hold.
 

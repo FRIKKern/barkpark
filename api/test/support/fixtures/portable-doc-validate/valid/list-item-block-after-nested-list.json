@@ -1,0 +1,18 @@
+{
+  "blocks": [
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        {
+          "content": [{ "type": "text", "value": "one" }],
+          "children": [{ "type": "list", "ordered": false, "items": [[{ "type": "text", "value": "x" }]] }]
+        },
+        {
+          "content": [{ "type": "text", "value": "two" }],
+          "children": [{ "type": "paragraph", "content": [{ "type": "text", "value": "three" }] }]
+        }
+      ]
+    }
+  ]
+}

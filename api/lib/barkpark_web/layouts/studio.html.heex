@@ -46,6 +46,20 @@
               workspace's name as the switcher's button (`Desk.ScopeSwitch`). --%>
         <%= cond do %>
           <% is_binary(assigns[:desk_base]) and assigns[:current_workspace] != nil -> %>
+            <%!-- Under 900 px the tools and the user menu are in a drawer
+                  this opens (`Desk.NavDrawer`), as TanStack's. --%>
+            <BarkparkWeb.Studio.Desk.NavDrawer.drawer
+              dataset={@dataset}
+              desk_base={@desk_base}
+              scope_prefix={assigns[:scope_prefix] || ""}
+              current_path={assigns[:current_path]}
+              admin?={assigns[:shares_admin?] == true}
+              shares?={assigns[:shares_admin?] == true}
+              current_user={assigns[:current_user]}
+              api_token={assigns[:api_token]}
+              workspace={assigns[:current_workspace]}
+              tasks?={assigns[:desk_tasks?] == true}
+            />
             <span class="logo" aria-hidden="true">{BarkparkWeb.Studio.Desk.ScopeSwitch.brand_initials(assigns[:current_workspace].name)}</span>
             <BarkparkWeb.Studio.Desk.ScopeSwitch.switcher
               workspace={assigns[:current_workspace]}
@@ -79,7 +93,7 @@
         <button
           :if={is_binary(assigns[:desk_base])}
           type="button"
-          class="btn btn-ghost btn-sm"
+          class="btn btn-ghost btn-sm nav-search"
           data-desk-search-open
           aria-haspopup="dialog"
           aria-controls="dk-search-dialog"
@@ -132,16 +146,22 @@
         <button
           :if={assigns[:shares_admin?]}
           type="button"
-          class="btn btn-ghost btn-sm bar-focusable"
+          class="btn btn-ghost btn-sm bar-focusable nav-shares"
           phx-click="shares-open"
           title={gettext("Network shares")}
           aria-label={gettext("Network shares")}
         >
           <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={16} /></span>
         </button>
-        <%!-- The desk's Help and resources (`Desk.HelpMenu`), as the
-              TanStack navbar's. --%>
-        <BarkparkWeb.Studio.Desk.HelpMenu.menu :if={is_binary(assigns[:desk_base])} />
+        <%!-- The desk's perspective picker (`Desk.PerspectivePicker`):
+              Drafts or Published, the page's `?perspective=`. --%>
+        <BarkparkWeb.Studio.Desk.PerspectivePicker.picker :if={is_binary(assigns[:desk_base])} uri={assigns[:desk_uri]} />
+        <%!-- The desk's Tasks sidebar button (`Desk.TasksPanel`), after the
+              perspective as TanStack's. Only while the Tasks plugin is on. --%>
+        <BarkparkWeb.Studio.Desk.TasksPanel.button
+          :if={is_binary(assigns[:desk_base]) and assigns[:desk_tasks?] == true}
+          open={assigns[:desk_tasks_open?] == true}
+        />
         <.studio_theme_toggle :if={!is_binary(assigns[:desk_base])} />
         <%!-- A token session (`:api_token`) OR an account session
               (`:current_user`) can sign out; an anonymous public-demo socket
@@ -164,8 +184,13 @@
             current_workspace={assigns[:current_workspace]}
             current_project={assigns[:current_project]}
             grant_scoped_read={assigns[:grant_scoped_read] == true}
+            desk={is_binary(assigns[:desk_base])}
           />
         <% end %>
+        <%!-- The desk's Help and resources (`Desk.HelpMenu`), after who is
+              here, in the TanStack navbar's order (Tasks, presence, help,
+              the user). --%>
+        <BarkparkWeb.Studio.Desk.HelpMenu.menu :if={is_binary(assigns[:desk_base])} />
         <BarkparkWeb.Studio.Desk.UserMenu.menu
           :if={is_binary(assigns[:desk_base])}
           current_user={assigns[:current_user]}

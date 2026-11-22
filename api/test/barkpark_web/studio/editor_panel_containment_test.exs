@@ -257,7 +257,12 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # layer and the card, fixed over the whole window. EditorHost draws them
     # in the edit pane's `.dk-edit-body`, a SIBLING of the Studio shell that
     # holds the `.editor-panel`, never under it, as the Inspect layer above.
-    "live/studio/desk/doc_dialog.ex" => 2
+    "live/studio/desk/doc_dialog.ex" => 2,
+    # The desk navbar's phone drawer (`NavDrawer`, `.nav-drawer`): a modal
+    # `<dialog>` fixed to the window's left edge. It is drawn in the Studio
+    # top bar (studio.html.heex), never under an `.editor-panel`, and a modal
+    # dialog sits in the top layer, which no containing block reaches.
+    "live/studio/desk/nav_drawer_style.ex" => 1
   }
 
   # Shipped studio JS that emits `position: fixed` from script. Each MUST portal

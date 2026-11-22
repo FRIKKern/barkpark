@@ -181,7 +181,10 @@
 // showed before (`RemoteValues.push/3`). The focused input takes the
 // new value only while it still shows exactly the old one: anything else is
 // typing not yet sent, and stays. Focus stays; the caret keeps its place in
-// the text around the other's change.
+// the text around the other's change. A focused select is set the same way
+// (task-165052f4fad43c1e): the desk's undo leaves the focus in the select it
+// put back, so another editor's later pick stayed out of sight there until
+// the person's next action.
 (function () {
   "use strict";
 
@@ -198,13 +201,25 @@
     return now.length - s;
   }
 
+  function hasOption(select, value) {
+    for (var i = 0; i < select.options.length; i++) if (select.options[i].value === value) return true;
+    return false;
+  }
+
   function takeFocused(values) {
     var el = document.activeElement;
     if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
-    if (!(el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
+    var select = el.tagName === "SELECT" && !el.multiple;
+    if (!(select || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
     if (!Object.prototype.hasOwnProperty.call(values, el.name)) return;
     var change = values[el.name];
     if (!change || typeof change.value !== "string" || el.value !== change.was) return;
+    // A choice has no caret; one the select does not offer is left to the
+    // patch, once the focus leaves it.
+    if (select) {
+      if (hasOption(el, change.value)) el.value = change.value;
+      return;
+    }
     var start = shift(el.selectionStart, change.was, change.value);
     var end = shift(el.selectionEnd, change.was, change.value);
     el.value = change.value;
@@ -421,8 +436,8 @@
 })();
 
 // task-8908b6e031268f77: a press that writes the open document names it.
-// A list's Add, Remove and Move, Generate on a slug, the old pickers'
-// pick, clear and upload, and a tree codelist's pick and Remove are events
+// A list's Add, Remove and Move, Generate on a slug, a tree codelist's
+// pick and Remove, and a field's Revert are events
 // of their own, not posts of the editor form. The server writes one only
 // into the document it was pressed in (`PostIdentity`), so the pressed
 // control is given the form's own mark,
@@ -440,7 +455,7 @@
 
   var MARK = "phx-value-_bp_doc";
   var WRITES = [
-    "array_op", "slug-generate", "select-ref", "clear-ref", "select-media", "clear-image", "upload-image",
+    "array_op", "slug-generate",
     "publish", "unpublish", "confirm-unpublish", "delete-doc", "confirm-delete", "discard-draft",
     "confirm-discard", "duplicate-doc", "restore-revision", "paper-publish", "desk-field-revert",
     "tree_node_select", "tree_node_clear"

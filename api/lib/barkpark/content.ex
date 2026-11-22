@@ -659,6 +659,10 @@ defmodule Barkpark.Content do
   def restore_revision(revision_id, type, dataset, opts \\ []),
     do: Revisions.restore_revision(revision_id, type, dataset, opts)
 
+  @doc "Whether `restore_revision/4` would write, writing nothing. See `Content.Revisions.check_restore/4`."
+  def check_restore(revision_id, type, dataset, opts \\ []),
+    do: Revisions.check_restore(revision_id, type, dataset, opts)
+
   # ── Papers — context functions (extracted → Content.Papers, Step 10) ───────
   #
   # The `type:"paper"` feature (the Bulldocs surface) lives in

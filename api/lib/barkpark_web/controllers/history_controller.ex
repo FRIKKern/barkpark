@@ -88,12 +88,27 @@ defmodule BarkparkWeb.HistoryController do
     end
   end
 
+  # The state the caller asked against, optional (task-e89ff0279fb83fc6):
+  # `ifRevisionID` ("I saw this rev", named like a `/v1` mutate patch's field)
+  # or `ifAbsent: true` ("I saw no document"). A restore naming a state the
+  # document has moved on from is refused 412 `precondition_failed` and writes
+  # nothing; `Content.restore_revision/4` holds the compare. `ifRevisionID` must
+  # be a non-empty string and `ifAbsent` exactly `true`; any other value of a sent
+  # field (null included), or both fields at once, is a 400 `malformed` and writes
+  # nothing. A field not sent is no guard.
   def restore(conn, %{"dataset" => dataset, "id" => id} = params) do
+    case restore_fence(params) do
+      {:ok, fence} -> restore_with(conn, dataset, id, params, fence)
+      {:error, message} -> malformed_fence(conn, message)
+    end
+  end
+
+  defp restore_with(conn, dataset, id, params, fence) do
     type = get_type(conn, params)
+    opts = [source: :api] ++ scope_opts(conn) ++ fence
 
     with :ok <- validate_uuid(id),
-         {:ok, doc} <-
-           Content.restore_revision(id, type, dataset, [source: :api] ++ scope_opts(conn)) do
+         {:ok, doc} <- Content.restore_revision(id, type, dataset, opts) do
       schema =
         case Content.Schema.get_schema_for_redaction(type, dataset, scope_opts(conn)) do
           {:ok, s} -> s
@@ -111,6 +126,13 @@ defmodule BarkparkWeb.HistoryController do
       {:error, :not_found} ->
         not_found(conn, "revision not found")
 
+      {:error, {:rev_mismatch, _details}} = mismatch ->
+        env = Errors.to_envelope(mismatch, conn)
+
+        conn
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
+
       {:error, {:halted, _reason}} = halt ->
         # Plugin lifecycle veto on the restore. Render the CANONICAL envelope
         # (code "halted", 409, request_id, hint) via the same Errors.to_envelope
@@ -125,6 +147,36 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   defp get_type(_conn, params), do: params["type"]
+
+  defp restore_fence(params) do
+    case {Map.fetch(params, "ifRevisionID"), Map.fetch(params, "ifAbsent")} do
+      {:error, :error} ->
+        {:ok, []}
+
+      {{:ok, _}, {:ok, _}} ->
+        {:error, "send ifRevisionID or ifAbsent, not both"}
+
+      {{:ok, rev}, :error} when is_binary(rev) and rev != "" ->
+        {:ok, [if_rev: rev]}
+
+      {{:ok, rev}, :error} ->
+        {:error, "ifRevisionID must be a non-empty string, got: #{inspect(rev)}"}
+
+      {:error, {:ok, true}} ->
+        {:ok, [if_absent: true]}
+
+      {:error, {:ok, other}} ->
+        {:error, "ifAbsent must be true, got: #{inspect(other)}"}
+    end
+  end
+
+  defp malformed_fence(conn, message) do
+    BarkparkWeb.ErrorResponse.emit_fields(conn, :bad_request, %{
+      code: "malformed",
+      message: message,
+      details: %{fields: ["ifRevisionID", "ifAbsent"]}
+    })
+  end
 
   @uuid_regex ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
   defp validate_uuid(id) when is_binary(id) do

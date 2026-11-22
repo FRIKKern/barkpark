@@ -731,6 +731,8 @@
       deskScript("data-desk-tags", window.BarkparkDeskTags);
       // A tree codelist's keys (bp-desk-codelist.js).
       deskScript("data-desk-codelist", window.BarkparkDeskCodelist);
+      // A localized text's language tabs (bp-desk-lang-tabs.js).
+      deskScript("data-desk-lang-tabs", window.BarkparkDeskLangTabs);
       root.bpPush = function (event, payload) { hook.pushEvent(event, payload); };
       // The Validation panel's jump to a field (bp-desk-validation.js).
       deskScript("data-desk-validation", window.BarkparkDeskValidation);
@@ -742,6 +744,16 @@
       deskScript("data-desk-image", window.BarkparkDeskImage);
       // The navbar's menus (bp-desk-navbar.js), when a live navigation came here.
       deskScript("data-desk-navbar", window.BarkparkDeskNavbar);
+      // The document's undo and redo, Mod+Z and Shift+Mod+Z (bp-desk-undo.js).
+      deskScript("data-desk-undo", window.BarkparkDeskUndo);
+      // A read-only field shows the server's value, focused too (bp-desk-locked-value.js).
+      deskScript("data-desk-locked-value", window.BarkparkDeskLockedValue);
+      // A field moved into a revision's disabled fields hands the focus on (bp-desk-revision-focus.js).
+      deskScript("data-desk-revision-focus", window.BarkparkDeskRevisionFocus);
+      // The navbar Create new's type search (bp-desk-new-doc.js).
+      deskScript("data-desk-new-doc", window.BarkparkDeskNewDoc);
+      // Vision's query, result tree and Save (bp-desk-vision.js), on its page only.
+      if (root.querySelector("[data-desk-vision]")) deskScript("data-desk-vision-js", window.BarkparkDeskVision);
       hook._onFieldAction = function (e) {
         // A field's "…" opens the form's one menu: the menu is told which
         // field, placed by that button, and Paste is off where the field takes none.
@@ -1567,12 +1579,12 @@
       // with it to <body>. The Studio says which document went
       // (`bp:focus-after-delete`, `Handlers.Delete`); the page's listener for
       // it (root.html.heex) looks for the Studio's rows, and the desk has
-      // none of those. Here the focus goes to the row next to the deleted
-      // one in the last pane, else that pane's first row or control. Only
-      // while the focus is lost, for 1.5 s (the list may be drawn again),
-      // and never after the user's first key or press.
+      // none of those. Here the focus goes to the row that took its place in
+      // the last pane (where it was drawn, else `index`), else the last row,
+      // else a control, once it is no longer drawn (the patch re-uses rows). Only
+      // while the focus is lost, for 1.5 s, never after a key or a press.
       hook._focusAfterDelete = function (e) {
-        var gone = String((e.detail && e.detail.id) || "");
+        var gone = String((e.detail && e.detail.id) || ""), index = Number(e.detail && e.detail.index) || 0, seen = -1;
         if (!gone) return;
         var doc = root.ownerDocument;
         var stop = Date.now() + 1500;
@@ -1598,11 +1610,10 @@
           var pane = editing ? null : Array.prototype.slice.call(root.querySelectorAll("[data-pane-index]:not([data-desk-leaving])")).pop();
           if (lost && pane) {
             var rows = Array.prototype.slice.call(pane.querySelectorAll(ROW));
+            var kept = rows.filter(function (row) { return !isGone(row); });
             var at = rows.findIndex(isGone);
-            var kept = rows.filter(function (row) {
-              return !isGone(row);
-            });
-            var to = (at >= 0 ? rows[at + 1] || rows[at - 1] : kept[0]) || pane.querySelector(TABBABLE);
+            seen = at >= 0 ? at : seen;
+            var to = at >= 0 && Date.now() < stop ? null : kept[Math.min(seen >= 0 ? seen : index, kept.length - 1)] || pane.querySelector(TABBABLE);
             if (to) to.focus();
           }
           if (Date.now() < stop) window.setTimeout(attempt, 100);

@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.QuotaGate do
   alias BarkparkWeb.Studio.Caps
 
   # Events that add a document row.
-  @creates ~w(new-document duplicate-doc upload-image)
+  @creates ~w(new-document duplicate-doc)
 
   # Studio writes that touch no workspace document: tenancy rows, the user's
   # own profile, and taking access away.
@@ -120,7 +120,6 @@ defmodule BarkparkWeb.Studio.QuotaGate do
   end
 
   defp info({:paper_op, %{"op" => _}}, socket), do: gate(socket, 0)
-  defp info({:autosave_form, _form}, socket), do: gate(socket, 0)
   defp info(_msg, socket), do: {:cont, socket}
 
   defp gate(socket, needed) do

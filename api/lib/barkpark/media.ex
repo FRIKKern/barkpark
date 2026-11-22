@@ -459,9 +459,9 @@ defmodule Barkpark.Media do
   # orphan risk, no in-flight window.
   #
   # AND THE PATH IS NEVER REWRITTEN AFTERWARDS, which is not a stylistic
-  # preference: `media_files.path` is a PUBLISHED REFERENCE. Studio's upload
-  # handler persists `"/media/files/\#{file.path}"` into a document's content
-  # (live/studio/studio_live/handlers/media.ex), and `serve/2` resolves that URL
+  # preference: `media_files.path` is a PUBLISHED REFERENCE. Documents hold
+  # `"/media/files/\#{file.path}"` in their content (Studio's old upload handler
+  # wrote it; Papers embed it, below), and `serve/2` resolves that URL
   # through `get_file_by_path/2` — a lookup keyed on the very string that was
   # persisted. Rewriting an existing row's path orphans every document already
   # pointing at it; pinned by

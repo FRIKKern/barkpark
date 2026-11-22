@@ -254,6 +254,10 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       for params <- [%{"field" => "title"}, %{"field" => "summary"}, %{"all" => "true"}],
           do: render_hook(view, "desk-field-revert", Map.merge(own_mark(d), params))
 
+      # The document's undo and redo (`DocUndo`).
+      for redo <- [false, true],
+          do: render_hook(view, "desk-undo", Map.put(own_mark(d), "redo", redo))
+
       for {event, params} <- [
             {"sidebar-label-add", %{"value" => "x"}},
             {"duplicate-doc", %{}},
@@ -348,6 +352,38 @@ defmodule BarkparkWeb.Studio.DeskRevisionViewGuardTest do
       send(view.pid, pick.("YFB"))
       render_async(view, 5_000)
       assert draft(d).content["subject"] == "YFB"
+    end
+  end
+
+  # task-27fdb358ec25df6a: the published view is read-only too, and draws no
+  # tree; a pick sent to it anyway must not reach the draft.
+  describe "a tree codelist's pick while the published version is shown" do
+    test "leaves the draft byte-identical", c do
+      d =
+        doc!(
+          [
+            %{
+              "name" => "subject",
+              "title" => "Subject",
+              "type" => "codelist",
+              "codelistId" => "onixedit:rvg-none"
+            }
+          ],
+          %{"title" => "Pub v1", "subject" => "FBA"},
+          %{"title" => "Pub draft", "subject" => "FBC"}
+        )
+
+      before = draft(d)
+      view = open(c, d, "?perspective=published")
+
+      send(
+        view.pid,
+        {:tree_codelist_pick, %{name: "doc[subject]", value: "YFB", press: own_mark(d)}}
+      )
+
+      render_async(view, 5_000)
+      assert draft(d) == before
+      assert published(d).content["subject"] == "FBA"
     end
   end
 

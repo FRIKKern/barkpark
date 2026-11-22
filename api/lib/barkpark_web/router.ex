@@ -241,11 +241,11 @@ defmodule BarkparkWeb.Router do
   # (the co-located caller passes workspace_id/project_id explicitly if needed).
   # Shaves the per-keystroke Phoenix floor from ~1–5 ms to the router minimum.
   pipeline :api_local do
-    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
-    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    # nosniff + referrer-policy FIRST, so a refusal carries them (task-4a882dcfb3cd44bc).
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(:accepts, ["json"])
+    # The first plug that can answer: a refused caller gets the empty 403, whatever it sends.
     plug(BarkparkWeb.Plugs.RequireLoopback)
+    plug(:accepts, ["json"])
   end
 
   # Tenancy-aware variant of :api for the path-scoped
@@ -1131,15 +1131,15 @@ defmodule BarkparkWeb.Router do
     end
   end
 
-  # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
-  # table). Used by the Bulldocs paper-ingest API and any plugin that ships an
-  # `auth: :ingest` route via the plugin highway.
+  # Ingest endpoints: JSON in, the shared-secret bearer or an admin api token. Used by the
+  # Bulldocs paper-ingest API and any plugin `auth: :ingest` route via the plugin highway.
   pipeline :ingest do
     # nosniff + referrer-policy, FIRST so a halted refusal carries them too
     # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireIngestToken)
+    plug(BarkparkWeb.Plugs.AssignWriteCaller)
     # Resolve ONE tenant for the whole bucket (task-ef3eb91bf7f87d4c). This
     # pipeline mounted no workspace producer at all, so every `auth: :ingest`
     # controller ran with `:current_workspace` nil — the sheets export read
@@ -1163,12 +1163,8 @@ defmodule BarkparkWeb.Router do
 
     plug(BarkparkWeb.Plugs.RequireWithinQuota,
       only: :writes,
-      creates: [
-        {BarkparkWeb.BulldocsIngestController, :ingest},
-        {BarkparkWeb.BulldocsIngestController, :create},
-        {BarkparkWeb.BulldocsIngestController, :sync},
-        {BarkparkWeb.BulldocsIngestController, :ingest_session}
-      ]
+      creates: BarkparkWeb.Plugs.RequireWithinQuota.ingest_creates(),
+      deferred_to: BarkparkWeb.BulldocsIngestController
     )
   end
 
@@ -2983,6 +2979,7 @@ defmodule BarkparkWeb.Router do
 
     get("/", ChatHostController, :index)
     post("/enrollments", ChatHostController, :create_enrollment)
+    post("/:id/enrollment", ChatHostController, :replace_enrollment)
     delete("/:id", ChatHostController, :revoke)
   end
 

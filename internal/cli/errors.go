@@ -149,6 +149,8 @@ var codeExit = map[string]int{
 	"invalid_pref":        exitValidation,
 	"rev_mismatch":        exitConflict,
 	"paper_exists":        exitConflict,
+	"paper_not_in_scope":  exitConflict,
+	"fixed_document":      exitConflict, // 409, content/fixed_documents.ex (task-f4c80d82cc25b19b)
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
 	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
@@ -357,6 +359,15 @@ var codeExit = map[string]int{
 	// cap of live chat hosts. A conflict, not a retry: revoke one first.
 	"host_limit_reached": exitConflict,
 
+	// 409, chat_host_controller.ex name_taken/4: a chat host in the workspace
+	// already holds the name. A conflict: pick another name or make a new
+	// code for the waiting host.
+	"name_taken": exitConflict,
+
+	// 409, chat_host_controller.ex replace_enrollment/2: the host already
+	// enrolled, so it takes no new code. Revoke it and register it again.
+	"already_enrolled": exitConflict,
+
 	// 422, ChatSendFailure: the turn names attachments and the session's
 	// registered host does not advertise their type. Permanent until the host
 	// binary is updated, so a validation exit, never a retry.
@@ -417,6 +428,9 @@ var codeExit = map[string]int{
 	"bpml":                       exitValidation, // 422, bulldocs_ingest_controller.ex:237
 	"bpml_unavailable":           exitValidation, // 422, bulldocs_source_controller.ex:77
 	"bpml_unprintable":           exitValidation, // 422, bulldocs_ingest_controller.ex:273
+	"bpml_stale_copy":            exitValidation, // 422, bpml/callout_body.ex
+	"bpml_inline_body":           exitValidation, // 422, bpml/callout_body.ex
+	"bpml_kept":                  exitValidation, // 422, bpml/callout_body.ex
 	"bpml_unshown":               exitValidation, // 422, bpml/write_wall.ex (sync)
 	"constraint":                 exitValidation, // 422, bulldocs_ingest_controller.ex:354
 	"create_wall":                exitValidation, // 422, bulldocs_ingest_controller.ex:432

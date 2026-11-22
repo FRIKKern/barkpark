@@ -35,7 +35,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
   # round trip stays quiet.
   @schema_keys ~w(name title icon visibility owner_scoped singleton kind fields dataset
                   cors_origins actions groups fieldsets desk_groups desk list_preview initial_values
-                  cross_validations layout prefill reader_writes readerWrites workspace_id project_id dataset_id
+                  cross_validations layout prefill reader_writes readerWrites fixed_documents fixedDocuments workspace_id project_id dataset_id
                   id schemaHash) ++ Map.keys(@camel_echo)
 
   @doc """

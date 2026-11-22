@@ -1406,10 +1406,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           from the WidthBucket hook on this container (root.html.heex) and
           stays "wide" until the client connects, so the static first render is
           byte-identical to pre-spd-s4 main. --%>
-    <%!-- The phone drill trail — a SIBLING BEFORE the pane row (D27), and at
-          the phone bucket the ONLY route back out of a drilled pane or an open
-          document. See `desk_crumbs/1` above. --%>
+    <%!-- The phone drill trail, a SIBLING BEFORE the pane row (D27, `desk_crumbs/1`). Not in the desk,
+          which has its own panes: arriving at narrow it moved the row, and a focused tab fell to BODY. --%>
     <.desk_crumbs
+      :if={not is_binary(Map.get(assigns, :desk_base))}
       panes={@panes}
       editor_doc={@editor_doc}
       width_bucket={@width_bucket}
@@ -2213,17 +2213,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         account_label={assigns[:account_label]}
         account_path={account_path(assigns)}
         profile_error={assigns[:profile_error]}
-        image_picker_field={@image_picker_field}
-        uploads={@uploads}
-        media_files={@media_files}
-        ref_picker_field={@ref_picker_field}
-        ref_search={@ref_search}
-        ref_candidates={@ref_candidates}
         show_history={@show_history}
         revisions={@revisions}
         show_delete={@show_delete}
         delete_refs={@delete_refs}
         editor_doc={@editor_doc}
+        seen_rev={BarkparkWeb.Studio.StudioLive.Handlers.History.seen_rev(assigns)}
         show_discard={@show_discard} doc_mark={BarkparkWeb.Studio.StudioLive.PostIdentity.of(%{assigns: assigns})}
       />
 

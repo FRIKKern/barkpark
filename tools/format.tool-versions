@@ -1,0 +1,15 @@
+# The Elixir that elixir.yml's `format` job formats with. Not production's.
+#
+# `mix format` output depends on the Elixir that runs it. 1.18 and 1.19 break
+# lines differently at the 98-column limit, so a tree formatted by one is red
+# under the other. Every dev and agent box runs 1.19.5 and nobody installs the
+# production pin locally, so the gate measures 1.19.5. Pinning it to
+# production's Elixir made a treadmill: each 1.18-shaped repair was undone by
+# the next local `mix format` (orchestrator ruling 2026-09-02,
+# task-9a08c27d897f38e6).
+#
+# Erlang is the same as the repo-root .tool-versions: formatter output is an
+# Elixir-level rule. scripts/format-check.sh reads the elixir line below.
+# Owners and consumers: scripts/toolchain-owners.tsv.
+erlang 27.3.4
+elixir 1.19.5-otp-27

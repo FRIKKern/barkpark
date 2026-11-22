@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -409,14 +410,91 @@ func TestDecodeKeepsABlockWithANumberPastFloat64(t *testing.T) {
 	}
 }
 
-func TestDecodeClipsJSONPastTheParserDepth(t *testing.T) {
+// Past the value depth (1000 JSON levels) a nested inline still keeps its word,
+// then the notice; past maxJSONDepth Decode cuts the JSON, and the notice still
+// shows, without a crash (task-11bbe4b4ae8c85f4).
+func TestDecodeKeepsTheWordPastTheValueDepthAndCutsPastItsBound(t *testing.T) {
+	nest := func(n int) string {
+		return `{"type":"paragraph","content":[` + strings.Repeat(`{"type":"em","children":[`, n) +
+			`{"type":"text","value":"leaf"}` + strings.Repeat(`]}`, n) + `]}`
+	}
+	past := renderBlockText(t, nest(500), 100)
+	if diffWords(past, conformanceWords("leaf "+nestedTooDeep)) != nil {
+		t.Errorf("500 em, past the value depth: want the word, then the notice: %.200q", past)
+	}
 	deep := strings.Repeat(`{"type":"strong","children":[`, 6000) + `"leaf"` + strings.Repeat(`]}`, 6000)
-	text := renderBlockText(t, `{"type":"paragraph","content":[`+deep+`]}`, 100)
-	if diffWords(text, conformanceWords(nestedTooDeep)) != nil {
-		t.Errorf("a doc past the JSON depth: %.200q", text)
+	cut := renderBlockText(t, `{"type":"paragraph","content":[`+deep+`]}`, 100)
+	if diffWords(cut, conformanceWords(nestedTooDeep)) != nil || strings.Contains(cut, "leaf") {
+		t.Errorf("a doc past maxJSONDepth (%d): want the notice only: %.200q", maxJSONDepth, cut)
 	}
 	if got := string(clipJSONDepth([]byte(`{"a":[[1],"[{"],"b":{"c":{}}}`), 2)); got != `{"a":[null,"[{"],"b":{"c":null}}` {
 		t.Errorf("clip: %s", got)
+	}
+}
+
+// The deepest shapes tabs, steps and list items reach, on the fixture Elixir reads
+// too (render_slot_depth_test.exs): the bounds there must equal Go's constants and
+// their sums, every blockSlots path must fit maxSlotPath, and each case must show the
+// word and the notice as the fixture says. task-11bbe4b4ae8c85f4.
+func TestSlotDepthFixture(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "api", "test", "support", "fixtures", "portable-doc-slot-depth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var fx struct {
+		Bounds map[string]int `json:"bounds"`
+		Cases  []struct {
+			Name   string `json:"name"`
+			Leaf   bool   `json:"leaf"`
+			Notice bool   `json:"notice"`
+			Doc    any    `json:"doc"`
+		} `json:"cases"`
+	}
+	if err := dec.Decode(&fx); err != nil {
+		t.Fatal(err)
+	}
+	b := fx.Bounds
+	for name, pair := range map[string][2]int{
+		"max_nest_depth":    {maxNestDepth, b["max_nest_depth"]},
+		"max_word_depth":    {maxWordDepth, b["max_word_depth"]},
+		"slot_path_levels":  {maxSlotPath, b["slot_path_levels"]},
+		"go_max_json_depth": {maxJSONDepth, b["go_max_json_depth"]},
+		"go sum":            {2*b["max_word_depth"] + b["slot_path_levels"]*b["max_nest_depth"] + 16, b["go_max_json_depth"]},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("%s: Go has %d, the fixture %d", name, pair[0], pair[1])
+		}
+	}
+	longest := 0
+	for _, paths := range blockSlots {
+		for _, path := range paths {
+			longest = max(longest, len(path))
+		}
+	}
+	if longest != maxSlotPath {
+		t.Errorf("the longest blockSlots path is %d JSON levels, maxSlotPath is %d", longest, maxSlotPath)
+	}
+	if len(fx.Cases) != 9 {
+		t.Fatalf("want 9 cases (tabs, steps, list x 3), got %d", len(fx.Cases))
+	}
+	for _, c := range fx.Cases {
+		block, err := json.Marshal(expandLimitDoc(c.Doc))
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		words := strings.Fields(renderBlockText(t, string(block), 100))
+		text := strings.Join(words, " ")
+		if got := slices.Contains(words, "leaf"); got != c.Leaf {
+			t.Errorf("%s: the word shows = %v, want %v: %.300q", c.Name, got, c.Leaf, text)
+		}
+		if got := strings.Contains(text, nestedTooDeep); got != c.Notice {
+			t.Errorf("%s: the notice shows = %v, want %v: %.300q", c.Name, got, c.Notice, text)
+		}
+		if c.Leaf && c.Notice && !strings.Contains(text, "leaf "+nestedTooDeep) {
+			t.Errorf("%s: want the word, then the notice: %.300q", c.Name, text)
+		}
 	}
 }
 
@@ -500,7 +578,9 @@ func TestCapDepthWalksEverySlotAndStopsAtOneHundred(t *testing.T) {
 	}
 }
 
-func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
+// A wrapper is drawn under depth 100 and a text's marks while depth + marks <= 100;
+// past that the word is kept and the notice follows it (task-11bbe4b4ae8c85f4).
+func TestInlineDepthKeepsTheWordAndWritesTheNoticeAfterIt(t *testing.T) {
 	ir := InlineRenderer{theme: LightTheme()}
 	nest := func(levels int, wrap func(any) any) any {
 		var n any = "leaf"
@@ -509,15 +589,22 @@ func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
 		}
 		return n
 	}
+	draw := func(n any) string { return ansi.Strip(ir.Inline([]any{n}, RenderCtx{})) }
+	after := "leaf " + nestedTooDeep
 	strong := func(n any) any { return map[string]any{"type": "strong", "children": []any{n}} }
 	list := func(n any) any { return []any{n} }
 	unknown := func(n any) any { return map[string]any{"type": "highlight", "children": []any{n}} }
 	for name, wrap := range map[string]func(any) any{"strong": strong, "bare list": list, "unknown": unknown} {
-		if got := ansi.Strip(ir.Inline([]any{nest(maxNestDepth-1, wrap)}, RenderCtx{})); got != "leaf" {
-			t.Errorf("%s at 99: %q", name, got)
+		for _, at := range []int{maxNestDepth - 1, maxNestDepth} {
+			if got := draw(nest(at, wrap)); got != "leaf" {
+				t.Errorf("%s at %d: %q", name, at, got)
+			}
 		}
-		if got := ansi.Strip(ir.Inline([]any{nest(maxNestDepth, wrap)}, RenderCtx{})); got != nestedTooDeep {
-			t.Errorf("%s at 100: %q", name, got)
+		if got := draw(nest(maxNestDepth+1, wrap)); got != after {
+			t.Errorf("%s at %d: %q", name, maxNestDepth+1, got)
+		}
+		if got := draw(nest(maxWordDepth+5, wrap)); got != nestedTooDeep {
+			t.Errorf("%s past maxWordDepth: %q", name, got)
 		}
 	}
 	marks := func(n int) []any {
@@ -527,15 +614,20 @@ func TestInlineDepthCountsNodesListsAndMarks(t *testing.T) {
 		}
 		return m
 	}
-	text := func(n int) map[string]any { return map[string]any{"type": "text", "value": "x", "marks": marks(n)} }
-	if got := ansi.Strip(ir.Inline([]any{text(maxNestDepth - 1)}, RenderCtx{})); got != "x" {
-		t.Errorf("99 marks: %q", got)
+	text := func(n int) map[string]any { return map[string]any{"type": "text", "value": "leaf", "marks": marks(n)} }
+	for _, k := range []int{maxNestDepth - 1, maxNestDepth} {
+		if got := draw(text(k)); got != "leaf" {
+			t.Errorf("%d marks: %q", k, got)
+		}
 	}
-	if got := ansi.Strip(ir.Inline([]any{text(maxNestDepth)}, RenderCtx{})); got != nestedTooDeep {
-		t.Errorf("100 marks: %q", got)
+	if got := draw(text(maxNestDepth + 1)); got != after {
+		t.Errorf("%d marks: %q", maxNestDepth+1, got)
 	}
-	if got := ansi.Strip(ir.Inline([]any{strong(text(maxNestDepth - 1))}, RenderCtx{})); got != nestedTooDeep {
+	if got := draw(strong(text(maxNestDepth - 1))); got != "leaf" {
 		t.Errorf("99 marks under a strong: %q", got)
+	}
+	if got := draw(strong(text(maxNestDepth))); got != after {
+		t.Errorf("100 marks under a strong: %q", got)
 	}
 }
 

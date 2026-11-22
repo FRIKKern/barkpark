@@ -75,6 +75,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     # `%{"create" => bool, "patchFields" => [field]}`; nil = none.
     # Enforced by `Barkpark.Content.ReaderWrites`.
     field :reader_writes, :map
+    # The ids of a type's fixed set of documents (task-f4c80d82cc25b19b); nil =
+    # no limit. Enforced by `Barkpark.Content.FixedDocuments`.
+    field :fixed_documents, {:array, :string}
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
@@ -92,36 +95,44 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   def changeset(schema_def, attrs) do
     schema_def
-    |> cast(attrs |> alias_reader_writes() |> normalise_rich_text_aliases(), [
-      :name,
-      :title,
-      :icon,
-      :visibility,
-      :owner_scoped,
-      :singleton,
-      :kind,
-      :fields,
-      :dataset,
-      :cors_origins,
-      :actions,
-      :groups,
-      :fieldsets,
-      :desk_groups,
-      :desk,
-      :list_preview,
-      :initial_values,
-      :cross_validations,
-      :layout,
-      :prefill,
-      :reader_writes,
-      :workspace_id,
-      :project_id,
-      :dataset_id
-    ])
+    |> cast(
+      attrs
+      |> alias_reader_writes()
+      |> Barkpark.Content.FixedDocuments.alias_key()
+      |> normalise_rich_text_aliases(),
+      [
+        :name,
+        :title,
+        :icon,
+        :visibility,
+        :owner_scoped,
+        :singleton,
+        :kind,
+        :fields,
+        :dataset,
+        :cors_origins,
+        :actions,
+        :groups,
+        :fieldsets,
+        :desk_groups,
+        :desk,
+        :list_preview,
+        :initial_values,
+        :cross_validations,
+        :layout,
+        :prefill,
+        :reader_writes,
+        :fixed_documents,
+        :workspace_id,
+        :project_id,
+        :dataset_id
+      ]
+    )
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_no_bare_required()
+    |> validate_array_of()
     |> validate_rich_text_formats()
     |> validate_inline_field_names()
     |> validate_visible_when_scopes()
@@ -132,6 +143,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_desk_sort_orderings()
     |> validate_desk_editor()
     |> validate_reader_writes()
+    |> Barkpark.Content.FixedDocuments.validate()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -188,6 +200,21 @@ defmodule Barkpark.Content.SchemaDefinition do
                 "`\"validation\": {\"required\": true}` (validation.required)"
             )
         end
+
+      _ ->
+        changeset
+    end
+  end
+
+  # An `arrayOf` must name its items' type (`ArrayOfCheck`,
+  # task-33f3ce6c95c48851). Only a CHANGED `fields` list is checked, so an
+  # unrelated update to an old row is never blocked.
+  defp validate_array_of(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        fields
+        |> Barkpark.Content.SchemaDefinition.ArrayOfCheck.problems()
+        |> Enum.reduce(changeset, fn msg, cs -> add_error(cs, :fields, msg) end)
 
       _ ->
         changeset

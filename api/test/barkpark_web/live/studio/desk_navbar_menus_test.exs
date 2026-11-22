@@ -92,9 +92,8 @@ defmodule BarkparkWeb.Studio.DeskNavbarMenusTest do
                ~s(.navbar button.scope-button[aria-haspopup="dialog"][aria-label="#{label}"])
              )
 
-      # No Vision link until the desk has the Vision tool: a link to a page
-      # that is not there is worse than none.
-      refute has_element?(view, ~s([role="navigation"] a[href$="/vision"]))
+      # The desk's Vision tool (`Desk.Vision`, `DeskVisionTest`) is a tool link.
+      assert has_element?(view, ~s([role="navigation"] a[href$="/_desk/_tools/vision"]), "Vision")
     end
 
     test "the old Studio keeps its own bar: no .navbar, the old switcher, the theme toggle and Sign out",

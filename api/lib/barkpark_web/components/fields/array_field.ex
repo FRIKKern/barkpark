@@ -181,10 +181,59 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   def array_field(assigns) do
     cond do
+      untyped?(assigns.field) -> read_only_list(assigns)
       # `options.layout: "tags"` in the desk: one input, Enter adds (`TagsField`).
       TagsField.tags?(assigns) -> TagsField.tags_field(assigns)
       select_list?(assigns.field) -> select_list(assigns)
       true -> row_list(assigns)
+    end
+  end
+
+  # An array whose `of` names no type (`of: {"name": "w"}`, or not a map):
+  # what an item is cannot be told, so the stored items are drawn as they
+  # are, read-only, one chip each, as TanStack's `Fields.tsx` draws them
+  # (task-04004b6d634dd535). Nothing is posted for it, so a save keeps what
+  # the store holds.
+  defp untyped?(field) do
+    case subfield_attr(field, :raw) do
+      %{"of" => of} when not is_nil(of) and not is_list(of) ->
+        not (is_map(of) and is_binary(Map.get(of, "type") || Map.get(of, :type)))
+
+      _ ->
+        false
+    end
+  end
+
+  defp read_only_list(assigns) do
+    path = Map.get(assigns, :path, "")
+
+    assigns =
+      assigns
+      |> Map.put_new(:id_base, nil)
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
+      |> Map.put(:dom_id, "bp-array-" <> sanitize_id("#{assigns.field.name}#{path}"))
+      |> Map.put(:items, assigns[:value] |> ticked() |> Enum.map(&item_text/1))
+
+    ~H"""
+    <fieldset class="bp-field bp-field-array bp-array-read-only" data-field-type="arrayOf"
+              data-array-kind="read-only" id={@dom_id} data-field-name={@field.name}>
+      <legend class="bp-field-title"><%= @title %></legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
+      <div id={@id_base} class="bp-array-read-only-items" aria-readonly="true">
+        <span :for={item <- @items} class="tag"><%= item %></span>
+      </div>
+      <p class="bp-field-hint"><%= gettext("Read-only") %></p>
+    </fieldset>
+    """
+  end
+
+  defp item_text(value) when is_binary(value), do: value
+
+  defp item_text(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      _ -> inspect(value)
     end
   end
 
@@ -194,11 +243,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # form sends a list in option order; the leading hidden "" keeps the key in
   # the post when nothing is ticked, and `Content.Forms` drops it. A stored
   # value that is not an option is listed after the options, ticked and marked
-  # invalid, so it stays until the editor unticks it.
+  # invalid, so it stays until the editor unticks it. A stored value that is
+  # not a list (one string, from an old bug) is drawn as a list of that one
+  # value; nothing is written until the editor ticks.
   defp select_list(assigns) do
-    item = element_field(assigns.field)
-    options = Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options))
-    values = Enum.map(assigns[:value] || [], &leaf_display/1)
+    options = choices(assigns.field)
+    values = assigns[:value] |> ticked() |> Enum.map(&leaf_display/1)
     known = Enum.map(options, & &1.value)
     path = Map.get(assigns, :path, "")
 
@@ -220,15 +270,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               data-array-kind="select" id={@dom_id} data-field-name={@field.name}>
       <legend class="bp-field-title"><%= @title %></legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
-      <input type="hidden" name={@path <> "[]"} value="" />
+      <input type="hidden" name={list_name(@path)} value="" />
       <div id={@id_base} class={"bp-select-list-options" <> if(@grid, do: " bp-select-list-grid", else: "")}>
         <label :for={o <- @options} class="bp-select-list-option">
-          <input type="checkbox" name={@path <> "[]"} value={o.value} checked={o.checked}
+          <input type="checkbox" name={list_name(@path)} value={o.value} checked={o.checked}
                  phx-change={@on_change} disabled={@readonly} />
           <span><%= o.label %></span>
         </label>
         <label :for={v <- @unknown} class="bp-select-list-option bp-select-list-invalid" data-invalid-value={v}>
-          <input type="checkbox" name={@path <> "[]"} value={v} checked aria-invalid="true"
+          <input type="checkbox" name={list_name(@path)} value={v} checked aria-invalid="true"
                  phx-change={@on_change} disabled={@readonly} />
           <span><code><%= v %></code></span>
           <span class="error" role="note"><%= gettext("Not one of the options") %></span>
@@ -238,11 +288,65 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     """
   end
 
+  defp ticked(nil), do: []
+  defp ticked(values) when is_list(values), do: values
+  defp ticked(%{} = map) when map_size(map) == 0, do: []
+  defp ticked(value), do: [value]
+
+  # The checkboxes' name. At the top level `doc[tags][]`. Inside an object
+  # or an array row the path has a dotted part (`doc[obj].tags`), and
+  # `Plug.Conn.Query.decode/1` reads `doc[obj].tags[]` as one key holding the
+  # last tick only. So there the whole path goes in one bracket, dotted:
+  # `doc[obj.tags][]`, `doc[rows.0.tags][]`, which decodes to a list, and
+  # `StudioLive.Path.unmangle_params/1` gives it back its dotted name.
+  defp list_name("doc[" <> rest = path) do
+    if String.contains?(rest, ".") do
+      dotted =
+        rest
+        |> String.replace("][", ".")
+        |> String.replace("].", ".")
+        |> String.trim_trailing("]")
+
+      "doc[" <> dotted <> "][]"
+    else
+      path <> "[]"
+    end
+  end
+
+  defp list_name(path), do: path <> "[]"
+
   defp select_list?(field) do
+    case element_field(field) |> subfield_attr(:type) do
+      "select" ->
+        choices(field) != []
+
+      # A missing `of` reads as strings here (`element_field/1`), not in TanStack.
+      "string" ->
+        subfield_attr(subfield_attr(field, :raw) || field, :of) != nil and
+          is_list(string_list(field))
+
+      _ ->
+        false
+    end
+  end
+
+  # The options of a checkbox list: an array of `select` values reads its
+  # item's options; an array of strings reads `options.list` on the array,
+  # as TanStack's `Fields.tsx` and Sanity draw it (task-5935f433650841be).
+  defp choices(field) do
     item = element_field(field)
 
-    subfield_attr(item, :type) == "select" and
-      Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options)) != []
+    case subfield_attr(item, :type) do
+      "select" -> Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options))
+      _string -> Barkpark.Content.SelectOptions.normalize(string_list(field))
+    end
+  end
+
+  defp string_list(field) do
+    case subfield_attr(field, :raw) || field do
+      %{"options" => %{"list" => list}} -> list
+      _ -> nil
+    end
   end
 
   # Sanity's `options.layout` on the array ("grid" draws the options in columns).

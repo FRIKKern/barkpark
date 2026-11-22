@@ -5,7 +5,7 @@ Every key a schema may declare when you `POST /v1/schemas/:dataset` (or `bp sche
 
 ## The schema object
 
-`name` and `title` are required. The changeset stores these keys and drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `fieldsets`, `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), [`list_preview`](list-preview.md), `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`).
+`name` and `title` are required. The changeset stores these keys and drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type used as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `fieldsets`, `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), [`list_preview`](list-preview.md), [`initial_values`](initial-values.md), `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`), [`fixed_documents`](fixed-documents.md).
 
 A top-level `validations` list is read by `parse/2` but not cast, so it is not stored.
 
@@ -19,9 +19,9 @@ A top-level `validations` list is read by `parse/2` but not cast, so it is not s
 | `type` | Required string: a built-in type below, or the `name` of a `kind: "object"` schema in scope. |
 | `title`, `description` | Label and help text in Studio. |
 | `validation` | Rules, see [Validation](#validation). |
-| `visibleWhen` | `{field, operator, value?, scope?}`. Operators: `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`, `count_eq`, `count_neq`, `count_gt`, `count_lt`. An unknown operator means visible. `field` is a dotted path; `scope` is `document` (default) or `parent` (the enclosing object or array item; refused 422 on a top-level field of a document schema, allowed on a `kind: "object"` schema's own fields, which read the object where the type is used). `{all: [...]}` and `{any: [...]}` combine predicates and may nest, as in `cross_validations`; each predicate carries its own `scope`. Hidden fields are still validated. |
+| `visibleWhen` | `{field, operator, value?, scope?}`. Operators and `valueField`: [schema-cross-validations.md](schema-cross-validations.md). An unknown operator means visible. `field` is a dotted path; `scope` is `document` (default) or `parent` (the enclosing object or array item; refused 422 on a top-level field of a document schema, allowed on a `kind: "object"` schema's own fields, which read the object where the type is used). `{all|any|one: [...]}` combine predicates and may nest, as in `cross_validations`; each predicate carries its own `scope`. Hidden fields are still validated. |
 | `hidden` | `true` hides the field in Studio whatever `visibleWhen` says. The stored value stays: a save writes only the fields the form posts, so the hidden value is kept. Only the literal `true` counts; for a condition use `visibleWhen`. Hidden fields are still validated and still returned by the API. |
-| `readOnly` | `true`, or a `visibleWhen`-shaped predicate (read-only while it holds). Enforced for non-admin API writes on top-level fields only. |
+| `readOnly` | `true`, or a `visibleWhen`-shaped predicate (read-only while it holds; `_createdAt` etc. too). Non-admin API writes, top-level only. |
 | `group` | The schema `groups` tab this field sits on (or a composite's `groups` tab). |
 | `surface` | `body` or `sidebar`; anything else is refused. Metadata only. |
 | `encrypted`, `private`, `visibility`, `readable_by` | Encryption at rest and per-field read visibility. |

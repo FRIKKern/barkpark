@@ -115,6 +115,9 @@ on:
       # fixture (task-a4d1ae76fdb2a6b0 — one rule per boundary, three engines);
       # same rule.
       - "api/test/support/fixtures/section-boundary-rules.json"
+      # internal/pdrender/limits_test.go TestSlotDepthFixture reads this fixture
+      # (one fixture, Go and Elixir — task-11bbe4b4ae8c85f4); same rule.
+      - "api/test/support/fixtures/portable-doc-slot-depth.json"
       # internal/cli/tasks_adjudication_drift_test.go reads this Elixir module
       # (const serverStagePath) to lock the CLI's adjudication vocabulary fixture
       # to Stage's @dispositions / @trigger_required / key attrs in BOTH directions
@@ -322,6 +325,12 @@ on:
       # TestCaddyInstallFunc_OneInstallerEverywhere asserts it carries the
       # install_caddy_pkg block byte-identical to deploy.sh's (task-16e58856f0182596).
       - "deploy/azure-base-install.sh"
+      # deploy/apt_lock_wait_test.go's TestBoxAptCallsWaitForTheDpkgLock scans
+      # these box scripts (with the two above) for an apt-get call that does not
+      # wait for the dpkg lock (task-aa4ef6ce7298ef70).
+      - "deploy.sh"
+      - "internal/cli/setup/assets/deploy.sh"
+      - "deploy/bake-server-image.sh"
       # deploy/azure/main.example.bicepparam: internal/cli/instance_check_cmd_test.go
       # checks that the init file holds every secret the Container Apps parameter
       # file names.

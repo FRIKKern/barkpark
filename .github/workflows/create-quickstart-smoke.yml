@@ -79,8 +79,8 @@ jobs:
       - name: Setup BEAM (Elixir/OTP — the app the smoke boots)
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "27.0"
-          elixir-version: "1.18.1"
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Setup Go (builds bp from source under test)
         uses: actions/setup-go@v5
@@ -93,9 +93,9 @@ jobs:
           path: |
             api/deps
             api/_build
-          key: ${{ runner.os }}-qs-smoke-mix-27.0-1.18.1-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-qs-smoke-mix-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-qs-smoke-mix-27.0-1.18.1-
+            ${{ runner.os }}-qs-smoke-mix-${{ hashFiles('.tool-versions') }}-
 
       - name: Install system deps (clang for NIF compile, libvips for vix, lsof)
         # libvips-dev: vix (media renditions) compiles its NIF against libvips at

@@ -121,7 +121,7 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 
 	// 1. install Caddy: the official apt repo first, else the pinned,
 	//    sha512-verified release .deb (install_caddy_pkg, task-8fcdc94b07a9dc60).
-	mustContainOne(t, steps, "apt-get install -y -qq caddy")
+	mustContainOne(t, steps, "bp_apt_get install -y -qq caddy")
 	mustContainOne(t, steps, "caddy-stable.list")
 	mustContainOne(t, steps, "sha512sum -c")
 	mustContainOne(t, steps, "command -v caddy >/dev/null 2>&1 || install_caddy_pkg")
@@ -162,8 +162,8 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 	// 2026-09-02. Asserting the ORDER, not mere presence: the second `apt-get
 	// update` (for the Caddy repo) has always been there and did not save it.
 	install := steps[0].Cmd
-	firstUpdate := strings.Index(install, "apt-get update")
-	firstInstall := strings.Index(install, "apt-get install")
+	firstUpdate := strings.Index(install, "bp_apt_get update")
+	firstInstall := strings.Index(install, "bp_apt_get install")
 	if firstUpdate < 0 {
 		t.Fatalf("install step must refresh the apt index; got:\n%s", install)
 	}

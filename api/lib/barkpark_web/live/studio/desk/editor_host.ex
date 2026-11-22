@@ -297,31 +297,6 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   # Sent by hand with no type: nothing to create.
   def handle_event("new-document", _params, socket), do: {:noreply, socket}
 
-  # The editor's reference and media events, and the params each one's
-  # handler takes. With no document in the editor (no form), or without those
-  # params, there is nothing to pick for: sent by hand they killed the page.
-  @picks %{
-    "select-ref" => ~w(id field),
-    "clear-ref" => ~w(field),
-    "ref-search" => ~w(value),
-    "open-ref-picker" => ~w(field ref-type),
-    "select-media" => ~w(url field),
-    "clear-image" => ~w(field)
-  }
-
-  def handle_event(event, params, socket) when is_map_key(@picks, event) do
-    with true <- is_map_key(socket.assigns, :editor_form),
-         false <- RevisionView.shown?(socket.assigns),
-         false <- PublishedView.active?(socket.assigns),
-         true <- Enum.all?(@picks[event], &is_map_key(params, &1)),
-         :cont <- NewDoc.guard(event, params, socket) do
-      event |> StudioLive.handle_event(params, socket) |> ours()
-    else
-      {:halt, socket} -> {:noreply, socket}
-      _ -> {:noreply, socket}
-    end
-  end
-
   # The Studio's events that write the open document from its form.
   @form_writes ~w(save autosave paper-block-autosave paper-save-master object-dialog-save)
 
@@ -412,23 +387,34 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   defp gone?(%{editing: {_dataset, type, id}} = assigns), do: LiveRefresh.gone?(assigns, type, id)
   defp gone?(_assigns), do: false
 
+  # The Studio's shell, without its profile dialog: the desk draws that one
+  # itself, outside the panes (`DeskLive`), so the navbar's pill and the
+  # drawer open it with no document open too. Inside a shown revision its
+  # form would sit in the revision's disabled fieldset.
+  defp shell(assigns), do: Components.studio_live_shell(assign(assigns, :show_profile, false))
+
+  # Whether nothing may be written from the form: its document is gone, or an
+  # old revision or the published version is shown in its place.
+  defp shut?(assigns),
+    do: gone?(assigns) or RevisionView.shown?(assigns) or PublishedView.active?(assigns)
+
   @doc "A message the page does not own is the editor's."
   # Someone else discarded the open draft: the frame carries the dead draft,
   # which the Studio would put in the form (`Discarded`).
   def handle_info({:doc_updated, msg} = message, socket) do
     if Discarded.frame?(msg, socket.assigns),
       do: ours({:noreply, Discarded.reload(socket)}),
-      else: message |> StudioLive.handle_info(socket) |> ours()
+      else: message |> StudioLive.handle_info(socket) |> quiet_remote() |> ours()
   end
 
   # A tree codelist's pick: the press went to its component
   # (`TreeCodelistField`), past `handle_event/3`'s guards, and comes here as a
   # message. It meets the same ones: nothing is written while an old revision
-  # is shown, into a document deleted elsewhere, or from the form of a draft
-  # discarded elsewhere.
+  # or the published version is shown, into a document deleted elsewhere, or
+  # from the form of a draft discarded elsewhere.
   def handle_info({:tree_codelist_pick, _msg} = message, socket) do
     cond do
-      gone?(socket.assigns) or RevisionView.shown?(socket.assigns) -> {:noreply, socket}
+      shut?(socket.assigns) -> {:noreply, socket}
       Discarded.drop?(socket.assigns) -> {:noreply, Discarded.drop(socket)}
       true -> message |> StudioLive.handle_info(socket) |> ours()
     end
@@ -578,6 +564,19 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
     end
   end
 
+  # Another user's save over a form with nothing unsaved is taken in and
+  # says nothing: TanStack's footer keeps its "Edited …" and has no words
+  # for it (DocumentPane `DocFooter`, task-22f40460dbb71b27). Over unsaved
+  # edits it is a conflict (`doc_conflict`) and keeps its words.
+  defp quiet_remote({:noreply, socket}) do
+    if socket.assigns[:save_status] == "Updated by another user" and
+         socket.assigns[:doc_conflict] != true,
+       do: {:noreply, assign(socket, :save_status, "")},
+       else: {:noreply, socket}
+  end
+
+  defp quiet_remote(reply), do: reply
+
   defp repatch(socket, to), do: push_patch(%{socket | redirected: nil}, to: to)
 
   @doc """
@@ -697,11 +696,20 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       data-desk-focused={assigns[:desk_focus] == @view.index}
       data-desk-document={document_node?(@view.pane)}
       data-desk-save={BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns)}
+      data-desk-conflict={
+        assigns[:doc_conflict] == true and
+          BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns) == "Updated by another user"
+      }
       data-desk-inspecting={inspector(@view.pane) != nil}
       aria-label={@page_title}
     >
       <%!-- `data-desk-save`: the save token (`SaveStatus`), not its words;
-            `bp-desk.js` asks before the tab closes over "Save failed". --%>
+            `bp-desk.js` asks before the tab closes over "Save failed".
+            `data-desk-conflict`: another user saved over edits not saved
+            here, and the status still says so. Both, as a guard: a save
+            that said "Saved" with `doc_conflict` still set (the removed
+            legacy pick's `{:autosave_form, …}` did) is no conflict.
+            `Desk.DocStyle` tones the form's status by both marks. --%>
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
@@ -805,6 +813,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           :if={!@edit_failed and !gone?(assigns) and !document_node?(@view.pane)}
           patch={Panes.split_right(@chain, @view.index, @base)}
           class="dk-split icon-btn"
+          data-desk-split-right
           aria-label={gettext("Split pane right")}
           data-tip={gettext("Split pane right")}
         >
@@ -940,17 +949,18 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         </div>
         <%!-- The Studio's own delete and unpublish modals are kept out of the
               desk: the desk draws its dialogs below, from the same assigns. --%>
-        <%!-- An old revision (`rev`) is the Studio's form over its values, in a
-              disabled fieldset (`RevisionView`); one that is not shown says so.
-              So is the published version in the published perspective
-              (`PublishedView`). The live form sits in the same fieldset,
-              enabled: the holders after it keep their place when a History
-              row is picked, so the row keeps the focus. Inside it, the form's
-              box is keyed by what it draws (`form_key/1`). --%>
+        <%!-- An old revision (`rev`) is the Studio's form over its values
+              (`RevisionView`); one that is not shown says so. So is the
+              published version in the published perspective
+              (`PublishedView`). Their fields sit in a disabled fieldset inside
+              the shell (`ReadonlyFields`), under group tabs that still switch.
+              The live form sits in the same holder: the holders after it keep
+              their place when a History row is picked, so the row keeps the
+              focus. Inside it, the form's box is keyed by what it draws
+              (`form_key/1`). --%>
         <fieldset
           id={"#{@view.id}-form-holder"}
           class="dk-revision-form"
-          disabled={RevisionView.shown?(assigns) or PublishedView.shown?(assigns)}
           data-desk-revision-form={RevisionView.shown?(assigns)}
           data-desk-published-form={PublishedView.shown?(assigns)}
         >
@@ -958,15 +968,15 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           <%= cond do %>
             <% @edit_failed or gone?(assigns) -> %>
             <% RevisionView.shown?(assigns) -> %>
-              {Components.studio_live_shell(RevisionView.shell_assigns(assigns))}
+              {shell(RevisionView.shell_assigns(assigns))}
             <% PublishedView.shown?(assigns) -> %>
-              {Components.studio_live_shell(PublishedView.shell_assigns(assigns))}
+              {shell(PublishedView.shell_assigns(assigns))}
             <% RevisionView.missing?(assigns) -> %>
               <p class="dk-note" role="alert" data-desk-revision-missing>
                 {gettext("This revision can't be found. Pick another entry in the history.")}
               </p>
             <% true -> %>
-              {Components.studio_live_shell(
+              {shell(
                 assigns
                 |> assign(show_delete: false, show_unpublish_guard: false)
                 |> HistoryPanel.waiting()
@@ -1052,6 +1062,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
         id={"#{@view.id}-revision-footer"}
         revision={@desk_revision}
         menu_button={"#{@view.id}-actions-button"}
+        seen_rev={BarkparkWeb.Studio.StudioLive.Handlers.History.seen_rev(assigns)}
       />
       <%!-- The published version's footer (`PublishedView`): its words and
             Unpublish, no "…", as TanStack's `PublishedFooter`. --%>

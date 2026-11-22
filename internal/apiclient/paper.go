@@ -47,14 +47,17 @@ func (e *PaperAPIErr) Error() string {
 // PaperSyncResult is a successful push receipt. Rev is the paper-level op-rev
 // (string on the wire, same spelling as the x-paper-rev anchor). When
 // Unchanged, nothing applied and Bpml is empty; otherwise Bpml carries the
-// CANONICAL post-write document the working copy must converge on.
+// CANONICAL post-write document the working copy must converge on. Notes are
+// lines the server wants the author to read, e.g. a callout whose stored body
+// the push kept although the copy spelled it inline.
 type PaperSyncResult struct {
-	OK        bool   `json:"ok"`
-	Slug      string `json:"slug"`
-	Rev       string `json:"rev"`
-	OpCount   int    `json:"op_count"`
-	Unchanged bool   `json:"unchanged"`
-	Bpml      string `json:"bpml"`
+	OK        bool     `json:"ok"`
+	Slug      string   `json:"slug"`
+	Rev       string   `json:"rev"`
+	OpCount   int      `json:"op_count"`
+	Unchanged bool     `json:"unchanged"`
+	Bpml      string   `json:"bpml"`
+	Notes     []string `json:"notes"`
 	// View is the fingerprint of the paper's view after the push (see
 	// PaperPullBpml); the anchor keeps it for the next push.
 	View string `json:"bpmlView"`

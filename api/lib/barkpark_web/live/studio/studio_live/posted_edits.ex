@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   import Phoenix.Component, only: [assign: 2, assign: 3]
 
   alias Barkpark.Content.Forms
+  alias BarkparkWeb.Studio.StudioLive.PostPath
 
   @doc """
   A remote save changed the buffer from `old_form` to `new_form`: each field
@@ -72,7 +73,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   """
   def into_form(socket, params, raw_params) do
     waiting = waiting(socket, socket.assigns[:editor_form] || %{}) -- target(socket)
-    merge(socket, params, old_values(socket, params, raw_params, waiting))
+    kept = old_values(socket, params, raw_params, waiting)
+    merge(socket, PostPath.into_buffer(params, socket), kept)
   end
 
   @doc """
@@ -86,13 +88,23 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
 
     assign(socket,
       save_status: "Saved",
-      editor_form: merge(socket, params, waiting(socket, form)),
+      editor_form: merge(socket, PostPath.into_buffer(params, socket), waiting(socket, form)),
       editor_remote_waiting: {base(socket), values}
     )
   end
 
-  defp merge(socket, params, kept),
-    do: Map.merge(socket.assigns[:editor_form] || %{}, Map.drop(params, kept))
+  @doc """
+  `values` (coerced posted fields) put into the form buffer. Every path
+  that puts a post into the buffer goes through here: an unset key
+  (`Forms.unset/0`) is nil in the buffer, as the form draws it, and the
+  marker never reaches a render or the next post.
+  """
+  def put(socket, values), do: assign(socket, editor_form: buffer(socket, values))
+
+  defp merge(socket, params, kept), do: buffer(socket, Map.drop(params, kept))
+
+  defp buffer(socket, values),
+    do: Map.merge(socket.assigns[:editor_form] || %{}, Forms.unset_as_nil(values))
 
   # The waiting fields whose posted value the save does not read as an edit.
   defp old_values(_socket, _params, _raw_params, []), do: []

@@ -1,0 +1,25 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "cache": false
+    },
+    "test": {
+      "inputs": [
+        "build/**",
+        "check/**",
+        "css/**",
+        "docs/**",
+        "parts/**",
+        "tests/**",
+        "README.md",
+        "package.json",
+        "vitest.config.ts",
+        "$TURBO_ROOT$/../api/priv/barkui/**",
+        "$TURBO_ROOT$/../.github/workflows/barkui.yml",
+        "$TURBO_ROOT$/../.github/workflows/js-tests.yml",
+        "$TURBO_ROOT$/../.github/required-checks.json"
+      ]
+    }
+  }
+}

@@ -48,13 +48,12 @@
 // cache hit is not a gate.
 //
 // .github/workflows/js-tests.yml now runs this file in an UNCACHED step of its
-// own ("pd-golden mirror freshness"), ahead of every turbo step, in addition to
-// the cached `test` task. The workflow already triggered on
-// `api/test/support/fixtures/pd-parity/**`; what was missing was a RUN, not a
-// trigger. MEASURED: with that step in place the same control commit reds
-// js-tests AT THAT STEP (step 12), before Build or Test execute at all. The
-// cached `test` task may still replay on such a PR — that is fine; the uncached
-// step is what carries the verdict now.
+// own ("pd-golden mirror freshness"), ahead of every turbo step. The workflow
+// already triggered on `api/test/support/fixtures/pd-parity/**`; what was
+// missing was a RUN, not a trigger. MEASURED: with that step in place the same
+// control commit reds js-tests AT THAT STEP (step 12), before Build or Test
+// execute at all. That step is the only run of this file: it is in
+// NAMED_STEP_FILES (../vitest.config.ts), so the cached `test` task leaves it out.
 
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'

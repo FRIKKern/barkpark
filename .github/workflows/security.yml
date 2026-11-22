@@ -100,6 +100,11 @@ name: security
 #                   8th, esaml (XXE), has no upstream fix and is mitigated by
 #                   OTP 27+ — it is the single documented --ignore-advisory-ids
 #                   suppression in the audit step. A NEW CVE reds the fleet.
+#                   The second oracle (`mix hex.audit` over both locks) counts
+#                   toward this job's light too (task-eb4b9903a92011cd): an
+#                   unexcepted, unbaselined HIGH, CRITICAL or UNKNOWN advisory
+#                   reds the job by name, and the daily `schedule:` run below
+#                   re-reads the feed so a new advisory reds main within a day.
 #
 # Policy of record: docs/ops/security-gates.md (split out of merge-gates.md).
 #
@@ -148,6 +153,15 @@ name: security
 
 on:
   pull_request:
+  # THE DAILY RUN (task-eb4b9903a92011cd). The advisory feeds are read fresh
+  # at run time, so a run on main's tip re-asks them with no diff. Not a
+  # pull_request, so the dispatcher sets every path set true and the whole
+  # workflow runs; a red on main files the `security-main` issue through
+  # "Report main-push failure to a human", and main-red-owner.yml reads it.
+  # 04:41 UTC clears the 03:17-03:25 nightlies. Classified `periodic` in
+  # scripts/cron-overdue-probe.sh.
+  schedule:
+    - cron: "41 4 * * *"
   push:
     branches: [main]
     # PATHS-FILTERED ON THE push ARM ONLY (2026-09-10, task-7ef9d81ed33d2b9c).
@@ -508,12 +522,6 @@ jobs:
     outputs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Track the prod server toolchain, same pin as elixir.yml.
-        otp: ["27.0"]
-        elixir: ["1.18.1"]
     defaults:
       run:
         working-directory: api
@@ -523,8 +531,8 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Cache deps + build
         uses: actions/cache@v6
@@ -532,9 +540,9 @@ jobs:
           path: |
             api/deps
             api/_build
-          key: ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-sobelow-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-sobelow-${{ hashFiles('.tool-versions') }}-
 
       - name: Fetch deps
         id: s1
@@ -641,7 +649,7 @@ jobs:
         if: always() && steps.s3.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
-          name: sobelow-baseline-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}
+          name: sobelow-baseline
           path: ${{ runner.temp }}/sobelow-baseline-reconcile
           # The reconcile script writes the baseline as a dotfile (.sobelow-skips);
           # upload-artifact@v4 excludes hidden files by default, which would ship
@@ -917,8 +925,8 @@ jobs:
         with:
           # Same pin as the sobelow job and elixir.yml. Nothing is compiled
           # here; this is only the runtime that provides :erlang.phash2.
-          otp-version: "27.0"
-          elixir-version: "1.18.1"
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Selftest (the fingerprint ratchet must be able to fail)
         id: s1
@@ -1006,7 +1014,7 @@ jobs:
     # decimal to ~> 3.0). The 8th, esaml GHSA-4g2h-vm7x-747c (XXE), has NO
     # upstream fix — every release ≤ 4.6.0 is affected — and is mitigated at
     # runtime by OTP 27+ (xmerl disables external entities by default), which
-    # this job (OTP 27.0) and prod both run. It is the single documented
+    # this job and prod both run (OTP 27, from .tool-versions). It is the single documented
     # suppression below; revisit if esaml ships a patched release.
     needs: changes
     # GATED ON ITS OWN INPUTS, not on `api` (2026-09-20, task-76e529e61d9e34d0).
@@ -1023,11 +1031,6 @@ jobs:
       # `security-gate` as V_AUDIT.
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ["27.0"]
-        elixir: ["1.18.1"]
     defaults:
       run:
         working-directory: api
@@ -1037,16 +1040,16 @@ jobs:
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ matrix.otp }}
-          elixir-version: ${{ matrix.elixir }}
+          version-file: .tool-versions
+          version-type: strict
 
       - name: Cache deps
         uses: actions/cache@v6
         with:
           path: api/deps
-          key: ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          key: ${{ runner.os }}-mix-audit-deps-${{ hashFiles('.tool-versions') }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-audit-deps-${{ hashFiles('.tool-versions') }}-
 
       - name: Fetch deps
         id: s1
@@ -1067,63 +1070,61 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
 
-      # ══ THE SECOND CVE ORACLE — ADVISORY, AND ADVISORY BY CONSTRUCTION ═══
+      # ══ THE SECOND CVE ORACLE — `mix hex.audit` OVER BOTH LOCKS ═══════════
       #
-      # cch-w12-bl-cve-gate-is-oracle-blind. Two oracles, the same two locks,
-      # the same commit, opposite answers: `mix deps.audit` (mix_audit, mirego's
-      # DB — the step directly above) says "No vulnerabilities found." while
-      # `mix hex.audit` (Hex's own OSV-backed feed) reports 17 advisories on
-      # api/mix.lock (4 HIGH) and 13 on cloud/mix.lock (5 HIGH) — measured
-      # 2026-09-09 at origin/main 8510213, and reproduced at this job's pinned
-      # 1.18.1/OTP 27.0 in run 34410161152, where the step directly above still
-      # printed "No vulnerabilities found." in the SAME job. The mix_audit step
-      # is not wrong about its own database; it simply cannot see this feed.
+      # `mix deps.audit` above reads mix_audit's advisory DB over api/mix.lock;
+      # `mix hex.audit` reads Hex's own OSV-backed feed over BOTH locks, and the
+      # two disagree (cch-w12-bl-cve-gate-is-oracle-blind). Both count.
       #
-      # THE RECORDED DECISION (2026-09-09, lead-gates, on the orchestrator's
-      # ruling). `mix hex.audit` runs as a SECOND, ADVISORY oracle beside
-      # mix_audit, over BOTH locks. The choice of which oracle should BLOCK is
-      # HELD FOR THE OWNER (owner-queue item 47 / criterion 1 of that row) and
-      # is deliberately NOT settled here. No PR reds when a new advisory is
-      # published, because these steps are non-blocking by construction:
+      # WHAT THIS DECIDES (task-eb4b9903a92011cd). The selftest and the oracle
+      # steps carry an `id:` and are in the Decide step's STEP_NAMES, so their
+      # exits count toward this job's light. The oracle exits 1 on an advisory
+      # at or above its floor (`--red-at HIGH`: HIGH, CRITICAL, and UNKNOWN, an
+      # advisory with no severity) that is neither in the lock's mix.exs
+      # `ignored_advisories` nor in .github/hex-audit-baseline.txt; below the
+      # floor it prints a notice. It exits 3, CANNOT READ, when hex.audit
+      # gives no report: a tool that dies never reads as clean. So the job is
+      # red by name on a lock pull request, on a push to main and on the daily
+      # run (`schedule:` above).
       #
-      #   1. `continue-on-error: true` — the step's own failure never fails the
-      #      job.
-      #   2. NO `id:` — and that is the load-bearing half. This job's verdict is
-      #      owned by the "Decide (main-red breaker…)" step below, which reads
-      #      `toJSON(steps)`; a step WITHOUT an id never appears in `steps` at
-      #      all, so it cannot enter the breaker's arithmetic even by accident.
-      #      Giving these steps an id would silently promote them to the job's
-      #      verdict. Do not add one without re-deciding the policy above.
-      #   3. No new JOB name. The check-run census (.github/required-checks.json,
-      #      scripts/required-checks-verify.sh) keys on job names; steps inside
-      #      an existing job add no row, so the required set cannot drift.
+      # WHAT STAYS OPEN. Whether this job or `Security gate` blocks merges is
+      # the owner's decision (owner-queue item 47).
       #
-      # AND IT IS STILL ABLE TO FAIL (criterion 2). scripts/hex-audit-oracle.sh
-      # exits 0 clean / 1 on an advisory not in .github/hex-audit-baseline.txt /
-      # 3 CANNOT READ when hex.audit itself refuses to answer. Proven locally
-      # 2026-09-09: api/mix.lock's plug hand-reverted 1.20.3 → 1.20.1 yielded
-      # "+ api:EEF-CVE-2026-56813, + api:EEF-CVE-2026-56814" and exit 1; the
-      # restored lock exit 0; cloud/deps parked away exit 3 with "CANNOT READ".
-      # A tool that dies must never read as clean.
+      # WHY A RED HERE STOPS NO OTHER PR'S MERGE. `Security gate` and this job
+      # are not required contexts (.github/required-checks.json `exclusions`);
+      # no automation opens a main-red hold from a CI run (scripts/main-red-
+      # hold.sh opens one only from its own reproduction, by hand); and
+      # scripts/bp-merge.sh reads none of these checks. A red on main reaches a
+      # human through "Report main-push failure to a human" (issue key
+      # `security-main`) and main-red-owner.yml. Pinned by
+      # scripts/security-gate-shape.test.sh case 8.
+      #
+      # ONE LIMIT. While main fails the oracle step, a lock PR whose oracle
+      # step fails reads OWNERSHIP-UNDETERMINED (exit 1), because the oracle
+      # prints no line the breaker's signature reads; it blocks nothing.
+      # Follow-up: task-1934eab18553d6dc.
       - name: Fetch cloud deps (hex.audit cannot load a lock whose deps are absent)
-        continue-on-error: true   # ADVISORY — and NO id:, see the block above
+        # No id: a failure here leaves cloud/ unreadable, and the oracle step
+        # then exits 3 (CANNOT READ), which counts.
+        continue-on-error: true
         working-directory: cloud
         run: mix deps.get
 
       - name: Second CVE oracle selftest (the parser + ratchet must be able to fail)
-        continue-on-error: true   # ADVISORY — and NO id:, see the block above
+        id: s3
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         working-directory: ${{ github.workspace }}
-        run: bash scripts/hex-audit-oracle.sh --selftest
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/hex-audit-oracle.sh --selftest
 
-      - name: Second CVE oracle — mix hex.audit over BOTH locks (ADVISORY, blocks nothing)
-        continue-on-error: true   # ADVISORY — and NO id:, see the block above
+      - name: Second CVE oracle — mix hex.audit over BOTH locks (an unexcepted HIGH or worse reds this job)
+        id: s4
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         working-directory: ${{ github.workspace }}
-        # NOTE, stated rather than buried: this job is `if: needs.changes.outputs.api
-        # == 'true'`, and the dispatcher emits no `cloud` output at all. A
-        # cloud-ONLY pull request therefore still never reaches either oracle.
-        # That topological half of the row is UNCHANGED here on purpose —
-        # widening the venue is a dispatcher change, not an oracle change.
-        run: bash scripts/hex-audit-oracle.sh --baseline .github/hex-audit-baseline.txt
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/hex-audit-oracle.sh --baseline .github/hex-audit-baseline.txt --red-at HIGH
       # ── main-red circuit breaker (task-e638b950726fea51) ─────────────────
       # Every gate step above ran with continue-on-error; this step owns the
       # job's verdict. A red that main's newest completed run already carries
@@ -1133,7 +1134,7 @@ jobs:
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"mix deps.audit (scans mix.lock against the advisory DB)\"}"
+          STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"mix deps.audit (scans mix.lock against the advisory DB)\", \"s3\": \"Second CVE oracle selftest (the parser + ratchet must be able to fail)\", \"s4\": \"Second CVE oracle — mix hex.audit over BOTH locks (an unexcepted HIGH or worse reds this job)\"}"
           JOB_NAME: "Dependency CVE audit (mix_audit over mix.lock, non-blocking)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
@@ -1162,8 +1163,8 @@ jobs:
     #
     #   * NO `strategy.matrix`. The published check-run name is then exactly the
     #     `name:` string below. A matrixed job's name either gains the full
-    #     matrix tuple (`… (27.0, 1.18.1)`, which is what BOTH heavy jobs here
-    #     publish) or, if it never STARTED, publishes the literal uninterpolated
+    #     matrix tuple (`… (27.0, 1.18.1)`, which BOTH heavy jobs here published
+    #     until they dropped their matrix) or, if it never STARTED, publishes the literal uninterpolated
     #     `${{ matrix.x }}` — both unusable as a required context (D20).
     #
     #   * `if: always()`. Without it this job would itself be `skipped` whenever
@@ -1577,7 +1578,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_FAILURE_KEY: ${{ github.ref == 'refs/heads/main' && 'security-main' || 'ci-drill-main-push-failure-arm' }}
           CI_FAILURE_DETAIL: |
-            The `Security gate` context is RED on a push to `main`.
+            The `Security gate` context is RED on `main` (a push, or the daily
+            scheduled run, which re-reads the advisory feeds with no diff).
             This is POST-MERGE: the breakage is already on the default branch.
 
             `Security gate` is ADVISORY: it is not among the contexts listed in

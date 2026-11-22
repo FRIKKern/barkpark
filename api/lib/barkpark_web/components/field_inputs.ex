@@ -30,10 +30,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   rendered by Web Components — `<bp-media-picker>` and `<bp-reference-picker>`
   respectively — which own the entire UX (browse / upload / select / search /
   clear). They bridge their value through `BarkparkFieldBridge`; no per-LV
-  events are required. The legacy `"open-image-picker"` / `"clear-image"` /
-  `"select-media"` / `"upload-image"` / `"open-ref-picker"` / `"clear-ref"`
-  handlers and the legacy picker-modal markup remain in StudioLive but are no
-  longer invoked from this component (orphaned-but-harmless until v2 cleanup).
+  events are required. The legacy picker modals and their StudioLive events
+  (`select-ref`, `select-media`, `upload-image`, …) are gone
+  (task-c42545346b93cbb0).
 
   ## Field types
 
@@ -414,8 +413,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # reference: bp-reference-picker Web Component (Task #12 WI2) bridged
   # via the hidden input + BarkparkFieldBridge hook (root.html.heex).
   # phx-update="ignore" gives the WC sole ownership of its inner DOM.
-  # The WC owns search + select + clear; the legacy phx-click=
-  # "open-ref-picker"/"clear-ref" modal flow is bypassed. The hidden
+  # The WC owns search + select + clear (the old picker modal is gone,
+  # task-c42545346b93cbb0). The hidden
   # input persists the ref doc id as a string, matching the v1
   # reference-field persistence model exactly.
   #

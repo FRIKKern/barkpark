@@ -29,8 +29,8 @@ defmodule Barkpark.PortableDoc.Bpml.UnprintableError do
   It stays TYPED rather than becoming a broadened rescue at the callers (charter
   D3): a blanket `rescue` would convert genuine printer bugs into the same 422,
   making progress unmeasurable and bugs invisible. Only a typed raise lets the
-  sync path tell "the canonical echo is unprintable, degrade to 200 + rev" apart
-  from "the printer is broken, crash loudly".
+  view tell "this Paper is unprintable, answer the reader's 422" apart from
+  "the printer is broken, crash loudly".
 
   The `Plug.Exception` implementation is a BACKSTOP: callers that know what they
   are printing rescue it explicitly (and shape their own teaching envelope), but

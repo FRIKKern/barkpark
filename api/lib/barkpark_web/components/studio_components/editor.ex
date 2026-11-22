@@ -632,11 +632,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   `<.document_header>` directly. StudioLive is the only consumer today.
 
   Events bubble to StudioLive: save, autosave, show-history, delete-doc,
-  publish, unpublish, plus the studio_field_renderer phx-click events
-  (open-image-picker, clear-image). The reference field is now owned
-  client-side by `<bp-reference-picker>` (Task #12 WI2) and bridges
-  through autosave; open-ref-picker / clear-ref handlers in StudioLive
-  are orphaned-but-harmless until v2 cleanup.
+  publish, unpublish. The image and reference fields are owned
+  client-side by `<bp-media-picker>` / `<bp-reference-picker>` (Task #12)
+  and bridge through autosave.
 
   Slots:
     * `:extra_actions` — (optional) appended after Publish/Unpublish.
@@ -756,7 +754,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content" role="main">
         <.document_header
           dataset={@dataset}
-          title={BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}
+          title={doc_heading(@editor_doc, @editor_schema, @parent_assigns)}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -816,7 +814,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   as the TanStack Studio does (`Desk.DocStyle`). --%>
             <div class="editor-meta dk-form-head">
               <div class="dk-kind">{@editor_schema.title}</div>
-              <div class="dk-big-title">{BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}</div>
+              <div class="dk-big-title">{doc_heading(@editor_doc, @editor_schema, @parent_assigns)}</div>
             </div>
           <% end %>
           <%= if @editor_schema && !desk?(@parent_assigns) do %>
@@ -832,7 +830,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <% end %>
 
           <.cross_violations_banner violations={@cross_violations} />
-          <.doc_conflict_banner conflict={@doc_conflict} />
+          <.doc_conflict_banner
+            conflict={@doc_conflict}
+            disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
+          />
           <.paper_halt_banner reason={@paper_halt} />
 
           <%= if @show_diff do %>
@@ -911,12 +912,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     (task-9bf415c3d78b42d6). The editor form is the panel. --%>
               <div class="bp-tab-bar" role="tablist">
                 <%!-- The desk leads with All fields, as the TanStack Studio and
-                      Sanity do: every field, grouped or not (nav_group nil). --%>
+                      Sanity do: every field, grouped or not (nav_group nil).
+                      While the groups wait (History open) it is the tab shown,
+                      so it stays live and takes the focus; the rest wait
+                      (DocumentPane.tsx `GroupTabs`). --%>
                 <button
                   :if={desk?(@parent_assigns)}
                   type="button"
                   id="bp-group-tab-all-fields"
-                  disabled={desk_groups_waiting?(@parent_assigns)}
                   phx-click="select-group"
                   phx-value-group=""
                   role="tab"
@@ -957,6 +960,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   aria-allowed-role). --%>
             <%!-- Left out of the patch that opens another document, so no
                   input of the last one is kept (`DocSwap`). --%>
+            <BarkparkWeb.Studio.Desk.ReadonlyFields.fields parent_assigns={@parent_assigns}>
             <div
               :if={@nav_view == nil and not BarkparkWeb.Studio.StudioLive.DocSwap.swapping?(@parent_assigns)}
               id="editor-tabpanel"
@@ -968,6 +972,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
+              data-desk-undo-keys={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.DocUndo.names(@editor_schema)}
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page
@@ -1035,6 +1040,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <input type="hidden" name={BarkparkWeb.Studio.StudioLive.PostIdentity.end_key()} value={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)} />
             </form>
             </div>
+            </BarkparkWeb.Studio.Desk.ReadonlyFields.fields>
           <% end %>
         </div>
         <BarkparkWeb.Components.OnixPreview.content_preview
@@ -1352,7 +1358,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <%= for v <- @violations do %>
             <li class={"bp-violation-item bp-violations-#{v["level"] || "error"}"}
                 data-test-id={"cross-violation-#{v["name"]}"}>
-              <span class="bp-violation-title"><%= v["title"] || v["name"] %></span>
+              <span class="bp-violation-title"><%= Barkpark.Content.CrossValidator.label(v) %></span>
               <%= if is_list(v["fields"]) and v["fields"] != [] do %>
                 <span class="bp-violation-fields">&nbsp;— <%= List.first(v["fields"]) %></span>
               <% end %>
@@ -1372,6 +1378,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   """
   attr :conflict, :boolean, default: false
 
+  attr :disabled, :boolean,
+    default: false,
+    doc:
+      "a read-only view (`Desk.ReadonlyFields`): Reload is refused there, so it is drawn disabled"
+
   def doc_conflict_banner(assigns) do
     ~H"""
     <%= if @conflict do %>
@@ -1386,6 +1397,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           type="button"
           class="btn btn-sm"
           phx-click="reload-remote-doc"
+          disabled={@disabled}
           data-test-id="doc-conflict-reload"
         ><%= gettext("Reload") %></button>
       </div>
@@ -1450,6 +1462,28 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   end
 
   def title_on_tab?(_schema, _nav_group), do: true
+
+  # The document's heading (the sr-only h1 and the desk's big title): the
+  # page's title (`Shared.assign_page_title/2`), which names the newest stored
+  # row this tab has seen, or this tab's own held title
+  # (task-42a6f063263338f6). `editor_doc` stays this tab's own row after
+  # another editor's save, so naming it kept the old title. A published or
+  # revision view draws another row in `editor_doc` (`PublishedView`,
+  # `RevisionView`), and that row is the one to name.
+  defp doc_heading(doc, schema, parent) do
+    other_row? =
+      BarkparkWeb.Studio.Desk.PublishedView.active?(parent) or
+        BarkparkWeb.Studio.Desk.RevisionView.shown?(parent)
+
+    case parent[:page_title] do
+      title when is_binary(title) and not other_row? and is_map_key(parent, :editor_doc) ->
+        title
+
+      _ ->
+        BarkparkWeb.Studio.DocTitle.shown(doc.title) || preview_title(doc, schema) ||
+          singleton_title(schema) || gettext("Untitled")
+    end
+  end
 
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)

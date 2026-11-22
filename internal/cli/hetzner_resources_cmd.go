@@ -652,6 +652,8 @@ FLEET (control plane — needs 'bp login')
                                                     (bp cloud autoupdate -h)
   rollout   the fleet-wide autoupdate brake: status · halt · resume
                                                         (bp cloud rollout -h)
+  warm-pool warm servers ready vs the pool size the worker reported; says
+            when the worker has the pool OFF (operator) (bp cloud warm-pool -h)
   rollback  roll ONE instance back to its previous blue/green code slot; pins it
             at that version, health-gated flip           (bp cloud rollback -h)
   update    trigger an in-place self-update run on ONE instance; --force

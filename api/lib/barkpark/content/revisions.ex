@@ -83,7 +83,7 @@ defmodule Barkpark.Content.Revisions do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.Revision
+  alias Barkpark.Content.{InsertOnly, Revision}
 
   import Barkpark.Content.Scope,
     only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
@@ -285,19 +285,63 @@ defmodule Barkpark.Content.Revisions do
 
   `opts` is forwarded to `Barkpark.Content.upsert_document/4` so callers can
   supply lifecycle-hook context (`:source`, `:user_id`).
+
+  A restore can name the state it was asked against (task-e89ff0279fb83fc6),
+  and is refused when the document has moved on since, writing nothing:
+  `{:error, {:rev_mismatch, %{expected, actual, id}}}` (412
+  `precondition_failed`). The document's current state is its draft row, or its
+  published row when it has no draft, or none when it has neither.
+
+    * `opts[:if_rev]`: "I saw this rev", named like a `/v1` mutate patch's
+      `ifRevisionID`. It must equal the current rev. On a match the
+      upsert fences its UPDATE of the draft row on that rev as well.
+    * `opts[:if_absent]` (`true`): "I saw no document". There must be no draft
+      and no published row; `expected` is then `nil`. The write is then insert
+      only (`Content.InsertOnly`), so a row born after this compare is refused
+      the same way.
+
+  With neither, nothing is compared. The HTTP door refuses a call that names
+  both.
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
-    with {:ok, rev} <- get_revision(revision_id, dataset, opts),
-         :ok <- assert_revision_dataset(rev, dataset),
-         :ok <- assert_revision_type(rev, type) do
+    with {:ok, rev} <- restorable(revision_id, type, dataset, opts) do
       attrs = %{
         "doc_id" => Content.draft_id(rev.doc_id),
         "title" => rev.title,
         "content" => rev.content
       }
 
-      Content.upsert_document(type, attrs, dataset, opts)
+      InsertOnly.seam!(:restore_after_state_check)
+      Content.upsert_document(type, attrs, dataset, write_opts(opts))
     end
+  end
+
+  @doc """
+  `restore_revision/4`'s checks, writing nothing: `:ok` when that call would
+  go on to write, else the same error. For a caller that must know before it
+  gives up state of its own, as the sheet's restore gives up its live session
+  (task-5b74471e6a2d6de8). It is the same compare, not a second one; the
+  write still makes it again, so a write landing between the two is refused
+  there.
+  """
+  def check_restore(revision_id, type, dataset, opts \\ []) do
+    with {:ok, _rev} <- restorable(revision_id, type, dataset, opts), do: :ok
+  end
+
+  defp restorable(revision_id, type, dataset, opts) do
+    with {:ok, rev} <- get_revision(revision_id, dataset, opts),
+         :ok <- assert_revision_dataset(rev, dataset),
+         :ok <- assert_revision_type(rev, type),
+         :ok <- assert_current_rev(rev.doc_id, type, dataset, opts),
+         do: {:ok, rev}
+  end
+
+  # `:if_absent` becomes an insert-only write, so a row born after the compare
+  # above is refused by the writer too (`Content.InsertOnly`).
+  defp write_opts(opts) do
+    if Keyword.get(opts, :if_absent) == true,
+      do: opts |> Keyword.delete(:if_absent) |> Keyword.put(:insert_only, true),
+      else: opts
   end
 
   # Defence-in-depth on top of get_revision's dataset scoping: refuse to restore
@@ -308,6 +352,46 @@ defmodule Barkpark.Content.Revisions do
        do: :ok
 
   defp assert_revision_dataset(_rev, _dataset), do: {:error, :not_found}
+
+  # The state a restore was asked against (`:if_rev` or `:if_absent`) against
+  # the document's current one. A delete removes the row, so a document deleted
+  # since a named rev has moved on, and one made again since `:if_absent` has too.
+  defp assert_current_rev(doc_id, type, dataset, opts) do
+    case expected_state(opts) do
+      :any -> :ok
+      expected -> compare_state(expected, current_row(doc_id, type, dataset, opts), doc_id)
+    end
+  end
+
+  defp expected_state(opts) do
+    case {Keyword.get(opts, :if_rev), Keyword.get(opts, :if_absent)} do
+      {rev, _} when is_binary(rev) and rev != "" -> rev
+      {_, true} -> nil
+      _ -> :any
+    end
+  end
+
+  defp current_row(doc_id, type, dataset, opts) do
+    published = Content.published_id(doc_id)
+
+    Enum.find_value([Content.draft_id(published), published], fn id ->
+      case Content.get_document(id, type, dataset, opts) do
+        {:ok, doc} -> doc
+        _ -> nil
+      end
+    end)
+  end
+
+  defp compare_state(nil, nil, _doc_id), do: :ok
+  defp compare_state(expected, %{rev: expected}, _doc_id) when is_binary(expected), do: :ok
+
+  defp compare_state(expected, %{rev: actual, doc_id: id}, _doc_id),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
+
+  defp compare_state(expected, nil, doc_id),
+    do:
+      {:error,
+       {:rev_mismatch, %{expected: expected, actual: nil, id: Content.published_id(doc_id)}}}
 
   # The restore writes `drafts.<rev.doc_id>` under the CALLER's `type`. A
   # revision of one type restored under another created or overwrote a draft

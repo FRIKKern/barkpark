@@ -12,8 +12,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
-  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, Shared}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, PostPath, Shared}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases, UnsavedObjects}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -36,7 +36,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> Shared.maybe_open_shares(params)
       |> Shared.rebuild_panes()
-      |> Shared.assign_page_title()
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
       # Navigating (re)loads the editor from the DB, so the buffer is clean:
@@ -46,10 +45,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       |> assign(
         editor_dirty: false,
         editor_unsaved_keys: MapSet.new(),
+        editor_refused_clears: nil,
         doc_conflict: false,
+        editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil
       )
+      # Named after the reset: another editor's last frame is older than the
+      # row just read, and may be of a draft that is gone (a Discard), so
+      # it must not name the page (#28322 review, round 2).
+      |> Shared.assign_page_title()
       # A dialog a document action opened goes with its document.
       |> BarkparkWeb.Studio.StudioLive.PostIdentity.leave(shown)
       |> BarkparkWeb.Studio.StudioLive.DocSwap.start(shown)
@@ -80,10 +85,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # changed keeps the remote one (`Forms.upsert_draft/6`). `RemoteValues`
   # tells the focused input of the new value (task-e6ef964ac2e41d5a).
   #
-  # With unsaved local edits (`editor_dirty`), raise the `doc_conflict` banner.
-  # The fields named in `editor_unsaved_keys` keep their local value and the
-  # other fields take the remote save (task-6f5426c4b04de74b); with none named
-  # (an array op, a slug derive) the whole buffer is kept, as before.
+  # With unsaved local edits (`editor_dirty`), the fields named in
+  # `editor_unsaved_keys` keep their local value and the other fields take
+  # the remote save (task-6f5426c4b04de74b). It is a conflict, the
+  # `doc_conflict` banner and "Updated by another user", only where the
+  # remote save rewrote one of those fields as TanStack's `rebase` and
+  # `clash` (barkpark-studio edit-bases.ts, edits.ts) read it
+  # (task-65543203e7b71c80): a field whose stored value did not move from
+  # its base stays ours; a text field both changed merges (`TextRebase.
+  # merge3_clash/3`, TanStack's `merge3`), and only a merge that cannot keep
+  # both changes clashes; any other value stays ours. A save that rewrote
+  # none of them is taken in quietly. A text field's base is the stored
+  # value its words were typed on (`UnsavedBases`); with none known it
+  # merges nothing and both changed is a conflict. Any other field's base is
+  # the newest stored version this tab saw (`base_doc/1`). With none named (an array op, a slug
+  # derive) the whole buffer is kept and it is a conflict, as before.
   #
   # A SIBLING PROJECT's save is ignored (r4a realtime authz sweep). The doc
   # topic is keyed by id + type + workspace + dataset NAME, which a same-id
@@ -105,10 +121,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
-        {:noreply,
-         socket
-         |> keep_unsaved_fields(doc_data)
-         |> assign(doc_conflict: true, save_status: "Updated by another user")}
+        {socket, clashed} = keep_unsaved_fields(socket, doc_data)
+
+        # The fields it rewrote are named in the save region, as TanStack's
+        # `clash` says them (`RefusedSave.status/1`); the whole buffer kept
+        # names none.
+        socket =
+          case clashed do
+            [] ->
+              socket
+
+            keys ->
+              assign(socket,
+                doc_conflict: true,
+                save_status: "Updated by another user",
+                editor_clash_fields: if(keys == :all, do: [], else: keys)
+              )
+          end
+
+        {:noreply, socket |> took_frame(doc_data) |> named_as_seen()}
 
       true ->
         schema = socket.assigns[:editor_schema]
@@ -123,14 +154,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
          socket
          |> RemoteValues.push(socket.assigns[:editor_form] || %{}, updated_form)
          |> PostedEdits.remote(socket.assigns[:editor_form] || %{}, updated_form)
+         |> took_frame(doc_data)
          |> assign(
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
-         )}
+         )
+         |> named_as_seen()}
     end
   end
+
+  # Another editor's frame, and the row of this tab's it arrived over
+  # (`base_doc/1`).
+  defp took_frame(socket, frame),
+    do:
+      assign(socket,
+        editor_store_doc: frame,
+        editor_store_over: row_key(socket.assigns[:editor_doc])
+      )
+
+  defp row_key(%{doc_id: id} = doc), do: {id, Map.get(doc, :updated_at), Map.get(doc, :rev)}
+  defp row_key(_doc), do: nil
+
+  # The pane header and the tab name the newest stored version this tab has
+  # seen, as the title field and the list row do: `editor_doc` stays this
+  # tab's own row (`post_base/1`), so naming it kept the old title after
+  # another editor renamed the document (task-42a6f063263338f6). TanStack's
+  # DocumentPane names the document it holds, which moves on every frame.
+  defp named_as_seen(socket), do: Shared.assign_page_title(socket)
 
   # Two people save one field at once: B's save lands, then this tab's save
   # is written over it, and only then does B's frame reach this process (it
@@ -143,26 +195,237 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   defp fresher(frame, _doc), do: frame
 
+  # The remote save taken into the form, and the unsaved fields it rewrote
+  # so both changes cannot stand (`clash/4`); `:all` when the whole buffer
+  # is kept.
   defp keep_unsaved_fields(socket, doc_data) do
     keys = socket.assigns[:editor_unsaved_keys] || MapSet.new()
 
     if MapSet.size(keys) == 0 do
-      socket
+      {socket, :all}
     else
       schema = socket.assigns[:editor_schema]
       local = socket.assigns[:editor_form] || %{}
+      base = Content.doc_to_form(base_doc(socket), schema)
+      theirs = Content.doc_to_form(doc_data, schema)
 
-      form =
-        doc_data
-        |> Content.doc_to_form(schema)
-        |> Map.merge(Map.take(local, MapSet.to_list(keys)))
+      # Each field's base is the stored value its words were typed on
+      # (`UnsavedBases`), which can be older than `base_doc/1`.
+      typed = Map.new(keys, fn key -> {key, UnsavedBases.fetch(socket, key)} end)
 
+      {mine, clashed, kept} =
+        Enum.reduce(keys, {%{}, [], UnsavedBases.all(socket)}, fn key, {mine, clashed, kept} ->
+          theirs_value = Map.get(theirs, key)
+          {b, m} = {Map.get(base, key), Map.get(local, key)}
+
+          case UnsavedObjects.subfields(schema, key, b, m, theirs_value) do
+            nil ->
+              field_clash(typed[key], b, m, theirs_value, schema, key, {mine, clashed, kept})
+
+            # An object: subfield by subfield, a text subfield by its path
+            # (task-71ff11d4e7374985).
+            subs ->
+              {value, clashed?, kept} =
+                UnsavedObjects.merge(socket, subs, [key], b, m, theirs_value, kept, &clash/6)
+
+              {Map.put(mine, key, value), if(clashed?, do: [key | clashed], else: clashed), kept}
+          end
+        end)
+
+      form = Map.merge(theirs, Map.filter(mine, fn {key, _} -> Map.has_key?(local, key) end))
       changed? = Shared.widget_values_changed?(schema, local, form)
+      # The page's next post of an unsaved field is made on the stored value
+      # its words were typed on (it kept typing) or on theirs (it took the
+      # merge), never on its own unsaved words.
+      bases =
+        Map.new(keys, fn key ->
+          was_base =
+            case typed[key] do
+              {:ok, typed_on} -> typed_on
+              :error -> Map.get(base, key)
+            end
 
-      socket
-      |> RemoteValues.push(local, form)
-      |> PostedEdits.remote(local, form)
-      |> assign(editor_form: form, editor_form_gen: Shared.next_form_gen(socket, changed?))
+          {key, {was_base, Map.get(theirs, key)}}
+        end)
+        |> Map.merge(UnsavedObjects.push_bases(socket, MapSet.to_list(keys), base, theirs))
+
+      socket =
+        socket
+        |> RemoteValues.push(local, form, bases)
+        |> PostedEdits.remote(local, form)
+        |> assign(
+          editor_form: form,
+          editor_form_gen: Shared.next_form_gen(socket, changed?),
+          editor_unsaved_bases: kept
+        )
+
+      {socket, clashed}
+    end
+  end
+
+  defp field_clash(typed, base, mine_value, theirs_value, schema, key, {mine, clashed, kept}) do
+    case clash(typed, base, mine_value, theirs_value, schema, key) do
+      {:ours, value} ->
+        {Map.put(mine, key, value), clashed, kept}
+
+      {:took, value} ->
+        {Map.put(mine, key, value), clashed, took(kept, schema, key, theirs_value, value)}
+
+      :clash ->
+        {Map.put(mine, key, mine_value), [key | clashed], kept}
+    end
+  end
+
+  # A text field that took theirs (or a merge onto it) is typed on theirs.
+  defp took(kept, schema, key, theirs, value) do
+    if RemoteValues.free_text?(schema, key),
+      do: UnsavedBases.put(kept, key, theirs, value),
+      else: kept
+  end
+
+  # One unsaved field under a remote save, as TanStack's `rebase` and
+  # `merge3`, from the base its words were typed on (`{:ok, base}`): theirs
+  # did not move from the base, ours stands (`:ours`); ours did not (or is
+  # theirs), theirs stands (`:took`). A string both changed: free text
+  # merges (`TextRebase.merge3_clash/3`, the splice merge a post gets, where
+  # TanStack's patch places mine too), and a merge that cannot keep both is
+  # a clash; any other string (a choice, a
+  # date) cannot keep both, so it clashes. A list or an object both changed
+  # clashes too: TanStack's `mergeList3` keeps theirs only where it can place
+  # mine, and an unplaced one kept ours unseen. Any other value (a number, a
+  # switch) stays ours ("else ours wins").
+  #
+  # Free text with no known base (`:error`) merges nothing: theirs that did
+  # not move from the stored value leaves ours, and theirs that differs from
+  # ours is a clash. A field that is not free text reads the stored value as
+  # its base.
+  defp clash(:error, stored, mine, theirs, schema, key) do
+    if RemoteValues.free_text?(schema, key) do
+      cond do
+        theirs == stored -> {:ours, mine}
+        mine == theirs -> {:took, theirs}
+        true -> :clash
+      end
+    else
+      clash({:ok, stored}, stored, mine, theirs, schema, key)
+    end
+  end
+
+  defp clash({:ok, base}, _stored, mine, theirs, schema, key) do
+    strings? = is_binary(base) and is_binary(mine) and is_binary(theirs)
+
+    cond do
+      theirs == base ->
+        {:ours, mine}
+
+      mine == base or mine == theirs ->
+        {:took, theirs}
+
+      strings? and RemoteValues.free_text?(schema, key) ->
+        case Barkpark.Content.TextRebase.merge3_clash(base, mine, theirs) do
+          nil -> :clash
+          merged -> {:took, merged}
+        end
+
+      strings? ->
+        :clash
+
+      is_list(mine) or is_map(mine) or is_list(theirs) or is_map(theirs) ->
+        :clash
+
+      true ->
+        {:ours, mine}
+    end
+  end
+
+  @doc """
+  The row a post is read against (`Shared.autosave_write`): this tab's own
+  last save (`editor_doc`), with the field the post is a change of
+  (`editor_post_target`) as the newest stored version this tab saw.
+
+  So a choice set back to this tab's earlier value after another editor's
+  save is an edit, as TanStack sends the field typed in
+  (task-1f6d4ed8c24a821b). Every other field is still read against this
+  tab's own row: a post that left the page before another editor's save
+  carries that editor's fields at their old values, and they stay dropped
+  (`PostedEdits`, task-a4ded0be5c8ec3cb). The rev and `updated_at` stay
+  this tab's own.
+
+  Inside an object only the subfield changed (`editor_post_path`,
+  `meta.code`) is taken from the newest version (`PostPath`): its siblings
+  are read against this tab's own row, as other fields are
+  (task-04e50efa8405b956).
+  """
+  def post_base(socket) do
+    own = socket.assigns[:editor_doc]
+    seen = base_doc(socket)
+    path = {socket.assigns[:editor_post_path], PostPath.shapes(socket)}
+
+    case List.wrap(socket.assigns[:editor_post_target]) do
+      [_ | _] = keys when is_map(own) and is_map(seen) and seen != own ->
+        Enum.reduce(keys, own, &take_seen(&2, seen, &1, path))
+
+      _ ->
+        own
+    end
+  end
+
+  defp take_seen(doc, seen, key, {[key, sub | _] = path, shapes})
+       when is_binary(sub) and key not in ["title", "status"] do
+    own = doc.content || %{}
+    theirs = seen.content || %{}
+
+    case PostPath.unit(path, shapes, own, theirs) do
+      [_, _ | _] = at -> %{doc | content: PostPath.put(own, theirs, at)}
+      _ -> take_seen(doc, seen, key)
+    end
+  end
+
+  defp take_seen(doc, seen, key, _path), do: take_seen(doc, seen, key)
+
+  defp take_seen(doc, seen, key) when key in ["title", "status"] do
+    atom = String.to_existing_atom(key)
+    Map.put(doc, atom, Map.get(seen, atom))
+  end
+
+  defp take_seen(doc, seen, key) do
+    own = doc.content || %{}
+
+    content =
+      case Map.fetch(seen.content || %{}, key) do
+        {:ok, value} -> Map.put(own, key, value)
+        :error -> Map.delete(own, key)
+      end
+
+    %{doc | content: content}
+  end
+
+  # The newest stored version of the open document this tab saw: its own
+  # last save (`editor_doc`), or a remote save taken in since. TanStack moves
+  # a field's base to theirs on every frame.
+  @doc """
+  The newest stored version of the open document this tab has seen: the
+  fresher of another editor's last frame (`editor_store_doc`) and this tab's
+  own row (`editor_doc`).
+
+  A frame counts only over the row it arrived on (`editor_store_over`): any
+  change of `editor_doc` since is a read or a write of this tab's that is
+  newer than the frame, or a row of another variant (a Discard drops the
+  draft the frame was of, a Publish or Unpublish swaps the row). Comparing
+  times alone named a discarded draft (#28322 review, round 2).
+  """
+  def base_doc(socket) do
+    own = socket.assigns[:editor_doc]
+
+    case socket.assigns[:editor_store_doc] do
+      %{doc_id: id} = seen when is_map(own) ->
+        if Content.published_id(id) == Content.published_id(own.doc_id) and
+             socket.assigns[:editor_store_over] == row_key(own),
+           do: fresher(seen, own),
+           else: own
+
+      _ ->
+        own
     end
   end
 
@@ -274,8 +537,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         # off-the-wire markup that lands straight in `raw(@paper_html)`, so
         # leaving it unscrubbed would re-open on the broadcast exactly what the
         # mount-side clamp closes.
+        #
+        # `paper_doc` is re-read with the painted words, as the delta arm does:
+        # history's Restore names its rev (`History.seen_rev/1`), and a stale
+        # one refused the first press after another writer's save
+        # (task-5b74471e6a2d6de8). `paper_rev` stays the frame's.
         {:noreply,
          socket
+         |> Shared.sync_paper_edit_doc()
          |> assign(:paper_html, Shared.editor_body_html(html))
          |> assign(:paper_block_mode, false)
          |> assign(:paper_rev, msg[:rev] || socket.assigns.paper_rev)}
@@ -372,15 +641,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         old_form = socket.assigns[:editor_form] || %{}
         rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
         {:noreply, RemoteValues.push(rebuilt, old_form, rebuilt.assigns[:editor_form] || %{})}
-    end
-  end
-
-  # A form built in one document is not saved into the next one the pane
-  # opened before this message was read (`PostIdentity`).
-  def autosave_form(sent, socket) do
-    case BarkparkWeb.Studio.StudioLive.PostIdentity.own?(sent, socket) do
-      %{} = form -> {:noreply, Shared.do_autosave(socket, form, :autosave_form)}
-      _ -> {:noreply, socket}
     end
   end
 

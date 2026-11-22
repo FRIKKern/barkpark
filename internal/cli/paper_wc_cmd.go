@@ -433,11 +433,21 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 
 	if result.Unchanged {
 		if out.output == "json" || out.output == "yaml" {
-			out.renderJSON(map[string]any{"ok": true, "slug": slug, "unchanged": true, "rev": result.Rev})
+			out.renderJSON(map[string]any{"ok": true, "slug": slug, "unchanged": true, "rev": result.Rev, "notes": result.Notes})
 			return exitOK
 		}
+		paperPushNotes(out, slug, result.Notes)
 		out.outf("%s: nothing to push (working copy matches the server)", slug)
 		return exitOK
+	}
+
+	// The push landed but the answer carries no text (the reader's view does
+	// not print): keep the copy and its anchor, so the next push asks for a
+	// pull instead of writing from a copy that no longer matches.
+	if result.Bpml == "" {
+		out.userErr("paper push %s: applied @ rev %s, but the server sent no BPML text for it; your working copy is unchanged — run `bp paper pull %s` before editing again",
+			slug, result.Rev, slug)
+		return exitGeneric
 	}
 
 	// Converge on the server's canonical spelling — the post-normalization
@@ -464,11 +474,20 @@ func runPaperPush(out *writer, g globals, ctx manifest.Context, args []string) i
 	}
 
 	if out.output == "json" || out.output == "yaml" {
-		out.renderJSON(map[string]any{"ok": true, "slug": slug, "rev": result.Rev, "op_count": result.OpCount})
+		out.renderJSON(map[string]any{"ok": true, "slug": slug, "rev": result.Rev, "op_count": result.OpCount, "notes": result.Notes})
 		return exitOK
 	}
+	paperPushNotes(out, slug, result.Notes)
 	out.outf("pushed %s: %d op(s) applied, now @ rev %s (file converged on canonical)", slug, result.OpCount, result.Rev)
 	return exitOK
+}
+
+// paperPushNotes prints each line the server's push answer carries, one per
+// line, before the receipt.
+func paperPushNotes(out *writer, slug string, notes []string) {
+	for _, note := range notes {
+		out.outf("%s: %s", slug, note)
+	}
 }
 
 // runPaperPushCheck POSTs the working copy to the validate-all dry-run

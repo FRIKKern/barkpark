@@ -148,9 +148,16 @@ const BLOCK_SLOTS = new Map<string, string[][]>([
   ...LIST_TYPES.map((type): [string, string[][]] => [type, [['items', '*', 'children', '*']]]),
 ])
 
+// Marks the notice block capDepth puts in place of a block past the depth
+// limit, so a list item keeps it (blocks/core-prose.tsx). JSON can't carry a
+// Symbol: a stored child with "capped": true is still dropped.
+// task-a6a57717506de979; the reference marks it the same way
+// (js/packages/react/src/list-children.ts, api render/block_depth.ex).
+export const CAPPED = Symbol('capped')
+
 export function capDepth(block: unknown, notice: string, depth = 0): unknown {
   if (!isMap(block)) return block
-  if (depth >= MAX_DEPTH) return { type: 'paragraph', text: notice }
+  if (depth >= MAX_DEPTH) return { type: 'paragraph', text: notice, [CAPPED]: true }
   return (BLOCK_SLOTS.get(str(block.type)) ?? []).reduce<unknown>(
     (capped, path) => updatePath(capped, path, (child) => capDepth(child, notice, depth + 1)),
     block,

@@ -33,6 +33,24 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   reload, another document, a new value) counts for nothing.
 
   With no field to name, `status/1` adds the reason to "Save failed".
+
+  ## A refused clear is not held
+
+  In the desk, a change that takes text away from the stored value is a
+  clear: the field or a key in it unset (`Forms.unset/0`, or "" over a
+  value), a language or a key left out, or emptied, also inside an array
+  row. A refused clear is not held (task-48b10c6eb7ec20c5,
+  task-8513709a4e52f781). Held, it was in the buffer, so the next post of
+  another field wrote it, and undo then took back only that other field.
+
+  The buffer keeps the stored value instead (a pick puts its form in the
+  buffer before the write; that is set back), and `editor_refused_clears`
+  keeps the field with the reason. While the buffer still holds that value:
+  the field reads "Not saved: <reason>" and is named in the save region, as
+  a held field is, and a later post of another field, the explicit Save
+  too, leaves it out, as the page can still show it empty (the input had
+  the focus when the refusal came back). A change of the field itself is a
+  new try. A reload, or another document, drops it.
   """
   use Gettext, backend: BarkparkWeb.Gettext
 
@@ -41,13 +59,49 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   alias Barkpark.Content
   alias Barkpark.Content.Forms
   alias BarkparkWeb.Studio.SaveStatus
+  alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   @failed ["Save failed", "Save cancelled"]
   @reason_max 300
 
-  @doc "Names the top-level fields the next `write/4` is a change of."
-  def target(socket, keys) when is_list(keys), do: assign(socket, :editor_save_target, keys)
+  @doc """
+  Names the top-level fields the next `write/4` is a change of, and `path`,
+  the input changed inside one of them (`["meta", "code"]`), when known.
+  """
+  def target(socket, keys, path \\ nil) when is_list(keys),
+    do: assign(socket, editor_save_target: keys, editor_save_path: path)
+
+  @doc """
+  Codelist fields whose post was not a code (`Forms.CodelistShape.split/2`)
+  and was not written: the form buffer takes the stored value back, so the
+  page draws what the store holds, and each field is held over it with the
+  reason. So the field reads "Not saved: Not a code (kept as stored)" and the
+  save region names it, until the buffer gets another value (a code typed or
+  picked, a reload).
+  """
+  def not_codes(socket, []), do: socket
+
+  def not_codes(socket, keys) when is_list(keys) do
+    stored =
+      socket.assigns[:editor_doc]
+      |> Forms.doc_to_form(socket.assigns[:editor_schema])
+      |> Map.take(keys)
+
+    socket = PostedEdits.put(socket, Map.merge(Map.new(keys, &{&1, nil}), stored))
+    form = socket.assigns[:editor_form] || %{}
+    reason = gettext("Not a code (kept as stored)")
+    doc_key = doc_key(socket.assigns)
+
+    held =
+      case socket.assigns[:editor_refused] do
+        {^doc_key, held} -> held
+        _ -> %{}
+      end
+
+    held = Enum.reduce(keys, held, &Map.put(&2, &1, {Map.get(form, &1), reason}))
+    assign(socket, editor_refused: {doc_key, held})
+  end
 
   @doc """
   The refusal branch of the write: the save token and the reason, as words.
@@ -68,12 +122,16 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   """
   def write(socket, params, trigger, writer) when is_map(params) and is_function(writer, 3) do
     keys = target_keys(socket, params)
+    {socket, params} = drop_refused_clears(socket, params, keys)
 
     socket =
       assign(socket,
         editor_save_target: nil,
-        # The field this write is a change of, for `PostedEdits`.
+        editor_save_path: nil,
+        # The field this write is a change of, for `PostedEdits`, and the
+        # input inside it (`Lifecycle.post_base/1`).
         editor_post_target: keys,
+        editor_post_path: socket.assigns[:editor_save_path],
         editor_save_error: nil,
         editor_save_error_fields: nil
       )
@@ -141,9 +199,22 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
   defp hold(socket, params, keys) do
     named = socket.assigns[:editor_save_error_fields]
-    keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
     reason = fn key -> (is_map(named) && named[key]) || socket.assigns[:editor_save_error] end
-    values = params |> Forms.coerce_params(socket.assigns[:editor_schema]) |> Map.take(keys)
+    stored = stored_form(socket.assigns)
+
+    # A clear is never held, whichever field the refusal names.
+    {clears, keys} =
+      Enum.split_with(keys, &clear?(socket.assigns, Map.get(stored, &1), Map.get(params, &1)))
+
+    socket = refuse_clears(socket, clears, stored, reason)
+    keys = if is_map(named), do: Enum.filter(keys, &Map.has_key?(named, &1)), else: keys
+
+    values =
+      params
+      |> Forms.coerce_params(socket.assigns[:editor_schema])
+      |> Map.take(keys)
+      |> Forms.unset_as_nil()
+
     doc_key = doc_key(socket.assigns)
 
     held =
@@ -154,10 +225,92 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
     held = Enum.reduce(values, held, fn {k, v}, acc -> Map.put(acc, k, {v, reason.(k)}) end)
 
-    assign(socket,
-      editor_refused: {doc_key, held},
-      editor_form: Map.merge(socket.assigns[:editor_form] || %{}, values)
+    socket
+    |> assign(editor_refused: {doc_key, held})
+    |> PostedEdits.put(values)
+  end
+
+  # The open document as the form draws it from the store.
+  defp stored_form(assigns),
+    do: Forms.doc_to_form(assigns[:editor_doc], assigns[:editor_schema])
+
+  # A clear: the posted value takes text away from the stored one. Only in
+  # the desk, the one host that unsets.
+  defp clear?(%{desk_base: base}, stored, value) when is_binary(base),
+    do: takes_away?(stored, value)
+
+  defp clear?(_assigns, _stored, _value), do: false
+
+  # `new` leaves blank, or leaves out, something `old` holds. An array is
+  # compared row by row only while it keeps its length; a row's `_key` and
+  # `_type` are not text.
+  defp takes_away?(old, new) do
+    cond do
+      blank?(old) -> false
+      blank?(new) -> true
+      plain_map?(old) and plain_map?(new) -> Enum.any?(old, &key_taken?(&1, new))
+      is_list(old) and is_list(new) and length(old) == length(new) -> zip_taken?(old, new)
+      true -> false
+    end
+  end
+
+  defp key_taken?({key, _old}, _new) when key in ["_key", "_type"], do: false
+  defp key_taken?({key, old}, new), do: takes_away?(old, Map.get(new, key))
+
+  defp zip_taken?(old, new),
+    do: old |> Enum.zip(new) |> Enum.any?(fn {o, n} -> takes_away?(o, n) end)
+
+  defp blank?(value) when value in [nil, "", []], do: true
+  defp blank?(%Forms.Unset{}), do: true
+
+  defp blank?(%{} = map) when not is_struct(map),
+    do: Enum.all?(map, fn {key, value} -> key in ["_key", "_type"] or blank?(value) end)
+
+  defp blank?(_value), do: false
+
+  defp plain_map?(value), do: is_map(value) and not is_struct(value)
+
+  defp refuse_clears(socket, [], _stored, _reason), do: socket
+
+  defp refuse_clears(socket, keys, stored, reason) do
+    form = socket.assigns[:editor_form] || %{}
+
+    back =
+      for key <- keys, takes_away?(Map.get(stored, key), Map.get(form, key)), into: %{} do
+        {key, Map.get(stored, key)}
+      end
+
+    socket = PostedEdits.put(socket, back)
+    form = socket.assigns[:editor_form] || %{}
+    refused = Map.new(keys, &{&1, {Map.get(form, &1), reason.(&1)}})
+
+    assign(
+      socket,
+      :editor_refused_clears,
+      {doc_key(socket.assigns), Map.merge(live_clears(socket.assigns), refused)}
     )
+  end
+
+  @doc "The top-level fields of the open document whose clear was refused."
+  def clears(%{assigns: assigns}), do: assigns |> live_clears() |> Map.keys()
+
+  # A post of another field leaves a refused clear out; a change of the field
+  # itself is a new try, so it is posted and no longer left out.
+  defp drop_refused_clears(socket, params, keys) do
+    case live_clears(socket.assigns) do
+      refused when refused == %{} ->
+        {socket, params}
+
+      refused ->
+        socket =
+          assign(
+            socket,
+            :editor_refused_clears,
+            {doc_key(socket.assigns), Map.drop(refused, keys)}
+          )
+
+        {socket, Map.drop(params, Map.keys(refused) -- keys)}
+    end
   end
 
   @doc "The held top-level fields of the open document."
@@ -169,19 +322,33 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   desk asks before the tab closes over it. Else the socket's own token.
   """
   def token(assigns) do
-    if live(assigns) == %{}, do: assigns[:save_status] || "", else: "Save failed"
+    if not_saved(assigns) == %{}, do: assigns[:save_status] || "", else: "Save failed"
   end
 
   @doc """
   The save region's words: the held fields by title, or the failed token
-  with its reason. Any other token is returned as it is.
+  with its reason. A conflict that named the fields another editor rewrote
+  (`editor_clash_fields`, set by `Lifecycle.doc_updated/2`) says so in
+  TanStack's words (barkpark-studio `edits.ts` `clash`,
+  task-c0374ce0961cc1bf), first: a refused field that another editor then
+  rewrote is held, and the conflict is the newer news. Any other token is
+  returned as it is.
   """
   def status(assigns) do
     token = assigns[:save_status] || ""
-    held = live(assigns)
+    held = not_saved(assigns)
     reason = assigns[:editor_save_error]
+    clashed = clash_fields(assigns)
 
     cond do
+      # The newer news, so said over a held field's "Not saved", as
+      # TanStack's `clash` replaces the footer's state.
+      token == "Updated by another user" and clashed != [] ->
+        gettext(
+          "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs.",
+          fields: Enum.map_join(clashed, ", ", &title(assigns, &1))
+        )
+
       held != %{} ->
         titles = held |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &title(assigns, &1))
         gettext("Not saved") <> ": " <> titles
@@ -194,11 +361,31 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     end
   end
 
+  # The fields the last conflict found rewritten, in the schema's order;
+  # only while that conflict stands.
+  defp clash_fields(assigns) do
+    case {assigns[:doc_conflict], assigns[:editor_clash_fields]} do
+      {true, [_ | _] = keys} ->
+        order = assigns |> schema_fields() |> Enum.map(&(is_map(&1) && &1["name"]))
+        Enum.sort_by(keys, &(Enum.find_index(order, fn name -> name == &1 end) || length(order)))
+
+      _ ->
+        []
+    end
+  end
+
+  defp schema_fields(assigns) do
+    case assigns[:editor_schema] do
+      %{fields: fields} when is_list(fields) -> fields
+      _ -> []
+    end
+  end
+
   @doc "`errors` (the editor's findings tree) with each held field's reason."
   def marks(errors, assigns) do
     errors = if is_map(errors), do: errors, else: %{}
 
-    Enum.reduce(live(assigns), errors, fn {key, {_value, reason}}, acc ->
+    Enum.reduce(not_saved(assigns), errors, fn {key, {_value, reason}}, acc ->
       mark =
         if is_binary(reason),
           do: gettext("Not saved") <> ": " <> reason,
@@ -212,11 +399,20 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     end)
   end
 
+  # Every field the page must call not saved: held, or a refused clear.
+  defp not_saved(assigns), do: Map.merge(live_clears(assigns), live(assigns))
+
   # Held for the open document, and the form still holds the refused value.
-  defp live(assigns) do
+  defp live(assigns), do: live(assigns, :editor_refused)
+
+  # A refused clear of the open document, while the form still holds the
+  # value it was refused over.
+  defp live_clears(assigns), do: live(assigns, :editor_refused_clears)
+
+  defp live(assigns, name) do
     form = assigns[:editor_form] || %{}
 
-    with {key, held} when is_map(held) <- assigns[:editor_refused],
+    with {key, held} when is_map(held) <- assigns[name],
          true <- key == doc_key(assigns) do
       Map.filter(held, fn {k, {value, _reason}} -> Map.fetch(form, k) == {:ok, value} end)
     else

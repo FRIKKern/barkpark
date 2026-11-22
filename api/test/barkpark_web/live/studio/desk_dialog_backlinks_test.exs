@@ -215,6 +215,74 @@ defmodule BarkparkWeb.Studio.DeskDialogBacklinksTest do
     assert author_of(c, "dbl-draft-4-#{c.n}") == nil
   end
 
+  # task-8e8a63c36d18130e: the sentence counts what the disconnect removed, a
+  # referring draft's field included; the edge index had no row for it.
+  test "Disconnect references and delete: the sentence counts each reference removed", c do
+    view = open(c, c.solo)
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@delete} button[phx-value-disconnect="true"]))
+    )
+
+    assert render(view) =~ "Deleted “Solo Drafted” and removed 1 reference to it."
+
+    # Ada: Post One from two fields, Post Two and Draft Three from one each.
+    view = open(c, c.ada)
+    BarkparkWeb.EditorPost.press(view, "delete-doc", %{})
+
+    BarkparkWeb.EditorPost.press_on(
+      view,
+      element(view, ~s(#{@delete} button[phx-value-disconnect="true"]))
+    )
+
+    assert render(view) =~ "Deleted “Ada Referenced” and removed 4 references to it."
+  end
+
+  # task-8e8a63c36d18130e: as the Incoming references panel, the dialogs draw
+  # at most its cap of rows and say how many there are.
+  test "past the panel's cap the dialogs draw that many rows and a line for the rest", c do
+    cap = BarkparkWeb.Studio.Desk.IncomingRefs.cap()
+    ref = %{"_ref" => c.other, "_type" => "reference"}
+
+    for i <- 1..(cap + 1) do
+      {:ok, _} =
+        Content.create_document(
+          c.post,
+          %{
+            "doc_id" => "dbl-many-#{i}-#{c.n}",
+            "title" => "Many #{i}",
+            "content" => %{"author" => ref}
+          },
+          @dataset
+        )
+    end
+
+    view = open(c, c.other)
+
+    for {press, dialog} <- [{"delete-doc", @delete}, {"unpublish", @unpublish}] do
+      BarkparkWeb.EditorPost.press(view, press, %{})
+
+      assert has_element?(
+               view,
+               ~s(#{dialog} [role="status"]),
+               "#{cap + 1} documents refer to “Other Author”"
+             )
+
+      html = view |> element("#{dialog} ul.used-in") |> render()
+      assert length(Regex.scan(~r/<li/, html)) == cap
+
+      assert has_element?(
+               view,
+               ~s(#{dialog} [data-desk-used-in-more]),
+               "Showing the first #{cap} of #{cap + 1}."
+             )
+
+      view |> element(~s(#{dialog} button[data-modal-focus])) |> render_click()
+    end
+  end
+
   test "Unpublish: one row per referring document, so the count is the number of rows", c do
     view = open(c, c.ada)
     BarkparkWeb.EditorPost.press(view, "unpublish", %{})

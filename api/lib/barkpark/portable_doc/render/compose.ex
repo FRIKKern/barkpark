@@ -442,38 +442,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  def compose_block(%{"type" => "callout"} = b, style) do
-    # Body inline comes from the `body` slot (STEP 3 slot model): the slot's lone
-    # paragraph when materialized, else the legacy `content` array — the SAME inline
-    # array either way (Slots.callout_body_inline/1), so this composes a byte-
-    # identical single PdText. The callout FLATTENS its single-paragraph body slot to
-    # INLINE; it never composes the paragraph as a block <p> (that would add a wrapper
-    # + 12pt margin and break parity).
-    body = %{
-      "kind" => "PdText",
-      "children" => compose_inline_children(Barkpark.PortableDoc.Slots.callout_body_inline(b))
-    }
-
-    tone = Map.get(b, "tone") || "info"
-
-    base =
-      %{"kind" => "PdCallout", "tone" => tone, "children" => [body]}
-      |> maybe_put("title", Map.get(b, "title"))
-
-    # Collapse is a SCREEN-only affordance: thread collapsible/collapsed ONLY in
-    # article mode (and only when `true`) so the email renderer — which shares
-    # walk.ex callout/3 — always emits the expanded <div>. Email clients strip
-    # <details> and would HIDE the body (the opposite of degrade-to-expanded).
-    # Skipping non-true also keeps existing callouts byte-identical at the Pd
-    # level, even after a re-save that writes an explicit collapsible:false.
-    if style == :article do
-      base
-      |> maybe_put_true("collapsible", Map.get(b, "collapsible"))
-      |> maybe_put_true("collapsed", Map.get(b, "collapsed"))
-    else
-      base
-    end
-  end
+  # A callout's words are its content, then each body block drawn as a block
+  # (Render.Callout).
+  def compose_block(%{"type" => "callout"} = b, style),
+    do: Barkpark.PortableDoc.Render.Callout.compose(b, style)
 
   # CONTENTLESS ACTION (the empty-chrome invariant — see `blank_field?/2`): an
   # action with NEITHER a label NOR a destination composed to
@@ -2491,8 +2463,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       when type in ["list", "ordered-list", "numbered_list"] or type in @unordered_list_aliases ->
         if is_list(items), do: [compose_block(child, style)], else: []
 
-      _ ->
-        []
+      child ->
+        Barkpark.PortableDoc.Render.BlockDepth.keep(child, &compose_block(&1, style))
     end)
   end
 
@@ -2888,12 +2860,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # e.g. `...(title !== undefined ? {title} : {})`).
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
-
-  # Like maybe_put but writes ONLY when the value is exactly `true` — so a
-  # boolean attr's absence and an explicit `false` render identically (an
-  # un-folded callout stays byte-identical even after a re-save).
-  defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
-  defp maybe_put_true(map, _key, _value), do: map
 
   # tabs (B052) entries: {label, blocks} objects off the `tabs` array,
   # non-object entries dropped. `blocks` stays a raw list — render_blocks/2

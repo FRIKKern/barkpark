@@ -769,6 +769,7 @@ defmodule BarkparkWeb.StudioLocale do
       "multi-language string" => gettext("multi-language string"),
       "multi-line value" => gettext("multi-line value"),
       "navigate" => gettext("navigate"),
+      "Nested too deep to show" => gettext("Nested too deep to show"),
       "No blocks match" => gettext("No blocks match"),
       "No commands match" => gettext("No commands match"),
       "No equation yet — type TeX below" => gettext("No equation yet — type TeX below"),
@@ -777,6 +778,18 @@ defmodule BarkparkWeb.StudioLocale do
       "No matching pages" => gettext("No matching pages"),
       "No video yet — paste a video url below" =>
         gettext("No video yet — paste a video url below"),
+      "Not saved: block %{number} is shown as JSON, and source mode does not edit it." =>
+        gettext(
+          "Not saved: block %{number} is shown as JSON, and source mode does not edit it.",
+          number: "%{number}"
+        ),
+      "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes." =>
+        gettext(
+          "Not saved: block %{number} is shown as JSON. Delete it and save first, then make your other changes.",
+          number: "%{number}"
+        ),
+      "Not saved: source mode could not read this change. Your text is kept." =>
+        gettext("Not saved: source mode could not read this change. Your text is kept."),
       "Note" => gettext("Note"),
       "Notes, one per line" => gettext("Notes, one per line"),
       "Numbered" => gettext("Numbered"),
@@ -809,6 +822,15 @@ defmodule BarkparkWeb.StudioLocale do
       "Primary" => gettext("Primary"),
       "Pullquote" => gettext("Pullquote"),
       "Quote" => gettext("Quote"),
+      "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet." =>
+        gettext(
+          "Read only: Markdown cannot carry the %{part} of block %{number}, a %{type}, yet.",
+          part: "%{part}",
+          number: "%{number}",
+          type: "%{type}"
+        ),
+      "Read only: this callout has a body, which the editor cannot edit yet." =>
+        gettext("Read only: this callout has a body, which the editor cannot edit yet."),
       "Reference" => gettext("Reference"),
       "registry-backed enum" => gettext("registry-backed enum"),
       "Remove" => gettext("Remove"),
