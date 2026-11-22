@@ -71,7 +71,7 @@ describe('a case that opens a layer or holds a layer refusal', () => {
 
   it('is told by what its run did', () => {
     expect(topLayerTouch([{ box: '#x' }], plain)).toBe('its part names a layer')
-    for (const line of [UNNAMED('div#x "X"'), UNNAMED_CAN('div#x "X"'), FRAME('iframe#x ""'), REFUSED['window.open'], REFUSED['document.open'], REFUSED.window])
+    for (const line of [UNNAMED('div#x "X"'), UNNAMED_CAN('div#x "X"'), FRAME('iframe#x ""'), REFUSED['window.open'], REFUSED['document.open'], REFUSED.page])
       expect(topLayerTouch(undefined, proof(line)), line).toMatch(/^its run says "/)
     expect(topLayerTouch(undefined, plain)).toBe('')
     expect(topLayerTouch([], plain)).toBe('')
