@@ -22,6 +22,8 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
   @dataset "production"
   @pane "section[data-pane-editing]"
   @status ".editor-actions .save-status"
+  @clash_title "Someone else rewrote Title meanwhile. Your text is kept here, not saved: " <>
+                 "type on to save yours over theirs."
 
   setup %{conn: conn} do
     {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
@@ -117,14 +119,32 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
                )
              end)
 
-      assert status(a) == "Updated by another user"
+      # TanStack's clash words, naming the field B rewrote
+      # (task-c0374ce0961cc1bf).
+      assert status(a) == @clash_title
 
       # The footer's words, where its caution rule reaches them
       # (task-d64e58f43f48de16).
       footer =
         ~s(#{@pane}[data-desk-save="Updated by another user"][data-desk-conflict] .dk-edit-footer button.dk-footer-status .save-state)
 
-      assert has_element?(a, footer, "Updated by another user")
+      assert has_element?(a, footer, @clash_title)
+    end
+
+    # A real refusal, not a forced assign: a title over the column's 255
+    # characters is refused ("Save failed") and held. B then saves a title:
+    # the conflict is the newer news, so it is said in TanStack's words over
+    # the held field's "Not saved" (task-c0374ce0961cc1bf).
+    test "a refused title that B then rewrites: TanStack's clash words", c do
+      a = open(c.conn, c.path)
+      b = open(c.conn, c.path)
+      save_from(a, String.duplicate("x", 300))
+      assert eventually(fn -> status(a) =~ "Not saved" end)
+
+      save_from(b, "From B")
+
+      assert eventually(fn -> status(a) == @clash_title end)
+      assert has_element?(a, ~s(#{@pane} .dk-edit-footer .save-state), @clash_title)
     end
 
     # #28139 review: a save that says "Saved" while `doc_conflict` is still

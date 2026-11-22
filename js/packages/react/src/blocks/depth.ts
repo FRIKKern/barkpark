@@ -1,4 +1,5 @@
 import { MAX_DEPTH, isMap, str } from '../inline'
+import { CAPPED } from '../list-children'
 
 type Path = (string | typeof EACH)[]
 
@@ -71,7 +72,7 @@ const BLOCK_SLOTS = new Map<string, Path[]>([
 
 export function capDepth(block: unknown, notice: string, depth = 0): unknown {
   if (!isMap(block)) return block
-  if (depth >= MAX_DEPTH) return { type: 'paragraph', text: notice }
+  if (depth >= MAX_DEPTH) return { type: 'paragraph', text: notice, [CAPPED]: true }
   return (BLOCK_SLOTS.get(str(block.type)) ?? []).reduce<unknown>(
     (acc, path) => updatePath(acc, path, (child) => capDepth(child, notice, depth + 1)),
     block,

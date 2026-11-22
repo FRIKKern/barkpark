@@ -23,8 +23,15 @@ const drawsAll = (w) => `${w.label.at ? `lowest label ${w.label.match.toFixed(3)
 /** The least of two weakest readings (verdict). */
 const least = (a, b) => ({ share: Math.min(a.share, b.share), label: b.label.match < a.label.match ? b.label : a.label })
 const NONE = { share: 1, label: { match: Infinity, at: '' } }
-/** The surfaces a run proves its lights on: every one, unless the selftest asked for base alone. */
-export const surfacesOf = (ctx) => (ctx.surfaces === false ? ['base'] : SURFACES)
+/** The surfaces a run proves its lights on: every one, unless the selftest asked for base alone (false) or for base
+    and a list of others, in their page order. A name that is no surface is refused. */
+export function surfacesOf(ctx) {
+  if (ctx.surfaces === false) return ['base']
+  if (!Array.isArray(ctx.surfaces)) return SURFACES
+  const unknown = ctx.surfaces.filter((s) => !SURFACES.includes(s))
+  if (unknown.length) throw new Error(`no such surface: ${unknown.join(', ')}; the surfaces are ${SURFACES.join(', ')}`)
+  return SURFACES.filter((s) => s === 'base' || ctx.surfaces.includes(s))
+}
 
 // `scale` is the device pixel ratio: the pages whose text is read from pixels open at 2, for solid glyph cores.
 // `motion`: the reduced-motion setting the page opens with; the lights are read under both (see motionFails).
@@ -38,8 +45,14 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.on('console', (m) => m.type() === 'error' && ctx.errors.push(`${where}: console: ${m.text().slice(0, 200)}`))
   page.on('request', (r) => !/^(file|data|blob):/.test(r.url()) && ctx.errors.push(`${where}: asked the network for ${r.url().slice(0, 120)}`))
   if (clock) await page.clock.install()
+  // A blank page in the same context, where things are drawn alone for reference (see drawn.mjs). It opens before the
+  // census is set, which is given both pages (docs/PARTS.md "The top layer").
+  const ref = await context.newPage()
+  await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   // What can enter the top layer is watched from the first frame (layers.mjs census).
-  page.barkCensus = await installCensus(page)
+  page.barkCensus = await installCensus(page, [page, ref], { script: js })
+  // The placement fails for this part, from the census's world (placement.mjs; docs/PARTS.md "Placement" says what is read and when).
+  page.barkPlacement = () => page.barkCensus.placement(ctx.part)
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })
   if (js && ctx.styles) {
@@ -56,9 +69,6 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   await page.barkCheck(installLayers)
   page.barkCdp = await page.context().newCDPSession(page)
   page.barkScale = scale
-  // A blank tab in the same context, where things are drawn alone for reference (see drawn.mjs).
-  const ref = await page.context().newPage()
-  await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   page.barkRef = { page: ref, world: await isolate(ref, 'barkui-ref') }
   for (const install of [installHelpers, installBoundary, installMatch, installDrawn]) await page.barkRef.world(install)
   installCover(page, ctx)
@@ -464,6 +474,9 @@ export async function phone(ctx, part, skins) {
 export async function noscript(ctx, part) {
   const page = await open(ctx, { js: false, scale: 2, height: 1600 })
   try {
+    // Nothing on a stage with no script can write a style attribute: any one there fails by name (placement.mjs).
+    const placed = await page.barkPlacement()
+    if (placed.length) return light(false, placed[0], { fails: placed })
     const shown = await inCheck(page, (root, h) => {
       // Every element in the stage that carries text or an icon must be seen (an idle spinner carries neither).
       const carrying = [...root.querySelectorAll('*')].filter((el) => h.carries(el) || (el.matches('[data-slot]') && (el.textContent.trim() || el.querySelector('svg'))))

@@ -20,6 +20,7 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
+  alias Barkpark.Content.Forms.ObjectRebase
   alias Barkpark.Content.Forms.Unset
 
   alias Barkpark.Content.{
@@ -455,7 +456,17 @@ defmodule Barkpark.Content.Forms do
   defp select_list?(%{"type" => "arrayOf", "of" => %{"type" => "select"} = of}),
     do: Barkpark.Content.SelectOptions.normalize(of["options"]) != []
 
+  # An array of strings with `options.list` is a checkbox list too, as
+  # TanStack's `Fields.tsx` draws it (task-5935f433650841be).
+  defp select_list?(%{"type" => "arrayOf", "options" => %{"list" => list}} = field)
+       when is_list(list),
+       do: string_items?(field)
+
   defp select_list?(_field), do: false
+
+  defp string_items?(%{"of" => %{"type" => "string"}}), do: true
+  defp string_items?(%{"of" => [%{"type" => "string"}]}), do: true
+  defp string_items?(_field), do: false
 
   # The ticked values of a checkbox list, as the form draws them (text; a
   # blank is never a tick), for the post and for the stored list alike.
@@ -787,6 +798,16 @@ defmodule Barkpark.Content.Forms do
   # each row is coerced by the member its `_type` names, and keeps `_type`,
   # `_key` and any other key its member does not declare. A row whose `_type`
   # names no member passes through unchanged (task-e24e33a2a1a4fe10).
+  # A checkbox list of strings whose `of` is a list of one string member:
+  # read as that member, so its leading "" is dropped below.
+  defp coerce_field_value(
+         %{"type" => "arrayOf", "of" => [%{"type" => "string"} = of], "options" => %{"list" => l}} =
+           field,
+         val
+       )
+       when is_list(l),
+       do: coerce_field_value(Map.put(field, "of", of), val)
+
   defp coerce_field_value(%{"type" => "arrayOf", "of" => members}, val) when is_list(members) do
     case indexed_map_to_list(val) do
       list when is_list(list) -> Enum.map(list, &coerce_member_row(members, &1))
@@ -805,8 +826,11 @@ defmodule Barkpark.Content.Forms do
       when is_list(list) and is_map_key(of, "type") and :erlang.map_get("type", of) == "select" ->
         list |> Enum.reject(&(&1 == "")) |> Enum.map(&coerce_field_value(of, &1))
 
+      # So does the checkbox list of an array of strings with `options.list`.
       list when is_list(list) ->
-        Enum.map(list, &coerce_field_value(of, kept_row(of, &1)))
+        if select_list?(field),
+          do: list |> Enum.reject(&(&1 == "")) |> Enum.map(&coerce_field_value(of, &1)),
+          else: Enum.map(list, &coerce_field_value(of, kept_row(of, &1)))
 
       other ->
         other
@@ -1115,7 +1139,13 @@ defmodule Barkpark.Content.Forms do
     snapshot = Map.get(base_doc, :content) || %{}
     base_content = Map.get(current_doc, :content) || %{}
 
-    params = params |> edits(snapshot, schema) |> Map.merge(whole)
+    # An object field writes only the subfields the post changed
+    # (`ObjectRebase`), onto what the store holds now.
+    params =
+      params
+      |> edits(snapshot, schema)
+      |> ObjectRebase.onto(snapshot, base_content, schema)
+      |> Map.merge(whole)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->

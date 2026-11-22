@@ -27,6 +27,12 @@ defmodule Barkpark.Content.ReadOnlyFields do
   `Barkpark.Content.FieldVisibility`): the field is read-only while the predicate
   holds on the row the write starts from (task-00eac0b023b11517). So the write
   that moves `stage` to `done` may still set the field, and later writes may not.
+  The field is locked when the condition holds on the content alone (as
+  before) or on the row as a client reads it: its content with the
+  envelope keys over it (`_id`, `_type`, `_createdAt`, `_updatedAt`, …,
+  `Barkpark.Content.Envelope.system_keys/1`). So `{"field": "_createdAt",
+  "operator": "non_empty"}` locks a field once the document is saved, as the
+  Studio shows it, and the create that first sets it is let through.
 
   WHAT IT DOES NOT COVER. Plugin code that writes through `Content` directly
   (the ticket thread, form ingestion) never reaches these doors, so the server
@@ -36,14 +42,18 @@ defmodule Barkpark.Content.ReadOnlyFields do
 
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
+  alias Barkpark.Content.Document
+  alias Barkpark.Content.Envelope
   alias Barkpark.Content.FieldVisibility
 
   @doc """
   `:ok`, or `{:error, {:read_only_fields, names}}` naming every readOnly field
   whose value `merged` changes from `base`.
 
-  `base` is the stored content map, or a zero-arity function returning it, so a
-  create only reads the published row when the check actually applies.
+  `base` is the stored row (a `%Document{}`), its content map, or a zero-arity
+  function returning either, so a create only reads the published row when the
+  check actually applies. Changes are compared on the content; a condition
+  reads a row's envelope keys too.
   """
   @spec check(String.t() | nil, map() | (-> map()), map(), String.t(), keyword()) ::
           :ok | {:error, {:read_only_fields, [String.t()]}}
@@ -51,10 +61,12 @@ defmodule Barkpark.Content.ReadOnlyFields do
     with true <- enforced?(opts),
          [_ | _] = rules <- read_only_rules(type, dataset, opts) do
       base = if is_function(base, 0), do: base.(), else: base
-      base = if is_map(base), do: base, else: %{}
+      {base, row} = as_read(base)
       merged = if is_map(merged), do: merged, else: %{}
 
-      names = for {name, rule} <- rules, locked?(rule, base), do: name
+      # Locked when the rule holds on the content alone (main's reading) or on the row with its
+      # envelope: an envelope key can lock a field, never open one main kept shut.
+      names = for {name, rule} <- rules, locked?(rule, base) or locked?(rule, row), do: name
 
       case Enum.filter(names, &(Map.get(base, &1) != Map.get(merged, &1))) do
         [] -> :ok
@@ -64,6 +76,17 @@ defmodule Barkpark.Content.ReadOnlyFields do
       _ -> :ok
     end
   end
+
+  # `{content, the row a condition reads}`: a stored row's content with its
+  # envelope keys over it, as `Envelope.render/3` gives it to a client.
+  defp as_read(%Document{content: content} = doc) do
+    content = if is_map(content), do: content, else: %{}
+    {content, Map.merge(content, Envelope.system_keys(doc))}
+  end
+
+  defp as_read(%{content: content}), do: as_read(if(is_map(content), do: content, else: %{}))
+  defp as_read(%{} = content), do: {content, content}
+  defp as_read(_), do: {%{}, %{}}
 
   defp enforced?(opts) do
     Keyword.get(opts, :source, :api) == :api and

@@ -21,6 +21,11 @@ export const INPUT = {
   SELFTEST_MOST: 0.8,
   // The one headroom rule: a ceiling is this many times its reading.
   HEADROOM: 1.5,
+  // The one limit every selftest case runs under (check/selftest.mjs stops a case that passes it, failing), and
+  // the share of it a case's hosted reading may take at most, so a slower runner does not push a case over.
+  // A case that outgrows the share is unfolded into runs; neither number moves, and no case carries its own.
+  CASE_SECONDS: 60,
+  CASE_SHARE: 0.8,
   READINGS: {
     // One reading per job. Those with 14 in the folder are proof runs (a) and (b): the real button and 13 copies of
     // it; from (b), only the two groups without its planted break.
@@ -77,12 +82,35 @@ export function capacityPassage(p = plan()) {
     '',
     `In CI the check runs as jobs side by side. \`check/jobs.mjs\` splits the sorted part folders into the fewest groups of at most ${parts(p.PER_JOB)}, their sizes within one of each other, and the job matrix in \`barkui.yml\` reads that list; no list is written by hand. The plan, each job and the closing check compute the split again from the same checkout and must agree. Every job builds and loads the whole page, and the readings above were taken with at most ${parts(p.FOLDER_READ)} in the folder: with more, a job's ceiling stays where it is, so a page that makes it slower fails the job instead of stretching it. One closing check (its name is \`AGGREGATE\` in \`check/jobs.mjs\`) always runs and is red when the plan, any group or either selftest job is red, cancelled, missing, or skipped while the plan said BarkUI was touched.`,
     '',
-    `The selftest copies one part, so its time does not grow with the parts folder. It runs as ${Object.keys(p.READINGS.selftest).length} jobs side by side, and one rule in \`check/jobs.mjs\` (\`selftestJob\`) puts each case in exactly one: the \`views\` job runs the cases that read the wide or phone views and drive no states, the \`rest\` job every other case; a test holds that the two together run every case, each once. ${Object.keys(p.READINGS.selftest).map((k) => selftestSentence(k, p)).join(' ')} Each ceiling stays at or under ${pct(p.SELFTEST_MOST)} of its step; a job that outgrows that is split again, never given a longer step.`,
+    `The selftest copies one part, so its time does not grow with the parts folder. It runs as ${Object.keys(p.READINGS.selftest).length} jobs side by side, and one rule in \`check/jobs.mjs\` (\`selftestJob\`) puts each case in exactly one: the \`views\` job runs the cases that read the wide or phone views and drive no states, the \`rest\` job every other case; a test holds that the two together run every case, each once. ${Object.keys(p.READINGS.selftest).map((k) => selftestSentence(k, p)).join(' ')} Each ceiling stays at or under ${pct(p.SELFTEST_MOST)} of its step; a job that outgrows that is split again, never given a longer step. Every case runs under one limit of ${p.CASE_SECONDS} s (\`CASE_SECONDS\`), and none carries its own; each case's reading on CI's hosted runner (\`check/case-readings.mjs\`) sits under ${pct(p.CASE_SHARE)} of it, ${p.CASE_SHARE * p.CASE_SECONDS} s, and a test names any case that does not. A case that outgrows that share is unfolded into runs, each of its rows in exactly one, never given a longer limit.`,
   ].join('\n')
 }
 
+// What a selftest case may hold: these keys and no other (the runner reads each). A limit of its own is not one.
+export const CASE_KEYS = ['name', 'only', 'plant', 'css', 'expect', 'direct', 'green', 'surfaces', 'motion', 'states', 'layers', 'part']
+
+/** What is wrong with the selftest's `cases` against the one limit, each by the case's name; empty when no case
+    holds a key the runner does not read (such as a limit of its own) and every case's hosted reading sits under
+    CASE_SHARE of CASE_SECONDS. `readings` is check/case-readings.mjs's CASE_READINGS, one per selftest job. */
+export function caseLimitsWrong(cases, readings, p = plan()) {
+  const most = p.CASE_SHARE * p.CASE_SECONDS
+  const read = new Map()
+  for (const r of Object.values(readings)) for (const [name, seconds] of Object.entries(r.cases)) read.set(name, { seconds, job: r.job })
+  const wrong = []
+  for (const c of cases) {
+    const other = Object.keys(c).filter((k) => !CASE_KEYS.includes(k))
+    if (other.length) wrong.push(`the case "${c.name}" holds ${other.map((k) => `"${k}"`).join(', ')}, which the runner does not read; every case runs under the one limit of ${p.CASE_SECONDS} s (check/capacity.mjs), and none carries its own`)
+    const r = read.get(c.name)
+    if (!r) wrong.push(`the case "${c.name}" has no hosted reading in check/case-readings.mjs`)
+    else if (r.seconds >= most) wrong.push(`the case "${c.name}" took ${r.seconds} s on CI's hosted runner (job ${r.job}), at or over ${pct(p.CASE_SHARE)} of the one limit of ${p.CASE_SECONDS} s (${most} s): unfold it into runs`)
+  }
+  const names = new Set(cases.map((c) => c.name))
+  for (const name of read.keys()) if (!names.has(name)) wrong.push(`check/case-readings.mjs reads a case the selftest does not have: "${name}"`)
+  return wrong
+}
+
 const P = plan()
-export const { AT_ONCE, STEP_MINUTES, SELFTEST_STEP_MINUTES, SELFTEST_MOST, HEADROOM, READINGS, ceilingFor, PER_JOB, FOLDER_READ, SELFTEST_CEILINGS } = P
+export const { AT_ONCE, STEP_MINUTES, SELFTEST_STEP_MINUTES, SELFTEST_MOST, HEADROOM, CASE_SECONDS, CASE_SHARE, READINGS, ceilingFor, PER_JOB, FOLDER_READ, SELFTEST_CEILINGS } = P
 
 // node check/capacity.mjs: writes the passage into docs/PARTS.md between its marks, and prints it.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

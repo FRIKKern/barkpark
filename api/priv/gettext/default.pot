@@ -15947,3 +15947,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "No results for"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/refused_save.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs."
+msgstr ""

@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.Components.Fields.TagsField do
   @moduledoc """
-  An array of strings with `options.layout: "tags"`, in the desk: the
+  An array of strings (or texts) with `options.layout: "tags"`, in the desk: the
   TanStack Studio's tags input (barkpark-studio `ArrayInputs.tsx`,
   `TagsInput`), after Sanity's.
 
@@ -36,8 +36,18 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
 
   def tags?(_assigns), do: false
 
-  @doc "Whether a schema field is a tags field: strings, `options.layout: \"tags\"`."
-  def tags_field?(field), do: layout(field) == "tags" and string_items?(field)
+  @doc """
+  Whether a schema field is a tags field: an `arrayOf` of strings or texts,
+  `options.layout: "tags"`. As TanStack's `Fields.tsx`, in its order: `of` a
+  `string` or a `text` (a list of one member read as that member), and not
+  strings with `options.list`, which are a checkbox list first
+  (`ArrayField`, task-5935f433650841be). An `of` with no type, or `layout`
+  set beside `options`, is not tags.
+  """
+  def tags_field?(field),
+    do:
+      field_attr(field, :type) == "arrayOf" and layout(field) == "tags" and
+        string_items?(field) and not (item_type(field) == "string" and is_list(list(field)))
 
   @doc """
   The list after a tags press, or `current` unchanged when it changes
@@ -170,19 +180,26 @@ defmodule BarkparkWeb.Components.Fields.TagsField do
 
   # Sanity's `options.layout` on the array: on the parsed field's `raw`
   # definition, or on the schema's own field map (`Shared.find_field/2`).
-  defp layout(field) do
+  defp layout(field), do: field |> options() |> field_attr(:layout)
+
+  defp list(field), do: field |> options() |> field_attr(:list)
+
+  # `options` as TanStack reads it: a map (a list of options is a select's).
+  defp options(field) do
     case field_attr(field, :raw) || field do
-      %{"options" => %{"layout" => layout}} -> layout
-      %{"layout" => layout} -> layout
+      %{"options" => %{} = options} -> options
       _ -> nil
     end
   end
 
-  defp string_items?(field) do
-    case field_attr(field, :of) do
-      %{} = of -> field_attr(of, :type) in ["string", nil]
-      nil -> true
-      _other -> false
+  defp string_items?(field), do: item_type(field) in ["string", "text"]
+
+  # The schema's own `of` (the parsed field reads a missing one as strings).
+  defp item_type(field) do
+    case field_attr(field_attr(field, :raw) || field, :of) do
+      [%{} = of] -> field_attr(of, :type)
+      %{} = of -> field_attr(of, :type)
+      _other -> nil
     end
   end
 

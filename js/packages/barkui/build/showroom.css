@@ -48,6 +48,9 @@ body {
 .sr-part-head h2:focus { outline: none; }
 .sr-meta { margin: 2px 0 0; color: var(--sr-quiet); font-size: 13px; }
 .sr-summary { margin: 8px 0 0; max-width: 72ch; }
+.sr-not-covered { margin: 8px 0 0; max-width: 72ch; }
+.sr-not-covered p { margin: 0; font-weight: 600; }
+.sr-not-covered ul { margin: 4px 0 0; padding-left: 20px; }
 .sr-lights { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; }
 .sr-light { display: inline-flex; align-items: baseline; gap: 6px; color: var(--sr-quiet); }
 .sr-light[data-on="true"] { color: var(--sr-ink); }

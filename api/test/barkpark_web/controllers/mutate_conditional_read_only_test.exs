@@ -91,6 +91,168 @@ defmodule BarkparkWeb.MutateConditionalReadOnlyTest do
     assert set(id, %{"title" => "T2"}).status == 200
   end
 
+  # task-65ce4299f6f432f0: a condition on an envelope key reads the stored row's
+  # envelope, as the Studio's document has it. HSO's Sanity source locks a field
+  # once the document exists: readOnly: ({document}) => Boolean(document?._createdAt).
+  defp omrade(ws_id, key) do
+    type = "omrade_#{String.trim_leading(key, "_")}"
+    upsert_omrade(ws_id, type, %{"field" => key, "operator" => "non_empty"})
+  end
+
+  defp upsert_omrade(ws_id, type, rule) do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => type,
+          "title" => type,
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{
+              "name" => "farge",
+              "title" => "Farge",
+              "type" => "string",
+              "readOnly" => rule
+            }
+          ]
+        },
+        @dataset,
+        workspace_id: ws_id
+      )
+
+    type
+  end
+
+  defp saved_then_patched(type, id) do
+    created = mutate([%{"create" => %{"_id" => id, "_type" => type, "farge" => "rod"}}])
+    patch = %{"patch" => %{"id" => id, "type" => type, "set" => %{"farge" => "bla"}}}
+    {created.status, mutate([patch]).status}
+  end
+
+  test "a readOnly condition on _createdAt refuses the write on a saved document and allows it on the create",
+       %{id: id, ws_id: ws_id} do
+    type = omrade(ws_id, "_createdAt")
+    assert saved_then_patched(type, id) == {200, 422}
+
+    {:ok, doc} = Content.get_document("drafts." <> id, type, @dataset, workspace_id: ws_id)
+    assert doc.content["farge"] == "rod"
+    title = %{"patch" => %{"id" => id, "type" => type, "set" => %{"title" => "T"}}}
+    assert mutate([title]).status == 200
+  end
+
+  test "_updatedAt, _id and _type read the stored row's envelope; a content field as before",
+       %{id: id, ws_id: ws_id} do
+    for key <- ~w(_updatedAt _id _type) do
+      assert saved_then_patched(omrade(ws_id, key), "#{id}#{key}") == {200, 422}, key
+    end
+
+    # A content field: locked once it holds a value, writable while it is empty.
+    type = omrade(ws_id, "farge")
+    assert saved_then_patched(type, id) == {200, 422}
+
+    assert mutate([%{"create" => %{"_id" => "#{id}-e", "_type" => type, "title" => "T"}}]).status ==
+             200
+
+    set = %{"patch" => %{"id" => "#{id}-e", "type" => type, "set" => %{"farge" => "rod"}}}
+    assert mutate([set]).status == 200
+  end
+
+  test "a rule that held on main's content-only reading still locks: empty envelope keys, any, neq _type",
+       %{id: id, ws_id: ws_id} do
+    rules = [
+      %{"field" => "_createdAt", "operator" => "empty"},
+      %{"field" => "_id", "operator" => "empty"},
+      %{"field" => "_rev", "operator" => "empty"},
+      %{"any" => [%{"field" => "_updatedAt", "operator" => "empty"}]},
+      %{"field" => "_type", "operator" => "neq", "value" => "omrade_neq"}
+    ]
+
+    for {rule, n} <- Enum.with_index(rules) do
+      type = if n < 4, do: "omrade_e#{n}", else: "omrade_neq"
+      upsert_omrade(ws_id, type, rule)
+      doc = "#{id}-#{n}"
+
+      assert mutate([%{"create" => %{"_id" => doc, "_type" => type, "title" => "T"}}]).status ==
+               200
+
+      set = %{"patch" => %{"id" => doc, "type" => type, "set" => %{"farge" => "rod"}}}
+      assert mutate([set]).status == 422, inspect(rule)
+    end
+  end
+
+  # A draft over a published twin: the create reads the published row, which has `_createdAt`, so
+  # a locked field cannot be changed by the first draft write (main allowed it). The Studio's own
+  # first edit, a full copy of the published content with another field changed, still lands.
+  defp twin(ws_id, id, content) do
+    type = "omrade_twin"
+    rule = %{"field" => "_createdAt", "operator" => "non_empty"}
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => type,
+          "title" => type,
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{"name" => "farge", "title" => "Farge", "type" => "string", "readOnly" => rule},
+            %{
+              "name" => "meta",
+              "title" => "Meta",
+              "type" => "composite",
+              "readOnly" => rule,
+              "fields" => [
+                %{"name" => "a", "title" => "A", "type" => "number"},
+                %{"name" => "b", "title" => "B", "type" => "number"}
+              ]
+            },
+            %{
+              "name" => "tags",
+              "title" => "Tags",
+              "type" => "arrayOf",
+              "readOnly" => rule,
+              "of" => %{"type" => "string"}
+            }
+          ]
+        },
+        @dataset,
+        workspace_id: ws_id
+      )
+
+    create = Map.merge(%{"_id" => id, "_type" => type}, content)
+    assert mutate([%{"create" => create}]).status == 200
+    {:ok, _} = Content.publish_document(id, type, @dataset, workspace_id: ws_id)
+    type
+  end
+
+  defp first_draft(type, id, content),
+    do:
+      mutate([%{"create" => Map.merge(%{"_id" => "drafts." <> id, "_type" => type}, content)}]).status
+
+  test "a draft of a published document may not change a locked field; the Studio's first edit of another field lands",
+       %{id: id, ws_id: ws_id} do
+    type = twin(ws_id, "#{id}-x", %{"title" => "T", "farge" => "rod"})
+    assert first_draft(type, "#{id}-x", %{"title" => "T", "farge" => "bla"}) == 422
+
+    ordered = Jason.OrderedObject.new([{"b", 2}, {"a", 1}])
+
+    shapes = [
+      {"absent in both", %{"title" => "T"}, %{"title" => "T2"}},
+      {"absent, then null", %{"title" => "T"}, %{"title" => "T2", "farge" => nil}},
+      {"null, then absent", %{"title" => "T", "farge" => nil}, %{"title" => "T2"}},
+      {"an object, keys in another order", %{"title" => "T", "meta" => %{"a" => 1, "b" => 2}},
+       %{"title" => "T2", "meta" => ordered}},
+      {"an equal array", %{"title" => "T", "tags" => ["x", "y"]},
+       %{"title" => "T2", "tags" => ["x", "y"]}}
+    ]
+
+    for {{shape, published, draft}, n} <- Enum.with_index(shapes) do
+      doc = "#{id}-s#{n}"
+      type = twin(ws_id, doc, published)
+      assert first_draft(type, doc, draft) == 200, shape
+    end
+  end
+
   test "the Studio resolves the condition against the form" do
     alias Barkpark.Content.ReadOnlyFields
 

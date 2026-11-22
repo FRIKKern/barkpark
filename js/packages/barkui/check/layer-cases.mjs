@@ -11,8 +11,8 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { CLOSED_ROOT_CASES } from './closed-root-cases.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
-import { all, both, each, edit, esc, inDemo, skinsSay } from './plants.mjs'
-import { FRAME, LATE, looks, REFUSED, UNNAMED_CAN } from './layers.mjs'
+import { all, both, each, edit, esc, inDemo, reasons, skinsSay } from './plants.mjs'
+import { FRAME, installCensus, LATE, looks, NOT_OWN, REFUSED, UNNAMED_CAN } from './layers.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -82,6 +82,91 @@ const named = (d, layers = [LAYER]) => edit(join(d, 'part.json'), (s) => JSON.st
 const faint = (id, top) => `#${id} { position: absolute; inset: auto; left: 8px; top: ${top}px; margin: 0; padding: 8px 12px; border: 0; background-color: rgb(255, 255, 255); color: rgb(185, 185, 185); font: 16px/1.4 sans-serif; }`
 const UNNAMED_AT = (box) => `${box} is open in the top layer during the reading, and no layer in part.json names it`
 const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
+
+// The census knows the check's own two pages by identity, and the list is closed both ways: a page the check's own
+// code opens after the census is refused like any other, and a census set before the reference page is open, or on
+// a context that holds a third page, is red by name. The rows that always make a page keep the case from passing
+// by making none.
+async function ownTwoPages() {
+  const browser = await chromium.launch()
+  const part = { name: 'x', json: {} }
+  const two = async () => {
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    const ref = await context.newPage()
+    return { context, page, ref }
+  }
+  const look = async (page, own) => {
+    const census = await installCensus(page, own)
+    await page.setContent('<!doctype html><p>A page</p>')
+    return census
+  }
+  const red = async (run) => run().then(() => false, (e) => e.message === NOT_OWN)
+  try {
+    const rows = {}
+    {
+      const { context, page, ref } = await two()
+      rows["the check's own two pages, opened before the census, are not refused"] = (await (await look(page, [page, ref]))(part)).length === 0
+      await context.close()
+    }
+    {
+      const { context, page, ref } = await two()
+      const census = await look(page, [page, ref])
+      const third = await context.newPage()
+      if (!third.isClosed()) await third.waitForEvent('close', { timeout: 5000 }).catch(() => {})
+      const said = await census(part)
+      rows["a third page the check's own code opens after the census, refused by name and closed"] = third.isClosed() && said.length === 1 && said[0] === REFUSED.page
+      await context.close()
+    }
+    {
+      const context = await browser.newContext()
+      const page = await context.newPage()
+      rows['the reference page opened after the census: a census set on the part\'s page alone is red by name'] = await red(() => installCensus(page, [page]))
+      rows['a list that names one page twice, red by name'] = await red(() => installCensus(page, [page, page]))
+      await context.close()
+    }
+    {
+      const { context, page, ref } = await two()
+      await context.newPage()
+      rows['a census set on a context that holds a third page, red by name'] = await red(() => installCensus(page, [page, ref]))
+      await context.close()
+    }
+    // Ways that may make a page or not, by the machine (the modifier for a background tab is not the same on every
+    // system): each says whether it made one, and a page it made is refused by name and closed, once.
+    const MAY = {
+      'Control click on a link': (page) => page.click('#a', { modifiers: ['Control'] }),
+      'Control+Enter on a link': async (page) => {
+        await page.focus('#a')
+        await page.keyboard.press('Control+Enter')
+      },
+      'a script Control click on a link': (page) => page.evaluate(() => document.getElementById('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }))),
+    }
+    // Side by side, each in a context of its own: the case waits once, not once per way.
+    const tried = await Promise.all(
+      Object.entries(MAY).map(async ([way, act]) => {
+        const { context, page, ref } = await two()
+        const census = await installCensus(page, [page, ref])
+        await page.setContent('<!doctype html><a id="a" href="about:blank#a">A link</a>')
+        const made = []
+        context.on('page', (p) => made.push(p))
+        await act(page)
+        await page.waitForTimeout(700)
+        await Promise.all(made.map((p) => p.isClosed() || p.waitForEvent('close', { timeout: 5000 }).catch(() => {})))
+        const said = await census(part)
+        const ok = made.length ? made.length === 1 && made[0].isClosed() && said.length === 1 && said[0] === REFUSED.page : said.length === 0
+        await context.close()
+        return [way, made.length > 0, ok]
+      }),
+    )
+    for (const [way, made, ok] of tried) {
+      console.log(`    ${way}: made a page: ${made ? 'yes' : 'no'}`)
+      rows[`${way}: a page it makes is refused by name and closed, once`] = ok
+    }
+    return each(Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, () => v])))()
+  } finally {
+    await browser.close()
+  }
+}
 
 /** The same box over two grounds of the page: white and black. Its text is mid grey, under 4.5:1 on white and over
     it on black; the box itself has no fill, so the only ground is what the page draws behind it. On white it fails
@@ -168,18 +253,6 @@ const censusRows = (m, n) => ({
 })
 /** The rows of the two top-layer runs, by run, as their cases hold them. */
 export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), census: Object.keys(censusRows()) }
-/** What is wrong with `runs` ({ run: rows }) against the rows of one run they replace, in plain words; empty when
-    each old row is in exactly one run. */
-export function rowsMoved(old, runs) {
-  const wrong = []
-  for (const row of old) {
-    const in_ = Object.keys(runs).filter((r) => runs[r].filter((x) => x === row).length)
-    const times = Object.values(runs).reduce((k, rows) => k + rows.filter((x) => x === row).length, 0)
-    if (times === 0) wrong.push(`the row "${row}" is in neither top-layer run`)
-    else if (times > 1) wrong.push(`the row "${row}" is in ${in_.length > 1 ? `both top-layer runs (${in_.join(', ')})` : `the ${in_[0]} run ${times} times`}`)
-  }
-  return wrong
-}
 // Each top-layer case is `layers`: it opens its boxes by real input (a click, a hover, a Tab) or holds a refusal,
 // and runs in the selftest's rest job by its one rule (check/jobs.mjs).
 export const LAYER_CASES = [
@@ -215,17 +288,26 @@ export const LAYER_CASES = [
       return each(censusRows(m, n))(p, ...rest)
     },
   },
-  // Its own run: were either call let through, it would take the page away and every other row with it.
+  // Its own run: were either call let through, it would take the page away and every other row with it. The first
+  // focus makes three pages the check did not open, in three ways, and calls window.open: each page is refused, once.
   {
-    name: "top layer: the ways out of the census's sight are refused by name: another window (window.open, or a link with a target), and markup written into the parsed page (document.write)",
+    name: "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)",
     only: ['skins'],
     layers: true,
-    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; a.target = '_blank'; a.rel = 'opener'; document.body.append(a); a.click(); a.remove(); window.open(''); document.write('<p>Written late</p>') })"),
+    plant: (d) => inDemo(d, "root.querySelector('#button-primary').addEventListener('focus', () => { const a = document.createElement('a'); a.href = 'about:blank'; document.body.append(a); a.target = '_blank'; a.rel = 'opener'; a.click(); a.removeAttribute('target'); a.removeAttribute('rel'); for (const init of [{ shiftKey: true }, { button: 1 }]) a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init })); a.remove(); window.open(''); document.write('<p>Written late</p>') }, { once: true })"),
     expect: each({
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
-      'another window opened by a link with a target, refused by name': skinsSay(new RegExp(esc(REFUSED.window))),
+      'every page the check did not open, refused by name, once each': (p) => {
+        const n = (s) => reasons(p, 'skins').filter((f) => f.includes(s)).length
+        console.log(`    pages the check did not open, refused: ${n(REFUSED.page)} of the 3 made`)
+        return n(REFUSED.page) === 3
+      },
       'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
     }),
+  },
+  {
+    name: "top layer: the part's context holds the check's own two pages and no other, known by identity",
+    direct: ownTwoPages,
   },
   {
     name: 'the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent',
