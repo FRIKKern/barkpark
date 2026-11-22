@@ -2,13 +2,16 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
   @moduledoc """
   task-b923a915151d2038: a JSON write could store a Portable Text link whose
   address is `javascript:`, `data:` or `vbscript:`. #28371 draws such a link
-  as its words and the editors never make one (TanStack's `linkHref`, the
-  Classic editor's `from_html`), but the API, an import or another client
-  could still write it, and every other reader of the stored JSON would get
-  it. A write that brings in an address `Content.LinkHref` refuses is
-  refused on every dataset, with the finding `pt_link_href_refused`. An
-  address the row (or its draft or published twin) already holds is not new:
-  a stored row with one stays editable.
+  as its words and the editors never make one, but the API, an import or
+  another client could still write it, and every other reader of the stored
+  JSON would get it. A write that brings one into a rich text field is
+  refused on every dataset, with the finding `pt_link_href_refused`.
+
+  r2 (#28393 review): only those three schemes are refused. Every other
+  address (no scheme, blank, `sms:`, `ftp:`, …) is written as given, since
+  the reader draws it as words anyway. A `json` field is not rich text. A
+  revision restore puts back what was stored. An address the row (or its
+  draft or published twin) already holds is not new.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -38,6 +41,15 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
               "name" => "meta",
               "type" => "composite",
               "fields" => [%{"name" => "rt", "type" => "richText"}]
+            },
+            %{"name" => "blob", "type" => "json"},
+            %{
+              "name" => "rows",
+              "type" => "arrayOf",
+              "of" => %{
+                "type" => "composite",
+                "fields" => [%{"name" => "rt", "type" => "richText"}]
+              }
             }
           ]
         },
@@ -47,7 +59,7 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
 
     raw = "href-" <> Ecto.UUID.generate()
     {:ok, _} = Auth.create_token(raw, "href", @dataset, ["read", "write", "admin"], ws.id)
-    {:ok, conn: put_req_header(conn, "authorization", "Bearer " <> raw)}
+    {:ok, conn: put_req_header(conn, "authorization", "Bearer " <> raw), scope: scope}
   end
 
   defp rt(defs) do
@@ -123,7 +135,8 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
         {"after a control character", "\u0001javascript:alert(1)"},
         {"data:", "data:text/html,<script>alert(1)</script>"},
         {"vbscript:", "vbscript:msgbox(1)"},
-        {"protocol-relative", "//evil.example/x"}
+        {"as a character reference", "&#106;avascript:alert(1)"},
+        {"with an encoded colon", "javascript&colon;alert(1)"}
       ] do
     test "a create whose link address is #{label} is refused, and nothing is written", %{
       conn: conn
@@ -141,14 +154,28 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
     end
   end
 
-  test "allowed addresses are written", %{conn: conn} do
+  # #28393 review, blocker 1: none of these can run script; each is written
+  # as given, and the reader draws the ones outside its allowlist as words.
+  test "every address that is not script is written as given", %{conn: conn} do
     for href <- [
           "https://x.example",
           "mailto:a@x.example",
           "tel:+4712345678",
           "/p",
           "#top",
-          "?q=1"
+          "?q=1",
+          "www.example.com",
+          "docs/x",
+          "page.html",
+          "example.com/a",
+          "",
+          "  ",
+          "sms:+4712345678",
+          "ftp://x.example/f",
+          "webcal://x.example/c.ics",
+          "geo:59.91,10.75",
+          "urn:isbn:9788202",
+          "//x.example/x"
         ] do
       id = id()
       assert create(conn, id, link(href)).status == 200
@@ -246,6 +273,28 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
       assert finding.path == "/meta/rt/0/markDefs/0/href"
     end
 
+    # #28393 review: content keyed by atoms, from an Elixir caller.
+    test "atom-keyed content is read as JSON is" do
+      atom_rt = [
+        %{
+          _type: "block",
+          _key: "k1",
+          style: "normal",
+          markDefs: [%{_type: "link", _key: "m1", href: "javascript:atom"}],
+          children: [%{_type: "span", _key: "s1", text: "here", marks: ["m1"]}]
+        }
+      ]
+
+      assert {:error, {:schema_validation_failed, _errors, [finding]}} =
+               Content.create_document(
+                 "hrefpost",
+                 %{"doc_id" => id(), "title" => "T", "content" => %{meta: %{rt: atom_rt}}},
+                 @dataset
+               )
+
+      assert finding.path == "/meta/rt/0/markDefs/0/href"
+    end
+
     test "an upsert that keeps the stored one writes; one that swaps it in is refused" do
       id = id()
 
@@ -283,6 +332,91 @@ defmodule BarkparkWeb.MutateLinkHrefTest do
                  },
                  @dataset
                )
+    end
+  end
+
+  describe "r2: what is not refused, and where it looks" do
+    test "a bulk write with an sms: and a scheme-less link writes both", %{conn: conn} do
+      [a, b] = [id(), id()]
+
+      resp =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          "/v1/data/mutate/#{@dataset}",
+          Jason.encode!(%{
+            "mutations" =>
+              for {i, href} <- [{a, "sms:+4712345678"}, {b, "www.example.com"}] do
+                %{
+                  "create" => %{
+                    "_type" => "hrefpost",
+                    "doc_id" => i,
+                    "title" => "T",
+                    "content" => %{"meta" => %{"rt" => link(href)}}
+                  }
+                }
+              end
+          })
+        )
+
+      assert resp.status == 200, resp.resp_body
+      assert stored(a) != nil and stored(b) != nil
+    end
+
+    test "a json field holding a Portable Text shape is written untouched", %{conn: conn} do
+      id = id()
+      blob = %{"rt" => link("javascript:alert(1)")}
+
+      resp =
+        mutate(conn, %{
+          "create" => %{
+            "_type" => "hrefpost",
+            "doc_id" => id,
+            "title" => "T",
+            "content" => %{"blob" => blob}
+          }
+        })
+
+      assert resp.status == 200, resp.resp_body
+      assert stored(id)["blob"] == blob
+    end
+
+    test "rich text in an array row is read", %{conn: conn} do
+      resp =
+        mutate(conn, %{
+          "create" => %{
+            "_type" => "hrefpost",
+            "doc_id" => id(),
+            "title" => "T",
+            "content" => %{"rows" => [%{"_key" => "r1", "rt" => link("vbscript:x")}]}
+          }
+        })
+
+      refused!(resp, "/rows/0/rt/0/markDefs/0/href")
+    end
+
+    # #28393 review, blocker 2: a restore puts back what was stored.
+    test "a revision restore puts back a stored javascript: link", %{conn: conn, scope: scope} do
+      id = id()
+      assert create(conn, id, link("https://x.example")).status == 200
+      store_raw!("drafts." <> id, link("javascript:legacy"))
+      assert set_fields(conn, id, %{"title" => "T2"}).status == 200
+
+      assert set_fields(conn, id, %{"meta" => %{"rt" => link("https://clean.example")}}).status ==
+               200
+
+      revs =
+        Repo.all(
+          from r in Barkpark.Content.Revision,
+            where: r.doc_id in ^[id, "drafts." <> id],
+            order_by: [asc: r.inserted_at],
+            select: {r.id, r.content}
+        )
+
+      {rid, _} = Enum.find(revs, fn {_rid, c} -> inspect(c) =~ "javascript:legacy" end)
+
+      assert {:ok, _} = Content.restore_revision(rid, "hrefpost", @dataset, scope)
+      assert stored(id)["meta"]["rt"] == link("javascript:legacy")
     end
   end
 end
