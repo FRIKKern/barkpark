@@ -191,9 +191,9 @@ defmodule BarkparkWeb.Studio.ObjectRichTextKeysTest do
       refute has_element?(a, @banner)
     end
 
-    # Control (also on main): both changed the rich text, which cannot be
-    # merged as blocks: the banner shows and A keeps its own.
-    test "#{surface}: A holds its own rich text change, B edits the rich text: banner, A's kept",
+    # Control: both changed the rich text. The banner shows. A's block and
+    # B's new paragraph merge as blocks (#28349), so A's form holds both.
+    test "#{surface}: A holds its own rich text change, B edits the rich text: banner, both kept",
          c do
       c = Map.put(c, :surface, @surface)
       a = open(c)
@@ -201,7 +201,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextKeysTest do
       b_adds_a_paragraph(c, "<p>one two</p>")
 
       assert eventually(fn -> assigns(a).doc_conflict == true end)
-      assert words(assigns(a).editor_form["meta"]["rt"]) == ["one two A"]
+      assert words(assigns(a).editor_form["meta"]["rt"]) == ["one two A", "B para"]
       assert has_element?(a, @banner)
     end
   end
