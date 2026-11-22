@@ -722,7 +722,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       try {
         html = readFileSync(join(out, 'index.html'), 'utf8')
       } catch {}
-      // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
+      // A case that opens a layer or holds a layer refusal never runs in the views job (check/jobs.mjs, layerMisplaced).
       const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, name, 'part.json'), 'utf8')).layers, proof))
       const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced
       if (pass) held.push(c.name)

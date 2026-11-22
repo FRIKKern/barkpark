@@ -4,11 +4,12 @@ name: barkui
 #   barkui-plan      the dispatcher: does this change touch BarkUI, and which groups of parts
 #                    (check/jobs.mjs --matrix). Checkout and plain node, no install.
 #   barkui-check     one job per group, from that list and no other; each splits again and must agree.
-#   barkui-selftest       the check's own proof that it can still lose, in two jobs side by side: this one runs
-#   barkui-selftest-rest  the cases that read the views, the other every other case (SELFTEST_JOBS and
-#                         selftestJob in check/jobs.mjs), each under its own ceiling.
+#   barkui-selftest-*  the check's own proof that it can still lose, as jobs side by side, one per entry of
+#                      SELFTEST_JOBS in check/jobs.mjs (its rule, selftestJob, puts each case in one), each under
+#                      its own ceiling: barkui-selftest runs the cases that read the views, barkui-selftest-layers
+#                      the top layer's cases, barkui-selftest-rest every other case.
 #   barkui           the closing check (AGGREGATE in check/jobs.mjs): always runs, and is red unless the plan, every
-#                    group and both selftest jobs passed, or the plan said BarkUI was not touched and the rest were
+#                    group and every selftest job passed, or the plan said BarkUI was not touched and the rest were
 #                    skipped (check/jobs.mjs, judge). A test holds this file's job names to check/jobs.mjs.
 #
 # THIS WORKFLOW HAS NO `on: … paths:` FILTER AND MUST NEVER GAIN ONE. A paths filter emits no run and no check
@@ -280,7 +281,7 @@ jobs:
       # reds unless each turns the right light off, naming the planted control.
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
       # them equal); the selftest stops, failing with its sentence, once it passes
-      # its ceiling, under this limit. This job runs every case the views job does not.
+      # its ceiling, under this limit. This job runs every case the views and layers jobs do not.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
         timeout-minutes: 10
@@ -298,9 +299,73 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  barkui-selftest-layers:
+    name: "BarkUI selftest, top layer"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit. This job runs the top layer's cases.
+      # Its report (each case it ran and held, by name) goes to the closing check.
+      - name: "Each planted break turns its light off"
+        timeout-minutes: 10
+        working-directory: js/packages/barkui
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node check/selftest.mjs --job layers --report "$RUNNER_TEMP/barkui-report/selftest-layers.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-layers
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
   barkui:
     name: "BarkUI showroom check"
-    needs: [barkui-plan, barkui-check, barkui-selftest, barkui-selftest-rest]
+    needs: [barkui-plan, barkui-check, barkui-selftest, barkui-selftest-rest, barkui-selftest-layers]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -312,7 +377,7 @@ jobs:
         with:
           node-version: "22"
 
-      # No report at all is not an error here: the closing check reads it as every group and both selftest jobs missing.
+      # No report at all is not an error here: the closing check reads it as every group and every selftest job missing.
       - name: Download the groups' and the selftest jobs' reports
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -324,7 +389,7 @@ jobs:
       # The jobs' results first, their reports second: a report cannot turn a red or cancelled job green, and
       # one from another group, part list or commit counts as missing (check/jobs.mjs, judge); the selftest jobs'
       # reports must together name every case once, each held (check/selftest-report.mjs).
-      - name: "The plan, every group and both selftest jobs passed"
+      - name: "The plan, every group and every selftest job passed"
         working-directory: js/packages/barkui
         env:
           NEEDS: ${{ toJSON(needs) }}

@@ -15,6 +15,8 @@ const job = (id) => {
 }
 const LEG_TEMPLATE = NAMES.group('${{ matrix.group }}')
 
+/** The ids of the jobs in a workflow's text that are selftest jobs by their id (barkui-selftest, barkui-selftest-*). */
+const selftestIds = (text) => [...text.matchAll(/^ {2}(barkui-selftest(?:-[\w-]+)?):$/gm)].map((m) => m[1]).sort()
 const run = (j) => `node check/selftest.mjs --job ${j.key} --report "$RUNNER_TEMP/barkui-report/${reportFile(j.key)}"`
 
 describe('barkui.yml runs the split it is given and closes on one name', () => {
@@ -25,7 +27,7 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
     expect(on).not.toMatch(/paths/)
   })
 
-  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and both selftest jobs`, () => {
+  it(`names the closing check "${AGGREGATE}" once, always runs it, and has it read the plan, every group and every selftest job`, () => {
     expect(wf.split('\n').filter((l) => l.includes(AGGREGATE))).toEqual([`    name: "${AGGREGATE}"`])
     const close = job('barkui')
     expect(close).toContain(`name: "${AGGREGATE}"`)
@@ -33,6 +35,15 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
     expect(close).toMatch(/\n {4}if: always\(\)\n/)
     expect(close).toContain('NEEDS: ${{ toJSON(needs) }}')
     expect(close).toContain('node check/jobs.mjs --judge')
+  })
+
+  it('has one selftest job for each entry of SELFTEST_JOBS and no other: a job either names that the other lacks is red', () => {
+    expect(selftestIds(wf)).toEqual(SELFTEST_JOBS.map((j) => j.id).sort())
+    // Planted both ways: a job in the file that SELFTEST_JOBS lacks, and an entry whose job the file lacks.
+    const extra = wf.replace('\n  barkui:\n', '\n  barkui-selftest-more:\n    name: "x"\n\n  barkui:\n')
+    expect(selftestIds(extra)).not.toEqual(SELFTEST_JOBS.map((j) => j.id).sort())
+    const gone = SELFTEST_JOBS.at(-1).id
+    expect(selftestIds(wf.replace(`\n  ${gone}:\n`, '\n  renamed-away:\n'))).not.toEqual(SELFTEST_JOBS.map((j) => j.id).sort())
   })
 
   it('makes the list in a plan job that installs nothing, and runs each group from it, with no list written by hand', () => {
@@ -101,7 +112,7 @@ describe('every name barkui.yml can render has a row in .github/required-checks.
     expect(readme).toContain(`Past ${MOST_PARTS} parts the plan job refuses`)
   })
 
-  it('the plan, both selftest jobs, the closing check and the skipped-matrix template each have a row', () => {
+  it('the plan, every selftest job, the closing check and the skipped-matrix template each have a row', () => {
     expect(missing([NAMES.plan, ...SELFTEST_JOBS.map((j) => j.name), AGGREGATE, LEG_TEMPLATE])).toEqual([])
   })
 

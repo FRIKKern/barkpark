@@ -3,12 +3,13 @@
 // the one case is in exactly one run, that the runs together still read what the case read (every surface; every
 // light), and that a case with a key the runner does not read, no reading, or a reading over the share is red by
 // the case's name.
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SURFACES } from '../build/page.mjs'
-import { CASE_SECONDS, CASE_SHARE, caseLimitsWrong } from '../check/capacity.mjs'
+import { CASE_SECONDS, CASE_SHARE, caseLimitsWrong, JOB_SHARE, jobShareRule, jobShareWrong, SELFTEST_CEILINGS } from '../check/capacity.mjs'
 import { CASE_READINGS } from '../check/case-readings.mjs'
 import { LIGHT_NAMES } from '../check/check.mjs'
-import { rowsMoved } from '../check/jobs.mjs'
+import { rowsMoved, SELFTEST_JOBS, selftestJob } from '../check/jobs.mjs'
 import { surfacesOf } from '../check/proofs.mjs'
 import { CASES, partOf } from '../check/selftest.mjs'
 import { STATE_CASES, SURFACE_CASES, UNFOLDED_ROWS } from '../check/unfolded-cases.mjs'
@@ -89,5 +90,26 @@ describe('every selftest case', () => {
     expect(caseLimitsWrong(CASES, slow)).toEqual([`the case "${c.name}" took ${most} s on CI's hosted runner (job ${r.job}), at or over 80% of the one limit of ${CASE_SECONDS} s (${most} s): unfold it into runs`])
     const gone = { ...CASE_READINGS, [key]: { ...r, cases: { ...r.cases, 'a case no one wrote': 1 } } }
     expect(caseLimitsWrong(CASES, gone)).toEqual(['check/case-readings.mjs reads a case the selftest does not have: "a case no one wrote"'])
+  })
+})
+
+describe('every selftest job', () => {
+  it(`keeps its cases' hosted readings, summed, at or under ${JOB_SHARE * 100}% of its ceiling`, () => {
+    expect(jobShareWrong(CASES, CASE_READINGS, selftestJob)).toEqual([])
+    for (const j of SELFTEST_JOBS) expect(SELFTEST_CEILINGS[j.key], j.key).toBeGreaterThan(0)
+  })
+
+  it('is red by its key when its cases sum over the share, or it has no ceiling, in the words docs/PARTS.md says', () => {
+    const [key, r] = Object.entries(CASE_READINGS).find(([k]) => k === 'views')
+    const c = CASES.find((x) => selftestJob(x) === key)
+    const over = JOB_SHARE * SELFTEST_CEILINGS[key]
+    const slow = { ...CASE_READINGS, [key]: { ...r, cases: { ...r.cases, [c.name]: r.cases[c.name] + over } } }
+    const [row, ...more] = jobShareWrong(CASES, slow, selftestJob)
+    expect(more).toEqual([])
+    expect(row).toMatch(new RegExp(`^the selftest's ${key} job: its cases' readings sum to [\\d.]+ s, over ${JOB_SHARE * 100}% of its ceiling of ${SELFTEST_CEILINGS[key]} s`))
+    expect(row.endsWith(`; ${jobShareRule()}`)).toBe(true)
+    const doc = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8')
+    expect(doc).toContain(jobShareRule().replace(/^./, (s) => s.toUpperCase()))
+    expect(jobShareWrong(CASES, CASE_READINGS, () => 'a job with no ceiling')).toEqual(["the selftest's a job with no ceiling job has no ceiling in check/capacity.mjs"])
   })
 })
