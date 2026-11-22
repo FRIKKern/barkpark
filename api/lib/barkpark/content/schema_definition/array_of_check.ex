@@ -102,5 +102,9 @@ defmodule Barkpark.Content.SchemaDefinition.ArrayOfCheck do
 
   defp typed?(shape), do: is_binary(get(shape, "type")) and get(shape, "type") != ""
 
-  defp get(map, key), do: Map.get(map, key, Map.get(map, String.to_atom(key)))
+  # The keys are fixed literals, so a fixed map gives the atom form and no
+  # string is ever turned into a new atom (Sobelow DOS.StringToAtom).
+  @atoms %{"name" => :name, "type" => :type, "of" => :of, "fields" => :fields}
+
+  defp get(map, key), do: Map.get(map, key, Map.get(map, Map.fetch!(@atoms, key)))
 end
