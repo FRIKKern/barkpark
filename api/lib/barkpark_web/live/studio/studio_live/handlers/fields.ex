@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostedEdits
@@ -478,17 +479,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         keys = target_key(params, socket.assigns[:editor_schema])
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
-        saved =
+        based =
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"])
           |> RemoteValues.add_bases(built_bases)
+
+        saved =
+          based
           |> RefusedSave.target(keys)
           |> Shared.do_autosave(doc, :change)
           |> RemoteValues.settle(socket, keys, doc)
 
+        bases = based.assigns[:editor_field_bases] || %{}
+
         {:noreply,
          saved
          |> keep_unsaved_values(doc, keys)
+         |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"])
          |> RefusedSave.not_codes(not_codes)
          |> settle_dirty(keys)}
 
@@ -983,7 +990,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       # A field the store refused earlier is still not saved (`RefusedSave`).
       held = MapSet.new(RefusedSave.keys(socket))
       dirty? = MapSet.size(held) > 0
-      assign(socket, editor_dirty: dirty?, editor_unsaved_keys: held, doc_conflict: false)
+
+      assign(socket,
+        editor_dirty: dirty?,
+        editor_unsaved_keys: held,
+        editor_unsaved_bases: Map.take(UnsavedBases.all(socket), MapSet.to_list(held)),
+        doc_conflict: false
+      )
     else
       settle_unsaved(socket, keys -- RefusedSave.clears(socket))
     end
