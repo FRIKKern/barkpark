@@ -4,8 +4,8 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   the text carries all of it. It is the one place the printer's rewrites live:
   `Bpml.WriteWall` compares `parse(print(view))` with `normalize(stored)` to
   find what a pull did not show. Each rewrite fires on an exact key set and
-  drops only keys that hold nothing (nil, false or empty) or repeat a body an
-  alias keeps, and empty text nodes. Thirteen rewrites, no others:
+  drops no content: a key it removes holds nothing (nil, false or empty), or
+  its body moves whole to another key or node. Thirteen rewrites, no others:
 
     1. `:mark_node` — an inline mark written as a node (`code`, `strong`, `em`, `underline`, `strike`) becomes text carrying that mark, only when the node holds nothing else (exactly type and children, or type, value and its own marks).
     2. `:expandable_children` — an `expandable`'s body key `children` becomes `blocks`.
@@ -24,8 +24,8 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   Nothing lost means: no character, no mark on a character, no link, no
   checked state, no block, no item child, no slot. A mark on zero characters
   (rule 7) and an empty `marks` list (rule 9) mark no character, so they are not
-  in that list. It never drops a key that holds content (`children`, `slots`,
-  `items`, `blocks`) and never changes a word. A fourteenth rewrite is its own
+  in that list. It never drops a key's content (`children`, `slots`, `items`,
+  `blocks`) and never changes a word. A fourteenth rewrite is its own
   change, with its own careful review.
   """
 

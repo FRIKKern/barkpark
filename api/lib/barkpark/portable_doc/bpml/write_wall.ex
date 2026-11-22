@@ -21,10 +21,11 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
   `normalize` is the spelling equivalence: a stored spelling the print merely
   re-spells (an alias key, a string heading level) is shown. Each of its rules
-  fires on an exact key set and drops only keys that hold nothing (nil, false
-  or empty) or repeat a body an alias keeps, and empty text nodes; its sweep
-  over every stored document holds that it loses nothing, so a spelling it
-  misses refuses an edit and never loses content.
+  fires on an exact key set and drops no content: a key it removes holds
+  nothing (nil, false or empty), or its body moves whole to another key or
+  node; its sweep over the stored-document fixtures (`BpmlStoredDocuments`)
+  holds that it loses nothing, so a spelling it misses refuses an edit and
+  never loses content.
 
   ## The rule
 
