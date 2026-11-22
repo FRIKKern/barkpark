@@ -39,7 +39,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   second, so only the push path (`Bpml.parse_copy/1`) ever sees them.
   """
 
-  alias Barkpark.PortableDoc.Bpml.Printer
+  alias Barkpark.PortableDoc.Bpml.{Canonical, Printer}
 
   defmodule Unwritable do
     @moduledoc """
@@ -224,7 +224,8 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     end
   end
 
-  # `paths` names each body as stored, in the write wall's shape.
+  # `paths` names each outermost body in the stored block's canonical
+  # spelling, in the write wall's shape.
   defp stale(v, stored, id) do
     i = Enum.find_index(stored, &(is_map(&1) and &1["id"] == id))
 
@@ -235,7 +236,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
          "#{callout_names(v)} #{has_have(v)} a body your copy was pulled without; " <>
            "nothing was written",
        hint: "bp paper pull, then make your edit again",
-       paths: if(i, do: slot_paths(Enum.at(stored, i), "blocks[#{i}]"), else: [])
+       paths: if(i, do: slot_paths(canonical(Enum.at(stored, i)), "blocks[#{i}]"), else: [])
      }}
   end
 
@@ -252,6 +253,8 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> slot_paths(v, "#{path}[#{i}]") end)
 
   defp slot_paths(_other, _path), do: []
+
+  defp canonical(block), do: block |> List.wrap() |> Canonical.normalize() |> hd()
 
   # ── the inline form ─────────────────────────────────────────────────────────
 

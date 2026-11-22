@@ -153,7 +153,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
 
     assert answer["error"]["code"] == "bpml_stale_copy"
     assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
-    assert answer["error"]["paths"] == ["blocks[1].children[0].slots"]
+    assert answer["error"]["paths"] == ["blocks[1].blocks[0].slots"]
     assert stored(slug) == before
   end
 
