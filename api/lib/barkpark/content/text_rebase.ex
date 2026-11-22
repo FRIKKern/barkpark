@@ -82,7 +82,12 @@ defmodule Barkpark.Content.TextRebase do
 
   @doc """
   `merge3/3` that gives nil, not `ours`, where the two changes cannot both
-  apply (they overlap, or a value is over the size bound). The desk's undo
+  apply (they overlap, or a value is over the size bound), or where `ours`
+  sits right at the edge of text `theirs` removed. TanStack's `merge3`
+  (barkpark-studio merge.ts) places `ours` by the text around it, and with
+  that text gone the patch has nowhere to go: words typed after a sentence
+  someone else cleared or rewrote are a clash, not kept on their own
+  (task-881f16e32fffbe9a). The desk's undo
   (`BarkparkWeb.Studio.Desk.DocUndo`) takes one of this editor's changes
   back out of the stored text with it, and leaves the text as it is rather
   than take another editor's words with it.
@@ -101,8 +106,19 @@ defmodule Barkpark.Content.TextRebase do
         nil
 
       true ->
-        merge_splices(String.graphemes(base), String.graphemes(ours), String.graphemes(theirs))
+        base = String.graphemes(base)
+        ours = String.graphemes(ours)
+        theirs = String.graphemes(theirs)
+        if lost_context?(base, ours, theirs), do: nil, else: merge_splices(base, ours, theirs)
     end
+  end
+
+  # `theirs` removed base text that ends where `ours`' splice starts, or
+  # starts where it ends: the text `ours` was written next to is gone.
+  defp lost_context?(base, ours, theirs) do
+    {os, oe, _oins} = splice(base, ours)
+    {ts, te, _tins} = splice(base, theirs)
+    te > ts and (te == os or ts == oe)
   end
 
   # The merged text, or nil when the two splices overlap (the caller keeps

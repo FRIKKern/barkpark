@@ -52,6 +52,19 @@ defmodule Barkpark.Content.TextUndoTest do
       assert TextRebase.merge3("Hello world", "Hello there", "Hello wOrld") == "Hello there"
     end
 
+    # TanStack's merge3 places ours by the text around it (task-881f16e32fffbe9a).
+    test "nil where ours sits at the edge of text theirs removed, as TanStack's merge3" do
+      assert TextRebase.merge3_both("First words here", "First words here mine", "") == nil
+      assert TextRebase.merge3_both("First words here", "First words here mine", "First") == nil
+      assert TextRebase.merge3_both("First words", "First words!", "First Rewritten") == nil
+      # Apart: both stand, as there.
+      assert TextRebase.merge3_both("First words here", "First words here mine", "words here") ==
+               "words here mine"
+
+      # The save path's merge3/3 still merges a post that crossed theirs.
+      assert TextRebase.merge3("First words here", "First words here mine", "") == " mine"
+    end
+
     test "nil over the size bound" do
       big = String.duplicate("x", TextRebase.max_bytes() + 1)
       assert TextRebase.merge3_both(big, big <> "a", "b" <> big) == nil

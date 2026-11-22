@@ -194,6 +194,23 @@ defmodule BarkparkWeb.Studio.RemoteSaveClashOwnFieldsTest do
       refute has_element?(a, @banner)
     end
 
+    # task-881f16e32fffbe9a: words typed after text B cleared have nothing
+    # left to sit next to (TanStack's merge3 gives null): a clash, not A's
+    # words alone, kept quietly and saved over B's clear.
+    test "#{surface}: B clears a field A holds unsaved words in: a conflict, B's clear stored",
+         c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      unsaved!(a, %{"excerpt" => "First words, mine"})
+
+      saves(b, "excerpt", %{"title" => "Fixture", "excerpt" => ""})
+
+      assert eventually(fn -> assigns(a).doc_conflict == true end)
+      assert assigns(a).editor_form["excerpt"] == "First words, mine"
+      assert has_element?(a, @banner)
+      assert stored(c).content["excerpt"] in [nil, ""]
+    end
+
     test "#{surface}: A kept typing through the merge: its next save keeps B's words", c do
       a = open(c, @surface)
       b = open(c, @surface)
