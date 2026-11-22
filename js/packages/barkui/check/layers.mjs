@@ -132,6 +132,8 @@ export const UNNAMED = (at) => `${at} is open in the top layer during the readin
 export const UNNAMED_CAN = (at) => `${at} can open in the top layer (a dialog, or it carries popover), and no layer in part.json names it`
 /** The fail for a frame anywhere in the page: another window, whose attachShadow and boxes the census does not watch. */
 export const FRAME = (at) => `${at} is a frame, another window in the page, which the check does not watch; a part makes none`
+/** The fail for a host of a closed shadow root anywhere in the page: the check cannot read inside it. */
+export const CLOSED = (at) => `${at} hosts a closed shadow root, which the check cannot read inside; a part's page holds none`
 /** The fail for a call the page's world refuses (tellRoots): the call, and why. */
 export const REFUSED = {
   'window.open': 'the page called window.open, which the check refuses: another window, which the check does not watch',
@@ -148,11 +150,11 @@ export const NOT_OWN = 'the census is set on a context that does not hold exactl
 export function topLayerTouch(layers, proof) {
   if (layers?.length) return 'its part names a layer'
   const text = JSON.stringify(proof ?? {})
-  const hit = [UNNAMED(''), UNNAMED_CAN(''), FRAME(''), ...Object.values(REFUSED)].find((s) => text.includes(JSON.stringify(s.trim()).slice(1, -1)))
+  const hit = [UNNAMED(''), UNNAMED_CAN(''), FRAME(''), CLOSED(''), ...Object.values(REFUSED)].find((s) => text.includes(JSON.stringify(s.trim()).slice(1, -1)))
   return hit ? `its run says "${hit.trim()}"` : ''
 }
 /** What the census tells, as the fail it is. */
-const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'call' ? REFUSED[at] : UNNAMED_CAN(at))
+const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'closed' ? CLOSED(at) : kind === 'call' ? REFUSED[at] : UNNAMED_CAN(at))
 
 /** Runs in the census world from the page's first frame (it is serialised): it notes every element that can enter
     the top layer, with the part whose stage held it when it was seen (null outside every stage), in the document and
@@ -167,6 +169,10 @@ function census(placement, script) {
   const FRAMES = 'iframe, frame, object, embed, fencedframe'
   const seen = new Map()
   const told = new Set()
+  // Each host of a closed root, with the part whose stage held it when it was seen; apart from `seen`, so a box
+  // that hosts one is told both ways.
+  const shut = new Map()
+  const toldShut = new Set()
   const roots = new WeakSet()
   const up = (e) => e.parentElement ?? (e.getRootNode() instanceof ShadowRoot ? e.getRootNode().host : null)
   const owner = (n) => {
@@ -201,6 +207,10 @@ function census(placement, script) {
   if (document.documentElement) take(document.documentElement)
   // The host, at once inside attachShadow, before the page can put anything in its new root.
   addEventListener('barkui-census-root', (e) => take(e.composedPath()[0]), true)
+  const closedHost = (el) => shut.has(el) || shut.set(el, owner(el))
+  // A closed root, at the call; and each one the look finds in the browser's own tree (installCensus).
+  addEventListener('barkui-census-closed', (e) => closedHost(e.composedPath()[0]), true)
+  globalThis.__barkClosed = closedHost
   for (const at of ['window.open', 'document.write', 'document.writeln', 'document.open'])
     addEventListener(`barkui-census-${at}`, () => seen.has(at) || seen.set(at, { of: null, kind: 'call' }), true)
   globalThis.__barkPlacement = (part) => {
@@ -220,6 +230,11 @@ function census(placement, script) {
       if (kind === 'can' && !el.isConnected && of === part && boxes.some((s) => el.matches(s))) continue
       told.add(el)
       out.push({ kind, at: kind === 'call' ? el : describe(el) })
+    }
+    for (const [el, of] of shut) {
+      if (toldShut.has(el) || (of !== null && of !== part)) continue
+      toldShut.add(el)
+      out.push({ kind: 'closed', at: describe(el) })
     }
     return out
   }
@@ -241,8 +256,10 @@ function tellRoots() {
   const tell = (target, type) => apply(send, target, [new Ev(type, { bubbles: true, composed: true })])
   const fix = (o, k, value) => define(o, k, { value, writable: false, enumerable: true, configurable: false })
   fix(Element.prototype, 'attachShadow', function attachShadow(init) {
-    const root = apply(attach, this, [init])
-    tell(this, 'barkui-census-root')
+    // Each member is read once, so the mode the census is told is the mode the root gets.
+    const { mode, delegatesFocus, slotAssignment, clonable, serializable, customElementRegistry } = init
+    const root = apply(attach, this, [{ mode, delegatesFocus, slotAssignment, clonable, serializable, customElementRegistry }])
+    tell(this, mode === 'closed' ? 'barkui-census-closed' : 'barkui-census-root')
     return root
   })
   fix(Element.prototype, 'removeAttribute', function removeAttribute(...a) {
@@ -310,8 +327,31 @@ export async function installCensus(page, own, { script = true } = {}) {
     }
     ready = true
   }
+  // Each closed root in the page now, from the browser's own tree, pierced: its host is told to the census, which
+  // names it once. A host already told is not asked again.
+  const sent = new Set()
+  const closedNow = async () => {
+    const ask = (method, params) => within(cdp.send(method, params), `${method} gave no answer in ${ASK_MS / 1000} s`)
+    const { root } = await ask('DOM.getDocument', { depth: -1, pierce: true })
+    const hosts = []
+    const walk = (n) => {
+      for (const r of n.shadowRoots ?? []) {
+        if (r.shadowRootType === 'closed') hosts.push(n.backendNodeId)
+        walk(r)
+      }
+      for (const c of n.children ?? []) walk(c)
+    }
+    walk(root)
+    for (const backendNodeId of hosts.filter((h) => !sent.has(h))) {
+      sent.add(backendNodeId)
+      const { object } = await ask('DOM.resolveNode', { backendNodeId, executionContextId: id, objectGroup: 'barkui-closed' })
+      await ask('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function () { __barkClosed(this) }' })
+    }
+    if (hosts.length) await cdp.send('Runtime.releaseObjectGroup', { objectGroup: 'barkui-closed' }).catch(() => {})
+  }
   const look = async (part) => {
     await ensure()
+    await closedNow()
     const opened = Array.from({ length: others }, () => REFUSED.page)
     others = 0
     return [...opened, ...(await run(`__barkCensus(${JSON.stringify(part.name)}, ${JSON.stringify((part.json.layers ?? []).map((l) => l.box))})`)).map(said)]

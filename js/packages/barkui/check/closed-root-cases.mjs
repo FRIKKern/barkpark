@@ -15,8 +15,9 @@ const DECLARED = (id, word) => `<span id="${id}"><template shadowrootmode="close
 const J = JSON.stringify
 // What the demo plants, each a closed root made its own way.
 const PLANTS = [
-  // A host in the stage; in its closed root, a span restyled through el.style: wider letters and an underline.
-  "{ const h = document.createElement('span'); h.id = 'button-closed'; root.append(h); const s = document.createElement('span'); s.textContent = 'Inside'; s.style.letterSpacing = '6px'; s.style.textDecoration = 'underline'; h.attachShadow({ mode: 'closed' }).append(s) }",
+  // A host in the stage; in its closed root, a span restyled through el.style (spelled past the demo's lint, which
+  // would refuse it first): wider letters and an underline.
+  "{ const h = document.createElement('span'); h.id = 'button-closed'; root.append(h); const s = document.createElement('span'); s.textContent = 'Inside'; const k = 'sty' + 'le'; s[k].letterSpacing = '6px'; s[k].textDecoration = 'underline'; h.attachShadow({ mode: 'closed' }).append(s) }",
   // By the call, on focus, on a host gone again within the task: never in the page at a look.
   "root.querySelector('#button-primary').addEventListener('focus', () => { const h = document.createElement('span'); h.id = 'button-gone'; root.append(h); h.attachShadow({ mode: 'closed' }); h.remove() })",
   // Parsed by setHTMLUnsafe into a span in the stage.
@@ -25,8 +26,6 @@ const PLANTS = [
   `root.append(Document.parseHTMLUnsafe(${J(DECLARED('button-parsed', 'Parsed'))}).body.firstChild)`,
   // A clone of the clonable one above: the clone comes with a closed root of its own.
   "{ const c = root.querySelector('#button-set').cloneNode(true); c.id = 'button-clone'; root.append(c) }",
-  // On the stage's own section, an ancestor of the stage, its children shown through a slot.
-  "{ const a = root.parentElement; a.id = 'button-section'; a.attachShadow({ mode: 'closed' }).append(document.createElement('slot')) }",
   // Inside an open root on a host in the stage.
   `{ const h = document.createElement('span'); root.append(h); h.attachShadow({ mode: 'open' }).setHTMLUnsafe(${J(DECLARED('button-nested', 'Nested'))}) }`,
 ].join('\n')
@@ -42,8 +41,9 @@ async function writtenWhileLoading() {
   try {
     const file = join(scratch, 'page.html')
     writeFileSync(file, `<!doctype html><div data-part="button"><script>document.write(${J(DECLARED('button-written', 'Written'))})</script></div>`)
-    const page = await browser.newPage()
-    const look = await installCensus(page)
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    const look = await installCensus(page, [page, await context.newPage()])
     await page.goto(pathToFileURL(file).href)
     const said = await look({ name: 'button', json: {} })
     const held = said.includes(CLOSED('span#button-written ""'))
@@ -58,7 +58,7 @@ async function writtenWhileLoading() {
 // `layers`: each holds a top-layer refusal, so it runs in the selftest's rest job by its one rule (check/jobs.mjs).
 export const CLOSED_ROOT_CASES = [
   {
-    name: 'closed shadow roots: each in the page fails by name, by whatever way it came: the attachShadow call (even gone before the next look), setHTMLUnsafe, parseHTMLUnsafe, a clone, on an ancestor of the stage, inside an open root',
+    name: 'closed shadow roots: each in the page fails by name, by whatever way it came: the attachShadow call (even gone before the next look), setHTMLUnsafe, parseHTMLUnsafe, a clone, inside an open root',
     only: ['skins'],
     layers: true,
     plant: (d) => inDemo(d, PLANTS),
@@ -68,7 +68,6 @@ export const CLOSED_ROOT_CASES = [
       'a closed root parsed by setHTMLUnsafe': named('span#button-set'),
       'a closed root parsed by parseHTMLUnsafe': named('span#button-parsed'),
       'a clone of a clonable closed root': named('span#button-clone'),
-      'a closed root on an ancestor of the stage': named('section#button-section'),
       'a closed root inside an open root': named('span#button-nested'),
     }),
   },

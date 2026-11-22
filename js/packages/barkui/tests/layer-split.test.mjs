@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { layerMisplaced, rowsMoved, selftestPick } from '../check/jobs.mjs'
 import { LAYER_CASES, TOP_LAYER_ROWS } from '../check/layer-cases.mjs'
-import { FRAME, REFUSED, topLayerTouch, UNNAMED, UNNAMED_CAN } from '../check/layers.mjs'
+import { CLOSED, FRAME, REFUSED, topLayerTouch, UNNAMED, UNNAMED_CAN } from '../check/layers.mjs'
 import { CASES } from '../check/selftest.mjs'
 
 // The rows of the one run, as it held them before it was split in two.
@@ -71,7 +71,7 @@ describe('a case that opens a layer or holds a layer refusal', () => {
 
   it('is told by what its run did', () => {
     expect(topLayerTouch([{ box: '#x' }], plain)).toBe('its part names a layer')
-    for (const line of [UNNAMED('div#x "X"'), UNNAMED_CAN('div#x "X"'), FRAME('iframe#x ""'), REFUSED['window.open'], REFUSED['document.open'], REFUSED.page])
+    for (const line of [UNNAMED('div#x "X"'), UNNAMED_CAN('div#x "X"'), FRAME('iframe#x ""'), CLOSED('span#x ""'), REFUSED['window.open'], REFUSED['document.open'], REFUSED.page])
       expect(topLayerTouch(undefined, proof(line)), line).toMatch(/^its run says "/)
     expect(topLayerTouch(undefined, plain)).toBe('')
     expect(topLayerTouch([], plain)).toBe('')
