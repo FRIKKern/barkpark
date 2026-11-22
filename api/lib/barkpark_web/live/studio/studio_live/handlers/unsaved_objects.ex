@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
   (`Handlers.UnsavedBases`).
   """
 
+  alias Barkpark.Content.PortableText
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
 
@@ -45,7 +46,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
     |> Enum.uniq()
     |> Enum.reduce({theirs, false, kept}, fn sub, {value, clashed?, kept} ->
       at = path ++ [sub]
-      {b, m, t} = {Map.get(base, sub), Map.get(mine, sub), Map.get(theirs, sub)}
+      {b, t} = {Map.get(base, sub), Map.get(theirs, sub)}
+      m = as_stored(b, Map.get(mine, sub))
 
       case subfields(sub_schema, sub, b, m, t) do
         nil ->
@@ -82,6 +84,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
       _ when mine == base -> {:ok, base}
       _ -> :error
     end
+  end
+
+  # Rich text in the form is rebuilt from the page's HTML with new block
+  # keys (`Forms.coerce_params/2` reads it against no stored blocks), where
+  # the save keeps the stored ones: rich text that draws as the stored
+  # blocks do is the stored blocks, not a change of this tab's, so another
+  # editor's change to it is taken in (task-d74a36f11381b523).
+  defp as_stored(base, mine) do
+    if mine != base and PortableText.value?(base) and PortableText.value?(mine) and
+         PortableText.to_html(base) == PortableText.to_html(mine),
+       do: base,
+       else: mine
   end
 
   @doc """
