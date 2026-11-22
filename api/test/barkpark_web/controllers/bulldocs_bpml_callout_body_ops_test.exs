@@ -356,6 +356,40 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
     assert stored(slug) == before
   end
 
+  # The rev fence comes first: an old copy anchored on an older rev answers
+  # 412 for every op and every body, writing nothing.
+  defp moved_on!(slug, bpml, rev) do
+    assert %{"ok" => true} =
+             sync_copy(slug, String.replace(bpml, "Closing.", "Closing!"), rev)
+             |> json_response(200)
+
+    stored(slug)
+  end
+
+  test "an old copy anchored on an older rev answers 412 for every op, writing nothing" do
+    for {blocks, copy_of, edits} <- [
+          {stored_blocks(), &old_text/1, Enum.map(@ops, &elem(&1, 0))},
+          {with_slots(%{"body" => []}), &old_text/1, [:delete, :new_id, :words]},
+          {with_slots(%{}), &kept_old/1, [:delete, :new_id, :words]}
+        ] do
+      slug = paper!(blocks)
+      {bpml, rev} = pull!(slug)
+      after_bump = moved_on!(slug, bpml, rev)
+
+      for e <- [:as_pulled | edits] do
+        copy =
+          case e do
+            :as_pulled -> copy_of.(bpml)
+            op when is_binary(op) -> edit(op, copy_of.(bpml))
+            atom -> empty_edit(atom, copy_of.(bpml))
+          end
+
+        assert sync_copy(slug, copy, rev).status == 412, "#{inspect(e)}"
+        assert stored(slug) == after_bump
+      end
+    end
+  end
+
   defp edit(op, bpml) do
     {^op, f} = List.keyfind(ops(), op, 0)
     edited = f.(bpml)

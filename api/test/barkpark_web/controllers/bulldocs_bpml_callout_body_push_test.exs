@@ -345,6 +345,14 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       assert hd(stored(ctx.slug))["content"] == text("Opening words.")
     end
 
+    test "a copy of this pull that edits elsewhere lands the same push; each body keeps its bytes",
+         ctx do
+      fresh = String.replace(ctx.bpml, "Opening paragraph.", "Opening words.")
+      assert %{"ok" => true} = push_copy(ctx.slug, fresh, ctx.rev) |> json_response(200)
+      assert tl(stored(ctx.slug)) == tl(ctx.before)
+      assert hd(stored(ctx.slug))["content"] == text("Opening words.")
+    end
+
     test "an old copy, pulled before <kept> lines, that deletes the callout is refused by name",
          ctx do
       old =

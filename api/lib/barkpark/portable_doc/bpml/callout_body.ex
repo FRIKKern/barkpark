@@ -156,7 +156,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
          n = PrintMark.read_number(copy),
          {:ok, pushed, done} <-
            resolve_kept(pushed, pulled, stored, {n, PrintMark.believed(copy)}),
-         {:ok, pushed, notes} <- old_copy(pushed, done, view, stored, copy),
+         {:ok, pushed, notes} <- old_copy(pushed, done, {view, stored, pulled}, copy),
          {:ok, pushed, more} <- inline_form(pushed, done, view, stored) do
       {:ok, strip_forms(pushed), notes ++ more}
     end
@@ -255,17 +255,53 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   # spells as this pull or as the print before the form comes home as stored,
   # and any other is left to the write wall, which reads the push against the
   # print before the form.
-  defp old_copy(pushed, done, view, stored, copy) do
+  defp old_copy(pushed, done, {view, stored, pulled}, copy) do
     n = PrintMark.read_number(copy)
     believed = PrintMark.believed(copy)
 
     if PrintMark.newer(view, n) != [] do
-      with {:ok, pushed, notes} <- come_home(pushed, done, {view, stored}, {n, believed}) do
+      # Blocks this pull printed as <kept> that the copy shows inline.
+      inline_kept =
+        for %{"type" => @kept, "id" => id} <- pulled, not MapSet.member?(done, id), do: id
+
+      with {:ok, pushed, notes} <- come_home(pushed, done, {view, stored}, {n, believed}),
+           {:ok, pushed} <- kept_old(pushed, inline_kept, {by_id(view), stored}, n) do
+        done = MapSet.union(done, MapSet.new(inline_kept))
         {:ok, each_old(pushed, done, by_id(view), by_id(stored), {n, believed}), notes}
       end
     else
       {:ok, pushed, []}
     end
+  end
+
+  # A block this pull printed as <kept> is one no copy can change. An old
+  # copy shows it inline: it comes home once, at the top level, spelled as
+  # the old print, and is kept as stored; any other answer is refused by the
+  # block's name.
+  defp kept_old(pushed, ids, {view_by_id, stored}, n) do
+    Enum.reduce_while(ids, {:ok, pushed}, fn id, {:ok, acc} ->
+      i = Enum.find_index(acc, &(&1["id"] == id))
+      v = view_by_id[id]
+
+      if i != nil and v != nil and Enum.count(found(acc, []), &(&1["id"] == id)) == 1 and
+           spells_as?(PrintMark.before(Enum.at(acc, i), n), PrintMark.before(v, n)),
+         do: {:cont, {:ok, List.replace_at(acc, i, by_id(stored)[id])}},
+         else: {:halt, unwritable(id, stored)}
+    end)
+  end
+
+  defp unwritable(id, stored) do
+    i = Enum.find_index(stored, &(is_map(&1) and &1["id"] == id))
+
+    {:refused,
+     %{
+       code: "bpml_unshown",
+       message:
+         ~s(block "#{id}" is one BPML cannot write \(it prints as <kept>\), ) <>
+           "so a text copy cannot change it; nothing was written",
+       hint: "BPML cannot change this block: keep it as pulled and edit it in Studio",
+       paths: if(i, do: ["blocks[#{i}]"], else: [])
+     }}
   end
 
   defp come_home(pushed, done, {view, stored}, {n, believed}) do
