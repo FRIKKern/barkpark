@@ -115,7 +115,7 @@ async function ownTwoPages() {
       const { context, page, ref } = await two()
       const census = await look(page, [page, ref])
       const third = await context.newPage()
-      await third.waitForEvent('close', { timeout: 5000 }).catch(() => {})
+      if (!third.isClosed()) await third.waitForEvent('close', { timeout: 5000 }).catch(() => {})
       const said = await census(part)
       rows["a third page the check's own code opens after the census, refused by name and closed"] = third.isClosed() && said.length === 1 && said[0] === REFUSED.page
       await context.close()
@@ -151,7 +151,7 @@ async function ownTwoPages() {
       context.on('page', (p) => made.push(p))
       await act(page)
       await page.waitForTimeout(700)
-      await Promise.all(made.map((p) => p.waitForEvent('close', { timeout: 5000 }).catch(() => {})))
+      await Promise.all(made.map((p) => p.isClosed() || p.waitForEvent('close', { timeout: 5000 }).catch(() => {})))
       const said = await census(part)
       console.log(`    ${way}: made a page: ${made.length ? 'yes' : 'no'}`)
       rows[`${way}: a page it makes is refused by name and closed, once`] = made.length
