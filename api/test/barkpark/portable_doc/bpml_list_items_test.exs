@@ -9,7 +9,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.{Bpml, Render, Validate}
-  alias Barkpark.PortableDoc.Bpml.{ListItems, UnprintableError}
+  alias Barkpark.PortableDoc.Bpml.{ListItems, PrintMark, UnprintableError}
   alias Barkpark.Test.BpmlWords
 
   @max Validate.max_depth()
@@ -211,6 +211,42 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
       assert_raise UnprintableError, ~r/"list"/, fn ->
         Bpml.print_blocks([list([%{"audit" => 1}])])
       end
+    end
+  end
+
+  describe "the print mark (Bpml.PrintMark)" do
+    defp paper(blocks), do: Bpml.print_paper(%{"slug" => "s", "title" => "T", "blocks" => blocks})
+
+    defp callout_body,
+      do: %{
+        "id" => "c1",
+        "type" => "callout",
+        "tone" => "info",
+        "slots" => %{"body" => [%{"id" => "c1-a", "type" => "paragraph", "content" => text("Body.")}]}
+      }
+
+    test "a callout body marks 2, a nested list or an item id 3, the highest wins, a flat list none" do
+      flat = list("f", [text("a"), %{"content" => text("b"), "checked" => true}])
+      with_id = list("f", [%{"id" => "a", "content" => text("a")}])
+      nested = list("n", [%{"content" => text("a"), "children" => [list([text("b")])]}])
+
+      assert paper([callout_body()]) =~ ~s(<paper slug="s" title="T" print="2">\n)
+      assert paper([with_id]) =~ ~s(<paper slug="s" title="T" print="3">\n)
+      assert paper([nested]) =~ ~s(<paper slug="s" title="T" print="3">\n)
+      assert paper([callout_body(), nested]) =~ ~s(<paper slug="s" title="T" print="3">\n)
+      assert paper([flat]) =~ ~s(<paper slug="s" title="T">\n)
+    end
+
+    test "a copy marked 2 is old for nested lists only; one marked 3 for none" do
+      nested = list("n", [%{"id" => "a", "content" => text("a")}])
+      assert PrintMark.newer([callout_body(), nested], 2) == [{3, ListItems}]
+      assert PrintMark.newer([callout_body(), nested], 3) == []
+      assert PrintMark.newer([callout_body(), nested], 1) == PrintMark.forms()
+    end
+
+    test "the old printer's list is the list without item ids and children" do
+      stored = list("l", [%{"id" => "a", "content" => text("a"), "children" => [list(["b"])]}, "c"])
+      assert Bpml.print_blocks([PrintMark.before(stored, 2)]) == "<ul id=\"l\">\n  <li>a</li>\n  <li>c</li>\n</ul>\n"
     end
   end
 

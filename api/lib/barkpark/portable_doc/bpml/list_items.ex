@@ -180,6 +180,85 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
 
   defp text_node(text), do: %{"type" => "text", "value" => text}
 
+  # ── the print mark's row (`Bpml.PrintMark`) ─────────────────────────────────
+
+  @doc """
+  True when `value` holds, at any depth, a list item the printer before this
+  form spelled without something: a child list, or an id.
+  """
+  @spec marked?(term()) :: boolean()
+  def marked?(%{"type" => t, "items" => items} = list) when t in @list_types and is_list(items),
+    do: Enum.any?(items, &item_marked?/1) or marked?(Map.delete(list, "items"))
+
+  def marked?(%{} = map), do: Enum.any?(Map.values(map), &marked?/1)
+  def marked?(list) when is_list(list), do: Enum.any?(list, &marked?/1)
+  def marked?(_other), do: false
+
+  defp item_marked?(%{} = item),
+    do: id(item) != nil or child_lists(item) != [] or marked?(Map.get(item, "children"))
+
+  defp item_marked?(_item), do: false
+
+  @doc """
+  `value` as the printer before this form spelled its lists: an item without
+  its id and children, its words its `content` when that is a list, else its
+  `text`.
+  """
+  @spec before_print(term()) :: term()
+  def before_print(%{"type" => t, "items" => items} = list) when t in @list_types and is_list(items) do
+    list
+    |> Map.new(fn {k, v} -> {k, if(k == "items", do: v, else: before_print(v))} end)
+    |> Map.put("items", Enum.map(items, &item_before_print/1))
+  end
+
+  def before_print(%{} = map), do: Map.new(map, fn {k, v} -> {k, before_print(v)} end)
+  def before_print(list) when is_list(list), do: Enum.map(list, &before_print/1)
+  def before_print(other), do: other
+
+  defp item_before_print(%{} = item) do
+    item = Map.drop(item, ["id", "children"])
+    if is_list(item["content"]), do: Map.delete(item, "text"), else: item
+  end
+
+  defp item_before_print(item), do: item
+
+  @doc "What an old copy's refusal says block `v` holds."
+  @spec stale_words(map()) :: String.t()
+  def stale_words(v), do: "#{v["type"]} #{v["id"]} has nested lists or item ids"
+
+  @doc """
+  The stored paths of every item id and every item's child lists in `block`
+  (canonical spelling); lists inside an item's children are under its
+  `.children` path already.
+  """
+  @spec stale_paths(term(), String.t()) :: [String.t()]
+  def stale_paths(%{"type" => t, "items" => items} = list, path)
+      when t in @list_types and is_list(items) do
+    own =
+      items
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {item, i} -> item_paths(item, "#{path}.items[#{i}]") end)
+
+    own ++ stale_paths(Map.delete(list, "items"), path)
+  end
+
+  def stale_paths(%{} = map, path),
+    do: map |> Enum.sort() |> Enum.flat_map(fn {k, v} -> stale_paths(v, "#{path}.#{k}") end)
+
+  def stale_paths(list, path) when is_list(list),
+    do: list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> stale_paths(v, "#{path}[#{i}]") end)
+
+  def stale_paths(_other, _path), do: []
+
+  defp item_paths(%{} = item, path) do
+    ids = if id(item), do: ["#{path}.id"], else: []
+    if marked?(Map.get(item, "children")) or child_lists(item) != [],
+      do: ids ++ ["#{path}.children"],
+      else: ids
+  end
+
+  defp item_paths(_item, _path), do: []
+
   # ── the parser's side ───────────────────────────────────────────────────────
 
   @doc """

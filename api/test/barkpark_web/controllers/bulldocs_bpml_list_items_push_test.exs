@@ -216,6 +216,72 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     end
   end
 
+  # ── a copy pulled before nested lists printed (`Bpml.PrintMark`) ─────────────
+
+  # The pull as the printer before nested lists and item ids spelled it: no
+  # print mark, list `id` given the old <ul> lines.
+  defp old_copy(bpml, id, old_ul) do
+    bpml
+    |> String.replace(~s( print="3"), "")
+    |> String.replace(~r{  <ul id="#{id}">.*?\n  </ul>}s, old_ul)
+  end
+
+  @old_nested """
+    <ul id="l1">
+      <li>Plan</li>
+      <li>Flat sibling</li>
+      <li checked="true">Done</li>
+    </ul>\
+  """
+
+  test "an old copy that edits a nested list is refused by name, writing nothing" do
+    {slug, bpml, rev} = pulled_with(blocks(nested()))
+    assert bpml =~ ~s(print="3")
+    before = stored(slug)
+    copy = old_copy(bpml, "l1", String.replace(@old_nested, "Flat sibling", "Flat sibling, edited"))
+
+    answer = push_copy(slug, copy, rev) |> json_response(422)
+    assert answer["error"]["code"] == "bpml_stale_copy"
+
+    assert answer["error"]["message"] ==
+             "list l1 has nested lists or item ids your copy was pulled without; nothing was written"
+
+    assert answer["error"]["hint"] == "bp paper pull, then make your edit again"
+
+    assert answer["error"]["paths"] ==
+             ["blocks[1].items[0].id", "blocks[1].items[0].children", "blocks[1].items[2].id"]
+
+    assert stored(slug) == before
+  end
+
+  test "an old copy that leaves a nested list as pulled and edits another block lands; the list stays" do
+    {slug, bpml, rev} = pulled_with(blocks(nested()))
+    before = stored_block(slug, "l1")
+    copy = bpml |> old_copy("l1", @old_nested) |> String.replace("Closing.", "Closing words.")
+
+    assert %{"ok" => true} = push_copy(slug, copy, rev) |> json_response(200)
+    assert stored_block(slug, "l1") == before
+    assert stored_block(slug, "p2")["content"] == text("Closing words.")
+  end
+
+  test "an old copy of a flat list with item ids: untouched it lands, edited it is refused" do
+    flat = list("f1", [%{"id" => "a", "content" => text("Alpha")}, %{"id" => "b", "content" => text("Beta")}])
+    old_ul = "  <ul id=\"f1\">\n    <li>Alpha</li>\n    <li>Beta</li>\n  </ul>"
+    {slug, bpml, rev} = pulled_with([flat, p("p2", "Closing.")])
+    assert bpml =~ ~s(<li id="b">Beta</li>)
+    before = stored(slug)
+
+    edited = old_copy(bpml, "f1", String.replace(old_ul, "Beta", "Beta, edited"))
+    answer = push_copy(slug, edited, rev) |> json_response(422)
+    assert answer["error"]["code"] == "bpml_stale_copy"
+    assert answer["error"]["paths"] == ["blocks[0].items[0].id", "blocks[0].items[1].id"]
+    assert stored(slug) == before
+
+    untouched = bpml |> old_copy("f1", old_ul) |> String.replace("Closing.", "Closing words.")
+    assert %{"ok" => true} = push_copy(slug, untouched, rev) |> json_response(200)
+    assert stored_block(slug, "f1") == flat
+  end
+
   test "a second item with an id already in the block is refused by that id" do
     {slug, bpml, rev} = pulled_with(blocks(nested()))
     before = stored(slug)

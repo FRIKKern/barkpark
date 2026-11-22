@@ -18,11 +18,10 @@ defmodule Barkpark.PortableDoc.BpmlPullGoldenTest do
   # Why this test fails, and what a printer change must bring with it.
   @rule """
   the printer's output changed. A copy pulled before this change carries the
-  old view's fingerprint (`bpmlView`) and now answers 412: pull again. A copy
-  without one (a bp from before `x-bpml-view`) gets the block rules alone,
-  computed with the new printer, and can push over a part it never saw:
-  decide that gap is acceptable for this change, then regenerate this golden
-  (BPML_PULL_GOLDEN_WRITE=1).
+  old view's fingerprint (`bpmlView`) and now answers 412: pull again. When the
+  print shows a form it did not show before, add the form as a row of
+  `Bpml.PrintMark`, so a copy pulled before it is read as old by its print
+  mark too; then regenerate this golden (BPML_PULL_GOLDEN_WRITE=1).
   """
 
   defp cases do

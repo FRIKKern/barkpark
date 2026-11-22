@@ -68,8 +68,9 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   answers the fingerprint of its bytes (`x-bpml-view`); bp keeps it with the
   anchor and sends it back as `bpmlView`; a push whose fingerprint is not the
   row's current one is refused with 412, and an applied push answers the new
-  one. A push without a fingerprint (a bp from before it) gets the block rules
-  alone, which cannot see such a change: that gap is pinned by a test. A pull
+  one. A form the printer began to show at a print number (`Bpml.PrintMark`)
+  is read from the copy's own print mark as well, with or without a
+  fingerprint: an old copy keeps such a block as stored or is refused. A pull
   through another perspective or tenant scope than `bp paper pull`'s can print
   another view; when it does, its push answers 412.
 

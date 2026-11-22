@@ -11,18 +11,19 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   lossy `""`. Callers turn that into an honest 422.
   """
 
-  alias Barkpark.PortableDoc.Bpml.{CalloutBody, ListItems, Unwritable}
+  alias Barkpark.PortableDoc.Bpml.{ListItems, PrintMark, Unwritable}
   alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   @indent "  "
 
   # ── public ──────────────────────────────────────────────────────────────────
 
-  # `print="2"` marks a Paper whose callouts print their body (CalloutBody):
-  # a copy without it was pulled before, and a push reads it as an old copy.
+  # `print="N"` marks a Paper holding a form the printer began to show at N
+  # (`PrintMark`): a copy with a lower mark was pulled before, and a push
+  # reads it as an old copy.
   def print_paper(%{} = paper) do
     blocks = Map.get(paper, "blocks", [])
-    mark = if CalloutBody.marked?(blocks), do: ~s( print="2"), else: ""
+    mark = PrintMark.attr(blocks)
     attrs = attr_str(paper, ["slug", "title"]) <> mark
     meta = meta_lines(paper)
     body = Enum.map(blocks, &top(&1, 1))

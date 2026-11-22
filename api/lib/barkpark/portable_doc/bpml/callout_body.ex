@@ -3,7 +3,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   A callout's body in BPML (task-4c27c15194ae9369): what a push may do to it.
 
   A callout with a `slots` key prints in the structured form, and the Paper's
-  `<paper>` carries `print="2"` (`marked?/1`):
+  `<paper>` carries the print mark (`Bpml.PrintMark`, this form's row is 2):
 
       <callout id="c1" tone="info">
         <content>inline</content>
@@ -16,11 +16,13 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   no body. The mark is how a push tells the two apart, so a body is never lost
   to an old copy. `resolve/4` applies these rules before the diff:
 
-    * **Old copy** (the stored view is marked, the copy is not). A top-level
-      block holding a callout with `slots` is kept as stored when it spells as
-      the old printer spelled it (`strip_slots/1`); otherwise the push is
-      refused with `bpml_stale_copy`, naming the callouts, with the stored
-      paths of their bodies in `paths`.
+    * **Old copy** (the view holds a form of `Bpml.PrintMark` newer than the
+      copy's mark: a callout body here, a nested list item in
+      `Bpml.ListItems`). A top-level block holding such a form is kept as
+      stored when it spells as the old printer spelled it
+      (`PrintMark.before/2`); otherwise the push is refused with
+      `bpml_stale_copy`, naming what the block holds, with the stored paths
+      of what the copy lacks in `paths`.
     * **The inline form never deletes a body**, in a marked copy too. An
       inline callout whose stored callout has `slots` keeps the stored body
       when its text is unchanged, and the answer says so in one note;
@@ -40,7 +42,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   second, so only the push path (`Bpml.parse_copy/1`) ever sees them.
   """
 
-  alias Barkpark.PortableDoc.Bpml.{Canonical, Printer}
+  alias Barkpark.PortableDoc.Bpml.{Canonical, PrintMark, Printer}
 
   @form "$form"
   @kept "$kept"
@@ -60,6 +62,19 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   def strip_slots(%{} = map), do: Map.new(map, fn {k, v} -> {k, strip_slots(v)} end)
   def strip_slots(list) when is_list(list), do: Enum.map(list, &strip_slots/1)
   def strip_slots(other), do: other
+
+  # ── the print mark's row (`Bpml.PrintMark`) ─────────────────────────────────
+
+  @doc false
+  def before_print(value), do: strip_slots(value)
+
+  @doc false
+  def stale_words(v), do: "#{callout_names(v)} #{has_have(v)} a body"
+
+  @doc false
+  # The path of every callout's `slots` key; a callout inside a body is under
+  # its outer `.slots` path already.
+  def stale_paths(block, path), do: slot_paths(block, path)
 
   @doc """
   Parsed blocks as every caller but the push sees them: the inline marks
@@ -103,8 +118,8 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     pushed = Map.get(copy, "blocks") || []
 
     with :ok <- no_nested_kept(pushed),
-         old? = marked?(view) and Map.get(copy, "print") != "2",
-         {:ok, pushed, done} <- resolve_kept(pushed, pulled, stored, old?),
+         n = PrintMark.copy_number(copy),
+         {:ok, pushed, done} <- resolve_kept(pushed, pulled, stored, n),
          {:ok, pushed, notes} <- old_copy(pushed, done, view, stored, copy),
          {:ok, pushed, more} <- inline_form(pushed, done, view, stored) do
       {:ok, strip_forms(pushed), notes ++ more}
@@ -130,7 +145,7 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
     end)
   end
 
-  defp resolve_kept(pushed, pulled, stored, old?) do
+  defp resolve_kept(pushed, pulled, stored, n) do
     stored_by_id = by_id(stored)
     printed = for %{"type" => @kept, "id" => id, "of" => of} <- pulled, into: %{}, do: {id, of}
     counts = Enum.frequencies_by(pushed, & &1["id"])
@@ -148,23 +163,27 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       end)
 
     with {:ok, rev} <- resolved,
-         :ok <- every_kept_back(printed, pushed, stored, old?) do
+         :ok <- every_kept_back(printed, pushed, stored, n) do
       {:ok, Enum.reverse(rev), MapSet.new(Map.keys(printed))}
     end
   end
 
-  # An old copy was pulled before <kept> lines were printed, so it never had
-  # one: it is stale, not an edit of the line.
-  defp every_kept_back(printed, pushed, stored, old?) do
+  # A copy older than a form the kept block holds was pulled before that
+  # block printed as <kept>, so it never had the line: it is stale, not an
+  # edit of the line.
+  defp every_kept_back(printed, pushed, stored, n) do
     kept_ids = for %{"type" => @kept, "id" => id} <- pushed, into: MapSet.new(), do: id
+    stored_by_id = by_id(stored)
 
     Enum.find_value(printed, :ok, fn {id, of} ->
+      forms = PrintMark.newer(stored_by_id[id], n)
+
       cond do
         MapSet.member?(kept_ids, id) ->
           false
 
-        old? ->
-          stale(by_id(stored)[id], stored, id)
+        forms != [] ->
+          PrintMark.stale(stored_by_id[id], stored, id, forms, &canonical/1)
 
         true ->
           refuse(
@@ -188,23 +207,26 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   # ── old copy ────────────────────────────────────────────────────────────────
 
   defp old_copy(pushed, done, view, stored, copy) do
-    if marked?(view) and Map.get(copy, "print") != "2" do
+    n = PrintMark.copy_number(copy)
+
+    if PrintMark.newer(view, n) != [] do
       view_by_id = by_id(view)
       stored_by_id = by_id(stored)
 
       Enum.reduce_while(pushed, {:ok, [], []}, fn block, {:ok, acc, notes} ->
         id = block["id"]
         v = Map.get(view_by_id, id)
+        forms = if v == nil, do: [], else: PrintMark.newer(v, n)
 
         cond do
-          MapSet.member?(done, id) or v == nil or not marked?(v) ->
+          MapSet.member?(done, id) or forms == [] ->
             {:cont, {:ok, [block | acc], notes}}
 
-          spells_as?(block, strip_slots(v)) ->
+          spells_as?(block, PrintMark.before(v, n)) ->
             {:cont, {:ok, [stored_by_id[id] | acc], notes ++ kept_notes(v)}}
 
           true ->
-            {:halt, stale(v, stored, id)}
+            {:halt, PrintMark.stale(v, stored, id, forms, &canonical/1)}
         end
       end)
       |> reversed()
@@ -215,22 +237,6 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   # `paths` names each outermost body in the stored block's canonical
   # spelling, in the write wall's shape.
-  defp stale(v, stored, id) do
-    i = Enum.find_index(stored, &(is_map(&1) and &1["id"] == id))
-
-    {:refused,
-     %{
-       code: "bpml_stale_copy",
-       message:
-         "#{callout_names(v)} #{has_have(v)} a body your copy was pulled without; " <>
-           "nothing was written",
-       hint: "bp paper pull, then make your edit again",
-       paths: if(i, do: slot_paths(canonical(Enum.at(stored, i)), "blocks[#{i}]"), else: [])
-     }}
-  end
-
-  # The path of every callout's `slots` key; a callout inside a body is under
-  # its outer `.slots` path already.
   defp slot_paths(%{"type" => "callout"} = c, path) when is_map_key(c, "slots"),
     do: ["#{path}.slots" | slot_paths(Map.delete(c, "slots"), path)]
 
