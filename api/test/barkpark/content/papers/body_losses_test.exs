@@ -8,9 +8,11 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
 
   import Ecto.Query
 
-  alias Barkpark.{Content, LabelFixtures, Repo}
+  alias Barkpark.{Content, LabelFixtures, Repo, TenancyFixtures}
   alias Barkpark.Content.{Document, Revision}
-  alias Barkpark.Content.Papers.BodyLosses
+  alias Barkpark.Content.Papers.{BodyLosses, PushRevision}
+
+  @push PushRevision.action()
 
   defp t(v), do: %{"type" => "text", "value" => v}
   defp para(id, v), do: %{"id" => id, "type" => "paragraph", "content" => [t(v)]}
@@ -36,14 +38,14 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
   defp no_body, do: [list([para("k1", "One."), para("k2", "Two.")]), callout([])]
   defp no_children, do: [list([]), callout([])]
 
-  defp plant!(paper, action, blocks, seconds) do
+  defp plant!(paper, action, blocks, seconds, scope \\ %{}) do
     Repo.insert!(%Revision{
       doc_id: paper.doc_id,
       type: "paper",
       dataset: paper.dataset,
-      dataset_id: paper.dataset_id,
-      workspace_id: paper.workspace_id,
-      project_id: paper.project_id,
+      dataset_id: Map.get(scope, :dataset_id, paper.dataset_id),
+      workspace_id: Map.get(scope, :workspace_id, paper.workspace_id),
+      project_id: Map.get(scope, :project_id, paper.project_id),
       title: paper.title,
       status: paper.status,
       action: action,
@@ -64,7 +66,7 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
     paper = Repo.get!(Document, paper.id)
 
     edited = plant!(paper, "api-ops", no_body(), 60)
-    pushed = plant!(paper, "bpml-push", no_body(), 120)
+    pushed = plant!(paper, @push, no_body(), 120)
 
     paper
     |> Ecto.Changeset.change(content: Map.put(paper.content, "blocks", no_children()))
@@ -73,7 +75,7 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
     [first | _] = revisions(slug)
     first_label = "revision #{first.id} (#{first.action}, #{first.inserted_at})"
     edited_label = "revision #{edited.id} (api-ops, #{edited.inserted_at})"
-    pushed_label = "revision #{pushed.id} (bpml-push, #{pushed.inserted_at})"
+    pushed_label = "revision #{pushed.id} (#{@push}, #{pushed.inserted_at})"
     counts = {Repo.aggregate(Revision, :count), Repo.aggregate(Document, :count)}
     row = Repo.get!(Document, paper.id)
 
@@ -108,5 +110,83 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
     moved = [para("p0", "First."), list([para("k1", "One.")])]
     assert BodyLosses.losses([list([para("k1", "One.")])], moved) == []
     assert BodyLosses.losses(full(), [para("p0", "All gone.")]) == []
+  end
+
+  test "an item found again by its words at another place, its old place taken, is not a loss" do
+    item = fn words, children -> %{"content" => [t(words)], "children" => children} end
+
+    before = [
+      %{"id" => "l", "type" => "list", "items" => [item.("parent", [para("k1", "One.")])]}
+    ]
+
+    after_ = [
+      %{
+        "id" => "l",
+        "type" => "list",
+        "items" => [item.("new", []), item.("parent", [para("k1", "One.")])]
+      }
+    ]
+
+    assert BodyLosses.losses(before, after_) == []
+  end
+
+  test "another workspace's revision under the same slug and dataset is not this Paper's" do
+    slug = "body-losses-ws-#{System.unique_integer([:positive])}"
+
+    {:ok, paper} =
+      Content.upsert_paper(LabelFixtures.paper_attrs(%{slug: slug, blocks: no_body()}))
+
+    paper = Repo.get!(Document, paper.id)
+    ws = TenancyFixtures.create_workspace!()
+    proj = TenancyFixtures.create_project!(ws)
+
+    plant!(paper, "update", full(), 60, %{
+      workspace_id: ws.id,
+      project_id: proj.id,
+      dataset_id: nil
+    })
+
+    own =
+      Repo.aggregate(
+        from(r in Revision, where: r.doc_id == ^slug and r.workspace_id == ^paper.workspace_id),
+        :count
+      )
+
+    lines = BodyLosses.report(slug, paper.dataset)
+
+    assert hd(lines) ==
+             "Paper #{slug} (#{paper.dataset}): #{own + 1} stored states, 0 recorded BPML pushes."
+
+    assert List.last(lines) == "No list item children or callout bodies disappeared."
+  end
+
+  test "two Papers under one slug: one line naming them, and the scope options read one" do
+    slug = "body-losses-two-#{System.unique_integer([:positive])}"
+    {:ok, paper} = Content.upsert_paper(LabelFixtures.paper_attrs(%{slug: slug, blocks: full()}))
+    paper = Repo.get!(Document, paper.id)
+    ws = TenancyFixtures.create_workspace!()
+    proj = TenancyFixtures.create_project!(ws)
+
+    Repo.insert!(%Document{
+      doc_id: paper.doc_id,
+      type: "paper",
+      dataset: paper.dataset,
+      workspace_id: ws.id,
+      project_id: proj.id,
+      title: "other",
+      status: paper.status,
+      content: paper.content,
+      rev: "other-#{System.unique_integer([:positive])}"
+    })
+
+    assert BodyLosses.report(slug, paper.dataset) == [
+             "2 Papers are stored as #{slug} (#{paper.dataset}) in different workspaces or projects; " <>
+               "pass :workspace_id and :project_id to read one."
+           ]
+
+    [header | _] =
+      BodyLosses.report(slug, paper.dataset, workspace_id: ws.id, project_id: proj.id)
+
+    assert header == "Paper #{slug} (#{paper.dataset}): 1 stored states, 0 recorded BPML pushes."
   end
 end

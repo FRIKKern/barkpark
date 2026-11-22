@@ -8,7 +8,10 @@ defmodule Barkpark.Content.Papers.BodyLosses do
   in tests, on the local test database.
 
   The states are the Paper's revisions, oldest first, then its row as it is
-  now. A step runs from one state to the next. Since a BPML push records the
+  now. The read finds the one Paper first, then its revisions in its own
+  workspace, project and dataset; when more than one Paper is stored under
+  the slug, the report is one line naming how many and the scope options. A
+  step runs from one state to the next. Since a BPML push records the
   Paper as it stood before it (`Papers.PushRevision`, action `"bpml-push"`), a
   step that starts at a `bpml-push` revision starts with that push. Any other
   step may hold several writes of any kind, and a push older than those
@@ -39,14 +42,26 @@ defmodule Barkpark.Content.Papers.BodyLosses do
   """
   @spec report(String.t(), String.t(), keyword()) :: [String.t()]
   def report(slug, dataset \\ "production", opts \\ []) do
-    states = states(slug, dataset, opts)
+    case states(slug, dataset, opts) do
+      {:many, n} ->
+        [
+          "#{n} Papers are stored as #{slug} (#{dataset}) in different workspaces or projects; " <>
+            "pass :workspace_id and :project_id to read one."
+        ]
+
+      {:ok, states} ->
+        lines(slug, dataset, states)
+    end
+  end
+
+  defp lines(slug, dataset, states) do
     steps = steps(states)
     pushes = Enum.count(states, &(&1.action == @push))
 
     header = [
       "Paper #{slug} (#{dataset}): #{length(states)} stored states, #{pushes} recorded BPML pushes.",
-      "A step that does not start at a bpml-push revision may hold any writes, a push older " <>
-        "than the bpml-push revisions among them; those cannot be told apart."
+      "A step that does not start at a #{@push} revision may hold any writes, a push older " <>
+        "than the #{@push} revisions among them; those cannot be told apart."
     ]
 
     lines =
@@ -165,6 +180,9 @@ defmodule Barkpark.Content.Papers.BodyLosses do
 
   # ── reading ─────────────────────────────────────────────────────────────────
 
+  # The one Paper's states: its revisions in its own workspace, project and
+  # dataset, then its row. With no row, the revisions must all share one
+  # workspace and project. `{:many, n}` when the read finds more than one.
   defp states(slug, dataset, opts) do
     id = DraftId.published_id(slug)
 
@@ -174,16 +192,51 @@ defmodule Barkpark.Content.Papers.BodyLosses do
         order_by: [asc: r.inserted_at, asc: r.id]
       )
       |> scoped(opts)
-      |> Repo.all()
-      |> Enum.map(&state(&1.action, "revision #{&1.id} (#{&1.action}, #{&1.inserted_at})", &1))
 
-    row =
+    rows =
       from(d in Document, where: d.doc_id == ^id and d.type == "paper" and d.dataset == ^dataset)
       |> scoped(opts)
-      |> Repo.one()
+      |> Repo.all()
 
-    revisions ++ if(row, do: [state(nil, "the Paper now", row)], else: [])
+    case rows do
+      [row] ->
+        {:ok,
+         revisions
+         |> same_scope(row)
+         |> revision_states()
+         |> Kernel.++([state(nil, "the Paper now", row)])}
+
+      [] ->
+        found = Repo.all(revisions)
+
+        case found |> Enum.uniq_by(&{&1.workspace_id, &1.project_id}) |> length() do
+          n when n > 1 -> {:many, n}
+          _one_or_none -> {:ok, Enum.map(found, &revision_state/1)}
+        end
+
+      many ->
+        {:many, length(many)}
+    end
   end
+
+  defp revision_states(query), do: query |> Repo.all() |> Enum.map(&revision_state/1)
+
+  defp revision_state(r),
+    do: state(r.action, "revision #{r.id} (#{r.action}, #{r.inserted_at})", r)
+
+  # Revisions in `row`'s workspace and project, and in its dataset (or with
+  # none, read by the dataset string).
+  defp same_scope(query, row) do
+    query = query |> same(:workspace_id, row.workspace_id) |> same(:project_id, row.project_id)
+
+    case row.dataset_id do
+      nil -> query
+      ds -> from(r in query, where: r.dataset_id == ^ds or is_nil(r.dataset_id))
+    end
+  end
+
+  defp same(query, key, nil), do: from(r in query, where: is_nil(field(r, ^key)))
+  defp same(query, key, value), do: from(r in query, where: field(r, ^key) == ^value)
 
   defp state(action, label, %{content: content}),
     do: %{action: action, label: label, blocks: List.wrap(get_in(content || %{}, ["blocks"]))}
