@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.SheetGrid.GridData
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
@@ -107,11 +108,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
 
     case restore_open_doc(socket, rev_id, type, fence) do
       {:ok, _doc} ->
+        was = socket.assigns[:editor_form]
+
         socket =
           socket
           |> assign(show_history: false, revisions: [])
           |> put_flash(:info, gettext("Restored from history"))
           |> Shared.rebuild_panes()
+          |> RichTextRemote.repaint(was)
           # The header names the restored title (task-42a6f063263338f6).
           |> Shared.assign_page_title()
 
@@ -128,6 +132,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
       # the newer words and its buttons name them; a second press is one made
       # against them. The edits a restore would have overwritten go too.
       {:error, {:rev_mismatch, _}} ->
+        was = socket.assigns[:editor_form]
+
         socket =
           socket
           |> assign(
@@ -143,6 +149,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
             gettext("The document changed since you loaded it — reload and retry.")
           )
           |> Shared.rebuild_panes()
+          |> RichTextRemote.repaint(was)
           |> Shared.assign_page_title()
 
         {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
