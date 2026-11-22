@@ -238,7 +238,9 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
     {slug, bpml, rev} = pulled_with(blocks(nested()))
     assert bpml =~ ~s(print="3")
     before = stored(slug)
-    copy = old_copy(bpml, "l1", String.replace(@old_nested, "Flat sibling", "Flat sibling, edited"))
+
+    copy =
+      old_copy(bpml, "l1", String.replace(@old_nested, "Flat sibling", "Flat sibling, edited"))
 
     answer = push_copy(slug, copy, rev) |> json_response(422)
     assert answer["error"]["code"] == "bpml_stale_copy"
@@ -265,7 +267,12 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   end
 
   test "an old copy of a flat list with item ids: untouched it lands, edited it is refused" do
-    flat = list("f1", [%{"id" => "a", "content" => text("Alpha")}, %{"id" => "b", "content" => text("Beta")}])
+    flat =
+      list("f1", [
+        %{"id" => "a", "content" => text("Alpha")},
+        %{"id" => "b", "content" => text("Beta")}
+      ])
+
     old_ul = "  <ul id=\"f1\">\n    <li>Alpha</li>\n    <li>Beta</li>\n  </ul>"
     {slug, bpml, rev} = pulled_with([flat, p("p2", "Closing.")])
     assert bpml =~ ~s(<li id="b">Beta</li>)

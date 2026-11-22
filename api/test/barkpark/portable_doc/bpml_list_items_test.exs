@@ -222,7 +222,9 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
         "id" => "c1",
         "type" => "callout",
         "tone" => "info",
-        "slots" => %{"body" => [%{"id" => "c1-a", "type" => "paragraph", "content" => text("Body.")}]}
+        "slots" => %{
+          "body" => [%{"id" => "c1-a", "type" => "paragraph", "content" => text("Body.")}]
+        }
       }
 
     test "a callout body marks 2, a nested list or an item id 3, the highest wins, a flat list none" do
@@ -245,8 +247,11 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
     end
 
     test "the old printer's list is the list without item ids and children" do
-      stored = list("l", [%{"id" => "a", "content" => text("a"), "children" => [list(["b"])]}, "c"])
-      assert Bpml.print_blocks([PrintMark.before(stored, 2)]) == "<ul id=\"l\">\n  <li>a</li>\n  <li>c</li>\n</ul>\n"
+      stored =
+        list("l", [%{"id" => "a", "content" => text("a"), "children" => [list(["b"])]}, "c"])
+
+      assert Bpml.print_blocks([PrintMark.before(stored, 2)]) ==
+               "<ul id=\"l\">\n  <li>a</li>\n  <li>c</li>\n</ul>\n"
     end
   end
 

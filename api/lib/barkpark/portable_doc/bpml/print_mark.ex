@@ -44,7 +44,9 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
   @doc "The highest print number among the forms `value` holds; 1 when it holds none."
   @spec number(term()) :: pos_integer()
   def number(value) do
-    Enum.reduce(@forms, 1, fn {n, mod}, acc -> if mod.marked?(value), do: max(n, acc), else: acc end)
+    Enum.reduce(@forms, 1, fn {n, mod}, acc ->
+      if mod.marked?(value), do: max(n, acc), else: acc
+    end)
   end
 
   @doc "The print number a pushed copy (`Bpml.parse_copy/1`) carries; 1 without one."
@@ -58,7 +60,8 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
 
   @doc "The forms in `value` newer than print number `n`: `[{print number, module}]`."
   @spec newer(term(), pos_integer()) :: [{pos_integer(), module()}]
-  def newer(value, n), do: Enum.filter(@forms, fn {since, mod} -> since > n and mod.marked?(value) end)
+  def newer(value, n),
+    do: Enum.filter(@forms, fn {since, mod} -> since > n and mod.marked?(value) end)
 
   @doc "`value` as a printer at print number `n` spelled it: every newer form taken out."
   @spec before(term(), pos_integer()) :: term()
@@ -89,7 +92,10 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
          end) <> "; nothing was written",
        hint: "bp paper pull, then make your edit again",
        paths:
-         if(i, do: Enum.flat_map(forms, fn {_n, mod} -> mod.stale_paths(block, "blocks[#{i}]") end), else: [])
+         if(i,
+           do: Enum.flat_map(forms, fn {_n, mod} -> mod.stale_paths(block, "blocks[#{i}]") end),
+           else: []
+         )
      }}
   end
 end

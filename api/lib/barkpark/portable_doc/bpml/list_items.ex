@@ -205,7 +205,8 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   `text`.
   """
   @spec before_print(term()) :: term()
-  def before_print(%{"type" => t, "items" => items} = list) when t in @list_types and is_list(items) do
+  def before_print(%{"type" => t, "items" => items} = list)
+      when t in @list_types and is_list(items) do
     list
     |> Map.new(fn {k, v} -> {k, if(k == "items", do: v, else: before_print(v))} end)
     |> Map.put("items", Enum.map(items, &item_before_print/1))
@@ -246,12 +247,14 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
     do: map |> Enum.sort() |> Enum.flat_map(fn {k, v} -> stale_paths(v, "#{path}.#{k}") end)
 
   def stale_paths(list, path) when is_list(list),
-    do: list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> stale_paths(v, "#{path}[#{i}]") end)
+    do:
+      list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> stale_paths(v, "#{path}[#{i}]") end)
 
   def stale_paths(_other, _path), do: []
 
   defp item_paths(%{} = item, path) do
     ids = if id(item), do: ["#{path}.id"], else: []
+
     if marked?(Map.get(item, "children")) or child_lists(item) != [],
       do: ids ++ ["#{path}.children"],
       else: ids
