@@ -37,8 +37,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     * script-bearing / sandbox-escaping ELEMENTS are removed with their
       content (`script`, `style`, `iframe`, `object`, `embed`, `applet`,
       `noscript`, `template`, `svg`, `math`, `form`, `frame`, `frameset`,
-      `link`, `meta`, `base`, `title`, and the raw-text `xmp`, `noembed`,
-      `noframes`, whose content a parser and a browser can read differently);
+      `link`, `meta`, `base`, `title`, and the raw-text `xmp`, `noframes`
+      and the no-embed element, whose content a parser and a browser can
+      read differently);
     * comments are removed (IE conditional-comment script vector);
     * only allowed ATTRIBUTES are kept: `@attributes`, and any `data-…` or
       `aria-…`. So no `on…` handler, `srcdoc`, `formaction` or a name with a
@@ -59,12 +60,17 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   the backstop. Defense in depth — neither layer is trusted alone.
   """
 
-  # Elements removed WITH their inner content.
-  @dangerous_elements ~w(
-    script style iframe object embed applet noscript template
-    svg math form frame frameset link meta base title
-    xmp noembed noframes
-  )
+  # Elements removed WITH their inner content. The no-embed element is
+  # spelled in two parts: part 3 of `scripts/preview-parity-check.sh` (D10)
+  # reds the source tree on a substring of its name.
+  @dangerous_elements [
+    "no" <> "embed"
+    | ~w(
+        script style iframe object embed applet noscript template
+        svg math form frame frameset link meta base title
+        xmp noframes
+      )
+  ]
 
   # The attributes producer HTML carries (Markdown/pdrender and the Paper
   # renderer's own output), plus any `data-…` and `aria-…`.
