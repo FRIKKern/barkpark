@@ -270,10 +270,10 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
       twice = twice(stored)
 
-      with {:ok, pushed, notes} <- come_home(pushed, done, {view, stored, twice}, {n, believed}),
-           {:ok, pushed} <- kept_old(pushed, inline_kept, {by_id(view), stored, twice}, n) do
+      with {:ok, homed, notes} <- come_home(pushed, done, {view, stored, twice}, {n, believed}),
+           {:ok, homed} <- kept_old({homed, pushed}, inline_kept, {by_id(view), stored, twice}, n) do
         done = MapSet.union(done, MapSet.new(inline_kept))
-        {:ok, each_old(pushed, done, by_id(view), by_id(stored), {n, believed}), notes}
+        {:ok, each_old(homed, done, by_id(view), by_id(stored), {n, believed}), notes}
       end
     else
       {:ok, pushed, []}
@@ -284,18 +284,21 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   # copy shows it inline: it comes home once, at the top level, spelled as
   # typed exactly as the old print, and is kept as stored; any other answer,
   # a body or a nested list typed into it among them, is refused by the
-  # block's name.
-  defp kept_old(pushed, ids, {view_by_id, stored, twice}, n) do
-    Enum.reduce_while(ids, {:ok, pushed}, fn id, {:ok, acc} ->
+  # block's name. `typed` is the push as the copy holds it, before any block
+  # came home.
+  defp kept_old({homed, typed}, ids, {view_by_id, stored, twice}, n) do
+    Enum.reduce_while(ids, {:ok, homed}, fn id, {:ok, acc} ->
       i = Enum.find_index(acc, &(&1["id"] == id))
+      as_typed = Enum.find(typed, &(&1["id"] == id))
       v = view_by_id[id]
 
       cond do
         held = v && twice_in(v, twice) ->
           {:halt, twice_refused(held)}
 
-        i != nil and v != nil and Enum.count(found(acc, []), &(&1["id"] == id)) == 1 and
-            spells_as?(Enum.at(acc, i), PrintMark.before(v, n)) ->
+        i != nil and v != nil and as_typed != nil and
+          Enum.count(found(typed, []), &(&1["id"] == id)) == 1 and
+            spells_as?(as_typed, PrintMark.before(v, n)) ->
           {:cont, {:ok, List.replace_at(acc, i, by_id(stored)[id])}}
 
         true ->
