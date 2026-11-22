@@ -3,22 +3,24 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
   The print mark: which forms a BPML copy was printed able to show.
 
   Each row of `@forms` is a form the printer began to show at one print
-  number. A pull of a Paper holding any of them carries
-  `<paper print="N">`, N the highest number among the forms it holds. A copy
-  with a lower number (no `print` reads as 1) was pulled before the printer
-  could show those forms, so it is old for them, and a push reads it so
-  (`Bpml.CalloutBody.resolve/4`): a top-level block holding such a form comes
-  home as stored when it spells as the old printer spelled it, and an edited
-  one is refused with `bpml_stale_copy`, naming the block, with the stored
-  paths of what the copy lacks, writing nothing.
+  number. A pull of a Paper holding any of them carries `<paper print="N">`,
+  N the highest number among the forms it holds; no `print` reads as 1.
 
-  The mark is the copy's own claim. A push that brings back the fingerprint
-  its pull served (`bpmlView`, checked first by `Bpml.WriteWall.same_view/2`)
-  is proven to come from the current view, so its mark is believed. A push
-  without one is believed up to print 2: forms up to that number are
-  read from the mark as before, and a newer form is read as unshown to it
-  (`believed/1`), so a block holding one comes home byte-equal and in place
-  or the push is refused by the write wall.
+  A push reads the mark as far as it is believed (`believed/1`). A push that
+  brings back the fingerprint its pull served (`bpmlView`, checked first by
+  `Bpml.WriteWall.same_view/2`) comes from the current view, so its mark is
+  believed in full. A push without one is believed up to print 2.
+
+  For a form newer than a believed mark (`Bpml.CalloutBody.resolve/4`), each
+  top-level block holding the form comes home as one top-level block with
+  its id, spelled as the printer before the form spelled it, and is kept as
+  stored. Any other push is refused with `bpml_stale_copy`, naming the block,
+  with the stored paths of what the copy lacks, writing nothing.
+
+  For a form newer than the mark is believed for, `Bpml.WriteWall` reads the
+  push against the print before that form: a block holding the form comes
+  home byte-equal under its id, or the push is refused (`bpml_unshown`) with
+  a hint to update bp.
 
   A form is one row: its print number and the module that answers for it
   (`marked?/1`: the form is in a value at any depth; `before_print/1`: the

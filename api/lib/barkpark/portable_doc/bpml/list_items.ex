@@ -27,6 +27,10 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   An item with an id prints what the printer can spell, even when it holds
   more: the pull shows its words, and `Bpml.WriteWall` refuses an edit to its
   block (422 `bpml_unshown`), so what BPML cannot spell keeps its stored bytes.
+  Editing nested lists from a text copy needs a bp that sends the pull's
+  fingerprint (`Bpml.PrintMark`); without it, a list holding nested lists or
+  item ids comes home byte-equal or the push is refused.
+
   A push that adds a second item with an id already in the block is refused
   by that id (`check_ids/2`).
 

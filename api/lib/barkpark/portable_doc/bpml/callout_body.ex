@@ -17,18 +17,18 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
   to an old copy. `resolve/4` applies these rules before the diff:
 
     * **Old copy** (the view holds a form of `Bpml.PrintMark` newer than the
-      copy's mark: a callout body here, a nested list item in
-      `Bpml.ListItems`). A top-level block holding such a form is kept as
-      stored when it spells as the old printer spelled it
-      (`PrintMark.before/2`); otherwise the push is refused with
-      `bpml_stale_copy`, naming what the block holds, with the stored paths
-      of what the copy lacks in `paths`.
-    * **A form newer than the mark is believed for** (`PrintMark.believed/1`:
-      a push without its pull's fingerprint). A block holding one is kept as
-      stored when it spells as this pull printed it or as the print before
-      the form; any other is left to `Bpml.WriteWall`, which reads the push
-      against the print before the form, so the block comes home byte-equal
-      and in place or the push is refused.
+      copy's believed mark: a callout body here, a nested list item in
+      `Bpml.ListItems`). Each top-level block holding such a form comes home
+      as one top-level block with its id, and is kept as stored when it
+      spells as the old printer spelled it (`PrintMark.before/2`); otherwise
+      the push is refused with `bpml_stale_copy`, naming what the block
+      holds, with the stored paths of what the copy lacks in `paths`.
+    * **A form past the believed mark** (`PrintMark.believed/1`: a push
+      without its pull's fingerprint). A block holding one is kept as stored
+      when it spells as this pull printed it or as the print before the form;
+      any other is left to `Bpml.WriteWall`, which reads the push against the
+      print before the form, so the block comes home byte-equal under its id
+      or the push is refused.
     * **The inline form never deletes a body**, in a marked copy too. An
       inline callout whose stored callout has `slots` keeps the stored body
       when its text is unchanged, and the answer says so in one note;

@@ -4,11 +4,11 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
   item ids (task-0b448ea0847a6b4f), pushed through the route bp calls, with
   and without the fingerprint its pull served (`Bpml.PrintMark`).
 
-  Without the fingerprint the push is read as main read it: the block comes
-  home byte-equal and in place, or the push is refused (422 `bpml_unshown`)
-  and nothing is written. That holds for a copy of this pull, a copy pulled
-  before nested lists printed, and the same with a print mark typed in. With
-  the fingerprint the copy shows every level, so each edit lands.
+  Without the fingerprint the list comes home byte-equal under its id, at any
+  top-level place, or the push is refused by name and nothing is written.
+  That holds for a copy of this pull, a copy pulled before nested lists
+  printed, and the same with a print mark typed in. With the fingerprint the
+  copy shows every level, so each edit lands.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -77,7 +77,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
 
   @split "  <ul id=\"l1\">\n    <li>Plan</li>\n  </ul>\n  <ul id=\"l1b\">\n    <li>Flat sibling</li>\n  </ul>"
 
-  # Each op, and whether it lands without the fingerprint (main's answer).
+  # Each op, and whether it lands without the fingerprint.
   @ops [
     {"edit", false},
     {"delete", false},
@@ -171,11 +171,11 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
   defp stored(slug), do: get_in(Content.get_paper(slug).content, ["blocks"])
   defp block(blocks, id), do: Enum.find(blocks, &(&1["id"] == id))
 
-  # A refusal "by name" names the stored list, and writes nothing.
+  # A refusal "by name" names the stored list (`l1`), and writes nothing.
   defp refused_by_name!(slug, before, resp) do
     assert resp.status in [412, 422]
     answer = Jason.decode!(resp.resp_body)
-    if resp.status == 422, do: assert(answer["error"]["message"] =~ ~s(block "l1"))
+    if resp.status == 422, do: assert(answer["error"]["message"] =~ ~r/\bl1\b/)
     assert stored(slug) == before
     answer
   end
@@ -233,7 +233,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
     end
   end
 
-  test "a typed print mark does not make an old copy current for nested lists: each op is answered as main answers it" do
+  test "a typed print mark does not make an old copy current for nested lists: each op brings the list home unchanged or is refused" do
     for {op, lands?} <- @ops do
       slug = paper!()
       before = stored(slug)
@@ -248,7 +248,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
 
   # ── a copy of this pull ───────────────────────────────────────────────────────
 
-  test "a copy of this pull pushed without its fingerprint is answered for every op as main answers an old copy" do
+  test "a copy of this pull pushed without its fingerprint brings the list home unchanged or is refused, for every op" do
     for {op, lands?} <- @ops do
       slug = paper!()
       before = stored(slug)
