@@ -118,12 +118,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
-        {socket, clashed?} = keep_unsaved_fields(socket, doc_data)
+        {socket, clashed} = keep_unsaved_fields(socket, doc_data)
 
+        # The fields it rewrote are named in the save region, as TanStack's
+        # `clash` says them (`RefusedSave.status/1`); the whole buffer kept
+        # names none.
         socket =
-          if clashed?,
-            do: assign(socket, doc_conflict: true, save_status: "Updated by another user"),
-            else: socket
+          case clashed do
+            [] ->
+              socket
+
+            keys ->
+              assign(socket,
+                doc_conflict: true,
+                save_status: "Updated by another user",
+                editor_clash_fields: if(keys == :all, do: [], else: keys)
+              )
+          end
 
         {:noreply, assign(socket, :editor_store_doc, doc_data)}
 
@@ -161,13 +172,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   defp fresher(frame, _doc), do: frame
 
-  # The remote save taken into the form, and whether it rewrote one of the
-  # unsaved fields so both changes cannot stand (`clash/4`).
+  # The remote save taken into the form, and the unsaved fields it rewrote
+  # so both changes cannot stand (`clash/4`); `:all` when the whole buffer
+  # is kept.
   defp keep_unsaved_fields(socket, doc_data) do
     keys = socket.assigns[:editor_unsaved_keys] || MapSet.new()
 
     if MapSet.size(keys) == 0 do
-      {socket, true}
+      {socket, :all}
     else
       schema = socket.assigns[:editor_schema]
       local = socket.assigns[:editor_form] || %{}
@@ -227,7 +239,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           editor_unsaved_bases: kept
         )
 
-      {socket, clashed != []}
+      {socket, clashed}
     end
   end
 
