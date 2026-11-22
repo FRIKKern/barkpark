@@ -995,7 +995,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       assign(socket,
         editor_dirty: dirty?,
         editor_unsaved_keys: held,
-        editor_unsaved_bases: Map.take(UnsavedBases.all(socket), MapSet.to_list(held)),
+        editor_unsaved_bases: UnsavedBases.only(UnsavedBases.all(socket), held),
         doc_conflict: false
       )
     else

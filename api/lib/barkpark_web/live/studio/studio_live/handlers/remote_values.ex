@@ -128,7 +128,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     drawn = if crossing?, do: drawn_numbers(seen), else: %{}
 
     bases =
-      for key <- keys ++ List.wrap(text_path(schema, keys, path)),
+      for key <- units(keys, text_path(schema, keys, path)),
           free_text_at?(schema, key),
           name <- [input_name(key)],
           # A generator, not `n = ...`: a nil filter would drop the field.
@@ -219,7 +219,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
       schema = socket.assigns[:editor_schema]
 
       sent =
-        for key <- keys ++ List.wrap(text_path(schema, keys, path)),
+        for key <- units(keys, text_path(schema, keys, path)),
             free_text_at?(schema, key),
             value = value_at(posted, key),
             is_binary(value),
@@ -338,6 +338,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   end
 
   def text_path(_schema, _keys, _path), do: nil
+
+  @doc "The post's field keys, and the text subfield path it changed (or nil)."
+  def units(keys, nil), do: keys
+  def units(keys, path), do: keys ++ [path]
 
   @doc "The input a field key, or a path into an object, is drawn as."
   def input_name(key) when is_binary(key), do: "doc[#{key}]"
