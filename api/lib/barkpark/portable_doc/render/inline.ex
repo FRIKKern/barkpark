@@ -49,12 +49,12 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   #     code-block source-key contract (`Compose.code_source/1` +
   #     test/support/fixtures/code-source-aliases.json).
   #
-  #   NOT A RENDER DEFECT · `inlineText/1` in js/packages/react/src/toPlainText.ts
-  #     is a plain-text EXTRACTOR, not a renderer: it already concatenates a
-  #     node's own value AND its children, so an inline `code` with children
-  #     always yielded its text there. It does drop a bare-array node, which
-  #     understates a search snippet but never blanks a rendered surface — left
-  #     alone deliberately rather than changed without a measured need.
+  #   PLAIN TEXT · js/packages/react/src/toPlainText.ts reads inline
+  #     content with the `inlineText` in
+  #     js/packages/react/src/inline.tsx, in place of its own copy, which
+  #     appended a leaf's children and dropped a bare-array node;
+  #     inline-code-source.json now holds it to the chip's rows
+  #     (task-b2e80c27cf61227f).
 
   alias Barkpark.PortableDoc.Render.InlineDepth
 

@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   import Phoenix.Component, only: [assign: 2, assign: 3]
 
   alias Barkpark.Content.Forms
+  alias BarkparkWeb.Studio.StudioLive.PostPath
 
   @doc """
   A remote save changed the buffer from `old_form` to `new_form`: each field
@@ -72,7 +73,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   """
   def into_form(socket, params, raw_params) do
     waiting = waiting(socket, socket.assigns[:editor_form] || %{}) -- target(socket)
-    merge(socket, params, old_values(socket, params, raw_params, waiting))
+    kept = old_values(socket, params, raw_params, waiting)
+    merge(socket, PostPath.into_buffer(params, socket), kept)
   end
 
   @doc """
@@ -86,7 +88,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
 
     assign(socket,
       save_status: "Saved",
-      editor_form: merge(socket, params, waiting(socket, form)),
+      editor_form: merge(socket, PostPath.into_buffer(params, socket), waiting(socket, form)),
       editor_remote_waiting: {base(socket), values}
     )
   end
