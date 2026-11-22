@@ -8,6 +8,15 @@ const page = (run, extra = {}) =>
   renderPage({ parts: [part], skins: ['a', 'b'], foundation: 'f1', uiSdkVersion: '0', proof: { ranAt: '2026-01-01T00:00:00Z', browser: 'B', foundation: 'f1', parts: { aa: run }, ...extra } })
 const lit = (html) => (html.match(/data-on="true"/g) ?? []).length
 
+describe('renderPage notCovered', () => {
+  it('prints what a part does not cover in one place under its summary, and nothing when it covers all', () => {
+    const list = [{ name: 'ui-x-indicator', why: 'Not on the stage <yet>.' }]
+    const html = renderPage({ parts: [{ ...part, json: { ...part.json, notCovered: list } }], skins: ['a'], foundation: 'f1', uiSdkVersion: '0', proof: null })
+    expect(html).toContain('<p class="sr-summary">s</p>\n    <div class="sr-not-covered"><p>Not covered</p><ul><li><code>ui-x-indicator</code>: Not on the stage &lt;yet&gt;.</li></ul></div>')
+    expect(page({ hash: 'h1', lights: allOn })).not.toContain('sr-not-covered')
+  })
+})
+
 describe('renderPage proof lights', () => {
   it('lights what a passing run proved', () => {
     expect(lit(page({ hash: 'h1', lights: allOn }))).toBe(5)

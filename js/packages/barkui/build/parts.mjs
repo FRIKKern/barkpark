@@ -52,6 +52,8 @@ function readPart(dir, name) {
   const steps = (x) => x && typeof x === 'object' && Object.keys(x).every((k) => ['focus', 'click', 'hover', 'leave', 'keys'].includes(k)) && (x.focus || x.click || x.hover || x.leave === true || x.keys?.length) && ['focus', 'click', 'hover'].every((k) => x[k] === undefined || (typeof x[k] === 'string' && x[k])) && (x.leave === undefined || x.leave === true) && (x.keys === undefined || (Array.isArray(x.keys) && x.keys.every((k) => typeof k === 'string' && k)))
   if (json.layers !== undefined && !(Array.isArray(json.layers) && json.layers.every((l) => l && typeof l.box === 'string' && l.box && steps(l.open) && steps(l.close) && Object.keys(l).every((k) => ['box', 'open', 'close'].includes(k)))))
     throw new Error(`${where}: part.json "layers" must be a list of { box, open, close }: the selector of a box the part opens in the top layer, and the real input (focus, click, hover, leave, keys) that opens and closes it`)
+  const covered = notCoveredWrong(json, readFileSync(join(dir, 'part.css'), 'utf8'))
+  if (covered) throw new Error(`${where}: ${covered}`)
   if ('allow' in json)
     throw new Error(`${where}: part.json "allow" is gone: a part cannot excuse itself; a property beyond the vocabulary is a row in build/vocabulary.mjs EXTRA, with the values it may take`)
   if (json.name !== name) throw new Error(`${where}: part.json names the part ${JSON.stringify(json.name)}; it must be the folder name`)
@@ -77,6 +79,32 @@ function readPart(dir, name) {
     demo,
     hash: hashFiles(files.map((f) => [f, readFileSync(join(dir, f))])),
   }
+}
+
+// What of its library element a part does not style or prove is a row of part.json "notCovered": { name, why },
+// the name of that thing (an element, a feature) and why. The showroom prints the list in one place under the
+// part (build/page.mjs). A sentence of the summary or of part.css's notes that says something is not covered
+// names a row of the list, so the list is the one place a reader looks.
+// The words that row reads, exactly these and no others, in any case and across line breaks: the ways the parts
+// have said "not covered" so far. A sentence that says it in other words is not caught; that is the row's one
+// limit, written in docs/PARTS.md.
+export const NOT_COVERED_WORDS = ['not styled', 'not covered', 'not proved', 'not judged', 'not on the stage', 'does not style', 'does not cover', 'does not prove', 'do not style', 'do not cover', 'do not prove', 'unstyled', 'unjudged', 'unproved']
+const NOT_COVERED = new RegExp(`\\b(${NOT_COVERED_WORDS.map((w) => w.split(' ').join('\\s+')).join('|')})\\b`, 'i')
+/** What is wrong with a part's "notCovered" and the prose beside it, in one sentence; empty when nothing is. */
+export function notCoveredWrong(json, css) {
+  const list = json.notCovered ?? []
+  if (!(Array.isArray(list) && list.every((x) => x && typeof x === 'object' && Object.keys(x).every((k) => k === 'name' || k === 'why') && [x.name, x.why].every((v) => typeof v === 'string' && v.trim()))))
+    return 'part.json "notCovered" must be a list of { name, why }: what of its library element the part does not style or prove, and why'
+  const twice = list.map((x) => x.name).find((n, i, all) => all.indexOf(n) !== i)
+  if (twice) return `part.json "notCovered" names "${twice}" twice`
+  const notes = [...css.matchAll(/\/\*([\s\S]*?)\*\//g)].map((m) => m[1]).join(' ')
+  for (const [where, prose] of [['part.json "summary"', json.summary ?? ''], ["part.css's notes", notes]]) {
+    for (const sentence of prose.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/)) {
+      if (NOT_COVERED.test(sentence) && !list.some((x) => sentence.toLowerCase().includes(x.name.toLowerCase())))
+        return `${where} says something is not covered ("${sentence.trim()}"), and part.json "notCovered" names none of it: what a part does not cover is a row of "notCovered", printed under the part`
+    }
+  }
+  return ''
 }
 
 // An example is markup only: looks live in part.css, behaviour in demo.mjs.

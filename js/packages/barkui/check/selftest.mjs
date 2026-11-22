@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
-import { partsDir } from '../build/parts.mjs'
+import { discoverParts, partsDir } from '../build/parts.mjs'
 import { capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
 import { layerMisplaced, SELFTEST_JOBS, selftestPick } from './jobs.mjs'
@@ -387,6 +387,39 @@ steps.push({
     only: ['pressed'],
     plant: inCss('#button-after { filter: opacity(0.1); }'),
     expect: refused(/part\.css line \d+: filter: opacity\(0\.1\); part\.css may only set filter to none/),
+  },
+  // What a part does not cover is a row of part.json "notCovered" (build/parts.mjs): prose that says something is
+  // not covered and names no row is refused by name; with the row, the same part is read.
+  {
+    name: 'a summary or part.css note that says something is not covered is refused at discovery unless part.json "notCovered" names it',
+    direct: () => {
+      const root = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
+      try {
+        const dir = join(root, 'button')
+        cpSync(join(partsDir, 'button'), dir, { recursive: true })
+        const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+        const css = readFileSync(join(dir, 'part.css'), 'utf8')
+        const plant = (summary, notes, list) => {
+          writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, summary: `${json.summary} ${summary}`.trim(), ...(list && { notCovered: list }) }))
+          writeFileSync(join(dir, 'part.css'), `${css}\n/* ${notes} */\n`)
+          try {
+            discoverParts(root)
+            return ''
+          } catch (e) {
+            return e.message
+          }
+        }
+        const said = [
+          /^parts\/button: part\.json "summary" says something is not covered \("Its ui-badge is not styled\."\), and part\.json "notCovered" names none of it/.test(plant('Its ui-badge is not styled.', 'Nothing more.')),
+          /^parts\/button: part\.css's notes says something is not covered \("The ripple is not proved\."\)/.test(plant('', 'The ripple is not proved.')),
+          plant('Its ui-badge is not styled.', 'The ripple is not proved.', [{ name: 'ui-badge', why: 'A planted reason.' }, { name: 'ripple', why: 'A planted reason.' }]) === '',
+        ]
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.flatMap((ok, k) => (ok ? [] : [k + 1])).join(', ')}`)
+        return said.every(Boolean)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
   },
   // The reviewer's own inputs: each refused before a browser opens, and each refused again by the browser's reading.
   ...[
