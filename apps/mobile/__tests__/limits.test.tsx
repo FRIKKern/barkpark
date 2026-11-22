@@ -169,8 +169,24 @@ describe('block nesting', () => {
 
   it.each(slots)('%s %j keeps depth 99 and replaces depth 100', (type, path) => {
     expect(leafAt(model.capDepth(chain(type, path, 99), NOTICE), path, 99)).toEqual({ type: 'paragraph', text: 'leaf' })
-    expect(leafAt(model.capDepth(chain(type, path, 100), NOTICE), path, 100)).toEqual({ type: 'paragraph', text: NOTICE })
+    expect(leafAt(model.capDepth(chain(type, path, 100), NOTICE), path, 100)).toEqual({
+      type: 'paragraph',
+      text: NOTICE,
+      [model.CAPPED]: true,
+    })
   })
+
+  // task-a6a57717506de979: a list item keeps the notice that stands in for the block.
+  it.each(['list', 'ordered-list', 'numbered_list', 'bulletList', 'bullet_list', 'bulleted-list', 'bulleted_list'])(
+    '%s item shows the notice past the depth, and still drops a stored child with "capped": true',
+    (type) => {
+      expect(render(chain(type, ['items', '*', 'children', '*'], 100))).toContain(NOTICE)
+      const stored = JSON.parse(
+        JSON.stringify({ type, items: [{ text: 'i', children: [{ type: 'paragraph', text: 'stored', capped: true }] }] }),
+      )
+      expect(render(stored)).not.toContain('stored')
+    },
+  )
 
   it('leaves a block outside the slot table alone', () => {
     const deep = chain('section', ['blocks', '*'], 100)
