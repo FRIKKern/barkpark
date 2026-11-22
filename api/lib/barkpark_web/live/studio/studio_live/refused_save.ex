@@ -320,14 +320,28 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
   @doc """
   The save region's words: the held fields by title, or the failed token
-  with its reason. Any other token is returned as it is.
+  with its reason. A conflict that named the fields another editor rewrote
+  (`editor_clash_fields`, set by `Lifecycle.doc_updated/2`) says so in
+  TanStack's words (barkpark-studio `edits.ts` `clash`,
+  task-c0374ce0961cc1bf), first: a refused field that another editor then
+  rewrote is held, and the conflict is the newer news. Any other token is
+  returned as it is.
   """
   def status(assigns) do
     token = assigns[:save_status] || ""
     held = not_saved(assigns)
     reason = assigns[:editor_save_error]
+    clashed = clash_fields(assigns)
 
     cond do
+      # The newer news, so said over a held field's "Not saved", as
+      # TanStack's `clash` replaces the footer's state.
+      token == "Updated by another user" and clashed != [] ->
+        gettext(
+          "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs.",
+          fields: Enum.map_join(clashed, ", ", &title(assigns, &1))
+        )
+
       held != %{} ->
         titles = held |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &title(assigns, &1))
         gettext("Not saved") <> ": " <> titles
@@ -337,6 +351,26 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
 
       true ->
         token
+    end
+  end
+
+  # The fields the last conflict found rewritten, in the schema's order;
+  # only while that conflict stands.
+  defp clash_fields(assigns) do
+    case {assigns[:doc_conflict], assigns[:editor_clash_fields]} do
+      {true, [_ | _] = keys} ->
+        order = assigns |> schema_fields() |> Enum.map(&(is_map(&1) && &1["name"]))
+        Enum.sort_by(keys, &(Enum.find_index(order, fn name -> name == &1 end) || length(order)))
+
+      _ ->
+        []
+    end
+  end
+
+  defp schema_fields(assigns) do
+    case assigns[:editor_schema] do
+      %{fields: fields} when is_list(fields) -> fields
+      _ -> []
     end
   end
 

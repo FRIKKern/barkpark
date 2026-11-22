@@ -15952,3 +15952,8 @@ msgstr "Filtrér"
 #, elixir-autogen, elixir-format
 msgid "No results for"
 msgstr "Ingen resultater for"
+
+#: lib/barkpark_web/live/studio/studio_live/refused_save.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs."
+msgstr "Noen andre skrev om %{fields} i mellomtiden. Teksten din er tatt vare på her, ikke lagret: skriv videre for å lagre din over deres."

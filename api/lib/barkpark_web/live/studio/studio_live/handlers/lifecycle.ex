@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `clash` (barkpark-studio edit-bases.ts, edits.ts) read it
   # (task-65543203e7b71c80): a field whose stored value did not move from
   # its base stays ours; a text field both changed merges (`TextRebase.
-  # merge3_both/3`, TanStack's `merge3`), and only a merge that cannot keep
+  # merge3_clash/3`, TanStack's `merge3`), and only a merge that cannot keep
   # both changes clashes; any other value stays ours. A save that rewrote
   # none of them is taken in quietly. A text field's base is the stored
   # value its words were typed on (`UnsavedBases`); with none known it
@@ -118,12 +118,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
-        {socket, clashed?} = keep_unsaved_fields(socket, doc_data)
+        {socket, clashed} = keep_unsaved_fields(socket, doc_data)
 
+        # The fields it rewrote are named in the save region, as TanStack's
+        # `clash` says them (`RefusedSave.status/1`); the whole buffer kept
+        # names none.
         socket =
-          if clashed?,
-            do: assign(socket, doc_conflict: true, save_status: "Updated by another user"),
-            else: socket
+          case clashed do
+            [] ->
+              socket
+
+            keys ->
+              assign(socket,
+                doc_conflict: true,
+                save_status: "Updated by another user",
+                editor_clash_fields: if(keys == :all, do: [], else: keys)
+              )
+          end
 
         {:noreply, assign(socket, :editor_store_doc, doc_data)}
 
@@ -161,13 +172,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   defp fresher(frame, _doc), do: frame
 
-  # The remote save taken into the form, and whether it rewrote one of the
-  # unsaved fields so both changes cannot stand (`clash/4`).
+  # The remote save taken into the form, and the unsaved fields it rewrote
+  # so both changes cannot stand (`clash/4`); `:all` when the whole buffer
+  # is kept.
   defp keep_unsaved_fields(socket, doc_data) do
     keys = socket.assigns[:editor_unsaved_keys] || MapSet.new()
 
     if MapSet.size(keys) == 0 do
-      {socket, true}
+      {socket, :all}
     else
       schema = socket.assigns[:editor_schema]
       local = socket.assigns[:editor_form] || %{}
@@ -227,7 +239,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           editor_unsaved_bases: kept
         )
 
-      {socket, clashed != []}
+      {socket, clashed}
     end
   end
 
@@ -242,8 +254,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # `merge3`, from the base its words were typed on (`{:ok, base}`): theirs
   # did not move from the base, ours stands (`:ours`); ours did not (or is
   # theirs), theirs stands (`:took`). A string both changed: free text
-  # merges (`TextRebase.merge3_both/3`, the splice merge a post gets), and a
-  # merge that cannot keep both is a clash; any other string (a choice, a
+  # merges (`TextRebase.merge3_clash/3`, the splice merge a post gets, where
+  # TanStack's patch places mine too), and a merge that cannot keep both is
+  # a clash; any other string (a choice, a
   # date) cannot keep both, so it clashes. A list or an object both changed
   # clashes too: TanStack's `mergeList3` keeps theirs only where it can place
   # mine, and an unplaced one kept ours unseen. Any other value (a number, a
@@ -276,7 +289,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:took, theirs}
 
       strings? and RemoteValues.free_text?(schema, key) ->
-        case Barkpark.Content.TextRebase.merge3_both(base, mine, theirs) do
+        case Barkpark.Content.TextRebase.merge3_clash(base, mine, theirs) do
           nil -> :clash
           merged -> {:took, merged}
         end
@@ -290,6 +303,49 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       true ->
         {:ours, mine}
     end
+  end
+
+  @doc """
+  The row a post is read against (`Shared.autosave_write`): this tab's own
+  last save (`editor_doc`), with the field the post is a change of
+  (`editor_post_target`) as the newest stored version this tab saw.
+
+  So a choice set back to this tab's earlier value after another editor's
+  save is an edit, as TanStack sends the field typed in
+  (task-1f6d4ed8c24a821b). Every other field is still read against this
+  tab's own row: a post that left the page before another editor's save
+  carries that editor's fields at their old values, and they stay dropped
+  (`PostedEdits`, task-a4ded0be5c8ec3cb). The rev and `updated_at` stay
+  this tab's own.
+  """
+  def post_base(socket) do
+    own = socket.assigns[:editor_doc]
+    seen = base_doc(socket)
+
+    case List.wrap(socket.assigns[:editor_post_target]) do
+      [_ | _] = keys when is_map(own) and is_map(seen) and seen != own ->
+        Enum.reduce(keys, own, &take_seen(&2, seen, &1))
+
+      _ ->
+        own
+    end
+  end
+
+  defp take_seen(doc, seen, key) when key in ["title", "status"] do
+    atom = String.to_existing_atom(key)
+    Map.put(doc, atom, Map.get(seen, atom))
+  end
+
+  defp take_seen(doc, seen, key) do
+    own = doc.content || %{}
+
+    content =
+      case Map.fetch(seen.content || %{}, key) do
+        {:ok, value} -> Map.put(own, key, value)
+        :error -> Map.delete(own, key)
+      end
+
+    %{doc | content: content}
   end
 
   # The newest stored version of the open document this tab saw: its own
