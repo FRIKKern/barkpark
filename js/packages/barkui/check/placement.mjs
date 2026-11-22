@@ -3,23 +3,19 @@
 // hold: where a top-layer box sits, never how anything looks. The look belongs in part.css.
 //
 // The closed list is here, once, with the UI SDK control that writes each entry, and apart from it one more entry
-// with its own reason, transition, the one entry whose value is read. A box is an element the census
+// with its own reason, TRANSITION. A box is an element the census
 // (layers.mjs) has seen can open in the top layer for the part: a dialog, or an element that carries popover. Every
 // box property is allowed only on such a box; anchor-name only on an element whose anchor name a box's
 // position-anchor names; anything else, anywhere in a stage, fails by name. docs/PARTS.md "Placement" prints the
 // same list, and a unit row is red when the two differ.
 //
-// Every element that holds a stage, up to the root element, is read the same way, since a stage inherits from it:
-// nothing may stand there but the second list, SCROLL_LOCK, with its own reason and its values, on the root element
-// or body only and only while a dialog box is open. That is all a stage inherits from: a stage stands in the
-// document itself, and nothing that holds it hosts a shadow root of any mode (read at every look, the root node here,
-// the shadow roots from the browser's own tree by layers.mjs), or either fails by name.
+// SCROLL_LOCK is the second list, with its own reason and its values, for an element that holds a stage: the root
+// element or body only, and only while a dialog box is open. OUT_OF_DOCUMENT names a stage that does not stand in
+// the document; SHADOW_ABOVE names an element that holds a stage and hosts a shadow root, asked of the browser's
+// own tree by layers.mjs.
 //
-// What is read: the declarations the browser applies, by property name (of the values, the check reads transition's,
-// the names anchor-name gives, and the scroll lock's), as the browser parses the attribute's text (a shorthand is judged by its
-// longhands, so `inset` is top, right, bottom and left, and `all` is its own name). When it is read: every value the attribute holds, from the page's first frame (placementWorld,
-// below, in the census's world), so a property written while a box is open and taken away at close fails by name.
-// On a stage with no script, any style attribute fails: nothing there can write one.
+// docs/PARTS.md "Placement" says what is read and when. placementWorld, below, keeps the log in the census's
+// world and judges it. On a stage with no script, any style attribute fails: nothing there can write one.
 
 export const REASON = 'placement is where a box sits, never how it looks'
 
@@ -110,8 +106,8 @@ export const HOLDERS_UNLISTED = (part, why) => `the check could not list what ho
 /** The fail for any style attribute on a stage with no script. */
 export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage with no script, where nothing may write one`
 
-/** Runs in the census's world (it is serialised): the log of every value each style attribute in a stage, or on an
-    element that holds a stage, holds from the first frame, and the judge of it. `lists` is { allowed: ALLOWED, root:
+/** Runs in the census's world (it is serialised): the placement log and its judge; docs/PARTS.md "Placement"
+    says what is read and when. `lists` is { allowed: ALLOWED, root:
     SCROLL_LOCK }; `script` is false on a page with no script; `say` holds the fails' wording; `owner(el)` names the
     part whose stage holds el (null outside every stage); `boxes(part)` the elements the census has seen can open in
     the top layer for that part, and boxes() all of them; `describe(el)` names an element. Returns { watch(root): observe a document or an open
@@ -213,8 +209,7 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
     }
     const fails = []
     const fail = (s) => fails.includes(s) || fails.push(s)
-    // Read now, so the order of attaching, moving and adding cannot matter: each stage of the part stands in the
-    // document itself. (Whether anything that holds it hosts a shadow root, the check asks the browser: holders.)
+    // A stage of the part whose root node is not the document fails: OUT_OF_DOCUMENT. (Whether anything that holds it hosts a shadow root, the check asks the browser: holders.)
     for (const s of stages.get(part) ?? []) if (s.getRootNode() !== document) fail(say.OUT_OF_DOCUMENT(named(s)))
     for (const [el, texts] of held)
       for (const { text, at } of texts.values()) {

@@ -40,7 +40,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   if (clock) await page.clock.install()
   // What can enter the top layer is watched from the first frame (layers.mjs census).
   page.barkCensus = await installCensus(page, { script: js })
-  // What a style attribute in the stage has held that is not placement (placement.mjs), from the first frame.
+  // The placement fails for this part, from the census's world (placement.mjs; docs/PARTS.md "Placement" says what is read and when).
   page.barkPlacement = () => page.barkCensus.placement(ctx.part)
   await limit(page.goto(ctx.url), 15000, 'opening the showroom')
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })

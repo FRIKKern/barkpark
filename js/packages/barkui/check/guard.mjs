@@ -3,11 +3,9 @@
 // It reads the page from an isolated world over CDP, so page script (a demo, a
 // press step) can neither see nor patch what it reads. It compares the page
 // with the same build run without any demo (the baseline): the stylesheets,
-// their rules, adopted sheets, and animations started from script. A style
-// attribute in a stage may hold placement only, and one on an element that
-// holds a stage only UI SDK's scroll lock while a dialog is open: the census's
-// world logs every value one holds from the first frame (placement.mjs), and
-// the guard asks it for its fails each time it looks.
+// their rules, adopted sheets, and animations started from script. For style
+// attributes it asks the census's world for placement's fails each time it
+// looks (placement.mjs; docs/PARTS.md "Placement" says what is read and when).
 import { source } from './probes.mjs'
 
 // Runs in the isolated world. Rule text is read wherever the world may read it;

@@ -156,9 +156,9 @@ const said = ({ kind, at }) => (kind === 'frame' ? FRAME(at) : kind === 'call' ?
     in each open shadow root, as it arrives or gains popover, and watches each open root from the moment
     attachShadow makes it (told by tellRoots). It also notes every frame (another window), and each call tellRoots
     refuses. __barkCensus(part, boxes) tells, once per page, each one seen for that part or outside every stage that
-    none of the part's layers selects. `placement` (placement.mjs placementSource) logs every value each style
-    attribute in a stage holds, watching each document and open root the census watches; __barkPlacement(part) is
-    its fails for the part. `script` is false on a page with no script. */
+    none of the part's layers selects. `placement` (placement.mjs placementSource) watches each document and open
+    root the census watches; __barkPlacement(part) is its fails for the part. docs/PARTS.md "Placement" says what
+    is read and when. `script` is false on a page with no script. */
 function census(placement, script) {
   const CAN = 'dialog, [popover]'
   const FRAMES = 'iframe, frame, object, embed, fencedframe'
