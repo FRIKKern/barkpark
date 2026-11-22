@@ -5,10 +5,10 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
   calls without a fingerprint, as every released bp pushes.
 
   A copy pulled before callouts printed their body (no print mark, the callout
-  inline) brings the callout home as one top-level block with its id, spelled
-  as it was pulled, and it is kept as stored; any other answer is refused by
-  name (422 `bpml_stale_copy`), writing nothing. A copy that showed the body
-  makes each edit.
+  inline) brings the callout home once under its id, at any depth, spelled as
+  it was pulled; it is kept as stored where it stands. Any other answer is
+  refused by name (422 `bpml_stale_copy`), writing nothing. A copy that
+  showed the body makes each edit.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -50,11 +50,11 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
   defp cut(t, s), do: String.replace(t, s <> "\n", "", global: false)
   defp closing, do: ~s(  <p id="p2">Closing.</p>)
 
-  # Each op, and whether it lands from an old copy.
+  # Each op, and whether it lands from an old copy, the callout byte-equal.
   @ops [
     {"delete", false},
-    {"move into a section", false},
-    {"wrap in a section", false},
+    {"move into a section", true},
+    {"wrap in a section", true},
     {"re-id", false},
     {"split", false},
     {"merge a paragraph in", false},
@@ -137,19 +137,32 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
       |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
 
   defp stored(slug), do: get_in(Content.get_paper(slug).content, ["blocks"])
-  defp stored_callout(slug), do: Enum.find(stored(slug), &(&1["id"] == "c1"))
+  # The block `c1` wherever it stands, with the id of the block holding it.
+  defp where(blocks, holder \\ nil) do
+    Enum.find_value(blocks, fn
+      %{"id" => "c1"} = c -> {holder, c}
+      %{"blocks" => inner, "id" => id} -> where(inner, id)
+      _ -> nil
+    end)
+  end
+
+  # Where each op puts the callout.
+  defp holder("move into a section"), do: "s0"
+  defp holder("wrap in a section"), do: "s9"
+  defp holder(_op), do: nil
 
   for {op, lands?} <- @ops do
     @op op
     if lands? do
       test "an old copy without a fingerprint: #{op} lands, and the callout keeps its body" do
         slug = paper!()
+        assert where(stored(slug)) == {nil, callout()}
         {bpml, rev} = pull!(slug)
 
         assert %{"ok" => true} =
                  sync_copy(slug, edit(@op, old_text(bpml)), rev) |> json_response(200)
 
-        assert stored_callout(slug) == callout()
+        assert where(stored(slug)) == {holder(@op), callout()}
       end
     else
       test "an old copy without a fingerprint: #{op} is refused by name, and the body stays" do
@@ -166,6 +179,37 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
     end
   end
 
+  # The id is found exactly once, on a callout.
+  @inside ~s(<p id="s0p">Inside.</p>)
+
+  defp finder_edit(:twice, t),
+    do: String.replace(t, @inside, @inside <> "\n  " <> @inline)
+
+  defp finder_edit(:other_kind, t),
+    do:
+      t
+      |> cut(@inline)
+      |> String.replace(@inside, @inside <> ~s(\n    <p id="c1">Read this first.</p>))
+
+  for {name, edit} <- [
+        {"holds the callout's id twice", :twice},
+        {"gives the callout's id to a paragraph in a section", :other_kind}
+      ] do
+    @edit edit
+    test "an old copy that #{name} is refused by name, and the body stays" do
+      slug = paper!()
+      before = stored(slug)
+      {bpml, rev} = pull!(slug)
+      copy = finder_edit(@edit, old_text(bpml))
+      assert copy != old_text(bpml)
+
+      answer = sync_copy(slug, copy, rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_stale_copy"
+      assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+      assert stored(slug) == before
+    end
+  end
+
   # Control rows: a copy that showed the body makes the same edits.
   for op <- ["delete", "move into a section", "wrap in a section", "re-id"] do
     @op op
@@ -174,6 +218,8 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyOpsTest do
       {bpml, rev} = pull!(slug)
       assert bpml =~ ~s(print="2")
       assert %{"ok" => true} = sync_copy(slug, edit(@op, bpml), rev) |> json_response(200)
+
+      if holder(@op), do: assert(where(stored(slug)) == {holder(@op), callout()})
     end
   end
 

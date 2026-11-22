@@ -12,9 +12,9 @@ defmodule Barkpark.PortableDoc.Bpml.PrintMark do
   believed in full. A push without one is believed up to print 2.
 
   For a form newer than a believed mark (`Bpml.CalloutBody.resolve/4`), each
-  top-level block holding the form comes home as one top-level block with
-  its id, spelled as the printer before the form spelled it, and is kept as
-  stored. Any other push is refused with `bpml_stale_copy`, naming the block,
+  block holding the form comes home once under its id, at any depth, spelled
+  as the printer before the form spelled it, and is kept as stored where it
+  stands. Any other push is refused with `bpml_stale_copy`, naming the block,
   with the stored paths of what the copy lacks, writing nothing.
 
   For a form newer than the mark is believed for, `Bpml.WriteWall` reads the

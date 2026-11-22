@@ -18,11 +18,12 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
     * **Old copy** (the view holds a form of `Bpml.PrintMark` newer than the
       copy's believed mark: a callout body here, a nested list item in
-      `Bpml.ListItems`). Each top-level block holding such a form comes home
-      as one top-level block with its id, and is kept as stored when it
+      `Bpml.ListItems`). Each block holding such a form comes home once under
+      its id, at any depth, and is kept as stored where it stands when it
       spells as the old printer spelled it (`PrintMark.before/2`); otherwise
-      the push is refused with `bpml_stale_copy`, naming what the block
-      holds, with the stored paths of what the copy lacks in `paths`.
+      (missing, found twice, or spelled otherwise) the push is refused with
+      `bpml_stale_copy`, naming what the block holds, with the stored paths
+      of what the copy lacks in `paths`.
     * **A form past the believed mark** (`PrintMark.believed/1`: a push
       without its pull's fingerprint). A block holding one is kept as stored
       when it spells as this pull printed it or as the print before the form;
@@ -213,9 +214,9 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
 
   # ── old copy ────────────────────────────────────────────────────────────────
 
-  # A top-level block holding a form newer than the copy's mark comes home as
-  # one top-level block with its id, spelled as the print before the form, and
-  # is kept as stored; any other answer is refused by name. A form newer than
+  # A block holding a form newer than the copy's mark comes home once under
+  # its id, at any depth, spelled as the print before the form, and is kept as
+  # stored where it stands; any other answer is refused by name. A form newer than
   # the mark is believed for (`PrintMark.believed/1`) is read as unshown: a
   # block holding one that spells as this pull or as the print before the form
   # comes home as stored, and any other is left to the write wall, which reads
@@ -228,29 +229,68 @@ defmodule Barkpark.PortableDoc.Bpml.CalloutBody do
       view_by_id = by_id(view)
       stored_by_id = by_id(stored)
 
-      case not_home(pushed, done, view, n, believed) do
-        {v, forms} -> PrintMark.stale(v, stored, v["id"], forms, &canonical/1)
-        nil -> each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed})
+      with {:ok, pushed} <- come_home(pushed, done, {view, stored}, {n, believed}) do
+        each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed})
       end
     else
       {:ok, pushed, []}
     end
   end
 
-  # The first view block holding a believed form newer than `n` whose id is
-  # not among the pushed top-level blocks, with those forms.
-  defp not_home(pushed, done, view, n, believed) do
-    ids = MapSet.new(pushed, & &1["id"])
+  # Each view block holding a believed form newer than `n` must come home
+  # exactly once, at any depth, under its id. A nested one that spells as the
+  # pull served it (the print before the form) is kept as stored where it
+  # stands; top-level ones are read by `each_old/4`. Missing, found twice, or
+  # nested and spelled otherwise: refused by name.
+  defp come_home(pushed, done, {view, stored}, {n, believed}) do
+    found = found(pushed, :top, [])
+    stored_by_id = by_id(stored)
 
-    Enum.find_value(view, fn v ->
-      id = v["id"]
+    view
+    |> Enum.flat_map(fn v ->
       {forms, _} = split(PrintMark.newer(v, n), believed)
 
-      if id != nil and forms != [] and not MapSet.member?(done, id) and
-           not MapSet.member?(ids, id),
-         do: {v, forms}
+      if v["id"] != nil and forms != [] and not MapSet.member?(done, v["id"]),
+        do: [{v, forms}],
+        else: []
+    end)
+    |> Enum.reduce_while({:ok, pushed}, fn {v, forms}, {:ok, acc} ->
+      case Enum.filter(found, &(elem(&1, 0)["id"] == v["id"])) do
+        [{_block, :top}] ->
+          {:cont, {:ok, acc}}
+
+        [{block, :nested}] ->
+          if spells_as?(block, PrintMark.before(v, n)),
+            do: {:cont, {:ok, put_nested(acc, v["id"], stored_by_id[v["id"]])}},
+            else: {:halt, PrintMark.stale(v, stored, v["id"], forms, &canonical/1)}
+
+        _none_or_twice ->
+          {:halt, PrintMark.stale(v, stored, v["id"], forms, &canonical/1)}
+      end
     end)
   end
+
+  # Every block with an id in `term`, tagged :top for a pushed top-level block.
+  defp found(list, depth, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &found(&1, depth, &2))
+
+  defp found(%{} = map, depth, acc) do
+    acc = if is_binary(map["id"]) and is_binary(map["type"]), do: [{map, depth} | acc], else: acc
+    map |> Map.values() |> Enum.reduce(acc, &found(&1, :nested, &2))
+  end
+
+  defp found(_other, _depth, acc), do: acc
+
+  # `term` with the nested block `id` replaced by `stored`.
+  defp put_nested(list, id, stored) when is_list(list),
+    do: Enum.map(list, &put_nested(&1, id, stored))
+
+  defp put_nested(%{"id" => id, "type" => _}, id, stored), do: stored
+
+  defp put_nested(%{} = map, id, stored),
+    do: Map.new(map, fn {k, v} -> {k, put_nested(v, id, stored)} end)
+
+  defp put_nested(other, _id, _stored), do: other
 
   defp each_old(pushed, done, {view_by_id, stored_by_id, stored}, {n, believed}) do
     Enum.reduce_while(pushed, {:ok, [], []}, fn block, {:ok, acc, notes} ->

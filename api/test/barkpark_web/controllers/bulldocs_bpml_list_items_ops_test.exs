@@ -278,6 +278,35 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
     end
   end
 
+  test "a copy with its fingerprint and its print mark taken out moves the nested list into a section byte-equal" do
+    slug = paper!()
+    {bpml, rev, view} = pull!(slug)
+
+    assert %{"ok" => true} =
+             push(slug, edit("move into a section", old_text(bpml)), rev, view)
+             |> json_response(200)
+
+    assert %{"blocks" => [_s0p, moved]} = block(stored(slug), "s0")
+    assert moved == nested()
+    assert block(stored(slug), "l1") == nil
+  end
+
+  test "a copy with its fingerprint and its print mark taken out may not hold the list's id twice" do
+    slug = paper!()
+    before = stored(slug)
+    {bpml, rev, view} = pull!(slug)
+    old = old_text(bpml)
+
+    twice =
+      String.replace(
+        old,
+        ~s(<p id="s0p">Inside.</p>),
+        ~s(<p id="s0p">Inside.</p>\n) <> indent(seg(old))
+      )
+
+    refused_by_name!(slug, before, push(slug, twice, rev, view))
+  end
+
   test "a copy of this pull with its fingerprint edits the list and keeps every level and item id" do
     slug = paper!()
     {bpml, rev, view} = pull!(slug)
