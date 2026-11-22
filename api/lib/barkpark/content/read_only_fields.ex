@@ -27,7 +27,8 @@ defmodule Barkpark.Content.ReadOnlyFields do
   `Barkpark.Content.FieldVisibility`): the field is read-only while the predicate
   holds on the row the write starts from (task-00eac0b023b11517). So the write
   that moves `stage` to `done` may still set the field, and later writes may not.
-  The condition reads the row as a client reads it: its content with the
+  The field is locked when the condition holds on the content alone (as
+  before) or on the row as a client reads it: its content with the
   envelope keys over it (`_id`, `_type`, `_createdAt`, `_updatedAt`, …,
   `Barkpark.Content.Envelope.system_keys/1`). So `{"field": "_createdAt",
   "operator": "non_empty"}` locks a field once the document is saved, as the
@@ -63,7 +64,9 @@ defmodule Barkpark.Content.ReadOnlyFields do
       {base, row} = as_read(base)
       merged = if is_map(merged), do: merged, else: %{}
 
-      names = for {name, rule} <- rules, locked?(rule, row), do: name
+      # Locked when the rule holds on the content alone (main's reading) or on the row with its
+      # envelope: an envelope key can lock a field, never open one main kept shut.
+      names = for {name, rule} <- rules, locked?(rule, base) or locked?(rule, row), do: name
 
       case Enum.filter(names, &(Map.get(base, &1) != Map.get(merged, &1))) do
         [] -> :ok

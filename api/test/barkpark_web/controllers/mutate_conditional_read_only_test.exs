@@ -96,7 +96,10 @@ defmodule BarkparkWeb.MutateConditionalReadOnlyTest do
   # once the document exists: readOnly: ({document}) => Boolean(document?._createdAt).
   defp omrade(ws_id, key) do
     type = "omrade_#{String.trim_leading(key, "_")}"
+    upsert_omrade(ws_id, type, %{"field" => key, "operator" => "non_empty"})
+  end
 
+  defp upsert_omrade(ws_id, type, rule) do
     {:ok, _} =
       Content.upsert_schema(
         %{
@@ -109,7 +112,7 @@ defmodule BarkparkWeb.MutateConditionalReadOnlyTest do
               "name" => "farge",
               "title" => "Farge",
               "type" => "string",
-              "readOnly" => %{"field" => key, "operator" => "non_empty"}
+              "readOnly" => rule
             }
           ]
         },
@@ -152,6 +155,29 @@ defmodule BarkparkWeb.MutateConditionalReadOnlyTest do
 
     set = %{"patch" => %{"id" => "#{id}-e", "type" => type, "set" => %{"farge" => "rod"}}}
     assert mutate([set]).status == 200
+  end
+
+  test "a rule that held on main's content-only reading still locks: empty envelope keys, any, neq _type",
+       %{id: id, ws_id: ws_id} do
+    rules = [
+      %{"field" => "_createdAt", "operator" => "empty"},
+      %{"field" => "_id", "operator" => "empty"},
+      %{"field" => "_rev", "operator" => "empty"},
+      %{"any" => [%{"field" => "_updatedAt", "operator" => "empty"}]},
+      %{"field" => "_type", "operator" => "neq", "value" => "omrade_neq"}
+    ]
+
+    for {rule, n} <- Enum.with_index(rules) do
+      type = if n < 4, do: "omrade_e#{n}", else: "omrade_neq"
+      upsert_omrade(ws_id, type, rule)
+      doc = "#{id}-#{n}"
+
+      assert mutate([%{"create" => %{"_id" => doc, "_type" => type, "title" => "T"}}]).status ==
+               200
+
+      set = %{"patch" => %{"id" => doc, "type" => type, "set" => %{"farge" => "rod"}}}
+      assert mutate([set]).status == 422, inspect(rule)
+    end
   end
 
   test "the Studio resolves the condition against the form" do
