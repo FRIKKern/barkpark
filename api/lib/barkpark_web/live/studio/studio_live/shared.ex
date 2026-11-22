@@ -2333,13 +2333,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   def same_editor_doc?(_, _), do: false
 
-  # [server-replaced-widget-values] task-c7b0565a482b9d21: when the server
-  # replaces a value drawn in a `phx-update="ignore"` widget, the form
-  # generation moves and the widget remounts (`WidgetValues`).
+  # [server-replaced-widget-values] task-c7b0565a482b9d21. Rich text, reference
+  # and image inputs render inside `phx-update="ignore"` wrappers that LiveView
+  # never re-renders, so when the SERVER replaces one of their values in the
+  # open document's form (another tab's save, Reload after a conflict, a
+  # revision restore) the widget kept the old value — and this tab's next
+  # autosave wrote it back over the other edit. `editor_form_gen` is part of
+  # those wrapper ids (`FieldInputs.doc_wrap_id/4`): moving it remounts them
+  # with the new value. It moves ONLY when a widget-owned value actually
+  # changed, so a reload that leaves them alone (and the tab's own autosave,
+  # which never comes through here) keeps the caret where it is.
+  @widget_field_types ~w(richText reference image)
+
   @doc false
-  defdelegate widget_values_changed?(schema, old_form, new_form),
-    to: BarkparkWeb.Studio.StudioLive.WidgetValues,
-    as: :changed?
+  def widget_values_changed?(schema, old_form, new_form) do
+    names =
+      case schema do
+        %{fields: fields} when is_list(fields) ->
+          for %{"type" => t, "name" => n} <- fields, t in @widget_field_types, do: n
+
+        _ ->
+          []
+      end
+
+    Map.take(old_form || %{}, names) != Map.take(new_form || %{}, names)
+  end
 
   @doc false
   def next_form_gen(socket, true), do: (socket.assigns[:editor_form_gen] || 0) + 1

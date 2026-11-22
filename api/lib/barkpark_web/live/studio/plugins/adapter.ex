@@ -101,10 +101,7 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           api_token_raw: Map.get(assigns, :api_token_raw, ""),
           # The document a nested `visibleWhen` reads by default (task-9905a69475b1ff3b).
           root: Map.get(assigns, :editor_form),
-          id_base: id_base,
-          # A rich text subfield remounts on a value the server replaced, as
-          # a top-level one does (task-47be2cdf59d0acd5).
-          form_gen: Map.get(assigns, :editor_form_gen, 0)
+          id_base: id_base
         })
 
       "arrayOf" ->

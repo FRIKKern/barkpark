@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
@@ -476,6 +477,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} ->
+        # A rich text in an object written over another editor's change is
+        # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
+        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
@@ -500,7 +504,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> keep_unsaved_values(doc, keys)
          |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
          |> RefusedSave.not_codes(not_codes)
-         |> settle_dirty(keys)}
+         |> settle_dirty(keys)
+         |> RichTextRemote.hold(held)}
 
       _ ->
         {:noreply, socket}

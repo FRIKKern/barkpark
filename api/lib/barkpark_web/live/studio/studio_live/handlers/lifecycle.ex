@@ -13,7 +13,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, PostPath, Shared}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases, UnsavedObjects}
+
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{
+    RemoteValues,
+    RichTextRemote,
+    UnsavedBases,
+    UnsavedObjects
+  }
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -153,6 +159,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply,
          socket
          |> RemoteValues.push(socket.assigns[:editor_form] || %{}, updated_form)
+         |> RichTextRemote.push(socket.assigns[:editor_form] || %{}, updated_form)
          |> PostedEdits.remote(socket.assigns[:editor_form] || %{}, updated_form)
          |> took_frame(doc_data)
          |> assign(
@@ -252,6 +259,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       socket =
         socket
         |> RemoteValues.push(local, form, bases)
+        |> RichTextRemote.push(local, form)
         |> PostedEdits.remote(local, form)
         |> assign(
           editor_form: form,
