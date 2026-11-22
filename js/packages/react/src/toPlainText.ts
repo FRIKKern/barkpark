@@ -2,7 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 import type { PortableTextBlock, PortableTextNode } from './PortableText'
-import { type Block, str, isMap, asList, codeSource } from './inline'
+import { type Block, str, isMap, asList, codeSource, inlineText } from './inline'
 import { listChildren } from './list-children'
 
 /**
@@ -93,31 +93,12 @@ function joinBlocks(parts: string[]): string {
   return parts.filter((s) => s !== '').join('\n\n')
 }
 
-/** Concatenate an inline content run's readable text — the `{type:'text',value}`
- * nodes paragraph/list/table cells carry, recursing through mark wrappers. Marks
- * are style metadata and contribute no text (twin of the renderer dropping them
- * to plain text). Fail-soft on non-arrays. */
-function inlineText(nodes: unknown): string {
-  if (typeof nodes === 'string') return nodes
-  if (typeof nodes === 'number') return String(nodes)
-  if (!Array.isArray(nodes)) return ''
-  let out = ''
-  for (const n of nodes) {
-    if (typeof n === 'string') {
-      out += n
-      continue
-    }
-    if (typeof n === 'number') {
-      out += String(n)
-      continue
-    }
-    if (!isMap(n)) continue
-    if (typeof n.value === 'string') out += n.value
-    else if (typeof n.text === 'string') out += n.text
-    if (Array.isArray(n.children)) out += inlineText(n.children)
-  }
-  return out
-}
+/* An inline content run's readable text is `inlineText` from ./inline: the
+ * same words every renderer draws. A leaf reads as its first non-empty of
+ * `value`, legacy `text`, then its own `children`; a number reads as its
+ * digits; a nested array recurses; marks contribute no text. Held to the
+ * shared fixture api/test/support/fixtures/inline-code-source.json by
+ * tests/inline-code-source.parity.test.ts. */
 
 /** Prose block body: the `content` inline run, or the legacy flat `text`
  * fallback (mirrors the renderer's `paragraphInline`). */
