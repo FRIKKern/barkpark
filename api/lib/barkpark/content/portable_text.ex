@@ -457,12 +457,13 @@ defmodule Barkpark.Content.PortableText do
   defp keep_stored(blocks, []), do: for({block, _src} <- blocks, not empty?(block), do: block)
 
   defp keep_stored(blocks, stored) do
-    indexed = Enum.map(stored, &{normalize(fragment_html(&1)), to_html([&1]), &1})
+    indexed =
+      Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1]), &1})
 
     kept =
       blocks
       |> Enum.map_reduce(indexed, fn {block, src}, left ->
-        src = src && normalize(src)
+        src = src && {normalize(src), drawn_list(block)}
         html = to_html([block])
 
         i =
@@ -488,6 +489,15 @@ defmodule Barkpark.Content.PortableText do
   # inside it belongs to the deeper items.
   defp fragment_html(%{"listItem" => _} = b), do: "<li>" <> spans_html(b)
   defp fragment_html(b), do: to_html([b])
+
+  # Where a list item sits as the editor draws it: its list (`<ul>` or
+  # `<ol>`) and its depth. A `<li>`'s own HTML does not say, so an item
+  # indented or turned from bullet to number with its text untouched matched
+  # the stored item and the change was not saved (task-be63132f2ec337c7).
+  # Read as drawn, a stored value the editor shows the same way (a custom
+  # `listItem` in a `<ul>`, a missing `level`) is still the stored item.
+  defp drawn_list(%{"listItem" => _} = b), do: {list_kind(b), item_level(b)}
+  defp drawn_list(_b), do: nil
 
   # A browser serialises a `"` in text as is and a no-break space as
   # `&nbsp;`; `escape/1` writes `&quot;` and the character itself.
