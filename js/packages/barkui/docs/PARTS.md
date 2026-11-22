@@ -261,9 +261,10 @@ dialog, or it carries popover), and no layer in part.json names it"), at the fir
 real input that follows. A box open in the top layer that no layer names also fails by name ("… is open in
 the top layer during the reading, and no layer in part.json names it") at every moment the check judges or
 drives the part: each reading, each Tab stop of the focus walk, each press step, each driven state, and
-each layer's open and close input. The one limit: a box the page never holds while the check has it open,
-up to the check's last look (one made only after an input the check never gives), or one only inside a
-closed shadow root, is not seen.
+each layer's open and close input. A closed shadow root, which no reading can see into, is refused by name
+however the page makes it: `attachShadow` with mode `closed`, or markup holding a closed declared root given to
+`setHTMLUnsafe`, `setHTML`, `parseHTMLUnsafe` or `parseHTML`. The one limit: a box the page never holds while the
+check has it open, up to the check's last look (one made only after an input the check never gives), is not seen.
 
 A layer's box opens at once on its input. One that is not open once its input settles fails by name ("… is
 not open in the top layer once its "open" input settles: it opened later than the check waits, or not at
@@ -307,9 +308,9 @@ a `style` attribute in a stage holds is read, from the page's first frame, howev
 name; a hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first,
 since the browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
 The rule reads stages only: what UI SDK writes on the root while a dialog is open (it stops the page scrolling) is
-outside every stage and not judged, since it is behaviour, not look. The one limit: a value only inside a closed
-shadow root, or one an element held only between arriving in a stage and leaving it within one task, changed
-after it left, is not seen.
+outside every stage and not judged, since it is behaviour, not look. A closed shadow root is refused (see "The top
+layer"). The one limit: a value an element held only between arriving in a stage and leaving it within one task,
+changed after it left, is not seen; it is never drawn.
 
 ## What part.css may condition on
 
