@@ -49,7 +49,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
 
       case subfields(sub_schema, sub, b, m, t) do
         nil ->
-          typed = if text?(socket, at), do: UnsavedBases.fetch(socket, at), else: :error
+          typed = typed_on(socket, at, b, m)
 
           case clash.(typed, b, m, t, sub_schema, sub) do
             {:ours, v} ->
@@ -68,6 +68,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
           {Map.put(value, sub, v), clashed? or inner_clashed?, kept}
       end
     end)
+  end
+
+  # The base a subfield's value is read from. A text subfield typed in has
+  # the base its words were typed on (`UnsavedBases`), or none known
+  # (`:error`: theirs that differs is a clash, never merged unseen). One this
+  # tab did not change from the stored row is read against that row, so
+  # another editor's change to it is taken in: the object is held for
+  # another subfield's typing, not this one's.
+  defp typed_on(socket, at, base, mine) do
+    case text?(socket, at) and UnsavedBases.fetch(socket, at) do
+      {:ok, typed} -> {:ok, typed}
+      _ when mine == base -> {:ok, base}
+      _ -> :error
+    end
   end
 
   @doc """

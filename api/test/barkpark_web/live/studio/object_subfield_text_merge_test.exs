@@ -217,6 +217,43 @@ defmodule BarkparkWeb.Studio.ObjectSubfieldTextMergeTest do
       refute has_element?(a, @banner)
     end
 
+    # The push after the merge carries the label's numbers: the page that
+    # took the merge reports the merge, one that kept typing reports the
+    # value its words were typed on, never its own unsaved words.
+    test "#{surface}: A took the merge: its next save keeps B's words", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      held_label(a, "one two three FAIL")
+      posts(b, @label, %{"code" => "c0", "label" => "B one two three"})
+
+      assert eventually(fn ->
+               assigns(a).editor_form["meta"]["label"] == "B one two three FAIL"
+             end)
+
+      [_was, merged] = label_seqs(a)
+
+      posts(a, @label, %{"code" => "c0", "label" => "B one two three ok"}, %{@label => merged})
+
+      assert eventually(fn -> stored(c)["label"] == "B one two three ok" end)
+    end
+
+    test "#{surface}: A kept typing through the merge: its next save keeps B's words", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      held_label(a, "one two three FAIL")
+      posts(b, @label, %{"code" => "c0", "label" => "B one two three"})
+
+      assert eventually(fn ->
+               assigns(a).editor_form["meta"]["label"] == "B one two three FAIL"
+             end)
+
+      [was, _merged] = label_seqs(a)
+
+      posts(a, @label, %{"code" => "c0", "label" => "one two three ok"}, %{@label => was})
+
+      assert eventually(fn -> stored(c)["label"] == "B one two three ok" end)
+    end
+
     # Control (passes on main): both rewrote the same words.
     test "#{surface}: an overlap in the label shows the banner and keeps A's words", c do
       a = open(c, @surface)
