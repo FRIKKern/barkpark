@@ -1,10 +1,12 @@
 /* Select: UI SDK's <ui-select>, a trigger (a native button showing the chosen value, or the placeholder) and the
    list it opens over the page in the top layer, each option a <ui-select-item>.
-   The trigger has the text field's height, type and edge, so a form reads as one; the edge darkens on hover. With no script, a list is printed open under its trigger, so every option can be read. The
-   list is UI SDK's: its ground, edge and shadow, the highlighted option on --ui-muted, a disabled option faded and
-   passed over by the arrows; the chosen option carries UI SDK's check. The list is read open, by its layer.
+   The trigger has the text field's height and type, and UI SDK's --ui-input edge, so a form reads as one; the list takes the same edge,
+   so it stands off the page at 3:1. The edge does not change on hover: the list's layer is opened by a click, which
+   leaves the pointer resting on the trigger. The rest of the list is UI SDK's: its ground and shadow, the
+   highlighted option on --ui-muted, a disabled option faded and passed over by the arrows, the chosen option
+   marked by UI SDK's check. With no script, each list is printed open under its trigger, so every option is read.
    The look keys only on what UI SDK writes: data-open, data-placeholder, data-highlighted, data-selected and
-   data-disabled, and on :hover. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also
+   data-disabled. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also
    turns the edge to --ui-ring-border while the trigger has focus or its list is open. */
 
 /* The root holds no look of its own; it lays out as its trigger and list, with script and without. */
@@ -14,23 +16,18 @@ ui-select {
 
 [data-slot="select-trigger"] {
   --bark-select-text: 0.875rem;
-  --bark-select-edge: var(--ui-input);
-  --bark-select-hover-edge: var(--ui-muted-foreground);
 
   box-sizing: border-box;
   width: 100%;
   min-width: calc(var(--ui-spacing) * 48);
   height: calc(var(--ui-spacing) * 9);
   padding-inline: calc(var(--ui-spacing) * 3);
-  border-color: var(--bark-select-edge);
   font-size: var(--bark-select-text);
   line-height: 1.25;
+}
 
-  /* Not while it has focus (UI SDK's data-focused): focus has the ring, and a list closed by Escape leaves the pointer
-     where its click opened it, so the edge does not hang on where the pointer was left. */
-  &:hover:not([data-disabled], [data-open], [data-focused]) {
-    border-color: var(--bark-select-hover-edge);
-  }
+[data-slot="select-content"] {
+  border-color: var(--ui-input);
 }
 
 [data-slot="select-content"],
