@@ -41,7 +41,9 @@ defmodule BarkparkWeb.Studio.RemoteSaveSetBackTest do
                 %{"value" => "done", "title" => "Done"}
               ]
             },
-            %{"name" => "notes", "title" => "Notes", "type" => "string"}
+            %{"name" => "notes", "title" => "Notes", "type" => "string"},
+            %{"name" => "due", "title" => "Due", "type" => "date"},
+            %{"name" => "flag", "title" => "Flag", "type" => "boolean"}
           ]
         },
         @dataset
@@ -55,7 +57,12 @@ defmodule BarkparkWeb.Studio.RemoteSaveSetBackTest do
         %{
           "doc_id" => id,
           "title" => "Fixture",
-          "content" => %{"stage" => "draft", "notes" => "n"}
+          "content" => %{
+            "stage" => "draft",
+            "notes" => "n",
+            "due" => "2026-01-01",
+            "flag" => false
+          }
         },
         @dataset
       )
@@ -86,7 +93,7 @@ defmodule BarkparkWeb.Studio.RemoteSaveSetBackTest do
 
   # A post of `key` as the page sends it: the whole form, `key` changed.
   defp picks(view, key, value) do
-    form = Map.take(assigns(view).editor_form, ~w(title stage notes))
+    form = Map.take(assigns(view).editor_form, ~w(title stage notes due flag))
 
     view
     |> element("#editor-form")
@@ -155,6 +162,32 @@ defmodule BarkparkWeb.Studio.RemoteSaveSetBackTest do
       picks(a, "stage", "review")
 
       assert eventually(fn -> stored(c)["stage"] == "review" end)
+    end
+
+    test "#{surface}: a date set back to A's first one after B's: it is saved", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      picks(a, "due", "2026-02-02")
+      assert eventually(fn -> stored(c)["due"] == "2026-02-02" end)
+      picks(b, "due", "2026-03-03")
+      assert eventually(fn -> assigns(a).editor_form["due"] == "2026-03-03" end)
+
+      picks(a, "due", "2026-02-02")
+
+      assert eventually(fn -> stored(c)["due"] == "2026-02-02" end)
+    end
+
+    test "#{surface}: a box ticked again after B cleared it: it is saved", c do
+      a = open(c, @surface)
+      b = open(c, @surface)
+      picks(a, "flag", "true")
+      assert eventually(fn -> stored(c)["flag"] == true end)
+      picks(b, "flag", "false")
+      assert eventually(fn -> assigns(a).editor_form["flag"] in [false, "false"] end)
+
+      picks(a, "flag", "true")
+
+      assert eventually(fn -> stored(c)["flag"] == true end)
     end
 
     # A conflict that keeps A's whole buffer does not draw B's save: A's
