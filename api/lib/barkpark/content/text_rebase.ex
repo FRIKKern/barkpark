@@ -20,6 +20,9 @@ defmodule Barkpark.Content.TextRebase do
   accent or an emoji in half.
   """
 
+  alias Barkpark.Content.DiffMatchPatch
+  alias Barkpark.Content.DiffMatchPatch.Make
+
   @doc """
   The text with both changes. `ours` when `theirs` did not change `base`,
   `theirs` when `ours` did not.
@@ -44,6 +47,7 @@ defmodule Barkpark.Content.TextRebase do
   # (last post wins, as before this module): a merge of a 1 MB field took 2 s
   # inside the document's patch lock (#25908 review).
   @max_bytes 65_536
+  @max_changed_units 700
 
   @doc """
   Rebases each posted text field named in `bases` onto the stored value.
@@ -62,13 +66,16 @@ defmodule Barkpark.Content.TextRebase do
   #{@max_bytes} bytes, is left alone.
   """
   @spec rebase(map(), map(), map()) :: map()
+  #
+  # A key may be a path into an object (`["meta", "label"]`,
+  # task-71ff11d4e7374985): the subfield is merged as a top-level field is.
   def rebase(params, bases, current) when is_map(params) and is_map(bases) do
     Enum.reduce(bases, params, fn {key, base}, acc ->
-      with posted when is_binary(posted) <- Map.get(acc, key),
-           stored when is_binary(stored) <- Map.get(current, key),
+      with posted when is_binary(posted) <- at(acc, key),
+           stored when is_binary(stored) <- at(current, key),
            true <- is_binary(base) and stored != base and posted != stored,
            true <- Enum.all?([base, posted, stored], &(byte_size(&1) <= @max_bytes)) do
-        Map.put(acc, key, merge3(base, posted, stored))
+        put(acc, key, merge3(base, posted, stored))
       else
         _ -> acc
       end
@@ -76,6 +83,26 @@ defmodule Barkpark.Content.TextRebase do
   end
 
   def rebase(params, _bases, _current), do: params
+
+  defp at(map, [key]) when is_map(map), do: Map.get(map, key)
+
+  defp at(map, [key | rest]) when is_map(map) do
+    case Map.get(map, key) do
+      %{} = inner when not is_struct(inner) -> at(inner, rest)
+      _ -> nil
+    end
+  end
+
+  defp at(map, key) when is_map(map), do: Map.get(map, key)
+  defp at(_map, _key), do: nil
+
+  # Only called where `at/2` found a string, so every map on the path is there.
+  defp put(map, [key], value), do: Map.put(map, key, value)
+
+  defp put(map, [key | rest], value),
+    do: Map.put(map, key, put(Map.fetch!(map, key), rest, value))
+
+  defp put(map, key, value), do: Map.put(map, key, value)
 
   @doc false
   def max_bytes, do: @max_bytes
@@ -103,6 +130,65 @@ defmodule Barkpark.Content.TextRebase do
       true ->
         merge_splices(String.graphemes(base), String.graphemes(ours), String.graphemes(theirs))
     end
+  end
+
+  @doc """
+  The conflict decision for words not yet saved under another editor's save
+  (`Handlers.Lifecycle`): `merge3_both/3`, and nil also where TanStack's
+  `merge3` (barkpark-studio merge.ts) gives null. That one makes `ours` into
+  a diff-match-patch patch and applies it to `theirs`, placing each hunk by
+  the text around it; a hunk with nowhere to go (the text it was typed next
+  to was cleared or rewritten) is a clash, not words kept on their own
+  (task-881f16e32fffbe9a). A text too big to decide in a fraction of a
+  second is a clash too. The desk's undo keeps `merge3_both/3`.
+  """
+  @spec merge3_clash(String.t(), String.t(), String.t()) :: String.t() | nil
+  def merge3_clash(base, ours, theirs)
+      when is_binary(base) and is_binary(ours) and is_binary(theirs) do
+    with merged when is_binary(merged) <- merge3_both(base, ours, theirs) do
+      if places?(base, ours, theirs), do: merged
+    end
+  end
+
+  defp places?(base, ours, theirs) when ours == base or ours == theirs or theirs == base,
+    do: true
+
+  # Too big to decide quickly is not placed: a clash, the banner. The port
+  # has no deadline (TanStack's diff stops at a second), so it is not run on
+  # a text over `apply/2`'s unit limit or a change from `base` to `ours` over
+  # `@max_changed_units`, and `Make.text/2` gives up past
+  # `Make.max_diffs/0` diff parts. A refusal by `apply/2` is not placed
+  # either. A held field in a text over the unit limit is therefore a clash
+  # under every remote save; the banner keeps its words, and the save path
+  # still merges its next post.
+  defp places?(base, ours, theirs) do
+    {base, ours} = {units(base), units(ours)}
+    limit = DiffMatchPatch.limits().text_units
+
+    if Enum.any?([base, ours, units(theirs)], &(length(&1) > limit)) or
+         changed_units(base, ours) > @max_changed_units do
+      false
+    else
+      with patch when is_binary(patch) <- Make.text(base, ours),
+           {:ok, _text, applied} <- DiffMatchPatch.apply(patch, theirs) do
+        Enum.all?(applied)
+      else
+        _too_big_or_refused -> false
+      end
+    end
+  end
+
+  # The units between the common prefix and the common suffix.
+  defp changed_units(a, b) do
+    prefix = common_prefix(a, b, 0)
+    {a, b} = {Enum.drop(a, prefix), Enum.drop(b, prefix)}
+    suffix = common_prefix(Enum.reverse(a), Enum.reverse(b), 0)
+    max(length(a), length(b)) - suffix
+  end
+
+  defp units(string) do
+    bin = :unicode.characters_to_binary(string, :utf8, {:utf16, :big})
+    for <<u::16 <- bin>>, do: u
   end
 
   # The merged text, or nil when the two splices overlap (the caller keeps

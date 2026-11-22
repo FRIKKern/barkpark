@@ -1,4 +1,4 @@
-// node check/selftest.mjs: proves the check can still lose. Each case copies
+// node check/selftest.mjs [--job <key>] [words]: proves the check can still lose. Each case copies
 // the button into a scratch parts folder, plants breaks, runs the check on it
 // and asserts the run fails for the right reason. A part's own files may not
 // style the stage except through part.css, so breaks in paint go in through
@@ -14,17 +14,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
-import { partsDir } from '../build/parts.mjs'
-import { capacitySentence, PER_JOB, SELFTEST_CEILING, selftestSentence } from './capacity.mjs'
+import { discoverParts, partsDir } from '../build/parts.mjs'
+import { CASE_SECONDS, capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
+import { layerMisplaced, SELFTEST_JOBS, selftestPick } from './jobs.mjs'
+import { selftestReport } from './selftest-report.mjs'
 import { runCheck } from './check.mjs'
 import { open } from './proofs.mjs'
 import { readView } from './reading.mjs'
 import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
-import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, says, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
+import { LAYER_CASES } from './layer-cases.mjs'
+import { PLACEMENT_CASES } from './placement-cases.mjs'
+import { STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
+import { holderSentence, topLayerTouch } from './layers.mjs'
+import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
-const CASES = [
+export const CASES = [
   // The label reading: the six plants it was built for, and the ladder that measures its limit.
   {
     name: 'a label not drawn as itself turns both wide lights off at its control, and the ladder holds docs/PARTS.md to its numbers',
@@ -144,41 +150,13 @@ const CASES = [
     plant: inCss('#button-after::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ui-primary); }'),
     expect: (p) => lights(p).skins.pass && lights(p).schemes.pass,
   },
-  // Waits on the sheet are bound to their view and pair; everything else is proved on every surface.
-  {
-    name: 'with every surface read, a label gone on raised, a second skin short on primary, and a waited pair measuring worse all turn the lights off; a placeholder is matched to a wait by its own colour',
-    only: ['skins', 'schemes'],
-    surfaces: true,
-    secs: 150,
-    // Fields in UI SDK's own look: a placeholder in the waited pair (muted text on the field's background) in an
-    // input and in a textarea, elements that draw no children, and one on another ground. fjord light's primary is
-    // planted worse above, so the waited ones are red there by design.
-    plant: (d) =>
-      edit(join(d, 'example.html'), (s) =>
-        `${s}\n<div data-demo-row>\n  <span data-demo-label>Fields</span>\n  <input id="button-ph-waited" data-slot="input" placeholder="Waited">\n  <input id="button-ph-other" data-slot="input" placeholder="Other ground">\n  <textarea id="button-ph-area" data-slot="textarea" placeholder="Waited, in a textarea"></textarea>\n</div>\n`),
-    css: [
-      '.sr-stage[data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }',
-      'html[data-skin="evergreen"][data-color-scheme="dark"] .sr-stage[data-surface="primary"] [data-demo-label] { color: var(--ui-border); }',
-      'html[data-skin="fjord"][data-color-scheme="light"] .sr-stage[data-surface="primary"] { --ui-muted-foreground: var(--ui-border); }',
-      '#button-ph-other { background: var(--ui-muted); }',
-    ].join('\n'),
-    expect: each({
-      'a label gone on raised': both(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)),
-      'a second skin short on primary': says('schemes', /evergreen dark on primary: drawn text [\d.]+:1 at span/),
-      'the waited pair worse than recorded': says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/),
-      'a placeholder on another ground stays red': says('skins', /on primary: drawn text [\d.]+:1 at input#button-ph-other ""::placeholder/),
-      'a placeholder in the waited pair is let through by its wait, in an input and in a textarea': (p) =>
-        !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /at (input#button-ph-waited|textarea#button-ph-area) ""::placeholder/.test(f) && !/fjord light/.test(f))),
-      'no reader puts a child into an element it measures': (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /a reader put a child into/.test(f))),
-    }),
-  },
+  ...SURFACE_CASES,
   // Phone width: read in full in every skin, scheme and surface. part.css may not change paint at phone width
   // (refused below), so these rules come from the selftest's own sheet, beyond that wall.
   {
     name: 'a label blanked, edges dropped, and a label and edge gone on raised only, at phone width, turn "phone" off, each by name',
     only: ['phone'],
     surfaces: true,
-    secs: 150,
     css: [
       '@media (max-width: 600px) { [data-slot="button"][data-size="lg"] { --bark-button-fg: var(--ui-background); } }',
       '@media (max-width: 600px) { [data-slot="button"]:not([data-variant]):not([data-size]) { --bark-button-edge: transparent; } }',
@@ -332,11 +310,11 @@ steps.push({
     name: 'styling that waits until after the demo has run is caught after a press step',
     only: ['pressed'],
     plant: (d) => inDemo(d, "setTimeout(() => { root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000' }, 2500)"),
-    expect: failedSay(/after step .*button#button-after carries a style attribute/),
+    expect: failedSay(/after step .*button#button-after "Duplicate" was given color in a style attribute, which is not placement/),
   },
   // The run-time guard: what dodges the lint is caught once the demo has run.
   ...[
-    ['an inline style spelled to dodge the lint', "root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000'", /button#button-after carries a style attribute/],
+    ['an inline style spelled to dodge the lint', "root.querySelector('#button-after')['sty' + 'le'].color = '#ff0000'", /button#button-after "Duplicate" was given color in a style attribute, which is not placement/],
     ['a <style> spelled to dodge the lint', "document.head.append(Object.assign(document.createElement('sty' + 'le'), { textContent: '#button-after::before { content: \"x\"; color: #ff0000 }' }))", /a stylesheet the build did not put there/],
     ['a rule slipped into the UI SDK sheet', "const s = [...document['style' + 'Sheets']].find((x) => !x.href); s['insert' + 'Rule']('#button-after { color: #ff0000 }')", /rules changed/],
     ['an adopted sheet', "const S = window['CSS' + 'StyleSheet']; const s = new S(); s['replace' + 'Sync']('#button-after { color: #ff0000 }'); document['adopted' + 'StyleSheets'] = [s]", /adopted/],
@@ -383,6 +361,39 @@ steps.push({
     only: ['pressed'],
     plant: inCss('#button-after { filter: opacity(0.1); }'),
     expect: refused(/part\.css line \d+: filter: opacity\(0\.1\); part\.css may only set filter to none/),
+  },
+  // What a part does not cover is a row of part.json "notCovered" (build/parts.mjs): prose that says something is
+  // not covered and names no row is refused by name; with the row, the same part is read.
+  {
+    name: 'a summary or part.css note that says something is not covered is refused at discovery unless part.json "notCovered" names it',
+    direct: () => {
+      const root = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
+      try {
+        const dir = join(root, 'button')
+        cpSync(join(partsDir, 'button'), dir, { recursive: true })
+        const json = JSON.parse(readFileSync(join(dir, 'part.json'), 'utf8'))
+        const css = readFileSync(join(dir, 'part.css'), 'utf8')
+        const plant = (summary, notes, list) => {
+          writeFileSync(join(dir, 'part.json'), JSON.stringify({ ...json, summary: `${json.summary} ${summary}`.trim(), ...(list && { notCovered: list }) }))
+          writeFileSync(join(dir, 'part.css'), `${css}\n/* ${notes} */\n`)
+          try {
+            discoverParts(root)
+            return ''
+          } catch (e) {
+            return e.message
+          }
+        }
+        const said = [
+          /^parts\/button: part\.json "summary" says something is not covered \("Its ui-badge is not styled\."\), and part\.json "notCovered" names none of it/.test(plant('Its ui-badge is not styled.', 'Nothing more.')),
+          /^parts\/button: part\.css's notes says something is not covered \("The ripple is not proved\."\)/.test(plant('', 'The ripple is not proved.')),
+          plant('Its ui-badge is not styled.', 'The ripple is not proved.', [{ name: 'ui-badge', why: 'A planted reason.' }, { name: 'ripple', why: 'A planted reason.' }]) === '',
+        ]
+        if (!said.every(Boolean)) console.log(`    not as wanted: input ${said.flatMap((ok, k) => (ok ? [] : [k + 1])).join(', ')}`)
+        return said.every(Boolean)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
   },
   // The reviewer's own inputs: each refused before a browser opens, and each refused again by the browser's reading.
   ...[
@@ -590,51 +601,13 @@ steps.push({
       'background-clip: text through a variable': skinsSay(/button#button-after "Duplicate" computes background-clip: text/),
     }),
   },
-  // Every rule on every control it can match, read at a moment it applies (states.mjs, coverage.mjs): all lights.
-  {
-    name: 'a state on any control of its kind, pending held or reached by the steps, and a rule nothing reads each fail by name',
-    only: ['pressed', 'skins', 'schemes', 'phone', 'noscript'],
-    states: true,
-    secs: 150,
-    plant: all(
-      // The review's: a second control of the secondary kind, and pending.
-      inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
-      inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }'),
-      // A later control reached by structure alone, and a rule that applies to nothing.
-      inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
-      inCss('[data-slot="button"][data-size="xl"] { gap: 0; }'),
-      // A dead branch beside one that applies at every reading.
-      inCss('[data-slot="button"], [data-slot="button"][data-variant="huge"] { --bark-button-text: 0.875rem; }'),
-      // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
-      inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
-    ),
-    css: [
-      // Beyond the walls (this sheet is the selftest's own, and never pinned): the round-8 review's two hover rules,
-      // the first kept off the save button, which the dark-only plant above needs proven and held.
-      '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled], #button-save) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
-      'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
-    ].join('\n'),
-    expect: each({
-      'a hover on a second control of its kind': skinsSay(/real hover on button#button-after "Duplicate": .*no pinned row shows this change/),
-      'a hover through :nth-child on a later control': skinsSay(/real hover on button "Medium": .*no pinned row shows this change/),
-      'the hover, drawn on every control it applies to': skinsSay(/hover held on every live control it applies to, .*: text does not draw at button#button-after "Duplicate"/),
-      'the pin unlike the real state on the control itself': skinsSay(/real hover on button#button-destructive "Delete": .* where the control pinned /),
-      'pending held at rest, in every view': drawnOff('button "Saving"'),
-      'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
-      'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
-      'a rule nothing reads': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a rule nothing read: [data-slot="button"][data-size="xl"]')),
-      'a branch nothing reads, beside one that is read': (p) => (p.parts.button.unread ?? []).some((u) => u.startsWith('a branch nothing read: [data-slot="button"][data-variant="huge"], of ')),
-      'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
-      'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
-    }),
-  },
+  ...STATE_CASES,
   // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
   // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
   {
     name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
     only: ['skins'],
     states: true,
-    secs: 120,
     plant: all(
       (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
       inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
@@ -653,6 +626,8 @@ steps.push({
     }),
   },
   ...CEILING_CASES,
+  ...LAYER_CASES,
+  ...PLACEMENT_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
@@ -680,45 +655,88 @@ steps.push({
   },
 ]
 
+/** The part a case runs on: `part` names one of the package's parts (build/parts.mjs, discoverParts); a case
+    without the key runs on the button. A name that is not a part, or a key with no name, fails the case by its name. */
+export function partOf(c, names = discoverParts().map((p) => p.name)) {
+  if (!Object.hasOwn(c, 'part')) return 'button'
+  if (typeof c.part === 'string' && names.includes(c.part)) return c.part
+  throw new Error(`the case "${c.name}" runs on the part ${JSON.stringify(c.part ?? null)}, which is not one; the parts are ${names.join(', ')} (parts/)`)
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let failures = 0
-  // node check/selftest.mjs <words>: only the cases whose name holds those words.
-  const pick = process.argv.slice(2).join(' ')
-  const run = CASES.filter((c) => c.name.includes(pick))
+  // node check/selftest.mjs --job <key> [words]: the cases that job runs (check/jobs.mjs, selftestJob), under its
+  // ceiling; CI runs one job per key. Without --job, every case, under the sum of the jobs' ceilings. With words,
+  // only the cases whose name holds them.
+  // --report <file>: the job's report for the closing check (check/selftest-report.mjs).
+  const args = process.argv.slice(2)
+  const at = args.indexOf('--report')
+  const report = at < 0 ? null : args.splice(at, 2)[1]
+  const key = args[0] === '--job' ? args[1] : null
+  if (key !== null && !SELFTEST_JOBS.some((j) => j.key === key)) {
+    console.log(`FAIL the selftest has no job ${JSON.stringify(key)}; its jobs are ${SELFTEST_JOBS.map((j) => j.key).join(', ')} (check/jobs.mjs)`)
+    process.exit(1)
+  }
+  const pick = args.slice(key === null ? 0 : 2).join(' ')
+  const run = selftestPick(CASES, key, pick)
+  if (!run.length) {
+    console.log(`FAIL the selftest${key === null ? '' : ` job ${key}`} has no case${pick ? ` whose name holds "${pick}"` : ''} to run; a selftest of nothing is never green`)
+    process.exit(1)
+  }
   const start = Date.now()
   let now = ''
-  enforceCeiling(SELFTEST_CEILING, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${selftestSentence()} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest across jobs.`)
+  const keys = key === null ? SELFTEST_JOBS.map((j) => j.key) : [key]
+  const ceiling = keys.reduce((n, k) => n + SELFTEST_CEILINGS[k], 0)
+  enforceCeiling(ceiling, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${keys.map((k) => selftestSentence(k)).join(' ')} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest again.`)
+  const held = []
   for (const c of run) {
     now = c.name
     if (c.direct) {
       const t0 = Date.now()
-      const held = await c.direct()
-      if (!held) failures++
-      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+      // A direct case gets the selftest's cases, for one that picks a case by a rule.
+      const ok = await c.direct(CASES)
+      if (ok) held.push(c.name)
+      else failures++
+      console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
       continue
     }
     const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
     try {
       const dir = join(scratch, 'parts')
       const out = join(scratch, 'out')
-      cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
-      c.plant?.(join(dir, 'button'))
+      let name
+      try {
+        name = partOf(c)
+      } catch (e) {
+        failures++
+        console.log(`FAIL ${e.message}`)
+        continue
+      }
+      cpSync(join(partsDir, name), join(dir, name), { recursive: true })
+      c.plant?.(join(dir, name))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: !!c.surfaces, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {
         html = readFileSync(join(out, 'index.html'), 'utf8')
       } catch {}
-      const held = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < (c.secs ?? 60)
-      if (!held) failures++
-      console.log(`${held ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
-      if (!held) console.log(logs.map((l) => `    ${l}`).join('\n'))
+      // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
+      const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, name, 'part.json'), 'utf8')).layers, proof))
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced
+      if (pass) held.push(c.name)
+      else failures++
+      console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
+      if (misplaced) console.log(`    ${misplaced}`)
+      if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }
   }
-  console.log(`selftest: ${run.length - failures} of ${run.length} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
+  const count = { held: run.length - failures, of: run.length }
+  console.log(holderSentence())
+  console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
+  if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)
 }

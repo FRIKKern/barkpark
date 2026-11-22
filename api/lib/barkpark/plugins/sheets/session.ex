@@ -483,18 +483,27 @@ defmodule Barkpark.Plugins.Sheets.Session do
   (its unflushed edits are what the restore replaces), run `write`, discard
   again (a collaborator's edit may have restarted it from the old row in
   between), then start a fresh session from the restored row and announce it,
-  so every open grid sees a new epoch and refetches. Returns `write`'s result;
-  on an error nothing is restarted or announced.
+  so every open grid sees a new epoch and refetches. Returns `write`'s result.
+  On an error nothing was written, but the session is gone: it is started
+  again from the stored row and announced, so the open grids refetch rather
+  than edit a session that no longer exists. Its unflushed edits are lost, so
+  a caller that can refuse checks first (`Content.check_restore/4`,
+  task-5b74471e6a2d6de8).
   """
   @spec restore(String.t(), String.t(), scope(), (-> {:ok, term()} | {:error, term()})) ::
           {:ok, term()} | {:error, term()}
   def restore(slug, dataset, workspace_id, write) when is_function(write, 0) do
     :ok = discard(slug, dataset, workspace_id)
 
-    with {:ok, _} = ok <- write.() do
-      :ok = discard(slug, dataset, workspace_id)
-      _ = call_session(slug, dataset, workspace_id, :announce_reload)
-      ok
+    case write.() do
+      {:ok, _} = ok ->
+        :ok = discard(slug, dataset, workspace_id)
+        _ = call_session(slug, dataset, workspace_id, :announce_reload)
+        ok
+
+      error ->
+        _ = call_session(slug, dataset, workspace_id, :announce_reload)
+        error
     end
   end
 

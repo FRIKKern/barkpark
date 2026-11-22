@@ -28,6 +28,12 @@ type fakePaperServer struct {
 	noText bool
 	// notes are the lines every sync answer carries (a kept callout body).
 	notes []string
+	// view is the fingerprint pull answers (x-bpml-view) and nextView the one
+	// an applied sync answers (bpmlView); "" plays a server from before it.
+	view     string
+	nextView string
+	lastView string
+	sentView bool
 }
 
 func (f *fakePaperServer) handler() http.Handler {
@@ -40,6 +46,9 @@ func (f *fakePaperServer) handler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/bpml")
 		w.Header().Set("x-paper-rev", f.rev)
+		if f.view != "" {
+			w.Header().Set("x-bpml-view", f.view)
+		}
 		_, _ = w.Write([]byte(f.bpml))
 	})
 
@@ -51,12 +60,18 @@ func (f *fakePaperServer) handler() http.Handler {
 		f.syncCalls++
 
 		var body struct {
-			Bpml    string `json:"bpml"`
-			BaseRev string `json:"baseRev"`
+			Bpml    string  `json:"bpml"`
+			BaseRev string  `json:"baseRev"`
+			View    *string `json:"bpmlView"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.lastBase = body.BaseRev
 		f.lastBpml = body.Bpml
+		f.sentView = body.View != nil
+		f.lastView = ""
+		if body.View != nil {
+			f.lastView = *body.View
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 
@@ -81,6 +96,9 @@ func (f *fakePaperServer) handler() http.Handler {
 			if f.noText {
 				answer["bpml"] = nil
 				answer["bpml_unprintable"] = "kind: block"
+			}
+			if f.nextView != "" {
+				answer["bpmlView"] = f.nextView
 			}
 			_ = json.NewEncoder(w).Encode(answer)
 		}

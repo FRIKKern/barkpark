@@ -25,9 +25,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
+  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, PostPath, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @doc false
@@ -424,13 +424,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   #
   # `Caps.attach/1` arms the Studio deny-gate as
   # `attach_hook(_, :handle_event, _)`, and no `handle_event` hook — parent
-  # socket or component socket — can see a `handle_info`. This function is the
-  # body of one: `handle_info({:autosave_form, form})` → `autosave_form/2` →
-  # here → `Content.upsert_draft`. Before this gate the ONLY thing standing in
-  # a write-denied principal's way was the socket gate on the five parent
-  # events that send to this seam today (select-media / clear-image /
-  # upload-image / select-ref / clear-ref, all in `Caps` `@write_events`) —
-  # a property of today's CALLERS, not of the seam. That is precisely the
+  # socket or component socket — can see a `handle_info`. This function was
+  # the body of one: `handle_info({:autosave_form, form})` → here →
+  # `Content.upsert_draft` (that door and the legacy picker events that fed
+  # it are gone, task-c42545346b93cbb0; `{:tree_codelist_pick, …}` →
+  # `Fields.tree_codelist_pick/2` still reaches this seam from a
+  # `handle_info`). Before this gate the ONLY thing standing in a
+  # write-denied principal's way was the socket gate on the parent events
+  # that sent to this seam — a property of the CALLERS, not of the seam. That is precisely the
   # argument that held for `paper_op` right up until `PaperFieldBlock` started
   # sending to it and turned it into a live bypass.
   #
@@ -573,7 +574,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   defp sanity_asset_ids(_doc, _schema), do: []
 
   defp autosave_write(socket, params, trigger) do
-    doc = socket.assigns[:editor_doc]
+    # This tab's row, the post's own field as the store last showed it.
+    doc = Lifecycle.post_base(socket)
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
 
@@ -597,6 +599,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         ScopeHelpers.scope_opts(socket)
       )
 
+    # A change inside an object posts only that subfield: its siblings are
+    # what the page drew (`PostPath`, task-04e50efa8405b956).
+    params = PostPath.only_changed(params, socket, doc)
+    raw_params = PostPath.only_changed(raw_params, socket, doc)
+
     changed? = autosave_changes_something?(doc, schema, params)
 
     # task-512fec7116c519e5 crit 0 — THE PHANTOM'S FLIGHT RECORDER.
@@ -607,8 +614,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # them: the autosave path left no trace, so every instance had to be
     # reconstructed from row timestamps alone. One line per write attempt,
     # naming the socket, WHICH door fired (a `phx-change`, an explicit save,
-    # the slug-derive arm, an array op, or the `{:autosave_form, …}`
-    # handle_info), how many params were posted, and whether the store would
+    # the slug-derive arm, an array op, or a tree codelist pick), how many
+    # params were posted, and whether the store would
     # actually move. A future instance is then one grep, not an archaeology.
     #
     # `:info`, not `:debug` — prod runs at `:info` and a line nobody ships is
@@ -2800,33 +2807,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     end
   end
 
-  # The browser tab names the open document (task-fee30130f015c416): every
-  # document tab read "Studio · Barkpark", and a screen reader's page
-  # announcement never said which document it was. The root layout's
-  # live_title adds the " · Barkpark" suffix.
-  # It is recomputed wherever the open document changes in place, not only on
-  # navigation: a save that renames it, and the block editor's sync
-  # (task-72e1de4c53c5ed9f).
-  # Same order as the document header names it (Editor's document_header):
-  # the stored title, else the schema's derived preview title (a titleless
-  # author is its name), else a singleton's schema title, else "Untitled".
-  def assign_page_title(socket) do
-    title =
-      case socket.assigns[:editor_doc] do
-        %{} = doc ->
-          BarkparkWeb.Studio.DocTitle.shown(Map.get(doc, :title)) ||
-            derived_title(doc, socket.assigns[:editor_schema])
-
-        _ ->
-          "Studio"
-      end
-
-    assign(socket, page_title: title)
-  end
-
-  defp derived_title(doc, schema) do
-    Barkpark.Content.TitleDerivation.preview_title(doc, schema) ||
-      (schema && Map.get(schema, :singleton) == true && Map.get(schema, :title)) ||
-      gettext("Untitled")
-  end
+  # The browser tab and the document heading name the open document
+  # (`StudioLive.PageTitle`).
+  defdelegate assign_page_title(socket), to: BarkparkWeb.Studio.StudioLive.PageTitle
 end

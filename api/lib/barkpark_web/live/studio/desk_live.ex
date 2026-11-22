@@ -635,6 +635,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-locked-value={BarkparkWeb.StaticAssets.path("bp-desk-locked-value.js")}
       data-desk-revision-focus={BarkparkWeb.StaticAssets.path("bp-desk-revision-focus.js")}
       data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
+      data-desk-new-doc={BarkparkWeb.StaticAssets.path("bp-desk-new-doc.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >
@@ -677,6 +678,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         focus={FocusMode.of(assigns, view)}
         bulk={Bulk.of(assigns, view.id)}
         bulk_confirm={@desk_bulk_confirm && @desk_bulk_confirm.pane == view.id && @desk_bulk_confirm}
+        held={BarkparkWeb.Studio.StudioLive.PageTitle.held(assigns, view.pane[:type])}
       />
       <% end %>
     </div>

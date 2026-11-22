@@ -42,7 +42,7 @@ Every part BarkUI must draw sits in one of three piles. Each is built differentl
 
 ## The order of families
 
-The first six parts set the look: button, text field, select, dialog, menu and tabs ([0004](decisions/0004-ready-before-any-switch.md) has the step that confirms it). Then ready-made parts land in batches by family:
+The first six parts set the look: button, text field, select, dialog, menu and tabs ([0004](decisions/0004-ready-before-any-switch.md) has the step that confirms it). Tabs come third: select, dialog and menu draw in the browser's top layer, and cost more to check, since the check reads each open box in every view, 1.33 to 1.90 s a reading on CI's hosted runner, so 80 to 115 s per open box per part (60 readings, PARTS.md "The top layer"). The look for a box no layer names, after each Tab stop, press step and driven state, costs 1 to 2 ms. Then ready-made parts land in batches by family:
 
 1. Forms
 2. Overlays
@@ -63,14 +63,14 @@ Done, in progress and open under each milestone, copied from the task board by `
 |---|---|---|---|---|
 | M0.5 | Proof round | 0 | 0 | 1 |
 | M1 | The map | 1 | 0 | 0 |
-| M2 | One skin everywhere | 19 | 5 | 19 |
-| Ready | The showroom and the first six parts | 0 | 2 | 1 |
+| M2 | One skin everywhere | 29 | 4 | 23 |
+| Ready | The showroom and the first six parts | 1 | 1 | 1 |
 | M3 | Editor menus and Barkdown's tree | 0 | 0 | 2 |
 | M4 | Blocks are parts | 0 | 0 | 1 |
 | M5 | Every app wears BarkUI | 0 | 0 | 1 |
 | M6 | Re-imagining | 0 | 0 | 1 |
 | Beside | Groundwork: every shared piece has one source | 1 | 0 | 3 |
 
-Read from the board; numbers last changed on 2026-11-21.
-<!-- stamp: 13905b821a42cc33 -->
+Read from the board; numbers last changed on 2026-11-22.
+<!-- stamp: 3e5122677a3d3cfb -->
 <!-- board:end -->

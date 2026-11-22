@@ -1,0 +1,13 @@
+{
+  "name": "text-field",
+  "family": "form",
+  "element": "ui-field",
+  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/input"],
+  "summary": "One line of text, an input inside its field: label, hint and error, with placeholder, read-only, disabled, required and invalid.",
+  "notCovered": [
+    {
+      "name": "a value longer than its box",
+      "why": "The field scrolls it sideways, and the check does not yet read whether a field's value draws as itself; every value on the stage fits its box."
+    }
+  ]
+}

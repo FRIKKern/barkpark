@@ -11586,6 +11586,7 @@ msgid "Table too large to show"
 msgstr ""
 
 #: lib/barkpark/portable_doc/render/chrome.ex:104
+#: lib/barkpark_web/studio_locale.ex:772
 #, elixir-autogen, elixir-format
 msgid "Nested too deep to show"
 msgstr ""
@@ -15938,4 +15939,19 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/vision_listen.ex
 #, elixir-autogen, elixir-format
 msgid "Unknown perspective: %{value}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "Search document types"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/new_doc_menu.ex
+#, elixir-autogen, elixir-format
+msgid "No results for"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/refused_save.ex
+#, elixir-autogen, elixir-format
+msgid "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs."
 msgstr ""

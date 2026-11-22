@@ -142,6 +142,8 @@ export function installDrawn() {
       const at = phase(el.getBoundingClientRect())
       items.push({ kind: 'graphic', el, at: `${h.describe(el)}::before/::after`, quiet: quiet(el), rects: [box(el.getBoundingClientRect())], holes: inner.map((x) => box(x.getBoundingClientRect(), 1)), key: `box|${ground}|${at}|${looks.join('|')}`, draw: { looks, ground, at } })
     }
+    // While a named top-layer box is open, what it covers or blocks is read with it closed instead (layers.mjs).
+    items = items.filter((t) => !h.behind?.(t.el))
     return { count: items.length, missing: [...new Set(items.filter((t) => t.key && !keyed.has(t.key)).map((t) => t.key))] }
   }
 

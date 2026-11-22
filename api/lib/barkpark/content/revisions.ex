@@ -304,10 +304,7 @@ defmodule Barkpark.Content.Revisions do
   both.
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
-    with {:ok, rev} <- get_revision(revision_id, dataset, opts),
-         :ok <- assert_revision_dataset(rev, dataset),
-         :ok <- assert_revision_type(rev, type),
-         :ok <- assert_current_rev(rev.doc_id, type, dataset, opts) do
+    with {:ok, rev} <- restorable(revision_id, type, dataset, opts) do
       attrs = %{
         "doc_id" => Content.draft_id(rev.doc_id),
         "title" => rev.title,
@@ -317,6 +314,26 @@ defmodule Barkpark.Content.Revisions do
       InsertOnly.seam!(:restore_after_state_check)
       Content.upsert_document(type, attrs, dataset, write_opts(opts))
     end
+  end
+
+  @doc """
+  `restore_revision/4`'s checks, writing nothing: `:ok` when that call would
+  go on to write, else the same error. For a caller that must know before it
+  gives up state of its own, as the sheet's restore gives up its live session
+  (task-5b74471e6a2d6de8). It is the same compare, not a second one; the
+  write still makes it again, so a write landing between the two is refused
+  there.
+  """
+  def check_restore(revision_id, type, dataset, opts \\ []) do
+    with {:ok, _rev} <- restorable(revision_id, type, dataset, opts), do: :ok
+  end
+
+  defp restorable(revision_id, type, dataset, opts) do
+    with {:ok, rev} <- get_revision(revision_id, dataset, opts),
+         :ok <- assert_revision_dataset(rev, dataset),
+         :ok <- assert_revision_type(rev, type),
+         :ok <- assert_current_rev(rev.doc_id, type, dataset, opts),
+         do: {:ok, rev}
   end
 
   # `:if_absent` becomes an insert-only write, so a row born after the compare

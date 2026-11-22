@@ -18,13 +18,17 @@ defmodule Barkpark.Content.Papers.BpmlView do
 
   A write's answer is the view of the Paper as saved: `saved_check/3` reads
   the row back inside the write's transaction, and a refusal rolls it back.
+
+  The pull also answers the fingerprint of its bytes (`hash/1`, sent as
+  `x-bpml-view`), so a push can tell that the view changed since its pull at
+  the same rev.
   """
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
-  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems}
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems, WriteWall}
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
@@ -134,6 +138,15 @@ defmodule Barkpark.Content.Papers.BpmlView do
   end
 
   @doc """
+  The fingerprint of a pull's bytes (sha256, lowercase hex). The pull answers
+  it in `x-bpml-view`; a push that carries it back is refused (412) when the
+  row's view prints differently now, at any rev.
+  """
+  @spec hash(String.t()) :: String.t()
+  def hash(bytes) when is_binary(bytes),
+    do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  @doc """
   A view `of/4` built, printed: the bytes, and the blocks they read back as,
   which is what a push of those bytes carries. Refused when the view does not
   print, or its print does not read back.
@@ -158,6 +171,10 @@ defmodule Barkpark.Content.Papers.BpmlView do
   follow `Bpml.CalloutBody.resolve/4` first; its notes come back with the ops.
   A list item with an id then gets back what BPML cannot spell
   (`Bpml.ListItems.carry/2`).
+  `Bpml.WriteWall` refuses, before that, a copy pulled from another view (its
+  `bpmlView` fingerprint, 412) and a hidden label field it sets (422
+  `bpml_unshown`), and after it, an id pushed twice (422 `bpml`) and blocks
+  that change what the pull did not show (422 `bpml_unshown`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """
@@ -170,11 +187,14 @@ defmodule Barkpark.Content.Papers.BpmlView do
     copy = Map.update(copy, "blocks", [], &BlockIds.ensure_block_ids(&1 || []))
 
     with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
-         {:ok, _bpml, pulled} <- printed(paper, shown, fields),
+         {:ok, bpml, pulled} <- printed(paper, shown, fields),
+         :ok <- WriteWall.same_view(hash(bpml), copy["bpmlView"]),
+         :ok <- WriteWall.check_fields(paper.content || %{}, fields, copy),
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
          {:ok, pushed} <- ListItems.carry(pushed, stored),
-         {:ok, _blocks, ops} <- Diff.derive(stored, pushed, pulled) do
+         {:ok, target} <- WriteWall.target(stored, pulled, pushed),
+         {:ok, _blocks, ops} <- Diff.derive_target(stored, target) do
       {:ok, ops, notes}
     else
       {:error, :diff_verification_failed} = failed -> failed
@@ -256,12 +276,22 @@ defmodule Barkpark.Content.Papers.BpmlView do
   end
 
   @doc """
-  A push answer with `notes`: one line per callout whose stored body the push
-  kept (`Bpml.CalloutBody`). No key when there are none.
+  A push or create answer: `bpmlView`, the fingerprint of its `bpml` (the view
+  as saved, which bp keeps for the next push), and `notes`, one line per
+  callout whose stored body the push kept (`Bpml.CalloutBody`). No key for
+  either when there is nothing to say.
   """
-  @spec with_notes(map(), [String.t()]) :: map()
-  def with_notes(payload, []), do: payload
-  def with_notes(payload, notes), do: Map.put(payload, :notes, notes)
+  @spec push_answer(map(), [String.t()]) :: map()
+  def push_answer(payload, notes) do
+    payload
+    |> then(&if(is_binary(&1[:bpml]), do: Map.put(&1, :bpmlView, hash(&1[:bpml])), else: &1))
+    |> then(&if(notes == [], do: &1, else: Map.put(&1, :notes, notes)))
+  end
+
+  @doc "The HTTP status a push refusal answers: 412 for a changed view, 422 otherwise."
+  @spec status(map()) :: :precondition_failed | :unprocessable_entity
+  def status(%{code: "precondition_failed"}), do: :precondition_failed
+  def status(_refusal), do: :unprocessable_entity
 
   @doc """
   The `before_commit` check a write runs inside its transaction, handed the

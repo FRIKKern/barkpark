@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostedEdits
@@ -290,6 +291,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> saved_flash()
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+          |> Shared.assign_page_title()
           |> clear_touched()
 
         {:noreply, socket}
@@ -317,6 +319,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil
       )
+      |> Shared.assign_page_title()
       |> clear_touched()
 
     {:noreply, socket}
@@ -363,8 +366,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   change (task-0f806691db0e06dd). `TreeCodelistField` sends the input name
   (`doc[subject]`, or a nested `doc[a][0].b`) and the code: the re-rendered
   hidden input alone fires no `phx-change`. The code goes into the editor
-  buffer at that path and the buffer is saved, as a reference pick does
-  (`Refs.select_ref/2`); `Shared.do_autosave/3` asks the write questions.
+  buffer at that path and the buffer is saved; `Shared.do_autosave/3` asks
+  the write questions.
 
   `press` is the pressed row's params: the pick is written only into the
   document it was pressed in (`PostIdentity.pressed/3`). A message without
@@ -376,7 +379,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       case {socket.assigns[:editor_doc], StudioLive.parse_path(name)} do
         {%{}, [_ | _] = path} ->
           form = picked_form(socket, path, code)
-          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1))
+          socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1), path)
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
           {:noreply, settle_dirty(saved, Enum.take(path, 1))}
 
@@ -476,19 +479,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
+        path = target_path(params, keys)
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
-        saved =
+        based =
           socket
-          |> RemoteValues.put_bases(keys, params["_bp_seen"])
+          |> RemoteValues.put_bases(keys, params["_bp_seen"], path)
           |> RemoteValues.add_bases(built_bases)
-          |> RefusedSave.target(keys)
+
+        saved =
+          based
+          |> RefusedSave.target(keys, path)
           |> Shared.do_autosave(doc, :change)
-          |> RemoteValues.settle(socket, keys, doc)
+          |> RemoteValues.settle(socket, keys, doc, path)
+
+        bases = based.assigns[:editor_field_bases] || %{}
 
         {:noreply,
          saved
          |> keep_unsaved_values(doc, keys)
+         |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
          |> RefusedSave.not_codes(not_codes)
          |> settle_dirty(keys)}
 
@@ -979,11 +989,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # it said was kept is now saved (#25880 review).
   @doc false
   def settle_dirty(socket, keys) do
+    # The header names a title held unsaved, and the stored one once it lands.
+    socket |> settled_dirty(keys) |> Shared.assign_page_title()
+  end
+
+  defp settled_dirty(socket, keys) do
     if socket.assigns[:save_status] == "Saved" do
       # A field the store refused earlier is still not saved (`RefusedSave`).
       held = MapSet.new(RefusedSave.keys(socket))
       dirty? = MapSet.size(held) > 0
-      assign(socket, editor_dirty: dirty?, editor_unsaved_keys: held, doc_conflict: false)
+
+      assign(socket,
+        editor_dirty: dirty?,
+        editor_unsaved_keys: held,
+        editor_unsaved_bases: UnsavedBases.only(UnsavedBases.all(socket), held),
+        doc_conflict: false
+      )
     else
       settle_unsaved(socket, keys -- RefusedSave.clears(socket))
     end
@@ -1037,4 +1058,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   defp target_key(_params, _schema), do: []
+
+  # The changed input's path under its top-level field: `doc[meta].code`
+  # is `["meta", "code"]`. nil when it is not under the one target field.
+  defp target_path(params, [key]) do
+    path =
+      case params do
+        %{"_target" => ["doc", _ | rest]} -> [key | rest]
+        %{"_target" => [name]} when is_binary(name) -> StudioLive.parse_path(name)
+        _ -> []
+      end
+
+    if match?([^key | _], path), do: path
+  end
+
+  defp target_path(_params, _keys), do: nil
 end

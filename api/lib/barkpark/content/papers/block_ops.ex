@@ -1697,7 +1697,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          normalized =
            folded
            |> maybe_restore_optional_tab_id_omissions(authored_blocks)
-           |> normalize_render_shapes(),
+           |> Papers.KeepUntouched.shapes(authored_blocks, opts),
          # Same PortableDoc RATCHET as the single-op path, on the batch RESULT.
          :ok <- NewErrors.check_touched(blocks, normalized),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —

@@ -63,7 +63,9 @@ defmodule Barkpark.Content.CrossValidator do
   """
   @spec validate(any(), map()) :: [map()]
   def validate(schema_or_rules, doc) when is_map(doc) do
-    rules = extract_rules(schema_or_rules)
+    # The rules violations/2 reads, no more: an unevaluable rule is skipped
+    # here too, so the two never give a second reading.
+    {rules, _unevaluable} = partition(schema_or_rules)
 
     Enum.map(rules, fn rule ->
       rule_str = stringify_top(rule)
@@ -222,11 +224,25 @@ defmodule Barkpark.Content.CrossValidator do
 
   def findings(_, _), do: %{errors: [], warnings: []}
 
+  @doc """
+  A violated rule's text, as the findings and the LiveView banner show it:
+  its title when that is non-empty text, else its name when that is, else
+  "cross-field rule" (task-57d0947d4a29a073). Never blank, never a map.
+  """
+  @spec label(map()) :: String.t()
+  def label(v) when is_map(v) do
+    Enum.find(
+      [Map.get(v, "title"), Map.get(v, "name")],
+      "cross-field rule",
+      &text?/1
+    )
+  end
+
   defp to_finding(v) do
     fields = if is_list(v["fields"]), do: Enum.filter(v["fields"], &is_binary/1), else: []
     first = List.first(fields)
 
-    title = v["title"] || v["name"] || "cross-field rule"
+    title = label(v)
 
     {path, message} =
       case v do
@@ -280,6 +296,13 @@ defmodule Barkpark.Content.CrossValidator do
   # In an item rule (`item?`) a leaf names the ITEM's fields, which the
   # schema's top-level names cannot check; one with "scope": "document" names
   # the document's and is checked.
+  #
+  # A combinator whose value is null reads as absent (a serializer writes null
+  # for an unused key): `{"all": [..], "any": null}` is the all-rule it was,
+  # and `{"all": null, "field": .., "operator": ..}` is a plain leaf. A
+  # leaf-shaped body with `false` there has no list to run and is unevaluable
+  # (evaluating either looped forever, task-3886eb786fc98923). Every other
+  # shape reads as it always did.
   defp body_reason(body, names, item?) do
     case Map.get(body, "all", Map.get(body, :all)) || Map.get(body, "any", Map.get(body, :any)) ||
            Map.get(body, "one", Map.get(body, :one)) do
@@ -292,10 +315,13 @@ defmodule Barkpark.Content.CrossValidator do
       nil ->
         scope = Map.get(body, "scope", Map.get(body, :scope))
 
-        leaf_reason(
-          body,
-          if(item? and scope not in ["document", :document], do: nil, else: names)
-        )
+        if Enum.any?(["all", "any", "one", :all, :any, :one], &(Map.get(body, &1) == false)),
+          do: "an all/any/one is not a list",
+          else:
+            leaf_reason(
+              body,
+              if(item? and scope not in ["document", :document], do: nil, else: names)
+            )
 
       _ ->
         "an all/any/one list is empty or not a list"
@@ -381,12 +407,22 @@ defmodule Barkpark.Content.CrossValidator do
   # rules), so recurse through evaluate/3 first. Otherwise feed to
   # FieldVisibility, the single source of truth for operator semantics; the
   # parent is the item of an item rule (nil for a plain rule: the document).
-  defp eval_leaf(%{"all" => _} = pred, doc, parent), do: evaluate(pred, doc, parent)
-  defp eval_leaf(%{all: _} = pred, doc, parent), do: evaluate(pred, doc, parent)
-  defp eval_leaf(%{"any" => _} = pred, doc, parent), do: evaluate(pred, doc, parent)
-  defp eval_leaf(%{any: _} = pred, doc, parent), do: evaluate(pred, doc, parent)
-  defp eval_leaf(%{"one" => _} = pred, doc, parent), do: evaluate(pred, doc, parent)
-  defp eval_leaf(%{one: _} = pred, doc, parent), do: evaluate(pred, doc, parent)
+  # Only a list recurses: evaluate/3 hands any other map back here, so a
+  # match on the key alone (`"all": null`) looped forever.
+  defp eval_leaf(%{"all" => l} = pred, doc, parent) when is_list(l),
+    do: evaluate(pred, doc, parent)
+
+  defp eval_leaf(%{all: l} = pred, doc, parent) when is_list(l), do: evaluate(pred, doc, parent)
+
+  defp eval_leaf(%{"any" => l} = pred, doc, parent) when is_list(l),
+    do: evaluate(pred, doc, parent)
+
+  defp eval_leaf(%{any: l} = pred, doc, parent) when is_list(l), do: evaluate(pred, doc, parent)
+
+  defp eval_leaf(%{"one" => l} = pred, doc, parent) when is_list(l),
+    do: evaluate(pred, doc, parent)
+
+  defp eval_leaf(%{one: l} = pred, doc, parent) when is_list(l), do: evaluate(pred, doc, parent)
 
   defp eval_leaf(pred, doc, parent) when is_map(pred),
     do: FieldVisibility.visible?(%{"visibleWhen" => pred}, doc, parent)
@@ -399,10 +435,21 @@ defmodule Barkpark.Content.CrossValidator do
   # to strings so callers / templates can rely on the same shape regardless
   # of whether the rule came from JSON (string-keyed) or was hand-built in
   # Elixir (atom-keyed).
+  #
+  # A `title` that is not text (a per-language map, a number) or is empty is
+  # dropped: the rule still applies and reads as having no title, so every
+  # reader (findings, the summary line, the banner) falls back to its name
+  # (task-57d0947d4a29a073). The Studio reads a title the same way.
   defp stringify_top(map) when is_map(map) do
-    Map.new(map, fn
+    map
+    |> Map.new(fn
       {k, v} when is_atom(k) -> {Atom.to_string(k), v}
       {k, v} -> {k, v}
     end)
+    |> then(fn rule -> if text?(rule["title"]), do: rule, else: Map.delete(rule, "title") end)
+    # A name that is not text is dropped too: the banner's test id interpolates it.
+    |> then(fn rule -> if is_binary(rule["name"]), do: rule, else: Map.delete(rule, "name") end)
   end
+
+  defp text?(s), do: is_binary(s) and s != ""
 end

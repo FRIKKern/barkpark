@@ -129,21 +129,25 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
 
     assert shown(b, "title") == "Fixture post A2"
     assert shown(b, "excerpt") == "First FAIL"
-    assert banner?(b)
+    # A rewrote none of B's unsaved fields: taken in quietly, as TanStack's
+    # `clash` (task-65543203e7b71c80).
+    refute banner?(b)
   end
 
   test "the banner goes when B's next save lands", c do
     a = open(c)
     b = open(c)
 
-    type_in(b, "excerpt", " FAIL")
-    type_in(a, "title", " A2")
+    # A rewrites the text B's unsaved edit is in: a conflict
+    # (task-65543203e7b71c80).
+    post_form(b, "excerpt", %{"title" => shown(b, "title"), "excerpt" => "Fi FAIL"})
+    post_form(a, "excerpt", %{"title" => shown(a, "title"), "excerpt" => "Fixed"})
     render(b)
     assert banner?(b)
 
     post_form(b, "excerpt", %{"title" => shown(b, "title"), "excerpt" => "First B-ok"})
 
-    assert stored(c) == {"Fixture post A2", "First B-ok"}
+    assert stored(c) == {"Fixture post", "First B-ok"}
     refute banner?(b)
   end
 
@@ -169,8 +173,18 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
     b = open(c)
 
     # B's title typing does not land; neither does the slug made from it.
+    # The title is posted as the page posts it, with `_bp_seen`: what it was
+    # typed on is known, so A's save merges with it (`UnsavedBases`).
     type_in(b, "excerpt", " FAIL")
-    post_form(b, "title", %{"title" => "Fail title", "excerpt" => "First FAIL"})
+
+    b
+    |> element("#editor-form")
+    |> render_change(%{
+      "_target" => ["doc", "title"],
+      "doc" => %{"title" => "Fail title", "excerpt" => "First FAIL"},
+      "_bp_seen" => ~s({"v":2})
+    })
+
     BarkparkWeb.EditorPost.press(b, "slug-generate", %{"field" => "slug"})
 
     type_in(a, "title", " A2")
@@ -178,7 +192,9 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnsavedTypingTest do
 
     form = :sys.get_state(b.pid).socket.assigns.editor_form
     assert form["excerpt"] == "First FAIL"
-    assert form["title"] == "Fail title"
+    # B's title and A's " A2" do not overlap: both stand, as TanStack's
+    # `merge3` (task-65543203e7b71c80).
+    assert form["title"] == "Fail title A2"
     assert form["slug"] in ["fail-title", %{"_type" => "slug", "current" => "fail-title"}]
   end
 end

@@ -11,10 +11,10 @@ defmodule Barkpark.MediaPathIsAPublishedReferenceTest do
   must be chosen at BIRTH (`Media.upload/3`) and an existing row's path must
   never be rewritten.
 
-  The mechanism: `StudioLive`'s upload handler writes
-  `"/media/files/\#{file.path}"` into the editor form and autosaves it, so a
-  document's CONTENT persists the path as a literal string
-  (`live/studio/studio_live/handlers/media.ex:54`). `MediaController.serve/2`
+  The mechanism: a document's CONTENT persists
+  `"/media/files/\#{file.path}"` as a literal string (Studio's old upload
+  handler wrote it into the editor form; Papers embed it in their blocks).
+  `MediaController.serve/2`
   then resolves that URL through `Media.get_file_by_path/2` — a lookup keyed on
   the very string that was persisted. Rewriting the row's `path` therefore
   orphans every document that already points at it, and a bundle carries BOTH

@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import { capacitySentence, selftestSentence } from './capacity.mjs'
 import { edit } from './copy.mjs'
+import { selftestPick } from './jobs.mjs'
 
 export { edit, copyAs } from './copy.mjs'
 // Runs `code` at the start of the part's demo, with `root` in scope.
@@ -94,9 +95,12 @@ export const CEILING_CASES = [
   },
   {
     name: 'a selftest whose last case passes its ceiling stops there, failing, with the sentence',
-    direct: async () => {
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), 'a state on any control of its kind'], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
-      return r.status === 1 && r.stdout.includes('FAIL the selftest passed its ceiling of 0 s while "a state on any control of its kind') && r.stdout.includes(selftestSentence()) && !r.stdout.includes('cases held')
+    // The case it runs is picked by a rule, not by a name that can go stale: the first case the rest job runs that is
+    // not direct.
+    direct: async (cases) => {
+      const c = selftestPick(cases, 'rest', '').find((x) => !x.direct)
+      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), '--job', 'rest', c.name], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
+      return r.status === 1 && r.stdout.includes(`FAIL the selftest passed its ceiling of 0 s while "${c.name}"`) && r.stdout.includes(selftestSentence('rest')) && !r.stdout.includes('cases held')
     },
   },
 ]

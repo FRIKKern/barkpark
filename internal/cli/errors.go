@@ -150,6 +150,7 @@ var codeExit = map[string]int{
 	"rev_mismatch":        exitConflict,
 	"paper_exists":        exitConflict,
 	"paper_not_in_scope":  exitConflict,
+	"fixed_document":      exitConflict, // 409, content/fixed_documents.ex (task-f4c80d82cc25b19b)
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
 	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
@@ -430,6 +431,7 @@ var codeExit = map[string]int{
 	"bpml_stale_copy":            exitValidation, // 422, bpml/callout_body.ex
 	"bpml_inline_body":           exitValidation, // 422, bpml/callout_body.ex
 	"bpml_kept":                  exitValidation, // 422, bpml/callout_body.ex
+	"bpml_unshown":               exitValidation, // 422, bpml/write_wall.ex (sync)
 	"constraint":                 exitValidation, // 422, bulldocs_ingest_controller.ex:354
 	"create_wall":                exitValidation, // 422, bulldocs_ingest_controller.ex:432
 	"invalid_conversation":       exitValidation, // 422, bulldocs_ingest_controller.ex:1151

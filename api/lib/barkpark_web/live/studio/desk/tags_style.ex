@@ -14,6 +14,8 @@ defmodule BarkparkWeb.Studio.Desk.TagsStyle do
       then a 25 px × in the chip's muted ink, filled under the pointer.
     * The input takes the rest of the line, at least 120 px, unringed.
     * Touch phones get a 44 px ×.
+    * An array whose `of` names no type draws its items as the same chips,
+      read-only, with no box (`ArrayField`).
 
   `DocStyle.sheet/1` draws these rules with the rest of the edit pane's.
   """
@@ -32,6 +34,8 @@ defmodule BarkparkWeb.Studio.Desk.TagsStyle do
     .dk .dk-edit .tags-box .tag button svg { width: 21px; height: 21px; }
     .dk .dk-edit .tags-input { flex: 1; min-width: 120px; font: inherit; font-size: 15px; line-height: 23px; padding: 2px 8px; border: 0; outline: none; background: none; color: var(--dk-input-fg); }
     .dk .dk-edit .tags-input::placeholder { color: var(--dk-placeholder); }
+    .dk .dk-edit .bp-array-read-only-items { display: flex; flex-wrap: wrap; gap: 4px; }
+    .dk .dk-edit .bp-array-read-only-items .tag { font-size: 15px; line-height: 23px; padding: 2px 8px; border-radius: 3px; background: var(--dk-upload-fill); color: var(--dk-fg); overflow-wrap: anywhere; }
     @media (max-width: 768px) and (pointer: coarse) { .dk .dk-edit .tags-box .tag button { width: 44px; height: 44px; } }
     """
   end

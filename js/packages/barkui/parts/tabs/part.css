@@ -1,0 +1,83 @@
+/* Tabs: UI SDK's <ui-tabs>, a list of tabs, each a native button, and the panel of the selected one.
+   The selected tab is marked by its own edge, a border under it (across) or beside it (down), in
+   --ui-primary; the other tabs keep the same border in transparent, so nothing moves, and are text only.
+   The edge is a border, not a box-shadow, so base.css's focus ring (a box-shadow) cannot replace it.
+   The look keys only on what UI SDK writes: data-selected, data-disabled and data-orientation, and on :hover.
+   A disabled tab takes focus from the arrow keys but is never selected; it is drawn faded.
+   The focus ring is base.css's, drawn once for every part. */
+
+[data-slot="tabs"] {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--ui-spacing) * 3);
+  /* A share of the row up to 88 steps: a fixed width would hold a grid column open past a phone's edge. */
+  width: 100%;
+  max-width: calc(var(--ui-spacing) * 88);
+  min-width: 0;
+
+  &[data-orientation="vertical"] {
+    flex-direction: row;
+  }
+}
+
+/* One text size for a tab and a panel; set on both, since the showroom's pinned tabs stand outside a <ui-tabs>. */
+[data-slot="tabs-tab"],
+[data-slot="tabs-panel"] {
+  --bark-tabs-text: 0.875rem;
+}
+
+[data-slot="tabs-list"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--ui-spacing) * 1);
+  box-shadow: inset 0 -1px 0 var(--ui-border);
+
+  &[data-orientation="vertical"] {
+    flex-direction: column;
+    box-shadow: inset 1px 0 0 var(--ui-border);
+  }
+}
+
+[data-slot="tabs-tab"] {
+  --bark-tab-fg: var(--ui-muted-foreground);
+  --bark-tab-edge: transparent;
+  --bark-tabs-edge: 2px;
+
+  box-sizing: border-box;
+  height: calc(var(--ui-spacing) * 9);
+  padding-inline: calc(var(--ui-spacing) * 3);
+  /* Every side without an edge is 0 wide and transparent, so its colour never follows the text on hover. */
+  border: 0 solid transparent;
+  border-bottom: var(--bark-tabs-edge) solid var(--bark-tab-edge);
+  background: transparent;
+  color: var(--bark-tab-fg);
+  font-size: var(--bark-tabs-text);
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: start;
+  transition: color 120ms ease-out;
+
+  &:hover:not([data-disabled]) {
+    --bark-tab-fg: var(--ui-foreground);
+  }
+
+  &[data-orientation="vertical"] {
+    border-bottom: 0 solid transparent;
+    border-inline-start: var(--bark-tabs-edge) solid var(--bark-tab-edge);
+  }
+
+  &[data-selected] {
+    --bark-tab-fg: var(--ui-foreground);
+    --bark-tab-edge: var(--ui-primary);
+  }
+
+  &[data-disabled] {
+    opacity: 0.5;
+  }
+}
+
+[data-slot="tabs-panel"] {
+  color: var(--ui-foreground);
+  font-size: var(--bark-tabs-text);
+  line-height: 1.5;
+}

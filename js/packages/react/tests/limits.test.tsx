@@ -95,10 +95,18 @@ describe('@barkpark/react render limits at their boundaries', () => {
     expect(render(nest(100, leaf))).toContain('Nested too deep to show')
   })
 
-  it('shows inline text one level above the limit and the notice at it', () => {
-    expect(render(strongText(99))).toContain('leaf')
-    expect(render(strongText(100))).not.toContain('leaf')
-    expect(render(strongText(100))).toContain('Nested too deep to show')
+  // task-11bbe4b4ae8c85f4: past the limit the word stays and the notice follows it.
+  it('keeps inline text at the limit and writes the notice after it past the limit', () => {
+    expect(render(strongText(100))).toContain('leaf')
+    expect(render(strongText(100))).not.toContain('Nested too deep to show')
+    expect(render(strongText(101))).toContain('leaf Nested too deep to show')
+    expect(render(strongText(500))).toContain('leaf Nested too deep to show')
+  })
+
+  it('reads words no deeper than the word bound, and still shows the notice', () => {
+    const html = render(strongText(5000))
+    expect(html).not.toContain('leaf')
+    expect(html).toContain('Nested too deep to show')
   })
 
   it('counts marks toward the inline depth', () => {
@@ -106,8 +114,18 @@ describe('@barkpark/react render limits at their boundaries', () => {
       type: 'paragraph',
       content: [{ type: 'text', value: 'leaf', marks: Array.from({ length: n }, () => 'strong') }],
     })
-    expect(render(marked(99))).toContain('leaf')
-    expect(render(marked(100))).toContain('Nested too deep to show')
+    expect(render(marked(100))).toContain('leaf')
+    expect(render(marked(100))).not.toContain('Nested too deep to show')
+    expect(render(marked(101))).toContain('leaf</span>')
+    expect(render(marked(101))).toContain('</span> Nested too deep to show')
+    const cell = (n: number) =>
+      render({
+        type: 'table',
+        rows: [[{ type: 'text', value: 'leaf', marks: Array.from({ length: n }, () => 'strong') }]],
+      })
+    expect(cell(100)).not.toContain('Nested too deep to show')
+    expect(cell(101)).toContain('leaf</span>')
+    expect(cell(101)).toContain('</span> Nested too deep to show')
   })
 
   it('never puts a link inside a link', () => {
@@ -132,7 +150,7 @@ describe('@barkpark/react render limits at their boundaries', () => {
     const html = (block: unknown) =>
       renderToStaticMarkup(createElement(PortableDoc, { value: [block], strings } as never))
     expect(html(nest(100, { type: 'paragraph', text: 'leaf' }))).toContain('For dypt nestet')
-    expect(html(strongText(100))).toContain('For dypt nestet')
+    expect(html(strongText(101))).toContain('leaf For dypt nestet')
     expect(html(recordTable(101, 100))).toContain('Tabellen er for stor')
   })
 })
@@ -197,6 +215,18 @@ describe('@barkpark/react caps every nested block slot', () => {
       )
     expect(render(lists(99))).toContain('leaf')
     expect(render(lists(100))).not.toContain('leaf')
+    // task-a6a57717506de979: the item keeps the notice that stands in for the block.
+    expect(render(lists(100))).toContain('Nested too deep to show')
+  })
+
+  it.each(LISTS)('%s item still drops a stored child with "capped": true', (type) => {
+    const stored = JSON.parse(
+      JSON.stringify({
+        type,
+        items: [{ text: 'i', children: [{ type: 'paragraph', text: 'stored', capped: true }] }],
+      }),
+    )
+    expect(render(stored)).not.toContain('stored')
   })
 })
 

@@ -209,6 +209,21 @@ jobs:
       - name: "Harness wiring (every script under js/scripts is run by a workflow step, or waived with a reason)"
         run: node scripts/check-harness-wiring.mjs
 
+      # A test file a step below runs by name (PortableDoc conformance, pd-golden
+      # mirror) runs only there: its package lists it in NAMED_STEP_FILES and the
+      # all-packages Test step leaves it out. This row reads this workflow and the
+      # vitest configs and fails when a named file still runs in the Test step, is
+      # run by no step or by two, or sits behind a condition the Test step lacks.
+      # A named step's run block is one of the known whole forms; any other is refused.
+      # Each named step ends 0 only when vitest's JSON report shows every named file
+      # ran at least one test and every test in it passed.
+      # A shape it does not know is exit 2, never a skip. Reads only; seconds.
+      - name: "Named test steps selftest (proves the rule can still lose)"
+        run: node scripts/check-named-test-steps.selftest.mjs
+
+      - name: "A test file a js-tests step runs by name runs only there"
+        run: node scripts/check-named-test-steps.mjs
+
       # The changelog gate's own offline selftest. It was DECLARED in
       # js/package.json as `selftest:changesets` and run by nothing — the second
       # member of the same un-run class, still green today only because nobody had
@@ -250,10 +265,10 @@ jobs:
       # place the same control commit reds js-tests HERE (step 12), deterministically,
       # before Build or Test run at all.
       #
-      # NOT already covered by "Every declared vitest project actually executed"
-      # below: that step does EXECUTE this file uncached, but it DISCARDS vitest's
-      # pass/fail on purpose (see its closing comment) and only prints a note. It
-      # answers "did it run", never "did it pass". This step is the judgement.
+      # This step is the only run of this file: it is in @barkpark/react's
+      # NAMED_STEP_FILES, so neither the Test step nor "Every declared vitest
+      # project actually executed" below runs it (check-named-test-steps.mjs holds
+      # that). This step is the judgement.
       #
       # ZERO-MATCH GUARD, same class as the two @barkpark/core steps below: `pnpm
       # --filter <name> ...` prints "No projects matched the filters" and EXITS 0
@@ -278,8 +293,10 @@ jobs:
       # this guard to be skipped, which is the exact defect being removed.
       - name: "pd-golden mirror freshness (UNCACHED — turbo's test inputs cannot name api/, so a cache hit would skip this guard)"
         run: |
+          report="$RUNNER_TEMP/named-step-pd-golden-mirror.json"
+          rm -f "$report"
           set +e
-          out="$(pnpm --filter @barkpark/react exec vitest run tests/pd-golden-mirror-parity.test.ts 2>&1)"
+          out="$(pnpm --filter @barkpark/react exec vitest run tests/pd-golden-mirror-parity.test.ts --reporter=default --reporter=json --outputFile.json="$report" 2>&1)"
           status=$?
           set -e
           echo "$out"
@@ -289,6 +306,7 @@ jobs:
               exit 1
               ;;
           esac
+          jq -e --args '.success == true and .numTotalTests > 0 and .numFailedTests == 0 and .numPendingTests == 0 and .numTodoTests == 0 and (. as $r | $ARGS.positional | length > 0 and all(. as $f | [$r.testResults[] | select(.name | endswith("/" + $f))] | length == 1 and .[0].status == "passed" and (.[0].assertionResults | length > 0 and all(.status == "passed"))))' tests/pd-golden-mirror-parity.test.ts < "$report"
           exit "$status"
 
       - name: Cache turbo task outputs (js/.turbo)
@@ -335,7 +353,12 @@ jobs:
         run: pnpm exec turbo run build ${{ steps.scope.outputs.filter }}
 
       - name: "PortableDoc conformance (UNCACHED — the runner reads api/priv/portable_doc, which turbo's test inputs cannot name)"
-        run: pnpm --filter @barkpark/react exec vitest run tests/conformance.test.tsx
+        run: |
+          set -e
+          report="$RUNNER_TEMP/named-step-conformance.json"
+          rm -f "$report"
+          pnpm --filter @barkpark/react exec vitest run tests/conformance.test.tsx --reporter=default --reporter=json --outputFile.json="$report"
+          jq -e --args '.success == true and .numTotalTests > 0 and .numFailedTests == 0 and .numPendingTests == 0 and .numTodoTests == 0 and (. as $r | $ARGS.positional | length > 0 and all(. as $f | [$r.testResults[] | select(.name | endswith("/" + $f))] | length == 1 and .[0].status == "passed" and (.[0].assertionResults | length > 0 and all(.status == "passed"))))' tests/conformance.test.tsx < "$report"
 
       # Drift gate: the committed generated types MUST equal a fresh regen from
       # the committed schema fixture. Network-free (`--from` reads the fixture —
@@ -382,6 +405,22 @@ jobs:
         # coverage artifact ever existed. One blocking run, no coverage flag;
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
+
+      # BarkUI's fast tests hold for every number of parts the showroom allows, 1 to MOST_PARTS
+      # (js/packages/barkui/check/jobs.mjs): the walk runs them once per count, about a minute, so it is
+      # not one of the fast tests. On a pull request the walk decides from the files changed since the base
+      # (walkNeeded in js/packages/barkui/tests/counts.mjs): it is skipped only when every changed file is
+      # in another package; on main it always walks. Its bound is inside the walk (WALK_SECONDS); the
+      # step's timeout is the backstop. This comment and the step are pinned whole, byte for byte, by STEP in
+      # js/packages/barkui/tests/counts.test.mjs: an edit here is red until STEP is changed in the same change.
+      - name: "BarkUI: the fast tests hold at every part count"
+        timeout-minutes: 15
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm --filter @barkpark/barkui run test:counts --since "origin/${{ github.base_ref }}"
+          else
+            pnpm --filter @barkpark/barkui run test:counts
+          fi
 
       # REGISTRATION for js/scripts/check-vitest-projects.mjs, added by the PR
       # that creates it. Execution floor for every project js/vitest.config.mts

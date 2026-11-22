@@ -17,7 +17,7 @@ doc.body.innerHTML =
   `<section id="list" data-pane-kind="list"><input id="search" type="search"></section>` +
   `<section id="pane" data-pane-index="1" data-pane-editing><header><span class="kind" id="kind">Post</span>` +
   `<button id="menu" type="button">…</button><input id="pane-input" type="text"></header>` +
-  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt] doc[choice] doc[cards] doc[address]" phx-value-_bp_doc='${MARK}'>` +
+  `<form id="editor-form" data-desk-undo-keys="doc[title] doc[excerpt] doc[choice] doc[cards] doc[address] doc[tags] doc[topic]" phx-value-_bp_doc='${MARK}'>` +
   `<input type="text" id="title" name="doc[title]" value="Fixture post 14">` +
   `<textarea id="excerpt" name="doc[excerpt]">Short.</textarea>` +
   `<input type="text" id="slug" name="doc[slug]" value="fixture-post-14">` +
@@ -29,6 +29,10 @@ doc.body.innerHTML =
   `<input type="text" id="street" name="doc[address][street]" value="Main 12">` +
   `<input type="number" id="floor" name="doc[address][floor]">` +
   `<button type="button" id="add">Add</button>` +
+  `<div id="tags"><input type="checkbox" id="tag-a" name="doc[tags][]" value="a" checked><input type="checkbox" id="tag-b" name="doc[tags][]" value="b"></div>` +
+  `<input type="radio" id="tone" name="doc[tone]" value="warm">` +
+  `<div id="topic"><input type="search" id="topic-search" name="codelist_search[topic]" value=""></div>` +
+  `<input type="text" id="cover-alt" data-desk-image-part="alt" data-desk-image-for="cover">` +
   `<fieldset id="set" data-collapsible><legend><button type="button" class="object-toggle" id="set-toggle" aria-expanded="false">More</button></legend>` +
   `<textarea id="folded" name="doc[folded]">Folded.</textarea></fieldset>` +
   `<fieldset id="obj" data-collapsible><legend><button type="button" class="object-toggle" id="obj-toggle" aria-expanded="false">Obj</button></legend>` +
