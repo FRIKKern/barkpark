@@ -87,6 +87,7 @@ defmodule Barkpark.PortableDoc.Render.StoredWordsRenderTest do
   # Fixture files that hold no Portable Doc document, by pattern, with why.
   @not_documents [
     {"box_*.json", "box status payloads"},
+    {"bpml_pull_golden.json", "BPML pull print hashes, not stored documents"},
     {"chat_*.json", "chat transcript, label and capability rows"},
     {"code-*.json", "code language and emphasis rows"},
     {"from-markdown.json", "Markdown import cases, not stored documents"},
