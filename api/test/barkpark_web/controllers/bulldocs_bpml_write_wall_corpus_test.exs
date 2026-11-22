@@ -2,8 +2,9 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallCorpusTest do
   @moduledoc """
   The BPML push over the corpus (`Barkpark.BpmlCorpus`): for every Paper the
   pull serves, an unedited push changes nothing, and a push that adds a block
-  lands with every stored block byte-equal in the row the write left (after
-  the canonical shapes every block write applies to every block). It
+  lands with every stored block byte-equal in the row the write left (as
+  stored when its id is its own, in the chokepoint's shapes otherwise:
+  `Papers.KeepUntouched`). It
   prints how many blocks each reason freezes (a BPML edit of them is refused),
   on the corpus and on the stored-documents set.
   """
@@ -66,7 +67,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallCorpusTest do
     :ok
   end
 
-  test "every corpus Paper: an unedited push changes nothing; an added block keeps every stored block byte-equal" do
+  test "every corpus Paper: an unedited push changes nothing; an added block keeps every stored block with its own id byte-equal" do
     {papers, left_out} = BpmlCorpus.papers!()
     assert length(papers) > 100
 

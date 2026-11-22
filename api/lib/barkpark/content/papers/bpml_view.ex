@@ -169,9 +169,10 @@ defmodule Barkpark.Content.Papers.BpmlView do
   block that spells as the pull printed it was not edited, so an unedited push
   derives no op whatever the view hides. A callout's body and `<kept>` lines
   follow `Bpml.CalloutBody.resolve/4` first; its notes come back with the ops.
-  `Bpml.WriteWall` then refuses a copy pulled from another view (its
-  `bpmlView` fingerprint, 412), a hidden label field it sets, and blocks that
-  change what the pull did not show (422 `bpml_unshown`).
+  `Bpml.WriteWall` refuses, before that, a copy pulled from another view (its
+  `bpmlView` fingerprint, 412) and a hidden label field it sets (422
+  `bpml_unshown`), and after it, an id pushed twice (422 `bpml`) and blocks
+  that change what the pull did not show (422 `bpml_unshown`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """

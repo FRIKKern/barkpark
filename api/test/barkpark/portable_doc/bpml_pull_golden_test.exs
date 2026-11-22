@@ -17,12 +17,12 @@ defmodule Barkpark.PortableDoc.BpmlPullGoldenTest do
 
   # Why this test fails, and what a printer change must bring with it.
   @rule """
-  the printer's output changed. "Shown" for a BPML push (Bpml.WriteWall) is
-  computed with the printer that answers the push, so a copy pulled before
-  this change can push over a part it never saw. Add a printer-version mark to
-  the pull and the working-copy anchor, and refuse pushes from an older
-  version that edit or remove a block whose shown parts changed; then
-  regenerate this golden (BPML_PULL_GOLDEN_WRITE=1).
+  the printer's output changed. A copy pulled before this change carries the
+  old view's fingerprint (`bpmlView`) and now answers 412: pull again. A copy
+  without one (a bp from before `x-bpml-view`) gets the block rules alone,
+  computed with the new printer, and can push over a part it never saw:
+  decide that gap is acceptable for this change, then regenerate this golden
+  (BPML_PULL_GOLDEN_WRITE=1).
   """
 
   defp cases do

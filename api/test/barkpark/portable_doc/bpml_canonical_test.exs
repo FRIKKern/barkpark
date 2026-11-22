@@ -234,9 +234,9 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
     end
   end
 
-  # Rule 1 rewrites only a mark node that is exactly its type and children; any
-  # other key on the node is something the print drops, so normalize leaves it
-  # and the wall refuses it.
+  # Rule 1 rewrites only a mark node that is exactly its type and children, or
+  # type, value and its own marks; any other key on the node is something the
+  # print drops, so normalize leaves it and the wall refuses it.
   @strong_children [%{"type" => "text", "value" => "seen"}]
   @mark_node_extras [
     {"a strong node also holding a value", %{"value" => "HIDDEN"}},
@@ -286,7 +286,7 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
              Render.render_blocks(Canonical.normalize([children]))
   end
 
-  # ── the property, over every stored document ────────────────────────────────
+  # ── the property, over every stored-document fixture ────────────────────────
 
   test "no character, no mark on a character, no link, no checked state, no block, no item child, no slot" do
     for {file, blocks} <- BpmlStoredDocuments.all(), {block, i} <- Enum.with_index(blocks) do

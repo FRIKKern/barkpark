@@ -1,17 +1,17 @@
 defmodule Barkpark.Content.Papers.KeepUntouched do
   @moduledoc """
   The batch write's render shapes (`BlockOps.normalize_render_shapes/1`), with
-  one opt-in exception: under `keep_untouched: true`, a top-level block the
-  batch left exactly as stored keeps its stored bytes.
+  one opt-in exception: under `keep_untouched: true`, a top-level block with
+  its own id that the batch left exactly as stored keeps its stored bytes.
 
   The chokepoint rewrites older shapes (bare-string list items, `{"text"}`
   items, text-keyed leaves) in every block of the Paper, touched or not. A
   BPML push (`Bpml.WriteWall`) lets a block holding content its pull did not
   show through only when it comes out byte-equal to the stored block, so the
   sync write asks for this: a block it did not change is written back as it
-  was read. A block the batch changed, a new block, and a block whose id the
-  stored Paper holds twice get the shapes as before. Every other writer is
-  unchanged.
+  was read. A block the batch changed, a new block, a block with no id, and a
+  block whose id the stored Paper holds twice get the shapes as before. Every
+  other writer is unchanged.
   """
 
   alias Barkpark.Content.Papers.BlockOps

@@ -357,9 +357,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
     * `bpmlView` is not the row's current view → 412; a push that changes what
       its pull did not show → 422 `bpml_unshown` (`Bpml.WriteWall`);
     * no changes → 200 `{ok, unchanged: true}`;
-    * applied → 200 `{ok, rev, op_count, bpml, bpmlView}`: `bpml` is the view
-      of the Paper as saved, read back before commit (the bytes a pull gives
-      at that rev, which the client writes), `bpmlView` their fingerprint.
+    * applied → 200 `{ok, slug, rev, op_count, bpml, bpmlView}` (+ `notes`):
+      `bpml` is the view as saved, read back before commit (the bytes a pull
+      gives at that rev, which the client writes), `bpmlView` their fingerprint.
   """
   def sync(conn, %{"slug" => slug} = params) do
     bpml = params["bpml"]
