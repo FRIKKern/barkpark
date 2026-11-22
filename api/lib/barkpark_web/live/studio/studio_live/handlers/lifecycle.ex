@@ -651,7 +651,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       true ->
         old_form = socket.assigns[:editor_form] || %{}
         rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
-        {:noreply, RemoteValues.push(rebuilt, old_form, rebuilt.assigns[:editor_form] || %{})}
+        new_form = rebuilt.assigns[:editor_form] || %{}
+
+        {:noreply,
+         rebuilt
+         |> RemoteValues.push(old_form, new_form)
+         |> RichTextRemote.push(old_form, new_form)}
     end
   end
 
