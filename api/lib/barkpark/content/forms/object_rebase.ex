@@ -24,13 +24,6 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
 
   def onto(params, _base, _theirs, _schema), do: params
 
-  @doc "Whether `key` is an object field (`composite`) of `schema`."
-  @spec object?(map() | nil, String.t()) :: boolean()
-  def object?(%{fields: fields}, key) when is_list(fields),
-    do: Enum.any?(fields, &match?(%{"name" => ^key, "type" => "composite"}, &1))
-
-  def object?(_schema, _key), do: false
-
   defp rebase(fields, mine, base, theirs) do
     Enum.reduce(fields, mine, fn
       %{"name" => key, "type" => "composite"} = field, acc when is_binary(key) ->

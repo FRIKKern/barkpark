@@ -1218,33 +1218,6 @@ defmodule Barkpark.Content.Forms do
     |> Map.keys()
   end
 
-  @doc """
-  `params` with each object field in `keys` as a save from `base_doc` writes
-  it onto `theirs` (`ObjectRebase`): the subfields the post changed, over
-  what `theirs` holds. An object the save does not read as an edit is
-  `theirs`'s. The Studio's form buffer takes the target object this way
-  when a remote save changed it (`PostedEdits`), so it draws what the store
-  holds.
-  """
-  @spec subfields_onto(map(), [String.t()], map(), String.t() | nil, map() | nil, map()) :: map()
-  def subfields_onto(params, keys, base_doc, type, schema, theirs)
-      when is_map(params) and is_map(base_doc) and is_map(theirs) do
-    shapes = CanonicalShapes.for_type(schema, type)
-    snapshot = Map.get(base_doc, :content) || %{}
-    rebased = params |> Map.take(keys) |> edits(snapshot, shapes)
-    rebased = ObjectRebase.onto(rebased, snapshot, theirs, shapes)
-
-    Enum.reduce(keys, params, fn key, acc ->
-      cond do
-        not (ObjectRebase.object?(shapes, key) and is_map(Map.get(theirs, key))) -> acc
-        Map.has_key?(rebased, key) -> Map.put(acc, key, Map.fetch!(rebased, key))
-        true -> Map.put(acc, key, Map.fetch!(theirs, key))
-      end
-    end)
-  end
-
-  def subfields_onto(params, _keys, _base_doc, _type, _schema, _theirs), do: params
-
   defp classic_save_top_level_blocks(base_content, blocks, params, schema, dataset, scope) do
     values = classic_field_values(params, schema)
     new_blocks = Synthesis.patch_bound_values(blocks, values)

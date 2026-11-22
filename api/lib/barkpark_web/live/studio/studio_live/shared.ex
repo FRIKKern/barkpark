@@ -27,7 +27,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
   alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, RefusedSave}
+  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, PostPath, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   @doc false
@@ -598,6 +598,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         socket.assigns.dataset,
         ScopeHelpers.scope_opts(socket)
       )
+
+    # A change inside an object posts only that subfield: its siblings are
+    # what the page drew (`PostPath`, task-04e50efa8405b956).
+    params = PostPath.only_changed(params, socket, doc)
+    raw_params = PostPath.only_changed(raw_params, socket, doc)
 
     changed? = autosave_changes_something?(doc, schema, params)
 

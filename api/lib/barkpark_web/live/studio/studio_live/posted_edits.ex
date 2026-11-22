@@ -43,7 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   import Phoenix.Component, only: [assign: 2, assign: 3]
 
   alias Barkpark.Content.Forms
-  alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
+  alias BarkparkWeb.Studio.StudioLive.PostPath
 
   @doc """
   A remote save changed the buffer from `old_form` to `new_form`: each field
@@ -72,10 +72,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
   post as the browser sent it, both as `Forms.upsert_draft/6` was given them.
   """
   def into_form(socket, params, raw_params) do
-    all = waiting(socket, socket.assigns[:editor_form] || %{})
-    waiting = all -- target(socket)
+    waiting = waiting(socket, socket.assigns[:editor_form] || %{}) -- target(socket)
     kept = old_values(socket, params, raw_params, waiting)
-    merge(socket, objects(socket, params, raw_params, all), kept)
+    merge(socket, PostPath.into_buffer(params, socket), kept)
   end
 
   @doc """
@@ -89,7 +88,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
 
     assign(socket,
       save_status: "Saved",
-      editor_form: merge(socket, params, waiting(socket, form)),
+      editor_form: merge(socket, PostPath.into_buffer(params, socket), waiting(socket, form)),
       editor_remote_waiting: {base(socket), values}
     )
   end
@@ -106,31 +105,6 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
 
   defp buffer(socket, values),
     do: Map.merge(socket.assigns[:editor_form] || %{}, Forms.unset_as_nil(values))
-
-  # The object a post is a change of, when a remote save changed it in the
-  # buffer, takes only the subfields the post changed; the rest keep the
-  # remote values, as the store does (`Forms.subfields_onto/6`,
-  # task-04e50efa8405b956). Read against the row the save read against.
-  defp objects(socket, params, raw_params, waiting) do
-    case Enum.filter(target(socket), &(&1 in waiting)) do
-      [] ->
-        params
-
-      keys ->
-        schema = socket.assigns[:editor_schema]
-
-        params
-        |> Forms.with_posted_rich_text(raw_params, schema)
-        |> Forms.subfields_onto(
-          keys,
-          Lifecycle.post_base(socket),
-          socket.assigns[:editor_type],
-          schema,
-          socket.assigns[:editor_form] || %{}
-        )
-        |> then(&Map.merge(params, Map.take(&1, keys)))
-    end
-  end
 
   # The waiting fields whose posted value the save does not read as an edit.
   defp old_values(_socket, _params, _raw_params, []), do: []
