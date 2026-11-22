@@ -102,6 +102,9 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/content/writer.ex:validate_document_findings" =>
       "unscoped 2-arity, write validation (task-1dac662bed153203 moved the get_schema call " <>
         "here from validate_document/5, which now delegates to this function)",
+    "barkpark/content/link_href_fence.ex:fields" =>
+      "write fence (task-b923a915151d2038): the schema only says which fields are " <>
+        "rich text to check for a refused link address; never rendered or redacted",
     "barkpark/content/writer.ex:schema_for_create" =>
       "unscoped arm only (no stamped scope), write scaffold",
 
