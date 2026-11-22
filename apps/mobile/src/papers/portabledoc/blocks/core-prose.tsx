@@ -9,12 +9,14 @@ import type { Theme } from '../../../ui/theme'
 import { roles, scale } from '../../../ui/typography'
 import { renderInlineNodes } from '../inlines'
 import {
+  CAPPED,
   asList,
   headingLevel,
   isMap,
   itemInlines,
   paragraphInline,
   str,
+  type Block,
 } from '../model'
 import { bodyText, spec, type BlockCtx, type Render } from '../register'
 
@@ -174,17 +176,18 @@ const list: Render = (b, ctx, key) => {
           ? asList(item.children).filter(
               (child) =>
                 isMap(child) &&
-                typeof child.type === 'string' &&
-                [
-                  'list',
-                  'bulletList',
-                  'bullet_list',
-                  'bulleted-list',
-                  'bulleted_list',
-                  'ordered-list',
-                  'numbered_list',
-                ].includes(child.type) &&
-                Array.isArray(child.items),
+                (CAPPED in child ||
+                  (typeof child.type === 'string' &&
+                    [
+                      'list',
+                      'bulletList',
+                      'bullet_list',
+                      'bulleted-list',
+                      'bulleted_list',
+                      'ordered-list',
+                      'numbered_list',
+                    ].includes(child.type) &&
+                    Array.isArray(child.items))),
             )
           : []
         const body = (
@@ -202,6 +205,7 @@ const list: Render = (b, ctx, key) => {
                 {body}
                 {children.map((child, j) => {
                   const nested = child as Record<string, unknown>
+                  if (CAPPED in nested) return paragraph(child as Block, ctx, j)
                   return list(
                     {
                       ...nested,

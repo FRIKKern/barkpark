@@ -404,6 +404,23 @@ defmodule Barkpark.PortableDoc.RenderFieldLimitsTest do
       end
     end
 
+    # task-a6a57717506de979: a list item draws only its list children, and keeps
+    # the notice block too; a stored "capped": true does not make a paragraph draw.
+    test "list: a block at the validator's depth shows the notice in its item" do
+      list = &%{"type" => "list", "items" => [%{"children" => [&1]}]}
+      deepest = nest(list, Validate.max_depth())
+
+      stored =
+        list.(%{"type" => "paragraph", "text" => "stored", "capped" => true})
+        |> Jason.encode!()
+        |> Jason.decode!()
+
+      for style <- [:article, :email] do
+        assert Render.render_block(deepest, %{style: style}) =~ @too_deep
+        refute Render.render_block(stored, %{style: style}) =~ "stored"
+      end
+    end
+
     for mark <- ["strong", "em", "link"] do
       @mark mark
       # task-11bbe4b4ae8c85f4: past the depth the word stays and the notice follows it.
