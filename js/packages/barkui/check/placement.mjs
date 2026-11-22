@@ -9,11 +9,16 @@
 // position-anchor names; anything else, anywhere in a stage, fails by name. docs/PARTS.md "Placement" prints the
 // same list, and a unit row is red when the two differ.
 //
-// What is read: the declarations the browser applies, by property name (values are not read, except transition's), as it parses the attribute's text (a
-// shorthand is judged by its longhands, so `inset` is top, right, bottom and left, and `all` is its own name).
-// Text the browser drops is not a declaration. When it is read: every value the attribute holds, from the page's
-// first frame (placementWorld, below, in the census's world), so a property written while a box is open and taken
-// away at close fails by name. On a stage with no script, any style attribute fails: nothing there can write one.
+// Every element that holds a stage, up to the root element, is read the same way, since a stage inherits from it:
+// nothing may stand there but the second list, SCROLL_LOCK, with its own reason, on the root element or body only
+// and only while a dialog box is open.
+//
+// What is read: the declarations the browser applies, by property name (values are not read, except transition's
+// and the names anchor-name gives), as the browser parses the attribute's text (a shorthand is judged by its
+// longhands, so `inset` is top, right, bottom and left, and `all` is its own name). Text the browser drops is not a
+// declaration. When it is read: every value the attribute holds, from the page's first frame (placementWorld,
+// below, in the census's world), so a property written while a box is open and taken away at close fails by name.
+// On a stage with no script, any style attribute fails: nothing there can write one.
 
 export const REASON = 'placement is where a box sits, never how it looks'
 
@@ -60,6 +65,14 @@ export const TRANSITION = {
 /** Every entry the judge allows: the list, then transition. */
 export const ALLOWED = [...PLACEMENT, TRANSITION]
 
+/** The second list, for the root element and body, which hold every stage, with its own reason: UI SDK stops the page
+    scrolling behind an open dialog by writing these on the root element (its scroller); scrollbar-gutter and
+    --scrollbar-width only when the page has a scrollbar that takes room. Allowed there only while a dialog box is
+    open. Any other element that holds a stage may carry nothing: a stage inherits from it. */
+export const ROOT_REASON = 'UI SDK stops the page scrolling behind an open dialog; that is behaviour, not look'
+const LOCK = 'UI SDK dialog, on the root element (foundation/popups/modal.js)'
+export const SCROLL_LOCK = ['overflow-x', 'overflow-y', 'scroll-behavior', 'scrollbar-gutter', '--scrollbar-width'].map((property) => ({ property, on: 'root', writer: LOCK }))
+
 /** The fail for a property that is not placement, on any element in a stage. */
 export const NOT_PLACEMENT = (at, prop) => `${at} was given ${prop} in a style attribute, which is not placement: the look belongs in part.css`
 /** The fail for a box property on an element that cannot open in the top layer. */
@@ -68,18 +81,25 @@ export const NOT_A_BOX = (at, prop) => `${at} was given ${prop} in a style attri
 export const NOT_ANCHORED = (at, name) => `${at} was given anchor-name ${name} in a style attribute, and no box in the top layer anchors to it`
 /** The fail for an entry with one value, given another. */
 export const NOT_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and ${entry.property} is allowed there only as "${entry.property}: ${entry.value}"`
+/** The fail for a property off the scroll lock on the root element or body. */
+export const NOT_LOCK = (at, prop) => `${at} was given ${prop} in a style attribute, and it holds every stage: only the scroll lock may stand there, while a dialog is open`
+/** The fail for the scroll lock on the root element or body with no dialog open. */
+export const NO_DIALOG = (at, prop) => `${at} was given ${prop} in a style attribute while no dialog was open: the scroll lock stands there only while a dialog is open`
+/** The fail for any property on another element that holds a stage. */
+export const ON_ANCESTOR = (at, prop) => `${at} was given ${prop} in a style attribute, and it holds a stage, which inherits from it: nothing may stand there`
 /** The fail for any style attribute on a stage with no script. */
 export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage with no script, where nothing may write one`
 
-/** Runs in the census's world (it is serialised): the log of every value each style attribute in a stage holds,
-    from the first frame, and the judge of it. `list` is ALLOWED; `script` is false on a page with no script; `say`
-    holds the fails' wording; `owner(el)` names the part whose stage holds el (null outside every stage);
-    `boxes(part)` the elements the census has seen can open in the top layer for that part; `describe(el)` names an
-    element. Returns { watch(root): observe a document or an open shadow root from now on, look(part): the fails
-    for that part, in the order first seen }. */
-export function placementWorld(list, script, say, owner, boxes, describe) {
+/** Runs in the census's world (it is serialised): the log of every value each style attribute in a stage, or on an
+    element that holds a stage, holds from the first frame, and the judge of it. `lists` is { allowed: ALLOWED, root:
+    SCROLL_LOCK }; `script` is false on a page with no script; `say` holds the fails' wording; `owner(el)` names the
+    part whose stage holds el (null outside every stage); `boxes(part)` the elements the census has seen can open in
+    the top layer for that part, and boxes() all of them; `describe(el)` names an element. Returns { watch(root): observe a document or an open
+    shadow root from now on, look(part): the fails for that part, in the order first seen }. */
+export function placementWorld(lists, script, say, owner, boxes, describe) {
   const entries = new Map()
-  for (const e of list) for (const name of [e.property, ...(e.longhands ?? [])]) entries.set(name, e)
+  for (const e of lists.allowed) for (const name of [e.property, ...(e.longhands ?? [])]) entries.set(name, e)
+  const lock = new Map(lists.root.map((e) => [e.property, e]))
   const pad = document.createElement('div')
   const parse = (text) => {
     pad.setAttribute('style', text)
@@ -87,12 +107,27 @@ export function placementWorld(list, script, say, owner, boxes, describe) {
     for (let i = 0; i < pad.style.length; i++) decls.push({ prop: pad.style.item(i), value: pad.style.getPropertyValue(pad.style.item(i)) })
     return { decls, of: (name) => pad.style.getPropertyValue(name) }
   }
-  // Every value held, by element: text, and the part whose stage held the element then.
+  // Whether a dialog box is open: one the census has seen can open in the top layer, open now, that is a dialog or holds
+  // one. The browser tells beforetoggle at once, before a box opens or closes, so the writes waiting until then are
+  // taken there, while the box is as it was.
+  const DIALOG = 'dialog, [role="dialog"], [role="alertdialog"]'
+  const dialogOpen = () => boxes().some((b) => b.isConnected && b.matches(':modal, :popover-open, dialog[open]') && (b.matches(DIALOG) || !!b.querySelector(DIALOG)))
+  const toggles = () => take(so.takeRecords())
+  // Where an element stands: in a part's stage ({ part }), or holding stages ({ parts, root: the root element or
+  // body, dialog: a dialog box open }); null when neither.
+  const place = (el) => {
+    const part = owner(el)
+    if (part !== null) return { part }
+    if (el.nodeType !== 1 || !el.querySelector('[data-part]')) return null
+    return { parts: [...el.querySelectorAll('[data-part]')].map((e) => e.dataset.part), root: el === document.documentElement || el === document.body, dialog: dialogOpen() }
+  }
+  // Every value held, by element: each text with where the element stood then.
   const held = new Map()
-  const hold = (el, text, part) => {
-    if (text === null || part === null) return
+  const hold = (el, text, at) => {
+    if (text === null || at === null) return
     if (!held.has(el)) held.set(el, new Map())
-    if (!held.get(el).has(text)) held.get(el).set(text, part)
+    const key = `${at.dialog ? 1 : 0}${text}`
+    if (!held.get(el).has(key)) held.get(el).set(key, { text, at })
   }
   const up = (n) => (n.parentNode instanceof ShadowRoot ? n.parentNode.host : n.parentNode)
   // Where a node stood when record i was made: one taken out later in the same delivery stood where it was taken
@@ -100,16 +135,20 @@ export function placementWorld(list, script, say, owner, boxes, describe) {
   const where = (node, i, gone) => {
     let top = node
     for (let n = node; n; n = up(n)) top = n
-    if (top === document) return owner(node)
+    if (top === document) return place(node)
     const g = gone.get(top)
-    return g && g[0] > i ? where(g[1], g[0], gone) : null
+    if (!g || g[0] <= i) return null
+    const from = where(g[1], g[0], gone)
+    if (from?.part !== undefined) return from
+    const p = place(node)
+    return p?.parts ? p : null
   }
   // An element as it arrives, with all under it and inside each open shadow root it carries.
-  const arrive = (n, part) => {
+  const arrive = (n, i, gone) => {
     if (n.nodeType !== 1) return
     for (const e of [n, ...n.querySelectorAll('*')]) {
-      if (e.hasAttribute('style')) hold(e, e.getAttribute('style'), part)
-      if (e.shadowRoot) for (const c of e.shadowRoot.children) arrive(c, part)
+      if (e.hasAttribute('style')) hold(e, e.getAttribute('style'), where(e, i, gone))
+      if (e.shadowRoot) for (const c of e.shadowRoot.children) arrive(c, i, gone)
     }
   }
   const take = (records) => {
@@ -119,44 +158,54 @@ export function placementWorld(list, script, say, owner, boxes, describe) {
     })
     records.forEach((m, i) => {
       if (m.type === 'childList') {
-        for (const n of m.addedNodes) arrive(n, where(m.target, i, gone))
+        for (const n of m.addedNodes) arrive(n, i, gone)
         return
       }
       // Each record holds the value before it; the value after the last one is the attribute now.
-      const part = where(m.target, i, gone)
-      hold(m.target, m.oldValue, part)
-      if (!records.some((r, k) => k > i && r.type === 'attributes' && r.target === m.target)) hold(m.target, m.target.getAttribute('style'), part)
+      const at = where(m.target, i, gone)
+      hold(m.target, m.oldValue, at)
+      if (!records.some((r, k) => k > i && r.type === 'attributes' && r.target === m.target)) hold(m.target, m.target.getAttribute('style'), at)
     })
   }
   const so = new MutationObserver(take)
-  const watch = (root) => so.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'], attributeOldValue: true })
+  const watch = (root) => {
+    so.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'], attributeOldValue: true })
+    root.addEventListener('beforetoggle', toggles, true)
+  }
   const look = (part) => {
     take(so.takeRecords())
-    for (const e of document.querySelectorAll('[style]')) hold(e, e.getAttribute('style'), owner(e))
+    for (const e of document.querySelectorAll('[style]')) hold(e, e.getAttribute('style'), place(e))
     const mine = new Set(boxes(part))
     // The anchor names the part's boxes hang from: every position-anchor a box held, or holds from part.css.
     const anchors = new Set()
     for (const b of mine) {
-      for (const text of held.get(b)?.keys() ?? []) anchors.add(parse(text).of('position-anchor').trim())
+      for (const { text } of held.get(b)?.values() ?? []) anchors.add(parse(text).of('position-anchor').trim())
       if (b.isConnected) anchors.add(getComputedStyle(b).getPropertyValue('position-anchor').trim())
     }
     const fails = []
     const fail = (s) => fails.includes(s) || fails.push(s)
     for (const [el, texts] of held)
-      for (const [text, of] of texts) {
-        if (of !== part) continue
-        const at = describe(el)
+      for (const { text, at } of texts.values()) {
+        if (at.part !== undefined ? at.part !== part : !at.parts.includes(part)) continue
+        // An element that holds a stage is named by its tag and id: its text is every stage's.
+        const who = at.part !== undefined ? describe(el) : `${el.localName}${el.id ? '#' + el.id : ''}`
         if (!script) {
-          fail(say.NO_SCRIPT(at))
+          fail(say.NO_SCRIPT(who))
           continue
         }
         const p = parse(text)
         for (const { prop, value } of p.decls) {
+          if (at.part === undefined) {
+            if (!at.root) fail(say.ON_ANCESTOR(who, prop))
+            else if (!lock.has(prop)) fail(say.NOT_LOCK(who, prop))
+            else if (!at.dialog) fail(say.NO_DIALOG(who, prop))
+            continue
+          }
           const e = entries.get(prop)
-          if (!e) fail(say.NOT_PLACEMENT(at, prop))
-          else if (e.on === 'box' && !mine.has(el)) fail(say.NOT_A_BOX(at, prop))
-          else if (e.value !== undefined && p.of(e.property) !== e.value) fail(say.NOT_VALUE(at, prop, value, e))
-          else if (e.on === 'anchor') for (const name of value.split(',').map((s) => s.trim())) if (!anchors.has(name)) fail(say.NOT_ANCHORED(at, name))
+          if (!e) fail(say.NOT_PLACEMENT(who, prop))
+          else if (e.on === 'box' && !mine.has(el)) fail(say.NOT_A_BOX(who, prop))
+          else if (e.value !== undefined && p.of(e.property) !== e.value) fail(say.NOT_VALUE(who, prop, value, e))
+          else if (e.on === 'anchor') for (const name of value.split(',').map((s) => s.trim())) if (!anchors.has(name)) fail(say.NOT_ANCHORED(who, name))
         }
       }
     return fails
@@ -167,7 +216,7 @@ export function placementWorld(list, script, say, owner, boxes, describe) {
 /** placementWorld as code for the census's world, the list and the fails' wording in it: a function of
     (script, owner, boxes, describe). `source` is probes.mjs's. */
 export function placementSource(source) {
-  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT }
+  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT, NOT_LOCK, NO_DIALOG, ON_ANCESTOR }
   const said = `{ ${Object.entries(say).map(([k, f]) => `${k}: ${source(f)}`).join(', ')} }`
-  return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify(ALLOWED)}, script, ${said}, owner, boxes, describe))`
+  return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify({ allowed: ALLOWED, root: SCROLL_LOCK })}, script, ${said}, owner, boxes, describe))`
 }

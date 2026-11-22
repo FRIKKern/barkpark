@@ -1,6 +1,7 @@
 // The selftest's cases for placement in a style attribute (check/placement.mjs): UI SDK's own placement passes; any
 // other property, a box property off a box, an anchor name no box hangs from, and a property held only while a box
-// was open fail by name; and on a stage with no script any style attribute fails.
+// was open fail by name; on an element that holds a stage only UI SDK's scroll lock passes, on the root element or
+// body while a dialog is open; and on a stage with no script any style attribute fails.
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +10,7 @@ import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { noscript } from './proofs.mjs'
-import { NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_PLACEMENT, NOT_VALUE, TRANSITION } from './placement.mjs'
+import { NO_DIALOG, NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_LOCK, NOT_PLACEMENT, NOT_VALUE, ON_ANCESTOR, TRANSITION } from './placement.mjs'
 import { all, edit, each, inDemo, lights } from './plants.mjs'
 
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
@@ -34,6 +35,26 @@ steps.push(
   { name: 'Escape closes it', keys: ['Escape'], expect: (root) => !root.querySelector('ui-select-content').matches(':popover-open') || 'the select is still open' },
 )
 `
+
+const DIALOG = `<ui-dialog id="button-dlg-ui">
+  <ui-dialog-trigger><button id="button-dlg-open" type="button">Open dialog</button></ui-dialog-trigger>
+  <ui-dialog-content hidden><ui-dialog-title>Details</ui-dialog-title><ui-dialog-close><button id="button-dlg-close" type="button">Close</button></ui-dialog-close></ui-dialog-content>
+</ui-dialog>`
+const DIALOG_LAYER = { box: 'ui-dialog-content', open: { click: '#button-dlg-open' }, close: { keys: ['Escape'] } }
+const DIALOG_STEPS = `
+steps.push(
+  { name: 'A click opens the dialog', click: '#button-dlg-open', expect: (root) => root.querySelector('ui-dialog-content').matches(':popover-open, :modal') || 'the dialog is not open' },
+  { name: 'Escape closes it', keys: ['Escape'], expect: (root) => !root.querySelector('ui-dialog-content').matches(':popover-open, :modal') || 'the dialog is still open' },
+)
+`
+// On the elements that hold the stage, as the page loads, with no dialog open: one off the scroll lock on the root
+// element, the scroll lock on body, and anything on the wrapper between body and the stage.
+const ABOVE = [
+  S,
+  "document.documentElement.setAttribute(S, 'color: rgb(255, 0, 0)')",
+  "document.body.setAttribute(S, 'overflow: hidden')",
+  "root.parentElement.setAttribute(S, 'margin-top: 0px')",
+].join('\n')
 
 // Each written as the page loads; the last is written while its box is open and taken away as it closes, in one task,
 // so no look ever finds it.
@@ -114,6 +135,31 @@ export const PLACEMENT_CASES = [
       'a transition other than none on a box fails by name, with its value': has(NOT_VALUE('div#button-fading "Fading"', 'transition-duration', '1s', TRANSITION)),
       'one transition longhand that is not none (a duration) on a box fails by name': has(NOT_VALUE('div#button-slowed "Slowed"', 'transition-duration', '0.2s', TRANSITION)),
       "removeAttribute taken from a frame's window after an el.style write: the value is still seen": has(NOT_PLACEMENT('span#button-framed "Framed"', 'color')),
+    }),
+  },
+  {
+    name: 'placement: a UI SDK dialog opened by a click and closed by Escape writes its scroll lock on the root element while it is open, and that passes',
+    only: ['pressed'],
+    layers: true,
+    green: true,
+    plant: all(
+      (d) => row(d, DIALOG),
+      (d) => json(d, (j) => ({ ...j, imports: [...j.imports, '@ui-sdk/web/dialog'], layers: [DIALOG_LAYER] })),
+      (d) => appendFileSync(join(d, 'press.mjs'), DIALOG_STEPS),
+    ),
+    expect: each({
+      'every press step passed, the dialog opened and closed among them': (p) => lights(p).pressed?.pass === true && (p?.parts?.button?.steps ?? []).length > 0,
+      'no fail names a style attribute: not the root element, not the dialog': (p) => !STYLE_FAIL.test(said(p)),
+    }),
+  },
+  {
+    name: 'placement: on an element that holds a stage, a property off the scroll lock on the root element, the scroll lock on body with no dialog open, and any property on a wrapper fail by name',
+    only: ['pressed'],
+    plant: all((d) => inDemo(d, ABOVE)),
+    expect: each({
+      'color on the root element fails by name': has(NOT_LOCK('html', 'color')),
+      'the scroll lock on body with no dialog open fails by name': has(NO_DIALOG('body', 'overflow-y')),
+      'margin-top on the wrapper between body and the stage fails by name': has(ON_ANCESTOR('section#part-button', 'margin-top')),
     }),
   },
   {

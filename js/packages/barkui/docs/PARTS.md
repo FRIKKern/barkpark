@@ -290,10 +290,10 @@ where each may stand and what writes it:
   menu, on the box.
 - `--dialog-stack`, `--keyboard-inset`, `--visual-viewport-height`: only on a box. UI SDK dialog, on the box.
 
-Values are not read, except transition's. Apart from the list, one more entry has its own reason: UI SDK switches
-motion off on a box while it measures where to put it, and `none` takes motion away and adds no look. UI SDK writes it
-when it first places a select or menu box and puts the old value back in the same task, so only a reader from the
-first frame sees it:
+Values are not read, except transition's and the names anchor-name gives. Apart from the list, one more entry has
+its own reason: UI SDK switches motion off on a box while it measures where to put it, and `none` takes motion away
+and adds no look. UI SDK writes it when it first places a select or menu box and puts the old value back in the same
+task, so only a reader from the first frame sees it:
 
 - `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
 
@@ -306,8 +306,21 @@ a `style` attribute in a stage holds is read, from the page's first frame, howev
 `el.style`, `attributeStyleMap`), so a property written while a box is open and taken away as it closes fails by
 name; a hook set before any of the page's script makes `removeAttribute` bring the attribute up to date first,
 since the browser does not. On the stage with no script, any `style` attribute fails: nothing there can write one.
-The rule reads stages only: what UI SDK writes on the root while a dialog is open (it stops the page scrolling) is
-outside every stage and not judged, since it is behaviour, not look. The one limit: a value only inside a closed
+
+Every element that holds a stage, up to and including the root element, is read the same way from the first frame,
+since a stage inherits from it. Nothing may stand there, with one closed list apart, in the same file, with its own
+reason: UI SDK stops the page scrolling behind an open dialog, which is behaviour, not look. It writes the lock on the
+root element, `scrollbar-gutter` and `--scrollbar-width` only when the page has a scrollbar that takes room:
+
+- `overflow-x`, `overflow-y`, `scroll-behavior`, `scrollbar-gutter`, `--scrollbar-width`: only on the root element
+  or body, while a dialog box is open. UI SDK dialog, on the root element.
+
+A dialog box is a box that is a `dialog`, or carries the role `dialog` or `alertdialog`, or holds one. Each write is
+judged by whether one is open when the browser hands the write over, and the writes waiting are taken at each
+`beforetoggle`, before a box opens or closes, so a lock written just before a dialog opens, or left after it closes,
+fails by name. Any other property on the root element or
+body, the lock while no dialog box is open, and any property on another element that holds a stage fail by name
+("… holds a stage, which inherits from it: nothing may stand there"). The one limit: a value only inside a closed
 shadow root, or one an element held only between arriving in a stage and leaving it within one task, changed
 after it left, is not seen.
 

@@ -177,7 +177,7 @@ function census(placement, script) {
   }
   const mo = new MutationObserver(records)
   const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''} "${(el.textContent || '').trim().slice(0, 30)}"`
-  const placed = placement(script, owner, (part) => [...seen].filter(([el, v]) => v.kind === 'can' && v.of === part).map(([el]) => el), describe)
+  const placed = placement(script, owner, (part) => [...seen].filter(([el, v]) => v.kind === 'can' && (part === undefined || v.of === part)).map(([el]) => el), describe)
   const watch = (r) => {
     mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['popover'] })
     placed.watch(r)
