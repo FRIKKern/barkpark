@@ -136,7 +136,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
               )
           end
 
-        {:noreply, assign(socket, :editor_store_doc, doc_data)}
+        {:noreply, socket |> assign(:editor_store_doc, doc_data) |> named_as_seen()}
 
       true ->
         schema = socket.assigns[:editor_schema]
@@ -157,9 +157,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
-         )}
+         )
+         |> named_as_seen()}
     end
   end
+
+  # The pane header and the tab name the newest stored version this tab has
+  # seen, as the title field and the list row do: `editor_doc` stays this
+  # tab's own row (`post_base/1`), so naming it kept the old title after
+  # another editor renamed the document (task-42a6f063263338f6). TanStack's
+  # DocumentPane names the document it holds, which moves on every frame.
+  defp named_as_seen(socket), do: Shared.assign_page_title(socket, base_doc(socket))
 
   # Two people save one field at once: B's save lands, then this tab's save
   # is written over it, and only then does B's frame reach this process (it

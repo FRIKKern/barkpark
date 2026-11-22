@@ -2817,9 +2817,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # Same order as the document header names it (Editor's document_header):
   # the stored title, else the schema's derived preview title (a titleless
   # author is its name), else a singleton's schema title, else "Untitled".
-  def assign_page_title(socket) do
+  #
+  # `doc` is the row to name: the open document as this tab last saved or
+  # loaded it, or, after another editor's save, the newest stored version this
+  # tab has seen (`Lifecycle.doc_updated/2`, task-42a6f063263338f6).
+  def assign_page_title(socket, doc \\ nil) do
     title =
-      case socket.assigns[:editor_doc] do
+      case doc || socket.assigns[:editor_doc] do
         %{} = doc ->
           BarkparkWeb.Studio.DocTitle.shown(Map.get(doc, :title)) ||
             derived_title(doc, socket.assigns[:editor_schema])
