@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
@@ -265,8 +266,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} ->
+        # As an autosave: a rich text in an object written over another
+        # editor's change is not written over it (#28349 r2 review, V1).
+        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
-        do_save(doc, not_codes, socket)
+        {:noreply, socket} = do_save(doc, not_codes, socket)
+        {:noreply, RichTextRemote.hold(socket, held)}
 
       _ ->
         {:noreply, socket}
@@ -310,9 +315,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
   def reload_remote_doc(socket) do
+    was = socket.assigns[:editor_form]
+
     socket =
       socket
       |> Shared.rebuild_panes()
+      |> RichTextRemote.repaint(was)
       |> assign(
         editor_dirty: false,
         doc_conflict: false,
@@ -476,6 +484,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
       %{"doc" => doc} ->
+        # A rich text in an object written over another editor's change is
+        # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
+        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
@@ -500,7 +511,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> keep_unsaved_values(doc, keys)
          |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
          |> RefusedSave.not_codes(not_codes)
-         |> settle_dirty(keys)}
+         |> settle_dirty(keys)
+         |> RichTextRemote.hold(held)}
 
       _ ->
         {:noreply, socket}

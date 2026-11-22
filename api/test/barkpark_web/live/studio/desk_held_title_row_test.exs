@@ -175,6 +175,46 @@ defmodule BarkparkWeb.Studio.DeskHeldTitleRowTest do
     assert rows(a)[c.id] == "Doc 7"
   end
 
+  # task-dfd5b9df60547682: each keystroke of a held title changes the open
+  # row's title, so the list pane renders again. Its rows read the held title
+  # through the pane's assigns, so every row was sent again: about twice
+  # main's bytes per keystroke on a 100-row list. Only the open row may be.
+  test "a keystroke in a held title sends the open row alone, not the others", c do
+    a = open(c)
+    held!(a)
+    assert eventually(fn -> rows(a)[c.id] == @long end)
+
+    form = assigns(a).editor_form |> Map.take(~w(title notes)) |> Map.put("title", @long <> "z")
+    post = %{"_target" => ["doc", "title"], "doc" => form}
+
+    sent =
+      sent_by(a, fn -> a |> element("[data-pane-editing] #editor-form") |> render_change(post) end)
+
+    assert sent =~ "xz"
+    refute sent =~ "Other", "the other row was sent again"
+    assert rows(a)[c.id] == @long <> "z"
+    assert rows(a)[c.other] == "Other"
+  end
+
+  # Everything the LiveView process sends to the page while `fun` runs (its
+  # diffs), as one string.
+  defp sent_by(view, fun) do
+    :erlang.trace(view.pid, true, [:send])
+    fun.()
+    :erlang.trace(view.pid, false, [:send])
+
+    Stream.repeatedly(fn ->
+      receive do
+        {:trace, _pid, :send, msg, _to} ->
+          inspect(msg, limit: :infinity, printable_limit: :infinity)
+      after
+        0 -> nil
+      end
+    end)
+    |> Enum.take_while(& &1)
+    |> Enum.join("\n")
+  end
+
   # Control (passes on main): nothing held, the row is the stored title.
   test "with nothing held the row follows B's rename", c do
     a = open(c)

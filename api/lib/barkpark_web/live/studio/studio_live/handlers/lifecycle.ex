@@ -13,7 +13,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, PostPath, Shared}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.{RemoteValues, UnsavedBases, UnsavedObjects}
+
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{
+    RemoteValues,
+    RichTextRemote,
+    UnsavedBases,
+    UnsavedObjects
+  }
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
   # `:handle_params` hook is the single producer (it runs before this
@@ -49,7 +55,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         doc_conflict: false,
         editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
-        object_dialog: nil
+        object_dialog: nil,
+        editor_rt_held: %{},
+        editor_rt_clash: %{}
       )
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so
@@ -153,6 +161,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply,
          socket
          |> RemoteValues.push(socket.assigns[:editor_form] || %{}, updated_form)
+         |> RichTextRemote.push(socket.assigns[:editor_form] || %{}, updated_form)
          |> PostedEdits.remote(socket.assigns[:editor_form] || %{}, updated_form)
          |> took_frame(doc_data)
          |> assign(
@@ -252,12 +261,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       socket =
         socket
         |> RemoteValues.push(local, form, bases)
+        |> RichTextRemote.push(local, form)
         |> PostedEdits.remote(local, form)
         |> assign(
           editor_form: form,
           editor_form_gen: Shared.next_form_gen(socket, changed?),
           editor_unsaved_bases: kept
         )
+        |> RichTextRemote.push_held(base, theirs)
 
       {socket, clashed}
     end
@@ -412,7 +423,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   change of `editor_doc` since is a read or a write of this tab's that is
   newer than the frame, or a row of another variant (a Discard drops the
   draft the frame was of, a Publish or Unpublish swaps the row). Comparing
-  times alone named a discarded draft (#28322 review, round 2).
+  times alone named a discarded draft (#28322 review, round 2): another tab
+  discards the draft it renamed, and this tab's Reload reads the published
+  row, older than that draft's frame (task-e82f6c625819d4f5, pinned in
+  `desk_remote_title_header_test.exs`).
   """
   def base_doc(socket) do
     own = socket.assigns[:editor_doc]
@@ -640,7 +654,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       true ->
         old_form = socket.assigns[:editor_form] || %{}
         rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
-        {:noreply, RemoteValues.push(rebuilt, old_form, rebuilt.assigns[:editor_form] || %{})}
+        new_form = rebuilt.assigns[:editor_form] || %{}
+
+        {:noreply,
+         rebuilt
+         |> RemoteValues.push(old_form, new_form)
+         |> RichTextRemote.push(old_form, new_form)}
     end
   end
 

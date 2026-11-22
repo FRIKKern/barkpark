@@ -66,6 +66,8 @@ defmodule Barkpark.Content.PortableText do
   `_key` of the stored block at its position.
   """
 
+  alias Barkpark.Content.LinkHref
+
   @decorators %{
     "strong" => "strong",
     "b" => "strong",
@@ -457,12 +459,13 @@ defmodule Barkpark.Content.PortableText do
   defp keep_stored(blocks, []), do: for({block, _src} <- blocks, not empty?(block), do: block)
 
   defp keep_stored(blocks, stored) do
-    indexed = Enum.map(stored, &{normalize(fragment_html(&1)), to_html([&1]), &1})
+    indexed =
+      Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1]), &1})
 
     kept =
       blocks
       |> Enum.map_reduce(indexed, fn {block, src}, left ->
-        src = src && normalize(src)
+        src = src && {normalize(src), drawn_list(block)}
         html = to_html([block])
 
         i =
@@ -488,6 +491,15 @@ defmodule Barkpark.Content.PortableText do
   # inside it belongs to the deeper items.
   defp fragment_html(%{"listItem" => _} = b), do: "<li>" <> spans_html(b)
   defp fragment_html(b), do: to_html([b])
+
+  # Where a list item sits as the editor draws it: its list (`<ul>` or
+  # `<ol>`) and its depth. A `<li>`'s own HTML does not say, so an item
+  # indented or turned from bullet to number with its text untouched matched
+  # the stored item and the change was not saved (task-be63132f2ec337c7).
+  # Read as drawn, a stored value the editor shows the same way (a custom
+  # `listItem` in a `<ul>`, a missing `level`) is still the stored item.
+  defp drawn_list(%{"listItem" => _} = b), do: {list_kind(b), item_level(b)}
+  defp drawn_list(_b), do: nil
 
   # A browser serialises a `"` in text as is and a no-break space as
   # `&nbsp;`; `escape/1` writes `&quot;` and the character itself.
@@ -530,6 +542,11 @@ defmodule Barkpark.Content.PortableText do
     |> elem(0)
   end
 
+  # The fields the editor draws, as TanStack's pt-value.ts `MANAGED`: an
+  # edited block takes them from the editor and keeps every other stored
+  # field (`mergeText`, task-9e958e1739c7ce9b).
+  @managed ~w(_type _key children markDefs style listItem level)
+
   # An edited block read against the stored block it replaces
   # (task-74ef03a381b961ce). It takes the stored `_key`, and each span the
   # `_key` of the stored span it matches (`match_spans/2`), so only a span the
@@ -567,8 +584,29 @@ defmodule Barkpark.Content.PortableText do
           {child, used}
       end)
 
-    %{block | "_key" => key, "children" => children}
+    old
+    |> Map.drop(@managed)
+    |> Map.merge(%{block | "_key" => key, "children" => children})
+    |> keep_list(old)
   end
+
+  # A list item the editor draws as stored keeps the stored `listItem` and
+  # `level`: a custom kind (`check`) is drawn as a bullet, and a missing level
+  # as 1, so the editor's own reading is not a change.
+  defp keep_list(%{"listItem" => _} = block, %{"listItem" => _} = old) do
+    block =
+      if list_kind(block) == list_kind(old),
+        do: Map.put(block, "listItem", old["listItem"]),
+        else: block
+
+    cond do
+      item_level(block) != item_level(old) -> block
+      Map.has_key?(old, "level") -> Map.put(block, "level", old["level"])
+      true -> Map.delete(block, "level")
+    end
+  end
+
+  defp keep_list(block, _old), do: block
 
   defp keep_span(span, stored) do
     marks =
@@ -798,13 +836,24 @@ defmodule Barkpark.Content.PortableText do
 
     extra = link_extra(attrs)
 
+    # An address the allowlist refuses (`LinkHref`) is not linked: the words
+    # stay, without the mark (task-e1584dc1f1516991).
     mark =
-      case attr(attrs, "data-pt-def") do
-        nil -> {:link, href, extra}
-        key -> {:link_def, key, href, extra}
-      end
+      if drawable_href?(href),
+        do: link_mark(attrs, href, extra),
+        else: {:link, :refused, nil}
 
     %{state | marks: state.marks ++ [mark]}
+  end
+
+  # An empty address is drawn and read as before.
+  defp drawable_href?(href), do: href == "" or LinkHref.allowed?(href)
+
+  defp link_mark(attrs, href, extra) do
+    case attr(attrs, "data-pt-def") do
+      nil -> {:link, href, extra}
+      key -> {:link_def, key, href, extra}
+    end
   end
 
   # A `data-pt-mark` span is a stored decorator, a `data-pt-def` span a stored
@@ -976,6 +1025,9 @@ defmodule Barkpark.Content.PortableText do
         {span, j}, defs ->
           {marks, defs} =
             Enum.map_reduce(span.marks, defs, fn
+              {:link, :refused, _extra}, defs ->
+                {nil, defs}
+
               {:link, href, extra}, defs ->
                 new_link(key, href, extra, defs, link_type, annotations)
 
@@ -1396,13 +1448,22 @@ defmodule Barkpark.Content.PortableText do
 
   defp wrap(key, acc, defs) when is_binary(key) do
     case defs[key] do
+      # A link whose address is refused (`LinkHref`: a `javascript:`, `data:`
+      # or `vbscript:` address the API, an import or another client wrote) is
+      # drawn as its words, as TanStack's field draws it, and its stored def
+      # rides back by key (`{:def, k}`) unchanged (task-e1584dc1f1516991).
       %{"_type" => "link", "href" => href} when is_binary(href) ->
-        ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>)
+        if drawable_href?(href),
+          do: ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>),
+          else: ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
 
       %{"_type" => "linkAnnotation"} = def ->
         case link_def_href(def) do
           href when is_binary(href) ->
-            ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}"#{link_extra_attrs(def)}>#{acc}</a>)
+            if drawable_href?(href),
+              do:
+                ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}"#{link_extra_attrs(def)}>#{acc}</a>),
+              else: ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
 
           nil ->
             ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
