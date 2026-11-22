@@ -13,6 +13,9 @@
 //   Go      internal/pdrender/inline.go                     `inlineCodeSource`
 //           tested by internal/pdrender/inline_code_source_parity_test.go
 //
+// `toPlainText` (js/packages/react/src/toPlainText.ts) is held to the same
+// fixture HERE: the plain text of a paragraph holding the chip is its body.
+//
 // ONE file, not three generated mirrors — a mirror set drifts the moment one
 // side is regenerated and the others are not, which is exactly the bug this row
 // exists to close: this SDK shipped the value-or-children law while inline.ex
@@ -30,6 +33,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { escapeHtml, inlineCodeSource, renderInline } from '../src/inline'
+import { toPlainText } from '../src/toPlainText'
 
 const FIXTURE_URL = new URL(
   '../../../../api/test/support/fixtures/inline-code-source.json',
@@ -56,6 +60,12 @@ describe('inline `code` source contract (shared fixture)', () => {
 
     it(`renderInline emits the recorded body: ${c.name}`, () => {
       expect(renderInline(c.node as never)).toBe(`<code>${escapeHtml(c.source)}</code>`)
+    })
+
+    // The plain-text reader (excerpts, meta descriptions) reads the same words
+    // every renderer draws: a paragraph holding only this chip is its body.
+    it(`toPlainText reads the recorded body: ${c.name}`, () => {
+      expect(toPlainText([{ type: 'paragraph', content: [c.node] }])).toBe(c.source)
     })
   }
 
