@@ -86,7 +86,7 @@ export function installBoundary() {
         continue
       }
       const [by, ratio] = best(marks(el))
-      const dbg = () => { const s = getComputedStyle(el); const g = h.effectiveBg(el.parentElement); return { parent: el.parentElement?.tagName, open: el.matches(':popover-open'), hidden: el.hidden, op: s.opacity, bw: s.borderTopWidth, bs: s.borderTopStyle, bc: s.borderTopColor, bg: s.backgroundColor, ground: g, fade: fadeOver(el), marks: marks(el) } }
+      const dbg = () => { const s = getComputedStyle(el); const g = h.effectiveBg(el.parentElement); return { parent: el.parentElement?.tagName, open: el.matches(':popover-open'), hidden: el.hidden, op: s.opacity, bw: s.borderTopWidth, bs: s.borderTopStyle, bc: s.borderTopColor, bg: s.backgroundColor, ground: g, fade: fadeOver(el), marks: marks(el), sheets: [...document.querySelectorAll('style')].map((x) => x.textContent).filter((x) => x.includes('barkui-check')).map((x) => x.slice(0, 90)), anims: el.getAnimations().map((a) => a.constructor.name + ':' + (a.transitionProperty ?? a.animationName) + ':' + a.playState), inline: el.getAttribute('style')?.slice(0, 60) } }
       read.push({ at: h.describe(el) + (el.dataset.slot === 'select-content' && ratio < 3 ? ' DBG ' + JSON.stringify(dbg()) : ''), by, ratio })
       if (called) misnamed.push({ at: h.describe(el), by: best(drawn)[0], ratio: best(drawn)[1] })
     }
