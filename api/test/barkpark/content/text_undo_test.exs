@@ -119,6 +119,36 @@ defmodule Barkpark.Content.TextUndoTest do
       end
     end
 
+    # Short repeated structure makes many diff parts: the clash check stays
+    # under half a second on it, at the caps and past them.
+    test "merge3_clash: repeated text, a table, a rewrite at the caps: an answer at once" do
+      cat = String.duplicate("the cat sat. ", 1_531) |> String.slice(0, 19_900)
+
+      table =
+        Enum.map_join(1..1_100, "", fn i -> "| #{i} | item | ok |\n" end)
+        |> String.slice(0, 13_900)
+
+      prose = String.duplicate("alpha beta gamma delta epsilon zeta ", 40)
+
+      splice = fn text, from, n ->
+        String.slice(text, 0, from) <>
+          String.slice(prose, 0, n) <> String.slice(text, from + n, String.length(text))
+      end
+
+      for {text, n} <- [
+            {cat, 999},
+            {table, 999},
+            {cat, 250},
+            {table, 250},
+            {cat, 700},
+            {table, 700}
+          ] do
+        ours = splice.(text, 9_000, n)
+        {micros, _result} = :timer.tc(fn -> TextRebase.merge3_clash(text, ours, "B " <> text) end)
+        assert micros < 500_000, "#{n} took #{div(micros, 1000)} ms"
+      end
+    end
+
     test "undo takes A's words back out after B deleted the sentence before them" do
       assert TextUndo.revert(
                "One. Two three. Yes four.",

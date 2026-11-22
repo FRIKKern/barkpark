@@ -19,22 +19,35 @@ defmodule Barkpark.Content.DiffMatchPatch.Make do
   @margin 4
   @max_bits 32
   @edit_cost 4
+  @max_diffs 200
   # What `encodeURI` leaves as it is besides the unreserved characters (the
   # space is the library's own `%20` → " ").
   @uri_kept ~c" ;,/?:@&=+$!*'()#"
 
-  @doc "The patch text that turns `a` into `b` (both UTF-16 unit lists)."
-  @spec text([non_neg_integer()], [non_neg_integer()]) :: String.t()
+  @doc """
+  The patch text that turns `a` into `b` (both UTF-16 unit lists), or nil
+  when the diff has over `max_diffs/0` parts: the cleanups work on lists and
+  grow with the square of that count, so past it the answer would not come
+  in a fraction of a second.
+  """
+  @spec text([non_neg_integer()], [non_neg_integer()]) :: String.t() | nil
   def text(a, b) do
     diffs = Diff.diff(a, b)
 
-    diffs =
-      if length(diffs) > 2,
-        do: diffs |> cleanup_semantic() |> cleanup_efficiency(),
-        else: diffs
+    if length(diffs) > @max_diffs do
+      nil
+    else
+      diffs =
+        if length(diffs) > 2,
+          do: diffs |> cleanup_semantic() |> cleanup_efficiency(),
+          else: diffs
 
-    a |> make(diffs) |> Enum.map_join(&stringify/1) |> String.replace("%20", " ")
+      a |> make(diffs) |> Enum.map_join(&stringify/1) |> String.replace("%20", " ")
+    end
   end
+
+  @doc "The most diff parts `text/2` works through."
+  def max_diffs, do: @max_diffs
 
   # ── cleanupSemantic ──────────────────────────────────────────────────────
 

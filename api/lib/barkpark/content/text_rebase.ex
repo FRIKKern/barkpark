@@ -47,7 +47,7 @@ defmodule Barkpark.Content.TextRebase do
   # (last post wins, as before this module): a merge of a 1 MB field took 2 s
   # inside the document's patch lock (#25908 review).
   @max_bytes 65_536
-  @max_changed_units 1_000
+  @max_changed_units 700
 
   @doc """
   Rebases each posted text field named in `bases` onto the stored value.
@@ -130,11 +130,14 @@ defmodule Barkpark.Content.TextRebase do
   defp places?(base, ours, theirs) when ours == base or ours == theirs or theirs == base,
     do: true
 
-  # Too big to decide quickly is not placed: a clash, the banner. The port's
-  # diff has no deadline (TanStack's stops at a second), so a text over
-  # `apply/2`'s unit limit, or a change from `base` to `ours` over
-  # `@max_changed_units` (about 0.2 s of diff), is not run. A refusal by
-  # `apply/2` is not placed either.
+  # Too big to decide quickly is not placed: a clash, the banner. The port
+  # has no deadline (TanStack's diff stops at a second), so it is not run on
+  # a text over `apply/2`'s unit limit or a change from `base` to `ours` over
+  # `@max_changed_units`, and `Make.text/2` gives up past
+  # `Make.max_diffs/0` diff parts. A refusal by `apply/2` is not placed
+  # either. A held field in a text over the unit limit is therefore a clash
+  # under every remote save; the banner keeps its words, and the save path
+  # still merges its next post.
   defp places?(base, ours, theirs) do
     {base, ours} = {units(base), units(ours)}
     limit = DiffMatchPatch.limits().text_units
@@ -143,9 +146,11 @@ defmodule Barkpark.Content.TextRebase do
          changed_units(base, ours) > @max_changed_units do
       false
     else
-      case DiffMatchPatch.apply(Make.text(base, ours), theirs) do
-        {:ok, _text, applied} -> Enum.all?(applied)
-        _refused -> false
+      with patch when is_binary(patch) <- Make.text(base, ours),
+           {:ok, _text, applied} <- DiffMatchPatch.apply(patch, theirs) do
+        Enum.all?(applied)
+      else
+        _too_big_or_refused -> false
       end
     end
   end
