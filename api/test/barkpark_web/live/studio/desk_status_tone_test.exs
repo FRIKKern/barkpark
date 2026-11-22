@@ -131,6 +131,22 @@ defmodule BarkparkWeb.Studio.DeskStatusToneTest do
       assert has_element?(a, footer, @clash_title)
     end
 
+    # A real refusal, not a forced assign: a title over the column's 255
+    # characters is refused ("Save failed") and held. B then saves a title:
+    # the conflict is the newer news, so it is said in TanStack's words over
+    # the held field's "Not saved" (task-c0374ce0961cc1bf).
+    test "a refused title that B then rewrites: TanStack's clash words", c do
+      a = open(c.conn, c.path)
+      b = open(c.conn, c.path)
+      save_from(a, String.duplicate("x", 300))
+      assert eventually(fn -> status(a) =~ "Not saved" end)
+
+      save_from(b, "From B")
+
+      assert eventually(fn -> status(a) == @clash_title end)
+      assert has_element?(a, ~s(#{@pane} .dk-edit-footer .save-state), @clash_title)
+    end
+
     # #28139 review: a save that says "Saved" while `doc_conflict` is still
     # set (the legacy pick's `{:autosave_form, …}` did, before it was removed,
     # task-c42545346b93cbb0) is not drawn as a refusal: the mark follows the

@@ -323,7 +323,9 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
   with its reason. A conflict that named the fields another editor rewrote
   (`editor_clash_fields`, set by `Lifecycle.doc_updated/2`) says so in
   TanStack's words (barkpark-studio `edits.ts` `clash`,
-  task-c0374ce0961cc1bf). Any other token is returned as it is.
+  task-c0374ce0961cc1bf), first: a refused field that another editor then
+  rewrote is held, and the conflict is the newer news. Any other token is
+  returned as it is.
   """
   def status(assigns) do
     token = assigns[:save_status] || ""
@@ -332,18 +334,20 @@ defmodule BarkparkWeb.Studio.StudioLive.RefusedSave do
     clashed = clash_fields(assigns)
 
     cond do
+      # The newer news, so said over a held field's "Not saved", as
+      # TanStack's `clash` replaces the footer's state.
+      token == "Updated by another user" and clashed != [] ->
+        gettext(
+          "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs.",
+          fields: Enum.map_join(clashed, ", ", &title(assigns, &1))
+        )
+
       held != %{} ->
         titles = held |> Map.keys() |> Enum.sort() |> Enum.map_join(", ", &title(assigns, &1))
         gettext("Not saved") <> ": " <> titles
 
       token in @failed and is_binary(reason) ->
         SaveStatus.label(token) <> ": " <> reason
-
-      token == "Updated by another user" and clashed != [] ->
-        gettext(
-          "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs.",
-          fields: Enum.map_join(clashed, ", ", &title(assigns, &1))
-        )
 
       true ->
         token
