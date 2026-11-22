@@ -32,8 +32,10 @@
 // theirs. A post typed over theirs then carries an older number, and the
 // server holds it instead of writing it over theirs: also when theirs is
 // still on its way, since this page reports the numbers it has, 0 before
-// any. A page without this file reports nothing, and its posts are read as
-// before.
+// any. When the server holds this page's post (`own`), typing or an IME
+// composition already under way keeps reporting the old number until it
+// ends, so only input begun after the banner showed saves over theirs. A
+// page without this file reports nothing, and its posts are read as before.
 
 (() => {
   if (window.__bpRtRemote) return;
@@ -57,7 +59,13 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).seq - 1 : last);
+  // name -> the number to keep reporting while typing or a composition that
+  // began before the server held this page's post goes on: its commit is not
+  // "typing on" (#28349 r3, S6b). Only input after it may save over theirs.
+  const stale = new Map();
+
+  const seenOf = (name) =>
+    stale.has(name) ? stale.get(name) : waiting.has(name) ? waiting.get(name).seq - 1 : last;
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
   // ignored by LiveView's patch, so the input stays.
@@ -158,13 +166,24 @@
     if (!theirs.reload && busy(editor)) return;
     show(w, editor, theirs.html);
     waiting.delete(name);
+    stale.delete(name);
     mark(w);
+  };
+
+  // The typing or composition the hold met has ended: the next input is new.
+  const settle = (name) => {
+    const w = wrapOf(name);
+    const editor = editorIn(w);
+    if (editor && busy(editor)) return;
+    stale.delete(name);
+    if (w) mark(w);
   };
 
   const tick = () => {
     timer = null;
     for (const name of [...waiting.keys()]) tryShow(name);
-    if (waiting.size) timer = setTimeout(tick, IDLE_MS);
+    for (const name of [...stale.keys()]) settle(name);
+    if (waiting.size || stale.size) timer = setTimeout(tick, IDLE_MS);
   };
 
   const later = () => {
@@ -175,15 +194,19 @@
     const values = (e.detail && e.detail.values) || {};
     for (const [name, v] of Object.entries(values)) {
       if (!v || typeof v.seq !== "number") continue;
+      const before = seenOf(name);
       last = Math.max(last, v.seq);
       const w = wrapOf(name);
       if (v.own) {
         // This page's text, held over theirs: nothing of theirs waits any
-        // more, and the text comes back if theirs was shown meanwhile.
+        // more, and the text comes back if theirs was shown meanwhile. Input
+        // under way as the hold arrives began before the banner: it keeps
+        // the old number, so its posts are held too, until it ends.
         const theirs = waiting.get(name);
         if (theirs && theirs.seq < v.seq) waiting.delete(name);
         const editor = editorIn(w);
-        if (editor && typeof v.html === "string" && !busy(editor)) show(w, editor, v.html);
+        if (editor && busy(editor)) stale.set(name, before);
+        else if (editor && typeof v.html === "string") show(w, editor, v.html);
       } else if (typeof v.html === "string") {
         const theirs = waiting.get(name);
         if (!theirs || theirs.seq < v.seq) waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload});
@@ -199,9 +222,13 @@
 
   const editorOf = (e) => (e.target && e.target.closest ? e.target.closest("bp-rich-text-editor") : null);
 
+  // An input that is not part of a composition ends one: a commit does not
+  // always fire compositionend (Chrome's Input.insertText over a composition).
   document.addEventListener("input", (e) => {
     const editor = editorOf(e);
-    if (editor) typedAt.set(editor, Date.now());
+    if (!editor) return;
+    typedAt.set(editor, Date.now());
+    if (!e.isComposing) composing.delete(editor);
   }, true);
 
   // Before the bridge copies the text into the hidden input and the form

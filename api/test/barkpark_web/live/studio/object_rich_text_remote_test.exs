@@ -432,6 +432,38 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     end
   end
 
+  # #28349 r3, S6b: A's composition was under way when the hold came, and
+  # its commit wrote A's text over B's paragraph as "typing on". The page
+  # (bp-rt-remote.js) keeps reporting the number before theirs for input
+  # begun before the hold: that post is held again. Input after it, which
+  # reports the hold's number, is typing on.
+  test "the commit of a composition begun before the hold is held again; input after it types on",
+       c do
+    a = open(c)
+    b = open(c)
+    seq = held_over_b(a, b, c)
+
+    html =
+      send_post(a, "doc[meta].rt", %{
+        "doc[meta].label" => "l0",
+        "doc[meta].rt" => "<p>one two Aか漢</p>",
+        "_bp_rt_seen" => ["doc[meta].rt|#{seq - 1}"]
+      })
+
+    assert words(stored(c)["meta"]["rt"]) == ["one two", "B para"]
+    assert words(form(a)["meta"]["rt"]) == ["one two Aか漢"]
+    assert html =~ "Someone else rewrote"
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: own, own: true}}}, 2_000)
+
+    send_post(a, "doc[meta].rt", %{
+      "doc[meta].label" => "l0",
+      "doc[meta].rt" => "<p>one two Aか漢 Q</p>",
+      "_bp_rt_seen" => ["doc[meta].rt|#{own}"]
+    })
+
+    assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two Aか漢 Q"] end)
+  end
+
   # B adds a paragraph; A's editor, still showing "one two", posts a word:
   # held with the banner. The number B's change was sent with.
   defp held_over_b(a, b, c) do

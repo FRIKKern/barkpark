@@ -124,15 +124,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
     log = socket.assigns[:editor_rt_log] || %{}
-    form = socket.assigns[:editor_form] || %{}
 
     Enum.reduce(seen, {doc, []}, fn entry, {doc, held} ->
       with {name, n} <- parse_seen(entry),
            [_ | _] = later <- Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end),
            path when path != [] <- Path.parse_path(name),
            posted when is_binary(posted) <- get(doc, path) do
+        # Read against the oldest change the page missed; theirs is the
+        # newest, from the log: the form holds A's words while A is held.
         {_seq, was, _now} = List.last(later)
-        theirs = get(form, path)
+        {_seq, _was, theirs} = hd(later)
         doc = put(doc, path, html(theirs))
 
         if drawn(PortableText.from_html(posted, list(was))) == drawn(was),
