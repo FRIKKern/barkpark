@@ -181,7 +181,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
           {"a table without tbody", "<table><tr><td>a</td></tr></table>"},
           {"unquoted and single-quoted attributes", "<p class=bp-hr id='x'>a &amp; b</p>"},
           {"a void element written XHTML-style",
-           "<p>a<br/>b<img src=\"https://x/y.png\" alt=\"\"/></p>"},
+           "<p>a<img src=\"https://x/y.png\" alt=\"\"/>b</p>"},
           {"upper-case tags", "<P CLASS=\"bp-hr\">A</P>"},
           {"data and aria attributes",
            ~s|<span data-wikilink="x" aria-label="y" role="note">z</span>|}

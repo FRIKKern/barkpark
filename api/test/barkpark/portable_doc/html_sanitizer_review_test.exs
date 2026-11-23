@@ -56,7 +56,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
     end
 
     test "control: clean markup that ends closed keeps its bytes, an open p included" do
-      for html <- [~s|<p>a</p><img src="https://x/y.png" alt="">|, ~s|<p>a<br/>b|, ~s|text only|] do
+      for html <- [
+            ~s|<p>a</p><img src="https://x/y.png" alt="">|,
+            ~s|<p>a<img src="https://x/y.png" alt=""/>b|,
+            ~s|text only|
+          ] do
         assert S.sanitize(html) == html
       end
     end
@@ -314,6 +318,67 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
         out = S.sanitize(~s|<a href="#" style="#{decl};color:#fff">x</a>|)
         assert style_of(out) == [if(kept?, do: "#{decl};color:#fff", else: "color:#fff")], decl
       end
+    end
+  end
+
+  describe "B3: an element a browser parses differently is never passed through" do
+    alias Barkpark.PortableDoc.HtmlSanitizer.Elements
+
+    @refresh ~s|<meta http-equiv="refresh" content="0;url=https://e.example/">|
+    @handler ~s|<img src=x onerror="alert(1)">|
+
+    # lexbor reads a select by the old rules and drops the tags in it; Chrome
+    # builds them, so the bytes navigated the reader.
+    test "a meta in a select is gone" do
+      out = S.sanitize("<select>" <> @refresh <> "</select>")
+      refute out =~ ~r/meta|refresh/i
+      assert out |> page() |> count("meta, select") == 0
+    end
+
+    test "an img with a handler in a select is gone" do
+      out =
+        S.sanitize(
+          "<select>" <> @handler <> ~s|<iframe src="https://e.example/"></iframe></select>|
+        )
+
+      refute out =~ ~r/onerror|<img|<iframe/i
+    end
+
+    for tag <- ~w(select option optgroup datalist selectedcontent template noscript textarea) do
+      @tag_name tag
+      test "<#{tag}> goes with its content, the text around it stays" do
+        out =
+          S.sanitize(
+            "<p>a</p><#{@tag_name}>" <> @handler <> @refresh <> "</#{@tag_name}><p>b</p>"
+          )
+
+        refute out =~ ~r/onerror|<img|<meta|<#{@tag_name}/i
+
+        assert out |> page() |> LazyHTML.query("p") |> Enum.map(&LazyHTML.text/1) == [
+                 "a",
+                 "b",
+                 "after"
+               ]
+      end
+    end
+
+    test "an element the renderer does not write is unwrapped, so its bytes never pass" do
+      for tag <- ~w(dialog search marquee font center em br portal geolocation) do
+        html = "<p>a</p><#{tag}>t</#{tag}>"
+        out = S.sanitize(html)
+        refute out == html, tag
+        assert out |> LazyHTML.from_fragment() |> count(tag) == 0, tag
+        assert out =~ "a"
+      end
+    end
+
+    test "the kept elements are the renderer's, none parsed in a mode of its own" do
+      special = ~w(select option optgroup datalist selectedcontent template noscript textarea
+                   iframe object embed svg math script style title xmp plaintext listing)
+
+      assert Elements.kept() -- special == Elements.kept()
+      assert Enum.all?(special, &(&1 in Elements.dropped()))
+      assert ~w(a p div span table td img h2 h6 code pre) -- Elements.kept() == []
     end
   end
 

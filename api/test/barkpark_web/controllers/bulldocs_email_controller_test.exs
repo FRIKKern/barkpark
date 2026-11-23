@@ -194,6 +194,28 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     refute source["html"] =~ "<script"
   end
 
+  # #28404 review, S1: the email page is a browser page on our origin, so a
+  # legacy body is drawn in the reader's box; a blocks paper is the renderer's.
+  test "a legacy body is drawn in the contain box, a blocks paper is not", %{conn: conn} do
+    slug = "legacy-html-email-box"
+    box = ~s(<div style="#{Barkpark.PortableDoc.HtmlSanitizer.contain(:email)}">)
+
+    {:ok, _paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "dataset" => @dataset,
+          "body_html" => "<h1>Boxed</h1><p>legacy body</p>"
+        })
+      )
+
+    html = conn |> get("/papers/#{slug}/email") |> response(200)
+    assert html =~ box <> "<h1>Boxed</h1><p>legacy body</p></div>"
+
+    ingest!(conn, "email-box-blocks")
+    refute build_conn() |> get("/papers/email-box-blocks/email") |> response(200) =~ "contain:"
+  end
+
   test "email-only link policy absolutizes internal links and strips unsafe schemes", %{
     conn: conn
   } do

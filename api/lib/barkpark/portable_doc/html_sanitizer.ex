@@ -34,15 +34,18 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   browser reads them (task-65430475d0552e36; the regex scrub before it read
   them as text).
 
-    * script-bearing / sandbox-escaping ELEMENTS are removed with their
-      content (`script`, `style`, `iframe`, `object`, `embed`, `applet`,
-      `noscript`, `template`, `svg`, `math`, `form`, `frame`, `frameset`,
-      `link`, `meta`, `base`, `title`, and the raw-text `xmp`, `noframes`
-      and the no-embed element, whose content a parser and a browser can
-      read differently, and `plaintext` and `listing`);
-    * a custom element (a tag name with a hyphen) the renderer does not emit
-      is unwrapped, its text kept: a Studio component draws its `value` into
-      the page;
+    * only the ELEMENTS the Paper renderer writes are kept (`Elements`,
+      read off its goldens and source); any other element is unwrapped, its
+      text kept, a custom element (`bp-rich-text-editor` draws its `value`
+      into the page) included;
+    * script-bearing / sandbox-escaping elements, and those a parser reads
+      in a mode of its own, are removed with their content (`script`,
+      `style`, `iframe`, `object`, `embed`, `noscript`, `template`, `svg`,
+      `math`, `form`, `link`, `meta`, `base`, `title`, the raw-text
+      `xmp`, `noframes`, `plaintext`, `listing` and the no-embed element,
+      and `select`, `option`, `optgroup`, `datalist`, `selectedcontent`
+      and `textarea`: lexbor drops the tags inside a `select`, which a
+      current browser builds; #28404 review, B3);
     * comments are removed (IE conditional-comment script vector);
     * only allowed ATTRIBUTES are kept: `@attributes`, the `data-…` names
       the renderer writes, and any `aria-…`. So no `on…` handler, `srcdoc`,
@@ -60,7 +63,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
 
   When the parse finds nothing to remove AND the tree reads back as the input
   byte for byte, the input is returned unchanged: the parser's tree is what a
-  browser builds from those same bytes, so they are safe as they are. Markup
+  browser builds from those same bytes, so they are safe as they are. Nothing
+  to remove means every element in the tree is one the renderer writes, so
+  the bytes come back only when each element's parse is known. Markup
   that loses something, or does not read back (a tag left open at the end,
   which the reader's own `</article>` would close; #28404 review, F1), is
   written back from the clean tree. A stored paper's clean `body_html` is
@@ -70,26 +75,16 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   the backstop. Defense in depth — neither layer is trusted alone.
   """
 
-  alias Barkpark.PortableDoc.HtmlSanitizer.StyleGrammar
+  alias Barkpark.PortableDoc.HtmlSanitizer.{Elements, StyleGrammar}
 
-  # Elements removed WITH their inner content. The no-embed element is
-  # spelled in two parts: part 3 of `scripts/preview-parity-check.sh` (D10)
-  # reds the source tree on a substring of its name.
-  @dangerous_elements [
-    "no" <> "embed"
-    | ~w(
-        script style iframe object embed applet noscript template
-        svg math form frame frameset link meta base title
-        xmp noframes plaintext listing
-      )
-  ]
-
-  # Custom elements (a tag name with a hyphen) the Paper renderer emits: none
-  # today. Any other custom element is unwrapped, its text kept: a Studio
+  # Elements removed with their content, and the elements kept: those the
+  # Paper renderer writes (`Elements`). Every other element is unwrapped, its
+  # text kept, so a tree holding one is always written back (#28404 review,
+  # B3). A custom element (a tag name with a hyphen) is never kept: a Studio
   # component such as `bp-rich-text-editor` draws its `value`/`data-value`
-  # into the page, so a stored one would draw unsanitised HTML. A test
-  # derives the renderer's names from its goldens and reds when one is
-  # missing here.
+  # into the page. A test derives the renderer's names from its goldens and
+  # reds when one is missing.
+  @dangerous_elements Elements.dropped()
   @custom_elements []
 
   # The CSS properties the producer and the Paper renderer write in `style`
@@ -246,6 +241,14 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   def contain,
     do: "contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%"
 
+  @doc """
+  The same box on the `/papers/:slug/email` page (#28404 review, S1). That
+  page is the email's bytes, all styles inline, so it sets no custom
+  property: a mail client that keeps `style` reads plain CSS, and one that
+  does not know `contain` ignores it. A wide block scrolls inside the box.
+  """
+  def contain(:email), do: "contain: paint; overflow-x: auto"
+
   # The paragraph carries text: an `<a>`, `<b>`, `<font>`… left open across
   # a closing `</p>`, `</li>` or `</td>` stays on the parser's list of active
   # formatting elements and is built again around the next text, so in the
@@ -265,17 +268,14 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
       String.downcase(tag) in @dangerous_elements ->
         []
 
-      # A name no element has, such as `scr<script` from `<scr<script>ipt>`:
-      # its content stays, the tag goes.
-      not Regex.match?(~r/^[a-z][a-z0-9-]*$/i, tag) ->
-        scrub(children)
-
-      # A custom element the renderer does not emit: its text stays.
-      String.contains?(tag, "-") and String.downcase(tag) not in @custom_elements ->
-        scrub(children)
-
-      true ->
+      # An element the renderer writes is kept, its attributes scrubbed.
+      Elements.kept?(String.downcase(tag)) ->
         [{tag, Enum.flat_map(attrs, &scrub_attr/1), scrub(children)}]
+
+      # Any other element, a custom one or a name no element has (`scr<script`
+      # from `<scr<script>ipt>`) included: its content stays, the tag goes.
+      true ->
+        scrub(children)
     end
   end
 
