@@ -5,8 +5,8 @@
 // is allowed; nothing lists what is refused. Keys, the pointer and touch are on no list: check/acts.mjs makes them,
 // each followed by its rest step.
 
-/** What every wall object answers: `then`, which await and Promise read (a wall object is no promise). */
-const EVERY = ['then']
+/** What every wall object answers, of any kind: `then`, which await and Promise read (a wall object is no promise). */
+export const EVERY = ['then']
 const EVENTS = ['on', 'once', 'off', 'addListener', 'removeListener', 'waitForEvent']
 /** The check's own fields on a page (proofs.mjs, open), the only names a wall object takes a value for. */
 export const PAGE_FIELDS = ['barkCdp', 'barkCensus', 'barkCheck', 'barkCover', 'barkPlacement', 'barkPress', 'barkRef', 'barkScale', 'barkStyles']
@@ -23,7 +23,7 @@ export const ALLOWED = {
   Request: [...EVERY, 'url'],
 }
 /** The protocol commands a CDP session may send: reads, isolated worlds and scripts. No command of the Input domain. */
-export const CDP_ALLOWED = ['Accessibility.getPartialAXTree', 'DOM.getDocument', 'DOM.querySelector', 'Page.addScriptToEvaluateOnNewDocument', 'Page.createIsolatedWorld', 'Page.enable', 'Page.getFrameTree', 'Runtime.enable', 'Runtime.evaluate', 'Runtime.releaseObjectGroup']
+export const CDP_ALLOWED = ['Accessibility.getPartialAXTree', 'DOM.describeNode', 'DOM.getDocument', 'DOM.querySelector', 'Page.addScriptToEvaluateOnNewDocument', 'Page.createIsolatedWorld', 'Page.enable', 'Page.getFrameTree', 'Runtime.enable', 'Runtime.evaluate', 'Runtime.getProperties', 'Runtime.releaseObjectGroup']
 /** Kinds of the library's objects that do not descend from its ChannelOwner, known by their class's name. */
 export const PLAIN_KINDS = ['Accessibility', 'Clock', 'ConsoleMessage', 'Coverage', 'FileChooser', 'FrameLocator', 'Keyboard', 'Locator', 'Mouse', 'Selectors', 'Touchscreen', 'Tracing', 'Video', 'WebError']
 

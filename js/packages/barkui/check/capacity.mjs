@@ -111,7 +111,7 @@ export function capacityPassage(p = plan()) {
 }
 
 // What a selftest case may hold: these keys and no other (the runner reads each). A limit of its own is not one.
-export const CASE_KEYS = ['name', 'only', 'plant', 'css', 'expect', 'direct', 'green', 'surfaces', 'motion', 'states', 'layers', 'part']
+export const CASE_KEYS = ['name', 'only', 'plant', 'css', 'expect', 'direct', 'green', 'surfaces', 'motion', 'states', 'skinsRead', 'layers', 'part']
 
 /** What is wrong with the selftest's `cases` against the one limit, each by the case's name; empty when no case
     holds a key the runner does not read (such as a limit of its own) and every case's hosted reading sits under

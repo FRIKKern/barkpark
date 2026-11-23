@@ -9,7 +9,7 @@
 //   view included), or the act is red there, named with the file and line the checker made it from.
 import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
-import { ALLOWED, CDP_ALLOWED, PAGE_FIELDS, PLAIN_KINDS, WALL } from './wall.mjs'
+import { ALLOWED, CDP_ALLOWED, EVERY, PAGE_FIELDS, PLAIN_KINDS, WALL } from './wall.mjs'
 
 const HERE = fileURLToPath(import.meta.url)
 const PACKAGE = fileURLToPath(new URL('..', import.meta.url))
@@ -18,7 +18,7 @@ const PACKAGE = fileURLToPath(new URL('..', import.meta.url))
     the library. The wall never decides by it. */
 function from() {
   for (const l of new Error().stack.split('\n').slice(1)) {
-    const m = l.match(/(?:file:\/\/)?(\/[^\s():]+):(\d+):\d+/)
+    const m = l.match(/(?:\(|\bat )(?:file:\/\/)?(\/[^\s():]+):(\d+):\d+/)
     if (!m || m[1] === HERE || m[1].includes('/node_modules/')) continue
     return `${m[1].replace(PACKAGE, '')}:${m[2]}`
   }
@@ -75,11 +75,12 @@ function given(name, a) {
     walled, anything else as it is. */
 function wall(v) {
   if (Array.isArray(v)) return v.map(wall)
+  if (TARGET.has(v)) return v
   const kind = kindOf(v)
-  if (!kind || TARGET.has(v)) return v
+  if (!kind) return v
   if (WALLS.has(v)) return WALLS.get(v)
   WALL.read[kind] = Math.max(WALL.read[kind] ?? 0, methodsOf(v))
-  const allowed = new Set(ALLOWED[kind] ?? [])
+  const allowed = new Set([...EVERY, ...(ALLOWED[kind] ?? [])])
   const fields = new Set(kind === 'Page' ? PAGE_FIELDS : [])
   const w = new Proxy(v, {
     get(t, name) {
@@ -117,18 +118,32 @@ function guard() {
   if (guarded) return
   guarded = true
   const end = (e) => {
-    if (e instanceof WallRefusal) return
+    // Kept (refusals), so the case or run it came in is red by it; a run that ends on its own after one is red too.
+    if (e instanceof WallRefusal) {
+      process.exitCode = 1
+      return
+    }
     console.error(e)
     process.exit(1)
   }
   process.on('uncaughtException', end)
   process.on('unhandledRejection', end)
+  // A run whose work stops while a browser is still open (a promise left waiting forever) ends red, never at 0.
+  process.on('beforeExit', () => {
+    if (!OPEN.size) return
+    console.error(`the run stopped with ${OPEN.size} browser(s) still open: some work never finished`)
+    process.exit(1)
+  })
 }
+const OPEN = new Set()
 
 /** The browser, as a wall object. */
 export async function launch(options) {
   guard()
-  return wall(await chromium.launch(options))
+  const browser = await chromium.launch(options)
+  OPEN.add(browser)
+  browser.on('disconnected', () => OPEN.delete(browser))
+  return wall(browser)
 }
 
 /** The library's own page behind a wall page, for the input below. */

@@ -682,7 +682,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (c.direct) {
       const t0 = Date.now()
       // A direct case gets the selftest's cases, for one that picks a case by a rule.
-      const ok = (await c.direct(CASES)) && !refusedIn(r0).length
+      // A case that throws (a refusal by the wall too) is red by what it threw; the run goes on.
+      const ok = (await Promise.resolve().then(() => c.direct(CASES)).catch((e) => (console.log(`    threw: ${String(e?.message ?? e).split('\n')[0]}`), false))) && !refusedIn(r0).length
       if (ok) held.push(c.name)
       else failures++
       console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
@@ -705,7 +706,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, name))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: Array.isArray(c.states) ? c.states : !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: Array.isArray(c.states) ? c.states : !!c.states, skinsRead: c.skinsRead ?? null, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {
@@ -721,6 +722,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       if (misplaced) console.log(`    ${misplaced}`)
       if (refused.length) console.log(refusedSay(refused))
       if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
+    } catch (e) {
+      failures++
+      console.log(`FAIL ${c.name}\n    threw: ${String(e?.message ?? e).split('\n')[0]}`)
+      if (refusedIn(r0).length) console.log(refusedSay(refusedIn(r0)))
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }

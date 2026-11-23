@@ -261,7 +261,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
     await pointTo(page, 0, 0)
     const names = await page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
     for (const scheme of ['light', 'dark']) {
-      for (const skin of skins) {
+      for (const skin of ctx.skinsRead ? skins.slice(0, ctx.skinsRead) : skins) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
         await settle(page)
