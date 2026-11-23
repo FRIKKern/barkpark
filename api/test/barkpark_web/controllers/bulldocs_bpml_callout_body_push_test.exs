@@ -72,13 +72,13 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
   end
 
   defp pull!(slug) do
-    conn = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    conn = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(conn, "x-paper-rev")
     {response(conn, 200), rev}
   end
 
   defp push_copy(slug, bpml, rev) do
-    build_conn()
+    scoped_conn()
     |> authed()
     |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
   end
@@ -378,7 +378,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
   end
 
   defp check(bpml) do
-    build_conn()
+    scoped_conn()
     |> authed()
     |> post("#{@ingest_path}/validate", %{"bpml" => bpml})
     |> json_response(200)

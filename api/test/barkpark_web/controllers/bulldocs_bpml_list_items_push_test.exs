@@ -103,7 +103,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   # The pull, with the rev it anchors on and the fingerprint it served; a push
   # that sends the fingerprint back is a current copy (`Bpml.PrintMark`).
   defp pull!(slug) do
-    conn = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    conn = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(conn, "x-paper-rev")
     [view] = get_resp_header(conn, "x-bpml-view")
     {response(conn, 200), {rev, view}}
@@ -117,12 +117,12 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   defp push_copy(slug, bpml, rev), do: sync(slug, %{"bpml" => bpml, "baseRev" => rev})
 
   defp sync(slug, params),
-    do: build_conn() |> authed() |> post("#{@ingest_path}/#{slug}/sync", params)
+    do: scoped_conn() |> authed() |> post("#{@ingest_path}/#{slug}/sync", params)
 
   defp no_fingerprint({rev, _view}), do: rev
 
   defp check(bpml) do
-    build_conn()
+    scoped_conn()
     |> authed()
     |> post("#{@ingest_path}/validate", %{"bpml" => bpml})
     |> json_response(200)

@@ -156,7 +156,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
   end
 
   defp pull!(slug) do
-    conn = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    conn = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(conn, "x-paper-rev")
     [view] = get_resp_header(conn, "x-bpml-view")
     {response(conn, 200), rev, view}
@@ -165,7 +165,7 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsOpsTest do
   defp push(slug, bpml, rev, view) do
     params = %{"bpml" => bpml, "baseRev" => rev}
     params = if view, do: Map.put(params, "bpmlView", view), else: params
-    build_conn() |> authed() |> post("#{@ingest_path}/#{slug}/sync", params)
+    scoped_conn() |> authed() |> post("#{@ingest_path}/#{slug}/sync", params)
   end
 
   defp stored(slug), do: get_in(Content.get_paper(slug).content, ["blocks"])

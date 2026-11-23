@@ -38,13 +38,13 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
   end
 
   defp pull(slug) do
-    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(resp, "x-paper-rev")
     {response(resp, 200), rev}
   end
 
   defp sync(slug, bpml, rev) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
     |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
@@ -311,14 +311,14 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
   # ── the view a copy was pulled from ─────────────────────────────────────────
 
   defp pull_view(slug) do
-    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(resp, "x-paper-rev")
     [view] = get_resp_header(resp, "x-bpml-view")
     {response(resp, 200), rev, view}
   end
 
   defp sync_view(slug, bpml, rev, view) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
     |> post("#{@ingest_path}/#{slug}/sync", %{
