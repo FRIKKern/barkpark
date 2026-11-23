@@ -404,7 +404,9 @@ export function installHelpers(lists) {
     const until = performance.now() + 2000
     while ((moving(true).length || scrolling().length) && performance.now() < until) {
       const was = scroll.count
-      await frame()
+      // A frame's scroll events come before its animation frame callbacks, so one frame tells a scroll that goes on.
+      if (moving(true).length) await frame()
+      else await new Promise((r) => requestAnimationFrame(r))
       if (scroll.count === was) {
         scroll.seen = was
         scroll.by.clear()
