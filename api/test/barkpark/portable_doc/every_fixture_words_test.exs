@@ -126,7 +126,13 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   }
 
   # Document name => [{top-level block id, why}] for each block printed as <kept>.
-  @kept %{}
+  @kept %{
+    # The renderer's depth golden nests lists deeper than a stored Paper may
+    # (`Validate.max_depth/0`): fallback row F4 (task-0b448ea0847a6b4f).
+    "limits/list-at-the-depth-limit" => [
+      {"fixture-0", "a list: its item 1 nests lists deeper than 100 levels"}
+    ]
+  }
 
   # {block type, field} => why the printout may lack that field's words. Empty: the
   # one fixture whose callout has a `text` field (task-04de6fc749b11380) is refused
@@ -136,32 +142,16 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   # Document name => the skipped fields that hid a word in it.
   @skip_hits %{}
 
-  # Document name => [{word, in source, in printout}] the printout loses today:
-  # a nested list's child items, outside the callout body. Known, tracked by
-  # task-0b448ea0847a6b4f.
+  # Document name => [{word, in source, in printout}] the printout lacks. The
+  # nested-list golden's `text` the reader does not show (not printed; the
+  # write wall refuses an edit to its block, task-0b448ea0847a6b4f) and its
+  # alias type name.
   @lost %{
-    "from-markdown/nested-list-children" => [
-      {"b", 1, 0},
-      {"c", 1, 0},
-      {"list", 2, 1},
-      {"text", 4, 2}
-    ],
-    "limits/list-at-the-depth-limit" => [{"leaf", 1, 0}, {"list", 101, 1}],
-    "limits/list-one-level-above-the-depth-limit" => [{"leaf", 1, 0}, {"list", 100, 1}],
     "nested-list-carriers" => [
-      {"Alias", 1, 0},
-      {"Build", 1, 0},
-      {"Fallback", 1, 0},
       {"Inactive", 1, 0},
-      {"Ship", 1, 0},
-      {"Verify", 1, 0},
-      {"build", 1, 0},
-      {"child", 1, 0},
-      {"fallback", 2, 0},
-      {"list", 5, 2},
+      {"fallback", 2, 1},
       {"ordered", 1, 0},
-      {"parent", 2, 0},
-      {"plan", 1, 0}
+      {"parent", 2, 1}
     ]
   }
 

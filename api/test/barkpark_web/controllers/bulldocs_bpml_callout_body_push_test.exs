@@ -11,6 +11,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
   use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.Content
+  alias Barkpark.Content.Papers.BpmlView
   alias Barkpark.LabelFixtures
   alias Barkpark.PortableDoc.Bpml.Canonical
   alias Barkpark.Repo
@@ -71,13 +72,13 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
   end
 
   defp pull!(slug) do
-    conn = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    conn = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(conn, "x-paper-rev")
     {response(conn, 200), rev}
   end
 
   defp push_copy(slug, bpml, rev) do
-    build_conn()
+    scoped_conn()
     |> authed()
     |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
   end
@@ -320,7 +321,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       assert stored(ctx.slug) == ctx.before
     end
 
-    test "an old copy, pulled before <kept> lines, is stale: untouched or edited elsewhere",
+    test "an old copy, pulled before <kept> lines, lands untouched or edited elsewhere; each body keeps its bytes",
          ctx do
       old =
         ctx.bpml
@@ -338,11 +339,32 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
       edited = String.replace(old, "Opening paragraph.", "Opening words.")
 
       for copy <- [old, edited] do
-        answer = push_copy(ctx.slug, copy, ctx.rev) |> json_response(422)
-        assert answer["error"]["code"] == "bpml_stale_copy"
-        assert answer["error"]["hint"] == "bp paper pull, then make your edit again"
-        assert stored(ctx.slug) == ctx.before
+        assert %{"ok" => true} = push_copy(ctx.slug, copy, ctx.rev) |> json_response(200)
+        assert tl(stored(ctx.slug)) == tl(ctx.before)
       end
+
+      assert hd(stored(ctx.slug))["content"] == text("Opening words.")
+    end
+
+    test "a copy of this pull that edits elsewhere lands the same push; each body keeps its bytes",
+         ctx do
+      fresh = String.replace(ctx.bpml, "Opening paragraph.", "Opening words.")
+      assert %{"ok" => true} = push_copy(ctx.slug, fresh, ctx.rev) |> json_response(200)
+      assert tl(stored(ctx.slug)) == tl(ctx.before)
+      assert hd(stored(ctx.slug))["content"] == text("Opening words.")
+    end
+
+    test "an old copy, pulled before <kept> lines, that deletes the callout is refused by name",
+         ctx do
+      old =
+        ctx.bpml
+        |> String.replace(~s( print="2"), "")
+        |> String.replace(@kept_line, "")
+
+      answer = push_copy(ctx.slug, old, ctx.rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_stale_copy"
+      assert answer["error"]["message"] =~ "callout c1 has a body your copy was pulled without"
+      assert stored(ctx.slug) == ctx.before
     end
 
     test "bp paper push --check passes the pulled copy, and fails an edited <kept> by name",
@@ -356,7 +378,7 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
   end
 
   defp check(bpml) do
-    build_conn()
+    scoped_conn()
     |> authed()
     |> post("#{@ingest_path}/validate", %{"bpml" => bpml})
     |> json_response(200)
@@ -437,6 +459,73 @@ defmodule BarkparkWeb.BulldocsBpmlCalloutBodyPushTest do
     answer = push_copy(slug, no_slot, rev) |> json_response(200)
     assert stored(slug) == before
     assert [_note] = answer["notes"]
+  end
+
+  # An old copy printed from `typed`: the blocks as the copy holds them, the
+  # print mark taken off.
+  defp typed_old_copy(slug, typed) do
+    paper = Content.get_paper(slug)
+    {:blocks, _shown, fields} = BpmlView.of(paper, paper.dataset, [], :published)
+    {:ok, bpml, _} = BpmlView.printed(paper, typed, fields)
+    Regex.replace(~r/ print="\d+"/, bpml, "")
+  end
+
+  defp bare_callout(id, words),
+    do: %{"id" => id, "type" => "callout", "tone" => "info", "content" => text(words)}
+
+  describe "an old copy that types into a block this pull prints as <kept>" do
+    test "a body typed into the callout is refused by the block's name, writing nothing" do
+      c1 = Map.put(bare_callout("c1", "Read this first."), "slots", %{})
+      stored = [p("p1", "Opening paragraph."), c1, p("p2", "Closing paragraph.")]
+      slug = with_blocks!(new_slug(), stored)
+      {bpml, rev} = pull!(slug)
+      assert bpml =~ ~s(<kept id="c1")
+      before = stored(slug)
+
+      typed = List.replace_at(stored, 1, Map.put(c1, "slots", %{"body" => [p("c1-t", "Typed.")]}))
+      copy = typed_old_copy(slug, typed)
+      assert copy =~ "Typed."
+
+      answer = push_copy(slug, copy, rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_unshown"
+      assert answer["error"]["message"] =~ ~s(block "c1")
+      assert stored(slug) == before
+    end
+
+    test "a nested list typed into a list in it is refused by the block's name, writing nothing" do
+      c9 = Map.put(bare_callout("c9", "Note."), "slots", %{})
+      l9 = %{"id" => "l9", "type" => "list", "items" => [%{"content" => text("Plan.")}]}
+      s9 = %{"id" => "s9", "type" => "section", "blocks" => [c9, l9]}
+      stored = [p("p1", "Opening paragraph."), s9, p("p2", "Closing paragraph.")]
+      slug = with_blocks!(new_slug(), stored)
+      {bpml, rev} = pull!(slug)
+      assert bpml =~ ~s(<kept id="s9")
+      before = stored(slug)
+
+      child = %{"type" => "list", "items" => [text("Typed step.")]}
+      typed_l9 = put_in(l9, ["items"], [%{"content" => text("Plan."), "children" => [child]}])
+      typed = List.replace_at(stored, 1, %{s9 | "blocks" => [Map.delete(c9, "slots"), typed_l9]})
+      copy = typed_old_copy(slug, typed)
+      assert copy =~ "Typed step."
+
+      answer = push_copy(slug, copy, rev) |> json_response(422)
+      assert answer["error"]["code"] == "bpml_unshown"
+      assert answer["error"]["message"] =~ ~s(block "s9")
+      assert stored(slug) == before
+    end
+  end
+
+  test "an old copy over a Paper that already holds an id twice is refused by that id, writing nothing" do
+    slug =
+      with_blocks!(new_slug(), blocks() ++ [p("c1-a", "A second block under the body's id.")])
+
+    {bpml, rev} = pull!(slug)
+    before = stored(slug)
+
+    answer = push_copy(slug, old_copy(bpml), rev) |> json_response(422)
+    assert answer["error"]["code"] == "bpml_stale_copy"
+    assert answer["error"]["message"] =~ ~s(block "c1-a" is stored more than once)
+    assert stored(slug) == before
   end
 
   test "a new Paper pushed with a <kept> line is refused" do
