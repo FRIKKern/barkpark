@@ -1411,11 +1411,9 @@
         return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
           (!!pane && (pane.getAttribute("data-desk-save") === "Save failed" || pane.hasAttribute("data-desk-held")));
       };
-      // A held field (`Desk.LeaveGuard`, task-33cbb6269c8823ad): a link is
-      // held back before the URL moves and sent (`desk-leave`); the server
-      // lets a desk link that keeps the document go and asks in its own
-      // dialog for the rest. Capture on the document, so LiveView's link
-      // handler (on window) never sees a held-back click.
+      // A held field (`Desk.LeaveGuard`): a link is held back before the URL
+      // moves and sent (`desk-leave`), for the server to let go or ask. On the
+      // document's capture, so LiveView's link handler (window) never sees it.
       hook._onLeave = function (e) {
         var link = e.target.closest ? e.target.closest("a[href]") : null;
         if (!link || !plainClick(e) || link.target === "_blank") return;
@@ -1427,23 +1425,27 @@
         e.stopImmediatePropagation();
         hook.pushEvent("desk-leave", { href: to.pathname + to.search + to.hash, kind: link.getAttribute("data-phx-link") || "" });
       };
-      // Where the caret was in the edit pane, put back after Stay.
+      // Where the caret was in the form, put back after Stay: a field's
+      // offsets, or a rich text's character offset (its nodes may be redrawn).
       hook._noteField = function (e) {
-        var el = e.type === "focusout" ? e.target : root.ownerDocument.activeElement;
+        var el = e.type === "focusout" ? e.target : root.ownerDocument.activeElement, sel = window.getSelection();
         if (!el || !el.closest || !el.closest("[data-pane-editing] #editor-form") || !root.contains(el)) return;
-        var sel = window.getSelection();
-        hook._field = { el: el, start: el.selectionStart, end: el.selectionEnd,
-          range: el.isContentEditable && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null };
+        if (!el.isContentEditable) return void (hook._field = { el: el, start: el.selectionStart, end: el.selectionEnd });
+        if (!sel.rangeCount || !el.contains(sel.anchorNode)) return;
+        var r = sel.getRangeAt(0).cloneRange(); r.setStart(el, 0);
+        hook._field = { el: el, at: r.toString().length };
       };
       root.addEventListener("focusout", hook._noteField, true);
       root.ownerDocument.addEventListener("selectionchange", hook._noteField);
       if (hook.handleEvent) hook.handleEvent("bp:desk-leave-stayed", function () {
         window.requestAnimationFrame(function () {
-          var f = hook._field;
-          if (!f || !f.el.isConnected) return;
-          f.el.focus({ preventScroll: true });
-          if (f.range && f.range.startContainer.isConnected) window.getSelection().removeAllRanges(), window.getSelection().addRange(f.range);
-          else if (typeof f.start === "number" && f.el.setSelectionRange) f.el.setSelectionRange(f.start, f.end);
+          var f = hook._field, el = f && (f.el.isConnected ? f.el : f.el.id && document.getElementById(f.el.id));
+          if (!el) return;
+          el.focus({ preventScroll: true });
+          if (f.at == null) return void (el.setSelectionRange && typeof f.start === "number" && el.setSelectionRange(f.start, f.end));
+          var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n, left = f.at;
+          while ((n = w.nextNode()) && left > n.length) left -= n.length;
+          if (n) window.getSelection().collapse(n, left);
         });
       });
       root.ownerDocument.addEventListener("click", hook._onLeave, true);
