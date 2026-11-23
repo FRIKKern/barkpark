@@ -1,6 +1,5 @@
 // One function per proof light. Each opens its own page, so a light never
 // borrows state from another, and returns { pass, detail } (plus numbers).
-import { wallPage } from './wall.mjs'
 import { click, pointTo, press } from './acts.mjs'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -43,7 +42,7 @@ export function surfacesOf(ctx) {
 // pressed); the check's worlds keep real time.
 export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1, motion = 'reduce', clock = false } = {}) {
   const context = await ctx.browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: motion, isMobile: mobile, hasTouch: mobile })
-  const page = wallPage(await context.newPage())
+  const page = await context.newPage()
   const where = `${ctx.part}, ${width}px${js ? '' : ', no script'}`
   page.on('pageerror', (e) => ctx.errors.push(`${where}: ${String(e).slice(0, 200)}`))
   page.on('console', (m) => m.type() === 'error' && ctx.errors.push(`${where}: console: ${m.text().slice(0, 200)}`))
@@ -51,7 +50,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   if (clock) await page.clock.install()
   // A blank page in the same context, where things are drawn alone for reference (see drawn.mjs). It opens before the
   // census is set, which is given both pages (docs/PARTS.md "The top layer").
-  const ref = wallPage(await context.newPage())
+  const ref = await context.newPage()
   await ref.setContent('<!doctype html><html><head></head><body></body></html>')
   // What can enter the top layer is watched from the first frame (layers.mjs census).
   page.barkCensus = await installCensus(page, [page, ref], { script: js })
@@ -92,7 +91,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
 export async function styleBaseline(browser, url) {
   const context = await browser.newContext({ colorScheme: 'light', reducedMotion: 'reduce' })
   try {
-    const page = wallPage(await context.newPage())
+    const page = await context.newPage()
     await limit(page.goto(url), 15000, 'opening the baseline page')
     await page.waitForSelector('html[data-ready]', { timeout: 15000 })
     return await (await styleReader(page))()

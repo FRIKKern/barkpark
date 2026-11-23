@@ -5,7 +5,6 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { capture } from './capture.mjs'
@@ -13,12 +12,14 @@ import { named, withPopover } from './layer-cases.mjs'
 import { each } from './plants.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
+import * as acts from './acts.mjs'
+import { launch } from './acts.mjs'
 
 /** The button part with the named "Details" popover, `css` planted, opened with motion `motion`; `go` gets the page
     and the part, and its answer is the case's. */
 export async function onPage(css, motion, go) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  const browser = await launch({ args: ['--disable-lcd-text'] })
   try {
     const dir = join(scratch, 'parts')
     cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
@@ -281,13 +282,6 @@ async function sameAfter(page, act) {
   await new Promise((r) => setTimeout(r, 2500))
   return { before, at, settled: await top() }
 }
-// The checker's input (check/acts.mjs), or on a checker without it the bare input the checker made.
-const acts = await import('./acts.mjs').catch(() => ({
-  press: (page, key) => page.keyboard.press(key),
-  pointTo: (page, x, y) => page.mouse.move(x, y),
-  click: (page, x, y) => page.mouse.click(x, y),
-  clickOn: (page, s) => page.click(s),
-}))
 const held = (what, got) => {
   const ok = got.at === got.settled && got.settled !== got.before
   if (!ok) console.log(`    ${what}: before ${got.before}, read at ${got.at}, at rest at ${got.settled}`)

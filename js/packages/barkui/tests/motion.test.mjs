@@ -31,7 +31,8 @@ describe("the checker's changes to a page's look", () => {
   it("are counted with the checker's acts, each made with the option that leaves the page at rest, and an act without it is red by name", () => {
     const at = Object.fromEntries(Object.keys(ACTS).map((k) => [k, 0]))
     const wrong = []
-    for (const f of checker().filter((f) => f !== 'motion.mjs')) {
+    // check/wall-plants.mjs holds library calls planted to be refused by the wall (check/acts.mjs), not acts.
+    for (const f of checker().filter((f) => f !== 'motion.mjs' && f !== 'wall-plants.mjs')) {
       const text = readFileSync(new URL(f, DIR), 'utf8')
       const line = (i) => text.slice(0, i).split('\n').length
       for (const [k, { call, holds, through }] of Object.entries(ACTS)) {

@@ -5,7 +5,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom, foundationHash, outDir, proofPath, root, skinNames, tokensPath, uiSdkVersion } from '../build/showroom.mjs'
 import { AT_ONCE, capacitySentence, PER_JOB } from './capacity.mjs'
@@ -14,6 +13,7 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { limit } from './limit.mjs'
 import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } from './proofs.mjs'
 import { waitLine } from '../build/sheet-waits.mjs'
+import { launch, refusals } from './acts.mjs'
 
 // A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
 // sooner, by each step's own limit (STEP_MS in proofs.mjs).
@@ -33,6 +33,8 @@ function variableNames() {
 // (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
 // page CI ships, but only those parts are pressed and read. Without it, every part is.
 export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null } = {}) {
+  // A refusal by the wall anywhere in this run (check/acts.mjs), a timer's or a listener's too, is an error of the run.
+  const before = refusals().length
   let built
   let bare
   try {
@@ -55,7 +57,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
   // Grayscale text everywhere: with LCD text on, a layer the compositor makes non-opaque (a blend mode, say)
   // draws its glyphs another way than the reference does, and an honest label reads as cut.
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  const browser = await launch({ args: ['--disable-lcd-text'] })
   // part.css as the browser parses it meets the same walls as its text, and the page's barkui.css holds each
   // part exactly as it was read alone (check/cssom.mjs).
   const judged = []
@@ -145,6 +147,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   } finally {
     await browser.close()
   }
+  for (const r of refusals().slice(before)) proof.errors.push(`the wall refused ${r.what}, from ${r.at}`)
   writeFileSync(proofFile, JSON.stringify(proof, null, 2) + '\n')
   await buildShowroom({ dir, out, proof: proofFile, quiet: true })
   for (const e of proof.errors) log(`error: ${e}`)

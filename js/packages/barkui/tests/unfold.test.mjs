@@ -11,12 +11,13 @@ import { LIGHT_NAMES } from '../check/check.mjs'
 import { rowsMoved } from '../check/jobs.mjs'
 import { surfacesOf } from '../check/proofs.mjs'
 import { CASES, partOf } from '../check/selftest.mjs'
-import { STATE_CASES, SURFACE_CASES, UNFOLDED_ROWS } from '../check/unfolded-cases.mjs'
+import { EVERY_RUN_ROWS, STATE_CASES, SURFACE_CASES, SURFACE_PLANTS, UNFOLDED_ROWS } from '../check/unfolded-cases.mjs'
 
 // The rows of each case, as it held them before it was unfolded.
 const ONE_CASE = {
   surfaces: [
     'a label gone on raised',
+    'a label gone on inverse',
     'a second skin short on primary',
     'the waited pair worse than recorded',
     'a placeholder on another ground stays red',
@@ -43,7 +44,18 @@ const ONE_CASE = {
 
 describe('an unfolded case', () => {
   it('keeps every row it held, each in exactly one run', () => {
-    for (const kind of ['surfaces', 'states', 'checked']) expect(rowsMoved(ONE_CASE[kind], UNFOLDED_ROWS[kind], kind), kind).toEqual([])
+    for (const kind of ['surfaces', 'states', 'checked']) {
+      const every = EVERY_RUN_ROWS[kind] ?? []
+      expect(rowsMoved(ONE_CASE[kind].filter((r) => !every.includes(r)), UNFOLDED_ROWS[kind], kind), kind).toEqual([])
+      expect(every.filter((r) => !ONE_CASE[kind].includes(r)), kind).toEqual([])
+    }
+  })
+
+  it('holds the rows every surface holds in every surface run, each with a plant on each surface', () => {
+    expect(SURFACE_CASES.length).toBe(SURFACES.length - 1)
+    expect(SURFACE_PLANTS.length).toBeGreaterThan(0)
+    expect(SURFACE_PLANTS.length).toBe(EVERY_RUN_ROWS.surfaces.length * (SURFACES.length - 1))
+    for (const row of EVERY_RUN_ROWS.surfaces) expect(SURFACE_CASES.map((c) => SURFACE_PLANTS.some((x) => x.row === row && x.on === c.surfaces[0]))).toEqual(SURFACE_CASES.map(() => true))
   })
 
   it('is red by the row’s name when a row is dropped or doubled', () => {

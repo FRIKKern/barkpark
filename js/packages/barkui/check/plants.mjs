@@ -4,11 +4,10 @@ import { spawnSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { capacitySentence, selftestSentence } from './capacity.mjs'
 import { edit } from './copy.mjs'
 import { selftestPick } from './jobs.mjs'
-import { wallPage } from './wall.mjs'
+import { launch } from './acts.mjs'
 
 export { edit, copyAs } from './copy.mjs'
 // Runs `code` at the start of the part's demo, with `root` in scope.
@@ -71,10 +70,10 @@ export const ladderHolds = async (p, html, ok, logs, out) => {
     if (!clean || offs[0] !== claim.first[kind] || claim.on[kind] !== claim.first[kind] - 1) held = false
   }
   // The label's width, read from the same build in the same browser.
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  const browser = await launch({ args: ['--disable-lcd-text'] })
   let width = 0
   try {
-    const page = wallPage(await browser.newPage())
+    const page = await browser.newPage()
     await page.goto(pathToFileURL(join(out, 'index.html')).href)
     width = Math.round(await page.evaluate(() => document.querySelector('#button-ladder-cut-1').getBoundingClientRect().width))
   } finally {

@@ -9,13 +9,12 @@
 // carries every reason it is off (`fails`), and each plant asserts that one of
 // them names its own control. The ladder measures what the label reading's
 // limit costs and holds docs/PARTS.md's sentence to it.
-import { movesLine, press } from './acts.mjs'
+import { launch, press, refusals } from './acts.mjs'
 import { wallLine } from './wall.mjs'
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { discoverParts, partsDir } from '../build/parts.mjs'
 import { CASE_SECONDS, capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
@@ -252,7 +251,7 @@ steps.push({
     name: 'a reading is the same whether or not text in a field is selected',
     direct: async () => {
       const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-      const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+      const browser = await launch({ args: ['--disable-lcd-text'] })
       try {
         const dir = join(scratch, 'parts')
         cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
@@ -422,7 +421,7 @@ steps.push({
   {
     name: "the browser's reading of part.css refuses the same inputs with no help from the text lint",
     direct: async () => {
-      const browser = await chromium.launch()
+      const browser = await launch()
       try {
         const said = []
         for (const [css, re] of [
@@ -465,7 +464,7 @@ steps.push({
     name: "a page whose barkui.css differs from a part as it was judged alone fails, naming that part and no other",
     direct: async () => {
       const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-      const browser = await chromium.launch()
+      const browser = await launch()
       try {
         const dir = join(scratch, 'parts')
         cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
@@ -534,7 +533,7 @@ steps.push({
   {
     name: 'a sheet the check cannot read rule for rule the way the browser does is refused, and one it reads is not',
     direct: async () => {
-      const browser = await chromium.launch()
+      const browser = await launch()
       const cannot = /the check cannot read this sheet the way the browser does/
       const either = /the check cannot read this sheet the way the browser does|the browser drops this rule/
       try {
@@ -564,7 +563,7 @@ steps.push({
   {
     name: 'an arm inside :is() or :where() that the browser drops in its place is refused by name, and one it keeps is not',
     direct: async () => {
-      const browser = await chromium.launch()
+      const browser = await launch()
       const any = /the arm |inside :(is|where)\(\) in its place/
       try {
         const said = []
@@ -673,15 +672,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const ceiling = keys.reduce((n, k) => n + SELFTEST_CEILINGS[k], 0)
   enforceCeiling(ceiling, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${keys.map((k) => selftestSentence(k)).join(' ')} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest again.`)
   const held = []
+  // A refusal by the wall (check/acts.mjs) while a case runs, a timer's or a listener's too, makes that case red by
+  // the refused name and the file that reached it. The wall's own row plants refusals and counts them itself.
+  const refusedIn = (r0) => refusals().slice(r0).filter((r) => !/^check\/wall-(cases|plants)\.mjs:/.test(r.at))
+  const refusedSay = (list) => `    the wall refused ${list.map((r) => `${r.what}, from ${r.at}`).join('; ')}`
   for (const c of run) {
     now = c.name
+    const r0 = refusals().length
     if (c.direct) {
       const t0 = Date.now()
       // A direct case gets the selftest's cases, for one that picks a case by a rule.
-      const ok = await c.direct(CASES)
+      const ok = (await c.direct(CASES)) && !refusedIn(r0).length
       if (ok) held.push(c.name)
       else failures++
       console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+      if (refusedIn(r0).length) console.log(refusedSay(refusedIn(r0)))
       continue
     }
     const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
@@ -708,11 +713,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       } catch {}
       // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
       const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, name, 'part.json'), 'utf8')).layers, proof))
-      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced
+      const refused = refusedIn(r0)
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced && !refused.length
       if (pass) held.push(c.name)
       else failures++
       console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
       if (misplaced) console.log(`    ${misplaced}`)
+      if (refused.length) console.log(refusedSay(refused))
       if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
     } finally {
       rmSync(scratch, { recursive: true, force: true })
@@ -720,7 +727,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const count = { held: run.length - failures, of: run.length }
   console.log(holderSentence())
-  console.log(movesLine())
   console.log(wallLine())
   console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
   if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')

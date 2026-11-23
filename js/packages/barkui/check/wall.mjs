@@ -1,100 +1,40 @@
-// The wall round the checker's input. On every page the check opens (check/proofs.mjs, check/cssom.mjs), it reads the methods of
-// the browser library's own page-side objects from those objects: the page, its keyboard, mouse and touchscreen,
-// and every frame, locator and element handle a page method hands back. A method on the one closed list below makes
-// no input and is let through. Every other method, one the library adds later included, throws by name and file
-// unless check/acts.mjs called it, where every act is followed by its rest step. The library's own calls inside it
-// go through as they are.
-import { fileURLToPath } from 'node:url'
+// The wall round the browser library: the one closed list of what the check's code may reach on the library's
+// objects. check/acts.mjs holds the library's own objects and hands every other file a wall object in each one's
+// place (`launch`, and everything an allowed call hands back). On a wall object a name on this list goes through;
+// every other name, the library's own, inherited, underscored or a symbol, is refused by name. The list holds what
+// is allowed; nothing lists what is refused. Keys, the pointer and touch are on no list: check/acts.mjs makes them,
+// each followed by its rest step.
 
-const READS = ['$', '$$', '$eval', '$$eval', 'ariaSnapshot', 'ariaSnapshotJSON', 'content', 'evaluate', 'evaluateAll', 'evaluateHandle', 'getAttribute', 'innerHTML', 'innerText', 'inputValue', 'isChecked', 'isDisabled', 'isEditable', 'isEnabled', 'isHidden', 'isVisible', 'textContent', 'title', 'url']
-const FINDS = ['frameLocator', 'getByAltText', 'getByLabel', 'getByPlaceholder', 'getByRole', 'getByTestId', 'getByText', 'getByTitle', 'locator']
-const WAITS = ['waitForFunction', 'waitForLoadState', 'waitForNavigation', 'waitForSelector', 'waitForTimeout', 'waitForURL']
-/** The methods that make no input to a page, by the library's name for each object: the one closed list. */
-export const NO_INPUT = {
-  Page: [...READS, ...FINDS, ...WAITS, 'addInitScript', 'addListener', 'addScriptTag', 'addStyleTag', 'clearConsoleMessages', 'clearPageErrors', 'close', 'consoleMessages', 'context', 'emulateMedia', 'exposeBinding', 'exposeFunction', 'frame', 'frames', 'goBack', 'goForward', 'goto', 'isClosed', 'mainFrame', 'off', 'on', 'once', 'opener', 'pageErrors', 'pdf', 'prependListener', 'reload', 'removeAllListeners', 'removeListener', 'requestGC', 'requests', 'route', 'routeFromHAR', 'routeWebSocket', 'screenshot', 'setContent', 'setDefaultNavigationTimeout', 'setDefaultTimeout', 'setExtraHTTPHeaders', 'setViewportSize', 'unroute', 'unrouteAll', 'video', 'viewportSize', 'waitForEvent', 'waitForRequest', 'waitForResponse', 'workers'],
-  Frame: [...READS, ...FINDS, ...WAITS, 'addScriptTag', 'addStyleTag', 'childFrames', 'frameElement', 'goto', 'isDetached', 'name', 'page', 'parentFrame', 'setContent'],
-  Locator: [...READS, ...FINDS, 'all', 'allInnerTexts', 'allTextContents', 'and', 'boundingBox', 'contentFrame', 'count', 'describe', 'description', 'elementHandle', 'elementHandles', 'filter', 'first', 'last', 'normalize', 'nth', 'or', 'page', 'screenshot', 'toString', 'visible', 'waitFor'],
-  FrameLocator: [...FINDS, 'first', 'last', 'nth', 'owner'],
-  ElementHandle: [...READS, 'asElement', 'boundingBox', 'contentFrame', 'dispose', 'getProperties', 'getProperty', 'jsonValue', 'ownerFrame', 'screenshot', 'toString', 'waitForElementState', 'waitForSelector'],
-  JSHandle: [...READS, 'asElement', 'dispose', 'getProperties', 'getProperty', 'jsonValue', 'toString'],
-  Keyboard: [],
-  Mouse: [],
-  Touchscreen: [],
+/** What every wall object answers: `then`, which await and Promise read (a wall object is no promise). */
+const EVERY = ['then']
+const EVENTS = ['on', 'once', 'off', 'addListener', 'removeListener', 'waitForEvent']
+/** The check's own fields on a page (proofs.mjs, open), the only names a wall object takes a value for. */
+export const PAGE_FIELDS = ['barkCdp', 'barkCensus', 'barkCheck', 'barkCover', 'barkPlacement', 'barkPress', 'barkRef', 'barkScale', 'barkStyles']
+
+/** The allowed names, by the library's name for each kind of object. */
+export const ALLOWED = {
+  Browser: [...EVERY, 'close', 'newContext', 'newPage', 'version'],
+  BrowserContext: [...EVERY, ...EVENTS, 'close', 'newCDPSession', 'newPage', 'pages'],
+  Page: [...EVERY, ...EVENTS, ...PAGE_FIELDS, 'clock', 'close', 'context', 'evaluate', 'goto', 'isClosed', 'locator', 'screenshot', 'setContent', 'waitForSelector', 'waitForTimeout'],
+  Locator: [...EVERY, 'screenshot'],
+  Clock: [...EVERY, 'install', 'pauseAt', 'runFor'],
+  CDPSession: [...EVERY, ...EVENTS, 'detach', 'send'],
+  ConsoleMessage: [...EVERY, 'text', 'type'],
+  Request: [...EVERY, 'url'],
 }
+/** The protocol commands a CDP session may send: reads, isolated worlds and scripts. No command of the Input domain. */
+export const CDP_ALLOWED = ['Accessibility.getPartialAXTree', 'DOM.getDocument', 'DOM.querySelector', 'Page.addScriptToEvaluateOnNewDocument', 'Page.createIsolatedWorld', 'Page.enable', 'Page.getFrameTree', 'Runtime.enable', 'Runtime.evaluate', 'Runtime.releaseObjectGroup']
+/** Kinds of the library's objects that do not descend from its ChannelOwner, known by their class's name. */
+export const PLAIN_KINDS = ['Accessibility', 'Clock', 'ConsoleMessage', 'Coverage', 'FileChooser', 'FrameLocator', 'Keyboard', 'Locator', 'Mouse', 'Selectors', 'Touchscreen', 'Tracing', 'Video', 'WebError']
 
-const ACTS_FILE = fileURLToPath(new URL('./acts.mjs', import.meta.url))
-const HERE = fileURLToPath(import.meta.url)
-const PACKAGE = fileURLToPath(new URL('..', import.meta.url))
-const WALLED = Symbol('walled')
-/** What the wall has read so far: each object's methods, by the library's name for it. */
-export const WALL = { read: {}, refused: 0 }
+/** What the wall has read of the library's own objects: each kind's methods, by the library's name for it. */
+export const WALL = { read: {} }
 
-/** The file and line that called the walled method, or null when the library itself did. */
-function caller() {
-  for (const l of new Error().stack.split('\n').slice(1)) {
-    const m = l.match(/\(?((?:file:\/\/)?\/[^():]+):(\d+):\d+\)?$/)
-    if (!m) continue
-    const file = m[1].replace(/^file:\/\//, '')
-    if (file === HERE) continue
-    if (file.includes('/node_modules/')) return null
-    return { file, line: m[2] }
-  }
-  return null
-}
-
-/** The library's own name for an object's class; its bundle may mark the name with a leading _ or a trailing number. */
-const kindOf = (o) => o.constructor?.name?.replace(/^_+|\d+$/g, '')
-
-/** A method's own name for every function the object's class and its parents up to the library's base define. */
-function methodsOf(obj) {
-  const out = new Set()
-  for (let p = Object.getPrototypeOf(obj); p && !['Object', 'ChannelOwner', 'EventEmitter'].includes(kindOf(p)); p = Object.getPrototypeOf(p))
-    for (const k of Object.getOwnPropertyNames(p)) if (k !== 'constructor' && !k.startsWith('_') && typeof Object.getOwnPropertyDescriptor(p, k).value === 'function') out.add(k)
-  return [...out]
-}
-
-/** Walls one of the library's objects in place: each method off the closed list throws unless check/acts.mjs called
-    it; each one on it goes through, and what it hands back is walled in turn. */
-export function wall(obj) {
-  if (!obj || typeof obj !== 'object' || obj[WALLED]) return obj
-  const kind = kindOf(obj)
-  if (!(kind in NO_INPUT)) return obj
-  obj[WALLED] = true
-  const names = methodsOf(obj)
-  WALL.read[kind] = Math.max(WALL.read[kind] ?? 0, names.length)
-  for (const name of names) {
-    const own = obj[name]
-    if (NO_INPUT[kind].includes(name)) {
-      obj[name] = function (...a) {
-        const out = own.apply(this, a)
-        return out && typeof out.then === 'function' ? out.then(walled) : walled(out)
-      }
-      continue
-    }
-    obj[name] = function (...a) {
-      const by = caller()
-      if (by && by.file !== ACTS_FILE) {
-        WALL.refused++
-        throw new Error(`the checker's input goes only through check/acts.mjs: ${kind}.${name} called at ${by.file.replace(PACKAGE, '')}:${by.line}`)
-      }
-      return own.apply(this, a)
-    }
-  }
-  return obj
-}
-const walled = (v) => (Array.isArray(v) ? v.map(wall) : wall(v))
-
-/** Walls a page the check opened and the input objects it holds. */
-export function wallPage(page) {
-  wall(page)
-  for (const k of ['keyboard', 'mouse', 'touchscreen']) wall(page[k])
-  return page
-}
-
-/** One line for a run's end: what the wall read, and its closed list, each counted from itself. */
+/** One line for a run's end: the library's methods read from its own objects, and the closed list, each counted
+    from itself. */
 export const wallLine = () => {
   const kinds = Object.keys(WALL.read)
   const read = kinds.reduce((n, k) => n + WALL.read[k], 0)
-  const listed = Object.values(NO_INPUT).reduce((n, l) => n + new Set(l).size, 0)
-  return `the input wall: ${read} methods read from the library's own page-side objects (${kinds.map((k) => `${k} ${WALL.read[k]}`).join(', ')}); the closed list of those that make no input holds ${listed}; every other one only through check/acts.mjs`
+  const allowed = Object.values(ALLOWED).reduce((n, l) => n + new Set(l).size, 0)
+  return `the wall: ${read} methods read from the browser library's own objects (${kinds.map((k) => `${k} ${WALL.read[k]}`).join(', ')}); the closed list allows ${allowed} names and ${CDP_ALLOWED.length} protocol commands; every other name refused by name`
 }

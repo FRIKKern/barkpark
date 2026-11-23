@@ -1,18 +1,19 @@
 // The selftest's cases for the top layer (check/layers.mjs): a box the part names is read open, on the ground the
 // page really draws behind it; what can open in the top layer and no layer names is a fail by name, open or not;
 // and a named box that opens late fails by name.
-import { clickOn } from './acts.mjs'
+import { clickOn, launch, press } from './acts.mjs'
 import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
 import { all, both, each, edit, esc, inDemo, reasons, skinsSay } from './plants.mjs'
 import { FRAME, installCensus, LATE, looks, NOT_OWN, REFUSED, UNNAMED_CAN } from './layers.mjs'
+import { LISTS } from './motion.mjs'
+import { installHelpers, source } from './probes.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -88,7 +89,7 @@ const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
 // a context that holds a third page, is red by name. The rows that always make a page keep the case from passing
 // by making none.
 async function ownTwoPages() {
-  const browser = await chromium.launch()
+  const browser = await launch()
   const part = { name: 'x', json: {} }
   const two = async () => {
     const context = await browser.newContext()
@@ -133,11 +134,20 @@ async function ownTwoPages() {
     }
     // Ways that may make a page or not, by the machine (the modifier for a background tab is not the same on every
     // system): each says whether it made one, and a page it made is refused by name and closed, once.
+    // The checker's input (check/acts.mjs) reads its rest step through the page's helpers: here in the page's own world.
+    const helped = async (page) => {
+      page.barkCheck = (fn, arg = null) => page.evaluate(`(async () => { await globalThis.__barkCheck?.toRest?.(); return (${source(fn)})(${JSON.stringify(arg)}) })()`)
+      await page.barkCheck(installHelpers, LISTS)
+    }
     const MAY = {
-      'Control click on a link': (page) => page.click('#a', { modifiers: ['Control'] }),
+      'Control click on a link': async (page) => {
+        await helped(page)
+        await clickOn(page, '#a', { modifiers: ['Control'] })
+      },
       'Control+Enter on a link': async (page) => {
-        await page.focus('#a')
-        await page.keyboard.press('Control+Enter')
+        await helped(page)
+        await page.evaluate(() => document.getElementById('a').focus({ preventScroll: true }))
+        await press(page, 'Control+Enter')
       },
       'a script Control click on a link': (page) => page.evaluate(() => document.getElementById('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }))),
     }
@@ -173,7 +183,7 @@ async function ownTwoPages() {
     by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
 async function overTwoGrounds() {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  const browser = await launch({ args: ['--disable-lcd-text'] })
   try {
     const dir = join(scratch, 'parts')
     cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })

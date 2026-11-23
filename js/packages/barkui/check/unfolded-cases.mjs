@@ -3,51 +3,66 @@
 // is cheaper than the one case was; every row the case held is in exactly one run (tests/unfold.test.mjs).
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { SURFACES } from '../build/page.mjs'
 import { UNNAMED } from './layers.mjs'
 import { all, both, drawnOff, DRAWN, each, edit, esc, inCss, inDemo, reasons, says, skinsSay } from './plants.mjs'
 
-// Every surface read, in two runs whose surfaces together are all of them (each also reads base).
+// Every surface read: one run per surface but base, made by one rule from the page's list of surfaces (each run also
+// reads base). A row that names a surface is held in that surface's run, with its plant; a row that names no surface
+// is held in every run, on that run's own read, and each of those rows has a plant on each surface that must be red
+// there, so it is known to read that surface: N of M, M the plant list's length.
 // Fields in UI SDK's own look: a placeholder in the waited pair (muted text on the field's background) in an input
 // and in a textarea, elements that draw no children, and one on another ground. fjord light's primary is planted
-// worse below, so the waited ones are red there by design.
+// worse below, so the waited ones are red there by design. The planted field and the planted label are the plants of
+// the rows every surface holds; those rows read every other field and element.
 const FIELDS = (d) =>
   edit(join(d, 'example.html'), (s) =>
-    `${s}\n<div data-demo-row>\n  <span data-demo-label>Fields</span>\n  <input id="button-ph-waited" data-slot="input" placeholder="Waited">\n  <input id="button-ph-other" data-slot="input" placeholder="Other ground">\n  <textarea id="button-ph-area" data-slot="textarea" placeholder="Waited, in a textarea"></textarea>\n</div>\n`)
-const surfaceRows = {
-  raised: {
-    'a label gone on raised': both(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)),
+    `${s}\n<div data-demo-row>\n  <span data-demo-label>Fields</span>\n  <input id="button-ph-waited" data-slot="input" placeholder="Waited">\n  <input id="button-ph-other" data-slot="input" placeholder="Other ground">\n  <textarea id="button-ph-area" data-slot="textarea" placeholder="Waited, in a textarea"></textarea>\n  <input id="button-ph-planted" data-slot="input" placeholder="Planted">\n  <span id="button-grown">Grown</span>\n</div>\n`)
+const PLACEHOLDER = (ids) => new RegExp(`at (${ids}) ""::placeholder`)
+const GROWN = /a reader put a child into (\S+)/
+/** The rows, each with the surface it names (none: every surface's run holds it) and its plant. */
+const SURFACE_ROWS = {
+  'a label gone on raised': { on: 'raised', css: '.sr-stage[data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }', holds: both(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)) },
+  'a label gone on inverse': { on: 'inverse', css: '.sr-stage[data-surface="inverse"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }', holds: both(new RegExp(`on inverse: .*${DRAWN} at button#button-secondary`)) },
+  'a second skin short on primary': { on: 'primary', css: 'html[data-skin="evergreen"][data-color-scheme="dark"] .sr-stage[data-surface="primary"] [data-demo-label] { color: var(--ui-border); }', holds: says('schemes', /evergreen dark on primary: drawn text [\d.]+:1 at span/) },
+  'the waited pair worse than recorded': { on: 'primary', css: 'html[data-skin="fjord"][data-color-scheme="light"] .sr-stage[data-surface="primary"] { --ui-muted-foreground: var(--ui-border); }', holds: says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/) },
+  'a placeholder on another ground stays red': { on: 'primary', css: '#button-ph-other { background: var(--ui-muted); }', holds: says('skins', /on primary: drawn text [\d.]+:1 at input#button-ph-other ""::placeholder/) },
+  'a placeholder in the waited pair is let through by its wait, in an input and in a textarea': {
+    holds: (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => PLACEHOLDER('input#button-ph-waited|textarea#button-ph-area').test(f) && !/fjord light/.test(f))),
+    plant: (s) => ({
+      css: `.sr-stage[data-surface="${s}"] #button-ph-planted { --ui-muted-foreground: var(--ui-border); }`,
+      red: (p) => ['skins', 'schemes'].some((l) => reasons(p, l).some((f) => f.includes(` on ${s}: `) && PLACEHOLDER('input#button-ph-planted').test(f))),
+    }),
   },
-  primary: {
-    'a second skin short on primary': says('schemes', /evergreen dark on primary: drawn text [\d.]+:1 at span/),
-    'the waited pair worse than recorded': says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/),
-    'a placeholder on another ground stays red': says('skins', /on primary: drawn text [\d.]+:1 at input#button-ph-other ""::placeholder/),
-    'a placeholder in the waited pair is let through by its wait, in an input and in a textarea': (p) =>
-      !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /at (input#button-ph-waited|textarea#button-ph-area) ""::placeholder/.test(f) && !/fjord light/.test(f))),
-    'no reader puts a child into an element it measures': (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => /a reader put a child into/.test(f))),
+  'no reader puts a child into an element it measures': {
+    holds: (p) => !['skins', 'schemes'].some((l) => reasons(p, l).some((f) => GROWN.test(f) && GROWN.exec(f)[1] !== 'span#button-grown')),
+    plant: (s) => ({
+      demo: `{ const g = root.querySelector('#button-grown'); const tick = () => { if (root.getAttribute('data-surface') === '${s}') { g.append(document.createElement('i')); g.lastChild.remove() } requestAnimationFrame(tick) }; requestAnimationFrame(tick) }`,
+      red: (p) => ['skins', 'schemes'].some((l) => reasons(p, l).some((f) => f.includes(` on ${s}: `) && GROWN.test(f) && GROWN.exec(f)[1] === 'span#button-grown')),
+    }),
   },
 }
-// Waits on the sheet are bound to their view and pair; everything else is proved on every surface.
-export const SURFACE_CASES = [
-  {
-    name: 'every surface read, raised and sunken: a label gone on raised turns both wide lights off at its control',
-    only: ['skins', 'schemes'],
-    surfaces: ['raised', 'sunken'],
-    css: '.sr-stage[data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }',
-    expect: each(surfaceRows.raised),
+/** The surfaces the family reads, each in a run of its own: the page's list but base, which every run reads. */
+const FAMILY = SURFACES.filter((s) => s !== 'base')
+const rowsOn = (s) => Object.entries(SURFACE_ROWS).filter(([, r]) => r.on === s)
+const everyRun = Object.entries(SURFACE_ROWS).filter(([, r]) => !r.on)
+/** Each row every surface holds, planted on each surface. */
+export const SURFACE_PLANTS = FAMILY.flatMap((s) => everyRun.map(([name, r]) => ({ row: name, on: s, ...r.plant(s) })))
+const plantsOn = (s) => SURFACE_PLANTS.filter((x) => x.on === s)
+export const SURFACE_CASES = FAMILY.map((s) => ({
+  name: `every surface read, ${s}: each row that names ${s}, and each row every surface holds, read on ${s} with its plant there red`,
+  only: ['skins', 'schemes'],
+  surfaces: [s],
+  plant: all(FIELDS, ...plantsOn(s).filter((x) => x.demo).map((x) => (d) => inDemo(d, x.demo))),
+  css: [...rowsOn(s).map(([, r]) => r.css), ...plantsOn(s).filter((x) => x.css).map((x) => x.css)].join('\n'),
+  expect: async (p, ...a) => {
+    const rows = await each(Object.fromEntries([...rowsOn(s), ...everyRun].map(([name, r]) => [name, r.holds])))(p, ...a)
+    const red = plantsOn(s).filter((x) => x.red(p))
+    for (const x of plantsOn(s)) if (!red.includes(x)) console.log(`    the plant for "${x.row}" on ${s} is not red`)
+    console.log(`    plants of the rows every surface holds, on ${s}: ${red.length} of ${plantsOn(s).length} red (${SURFACE_PLANTS.length} in all)`)
+    return rows && plantsOn(s).length > 0 && red.length === plantsOn(s).length
   },
-  {
-    name: 'every surface read, primary and inverse: a second skin short on primary and a waited pair measuring worse turn the lights off; a placeholder is matched to a wait by its own colour',
-    only: ['skins', 'schemes'],
-    surfaces: ['primary', 'inverse'],
-    plant: FIELDS,
-    css: [
-      'html[data-skin="evergreen"][data-color-scheme="dark"] .sr-stage[data-surface="primary"] [data-demo-label] { color: var(--ui-border); }',
-      'html[data-skin="fjord"][data-color-scheme="light"] .sr-stage[data-surface="primary"] { --ui-muted-foreground: var(--ui-border); }',
-      '#button-ph-other { background: var(--ui-muted); }',
-    ].join('\n'),
-    expect: each(surfaceRows.primary),
-  },
-]
+}))
 
 // Real states held to their pins (states.mjs, coverage.mjs), in five runs: what the skins draw while a state holds;
 // pending held at rest, in both wide views; what the press steps reach; the rules nothing reads, which only a run of every light can say; and a run of
@@ -218,9 +233,11 @@ export const CHECKED_CASES = [
   },
 ]
 
-/** The rows of each unfolded case, by run, as the runs hold them. */
+/** The rows every surface's run holds, each on its own read. */
+export const EVERY_RUN_ROWS = { surfaces: everyRun.map(([name]) => name) }
+/** The rows of each unfolded case, by run, as the runs hold them (and, for the surfaces, EVERY_RUN_ROWS in each). */
 export const UNFOLDED_ROWS = {
-  surfaces: Object.fromEntries(Object.entries(surfaceRows).map(([k, rows]) => [k, Object.keys(rows)])),
+  surfaces: Object.fromEntries(FAMILY.map((s) => [s, rowsOn(s).map(([name]) => name)])),
   states: Object.fromEntries(Object.entries(stateRows).map(([k, rows]) => [k, Object.keys(rows)])),
   checked: Object.fromEntries(Object.entries(checkedRows).map(([k, rows]) => [k, Object.keys(rows)])),
 }
