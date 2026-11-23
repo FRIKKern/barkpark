@@ -450,7 +450,7 @@ export function installHelpers(lists) {
       scroll into view of that element would move nothing (or nothing has focus). After the pointer, whose focus the
       browser never scrolls, only the first two. Motion with no end is left to the read, whose gate names it. */
   const afterAct = async ([who, kind]) => {
-    const moved = kind === 'key' ? focused() : null
+    const moved = kind === 'key' ? null : focused()
     const unscrolled = () => intoView(moved)
     await frame()
     await toRest(unscrolled)
