@@ -1,17 +1,19 @@
 // The selftest's cases for the top layer (check/layers.mjs): a box the part names is read open, on the ground the
 // page really draws behind it; what can open in the top layer and no layer names is a fail by name, open or not;
 // and a named box that opens late fails by name.
+import { clickOn, launch, press } from './acts.mjs'
 import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { open } from './proofs.mjs'
 import { readView, verdict } from './reading.mjs'
 import { all, both, each, edit, esc, inDemo, reasons, skinsSay } from './plants.mjs'
 import { FRAME, installCensus, LATE, looks, NOT_OWN, REFUSED, UNNAMED_CAN } from './layers.mjs'
+import { LISTS } from './motion.mjs'
+import { installHelpers, source } from './probes.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
 // the stage's own box, and over the page header, not over its DOM parent.
@@ -46,11 +48,13 @@ const MORE = `
   <div id="button-slow" popover="manual">Shown slowly</div>
 </div>
 `
-// What both runs plant: the boxes that open, at once or late.
+// The hint the hint run reads open: shown while the pointer is on its button.
+const HINT_JS = "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }"
+// What the unnamed and census runs both plant: the boxes that open, at once or late.
 const BOXES_JS = [
   "root.querySelector('#button-open').showPopover()",
   "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }",
-  "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
+  HINT_JS,
   // Shown 400 ms after focus or hover, as real tooltips are; leaving clears the timer.
   "{ const late = (b, t, shows, hides) => { let k = 0; for (const e of shows) b.addEventListener(e, () => { clearTimeout(k); k = setTimeout(() => t.matches(':popover-open') || t.showPopover(), 400) }); for (const e of hides) b.addEventListener(e, () => { clearTimeout(k); if (t.matches(':popover-open')) t.hidePopover() }) }; late(root.querySelector('#button-late-open'), root.querySelector('#button-late'), ['focus', 'mouseenter'], ['blur', 'mouseleave']); late(root.querySelector('#button-slow-open'), root.querySelector('#button-slow'), ['mouseenter'], ['mouseleave']) }",
 ].join('\n')
@@ -87,7 +91,7 @@ const can = (box) => skinsSay(new RegExp(esc(UNNAMED_CAN(box))))
 // a context that holds a third page, is red by name. The rows that always make a page keep the case from passing
 // by making none.
 async function ownTwoPages() {
-  const browser = await chromium.launch()
+  const browser = await launch()
   const part = { name: 'x', json: {} }
   const two = async () => {
     const context = await browser.newContext()
@@ -132,11 +136,20 @@ async function ownTwoPages() {
     }
     // Ways that may make a page or not, by the machine (the modifier for a background tab is not the same on every
     // system): each says whether it made one, and a page it made is refused by name and closed, once.
+    // The checker's input (check/acts.mjs) reads its rest step through the page's helpers: here in the page's own world.
+    const helped = async (page) => {
+      page.barkCheck = (fn, arg = null) => page.evaluate(`(async () => { await globalThis.__barkCheck?.toRest?.(); return (${source(fn)})(${JSON.stringify(arg)}) })()`)
+      await page.barkCheck(installHelpers, LISTS)
+    }
     const MAY = {
-      'Control click on a link': (page) => page.click('#a', { modifiers: ['Control'] }),
+      'Control click on a link': async (page) => {
+        await helped(page)
+        await clickOn(page, '#a', { modifiers: ['Control'] })
+      },
       'Control+Enter on a link': async (page) => {
-        await page.focus('#a')
-        await page.keyboard.press('Control+Enter')
+        await helped(page)
+        await page.evaluate(() => document.getElementById('a').focus({ preventScroll: true }))
+        await press(page, 'Control+Enter')
       },
       'a script Control click on a link': (page) => page.evaluate(() => document.getElementById('a').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }))),
     }
@@ -172,7 +185,7 @@ async function ownTwoPages() {
     by its contrast alone; on black it passes, drawn as itself against its words drawn alone on that same ground. */
 async function overTwoGrounds() {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  const browser = await launch({ args: ['--disable-lcd-text'] })
   try {
     const dir = join(scratch, 'parts')
     cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
@@ -188,7 +201,7 @@ async function overTwoGrounds() {
     const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
     const part = built.parts.find((x) => x.name === 'button')
     const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { scale: 2, height: 1600 })
-    await page.click('#button-pop-open')
+    await clickOn(page, '#button-pop-open')
     const readings = {}
     for (const ground of ['white', 'black']) {
       // The check moves the box over the middle of that ground: the box's DOM parent stays the same row.
@@ -215,8 +228,9 @@ async function overTwoGrounds() {
   }
 }
 
-// Two runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
-// time for one case: the first reads named and unnamed boxes open, the second the boxes the census must name.
+// Four runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
+// time for one case: the first reads the named popover open, the second unnamed boxes open and a named box late,
+// the third the named hint open, the fourth the boxes the census must name.
 const BOXES_CSS = [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n')
 /** What one open state and the looks after real input cost on this runner, for the record (the hosted job prints it). */
 const measured = (p) => {
@@ -224,18 +238,25 @@ const measured = (p) => {
   if (m) console.log(`    the top layer: ${m.readings} readings open in ${m.seconds} s, ${(m.seconds / m.readings).toFixed(2)} s each`)
   return m
 }
-/** The first run's rows: named and unnamed boxes read open. `m` is the part's measure of its layers. */
+/** The first run's rows: the named popover read open. `m` is the part's measure of its layers. */
 const popoverRows = (m) => ({
   'a named popover, opened by a click, read open': both(/with #button-pop open: drawn text [\d.]+:1 at div#button-pop "Saved two minutes ago"/),
+  'every layer that opens at once read in every view': () => m?.readings === 10,
+})
+/** The second run's rows: boxes no layer names read open, and a named box that opens late. */
+const unnamedRows = () => ({
   // In the reading's own form ("<skin> <scheme> on base: …"), so only the reading holds it, not the looks.
   'a box open from the start, named by no layer, in the reading': both(new RegExp(`^\\w+ (light|dark) on base: ${esc(UNNAMED_AT('div#button-open "Always open"'))}$`)),
   'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`^\\w+ (light|dark): Tab to button#button-tip-open "Info": ${esc(UNNAMED_AT('div#button-tip "Shown on focus"'))}$`)),
   'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
-  'every layer that opens at once read in every view': () => m?.readings === 10,
 })
-/** The second run's rows: the named hint read open, and every box the census must name. `n` is the looks made. */
-const censusRows = (m, n) => ({
+/** The third run's rows: the named hint read open. `m` is the part's measure of its layers. */
+const hintRows = (m) => ({
   'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
+  'the named hint read in every view': () => m?.readings === 10,
+})
+/** The fourth run's rows: every box the census must name. `n` is the looks made. */
+const censusRows = (n) => ({
   'a tooltip shown 400 ms after focus or hover, named by no layer': can('div#button-late "Shown late"'),
   'a tooltip on hover over a plain span, named by no layer': can('div#button-span-tip "Shown on the span"'),
   'a dialog never opened, named by no layer': can('dialog#button-dlg "Never opened"'),
@@ -247,44 +268,61 @@ const censusRows = (m, n) => ({
   'a box in a shadow root parsed from markup, with no attachShadow call': can('div#button-parsed "In a parsed root"'),
   'a frame in the page, refused by name': skinsSay(new RegExp(esc(FRAME('iframe#button-frame ""')))),
   "a box made as the page loads and gone before the check's first look": can('div#button-at-load "Made at load"'),
-  'the named hint read in every view': () => m?.readings === 10,
   'the looks were made': () => n > 0,
 })
-/** The rows of the two top-layer runs, by run, as their cases hold them. */
-export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), census: Object.keys(censusRows()) }
+/** The rows of the four top-layer runs, by run, as their cases hold them. */
+export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), unnamed: Object.keys(unnamedRows()), hint: Object.keys(hintRows()), census: Object.keys(censusRows()) }
 // Each top-layer case is `layers`: it opens its boxes by real input (a click, a hover, a Tab) or holds a refusal,
 // and runs in the selftest's rest job by its one rule (check/jobs.mjs).
 export const LAYER_CASES = [
   {
-    name: 'top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name',
+    name: 'top layer: a named popover is read open, in every view',
     only: ['skins'],
     layers: true,
-    plant: all(
-      withPopover,
-      (d) => appendFileSync(join(d, 'example.html'), MORE),
-      (d) => inDemo(d, BOXES_JS),
-      (d) => named(d, [LAYER, SLOW]),
-    ),
+    plant: all(withPopover, (d) => named(d, [LAYER])),
     css: BOXES_CSS,
     expect: (p, ...rest) => each(popoverRows(measured(p)))(p, ...rest),
   },
   {
-    name: 'top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load',
+    name: 'top layer: a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name',
+    only: ['skins'],
+    layers: true,
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), MORE),
+      (d) => inDemo(d, BOXES_JS),
+      (d) => named(d, [SLOW]),
+    ),
+    css: BOXES_CSS,
+    expect: each(unnamedRows()),
+  },
+  {
+    name: 'top layer: a named hover hint is read open, in every view',
+    only: ['skins'],
+    layers: true,
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), MORE),
+      (d) => inDemo(d, HINT_JS),
+      (d) => named(d, [HINT]),
+    ),
+    css: BOXES_CSS,
+    expect: (p, ...rest) => each(hintRows(measured(p)))(p, ...rest),
+  },
+  // Its own run, with no layer named and no sheet of its own: the census names boxes that never open while the check
+  // looks, so it reads no layer open.
+  {
+    name: 'top layer: boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load',
     only: ['skins'],
     layers: true,
     plant: all(
       () => Object.assign(since, looks),
       (d) => appendFileSync(join(d, 'example.html'), MORE),
       (d) => inDemo(d, [BOXES_JS, CENSUS_JS].join('\n')),
-      (d) => named(d, [HINT]),
     ),
-    css: BOXES_CSS,
     expect: (p, ...rest) => {
-      const m = measured(p)
       const n = looks.n - since.n
       const s = (looks.ms - since.ms) / 1000
       console.log(`    looks for a box no layer names: ${n} in ${s.toFixed(1)} s, ${n ? ((s * 1000) / n).toFixed(1) : 0} ms each`)
-      return each(censusRows(m, n))(p, ...rest)
+      return each(censusRows(n))(p, ...rest)
     },
   },
   // Its own run: were either call let through, it would take the page away and every other row with it. The first

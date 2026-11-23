@@ -1,6 +1,11 @@
 // In-page helpers for the check. installHelpers runs inside the page (it is
-// serialised), so it may not reach anything outside its own body.
-export function installHelpers() {
+// serialised), so it may not reach anything outside its own body: the lists it reads come in as its argument
+// (LISTS, motion.mjs).
+export function installHelpers(lists) {
+  if (!lists?.places?.length || !lists?.changes?.length || !Object.keys(lists?.motion ?? {}).length) throw new Error('installHelpers needs the lists of check/motion.mjs')
+  const PLACES = lists.places
+  const MOTION = lists.motion
+  const CHANGES = new Set(lists.changes)
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = 1
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -299,15 +304,163 @@ export function installHelpers() {
     [...new Set(list.map((a) => `${describe(a.effect?.target ?? null)}${a.effect?.pseudoElement ?? ''} ${a instanceof CSSTransition ? `transition of ${a.transitionProperty}` : a instanceof CSSAnimation ? `animation ${a.animationName}` : 'animation'}`))].slice(0, 3).join('; ')
   /** The check's own red, not a part's: a look is read only on a page at rest. */
   const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
+  /** Motion where the check cannot see it, by name: a mover anywhere but the places of PLACES. */
+  const UNSEEN = 'the check could not read (not a fault of the part): motion where the check cannot see it'
+  const FOCUS_UNSEEN = 'the check could not read (not a fault of the part; task-937d3e772d576b90): focus outside the view after a key'
+  /** Scrolls under way: what scrolled since a frame was last seen to pass with no scroll. A scroll that goes on
+      scrolls again on every frame; one that has ended does not. */
+  const scroll = { count: 0, seen: 0, by: new Set() }
+  addEventListener('scroll', (e) => {
+    scroll.count++
+    scroll.by.add(e.target)
+  }, { capture: true })
+  const scrolling = () => (scroll.count === scroll.seen ? [] : [...scroll.by])
   const atRest = (who) => {
     const now = moving()
+    const off = now.filter((a) => !PLACES.includes(a.effect?.pseudoElement ?? ''))
+    if (off.length) throw new Error(`${UNSEEN}: ${who}: ${named(off)}`)
     if (now.length) throw new Error(`${AT_REST}: ${who}: ${named(now)}`)
+    const going = scrolling()
+    if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
+  }
+  /** The sheets' motion anywhere but PLACES, by selector: every sheet the page loads and every adopted one, every
+      rule in every block, nested rules read from their parent. `texts` ({ href: text }) are the sheets a page
+      loaded from a file, which the browser keeps from script: read from the same text. Any other sheet the check
+      cannot read is named. With no `texts`, the answer also names each file sheet to read (`files`). */
+  const motionOffList = (texts = null) => {
+    const off = []
+    const top = (sel) => {
+      const out = []
+      let depth = 0
+      let from = 0
+      for (let i = 0; i < sel.length; i++) {
+        if ('([{'.includes(sel[i])) depth++
+        else if (')]}'.includes(sel[i])) depth--
+        else if (sel[i] === ',' && !depth) {
+          out.push(sel.slice(from, i).trim())
+          from = i + 1
+        }
+      }
+      return [...out, sel.slice(from).trim()]
+    }
+    // The pseudo-element a selector's subject is, '' for the element itself.
+    const placeOf = (sel, parent) => {
+      const flat = sel.replace(/\([^()]*\)|\[[^\]]*\]/g, '')
+      const last = flat.split(/[\s>+~]+/).filter(Boolean).pop() ?? ''
+      const m = last.match(/::([\w-]+)|:(before|after|first-letter|first-line)\b/)
+      if (m) return `::${m[1] ?? m[2]}`
+      return last.includes('&') ? parent : ''
+    }
+    const moves = (style) => [...style].some((p) => p in MOTION)
+    // A kind whose rule names a still value is declared at any other value only where motion is allowed, so it
+    // holds in every state a rule can match.
+    const fixed = Object.entries(MOTION).filter(([, r]) => r.still !== 'nothing running')
+    const unstill = (style, sels, free) => {
+      if (free) return
+      for (const [p, r] of fixed) {
+        const v = style.getPropertyValue(p).trim()
+        if (v && v !== r.still) for (const s of sels) off.push(`${s.sel} declares ${p}: ${v} outside @media (prefers-reduced-motion: no-preference)`)
+      }
+    }
+    const walk = (rules, parents, free) => {
+      for (const r of rules) {
+        let here = parents
+        if (r instanceof CSSStyleRule) {
+          here = top(r.selectorText).flatMap((s) => (parents.length ? parents.map((p) => ({ sel: s, place: placeOf(s, p.place) })) : [{ sel: s, place: placeOf(s, '') }]))
+          if (moves(r.style)) for (const s of here) if (!PLACES.includes(s.place)) off.push(s.sel)
+          unstill(r.style, here, free)
+        } else if (typeof CSSNestedDeclarations === 'function' && r instanceof CSSNestedDeclarations) {
+          if (moves(r.style)) for (const s of parents) if (!PLACES.includes(s.place)) off.push(s.sel)
+          unstill(r.style, parents, free)
+        }
+        const allowed = free || (r instanceof CSSMediaRule && /\(\s*prefers-reduced-motion\s*:\s*no-preference\s*\)/.test(r.conditionText))
+        if (r.cssRules && !(r instanceof CSSKeyframesRule)) walk(r.cssRules, here, allowed)
+      }
+    }
+    const files = []
+    for (const s of [...document.styleSheets, ...document.adoptedStyleSheets]) {
+      let rules
+      try {
+        rules = s.cssRules
+      } catch {
+        if (s.href?.startsWith('file:') && texts && s.href in texts) {
+          const copy = new CSSStyleSheet()
+          copy.replaceSync(texts[s.href])
+          rules = copy.cssRules
+        } else if (s.href?.startsWith('file:') && !texts) {
+          files.push(s.href)
+          continue
+        } else {
+          off.push(`a sheet the check cannot read: ${s.href}`)
+          continue
+        }
+      }
+      walk(rules, [], false)
+    }
+    return { off: [...new Set(off)], files }
+  }
+  /** The element with focus, through open shadow roots; null when nothing has it (the body or the root). */
+  const focused = () => {
+    let a = document.activeElement
+    while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement
+    return a && a !== document.body && a !== document.documentElement ? a : null
+  }
+  /** Where a scroll into view of `el` would still move something: the scroller, or null when on each axis of every
+      scroller around it the element is inside the scroller's view, covers that view, or the scroller is at its limit
+      the way the element lies. No scroller around a box with position: fixed moves it. */
+  const intoView = (el) => {
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const holds = (a0, a1, v0, v1, at, most) => (a0 >= v0 - 1 && a1 <= v1 + 1) || (a0 <= v0 + 1 && a1 >= v1 - 1) || (a0 < v0 ? at <= 1 : at >= most - 1)
+    const scrolls = (o) => o === 'auto' || o === 'scroll' || o === 'hidden'
+    for (let n = el; n; ) {
+      if (getComputedStyle(n).position === 'fixed') return null
+      n = n.assignedSlot ?? n.parentElement ?? (n.getRootNode() instanceof ShadowRoot ? n.getRootNode().host : null)
+      if (!n || n === document.body) continue
+      const root = n === document.documentElement
+      const s = getComputedStyle(n)
+      const b = root ? { top: 0, left: 0 } : n.getBoundingClientRect()
+      const top = b.top + (root ? 0 : n.clientTop)
+      const left = b.left + (root ? 0 : n.clientLeft)
+      const y = (root || scrolls(s.overflowY)) && n.scrollHeight > n.clientHeight && !holds(r.top, r.bottom, top, top + n.clientHeight, n.scrollTop, n.scrollHeight - n.clientHeight)
+      const x = (root || scrolls(s.overflowX)) && n.scrollWidth > n.clientWidth && !holds(r.left, r.right, left, left + n.clientWidth, n.scrollLeft, n.scrollWidth - n.clientWidth)
+      if (y || x) return root ? 'the page' : describe(n)
+    }
+    return null
   }
   /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an
-      animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
-  const toRest = async () => {
+      animation advances only when a frame runs), and for `also` (a condition read, empty when it holds). What has
+      no end never comes to rest; waiting for it changes nothing. */
+  const toRest = async (also = () => null) => {
     const until = performance.now() + 2000
-    while (moving(true).length && performance.now() < until) await frame()
+    while ((moving(true).length || scrolling().length || also()) && performance.now() < until) {
+      const was = scroll.count
+      // A frame's scroll events come before its animation frame callbacks, so one frame tells a scroll that goes on.
+      if (moving(true).length) await frame()
+      else await new Promise((r) => requestAnimationFrame(r))
+      if (scroll.count === was) {
+        scroll.seen = was
+        scroll.by.clear()
+      }
+    }
+  }
+  /** The rest step after the checker's input on a page (check/acts.mjs), `who` naming the act and where the checker
+      made it: a frame is drawn, so what the input started shows, then the page comes to rest inside the bound, or
+      the act is red there by name and nothing reads on. At rest is: nothing with an end moves, no scroll is under
+      way, and after a key (`kind` 'key'), which the browser follows by scrolling the element with focus into view, a
+      scroll into view of that element would move nothing (or nothing has focus). After the pointer, whose focus the
+      browser never scrolls, only the first two. Motion with no end is left to the read, whose gate names it. */
+  const afterAct = async ([who, kind]) => {
+    const moved = kind === 'key' ? focused() : null
+    const unscrolled = () => intoView(moved)
+    await frame()
+    await toRest(unscrolled)
+    const left = moving(true)
+    if (left.length) throw new Error(`${AT_REST}: ${who}: ${named(left)}`)
+    const going = scrolling()
+    if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
+    const at = unscrolled()
+    if (at) throw new Error(`${FOCUS_UNSEEN}: after ${who}, ${describe(moved)} has focus outside the view of ${at}, and no scroll has brought it in`)
   }
   /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
   const still = async (who) => {
@@ -362,13 +515,17 @@ export function installHelpers() {
   const state = {}
   /** The one way the checker changes the page's look (a sheet of its own on or off, a pin set or taken off): `change`
       runs with transitions held off by a first-layer sheet of the checker's own, and style is brought up to date
-      before that sheet goes, so the change starts no transition. The checker adds no animation to the page. A
-      transition of the page's own that the sheet meets ends where it was going; a read never sees that moment
-      alone, since every read passes the door (still) and the gate first.
+      before that sheet goes, so the change starts no transition. The checker adds no animation to the page. The
+      sheet holds off exactly the places of PLACES, the only places a sheet may declare motion.
       `place` names the caller; state.restyled counts the calls by place. */
   let stillSheet = null
   const restyle = (place, change) => {
-    stillSheet ??= Object.assign(document.createElement('style'), { textContent: '@layer barkui-check { *, *::before, *::after, *::backdrop { transition: none !important; } }' })
+    if (!CHANGES.has(place)) throw new Error(`restyle was asked for a change that is not in check/motion.mjs's CHANGES: "${place}"`)
+    // The hold sheet would end a transition of the page's own: one still running now (each call first waits for
+    // rest inside the bound) is the page not at rest, red by name, never read silently at its end.
+    const cut = moving().filter((a) => a instanceof CSSTransition)
+    if (cut.length) throw new Error(`${AT_REST}: the checker's change "${place}": ${named(cut)}`)
+    stillSheet ??= Object.assign(document.createElement('style'), { textContent: `@layer barkui-check { ${PLACES.map((p) => `*${p}`).join(', ')} { transition: none !important; } }` })
     document.head.prepend(stillSheet)
     try {
       change()
@@ -380,7 +537,7 @@ export function installHelpers() {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, looks, AT_REST, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, afterAct, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */
