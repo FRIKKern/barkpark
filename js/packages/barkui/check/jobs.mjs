@@ -30,10 +30,10 @@ export const NAMES = {
 
 // The selftest runs as six jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
 // case is the one rule below, written here once: `views` runs the cases that read the wide or phone views and
-// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`, not `layers`), but for
-// those that read every surface (`surfaces`), which `surfaces` runs; `layers` runs the direct readings (`direct`,
-// each on a page of its own) and the top layer's cases (`layers`), each of which opens its boxes by real input or
-// holds a refusal, but for the top layer's cases that bring a sheet of their own (`css`), named boxes read open,
+// drive no states (their `only` names skins, schemes or phone; no `states`, not `layers`), direct readings among
+// them, but for those that read every surface (`surfaces`), which `surfaces` runs; `layers` runs the other direct
+// readings (`direct`, each on a page of its own) and the top layer's cases (`layers`), each of which opens its
+// boxes by real input or holds a refusal, but for the top layer's cases that bring a sheet of their own (`css`), named boxes read open,
 // which `open` runs; `states` runs the states cases that bring a sheet (`css`) or a part (`part`) of their own;
 // `rest` runs every other case: presses, the other states cases, refusals and the no-script print. A test holds
 // that every case runs in exactly one job and that the six together run every case (coverCases).
@@ -47,11 +47,12 @@ export const SELFTEST_JOBS = [
 ]
 const VIEWS = ['skins', 'schemes', 'phone']
 /** The selftest job that runs a case, by its key. */
+const readsViews = (c) => (c.only ?? []).some((l) => VIEWS.includes(l))
 export const selftestJob = (c) =>
-  c.direct ? 'layers'
+  c.direct ? (readsViews(c) ? 'views' : 'layers')
   : c.layers ? (c.css ? 'open' : 'layers')
   : c.states ? (c.css || c.part ? 'states' : 'rest')
-  : (c.only ?? []).some((l) => VIEWS.includes(l)) ? (c.surfaces ? 'surfaces' : 'views')
+  : readsViews(c) ? (c.surfaces ? 'surfaces' : 'views')
   : 'rest'
 // The jobs that read the views, where no case may open a layer.
 const VIEW_JOBS = ['views', 'surfaces']

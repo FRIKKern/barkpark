@@ -13,6 +13,7 @@ import { readView, verdict } from './reading.mjs'
 import { all, both, each, edit, esc, inDemo, reasons, skinsSay } from './plants.mjs'
 import { FRAME, installCensus, LATE, looks, NOT_OWN, REFUSED, UNNAMED_CAN } from './layers.mjs'
 import { LISTS } from './motion.mjs'
+import { VIEW_PAGES } from './view-pages.mjs'
 import { installHelpers, source } from './probes.mjs'
 
 // A details popover the "Details" button opens by a click, drawn in the top layer at the page's top left: outside
@@ -327,6 +328,7 @@ export const LAYER_CASES = [
   },
   // Its own run: were either call let through, it would take the page away and every other row with it. The first
   // focus makes three pages the check did not open, in three ways, and calls window.open: each page is refused, once.
+  // The demo runs on each page the skins light reads its views on (check/view-pages.mjs), so it makes three on each.
   {
     name: "top layer: what would take the page out of the census's sight is refused by name: a page the check did not open, window.open, and markup written into the parsed page (document.write)",
     only: ['skins'],
@@ -336,8 +338,9 @@ export const LAYER_CASES = [
       'window.open, refused by name': skinsSay(new RegExp(esc(REFUSED['window.open']))),
       'every page the check did not open, refused by name, once each': (p) => {
         const n = (s) => reasons(p, 'skins').filter((f) => f.includes(s)).length
-        console.log(`    pages the check did not open, refused: ${n(REFUSED.page)} of the 3 made`)
-        return n(REFUSED.page) === 3
+        const made = 3 * VIEW_PAGES
+        console.log(`    pages the check did not open, refused: ${n(REFUSED.page)} of the ${made} made, 3 on each of the light's ${VIEW_PAGES} pages`)
+        return n(REFUSED.page) === made
       },
       'document.write into the parsed page, refused by name': skinsSay(new RegExp(esc(REFUSED['document.write']))),
     }),

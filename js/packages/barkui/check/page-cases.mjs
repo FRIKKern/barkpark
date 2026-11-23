@@ -10,14 +10,18 @@ import { runCheck } from './check.mjs'
 import { spread, viewList } from './view-pages.mjs'
 
 const PART = 'tabs'
+/** The lights the compare reads: the views of the skins light. */
+const ONLY = ['skins', 'schemes']
 const SKINS = skinNames(readFileSync(tokensPath, 'utf8'))
 const VIEWS = viewList(SKINS)
 /** A colour that is no skin variable, in one view: the light reads it there and turns off by name. */
 const inView = ({ skin, scheme }, sel) => `html[data-skin="${skin}"][data-color-scheme="${scheme}"] ${sel} { color: #808080; }`
 /** Fails in a view on each page, so the lines compared are lines of both. */
-const BASE = spread(VIEWS).map((share, j) => inView(share[1], j ? '#tabs-settings' : '#tabs-analytics')).join('\n')
+/** The compare is of one page against two. */
+const TWO = spread(VIEWS, 2)
+const BASE = TWO.map((share, j) => inView(share[1], j ? '#tabs-settings' : '#tabs-analytics')).join('\n')
 /** The plant: a view of the second page's alone, its reading changed only where two pages read. */
-const CHANGED = spread(VIEWS)[1][0]
+const CHANGED = TWO[1][0]
 const PLANT = inView(CHANGED, '#tabs-overview')
 
 /** Every line the light leaves, as the selftest reads a run: its log, and the part's entry in the proof. A number of
@@ -48,7 +52,7 @@ async function read(pages, css) {
     const dir = join(scratch, 'parts')
     cpSync(join(partsDir, PART), join(dir, PART), { recursive: true })
     const logs = []
-    const { proof } = await runCheck({ dir, out: join(scratch, 'out'), proofFile: join(scratch, 'proof.json'), only: ['skins', 'schemes'], surfaces: false, motion: false, states: false, plantCss: css, log: (l) => logs.push(l), viewPages: pages })
+    const { proof } = await runCheck({ dir, out: join(scratch, 'out'), proofFile: join(scratch, 'proof.json'), only: ONLY, surfaces: false, motion: false, states: false, plantCss: css, log: (l) => logs.push(l), viewPages: pages })
     return lightLines(logs, proof)
   } finally {
     rmSync(scratch, { recursive: true, force: true })
@@ -72,6 +76,6 @@ const seen = async () => {
 }
 
 export const PAGE_CASES = [
-  { name: 'two pages at once: the skins light reads line for line on two pages what it reads on one', direct: same },
-  { name: 'two pages at once: a view whose reading changes on the second page alone is seen by the compare, by its name', direct: seen },
+  { name: 'two pages at once: the skins light reads line for line on two pages what it reads on one', only: ONLY, direct: same },
+  { name: 'two pages at once: a view whose reading changes on the second page alone is seen by the compare, by its name', only: ONLY, direct: seen },
 ]

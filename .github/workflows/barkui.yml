@@ -6,7 +6,7 @@ name: barkui
 #   barkui-check     one job per group, from that list and no other; each splits again and must agree.
 #   barkui-selftest           the check's own proof that it can still lose, in six jobs side by side: the
 #   barkui-selftest-rest      first runs the cases that read the views, the fourth those of them that read every
-#   barkui-selftest-layers    surface, the third the direct readings and the top layer's cases, the sixth those of
+#   barkui-selftest-layers    surface, the third the other direct readings and the top layer's cases, the sixth those of
 #   barkui-selftest-surfaces  the top layer's cases that read named boxes open, the fifth the states cases that
 #   barkui-selftest-states    bring a sheet or a part of their own, the second every other case (SELFTEST_JOBS and
 #   barkui-selftest-open      selftestJob in check/jobs.mjs), each under its own ceiling.
@@ -349,8 +349,8 @@ jobs:
       # reds unless each turns the right light off, naming the planted control.
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
       # them equal); the selftest stops, failing with its sentence, once it passes
-      # its ceiling, under this limit. This job runs the direct readings and the top
-      # layer's cases, but for the named boxes read open.
+      # its ceiling, under this limit. This job runs the direct readings that read
+      # no views and the top layer's cases, but for the named boxes read open.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
         timeout-minutes: 10

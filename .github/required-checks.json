@@ -954,7 +954,7 @@
     },
     {
       "context": "BarkUI selftest, views",
-      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The first of six parts of the showroom check's own proof that it can still lose: the selftest runs as six jobs (SELFTEST_JOBS in js/packages/barkui/check/jobs.mjs), and this one runs the cases that read the wide or phone views and drive no states, but for those that read every surface; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a); RENAMED BY HAND 2026-11-21 from `BarkUI selftest` (task-464c046d3267d4a7)."
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The first of six parts of the showroom check's own proof that it can still lose: the selftest runs as six jobs (SELFTEST_JOBS in js/packages/barkui/check/jobs.mjs), and this one runs the cases that read the wide or phone views and drive no states, direct readings among them, but for those that read every surface; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-20 (task-3a8552dc2063494a); RENAMED BY HAND 2026-11-21 from `BarkUI selftest` (task-464c046d3267d4a7)."
     },
     {
       "context": "BarkUI selftest, presses, states and refusals",
@@ -962,7 +962,7 @@
     },
     {
       "context": "BarkUI selftest, top layer and direct readings",
-      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest-layers`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The third of six parts of the showroom check's own proof that it can still lose: the selftest runs as six jobs (SELFTEST_JOBS in js/packages/barkui/check/jobs.mjs), and this one runs the direct readings and the top layer's cases, but for the named boxes read open; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-22 (task-6920771103f61498)."
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkui.yml job `barkui-selftest-layers`, an upstream `needs` of `BarkUI showroom check`, which is excluded (S7, held for the owner). The third of six parts of the showroom check's own proof that it can still lose: the selftest runs as six jobs (SELFTEST_JOBS in js/packages/barkui/check/jobs.mjs), and this one runs the other direct readings and the top layer's cases, but for the named boxes read open; it runs only when the plan says BarkUI was touched. Promoting a leaf would re-implement the aggregator at leaf granularity and pin its internals as a contract. ADDED BY HAND 2026-11-22 (task-6920771103f61498)."
     },
     {
       "context": "BarkUI selftest, surfaces",
