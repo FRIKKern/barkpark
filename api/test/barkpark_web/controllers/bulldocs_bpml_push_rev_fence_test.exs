@@ -3,7 +3,9 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
   A write that names a BPML push's starting rev as its `ifRev` is refused as
   stale, with nothing written: a field batch (`fence: :blocks`), a patch
   (`"fence": "fields"`) and a `diffMatchPatch`, whether or not what it touches
-  changed since. The push's revision is not a snapshot those checks read.
+  changed since. The push's revisions are not snapshots those checks read.
+  A patch from the rev a push wrote is refused the same way once the Paper
+  moved on.
 
   Each Paper is pushed once before the push under test, so its starting rev is
   one that only a push wrote. The field-batch rows give the Paper schema a
@@ -189,6 +191,23 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevFenceTest do
 
       assert stored(slug) == before
     end
+  end
+
+  # Only the push's after row holds this rev: no push follows it.
+  test "a fields-fenced patch from the rev a push wrote, the Paper changed since, is refused" do
+    slug = paper!(%{})
+    bpml_push!(slug, "Plain.", "Plain, one.")
+    wrote = rev(slug)
+    {:ok, _} = mutate(slug, %{"source_doc" => "theirs"})
+    before = stored(slug)
+
+    assert {:error, {:rev_mismatch, %{expected: ^wrote}}} =
+             mutate(slug, %{"description" => "mine"}, %{
+               "ifRevisionID" => wrote,
+               "fence" => "fields"
+             })
+
+    assert stored(slug) == before
   end
 
   # A diffMatchPatch path is left out of the fields compare: it merges into the
