@@ -10,6 +10,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.PortableDoc.Bpml.ListItems
 
   def show(conn, %{"slug" => slug} = params) do
     dataset = requested_dataset(params)
@@ -18,7 +19,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
     format = Map.get(params, "format", "json")
 
     cond do
-      format not in ["json", "bpml"] ->
+      format not in ["json", "bpml", "carried"] ->
         conn
         |> put_status(:bad_request)
         |> json(%{
@@ -26,7 +27,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
             "code" => "unknown_format",
             "message" => "unknown format #{inspect(format)}",
             "hint" =>
-              "formats: json (default, the block truth) and bpml (the readable isomorphic view); derived formats (html) have their own endpoints"
+              "formats: json (default, the block truth), bpml (the readable isomorphic view) and carried (the list items a push carries back that bpml does not print); derived formats (html) have their own endpoints"
           }
         })
 
@@ -40,10 +41,12 @@ defmodule BarkparkWeb.BulldocsSourceController do
       nil ->
         send_resp(conn, 404, "not found")
 
-      paper when format == "bpml" ->
+      paper when format in ["bpml", "carried"] ->
         # The working copy: the reader's view (`Papers.BpmlView`), which the
-        # push and create answers print and refuse alike.
-        bpml_source(conn, paper, Content.Papers.BpmlView.of(paper, dataset, scope, perspective))
+        # push and create answers print and refuse alike. `carried` reads the
+        # same view and names its carried items instead of printing it.
+        view = Content.Papers.BpmlView.of(paper, dataset, scope, perspective)
+        bpml_source(conn, paper, view, format)
 
       paper ->
         json_source(conn, paper, dataset, scope, perspective)
@@ -52,10 +55,11 @@ defmodule BarkparkWeb.BulldocsSourceController do
 
   # BPML is a VIEW of blocks only: an html-source paper has no block truth to
   # print, so the isomorphic format refuses it.
-  defp bpml_source(conn, paper, {:blocks, blocks, fields}),
-    do: send_bpml(conn, paper, blocks, fields)
+  defp bpml_source(conn, paper, {:blocks, blocks, fields}, format),
+    do: send_bpml(conn, paper, blocks, fields, format)
 
-  defp bpml_source(conn, _paper, view), do: refuse(conn, Content.Papers.BpmlView.refusal(view))
+  defp bpml_source(conn, _paper, view, _format),
+    do: refuse(conn, Content.Papers.BpmlView.refusal(view))
 
   # The JSON read is what a reader renders (`bp paper view`, `bp paper export`,
   # the mirrors), never pushed back through sync, so the working copy's own
@@ -101,7 +105,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
   # The header carries the PAPER-LEVEL integer rev (content["rev"]) — the value
   # the ops path's if_rev guard compares against — NOT the row's _rev hash
   # (which the JSON envelope already exposes as "_rev").
-  defp send_bpml(conn, paper, blocks, fields) do
+  defp send_bpml(conn, paper, blocks, fields, format) do
     case Content.Papers.op_rev(paper) do
       {:error, {:unreadable_rev, field}} ->
         rev_unreadable(conn, paper, field)
@@ -111,10 +115,13 @@ defmodule BarkparkWeb.BulldocsSourceController do
         # is the refusal the push gives too.
         case Content.Papers.BpmlView.printed(paper, blocks, fields) do
           {:ok, bpml, _pulled} ->
+            carried = ListItems.carried(blocks)
+
             conn
-            |> put_resp_content_type("text/bpml")
             |> put_resp_header("x-paper-rev", to_string(rev))
-            |> send_resp(200, bpml)
+            |> put_resp_header("x-bpml-view", Content.Papers.BpmlView.hash(bpml))
+            |> put_resp_header("x-bpml-carried-count", to_string(length(carried)))
+            |> send_view(format, bpml, carried)
 
           {:refused, body} ->
             conn
@@ -122,6 +129,21 @@ defmodule BarkparkWeb.BulldocsSourceController do
             |> json(%{"error" => body})
         end
     end
+  end
+
+  # The pull answers the bytes; `carried` answers, for the same bytes (same
+  # `x-paper-rev` and `x-bpml-view`), every item the print does not show all of,
+  # by block and item id. `x-bpml-carried-count` on both is the whole count, so
+  # a client that sees a count above 0 reads `carried` and names every one.
+  defp send_view(conn, "carried", _bpml, carried) do
+    items = for {block, item} <- carried, do: %{"block" => block, "item" => item}
+    json(conn, %{"count" => length(items), "carried" => items})
+  end
+
+  defp send_view(conn, _bpml_format, bpml, _carried) do
+    conn
+    |> put_resp_content_type("text/bpml")
+    |> send_resp(200, bpml)
   end
 
   # An UNREADABLE op-anchor is a failed READ, never a rev. Refusing here (rather

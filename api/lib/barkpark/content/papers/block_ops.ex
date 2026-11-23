@@ -507,6 +507,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # whose cache is its only source.
     carried_blocks = carried_blocks(blocks, attrs, existing)
 
+    legacy_id = (existing && existing.doc_id) || slug
+
     body_html =
       cond do
         is_list(blocks) -> Render.render_blocks(blocks, render_opts)
@@ -514,7 +516,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # with no blocks. Scrub it through the strict allowlist BEFORE store so
         # a <script>/onerror= payload never persists (defensive; the reader CSP
         # is the second layer). See Barkpark.PortableDoc.HtmlSanitizer.
-        is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"])
+        is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"], id: legacy_id)
         is_list(carried_blocks) -> Render.render_blocks(carried_blocks, render_opts)
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
@@ -1697,7 +1699,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          normalized =
            folded
            |> maybe_restore_optional_tab_id_omissions(authored_blocks)
-           |> normalize_render_shapes(),
+           |> Papers.KeepUntouched.shapes(authored_blocks, opts),
          # Same PortableDoc RATCHET as the single-op path, on the batch RESULT.
          :ok <- NewErrors.check_touched(blocks, normalized),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
@@ -1740,6 +1742,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
         case fenced_or_plain_paper_update(changeset, doc, opts) do
           {:ok, saved} ->
+            :ok = Papers.PushRevision.record(doc, saved, dataset, opts)
             # Same actor stamp as the single-op frame (slice 4), same posture:
             # server-side, additive, ignorable.
             frame =
@@ -1757,11 +1760,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
             {:ok, new_blocks, rev, {saved, slug, frame}}
 
-          {:error, :precondition_failed} = err ->
+          {:error, _reason} = err ->
             err
-
-          {:error, changeset} ->
-            {:error, changeset}
         end
       end
     else

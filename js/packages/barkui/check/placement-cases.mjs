@@ -6,12 +6,12 @@ import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { partsDir } from '../build/parts.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { noscript } from './proofs.mjs'
 import { LOCK_VALUE, NO_DIALOG, NO_SCRIPT, NOT_A_BOX, NOT_ANCHORED, NOT_LOCK, NOT_PLACEMENT, NOT_VALUE, ON_ANCESTOR, OUT_OF_DOCUMENT, SCROLL_LOCK, SHADOW_ABOVE, TRANSITION } from './placement.mjs'
 import { all, edit, each, inDemo, lights } from './plants.mjs'
+import { launch } from './acts.mjs'
 
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
 const S = "const S = 'sty' + 'le'"
@@ -125,7 +125,7 @@ const PLACED = `<div id="button-box" popover="manual">A box</div>
     carry neither (the build refuses style=), so they are written into the built page. */
 async function noScriptStage() {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-  const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+  const browser = await launch({ args: ['--disable-lcd-text'] })
   try {
     const dir = join(scratch, 'parts')
     cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })

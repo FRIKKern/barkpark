@@ -43,7 +43,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
         Barkpark.LabelFixtures.paper_attrs(%{
           slug: @legacy_slug,
           dataset: @dataset,
-          body_html: ~s(<p data-test-id="legacy-opaque-body">#{@legacy_marker}</p>)
+          # An `id`, not a `data-test-id`: the sanitizer keeps only the
+          # renderer's own `data-…` names in stored HTML (#28404).
+          body_html: ~s(<p id="legacy-opaque-body">#{@legacy_marker}</p>)
         })
       )
 
@@ -115,13 +117,20 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
        %{conn: conn} do
     {:ok, _view, html} = open_legacy(conn)
 
-    body = query(html, ~s([data-test-id="legacy-opaque-body"]))
+    body = query(html, "#legacy-opaque-body")
 
     assert Enum.count(body) == 1,
            "the seeded body_html never rendered — this fixture does not reach the legacy arm, " <>
              "so everything below would be vacuous"
 
     assert LazyHTML.text(body) =~ @legacy_marker
+
+    # The stored HTML paints inside its own box (#28404 review, B2).
+    assert html
+           |> query(
+             ~s|article[id="paper-body-legacy-#{@legacy_slug}"][style="contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%"]|
+           )
+           |> Enum.count() == 1
 
     ids = article_ids(html)
 
@@ -144,7 +153,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
        %{conn: conn} do
     {:ok, view, html} = open_legacy(conn)
 
-    assert Enum.count(query(html, ~s([data-test-id="legacy-opaque-body"]))) == 1
+    assert Enum.count(query(html, "#legacy-opaque-body")) == 1
     pid_before = view.pid
 
     convert_to_blocks!()
@@ -190,7 +199,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
     assert LazyHTML.text(rows) =~ "Appended after the conversion."
 
     # And the opaque legacy bytes are nowhere in the pane any more.
-    assert Enum.count(query(after_html, ~s([data-test-id="legacy-opaque-body"]))) == 0
+    assert Enum.count(query(after_html, "#legacy-opaque-body")) == 0
     refute after_html =~ @legacy_marker
   end
 end

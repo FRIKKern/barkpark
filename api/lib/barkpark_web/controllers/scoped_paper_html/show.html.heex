@@ -6,7 +6,9 @@
         outer markup matches the public reader's. Static render — no streaming,
         no LiveView. --%>
   <div id="paper-sentinel" data-slug={@slug} hidden></div>
-  <article id="paper-body">{raw(@body_html)}</article>
+  <%!-- A legacy body (stored HTML, no blocks) paints inside its own box
+        (`HtmlSanitizer.contain/0`). --%>
+  <article id="paper-body" style={@legacy_html? && Barkpark.PortableDoc.HtmlSanitizer.contain()}>{raw(@body_html)}</article>
   <%!-- "Linked mentions" — papers that wikilink TO this one, server-rendered
         after the body. Empty string (and so no markup) when nothing links here;
         @backlinks_html already carries the full <section> or "". --%>

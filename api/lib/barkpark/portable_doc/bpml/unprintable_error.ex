@@ -88,3 +88,20 @@ defimpl Plug.Exception, for: Barkpark.PortableDoc.Bpml.UnprintableError do
   def status(_e), do: 422
   def actions(_e), do: []
 end
+
+defmodule Barkpark.PortableDoc.Bpml.Unwritable do
+  @moduledoc """
+  Raised by the printer for a block it cannot spell without losing something:
+  a callout's body (`Bpml.CalloutBody`) or a list item (`Bpml.ListItems`).
+  The rule is one, for any block type: what the printer can round-trip, it
+  prints; anything else is `<kept>`. Only the top-level print catches this,
+  turning the whole top-level block into one `<kept>` line. A top-level block
+  with no id cannot be matched back on push, so it stays the refusal
+  `UnprintableError` at `block`.
+  """
+  defexception [:block, :id, :reason]
+
+  @impl true
+  def message(%{block: block, id: nil, reason: reason}), do: "a #{block}: #{reason}"
+  def message(%{block: block, id: id, reason: reason}), do: "#{block} #{id}: #{reason}"
+end

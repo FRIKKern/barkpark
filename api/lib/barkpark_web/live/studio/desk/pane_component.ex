@@ -401,7 +401,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
             phx-viewport-bottom={@pane.kind == :list && "more"}
             phx-target={@pane.kind == :list && @myself}
           >
-            <%= for {entry, pos} <- placed(@data.result.entries) do %>
+            <%= for {entry, pos, row} <- rows(assigns) do %>
               <div :if={entry == :divider} class="pane-divider"></div>
               <%!-- A titled divider, as the TanStack root's "Settings": no row,
                    so no Tab or arrow stop. --%>
@@ -409,9 +409,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
               <div
                 :if={is_map(entry)}
                 id={@pane.kind == :list && ListSearch.item_id(@id, pos - 1)}
-                class={["dk-row", ListSearch.lit?(assigns, pos - 1) && "dk-lit", tick?(assigns, entry) && "bulk-row"]}
-                data-lit={ListSearch.lit?(assigns, pos - 1)}
-                data-picked={tick?(assigns, entry) && Bulk.picked?(@bulk, entry.next.id)}
+                class={["dk-row", row.lit && "dk-lit", row.tick && "bulk-row"]}
+                data-lit={row.lit}
+                data-picked={row.tick && Bulk.picked?(@bulk, entry.next.id)}
                 role={@pane.kind == :list && "listitem"}
                 aria-posinset={@pane.kind == :list && pos}
               >
@@ -419,7 +419,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                   <span class="pane-item-label">{entry.title}</span>
                 </div>
                 <BulkBar.tick
-                  :if={tick?(assigns, entry)}
+                  :if={row.tick}
                   id={entry.next.id}
                   title={entry.title}
                   checked={Bulk.picked?(@bulk, entry.next.id)}
@@ -445,7 +445,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                 <BarkparkWeb.Icons.desk_icon :if={!entry[:media]} name={entry.icon} size={21} />
               </span>
               <span class="pane-item-label">
-                <span class="dk-row-title">{row_title(entry, @held)}</span>
+                <span class="dk-row-title">{row.title}</span>
                 <%!-- A date-time in it is a marker: `PreviewDay` prints the day
                      in the workspace's zone and format (06.09.2026). --%>
                 <span :if={entry[:sub]} class="dk-row-sub"><PreviewDay.text text={entry.sub} /></span>
@@ -669,6 +669,26 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp row_at(_socket, _id), do: nil
 
   # Each row with its place among the rows (a divider has none).
+  # Each placed entry with what its row draws from the pane's assigns: its
+  # title (the held one for the open document), whether it is lit and
+  # whether it has a tick. Worked out here, the row's markup reads only the
+  # loop's own values, so LiveView's comprehension tracking sends a row again
+  # only when one of them changed: a held title's keystroke re-sends the open
+  # row alone, not every row of the list (task-dfd5b9df60547682).
+  defp rows(assigns) do
+    for {entry, pos} <- placed(assigns.data.result.entries) do
+      row =
+        is_map(entry) &&
+          %{
+            title: row_title(entry, assigns.held),
+            lit: ListSearch.lit?(assigns, pos - 1),
+            tick: tick?(assigns, entry)
+          }
+
+      {entry, pos, row}
+    end
+  end
+
   defp placed(entries) do
     {placed, _} =
       Enum.map_reduce(entries, 1, fn

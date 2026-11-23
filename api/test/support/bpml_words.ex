@@ -12,9 +12,14 @@ defmodule Barkpark.Test.BpmlWords do
   that hides a word is reported, so callers pin them. A top-level block printed
   as `<kept>` shows none of its words: it is left out of both counts and
   reported, so callers pin those too.
+
+  A list typed by an alias the printer reads as a list (`ListItems.alias_kind/1`,
+  the table the printer and parser use) is counted as a `list`, on both sides:
+  the alias is its type's other name, not a word the document holds.
   """
 
   alias Barkpark.PortableDoc.Bpml
+  alias Barkpark.PortableDoc.Bpml.ListItems
 
   @word ~r/[\p{L}\p{N}]+/u
 
@@ -46,6 +51,7 @@ defmodule Barkpark.Test.BpmlWords do
   end
 
   defp walk(%{} = map, owner, _key, skipped, acc) do
+    map = own_type(map)
     owner = if is_binary(map["type"]), do: map["type"], else: owner
     Enum.reduce(map, acc, fn {k, v}, acc -> walk(v, owner, k, skipped, acc) end)
   end
@@ -69,4 +75,12 @@ defmodule Barkpark.Test.BpmlWords do
   end
 
   defp walk(_value, _owner, _key, _skipped, acc), do: acc
+
+  defp own_type(%{"type" => type} = map) do
+    if ListItems.list?(map) and ListItems.alias_kind(type) != nil,
+      do: %{map | "type" => "list"},
+      else: map
+  end
+
+  defp own_type(map), do: map
 end

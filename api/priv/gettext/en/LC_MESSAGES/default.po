@@ -11460,6 +11460,26 @@ msgstr ""
 msgid "Not saved"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:135
+#, elixir-autogen, elixir-format
+msgid "Not saved: %{fields}. What you typed there will be lost."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:91
+#, elixir-autogen, elixir-format
+msgid "Leave this document?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:95
+#, elixir-autogen, elixir-format
+msgid "Stay"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:103 lib/barkpark_web/live/studio/desk/leave_guard.ex:111 lib/barkpark_web/live/studio/desk/leave_guard.ex:120
+#, elixir-autogen, elixir-format
+msgid "Leave"
+msgstr ""
+
 #: lib/barkpark_web/components/field_inputs.ex:777
 #, elixir-autogen, elixir-format
 msgid "This edit was not saved. Your text is still here."

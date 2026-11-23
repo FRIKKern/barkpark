@@ -18,13 +18,21 @@ defmodule Barkpark.Content.Papers.BpmlView do
 
   A write's answer is the view of the Paper as saved: `saved_check/3` reads
   the row back inside the write's transaction, and a refusal rolls it back.
+
+  The pull also answers the fingerprint of its bytes (`hash/1`, sent as
+  `x-bpml-view`), so a push can tell that the view changed since its pull at
+  the same rev.
   """
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
-  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff}
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems, PrintMark, WriteWall}
+
+  # A block holding a form a fingerprint-less push may not change: only a bp
+  # that sends its pull's fingerprint back can change it.
+  @update_hint "update bp, then bp paper pull and make your edit again"
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
@@ -134,6 +142,15 @@ defmodule Barkpark.Content.Papers.BpmlView do
   end
 
   @doc """
+  The fingerprint of a pull's bytes (sha256, lowercase hex). The pull answers
+  it in `x-bpml-view`; a push that carries it back is refused (412) when the
+  row's view prints differently now, at any rev.
+  """
+  @spec hash(String.t()) :: String.t()
+  def hash(bytes) when is_binary(bytes),
+    do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  @doc """
   A view `of/4` built, printed: the bytes, and the blocks they read back as,
   which is what a push of those bytes carries. Refused when the view does not
   print, or its print does not read back.
@@ -156,6 +173,13 @@ defmodule Barkpark.Content.Papers.BpmlView do
   block that spells as the pull printed it was not edited, so an unedited push
   derives no op whatever the view hides. A callout's body and `<kept>` lines
   follow `Bpml.CalloutBody.resolve/4` first; its notes come back with the ops.
+  `Bpml.WriteWall` refuses, before that, a copy pulled from another view (its
+  `bpmlView` fingerprint, 412) and a hidden label field it sets (422
+  `bpml_unshown`), and after it, an id pushed twice (422 `bpml`) and blocks
+  that change what the pull did not show (422 `bpml_unshown`). Between the
+  two, a list item id pushed twice in one block is refused (422 `bpml`,
+  `Bpml.ListItems.check_ids/2`), and a list item with an id gets back what
+  BPML cannot spell (`Bpml.ListItems.carry/2`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """
@@ -168,10 +192,15 @@ defmodule Barkpark.Content.Papers.BpmlView do
     copy = Map.update(copy, "blocks", [], &BlockIds.ensure_block_ids(&1 || []))
 
     with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
-         {:ok, _bpml, pulled} <- printed(paper, shown, fields),
+         {:ok, bpml, pulled} <- printed(paper, shown, fields),
+         :ok <- WriteWall.same_view(hash(bpml), copy["bpmlView"]),
+         :ok <- WriteWall.check_fields(paper.content || %{}, fields, copy),
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
-         {:ok, _blocks, ops} <- Diff.derive(stored, pushed, pulled) do
+         :ok <- ListItems.check_ids(pushed, stored),
+         pushed = ListItems.carry(pushed, stored),
+         {:ok, target} <- wall(paper, {stored, shown, fields}, pulled, pushed, copy),
+         {:ok, _blocks, ops} <- Diff.derive_target(stored, target) do
       {:ok, ops, notes}
     else
       {:error, :diff_verification_failed} = failed -> failed
@@ -180,10 +209,32 @@ defmodule Barkpark.Content.Papers.BpmlView do
     end
   end
 
+  # The write wall's target. A push without its pull's fingerprint is believed
+  # up to `PrintMark.believed/1`; a form the view holds past that is unshown to
+  # it, so the wall reads the push against the view as the printer before
+  # that form printed it, and its refusal says to update bp.
+  defp wall(paper, {stored, shown, fields}, pulled, pushed, copy) do
+    believed = PrintMark.believed(copy)
+
+    with {:ok, target} <- WriteWall.target(stored, pulled, pushed) do
+      if PrintMark.newer(shown, believed) == [] do
+        {:ok, target}
+      else
+        with {:ok, _bpml, before} <- printed(paper, PrintMark.before(shown, believed), fields) do
+          case WriteWall.target(stored, BlockIds.ensure_block_ids(before), pushed, items: false) do
+            {:refused, %{code: "bpml_unshown"} = body} -> {:refused, %{body | hint: @update_hint}}
+            other -> other
+          end
+        end
+      end
+    end
+  end
+
   @doc """
   A pushed copy (`Bpml.parse_copy/1`) for a Paper that does not exist yet, as
   a create reads it: refused when its `<paper slug>` names another Paper, or
-  when it holds a `<kept>` line (it stands for no stored block).
+  when it holds a `<kept>` line (it stands for no stored block), or a list
+  item id twice.
   """
   @spec create_copy(map(), String.t()) :: {:ok, map()} | {:refused, map()}
   def create_copy(%{} = copy, slug) do
@@ -203,7 +254,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
     else
       case Bpml.clean_copy(copy) do
         {:ok, paper} ->
-          {:ok, paper}
+          with :ok <- ListItems.check_ids(paper["blocks"] || [], []), do: {:ok, paper}
 
         {:error, errors} ->
           {:refused, %{code: "bpml", message: "the BPML document did not parse", errors: errors}}
@@ -238,7 +289,9 @@ defmodule Barkpark.Content.Papers.BpmlView do
         with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
              {:ok, _bpml, pulled} <- printed(paper, shown, fields),
              pulled = BlockIds.ensure_block_ids(pulled),
-             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy) do
+             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
+             :ok <- ListItems.check_ids(blocks, stored) do
+          blocks = ListItems.carry(blocks, stored)
           {:ok, copy |> Map.delete("print") |> Map.put("blocks", blocks)}
         else
           {:refused, _body} = refused -> refused
@@ -251,12 +304,22 @@ defmodule Barkpark.Content.Papers.BpmlView do
   end
 
   @doc """
-  A push answer with `notes`: one line per callout whose stored body the push
-  kept (`Bpml.CalloutBody`). No key when there are none.
+  A push or create answer: `bpmlView`, the fingerprint of its `bpml` (the view
+  as saved, which bp keeps for the next push), and `notes`, one line per
+  callout whose stored body the push kept (`Bpml.CalloutBody`). No key for
+  either when there is nothing to say.
   """
-  @spec with_notes(map(), [String.t()]) :: map()
-  def with_notes(payload, []), do: payload
-  def with_notes(payload, notes), do: Map.put(payload, :notes, notes)
+  @spec push_answer(map(), [String.t()]) :: map()
+  def push_answer(payload, notes) do
+    payload
+    |> then(&if(is_binary(&1[:bpml]), do: Map.put(&1, :bpmlView, hash(&1[:bpml])), else: &1))
+    |> then(&if(notes == [], do: &1, else: Map.put(&1, :notes, notes)))
+  end
+
+  @doc "The HTTP status a push refusal answers: 412 for a changed view, 422 otherwise."
+  @spec status(map()) :: :precondition_failed | :unprocessable_entity
+  def status(%{code: "precondition_failed"}), do: :precondition_failed
+  def status(_refusal), do: :unprocessable_entity
 
   @doc """
   The `before_commit` check a write runs inside its transaction, handed the

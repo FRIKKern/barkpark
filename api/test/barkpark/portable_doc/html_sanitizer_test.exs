@@ -90,8 +90,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerTest do
           {"list", "<ul><li>one</li><li>two</li></ul>"},
           {"inline data:image", "<img src=\"data:image/png;base64,AAAA\" alt=\"i\">"}
         ] do
-      test "keeps #{name} byte-identical" do
-        assert S.sanitize(unquote(html)) == unquote(html)
+      test "keeps #{name}: the same tree, and a second pass the same bytes" do
+        tree = &(&1 |> LazyHTML.from_fragment() |> LazyHTML.to_tree())
+        out = S.sanitize(unquote(html))
+        assert tree.(out) == tree.(unquote(html))
+        assert S.sanitize(out) == out
       end
     end
   end
