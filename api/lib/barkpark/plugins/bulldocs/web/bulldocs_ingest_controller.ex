@@ -112,7 +112,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Content.Papers.{BlockOps, MixedWriteGuard}
-  alias Barkpark.Plugins.Bulldocs.Web.WriteGate
+  alias Barkpark.Plugins.Bulldocs.Web.{SyncFault, WriteGate}
   alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Validate.NewErrors
   alias Barkpark.Tenancy
@@ -525,19 +525,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:write_admission, _}} = refused ->
         write_admission_refused(conn, refused)
 
-      # A push row the server could not store is its own fault: 500, nothing written.
-      {:error, {:push_revision_failed, _action}} ->
-        ErrorResponse.emit(
-          conn,
-          {:error, "the push could not record its revisions; nothing was written"}
-        )
-
-      {:error, _other} ->
-        conn
-        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-          code: "invalid_op",
-          message: "the derived batch could not be applied"
-        })
+      {:error, other} ->
+        SyncFault.answer(conn, other)
     end
   end
 
