@@ -398,11 +398,47 @@ export function installHelpers(lists) {
     }
     return { off: [...new Set(off)], files }
   }
+  /** The element with focus, through open shadow roots; null when nothing has it (the body or the root). */
+  const focused = () => {
+    let a = document.activeElement
+    while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement
+    return a && a !== document.body && a !== document.documentElement ? a : null
+  }
+  /** Where a scroll into view of `el` would still move something: the scroller, or null when on each axis of every
+      scroller around it the element is inside the scroller's view, covers that view, or the scroller is at its limit
+      the way the element lies. No scroller around a box with position: fixed moves it. */
+  const intoView = (el) => {
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const holds = (a0, a1, v0, v1, at, most) => (a0 >= v0 - 1 && a1 <= v1 + 1) || (a0 <= v0 + 1 && a1 >= v1 - 1) || (a0 < v0 ? at <= 1 : at >= most - 1)
+    const scrolls = (o) => o === 'auto' || o === 'scroll' || o === 'hidden'
+    for (let n = el; n; ) {
+      if (getComputedStyle(n).position === 'fixed') return null
+      n = n.assignedSlot ?? n.parentElement ?? (n.getRootNode() instanceof ShadowRoot ? n.getRootNode().host : null)
+      if (!n || n === document.body) continue
+      const root = n === document.documentElement
+      const s = getComputedStyle(n)
+      const b = root ? { top: 0, left: 0 } : n.getBoundingClientRect()
+      const top = b.top + (root ? 0 : n.clientTop)
+      const left = b.left + (root ? 0 : n.clientLeft)
+      const y = (root || scrolls(s.overflowY)) && n.scrollHeight > n.clientHeight && !holds(r.top, r.bottom, top, top + n.clientHeight, n.scrollTop, n.scrollHeight - n.clientHeight)
+      const x = (root || scrolls(s.overflowX)) && n.scrollWidth > n.clientWidth && !holds(r.left, r.right, left, left + n.clientWidth, n.scrollLeft, n.scrollWidth - n.clientWidth)
+      if (y || x) return root ? 'the page' : describe(n)
+    }
+    return null
+  }
+  /** The element with focus before the checker's input (check/acts.mjs marks it): a scroll into view follows only an
+      input that moves focus. */
+  let focusBefore = null
+  const markFocus = () => {
+    focusBefore = focused()
+  }
   /** Waits for what moves and has an end, inside the bound of 2s, a frame at a time (in a headless page an
-      animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
-  const toRest = async () => {
+      animation advances only when a frame runs), and for `also` (a condition read, empty when it holds). What has
+      no end never comes to rest; waiting for it changes nothing. */
+  const toRest = async (also = () => null) => {
     const until = performance.now() + 2000
-    while ((moving(true).length || scrolling().length) && performance.now() < until) {
+    while ((moving(true).length || scrolling().length || also()) && performance.now() < until) {
       const was = scroll.count
       // A frame's scroll events come before its animation frame callbacks, so one frame tells a scroll that goes on.
       if (moving(true).length) await frame()
@@ -415,14 +451,21 @@ export function installHelpers(lists) {
   }
   /** The rest step after the checker's input on a page (check/acts.mjs), `who` naming the act and where the checker
       made it: a frame is drawn, so what the input started shows, then the page comes to rest inside the bound, or
-      the act is red there by name and nothing reads on. Motion with no end is left to the read, whose gate names it. */
+      the act is red there by name and nothing reads on. At rest is: nothing with an end moves, no scroll is under
+      way, and when the input moved focus, a scroll into view of the element that has it would move nothing (or
+      nothing has focus). Motion with no end is left to the read, whose gate names it. */
   const afterAct = async (who) => {
+    const now = focused()
+    const moved = now !== focusBefore ? now : null
+    const unscrolled = () => intoView(moved)
     await frame()
-    await toRest()
+    await toRest(unscrolled)
     const left = moving(true)
     if (left.length) throw new Error(`${AT_REST}: ${who}: ${named(left)}`)
     const going = scrolling()
     if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
+    const at = unscrolled()
+    if (at) throw new Error(`${AT_REST}: ${who}: ${describe(moved)} has focus outside the view of ${at}, and no scroll has brought it in`)
   }
   /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
   const still = async (who) => {
@@ -499,7 +542,7 @@ export function installHelpers(lists) {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, afterAct, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, afterAct, markFocus, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

@@ -257,15 +257,17 @@ const everyKind = () =>
     return held
   }])))()
 
-/** A scroller beside the part: a button at its top, a far one 2000px down; `script` runs in the page's own world. */
+/** A scroller beside the part, holding `inside` (by default a button at its top and a far one 2000px down); `script`
+    runs in the page's own world. */
 const SCROLLER = '#bark-s { overflow: auto; height: 100px; }'
-async function scroller(page, script = '') {
-  await page.evaluate((s) => {
+const FAR = '<button id="bark-near">near</button><div style="height: 2000px"></div><button id="bark-far">far</button>'
+async function scroller(page, script = '', inside = FAR) {
+  await page.evaluate(([s, html]) => {
     const box = Object.assign(document.createElement('div'), { id: 'bark-s' })
-    box.innerHTML = '<button id="bark-near">near</button><div style="height: 2000px"></div><button id="bark-far">far</button>'
+    box.innerHTML = html
     document.body.append(box)
     if (s) new Function(s)()
-  }, script)
+  }, [script, inside])
   await page.barkCheck(() => {
     document.getElementById('bark-s').scrollIntoView({ block: 'center', behavior: 'instant' })
     document.getElementById('bark-near').focus({ preventScroll: true })
@@ -302,6 +304,42 @@ const keyAct = () =>
       onPage(SCROLLER, 'reduce', async (page) => {
         await scroller(page, "document.getElementById('bark-s').addEventListener('focusin', (e) => (e.currentTarget.style.scrollBehavior = 'smooth'))")
         return held('Tab, reduce', await sameAfter(page, () => acts.press(page, 'Tab')))
+      }),
+    // The focus scroll that follows the key: waited for however late it begins, and never a false red where a scroll
+    // into view would move nothing.
+    'a Tab whose scroll into view the page begins frames later is waited for, then read at rest': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); const far = document.getElementById('bark-far'); far.focus({ preventScroll: true }); requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => far.scrollIntoView({ block: 'nearest' })))) }, { once: true })")
+        return held('Tab, late', await sameAfter(page, () => acts.press(page, 'Tab')))
+      }),
+    'a Tab to an element larger than its scroller\'s view reads at rest once it covers the view, not red': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, '', '<button id="bark-near">near</button><div style="height: 2000px"></div><div id="bark-far" tabindex="0" style="height: 300px">tall</div>')
+        return held('Tab, larger than the view', await sameAfter(page, () => acts.press(page, 'Tab')))
+      }),
+    'a Tab to an element its scroller is at its limit to bring further in reads at once, not red': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, '', '<button id="bark-near">near</button><button id="bark-far" style="position: relative; top: -80px">up</button><div style="height: 2000px"></div>')
+        const got = await sameAfter(page, () => acts.press(page, 'Tab'))
+        const ok = got.before === got.at && got.at === got.settled
+        if (!ok) console.log(`    Tab, at the limit: before ${got.before}, read at ${got.at}, at rest at ${got.settled}`)
+        return ok
+      }),
+    'a key with nothing focused reads at once, not red': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page)
+        await page.barkCheck(() => document.activeElement?.blur())
+        const got = await acts.press(page, 'Shift').then(() => 'read on', (e) => String(e.message))
+        if (got !== 'read on') console.log(`    nothing focused: ${got.slice(0, 200)}`)
+        return got === 'read on'
+      }),
+    'a Tab that moves focus out of view, where no scroll brings it in, is red there, naming the key and the element': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); document.getElementById('bark-far').focus({ preventScroll: true }) }, { once: true })")
+        const got = await acts.press(page, 'Tab').then(() => 'read on', (e) => String(e.message))
+        const ok = /read on a page not at rest: the key Tab at check\/rest-cases\.mjs:\d+: button#bark-far "far" has focus outside the view of div#bark-s/.test(got)
+        if (!ok) console.log(`    focus out of view: ${got.slice(0, 200)}`)
+        return ok
       }),
     'a Tab after which the page keeps scrolling past the bound is red there, naming the act and where it was made': () =>
       onPage(SCROLLER, 'reduce', async (page) => {

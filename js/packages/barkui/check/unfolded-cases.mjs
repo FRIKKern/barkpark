@@ -1,7 +1,7 @@
 // Selftest cases that outgrew the share of the one limit a case may take (check/capacity.mjs), each unfolded into
 // runs: every surface read, real states held to their pins, and a checked box. A run reads only what its rows need, so each
 // is cheaper than the one case was; every row the case held is in exactly one run (tests/unfold.test.mjs).
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { UNNAMED } from './layers.mjs'
 import { all, both, drawnOff, DRAWN, each, edit, esc, inCss, inDemo, reasons, says, skinsSay } from './plants.mjs'
@@ -120,10 +120,10 @@ export const STATE_CASES = [
     expect: each(stateRows.drawn),
   },
   {
-    // The review's: pending, held at rest.
+    // The review's: pending, held at rest. Its rows read the pinned rows the stage draws at rest, so it drives no
+    // states (a drive of the button's whole stage costs a run most of a case's share).
     name: 'states, as drawn: pending held at rest fails by name in both wide views',
     only: ['skins', 'schemes'],
-    states: true,
     plant: PENDING,
     expect: each(stateRows.pending),
   },
@@ -161,24 +161,34 @@ export const STATE_CASES = [
 // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
 // drawn in every view while it holds (states.mjs), in two runs: a box checked at rest and the pinned checked row,
 // each drawn blank; and a box the check clicks, whose change no pinned row shows and whose click changes the stage.
-const BOX = '[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'
+// Both run on the tabs part, whose stage the drive covers in a fraction of the button's (as the run of every light
+// above does).
+const BOX = '[id^="tabs-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'
 const boxes = (ids) => (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row>${ids.join('')}</div>\n`)
-const TICK = '<input type="checkbox" id="button-tick" aria-label="Tick">'
-const TICK_PIN = '<input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked">'
-const TICK_ON = '<input type="checkbox" id="button-tick-on" aria-label="On" checked>'
+const TICK = '<input type="checkbox" id="tabs-tick" aria-label="Tick">'
+const TICK_PIN = '<input type="checkbox" id="tabs-tick-pin" aria-label="Ticked" data-pin="checked">'
+const TICK_ON = '<input type="checkbox" id="tabs-tick-on" aria-label="On" checked>'
+/** Code in the part's demo, made when the part has none. */
+const demoWith = (d, code) => (existsSync(join(d, 'demo.mjs')) ? inDemo(d, code) : writeFileSync(join(d, 'demo.mjs'), `export default function demo(root) {\n${code}\n}\n`))
+/** The tabs part's skins light is off, and one of its reasons matches `re`. */
+const tabsSay = (re) => (p) => {
+  const l = p?.parts?.tabs?.lights?.skins
+  return !!l && !l.pass && (l.fails ?? [l.detail ?? '']).some((f) => re.test(f))
+}
 const checkedRows = {
   blank: {
-    'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
-    'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
+    'a box checked at rest, blank': tabsSay(/control boundary [\d.]+:1 at input#tabs-tick-on "" by/),
+    'the pinned checked row, blank': tabsSay(/control boundary [\d.]+:1 at input#tabs-tick-pin "" by/),
   },
   click: {
-    'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
-    'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
+    'a checked change no pinned row shows': tabsSay(/real checked on input#tabs-tick "": .*no pinned row shows this change/),
+    'a click that leaves the stage changed': tabsSay(/real checked on input#tabs-tick "": ui-tabs-panel#tabs-main-panel-overview "[^"]*" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
   },
 }
 export const CHECKED_CASES = [
   {
     name: 'a checked box drawn blank, at rest and in its pinned row, fails by name',
+    part: 'tabs',
     only: ['skins'],
     states: true,
     plant: all(
@@ -191,6 +201,7 @@ export const CHECKED_CASES = [
   },
   {
     name: 'a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
+    part: 'tabs',
     only: ['skins'],
     states: true,
     plant: all(
@@ -199,7 +210,7 @@ export const CHECKED_CASES = [
       // A change only the real click shows: no pinned row carries it.
       inCss('#button-tick:checked { border-width: 3px; }'),
       // The demo's change handler marks another element; the check puts back only what is checked.
-      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
+      (d) => demoWith(d, "  root.querySelector('#tabs-tick').addEventListener('change', () => root.querySelector('#tabs-main-panel-overview').setAttribute('data-demo-seen', ''))"),
     ),
     expect: each(checkedRows.click),
   },
