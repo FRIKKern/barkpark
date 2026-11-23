@@ -16,7 +16,7 @@ describe('the selftest ceilings that stand', () => {
 
   it('are red by the job’s name when a reading would raise its ceiling, its own or the one of the job it came from', () => {
     expect(ceilingsRaised(withReading('rest', { seconds: 169 }))).toEqual([
-      'the selftest\'s rest job\'s reading of 169 s (job 137307145133) makes its ceiling 254 s, higher than the 252 s that stands: split the job (check/jobs.mjs), never raise a ceiling',
+      `the selftest's rest job's reading of 169 s (job ${INPUT.READINGS.selftest.rest.job}) makes its ceiling 254 s, higher than the 252 s that stands: split the job (check/jobs.mjs), never raise a ceiling`,
     ])
     for (const j of SELFTEST_JOBS.filter((x) => INPUT.READINGS.selftest[x.key].from)) {
       const top = INPUT.SELFTEST_STANDS[INPUT.READINGS.selftest[j.key].from]

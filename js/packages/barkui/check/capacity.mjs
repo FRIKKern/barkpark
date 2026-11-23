@@ -45,14 +45,13 @@ export const INPUT = {
     // One reading per selftest job (check/jobs.mjs, SELFTEST_JOBS): that job's whole run, as it printed it
     // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
-      views: { seconds: 210, job: 136906448861, run: 44923426286, commit: 'dcae531939' },
-      rest: { seconds: 168, job: 137307145133, run: 45054609251, commit: 'c05b1f9a13' },
-      layers: { seconds: 145, job: 137307145173, run: 45054609251, commit: 'c05b1f9a13' },
-      // Jobs split off another (`from`). Until its own hosted reading replaces it by measurement, each reads the run
-      // its cases ran inside (`within`), the run of the job it came from.
-      surfaces: { seconds: 210, from: 'views', within: 'views', job: 136906448861, run: 44923426286, commit: 'dcae531939' },
-      states: { seconds: 168, from: 'rest', within: 'rest', job: 137307145133, run: 45054609251, commit: 'c05b1f9a13' },
-      open: { seconds: 145, from: 'layers', within: 'layers', job: 137307145173, run: 45054609251, commit: 'c05b1f9a13' },
+      views: { seconds: 171, job: 137640566076, run: 45159302143, commit: '5883068c68' },
+      rest: { seconds: 48, job: 137640565962, run: 45159302143, commit: '5883068c68' },
+      layers: { seconds: 107, job: 137640565939, run: 45159302143, commit: '5883068c68' },
+      // Jobs split off another (`from`): each stands under the ceiling of the job it came from.
+      surfaces: { seconds: 185, from: 'views', job: 137640565923, run: 45159302143, commit: '5883068c68' },
+      states: { seconds: 144, from: 'rest', job: 137640565958, run: 45159302143, commit: '5883068c68' },
+      open: { seconds: 111, from: 'layers', job: 137640565954, run: 45159302143, commit: '5883068c68' },
     },
   },
 }
