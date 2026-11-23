@@ -830,10 +830,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <% end %>
 
           <.cross_violations_banner violations={@cross_violations} />
-          <.doc_conflict_banner
-            conflict={@doc_conflict}
-            disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
-          />
+          <%!-- An always-drawn slot (no box of its own): a banner that came
+                and went changed the children here, and morphdom moved the
+                fields below to put it in, which blurred the editor and ended
+                an IME composition (#28349 r3 review, K6). --%>
+          <div id="doc-conflict-slot" style="display: contents;">
+            <.doc_conflict_banner
+              conflict={@doc_conflict}
+              disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
+              theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
+            />
+          </div>
           <.paper_halt_banner reason={@paper_halt} />
 
           <%= if @show_diff do %>
@@ -1383,6 +1390,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     doc:
       "a read-only view (`Desk.ReadonlyFields`): Reload is refused there, so it is drawn disabled"
 
+  attr :theirs, :list,
+    default: [],
+    doc:
+      "the words of each rich text block another editor rewrote where this one's text is held (`RichTextRemote`), as TanStack's clash card shows theirs"
+
   def doc_conflict_banner(assigns) do
     ~H"""
     <%= if @conflict do %>
@@ -1393,6 +1405,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <%= gettext("Updated by another user — your unsaved edits are kept.") %>
           </span>
         </div>
+        <blockquote :for={text <- @theirs} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
         <button
           type="button"
           class="btn btn-sm"

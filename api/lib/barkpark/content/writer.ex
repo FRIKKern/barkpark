@@ -37,6 +37,7 @@ defmodule Barkpark.Content.Writer do
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Content.{FixedDocuments, InsertOnly, PreWriteFences, PreWriteTransforms}
+  alias Barkpark.Content.LinkHrefFence
 
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Projection, Render, Synthesis}
 
@@ -732,7 +733,8 @@ defmodule Barkpark.Content.Writer do
     # dies returns {:error, {:dedup_unavailable, msg}} rather than filing the
     # task unchecked. content.dedup_bypass: true is the deliberate escape.
     # The dedup gate is the Tasks plugin's last pre-write fence.
-    fences = PreWriteFences.list()
+    # A new unsafe link address is refused first (`LinkHrefFence`).
+    fences = [{LinkHrefFence, :refuse_new} | PreWriteFences.list()]
 
     # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
     # task-2978357a0701cd10, task-d91ccf54d43b9800). Declared by plugins via
@@ -1529,7 +1531,10 @@ defmodule Barkpark.Content.Writer do
     # `prev_doc == nil` exactly like the two birth guards above, so every
     # UPDATE arriving here (autosave, patch merges, block ops, forms) is
     # structurally untouched — parity with `do_create_document:175`.
-    fences = [{InsertOnly, :refuse_existing} | PreWriteFences.list()]
+    fences = [
+      {InsertOnly, :refuse_existing},
+      {LinkHrefFence, :refuse_new} | PreWriteFences.list()
+    ]
 
     # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
     # task-2978357a0701cd10, task-d91ccf54d43b9800). Declared by plugins via

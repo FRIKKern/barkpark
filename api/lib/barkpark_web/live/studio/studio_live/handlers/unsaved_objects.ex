@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
   (`Handlers.UnsavedBases`).
   """
 
+  alias Barkpark.Content.PortableText
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
 
@@ -45,7 +46,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
     |> Enum.uniq()
     |> Enum.reduce({theirs, false, kept}, fn sub, {value, clashed?, kept} ->
       at = path ++ [sub]
-      {b, m, t} = {Map.get(base, sub), Map.get(mine, sub), Map.get(theirs, sub)}
+      {b, t} = {Map.get(base, sub), Map.get(theirs, sub)}
+      m = as_stored(field(sub_schema, sub), b, Map.get(mine, sub))
 
       case subfields(sub_schema, sub, b, m, t) do
         nil ->
@@ -83,6 +85,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.UnsavedObjects do
       _ -> :error
     end
   end
+
+  # Rich text in the form is rebuilt from the page's HTML with new block
+  # keys (`Forms.coerce_params/2` reads it against no stored blocks), where
+  # the save keeps the stored ones: rich text that draws as the stored
+  # blocks do is the stored blocks, not a change of this tab's, so another
+  # editor's change to it is taken in (task-d74a36f11381b523). Only a field
+  # the schema calls rich text: a list of keyed rows (objects, references,
+  # images) reads as Portable Text too, and draws a row by its type, key and
+  # first text, so an edit of a price or a `_ref` would draw the same and be
+  # dropped (#28344 review).
+  defp as_stored(%{"type" => "richText"}, base, mine) do
+    if mine != base and PortableText.value?(base) and PortableText.value?(mine) and
+         PortableText.to_html(base) == PortableText.to_html(mine),
+       do: base,
+       else: mine
+  end
+
+  defp as_stored(_field, _base, mine), do: mine
 
   @doc """
   For `RemoteValues.push/4`: each text subfield inside the held objects of
