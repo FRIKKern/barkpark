@@ -166,14 +166,16 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
     # written under a `legacy-` PREFIXED doc_id that no lib/ code mints (nothing
     # in the tree interpolates "legacy-" into an id) and that this fixture never
     # asks for. So the id is ambient and the ARM is the claim: an `<article>`
-    # whose tag CLOSES right after `data-rev` is the read-only raw arm — the
+    # whose tag CLOSES right after `data-rev` (or after the legacy box's
+    # `style`, `HtmlSanitizer.contain/0`) is the read-only raw arm — the
     # streamed block arm carries `phx-update="stream"` and the never-blank arm
     # carries the `paper-body-unrenderable-` id, and neither can match. Callers
     # pass the id of the document they actually wrote, so a rename cannot make
     # this vacuous either.
     assert Enum.any?(
              articles,
-             &(&1 =~ ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+">$/)
+             &(&1 =~
+                 ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+"(?: style="contain: paint; overflow-x: auto")?>$/)
            ),
            """
            expected the READ-ONLY raw arm (the fixture's document is #{slug}).

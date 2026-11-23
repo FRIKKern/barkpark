@@ -145,15 +145,16 @@ defmodule BarkparkWeb.Studio.SharedPaperWriteCapableBodyHtmlSanitizeTest do
 
   # ANTI-VACUITY GUARD 2 — the read-only raw arm is the one rendering, not an
   # earlier cond branch (no slug / editor / block mode). Keyed on the ARM, not
-  # the id: an `<article>` whose tag CLOSES right after `data-rev` is the
-  # read-only raw arm; the streamed block arm carries `phx-update="stream"` and
+  # the id: an `<article>` whose tag CLOSES right after `data-rev` (or after
+  # the legacy box's `style`, `HtmlSanitizer.contain/0`) is the read-only raw arm; the streamed block arm carries `phx-update="stream"` and
   # the never-blank arm carries the `paper-body-unrenderable-` id.
   defp assert_readonly_article!(rendered, slug) do
     articles = rendered |> then(&Regex.scan(~r/<article[^>]*>/, &1)) |> List.flatten()
 
     assert Enum.any?(
              articles,
-             &(&1 =~ ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+">$/)
+             &(&1 =~
+                 ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+"(?: style="contain: paint; overflow-x: auto")?>$/)
            ),
            """
            expected the READ-ONLY raw arm (the fixture's document is #{slug}).
