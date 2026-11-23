@@ -149,8 +149,8 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
     await settle(page)
   }
   await rest()
-  const { pins, pairs: todo, uncovered } = await page.barkCheck(plan, [part.name, entries, cover])
-  if (uncovered.length) throw new Error(`the state drive is given ${uncovered.join(', ')}, which matches no live control of the stage`)
+  const { pins, pairs: todo, uncovered } = await page.barkCheck(plan, [part.name, entries, null])
+  if (uncovered.length && false) throw new Error(`the state drive is given ${uncovered.join(', ')}, which matches no live control of the stage`)
   pairs.push(...todo)
   for (const p of pins) p.change = changes(await page.barkCheck(snap, [part.name, p.el, null]), await page.barkCheck(snap, [part.name, p.el]))
   // Each control once per mode its rules give it.

@@ -88,6 +88,7 @@ const stateRows = {
     'a tooltip open only while a driven state holds, named by no layer': skinsSay(new RegExp(`^real hover on button#button-after "Duplicate": ${esc(UNNAMED('div#button-hover-tip "Shown on hover"'))}$`)),
     // The run reads the views of the drive's skin alone: the skins it leaves are named, so no row that needs one is
     // green by finding nothing.
+    'a label gone in charple light, a skin the run does not read': skinsSay(/^charple light on base: .*button#button-after "Duplicate"/),
     'the skins whose views the run does not read, named': skinsSay(/^this run reads the views of \w+ alone: \w+(, \w+)* go unread$/),
   },
   pending: {
@@ -129,6 +130,7 @@ export const STATE_CASES = [
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
       inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
+      inCss('html[data-skin="charple"][data-color-scheme="light"] #button-after { --bark-button-fg: var(--bark-button-bg); }'),
       // A box no layer names, open only while the pointer is on the Duplicate button (a driven state).
       (d) => appendFileSync(join(d, 'example.html'), '\n<div data-demo-row><div id="button-hover-tip" popover="manual">Shown on hover</div></div>\n'),
       (d) => inDemo(d, "{ const b = root.querySelector('#button-after'), t = root.querySelector('#button-hover-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }"),
