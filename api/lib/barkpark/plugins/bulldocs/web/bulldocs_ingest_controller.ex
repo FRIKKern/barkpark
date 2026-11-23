@@ -112,7 +112,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Content.Papers.{BlockOps, MixedWriteGuard}
-  alias Barkpark.Plugins.Bulldocs.Web.WriteGate
+  alias Barkpark.Plugins.Bulldocs.Web.{SyncFault, WriteGate}
   alias Barkpark.PortableDoc.{Render, Validate}
   alias Barkpark.PortableDoc.Validate.NewErrors
   alias Barkpark.Tenancy
@@ -479,7 +479,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
     ref = make_ref()
     check = Content.Papers.BpmlView.saved_check(ref)
-    keep = [keep_untouched: true, before_revision: Content.Papers.PushRevision.action()]
+    keep = [keep_untouched: true, push_revisions: true]
     opts = scope ++ keep ++ [if_rev: base_rev, before_commit: check, may_write: write_check(conn)]
 
     case Content.apply_paper_block_ops(slug, ops, dataset, opts) do
@@ -525,12 +525,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:write_admission, _}} = refused ->
         write_admission_refused(conn, refused)
 
-      {:error, _other} ->
-        conn
-        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
-          code: "invalid_op",
-          message: "the derived batch could not be applied"
-        })
+      {:error, other} ->
+        SyncFault.answer(conn, other)
     end
   end
 
