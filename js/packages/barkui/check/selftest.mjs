@@ -727,6 +727,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       // What the run read, so two runs can be held line for line against each other (check/view-pages.mjs).
       const read = lightLines(logs, proof, name)
       console.log(`    the run's lines: ${read.length}, digest ${createHash('sha256').update(read.join('\n')).digest('hex').slice(0, 12)}`)
+      for (const l of read) console.log(`    LINE ${l}`)
       if (misplaced) console.log(`    ${misplaced}`)
       if (refused.length) console.log(refusedSay(refused))
       if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
