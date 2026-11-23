@@ -156,6 +156,35 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
       assert doc.content["body"] === body
     end
 
+    test "an edit of the field itself keeps the refused address, inert", c do
+      id = doc!(c, ~s|<p>see <a href="javascript:alert(1)">x</a></p>|)
+      view = open(c, id)
+
+      # What the editor posts after a keystroke: its drawn copy, typed into.
+      [drawn] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("bp-rich-text-editor")
+        |> attr("value")
+
+      edited = String.replace(drawn, "see ", "see, typed, ")
+
+      BarkparkWeb.EditorPost.change(view, %{
+        "doc" => %{"body" => edited},
+        "_target" => ["doc", "body"]
+      })
+
+      {doc, _, _} = Content.fetch_doc_with_draft(c.type, id, @dataset)
+      assert doc.content["body"] =~ ~s|data-refused-href="javascript:alert(1)"|
+      refute doc.content["body"] =~ ~s|href="#"|
+
+      again = editor_html(render(open(c, id)))
+      assert again |> LazyHTML.query("a") |> attr("data-refused-href") == ["javascript:alert(1)"]
+      assert unsafe_hrefs(again) == []
+      assert LazyHTML.text(again) == "see, typed, x"
+    end
+
     test "a https anchor stays a link", c do
       id = doc!(c, ~s|<p><a href="https://x.example/a">y</a></p>|)
       doc = editor_html(render(open(c, id)))
@@ -202,6 +231,75 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
         names = doc |> LazyHTML.query("*") |> LazyHTML.attributes() |> List.flatten()
         assert Enum.filter(names, fn {k, _} -> String.starts_with?(k, "on") end) == [], payload
       end
+    end
+
+    # #28402 review B1: a handler between the letters of a tag name joined
+    # the name back together after the regex scrub's element pass.
+    test "a tag name split by a handler does not come back as the element" do
+      for {payload, tag} <- [
+            {~s|<me onx=""ta http-equiv="refresh" content="0;url=https://e.example/">|, "meta"},
+            {~s|<ifr onx=""ame srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">|, "iframe"},
+            {~s|<ifr onx=""ame src="https://e.example/" style="position:fixed;inset:0">|,
+             "iframe"},
+            {~s|<ba onx=""se href="https://e.example/">|, "base"},
+            {~s|<fo onx=""rm action="https://e.example/">|, "form"},
+            {~s|<obj onx=""ect data="https://e.example/">|, "object"}
+          ] do
+        doc = drawn("<p>a</p>" <> payload)
+        assert doc |> LazyHTML.query(tag) |> Enum.count() == 0, payload
+        assert doc |> LazyHTML.query("[http-equiv], [srcdoc], [action]") |> Enum.count() == 0
+      end
+    end
+
+    # S1 / N2: the copy is drawn inside #editor-form, so a stored control
+    # would post a value for another field.
+    test "no form control is drawn, so nothing stored adds to the form's post" do
+      doc =
+        drawn(
+          ~s|<p>body<input name="doc[title]" value="pwned"><button name="x" value="y">b</button>| <>
+            ~s|<label for="title">l</label></p><fieldset><legend>g</legend>f</fieldset>|
+        )
+
+      assert doc
+             |> LazyHTML.query("input, button, label, fieldset, legend, select, textarea, [name]")
+             |> Enum.count() == 0
+
+      assert LazyHTML.text(doc) == "bodyblgf"
+    end
+
+    # S2: a stored style could draw a link over the whole Studio.
+    test "no style is drawn" do
+      doc =
+        drawn(
+          ~s|<p><a href="https://e.example/" style="position:fixed;inset:0;z-index:99999">Sign in</a></p>| <>
+            ~s|<p style="color:#ff0000">t</p>|
+        )
+
+      assert doc |> LazyHTML.query("[style]") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("a") |> attr("href") == ["https://e.example/"]
+    end
+
+    # M1: the refused address is kept, inert, not replaced by "#".
+    test "a refused link keeps its address as data-refused-href, and draws no href" do
+      doc = drawn(~s|<p><a href="javascript:alert(1)">x</a></p>|)
+      assert doc |> LazyHTML.query("a") |> attr("data-refused-href") == ["javascript:alert(1)"]
+      assert doc |> LazyHTML.query("[href]") |> Enum.count() == 0
+    end
+
+    test "the drawn copy is a fixed point: drawn again it is the same" do
+      for body <- [
+            ~s|<p><a href="javascript:alert(1)">x</a> <input name="a"> <a href="https://e.example/">y</a></p>|,
+            ~s|<ul><li>a<div><aside><li>b</li></aside></div></li></ul>|
+          ] do
+        once = Barkpark.Content.LegacyRichHtml.for_editor(body)
+        assert Barkpark.Content.LegacyRichHtml.for_editor(once) == once
+      end
+    end
+
+    test "the reader drops data-refused-href: it is the editor's mark only" do
+      assert Barkpark.PortableDoc.HtmlSanitizer.sanitize(
+               ~s|<p><a data-refused-href="javascript:alert(1)">x</a></p>|
+             ) == "<p><a>x</a></p>"
     end
 
     test "a localized rich row draws the same way, and posts the stored string" do

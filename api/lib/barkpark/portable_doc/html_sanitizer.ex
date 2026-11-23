@@ -252,13 +252,13 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     # and the browser's parse of that closes the page's own `div`. A pass
     # whose output parses back to itself has no such tree left.
     passes = opts |> Keyword.get(:max_passes, @max_passes) |> min(@max_passes) |> max(1)
-    settle(html, passes, opts)
+    settle(html, passes, Keyword.put(opts, :policy, policy(opts)))
   end
 
   def sanitize(other, _opts), do: other
 
   defp settle(html, passes, opts) do
-    {out, tree} = pass(html)
+    {out, tree} = pass(html, opts[:policy])
 
     cond do
       out == html -> out
@@ -267,8 +267,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     end
   end
 
-  defp pass(html) do
-    tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> scrub()
+  defp pass(html, policy) do
+    tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> scrub(policy)
     {Serializer.to_html(tree), tree}
   end
 
@@ -309,29 +309,59 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   """
   def contain(:email), do: "contain: paint; overflow-x: auto"
 
-  defp scrub(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &scrub_node/1)
+  # The editor policy (`editor: true`): the copy a Studio rich text editor
+  # draws inside `#editor-form` (#28402). No form control, so nothing stored
+  # can add a value to the form's post (#28404 review, N2), and no `style`.
+  # An `href` that `href_allowed?` refuses is kept as `data-refused-href`
+  # with its address, so the link draws as its words and an edit keeps the
+  # address, inert. Any other `on…` or element rule is the reader's.
+  defp policy(opts) do
+    if opts[:editor],
+      do: %{editor: true, href_allowed?: opts[:href_allowed?] || fn _ -> true end},
+      else: %{editor: false}
+  end
 
-  defp scrub_node({:comment, _text}), do: []
+  @form_controls ~w(input button label fieldset legend)
 
-  defp scrub_node({tag, attrs, children}) when is_binary(tag) do
+  defp scrub(nodes, policy) when is_list(nodes),
+    do: Enum.flat_map(nodes, &scrub_node(&1, policy))
+
+  defp scrub_node({:comment, _text}, _policy), do: []
+
+  defp scrub_node({tag, attrs, children}, policy) when is_binary(tag) do
+    tag_key = String.downcase(tag)
+
     cond do
-      String.downcase(tag) in @dangerous_elements ->
+      tag_key in @dangerous_elements ->
         []
 
+      # The editor's copy unwraps a form control; `input` holds no text.
+      policy.editor and tag_key in @form_controls ->
+        scrub(children, policy)
+
       # An element the renderer writes is kept, its attributes scrubbed.
-      Elements.kept?(String.downcase(tag)) ->
-        [{tag, Enum.flat_map(attrs, &scrub_attr/1), scrub(children)}]
+      Elements.kept?(tag_key) ->
+        [{tag, Enum.flat_map(attrs, &scrub_attr(&1, policy)), scrub(children, policy)}]
 
       # Any other element, a custom one or a name no element has (`scr<script`
       # from `<scr<script>ipt>`) included: its content stays, the tag goes.
       true ->
-        scrub(children)
+        scrub(children, policy)
     end
   end
 
-  defp scrub_node(text), do: [text]
+  defp scrub_node(text, _policy), do: [text]
 
-  defp scrub_attr({name, value}) do
+  defp scrub_attr({name, value}, %{editor: true} = policy) do
+    case String.downcase(name) do
+      "style" -> []
+      "data-refused-href" -> [{"data-refused-href", value}]
+      "href" -> editor_href(value, policy)
+      _ -> scrub_attr({name, value}, %{editor: false})
+    end
+  end
+
+  defp scrub_attr({name, value}, _policy) do
     key = String.downcase(name)
 
     cond do
@@ -341,6 +371,12 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
       key == "class" -> scrub_class(name, value)
       true -> [{name, value}]
     end
+  end
+
+  defp editor_href(value, policy) do
+    if dangerous_url?(value) or not policy.href_allowed?.(value),
+      do: [{"data-refused-href", value}],
+      else: [{"href", value}]
   end
 
   @doc "The custom elements the sanitizer keeps: those the Paper renderer emits."
