@@ -41,6 +41,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.EditorHost
   alias BarkparkWeb.Studio.Desk.FieldActions
   alias BarkparkWeb.Studio.Desk.FocusMode
+  alias BarkparkWeb.Studio.Desk.LeaveGuard
   alias BarkparkWeb.Studio.Desk.ListMenu
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.ListFirst
@@ -106,6 +107,8 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # Each list type's sort as this editor keeps it (`ListMenu`).
       |> then(&assign(&1, :list_sorts, ListMenu.prefs(&1, dataset)))
       |> assign(:desk_inspect, false)
+      # The question before leaving a held field (`LeaveGuard`): not asked.
+      |> assign(desk_leave: nil, desk_leave_pass: false)
       # The desk's own tool in place of the panes (`Vision`), from the URL.
       |> assign(:desk_tool, nil)
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
@@ -130,9 +133,16 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    {:noreply, socket} = route(params, uri, socket)
-    # Vision's Listen ends when Vision is left or the page's dataset changes.
-    {:noreply, VisionListen.follow(socket)}
+    # A held field asks before the document is put away (`LeaveGuard`): the
+    # panes and the editor stay as they are, the URL already moved.
+    if LeaveGuard.ask?(socket) and not LeaveGuard.keeps?(socket, params) do
+      {:noreply, LeaveGuard.ask(socket, {:patch, params, uri})}
+    else
+      socket = assign(socket, desk_leave: nil, desk_leave_pass: false)
+      {:noreply, socket} = route(params, uri, socket)
+      # Vision's Listen ends when Vision is left or the page's dataset changes.
+      {:noreply, VisionListen.follow(socket)}
+    end
   end
 
   defp route(params, uri, socket) do
@@ -315,6 +325,57 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-search", params, socket) do
     {:noreply, socket} = EditorHost.handle_event("desk-search", params, socket)
     {:noreply, assign(socket, :desk_search_drawn, Search.step())}
+  end
+
+  # Leaving a held field (`LeaveGuard`). Create new asks before anything is
+  # made; a link that leaves the page comes from `bp-desk.js`.
+  def handle_event("new-document", params, socket) when is_map_key(params, "type") do
+    if LeaveGuard.ask?(socket),
+      do: {:noreply, LeaveGuard.ask(socket, {:event, "new-document", params})},
+      else:
+        DocUndo.around(
+          "new-document",
+          params,
+          socket,
+          &EditorHost.handle_event("new-document", params, &1)
+        )
+  end
+
+  def handle_event("desk-leave", %{"href" => href} = params, socket) do
+    if LeaveGuard.ask?(socket) and LeaveGuard.local?(href),
+      do: {:noreply, LeaveGuard.ask(socket, {:link, href, params["live"] == true})},
+      else: {:noreply, socket}
+  end
+
+  # Stay: the URL goes back to the document, and `bp-desk.js` puts the caret
+  # back where it was.
+  def handle_event("desk-leave-stay", _params, socket) do
+    socket =
+      case socket.assigns.desk_leave do
+        %{to: {:patch, _, _}, back: back} -> push_patch(socket, to: back, replace: true)
+        _ -> socket
+      end
+
+    {:noreply, socket |> assign(:desk_leave, nil) |> push_event("bp:desk-leave-stayed", %{})}
+  end
+
+  # Leave: what was asked goes on, past the guard once.
+  def handle_event("desk-leave-go", _params, socket) do
+    socket = assign(socket, desk_leave_pass: true)
+
+    case socket.assigns.desk_leave do
+      %{to: {:patch, params, uri}} ->
+        handle_params(params, uri, socket)
+
+      %{to: {:event, event, params}} ->
+        {:noreply, socket} = handle_event(event, params, assign(socket, :desk_leave, nil))
+        # The pass is for the patch the event sent; with none, it ends here.
+        {:noreply,
+         if(socket.redirected, do: socket, else: assign(socket, :desk_leave_pass, false))}
+
+      _ ->
+        {:noreply, assign(socket, desk_leave: nil, desk_leave_pass: false)}
+    end
   end
 
   # The hits' end scrolled near (`phx-viewport-bottom`): 40 more drawn.
@@ -593,6 +654,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
       />
     </dialog>
+    <LeaveGuard.dialog :if={@desk_leave} id="dk-leave-dialog" leave={@desk_leave} message={LeaveGuard.message(assigns)} />
     <%!-- The navbar's Create new (J37): its button is the layout's. --%>
     <NewDocMenu.picker picks={NewDocMenu.picks(@desk.new)} />
     <%!-- The presence profile (the display name and colour others see):

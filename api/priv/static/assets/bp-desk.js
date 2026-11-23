@@ -1411,26 +1411,41 @@
         return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
           (!!pane && (pane.getAttribute("data-desk-save") === "Save failed" || pane.hasAttribute("data-desk-held")));
       };
-      // A held field (`Desk.LeaveGuard`, task-33cbb6269c8823ad): a link to a
-      // path without this document asks first, and Cancel stays. Capture on
-      // the document, so LiveView's own link handler (on window) never sees
-      // a cancelled click. A path that still holds the document (its own
-      // panes, a query) does not ask.
+      // A held field (`Desk.LeaveGuard`, task-33cbb6269c8823ad): the server
+      // asks in its own dialog. A patch link reaches its guard as it is; a
+      // link that leaves the page is held back and sent (`desk-leave`), and
+      // the dialog's Leave is that link. Capture on the document, so
+      // LiveView's link handler (on window) never sees a held-back click.
       hook._onLeave = function (e) {
-        var pane = root.querySelector("[data-pane-editing][data-desk-held]");
-        var link = pane && e.target.closest ? e.target.closest("a[href]") : null;
+        var link = e.target.closest ? e.target.closest("a[href]") : null;
         if (!link || !plainClick(e) || link.target === "_blank") return;
-        var to = new URL(link.href, window.location.href);
-        if (to.origin !== window.location.origin || to.pathname === window.location.pathname) return;
-        var id = pane.getAttribute("data-desk-held-doc");
-        var keeps = to.pathname.split("/").some(function (seg) {
-          try { seg = decodeURIComponent(seg); } catch (_e) { return false; }
-          return seg.split(/[;,]/).indexOf(id) !== -1;
-        });
-        if (keeps || window.confirm(pane.getAttribute("data-desk-held"))) return;
+        if (link.hasAttribute("data-desk-leave-go")) { hook._leaving = true; return; }
+        if (!root.querySelector("[data-pane-editing][data-desk-held]") || link.getAttribute("data-phx-link") === "patch") return;
+        var to = new URL(link.href, window.location.href), at = window.location;
+        if (to.origin !== at.origin || (to.pathname === at.pathname && to.search === at.search)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
+        hook.pushEvent("desk-leave", { href: to.pathname + to.search + to.hash, live: link.getAttribute("data-phx-link") === "redirect" });
       };
+      // Where the caret was in the edit pane, put back after Stay.
+      hook._noteField = function (e) {
+        var el = e.type === "focusout" ? e.target : root.ownerDocument.activeElement;
+        if (!el || !el.closest || !el.closest("[data-pane-editing]") || !root.contains(el)) return;
+        var sel = window.getSelection();
+        hook._field = { el: el, start: el.selectionStart, end: el.selectionEnd,
+          range: el.isContentEditable && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null };
+      };
+      root.addEventListener("focusout", hook._noteField, true);
+      root.ownerDocument.addEventListener("selectionchange", hook._noteField);
+      if (hook.handleEvent) hook.handleEvent("bp:desk-leave-stayed", function () {
+        window.requestAnimationFrame(function () {
+          var f = hook._field;
+          if (!f || !f.el.isConnected) return;
+          f.el.focus({ preventScroll: true });
+          if (f.range && f.range.startContainer.isConnected) window.getSelection().removeAllRanges(), window.getSelection().addRange(f.range);
+          else if (typeof f.start === "number" && f.el.setSelectionRange) f.el.setSelectionRange(f.start, f.end);
+        });
+      });
       root.ownerDocument.addEventListener("click", hook._onLeave, true);
       // The TanStack Studio's e2e probe (its lib/edits.ts; the rig waits on
       // it before it resets its documents): an edit still on its way, typed
@@ -1441,7 +1456,7 @@
       };
       window.__savesPending = hook._savesPending;
       hook._onUnload = function (e) {
-        if (!hook._owes()) return;
+        if (hook._leaving || !hook._owes()) return;
         e.preventDefault();
         e.returnValue = "";
       };
@@ -1915,6 +1930,8 @@
       root.removeEventListener("input", this._onTyped, true);
       window.removeEventListener("beforeunload", this._onUnload);
       root.ownerDocument.removeEventListener("click", this._onLeave, true);
+      root.removeEventListener("focusout", this._noteField, true);
+      root.ownerDocument.removeEventListener("selectionchange", this._noteField);
       if (window.__savesPending === this._savesPending) delete window.__savesPending;
       var sheet = root.ownerDocument.getElementById("bp-desk-layout");
       if (sheet) sheet.textContent = "";
