@@ -1396,7 +1396,8 @@ defmodule Barkpark.Content.Writer do
          "paper"
        )
        when is_binary(html) do
-    Map.put(attrs, "content", Map.put(content, "body_html", HtmlSanitizer.sanitize(html)))
+    id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id)
+    Map.put(attrs, "content", Map.put(content, "body_html", HtmlSanitizer.sanitize(html, id: id)))
   end
 
   defp maybe_sanitize_paper_body_html(attrs, _type), do: attrs

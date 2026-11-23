@@ -19,7 +19,7 @@ defmodule BarkparkWeb.BulldocsEmailController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.{HtmlSanitizer, Render}
   alias BarkparkWeb.BulldocsEmailHTML
 
   # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: the body is
@@ -68,11 +68,17 @@ defmodule BarkparkWeb.BulldocsEmailController do
                   Render.render_document(blocks_with_name, opts)
 
                 {:html, sanitized_html} ->
+                  # In the box the reader draws it in (#28404 review, S1): this
+                  # is a browser page on our origin too.
+                  boxed =
+                    ~s(<div style="#{HtmlSanitizer.contain(:email)}">) <>
+                      sanitized_html <> "</div>"
+
                   named_html =
                     if BulldocsEmailHTML.legacy_heading?(sanitized_html) do
-                      sanitized_html
+                      boxed
                     else
-                      BulldocsEmailHTML.fallback_heading(title, opts) <> sanitized_html
+                      BulldocsEmailHTML.fallback_heading(title, opts) <> boxed
                     end
 
                   Render.render_html_document(named_html, opts)
