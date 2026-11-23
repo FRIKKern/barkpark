@@ -5,7 +5,8 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   `Bpml.WriteWall` compares `parse(print(view))` with `normalize(stored)` to
   find what a pull did not show. Each rewrite fires on an exact key set and
   drops no content: a key it removes holds nothing (nil, false or empty), or
-  its body moves whole to another key or node. Thirteen rewrites, no others:
+  its body moves whole to another key or node. These rewrites, and no others
+  (`rules/0` is this list, in this order):
 
     1. `:mark_node` — an inline mark written as a node (`code`, `strong`, `em`, `underline`, `strike`) becomes text carrying that mark, only when the node holds nothing else (exactly type and children, or type, value and its own marks).
     2. `:expandable_children` — an `expandable`'s body key `children` becomes `blocks`.
@@ -20,16 +21,20 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     11. `:byline_value_item` — a byline item `%{"value" => s}` and nothing else becomes the string `s` (the byline value-map shape stored by the wave-5/6 epic Papers).
     12. `:bare_note` — a notes item that is a bare string `s` becomes `%{"text" => s}` (the bare-string notes shape of the heggemsnes-act remedies block).
     13. `:absent_step_children` — a step's `children` holding nil or false is dropped; the printer reads past it to `blocks` or `content`.
+    14. `:bare_item` — an item of a list the reader draws (`ListItems.list?/1`; rules 14-16 read no other block's items) that is a bare string `s` becomes the inline array `[text s]`.
+    15. `:text_item` — a list item map whose words are only in `text` (a non-empty string, with `content` absent or empty, and no key besides `id`, `checked` and `children`) has them as `content: [text]` instead; when no other key is left, the item is that inline array.
+    16. `:list_alias` — a list item's child list typed by an alias the reader draws as a list (`ListItems.list?/1`) is a `list`; an ordered alias gains `ordered: true`, and only when it holds no `ordered` key yet.
 
   Nothing lost means: no character, no mark on a character, no link, no
   checked state, no block, no item child, no slot. A mark on zero characters
   (rule 7) and an empty `marks` list (rule 9) mark no character, so they are not
   in that list. It never drops a key's content (`children`, `slots`, `items`,
-  `blocks`) and never changes a word. A fourteenth rewrite is its own
-  change, with its own careful review.
+  `blocks`) and never changes a word. A new rewrite is its own change, with
+  its own careful review.
   """
 
   alias Barkpark.PortableDoc.Bpml.Canonical.AliasKey
+  alias Barkpark.PortableDoc.Bpml.ListItems
 
   @rules [
     :mark_node,
@@ -44,7 +49,10 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     :inline_shape,
     :byline_value_item,
     :bare_note,
-    :absent_step_children
+    :absent_step_children,
+    :bare_item,
+    :text_item,
+    :list_alias
   ]
 
   # The printer's decorator marks (`mark_tag/1`); any other mark is an annotation.
@@ -60,13 +68,13 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   # Inline node types: what `:inline_shape` recognises as inline content.
   @inline_types ~w(text link strong em code underline strike)
 
-  @doc "The thirteen rewrites, by name."
+  @doc "The rewrites, by name, in the moduledoc's order."
   @spec rules() :: [atom()]
   def rules, do: @rules
 
   @doc """
   The stored blocks as a BPML print and parse spells them. `rules` limits the
-  rewrites (all thirteen by default); the sweep test counts each one with it.
+  rewrites (all of them by default); the sweep test counts each one with it.
   """
   @spec normalize(term(), [atom()]) :: term()
   def normalize(blocks, rules \\ @rules)
@@ -143,11 +151,15 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
     Map.new(b, fn
       {"slots", %{} = slots} -> {"slots", Map.new(slots, fn {n, v} -> {n, block_value(v, r)} end)}
       {k, v} when k in @block_keys -> {k, block_value(v, r)}
-      {"items", v} when is_list(v) -> {"items", Enum.map(v, &item(&1, r))}
+      {"items", v} when is_list(v) -> {"items", Enum.map(v, &item(&1, item_rules(b, r)))}
       {"content", v} -> {"content", v |> inline_shape(r) |> then(&inline(&1, r))}
       {k, v} -> {k, inline(v, r)}
     end)
   end
+
+  # Rules 14-16 read the items of a list the reader draws, and no other block's.
+  @list_item_rules [:bare_item, :text_item, :list_alias]
+  defp item_rules(b, r), do: if(ListItems.list?(b), do: r, else: r -- @list_item_rules)
 
   defp inline_shape(v, r) do
     cond do
@@ -170,13 +182,66 @@ defmodule Barkpark.PortableDoc.Bpml.Canonical do
   defp block_value(%{} = v, r), do: walk_block(v, r)
   defp block_value(v, _r), do: v
 
-  defp item(%{"content" => c, "checked" => false} = it, r)
-       when map_size(it) == 2 and is_list(c) do
-    if :unchecked_item in r, do: inline(c, r), else: walk_block(it, r)
+  defp item(%{} = it, r) do
+    case it |> text_item(r) |> list_alias(r) do
+      %{"content" => c, "checked" => false} = it when map_size(it) == 2 and is_list(c) ->
+        if :unchecked_item in r, do: inline(c, r), else: walk_block(it, r)
+
+      {:words, c} ->
+        inline(c, r)
+
+      it ->
+        walk_block(it, r)
+    end
   end
 
-  defp item(%{} = it, r), do: walk_block(it, r)
+  defp item(s, r) when is_binary(s) do
+    if :bare_item in r, do: inline([string_to_text(s)], r), else: s
+  end
+
   defp item(other, r), do: inline(other, r)
+
+  @text_item_keys ~w(id text content checked children)
+
+  # Rule 15: the words the printer reads from `text` (ListItems' `words/1`)
+  # move whole to `content`, the key the parser writes; with nothing else
+  # left, the parser reads the item as its inline array.
+  defp text_item(%{"text" => s} = it, r) when is_binary(s) and s != "" do
+    if :text_item in r and Map.get(it, "content") in [nil, []] and
+         Map.keys(it) -- @text_item_keys == [] do
+      words = [string_to_text(s)]
+      rest = Map.drop(it, ["text", "content"])
+      if rest == %{}, do: {:words, words}, else: Map.put(rest, "content", words)
+    else
+      it
+    end
+  end
+
+  defp text_item(it, _r), do: it
+
+  # Rule 16: the reader's own alias rule (ListItems' `normalize/1`).
+  defp list_alias(%{"children" => children} = it, r) when is_list(children) do
+    if :list_alias in r,
+      do: %{it | "children" => Enum.map(children, &alias_list/1)},
+      else: it
+  end
+
+  defp list_alias(it, _r), do: it
+
+  defp alias_list(%{"type" => t} = list) do
+    case ListItems.list?(list) and ListItems.alias_kind(t) do
+      :unordered ->
+        Map.put(list, "type", "list")
+
+      :ordered when not is_map_key(list, "ordered") ->
+        %{list | "type" => "list"} |> Map.put("ordered", true)
+
+      _ ->
+        list
+    end
+  end
+
+  defp alias_list(child), do: child
 
   defp inline(l, r) when is_list(l) do
     l

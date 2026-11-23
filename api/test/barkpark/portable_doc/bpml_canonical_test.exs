@@ -1,6 +1,6 @@
 defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
   @moduledoc """
-  `Bpml.Canonical.normalize/1`, the thirteen rewrites the push check allows,
+  `Bpml.Canonical.normalize/1`, the rewrites its moduledoc lists (`rules/0`)
   and nothing more. Over every stored document the suite carries, and in each
   rule's own case, nothing is lost: no character, no mark on a character, no
   link, no checked state, no block, no item child, no slot. Each alias the
@@ -11,7 +11,7 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
 
   alias Barkpark.BpmlStoredDocuments
   alias Barkpark.PortableDoc.Bpml
-  alias Barkpark.PortableDoc.Bpml.{Canonical, WriteWall}
+  alias Barkpark.PortableDoc.Bpml.{Canonical, ListItems, WriteWall}
   alias Barkpark.PortableDoc.Bpml.Canonical.AliasKey
   alias Barkpark.PortableDoc.Render
 
@@ -33,8 +33,15 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
     paths
   end
 
-  test "the definition is closed: thirteen rewrites" do
-    assert length(Canonical.rules()) == 13
+  # The count is read from the list, so no test types it.
+  test "the definition is closed: the moduledoc numbers rules/0, in order" do
+    {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(Canonical)
+    listed = Regex.scan(~r/^\s*(\d+)\. `:(\w+)`/m, doc, capture: :all_but_first)
+
+    assert Enum.map(listed, fn [n, _] -> String.to_integer(n) end) ==
+             Enum.to_list(1..length(Canonical.rules()))
+
+    assert Enum.map(listed, fn [_, name] -> String.to_atom(name) end) == Canonical.rules()
   end
 
   # ── rule 6: the copied list and the printer's own reads ──────────────────────
@@ -234,6 +241,56 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
     end
   end
 
+  test "rule 14: a bare-string list item is the inline array of its text" do
+    list = %{"type" => "list", "items" => ["Ship < it", "x"]}
+    lossless!(list)
+    assert [%{"items" => [[%{"value" => "Ship < it"}], [%{"value" => "x"}]]}] = carried!([list])
+    assert Canonical.normalize([list], Canonical.rules() -- [:bare_item]) == [list]
+  end
+
+  test "rule 15: a list item's words only in text move to content" do
+    plain = %{"type" => "list", "items" => [%{"text" => "Build"}]}
+    lossless!(plain)
+    assert [%{"items" => [[%{"value" => "Build"}]]}] = carried!([plain])
+
+    ided = %{"type" => "list", "items" => [%{"id" => "b", "text" => "Build", "content" => []}]}
+    lossless!(ided)
+
+    assert [%{"items" => [%{"id" => "b", "content" => [%{"value" => "Build"}]} = it]}] =
+             carried!([ided])
+
+    refute is_map_key(it, "text")
+
+    # Words in both, or a key the printer cannot spell, are not rewritten.
+    both = %{"type" => "list", "items" => [%{"text" => "a", "content" => [t("b")]}]}
+    other = %{"type" => "list", "items" => [%{"id" => "o", "text" => "a", "audit" => 1}]}
+    assert Canonical.normalize([both]) == [both]
+    assert Canonical.normalize([other]) == [other]
+  end
+
+  test "rule 16: a child list typed by an alias is a list" do
+    child = fn type, extra ->
+      Map.merge(%{"type" => type, "items" => [[t("Build")]]}, extra)
+    end
+
+    item = fn c -> %{"id" => "p", "content" => [t("Plan")], "children" => [c]} end
+
+    for {type, extra, want} <- [
+          {"bulletList", %{}, %{"type" => "list"}},
+          {"ordered-list", %{}, %{"type" => "list", "ordered" => true}},
+          {"numbered_list", %{}, %{"type" => "list", "ordered" => true}}
+        ] do
+      list = %{"type" => "list", "items" => [item.(child.(type, extra))]}
+      lossless!(list)
+      assert [%{"items" => [%{"children" => [got]}]}] = carried!([list])
+      assert Map.take(got, ["type", "ordered"]) == want
+    end
+
+    # An ordered alias that already holds an `ordered` key is not rewritten.
+    held = %{"type" => "list", "items" => [item.(child.("ordered-list", %{"ordered" => false}))]}
+    assert Canonical.normalize([held]) == [held]
+  end
+
   # Rule 1 rewrites only a mark node that is exactly its type and children, or
   # type, value and its own marks; any other key on the node is something the
   # print drops, so normalize leaves it and the wall refuses it.
@@ -411,7 +468,10 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
   @block_keys ~w(blocks children child columns)
 
   defp block_types(l) when is_list(l), do: Enum.flat_map(l, &block_types/1)
-  defp block_types(%{"type" => t} = b) when is_binary(t), do: [t | nested_blocks(b)]
+
+  defp block_types(%{"type" => t} = b) when is_binary(t),
+    do: [list_name(t, b) | nested_blocks(b)]
+
   defp block_types(%{} = m), do: nested_blocks(m)
   defp block_types(_), do: []
 
@@ -435,6 +495,9 @@ defmodule Barkpark.PortableDoc.BpmlCanonicalTest do
 
     List.flatten([from_keys, slots, steps, items])
   end
+
+  # A list under an alias name is the one list it was (rule 16 renames it).
+  defp list_name(t, b), do: if(ListItems.list?(b), do: "list", else: t)
 
   defp tally(list), do: Enum.frequencies(list)
 end
