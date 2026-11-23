@@ -1409,8 +1409,11 @@
         if (!form) return false;
         var pane = form.closest("[data-pane-editing]");
         return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
-          (!!pane && pane.getAttribute("data-desk-save") === "Save failed");
+          (!!pane && (pane.getAttribute("data-desk-save") === "Save failed" || pane.hasAttribute("data-desk-held")));
       };
+      // A held field (`Desk.LeaveGuard`): a link is held back and asked
+      // about, and Stay puts the caret back (bp-desk-leave.js).
+      deskScript("data-desk-leave", window.BarkparkDeskLeave);
       // The TanStack Studio's e2e probe (its lib/edits.ts; the rig waits on
       // it before it resets its documents): an edit still on its way, typed
       // and not yet sent or any event not yet answered. Not a failed save,
@@ -1420,7 +1423,7 @@
       };
       window.__savesPending = hook._savesPending;
       hook._onUnload = function (e) {
-        if (!hook._owes()) return;
+        if (root.bpLeaving || !hook._owes()) return;
         e.preventDefault();
         e.returnValue = "";
       };

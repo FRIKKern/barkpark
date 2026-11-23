@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
+  alias BarkparkWeb.Studio.Desk.LeaveGuard
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -339,6 +340,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           |> StudioLive.handle_event(params, written(socket, event))
           |> ours()
           |> after_restore(event, before)
+          |> LeaveGuard.done(event)
         else
           {:halt, socket} -> {:noreply, socket}
         end
@@ -701,6 +703,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           BarkparkWeb.Studio.StudioLive.RefusedSave.token(assigns) == "Updated by another user"
       }
       data-desk-inspecting={inspector(@view.pane) != nil}
+      data-desk-held={BarkparkWeb.Studio.Desk.LeaveGuard.message(assigns)}
+      data-desk-held-doc={BarkparkWeb.Studio.Desk.LeaveGuard.doc(assigns)}
       aria-label={@page_title}
     >
       <%!-- `data-desk-save`: the save token (`SaveStatus`), not its words;
@@ -709,7 +713,9 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
             here, and the status still says so. Both, as a guard: a save
             that said "Saved" with `doc_conflict` still set (the removed
             legacy pick's `{:autosave_form, …}` did) is no conflict.
-            `Desk.DocStyle` tones the form's status by both marks. --%>
+            `Desk.DocStyle` tones the form's status by both marks.
+            `data-desk-held`: what `bp-desk.js` asks before leaving this
+            document while a field is held (`Desk.LeaveGuard`). --%>
       <%!-- The same header row the read-only panes have, so the close link
             covers none of the Studio's toolbar and the narrow layout's Back
             (`bp-desk.js`) finds it. --%>
