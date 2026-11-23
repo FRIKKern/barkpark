@@ -132,6 +132,37 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       assert eventually(fn -> title(a) == "T0" end)
     end
 
+    test "a restore that lands ends the hold: a row click goes on at once", c do
+      a = open(c)
+      post_title(a, "T1")
+      # The landed save made a revision; the next typing is held.
+      post_title(a, "T1 FAIL")
+      assert eventually(fn -> has_element?(a, @held) end)
+
+      [rev | _] =
+        Barkpark.Content.list_revisions(c.id, c.type, "production", limit: 30) |> Enum.reverse()
+
+      a
+      |> element(~s{[data-pane-editing] button[phx-click="show-history"]:not([role="menuitem"])})
+      |> render_click()
+
+      BarkparkWeb.EditorPost.press_on(
+        a,
+        element(
+          a,
+          ~s(#history-modal-dialog button[phx-click="restore-revision"][phx-value-id="#{rev.id}"])
+        )
+      )
+
+      assert render(a) =~ "Restored from history"
+      refute has_element?(a, @held)
+
+      to = to_doc(c, c.id <> "-link")
+      render_hook(a, "desk-leave", %{"href" => to, "kind" => "patch"})
+      assert_patch(a, to)
+      refute has_element?(a, @dialog)
+    end
+
     test "control: a held-back desk link that keeps the document goes on at once", c do
       a = held(c)
       to = to_doc(c, c.id) <> ",inspect=on"
