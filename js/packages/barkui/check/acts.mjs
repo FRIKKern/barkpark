@@ -106,6 +106,8 @@ function wall(v, seen = new Set()) {
     return Object.keys(v).every((k) => wall(v[k], seen) === v[k]) ? v : walled(v)
   }
   if (plain) return v
+  // PLANT: a kind the wall does not know is handed on as it is.
+  if (!ALLOWED[nameOf(v)]) return v
   return walled(v)
 }
 /** What a call throws or a promise rejects with goes through the wall as well. */

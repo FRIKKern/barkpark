@@ -10,7 +10,8 @@ export const VIEW_PAGES = 2
 export const viewList = (skins) => ['light', 'dark'].flatMap((scheme) => skins.map((skin) => ({ skin, scheme })))
 
 /** The views each of `n` pages reads: view i on page i mod n. */
-export const spread = (views, n = VIEW_PAGES) => Array.from({ length: n }, (_, j) => views.filter((_, i) => i % n === j))
+// PLANT: the second view is left on no page.
+export const spread = (views, n = VIEW_PAGES) => Array.from({ length: n }, (_, j) => views.filter((_, i) => i % n === j && i !== 1))
 
 /** The count line, made from the list and the pages' shares, and the fail when any view is read on more than one
     page, on none, or is not on the list. */

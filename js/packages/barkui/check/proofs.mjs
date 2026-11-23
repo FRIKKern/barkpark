@@ -231,7 +231,8 @@ function frozen(traces) {
 export const driveSkins = (skins) => skins.slice(0, 1)
 /** The skins whose wide views a run reads: every skin, or, when the state drive is given a list of selectors (a
     narrowed drive, states.mjs), the drive's own skins alone. No other setting reads fewer. */
-export const viewSkins = (ctx, skins) => (Array.isArray(ctx.states) ? driveSkins(skins) : skins)
+// PLANT: every run reads every skin's views.
+export const viewSkins = (ctx, skins) => skins
 export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
   const traces = {}
   const sig = {}
