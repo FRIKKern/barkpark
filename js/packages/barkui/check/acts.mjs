@@ -14,14 +14,14 @@ function where() {
   return 'an unknown place'
 }
 const marked = (page) => page.barkCheck(() => window.__barkCheck.markFocus())
-const rested = (page, act, at) => page.barkCheck((who) => window.__barkCheck.afterAct(who), `${act} at ${at}`)
+const rested = (page, act, at, kind = 'pointer') => page.barkCheck((a) => window.__barkCheck.afterAct(a), [`${act} at ${at}`, kind])
 
 /** A key pressed and let go. */
 export async function press(page, key) {
   const at = where()
   await marked(page)
   await page.keyboard.press(key)
-  await rested(page, `the key ${key}`, at)
+  await rested(page, `the key ${key}`, at, 'key')
 }
 
 /** A click at a point. */

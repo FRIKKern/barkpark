@@ -427,8 +427,8 @@ export function installHelpers(lists) {
     }
     return null
   }
-  /** The element with focus before the checker's input (check/acts.mjs marks it): a scroll into view follows only an
-      input that moves focus. */
+  /** The element with focus before the checker's input (check/acts.mjs marks it): after the pointer, a scroll into
+      view follows only an input that moves focus. */
   let focusBefore = null
   const markFocus = () => {
     focusBefore = focused()
@@ -452,11 +452,12 @@ export function installHelpers(lists) {
   /** The rest step after the checker's input on a page (check/acts.mjs), `who` naming the act and where the checker
       made it: a frame is drawn, so what the input started shows, then the page comes to rest inside the bound, or
       the act is red there by name and nothing reads on. At rest is: nothing with an end moves, no scroll is under
-      way, and when the input moved focus, a scroll into view of the element that has it would move nothing (or
-      nothing has focus). Motion with no end is left to the read, whose gate names it. */
-  const afterAct = async (who) => {
+      way, and a scroll into view of the element with focus would move nothing (or nothing has focus): after a key
+      (`kind` 'key'), which goes to the element with focus, always; after the pointer, when it moved focus. Motion
+      with no end is left to the read, whose gate names it. */
+  const afterAct = async ([who, kind]) => {
     const now = focused()
-    const moved = now !== focusBefore ? now : null
+    const moved = kind === 'key' || now !== focusBefore ? now : null
     const unscrolled = () => intoView(moved)
     await frame()
     await toRest(unscrolled)

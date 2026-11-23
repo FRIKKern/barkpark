@@ -307,9 +307,9 @@ const keyAct = () =>
       }),
     // The focus scroll that follows the key: waited for however late it begins, and never a false red where a scroll
     // into view would move nothing.
-    'a Tab whose scroll into view the page begins frames later is waited for, then read at rest': () =>
+    'a Tab whose scroll into view the page begins 30 frames later is waited for, then read at rest': () =>
       onPage(SCROLLER, 'reduce', async (page) => {
-        await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); const far = document.getElementById('bark-far'); far.focus({ preventScroll: true }); requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => far.scrollIntoView({ block: 'nearest' })))) }, { once: true })")
+        await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); const far = document.getElementById('bark-far'); far.focus({ preventScroll: true }); let n = 30; const go = () => (--n ? requestAnimationFrame(go) : far.scrollIntoView({ block: 'nearest' })); requestAnimationFrame(go) }, { once: true })")
         return held('Tab, late', await sameAfter(page, () => acts.press(page, 'Tab')))
       }),
     'a Tab to an element larger than its scroller\'s view reads at rest once it covers the view, not red': () =>
