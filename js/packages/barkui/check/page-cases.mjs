@@ -29,7 +29,9 @@ const PLANT = inView(CHANGED, '#tabs-overview')
 export function lightLines(logs, proof, part = PART) {
   const e = proof?.parts?.[part] ?? {}
   const lights = Object.entries(e.lights ?? {}).flatMap(([k, l]) => [`${k}: ${l.pass ? 'on' : 'OFF'} ${l.detail}`, ...(l.fails ?? []).map((f) => `${k} fails: ${f}`)])
-  const rest = ['measures', 'paintFree', 'textOnly', 'unread', 'failed'].map((k) => `${k}: ${JSON.stringify(e[k] ?? null)}`)
+  // The time the top layer took is no reading.
+  const measures = e.measures?.layers ? { ...e.measures, layers: { ...e.measures.layers, seconds: '#' } } : e.measures
+  const rest = Object.entries({ measures, paintFree: e.paintFree, textOnly: e.textOnly, unread: e.unread, failed: e.failed }).map(([k, v]) => `${k}: ${JSON.stringify(v ?? null)}`)
   return [...logs, ...lights, ...rest].map((l) => l.replace(/\d+(\.\d+)? s\b/g, '# s'))
 }
 /** The lines in one list and not the other, either way, each as often as it is missing. */
