@@ -1,0 +1,250 @@
+defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
+  @moduledoc """
+  The #28404 review's findings (task-65430475d0552e36). Each output is judged
+  as the reader draws it: inside `<article id="paper-body">…</article>`, the
+  page's markup after it included.
+
+    * F1: a tag left open at the end parsed to nothing, so the input came
+      back as it was, and in the page the reader's `</article>` closed it.
+    * F2: `plaintext` (and `listing`) were kept.
+    * F3: a custom element was kept; `bp-rich-text-editor` draws its
+      `data-value` into the page.
+    * F4: `style`, `class` and `data-…` could put a stored link over the
+      page: `position: fixed`, or a renderer class the reader CSS takes out
+      of the flow.
+  """
+  use ExUnit.Case, async: true
+
+  alias Barkpark.PortableDoc.HtmlSanitizer, as: S
+
+  # The reader's page around the body.
+  defp page(html),
+    do: LazyHTML.from_fragment(~s|<article id="paper-body">| <> html <> "</article><p>after</p>")
+
+  defp count(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count()
+
+  describe "F1: a tag left open at the end" do
+    for {payload, selector} <- [
+          {~s|<p>x</p><img src=x onerror=alert(1) |, "img"},
+          {~s|<p>x</p><img src=x onerror="alert(1)" |, "img"},
+          {~s|<p>x</p><meta http-equiv="refresh" content="0;url=https://evil.example" |, "meta"},
+          {~s|<p>x</p><iframe src="https://evil.example" style="position:fixed;inset:0" |,
+           "iframe"},
+          {~s|<p>x</p><a href="https://evil.example" style="position:fixed;inset:0;z-index:9" |,
+           "a[style*=fixed]"},
+          {~s|<p>x</p><!-- |, "p:not(:first-child):not(:last-child)"}
+        ] do
+      @payload payload
+      @selector selector
+      test "#{inspect(payload)} builds no #{selector} in the page" do
+        assert @payload |> S.sanitize() |> page() |> count(@selector) == 0
+        assert @payload |> page() |> count(@selector) > 0 or @selector =~ "not("
+      end
+    end
+
+    test "the page's own markup after the body stays the page's" do
+      for payload <- [~s|<p>x</p><img src=x |, ~s|<p>x</p><!-- |, ~s|<p>x</p><textarea>|] do
+        assert payload
+               |> S.sanitize()
+               |> page()
+               |> LazyHTML.query("p")
+               |> Enum.map(&LazyHTML.text/1) ==
+                 ["x", "after"],
+               inspect(payload)
+      end
+    end
+
+    test "control: clean markup that ends closed keeps its bytes, an open p included" do
+      for html <- [~s|<p>a</p><img src="https://x/y.png" alt="">|, ~s|<p>a<br/>b|, ~s|text only|] do
+        assert S.sanitize(html) == html
+      end
+    end
+  end
+
+  describe "F2: plaintext and listing" do
+    for tag <- ~w(plaintext listing) do
+      @tag_name tag
+      test "<#{tag}> is dropped" do
+        out = S.sanitize("<p>a</p><#{@tag_name}><p>b</p>")
+        assert out |> LazyHTML.from_fragment() |> count(@tag_name) == 0
+        assert out |> page() |> count("p") >= 2
+      end
+    end
+  end
+
+  describe "F3: custom elements" do
+    test "a Studio component is unwrapped, its text kept" do
+      out =
+        S.sanitize(
+          ~s|<bp-rich-text-editor data-value="&lt;img src=x onerror=alert(1)&gt;" value="&lt;meta http-equiv=refresh&gt;">kept</bp-rich-text-editor>|
+        )
+
+      assert out == "kept"
+    end
+
+    test "any hyphenated tag is unwrapped" do
+      assert S.sanitize(~s|<x-card data-value="x"><p>t</p></x-card>|) == "<p>t</p>"
+    end
+
+    test "every custom element the renderer emits is kept (none today)" do
+      emitted =
+        for f <-
+              Path.wildcard(
+                Path.expand("../../../priv/portable_doc/goldens/*/*.golden.json", __DIR__)
+              ),
+            %{"expectedHtml" => html} when is_binary(html) <- [Jason.decode!(File.read!(f))],
+            [_, tag] <- Regex.scan(~r/<([a-z][a-z0-9]*-[a-z0-9-]*)/, html),
+            uniq: true,
+            do: tag
+
+      assert emitted -- S.custom_elements() == []
+    end
+  end
+
+  describe "F4: nothing stored covers the page" do
+    defp style_of(html),
+      do: html |> LazyHTML.from_fragment() |> LazyHTML.query("a") |> LazyHTML.attribute("style")
+
+    defp class_of(html),
+      do: html |> LazyHTML.from_fragment() |> LazyHTML.query("a") |> LazyHTML.attribute("class")
+
+    test "a fixed full-page overlay link comes out in the flow" do
+      out =
+        S.sanitize(
+          ~s|<a href="https://evil.example" style="position:fixed;inset:0;top:0;left:0;right:0;bottom:0;z-index:99999;width:100vw;height:100vh;transform:none;background:url(https://evil.example/x.png)">x</a>|
+        )
+
+      [style] = style_of(out)
+      refute style =~ ~r/position|inset|right|bottom|z-index|transform|url\(|vw|vh/
+      assert style =~ "top:0;left:0"
+    end
+
+    test "the worst renderer class with a placed style cannot cover the page" do
+      # `.bp-rm__bar` is `position: absolute` in the reader CSS; with `style`
+      # sizing it, a stored one was a full-page link.
+      out =
+        S.sanitize(
+          ~s|<a href="https://evil.example" class="bp-rm__bar bp-rm__lane" style="position:relative;top:2rem;width:100%">x</a>|
+        )
+
+      assert class_of(out) == ["bp-rm__lane"]
+      assert style_of(out) == ["position:relative;top:2rem;width:100%"]
+
+      for denied <-
+            ~w(bp-rm__bar bp-rm__ms bp-rm__note bp-rm__today bp-rm__unplaced bp-toc--sticky bp-form-q--scale bp-form-q--yesno) do
+        refute S.keep_class?(denied), denied
+      end
+    end
+
+    test "position, top and left are kept only by value" do
+      for {decl, kept?} <- [
+            {"position:relative", true},
+            {"position:absolute", false},
+            {"position:sticky", false},
+            {"position:fixed", false},
+            {"top:-0.7rem", true},
+            {"top:2em", true},
+            {"top:3rem", false},
+            {"left:40%", true},
+            {"left:100%", true},
+            {"left:101%", false},
+            {"left:-1%", false},
+            {"top:20px", false}
+          ] do
+        out = S.sanitize(~s|<a href="#" style="#{decl};color:red">x</a>|)
+        assert style_of(out) == [if(kept?, do: "#{decl};color:red", else: "color:red")], decl
+      end
+    end
+
+    test "a custom property keeps only a short value that cannot load or escape" do
+      for {decl, kept?} <- [
+            {"--bp-cols:3", true},
+            {"--i:1", true},
+            {"--bp-tracks:repeat(3, 1fr)", true},
+            {"--bp-grid-gap:1.2rem", true},
+            {"--bp-cols:url(https://evil.example/x)", false},
+            {"--bp-cols:a\\62 c", false},
+            {"--bp-cols:@import", false},
+            {"--bp-cols:}", false},
+            {"--bp-cols:expression(alert(1))", false},
+            {"--bp-cols:" <> String.duplicate("1", 65), false},
+            {"--evil:1", false}
+          ] do
+        out = S.sanitize(~s|<a href="#" style="#{decl};color:red">x</a>|)
+        assert style_of(out) == [if(kept?, do: "#{decl};color:red", else: "color:red")], decl
+      end
+    end
+
+    test "class and data-… keep only the renderer's names" do
+      out =
+        S.sanitize(
+          ~s|<a href="#" class="bp-callout bp-callout--danger modal-backdrop bp-object-dialog" data-level="1" data-paper-link-open data-phx-link="redirect">x</a>|
+        )
+
+      assert class_of(out) == ["bp-callout bp-callout--danger"]
+      doc = LazyHTML.from_fragment(out)
+      assert count(doc, "a[data-level]") == 1
+      assert count(doc, "a[data-paper-link-open], a[data-phx-link]") == 0
+    end
+
+    # Every rule in the CSS on the reader page (and the editor's, loaded when
+    # an editor opens Edit there) that takes an element out of the flow must
+    # name a class or data attribute stored markup can no longer carry.
+    test "no positioned rule in the reader CSS can match stored markup" do
+      api = Path.expand("../../..", __DIR__)
+
+      css =
+        [
+          Barkpark.PortableDoc.Render.Stylesheet.css(),
+          File.read!(Path.join(api, "lib/barkpark_web/layouts/bulldocs.html.heex")),
+          File.read!(Path.join(api, "priv/static/assets/bp-paper-editor-shell.css")),
+          File.read!(Path.join(api, "priv/static/assets/bp-media-picker.css")),
+          File.read!(Path.join(api, "priv/static/assets/asciinema-player.css"))
+        ]
+        |> Enum.join("\n")
+        |> then(&Regex.replace(~r{/\*.*?\*/}s, &1, ""))
+
+      reachable =
+        for [_, selectors, body] <- Regex.scan(~r/([^{}]+)\{([^{}]*)\}/, css),
+            Regex.match?(~r/position\s*:\s*(fixed|sticky|absolute)/, body),
+            selector <- String.split(selectors, ","),
+            selector = String.trim(selector),
+            reachable?(selector),
+            do: selector
+
+      assert Enum.uniq(reachable) == []
+    end
+  end
+
+  # Whether stored markup can be the subject of `selector`: the subject has
+  # no class or data attribute the sanitizer drops, and no ancestor names a
+  # renderer class it denies (the page's own markup never carries one). A pseudo-element subject holds no stored markup.
+  # The asciinema player's `pre.ap-terminal .ap-line span` is its own widget:
+  # stored markup can neither carry `ap-` classes nor sit inside it.
+  defp reachable?(selector) do
+    compounds = String.split(selector, ~r/\s*[>+~]\s*|\s+/, trim: true)
+    subject = List.last(compounds) || ""
+    classes = &Regex.scan(~r/\.([a-zA-Z_][a-zA-Z0-9_-]*)/, &1, capture: :all_but_first)
+    data = &Regex.scan(~r/\[(data-[a-z0-9_-]+)/, &1, capture: :all_but_first)
+
+    cond do
+      subject =~ ~r/::|:(before|after|marker|placeholder|backdrop)\b/ ->
+        false
+
+      Enum.any?(classes.(selector), fn [c] -> String.starts_with?(c, "ap-") end) ->
+        false
+
+      Enum.any?(classes.(subject), fn [c] -> not S.keep_class?(c) end) ->
+        false
+
+      Enum.any?(data.(subject), fn [d] -> S.sanitize(~s|<p #{d}="1">x</p>|) == "<p>x</p>" end) ->
+        false
+
+      Enum.any?(classes.(selector), fn [c] -> c in S.denied_classes() end) ->
+        false
+
+      true ->
+        true
+    end
+  end
+end

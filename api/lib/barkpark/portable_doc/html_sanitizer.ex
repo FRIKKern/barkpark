@@ -39,22 +39,32 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
       `noscript`, `template`, `svg`, `math`, `form`, `frame`, `frameset`,
       `link`, `meta`, `base`, `title`, and the raw-text `xmp`, `noframes`
       and the no-embed element, whose content a parser and a browser can
-      read differently);
+      read differently, and `plaintext` and `listing`);
+    * a custom element (a tag name with a hyphen) the renderer does not emit
+      is unwrapped, its text kept: a Studio component draws its `value` into
+      the page;
     * comments are removed (IE conditional-comment script vector);
-    * only allowed ATTRIBUTES are kept: `@attributes`, and any `data-…` or
-      `aria-…`. So no `on…` handler, `srcdoc`, `formaction` or a name with a
-      character reference in it survives;
+    * only allowed ATTRIBUTES are kept: `@attributes`, the `data-…` names
+      the renderer writes, and any `aria-…`. So no `on…` handler, `srcdoc`,
+      `formaction` or a name with a character reference in it survives;
+    * `class` keeps only the names the renderer emits, less those the reader
+      CSS takes out of the flow; `style` keeps only the properties the
+      renderer writes, `position`/`top`/`left` by value, and no value that
+      loads, escapes or is sized to the viewport. Nothing stored can cover
+      the page (#28404 review, F4);
     * a script address in a URL attribute (`javascript:`, `vbscript:`,
       `blob:`, a `data:` that is not `data:image/…`) becomes `#`. The parser
       has decoded the value's character references, as a browser does.
 
   ## Clean markup keeps its bytes
 
-  When the parse finds nothing to remove, the input is returned unchanged:
-  the parser's tree is what a browser builds from those same bytes, so they
-  are safe as they are. Only markup that loses something is written back
-  from the tree, so a stored paper's clean `body_html` (and every render the
-  reader serves) is byte-identical to before.
+  When the parse finds nothing to remove AND the tree reads back as the input
+  byte for byte, the input is returned unchanged: the parser's tree is what a
+  browser builds from those same bytes, so they are safe as they are. Markup
+  that loses something, or does not read back (a tag left open at the end,
+  which the reader's own `</article>` would close; #28404 review, F1), is
+  written back from the clean tree. A stored paper's clean `body_html` is
+  byte-identical to before.
 
   This is the first layer; the reader's `script-src 'self' 'nonce-…'` CSP is
   the backstop. Defense in depth — neither layer is trusted alone.
@@ -68,12 +78,121 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     | ~w(
         script style iframe object embed applet noscript template
         svg math form frame frameset link meta base title
-        xmp noframes
+        xmp noframes plaintext listing
       )
   ]
 
+  # Custom elements (a tag name with a hyphen) the Paper renderer emits: none
+  # today. Any other custom element is unwrapped, its text kept: a Studio
+  # component such as `bp-rich-text-editor` draws its `value`/`data-value`
+  # into the page, so a stored one would draw unsanitised HTML. A test
+  # derives the renderer's names from its goldens and reds when one is
+  # missing here.
+  @custom_elements []
+
+  # The CSS properties the producer and the Paper renderer write in `style`
+  # (read off the renderer goldens' `expectedHtml`, the email golden and
+  # `render/*.ex`). A declaration of any other property is dropped, and so is
+  # one whose value could load, escape or size to the viewport (`url(`,
+  # `expression(`, `image-set(`, a `\` escape, `@`, `<`, `>`, a brace,
+  # `vw`/`vh`). Never: `z-index`, `inset`, `right`, `bottom`, `transform`.
+  # `position`, `top` and `left` are judged by value (`placed?/2`).
+  @style_properties ~w(
+    align-items background background-color border border-bottom
+    border-collapse border-left border-radius border-top border-top-width
+    box-sizing color cursor display flex flex-direction font-family font-size
+    font-style font-weight gap grid-column grid-template-columns height
+    letter-spacing line-height list-style margin margin-bottom margin-inline
+    margin-left margin-top max-width min-width opacity overflow overflow-wrap
+    overflow-x padding padding-bottom padding-left padding-top text-align
+    text-decoration text-transform vertical-align white-space width
+  )
+  @placed_properties ~w(position top left)
+
+  # The custom properties the renderer sets, each with a value check: a
+  # number, a length or a short token list (`repeat(3, 1fr)`), never
+  # `url(`, `\\`, `@`, `;`, `}` or `expression(` (`allowed_decl?/1`).
+  @custom_properties ~w(--bp-cols --bp-grid-gap --bp-tracks --i)
+
+  # `class`: only the names the Paper renderer emits for body content. Read
+  # at compile time off the renderer's source: every literal class token in a
+  # `class="…"` and its block's `__element` and `--modifier` names, and for a
+  # token built by interpolation (`bp-role-#{role}`) any name that starts
+  # with its literal part.
+  @render_sources [
+    Path.join(__DIR__, "render.ex") | Path.wildcard(Path.join(__DIR__, "render/*.ex"))
+  ]
+  for path <- @render_sources, do: @external_resource(path)
+
+  # And off what it renders: the goldens' `expectedHtml`, which hold names
+  # the source builds without a `class="…"` literal (`"bp-role-" <> role`).
+  @goldens Path.wildcard(
+             Path.expand("../../../priv/portable_doc/goldens/*/*.golden.json", __DIR__)
+           )
+  for path <- @goldens, do: @external_resource(path)
+
+  @rendered @goldens
+            |> Enum.map(&(&1 |> File.read!() |> Jason.decode!() |> Map.get("expectedHtml")))
+            |> Enum.filter(&is_binary/1)
+
+  {exact, prefixes} =
+    (Enum.map(@render_sources, &File.read!/1) ++ @rendered)
+    |> Enum.flat_map(&Regex.scan(~r/class=\\?"([^"\\]*)/, &1, capture: :all_but_first))
+    |> Enum.flat_map(fn [value] -> String.split(value) end)
+    |> Enum.reduce({MapSet.new(), MapSet.new()}, fn token, {exact, prefixes} ->
+      [base | _] = String.split(token, "\#{")
+      block = base |> String.split(["__", "--"]) |> hd()
+
+      cond do
+        # Built by interpolation: what follows its literal start.
+        String.contains?(token, "\#{") and Regex.match?(~r/^bp-[a-z0-9_-]+$/, base) ->
+          {exact,
+           prefixes |> MapSet.put(base) |> MapSet.put(block <> "__") |> MapSet.put(block <> "--")}
+
+        String.contains?(token, "\#{") ->
+          {exact, prefixes}
+
+        # A BEM name: its block's elements and modifiers too.
+        Regex.match?(~r/^bp-[a-z0-9_-]+$/, token) ->
+          {MapSet.put(exact, token),
+           prefixes |> MapSet.put(block <> "__") |> MapSet.put(block <> "--")}
+
+        Regex.match?(~r/^[a-zA-Z_][a-zA-Z0-9_-]*$/, token) ->
+          {MapSet.put(exact, token), prefixes}
+
+        true ->
+          {exact, prefixes}
+      end
+    end)
+
+  @render_classes exact
+  @render_prefixes prefixes |> MapSet.to_list() |> Enum.sort()
+
+  # `data-…`: only the names the renderer writes. CSS and the reader's
+  # scripts select on data attributes too (the editor shell's
+  # `[data-paper-link-open] { position: absolute; inset: 0 }`), so a stored
+  # one is a hook, not inert data.
+  @render_data_attrs (Enum.map(@render_sources, &File.read!/1) ++ @rendered)
+                     |> Enum.flat_map(
+                       &Regex.scan(~r/\b(data-[a-z0-9_-]*[a-z0-9])\b/, &1,
+                         capture: :all_but_first
+                       )
+                     )
+                     |> List.flatten()
+                     |> MapSet.new()
+
+  # Renderer classes the reader CSS takes out of the flow (`position:
+  # absolute`, `fixed` or `sticky` on the element, or on an `input` under it)
+  # while `style` can size the box: on stored markup each is an overlay
+  # (#28404 review, F4). A test reads the reader CSS and reds when a
+  # positioned rule's subject is reachable with the classes kept here.
+  @denied_classes ~w(
+    bp-rm__bar bp-rm__ms bp-rm__note bp-rm__today bp-rm__unplaced
+    bp-toc--sticky bp-form-q--scale bp-form-q--yesno
+  )
+
   # The attributes producer HTML carries (Markdown/pdrender and the Paper
-  # renderer's own output), plus any `data-…` and `aria-…`.
+  # renderer's own output), plus the renderer's `data-…` and any `aria-…`.
   @attributes ~w(
     href src alt title class id style role name lang dir translate hidden
     width height align valign colspan rowspan scope headers span start
@@ -95,14 +214,26 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   @spec sanitize(term()) :: term()
   def sanitize(html) when is_binary(html) do
     tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree()
+    clean = scrub(tree)
 
-    case scrub(tree) do
-      ^tree -> html
-      clean -> clean |> LazyHTML.from_tree() |> LazyHTML.to_html()
-    end
+    # The input itself only when nothing was removed AND it ends closed. A tag
+    # left open at the end (`<img src=x onerror=… `) parses to nothing here,
+    # but in the page the markup after it (the reader's own `</article>`)
+    # completes it (#28404 review, F1). So the input is read again with a
+    # paragraph after it: markup that ends closed reads as its own tree and
+    # that paragraph; an open tag, attribute, comment or raw-text element
+    # takes the paragraph in. Else the clean tree is written back.
+    if clean == tree and ends_closed?(html, tree),
+      do: html,
+      else: clean |> LazyHTML.from_tree() |> LazyHTML.to_html()
   end
 
   def sanitize(other), do: other
+
+  defp ends_closed?(html, tree) do
+    (html <> "<p></p>") |> LazyHTML.from_fragment() |> LazyHTML.to_tree() ==
+      tree ++ [{"p", [], []}]
+  end
 
   defp scrub(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &scrub_node/1)
 
@@ -110,11 +241,20 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
 
   defp scrub_node({tag, attrs, children}) when is_binary(tag) do
     cond do
-      String.downcase(tag) in @dangerous_elements -> []
+      String.downcase(tag) in @dangerous_elements ->
+        []
+
       # A name no element has, such as `scr<script` from `<scr<script>ipt>`:
       # its content stays, the tag goes.
-      not Regex.match?(~r/^[a-z][a-z0-9-]*$/i, tag) -> scrub(children)
-      true -> [{tag, Enum.flat_map(attrs, &scrub_attr/1), scrub(children)}]
+      not Regex.match?(~r/^[a-z][a-z0-9-]*$/i, tag) ->
+        scrub(children)
+
+      # A custom element the renderer does not emit: its text stays.
+      String.contains?(tag, "-") and String.downcase(tag) not in @custom_elements ->
+        scrub(children)
+
+      true ->
+        [{tag, Enum.flat_map(attrs, &scrub_attr/1), scrub(children)}]
     end
   end
 
@@ -126,14 +266,88 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     cond do
       not allowed_attr?(key) -> []
       key in @url_attrs and dangerous_url?(value) -> [{name, "#"}]
+      key == "style" -> scrub_style(name, value)
+      key == "class" -> scrub_class(name, value)
       true -> [{name, value}]
+    end
+  end
+
+  @doc "The custom elements the sanitizer keeps: those the Paper renderer emits."
+  def custom_elements, do: @custom_elements
+
+  @doc "The renderer classes dropped because the reader CSS takes them out of the flow."
+  def denied_classes, do: @denied_classes
+
+  @doc "Whether `class` keeps the name `token` (`@render_classes`, `@denied_classes`)."
+  @spec keep_class?(String.t()) :: boolean()
+  def keep_class?(token) when is_binary(token) do
+    token not in @denied_classes and
+      (MapSet.member?(@render_classes, token) or
+         Enum.any?(@render_prefixes, &String.starts_with?(token, &1)))
+  end
+
+  defp scrub_class(name, value) do
+    tokens = String.split(value)
+    kept = Enum.filter(tokens, &keep_class?/1)
+
+    cond do
+      kept == tokens -> [{name, value}]
+      kept == [] -> []
+      true -> [{name, Enum.join(kept, " ")}]
+    end
+  end
+
+  # Keep the declarations `@style_properties` allows, as written; the value is
+  # the input's own bytes when every declaration stays.
+  defp scrub_style(name, value) do
+    decls = String.split(value, ";")
+    kept = Enum.filter(decls, &(String.trim(&1) == "" or allowed_decl?(&1)))
+
+    cond do
+      kept == decls -> [{name, value}]
+      Enum.all?(kept, &(String.trim(&1) == "")) -> []
+      true -> [{name, Enum.join(kept, ";")}]
+    end
+  end
+
+  defp allowed_decl?(decl) do
+    case String.split(decl, ":", parts: 2) do
+      [prop, val] ->
+        prop = prop |> String.trim() |> String.downcase()
+        val = String.trim(val)
+
+        not Regex.match?(
+          ~r/url\(|expression\(|image-set\(|\\|@|<|>|\}|\{|\d(?:[sld]?v[wh]|vmin|vmax)\b/i,
+          val
+        ) and
+          (prop in @style_properties or (prop in @placed_properties and placed?(prop, val)) or
+             (prop in @custom_properties and Regex.match?(~r/^[a-z0-9.%#\s,()+*\/-]{1,64}$/i, val)))
+
+      _ ->
+        false
+    end
+  end
+
+  # `position: relative` only, and `top`/`left` as 0–100% or at most 2rem/2em
+  # either way: the section divider's mark and the roadmap's bars. Nothing
+  # placed so can leave its own block to cover the page.
+  defp placed?("position", val), do: String.downcase(val) == "relative"
+
+  defp placed?(_prop, "0"), do: true
+
+  defp placed?(_prop, val) do
+    case Regex.run(~r/^(-?\d+(?:\.\d+)?)(%|rem|em)$/i, val) do
+      [_, n, "%"] -> (x = elem(Float.parse(n), 0)) >= 0 and x <= 100
+      [_, n, _unit] -> abs(elem(Float.parse(n), 0)) <= 2.0
+      _ -> false
     end
   end
 
   defp allowed_attr?(key),
     do:
       key in @attributes or
-        Regex.match?(~r/^(data|aria)-[a-z0-9_.:-]+$/, key)
+        MapSet.member?(@render_data_attrs, key) or
+        Regex.match?(~r/^aria-[a-z0-9_.:-]+$/, key)
 
   defp dangerous_url?(value) do
     # A browser removes ASCII whitespace/control (incl. tab/newline/CR) while

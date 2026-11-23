@@ -171,15 +171,18 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
 
       assert length(docs) > 100
       changed = for {name, html} <- docs, S.sanitize(html) != html, do: name
-      assert changed == []
+      # These three carry a class the reader CSS takes out of the flow
+      # (`html_sanitizer_review_test.exs`, F4): their legacy copies lose it.
+      assert Enum.sort(changed) ==
+               ~w(form.golden.json questionnaire.golden.json roadmap.golden.json)
     end
 
     for {name, html} <- [
           {"a table without tbody", "<table><tr><td>a</td></tr></table>"},
-          {"unquoted and single-quoted attributes", "<p class=lead id='x'>a &amp; b</p>"},
+          {"unquoted and single-quoted attributes", "<p class=bp-hr id='x'>a &amp; b</p>"},
           {"a void element written XHTML-style",
            "<p>a<br/>b<img src=\"https://x/y.png\" alt=\"\"/></p>"},
-          {"upper-case tags", "<P CLASS=\"x\">A</P>"},
+          {"upper-case tags", "<P CLASS=\"bp-hr\">A</P>"},
           {"data and aria attributes",
            ~s|<span data-wikilink="x" aria-label="y" role="note">z</span>|}
         ] do
