@@ -362,6 +362,8 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
   const onPage = async (j) => {
     let page
     try {
+      // PLANT: the light's second page cannot open.
+      if (j === 1) throw new Error('planted: no second page')
       page = await open(ctx, { scale: 2, height: 1600 })
     } catch (e) {
       return failAt(-1, new Error(`the skins light could not open its page ${j + 1} of ${shares.length}: ${String(e.message).split('\n')[0]}`))

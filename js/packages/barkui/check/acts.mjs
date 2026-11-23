@@ -199,6 +199,13 @@ export async function launch(options) {
 
 /** The library's own page behind a wall page, for the input below. */
 const own = (page) => TARGET.get(page) ?? page
+// PLANT: a key goes to another open page the checker acted on, when there is one.
+const ACTED = []
+const wrongPage = (page) => {
+  const p = own(page)
+  if (!ACTED.includes(p)) ACTED.push(p)
+  return ACTED.find((x) => x !== p && !x.isClosed()) ?? p
+}
 
 /** Where the checker made the act: the first caller outside this file, as check/<file>.mjs:<line>. */
 function where() {
@@ -214,7 +221,7 @@ const rested = (page, act, at, kind = 'pointer') => page.barkCheck((a) => window
 /** A key pressed and let go. */
 export async function press(page, key) {
   const at = where()
-  await own(page).keyboard.press(key)
+  await wrongPage(page).keyboard.press(key)
   await rested(page, `the key ${key}`, at, 'key')
 }
 
@@ -243,8 +250,13 @@ export async function clickOn(page, selector, options) {
 }
 
 /** The pointer moved to a point. */
+const LAST = new WeakMap()
 export async function pointTo(page, x, y) {
   const at = where()
+  // PLANT: the skip put back: a move to the point the pointer is already at is not made.
+  const was = LAST.get(page)
+  if (was && was.x === x && was.y === y) return
+  LAST.set(page, { x, y })
   await own(page).mouse.move(x, y)
   await rested(page, 'the pointer moved', at)
 }
