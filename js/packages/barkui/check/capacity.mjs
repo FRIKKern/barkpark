@@ -45,13 +45,13 @@ export const INPUT = {
     // One reading per selftest job (check/jobs.mjs, SELFTEST_JOBS): that job's whole run, as it printed it
     // ("selftest: N of N cases held, in S s"), with the job it came from.
     selftest: {
-      views: { seconds: 171, job: 137640566076, run: 45159302143, commit: '5883068c68' },
-      rest: { seconds: 48, job: 137640565962, run: 45159302143, commit: '5883068c68' },
-      layers: { seconds: 107, job: 137640565939, run: 45159302143, commit: '5883068c68' },
+      views: { seconds: 201, job: 137754186448, run: 45192291440, commit: 'ff599196ef' },
+      rest: { seconds: 63, job: 137754186506, run: 45192291440, commit: 'ff599196ef' },
+      layers: { seconds: 133, job: 137754186372, run: 45192291440, commit: 'ff599196ef' },
       // Jobs split off another (`from`): each stands under the ceiling of the job it came from.
-      surfaces: { seconds: 185, from: 'views', job: 137640565923, run: 45159302143, commit: '5883068c68' },
-      states: { seconds: 144, from: 'rest', job: 137640565958, run: 45159302143, commit: '5883068c68' },
-      open: { seconds: 111, from: 'layers', job: 137640565954, run: 45159302143, commit: '5883068c68' },
+      surfaces: { seconds: 185, from: 'views', job: 137754186425, run: 45192291440, commit: 'ff599196ef' },
+      states: { seconds: 137, from: 'rest', job: 137754186267, run: 45192291440, commit: 'ff599196ef' },
+      open: { seconds: 108, from: 'layers', job: 137754186386, run: 45192291440, commit: 'ff599196ef' },
     },
   },
 }
