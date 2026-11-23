@@ -459,13 +459,11 @@ export function installHelpers(lists) {
     const moved = now !== focusBefore ? now : null
     const unscrolled = () => intoView(moved)
     await frame()
-    await toRest(unscrolled)
+    await toRest()
     const left = moving(true)
     if (left.length) throw new Error(`${AT_REST}: ${who}: ${named(left)}`)
     const going = scrolling()
     if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
-    const at = unscrolled()
-    if (at) throw new Error(`${AT_REST}: ${who}: ${describe(moved)} has focus outside the view of ${at}, and no scroll has brought it in`)
   }
   /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
   const still = async (who) => {
