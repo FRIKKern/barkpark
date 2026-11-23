@@ -95,7 +95,7 @@ export function installDrawn() {
     watch?.disconnect()
     measured = new Set([root, ...h.shown(root)])
     noted = []
-    watch = new MutationObserver((rs) => noted.push(...rs))
+    watch = new MutationObserver(() => {})
     watch.observe(root, { childList: true, subtree: true })
     const graphicEls = [...root.querySelectorAll('svg, img')].filter((g) => !(g.parentElement?.closest('svg')) && g.checkVisibility())
     const painting = new Map()
@@ -358,7 +358,7 @@ export function installDrawn() {
       if (t.kind === 'text' && pairs.length) r.fits = fitsOf(t, pairs)
       return r
     })
-    const records = [...noted, ...(watch?.takeRecords() ?? [])]
+    const records = watch?.takeRecords() ?? []
     noted = []
     watch?.disconnect()
     watch = null
