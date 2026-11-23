@@ -195,7 +195,7 @@ export const CHECKED_CASES = [
       boxes([TICK_PIN, TICK_ON]),
       inCss(BOX),
       // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
-      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
+      inCss('[id^="tabs-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
     ),
     expect: each(checkedRows.blank),
   },
@@ -208,7 +208,7 @@ export const CHECKED_CASES = [
       boxes([TICK, TICK_PIN, TICK_ON]),
       inCss(BOX),
       // A change only the real click shows: no pinned row carries it.
-      inCss('#button-tick:checked { border-width: 3px; }'),
+      inCss('#tabs-tick:checked { border-width: 3px; }'),
       // The demo's change handler marks another element; the check puts back only what is checked.
       (d) => demoWith(d, "  root.querySelector('#tabs-tick').addEventListener('change', () => root.querySelector('#tabs-main-panel-overview').setAttribute('data-demo-seen', ''))"),
     ),
