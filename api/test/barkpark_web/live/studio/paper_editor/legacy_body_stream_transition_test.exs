@@ -128,7 +128,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
     # The stored HTML paints inside its own box (#28404 review, B2).
     assert html
            |> query(
-             ~s|article[id="paper-body-legacy-#{@legacy_slug}"][style="contain: paint; overflow-x: auto"]|
+             ~s|article[id="paper-body-legacy-#{@legacy_slug}"][style="contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%"]|
            )
            |> Enum.count() == 1
 

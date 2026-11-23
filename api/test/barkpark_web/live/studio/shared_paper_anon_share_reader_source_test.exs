@@ -175,7 +175,7 @@ defmodule BarkparkWeb.Studio.SharedPaperAnonShareReaderSourceTest do
     assert Enum.any?(
              articles,
              &(&1 =~
-                 ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+"(?: style="contain: paint; overflow-x: auto")?>$/)
+                 ~r/^<article id="paper-body-(?!unrenderable-)[^"]+" data-rev="\d+"(?: style="contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%")?>$/)
            ),
            """
            expected the READ-ONLY raw arm (the fixture's document is #{slug}).

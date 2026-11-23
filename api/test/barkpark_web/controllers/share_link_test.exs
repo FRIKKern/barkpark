@@ -308,7 +308,9 @@ defmodule BarkparkWeb.ShareLinkTest do
 
     assert resp.resp_body
            |> LazyHTML.from_document()
-           |> LazyHTML.query(~s(article#paper-body[style="contain: paint; overflow-x: auto"]))
+           |> LazyHTML.query(
+             ~s(article#paper-body[style="contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%"])
+           )
            |> Enum.count() == 1
   end
 

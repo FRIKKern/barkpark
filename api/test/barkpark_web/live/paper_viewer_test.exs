@@ -80,7 +80,9 @@ defmodule BarkparkWeb.PaperViewerTest do
       # review, B2): nothing in it reaches the page around the article.
       assert html
              |> LazyHTML.from_document()
-             |> LazyHTML.query(~s(article#paper-body[style="contain: paint; overflow-x: auto"]))
+             |> LazyHTML.query(
+               ~s(article#paper-body[style="contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%"])
+             )
              |> Enum.count() == 1
 
       # The verdict never leaks into the anonymous page. Asserted on what the

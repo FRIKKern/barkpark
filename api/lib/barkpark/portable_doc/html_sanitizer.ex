@@ -238,8 +238,13 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   reader): nothing inside it paints or takes a click outside it, a fixed
   box included (#28404 review, B2). What the scrub keeps cannot cover the
   page; this keeps a gap a future style lets through inside the article.
+
+  A wide block in a renderer copy (a figure, a table, code) is pulled past
+  the column by `--bp-evidence-pull`; here it keeps to the column instead
+  of being cut off, and anything wider scrolls inside the box.
   """
-  def contain, do: "contain: paint; overflow-x: auto"
+  def contain,
+    do: "contain: paint; overflow-x: auto; --bp-evidence-pull: 0px; --bp-evidence-width: 100%"
 
   # The paragraph carries text: an `<a>`, `<b>`, `<font>`… left open across
   # a closing `</p>`, `</li>` or `</td>` stays on the parser's list of active
