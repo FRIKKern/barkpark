@@ -104,9 +104,11 @@ export const CASE_READINGS = {
       // 45054609251, commit c05b1f9a135c452f4b04e8ad1c508d872e04b80e).
       "at rest: motion declared on ::placeholder, ::marker or ::file-selector-button, and a shadow root on the page, are red by name": 1.7,
       "at rest: the checker's skin switch reads at rest straight after on a sound page, and is red by name on a page moving by its own rule": 2.9,
-      // One more at-rest case, added after the run above: from its PR's hosted run, job 137318718251 (run
-      // 45058367073, commit d40bb57fab334c0aac7082d0a57e266a41aa8255).
-      "at rest: every motion property of the vocabulary is read under its own rule, and is red by name where the check cannot see it": 1,
+      // Three more at-rest cases, added after the run above: from their PR's hosted run, job 137541960598 (run
+      // 45129568567, commit b038e90ba51e8db46b75412b1b33d11078b542c0).
+      "at rest: every motion property of the vocabulary is read under its own rule, and is red by name where the check cannot see it": 1.3,
+      "at rest: a key the checker presses leaves the page at rest before the next read, under reduced motion and outside it": 11.9,
+      "at rest: what the check reads about motion holds in every state the checker puts a page in, under reduced motion and outside it": 7.9,
     },
   },
   views: {
