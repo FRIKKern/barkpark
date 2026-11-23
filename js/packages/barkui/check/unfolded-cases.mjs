@@ -130,7 +130,6 @@ export const STATE_CASES = [
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
       inCss('#button-save:hover { color: var(--bark-success-foreground); }'),
-      inCss('html[data-skin="charple"][data-color-scheme="light"] #button-after { --bark-button-fg: var(--bark-button-bg); }'),
       // A box no layer names, open only while the pointer is on the Duplicate button (a driven state).
       (d) => appendFileSync(join(d, 'example.html'), '\n<div data-demo-row><div id="button-hover-tip" popover="manual">Shown on hover</div></div>\n'),
       (d) => inDemo(d, "{ const b = root.querySelector('#button-after'), t = root.querySelector('#button-hover-tip'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }"),
@@ -140,6 +139,7 @@ export const STATE_CASES = [
       // the first kept off the save button, which the dark-only plant above needs proven and held.
       '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled], #button-save) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
+      'html[data-skin="charple"][data-color-scheme="light"] #button-after { --bark-button-fg: var(--bark-button-bg); }',
     ].join('\n'),
     expect: each(stateRows.drawn),
   },
