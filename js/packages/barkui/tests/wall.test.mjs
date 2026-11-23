@@ -5,6 +5,8 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { refusedLoad } from '../check/load-wall.mjs'
+import { throughWall, WallRefusal } from '../check/acts.mjs'
+import { PLAIN } from '../check/wall.mjs'
 
 const PKG = fileURLToPath(new URL('..', import.meta.url))
 const at = (f) => new URL(`../check/${f}`, import.meta.url).href
@@ -32,5 +34,30 @@ describe('the load wall', () => {
     const got = run("const { launch } = await import('./check/acts.mjs'); await launch()", false)
     expect(got.status).not.toBe(0)
     expect(got.stderr).toMatch(/the check starts with its load wall: node --import \.\/check\/load-wall\.mjs <script>/)
+  })
+})
+
+describe('the wall, by default', () => {
+  class Gadget {
+    poke() {}
+  }
+  const refused = (f) => expect(f).toThrow(WallRefusal)
+
+  it('walls a value of a kind it does not know, wherever it sits', async () => {
+    refused(() => throughWall(new Gadget()).poke)
+    refused(() => throughWall({ a: [{ b: new Gadget() }] }).a[0].b.poke)
+    refused(() => throughWall(new Map([[1, new Gadget()]])).get)
+    refused(() => throughWall(() => 1)())
+    refused(() => throughWall(Object.assign(new Error('x'), { held: new Gadget() })).held)
+    refused(() => throughWall(Object.create(Gadget.prototype)).poke)
+    await expect(throughWall(Promise.resolve(new Gadget())).then((g) => g.poke)).rejects.toThrow(WallRefusal)
+    await expect(throughWall(Promise.reject(new Gadget())).catch((g) => g.poke)).rejects.toThrow(WallRefusal)
+  })
+
+  it('hands on as it is only the plain kinds of one closed list', () => {
+    expect(PLAIN).toEqual(['Object', 'Array', 'Buffer', 'Uint8Array', 'ArrayBuffer', 'Date', 'RegExp', 'Error'])
+    const samples = [{ a: 1 }, [1], Buffer.from('x'), new Uint8Array(1), new ArrayBuffer(1), new Date(0), /x/, new Error('x')]
+    for (const v of samples) expect(throughWall(v)).toBe(v)
+    for (const v of [1, 'x', true, null, undefined, 1n, Symbol.for('x')]) expect(throughWall(v)).toBe(v)
   })
 })

@@ -85,7 +85,7 @@ function wall(v, seen = new Set()) {
   if (v === null || (typeof v !== 'object' && typeof v !== 'function')) return v
   if (TARGET.has(v)) return v
   if (WALLS.has(v)) return WALLS.get(v)
-  if (v instanceof Promise) return v.then((x) => wall(x))
+  if (v instanceof Promise) return v.then((x) => wall(x), thrown)
   const plain = typeof v === 'object' ? plainOf(v) : null
   if (plain === 'Array' || plain === 'Object') {
     if (seen.has(v)) return v
@@ -99,9 +99,21 @@ function wall(v, seen = new Set()) {
     }
     return out
   }
+  // An error is data while every field of its own is: one that holds anything else is a wall object.
+  if (plain === 'Error') {
+    if (seen.has(v)) return v
+    seen.add(v)
+    return Object.keys(v).every((k) => wall(v[k], seen) === v[k]) ? v : walled(v)
+  }
   if (plain) return v
   return walled(v)
 }
+/** What a call throws or a promise rejects with goes through the wall as well. */
+const thrown = (e) => {
+  throw wall(e)
+}
+/** The wall, for the tests: what any value is once it has passed. */
+export const throughWall = (v) => wall(v)
 /** A wall object for `v`: on it, a name on the closed list for its kind goes through, and every other name is refused
     by name; called, if it is a function, it is refused. */
 function walled(v) {
@@ -118,8 +130,13 @@ function walled(v) {
       if (typeof value !== 'function') return wall(value)
       return (...args) => {
         if (kind === 'CDPSession' && name === 'send' && !CDP_ALLOWED.includes(args[0])) refuse(kind, `send('${args[0]}')`)
-        const out = value.apply(t, args.map((a) => given(name, a)))
-        return out && typeof out.then === 'function' ? out.then(wall) : wall(out)
+        let out
+        try {
+          out = value.apply(t, args.map((a) => given(name, a)))
+        } catch (e) {
+          thrown(e)
+        }
+        return out && typeof out.then === 'function' ? out.then((x) => wall(x), thrown) : wall(out)
       }
     },
     set(t, name, value) {
