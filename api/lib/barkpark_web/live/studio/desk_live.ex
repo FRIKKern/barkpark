@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(:desk_inspect, false)
       # The question before leaving a held field (`LeaveGuard`): not asked.
       |> assign(desk_leave: nil, desk_leave_pass: false)
-      |> attach_hook(:desk_leave, :after_render, &LeaveGuard.follow/1)
+      |> attach_hook(:desk_leave, :after_render, &leave_follow/1)
       # The desk's own tool in place of the panes (`Vision`), from the URL.
       |> assign(:desk_tool, nil)
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
@@ -649,6 +649,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
+
+  # After each render (`LeaveGuard.follow/1`): a local capture, so the
+  # receipt census reads the hook (LIVEVIEW-HOOK-FN-RESOLVES).
+  defp leave_follow(socket), do: LeaveGuard.follow(socket)
 
   @impl true
   def render(assigns) do
