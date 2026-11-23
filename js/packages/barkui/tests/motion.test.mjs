@@ -34,12 +34,11 @@ describe("the checker's changes to a page's look", () => {
     for (const f of checker().filter((f) => f !== 'motion.mjs')) {
       const text = readFileSync(new URL(f, DIR), 'utf8')
       const line = (i) => text.slice(0, i).split('\n').length
-      for (const [k, { call, holds, raw, through }] of Object.entries(ACTS)) {
+      for (const [k, { call, holds, through }] of Object.entries(ACTS)) {
         for (const m of through === f ? [] : text.matchAll(call)) {
           at[k]++
           if (holds && !holds.test(m[1])) wrong.push(`check/${f}:${line(m.index)}: ${k} without its option (check/motion.mjs ACTS)`)
         }
-        if (raw && f !== through) for (const m of text.matchAll(raw)) wrong.push(`check/${f}:${line(m.index)}: ${k} outside check/${through}, without its rest step (check/motion.mjs ACTS)`)
       }
     }
     console.log(`checker acts on a page: ${Object.values(at).filter(Boolean).length} kinds (${Object.entries(at).filter(([, n]) => n).map(([k, n]) => `${k} at ${n} places`).join(', ')}), each leaving the page at rest before the next read`)

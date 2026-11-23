@@ -9,6 +9,8 @@
 // carries every reason it is off (`fails`), and each plant asserts that one of
 // them names its own control. The ladder measures what the label reading's
 // limit costs and holds docs/PARTS.md's sentence to it.
+import { movesLine, press } from './acts.mjs'
+import { wallLine } from './wall.mjs'
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,6 +29,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
+import { WALL_CASES } from './wall-cases.mjs'
 import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
@@ -265,7 +268,7 @@ steps.push({
         const part = built.parts.find((x) => x.name === 'button')
         const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { scale: 2, height: 1600 })
         await page.barkCheck(() => document.getElementById('button-sel-before').focus())
-        await page.keyboard.press('Tab')
+        await press(page, 'Tab')
         const held = await page.barkCheck(() => {
           const f = document.getElementById('button-sel')
           return document.activeElement === f && f.selectionStart === 0 && f.selectionEnd === f.value.length
@@ -608,6 +611,7 @@ steps.push({
   ...LAYER_CASES,
   ...PLACEMENT_CASES,
   ...REST_CASES,
+  ...WALL_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
@@ -716,6 +720,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const count = { held: run.length - failures, of: run.length }
   console.log(holderSentence())
+  console.log(movesLine())
+  console.log(wallLine())
   console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
   if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)

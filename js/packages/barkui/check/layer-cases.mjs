@@ -1,6 +1,7 @@
 // The selftest's cases for the top layer (check/layers.mjs): a box the part names is read open, on the ground the
 // page really draws behind it; what can open in the top layer and no layer names is a fail by name, open or not;
 // and a named box that opens late fails by name.
+import { clickOn } from './acts.mjs'
 import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -188,7 +189,7 @@ async function overTwoGrounds() {
     const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
     const part = built.parts.find((x) => x.name === 'button')
     const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { scale: 2, height: 1600 })
-    await page.click('#button-pop-open')
+    await clickOn(page, '#button-pop-open')
     const readings = {}
     for (const ground of ['white', 'black']) {
       // The check moves the box over the middle of that ground: the box's DOM parent stays the same row.

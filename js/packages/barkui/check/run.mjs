@@ -7,6 +7,8 @@
 // (check/jobs.mjs). It splits the folder again, refuses unless its group k is the
 // list the plan handed it, checks only those parts on the whole page, and writes
 // its report for the closing check: group, parts, commit, and whether it passed.
+import { movesLine } from './acts.mjs'
+import { wallLine } from './wall.mjs'
 import { writeFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { capacitySentence, ceilingFor } from './capacity.mjs'
@@ -37,5 +39,7 @@ enforceCeiling(
 if (group) console.log(`check: group ${group.group} of ${group.of}: ${names.join(', ')}${dir === partsDir ? '' : ` (from ${dir})`}`)
 const { ok } = await runCheck({ dir, names })
 console.log(holderSentence())
+console.log(movesLine())
+console.log(wallLine())
 if (args.report) writeFileSync(args.report, JSON.stringify({ group: group?.group ?? null, of: group?.of ?? null, parts: names, sha: process.env.GITHUB_SHA ?? '', ok }) + '\n')
 process.exit(ok ? 0 : 1)

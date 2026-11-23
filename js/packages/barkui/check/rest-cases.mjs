@@ -16,7 +16,7 @@ import { readView, verdict } from './reading.mjs'
 
 /** The button part with the named "Details" popover, `css` planted, opened with motion `motion`; `go` gets the page
     and the part, and its answer is the case's. */
-async function onPage(css, motion, go) {
+export async function onPage(css, motion, go) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
   try {
@@ -37,7 +37,7 @@ async function onPage(css, motion, go) {
     what the read straight after each sees, or the error that refused it. `made`: animations on the page that are no
     transition or animation of a stylesheet's, so ones the checker would have made. */
 async function hiddenAndBack(page) {
-  await page.click('#button-pop-open')
+  await acts.clickOn(page, '#button-pop-open')
   // The click's own hover and focus changes run their course first, as they would before any reading.
   await page.waitForTimeout(100)
   const look = (on) =>
@@ -83,8 +83,8 @@ const ownLook = () =>
       }),
     'a box still fading in by its own 60 s transition is not at rest: its reading is red by name': () =>
       onPage(`${QUIET} #button-pop { transition: opacity 60s linear; } @starting-style { #button-pop:popover-open { opacity: 0; } }`, 'no-preference', async (page, part) => {
-        await page.click('#button-pop-open')
-        const read = await readView(page, part).then(() => 'read', (e) => String(e.message))
+        // The click's own rest step or the reading after it: either is red by name, and no reading is taken.
+        const read = await acts.clickOn(page, '#button-pop-open').then(() => readView(page, part)).then(() => 'read', (e) => String(e.message))
         const held = NOT_AT_REST.test(read)
         if (!held) console.log(`    reading: ${read.slice(0, 200)}`)
         return held
@@ -285,6 +285,8 @@ async function sameAfter(page, act) {
 const acts = await import('./acts.mjs').catch(() => ({
   press: (page, key) => page.keyboard.press(key),
   pointTo: (page, x, y) => page.mouse.move(x, y),
+  click: (page, x, y) => page.mouse.click(x, y),
+  clickOn: (page, s) => page.click(s),
 }))
 const held = (what, got) => {
   const ok = got.at === got.settled && got.settled !== got.before
@@ -353,8 +355,23 @@ const keyAct = () =>
 
 /** What the check reads about motion holds in every state the checker puts a page in: a rule that matches only in
     one state is read as any other, and after an act the page is at rest by what it does then. */
+const HALF = '<div style="height: 80px"></div><button id="bark-far" style="height: 40px">half</button><div style="height: 2000px"></div>'
+/** A click on the part of a control its scroller shows, the control half inside the scroller's view: the browser
+    does not scroll a click's focus, so nothing moves and nothing is red. */
+const halfClick = (what, css, motion) =>
+  onPage(css, motion, async (page) => {
+    await scroller(page, '', HALF)
+    const r = await page.barkCheck(() => document.getElementById('bark-far').getBoundingClientRect().toJSON())
+    const got = await sameAfter(page, () => acts.click(page, r.x + r.width / 2, r.y + 10))
+    const ok = got.before === got.at && got.at === got.settled
+    if (!ok) console.log(`    ${what}: before ${got.before}, read at ${got.at}, at rest at ${got.settled}`)
+    return ok
+  })
 const everyState = () =>
   each({
+    'outside reduced motion, a click onto a control half inside its scroller reads at once, not red': () =>
+      halfClick('click, half inside, no-preference', `${QUIET} ${SCROLLER} @media (prefers-reduced-motion: no-preference) { #bark-s { scroll-behavior: smooth; } }`, 'no-preference'),
+    'under reduced motion, a click onto a control half inside its scroller reads at once, not red': () => halfClick('click, half inside, reduce', SCROLLER, 'reduce'),
     'under reduced motion, a smooth scroll declared for one state only is red by name at open': async () => {
       const got = await onPage(`${SCROLLER} #bark-s:focus-within { scroll-behavior: smooth; }`, 'reduce', async () => 'opened').catch((e) => String(e.message))
       const ok = UNSEEN.test(got) && got.includes('#bark-s:focus-within declares scroll-behavior: smooth')
