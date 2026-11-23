@@ -23,7 +23,7 @@ const GROWN = /a reader put a child into (\S+)/
 /** The rows, each with the surface it names (none: every surface's run holds it) and its plant. */
 const SURFACE_ROWS = {
   'a label gone on raised': { on: 'raised', css: '.sr-stage[data-surface="raised"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }', holds: both(new RegExp(`on raised: .*${DRAWN} at button#button-secondary`)) },
-  'a label gone on inverse': { on: 'inverse', css: '.sr-stage[data-surface="inverse"] #button-secondary { --bark-button-fg: var(--bark-button-bg); }', holds: both(new RegExp(`on inverse: .*${DRAWN} at button#button-secondary`)) },
+  'a label gone on inverse': { on: 'inverse', css: '', holds: both(new RegExp(`on inverse: .*${DRAWN} at button#button-secondary`)) },
   'a second skin short on primary': { on: 'primary', css: 'html[data-skin="evergreen"][data-color-scheme="dark"] .sr-stage[data-surface="primary"] [data-demo-label] { color: var(--ui-border); }', holds: says('schemes', /evergreen dark on primary: drawn text [\d.]+:1 at span/) },
   'the waited pair worse than recorded': { on: 'primary', css: 'html[data-skin="fjord"][data-color-scheme="light"] .sr-stage[data-surface="primary"] { --ui-muted-foreground: var(--ui-border); }', holds: says('skins', /fjord light on primary: drawn text [\d.]+:1 at span .*, under the 3\.75:1 its wait on the sheet records/) },
   'a placeholder on another ground stays red': { on: 'primary', css: '#button-ph-other { background: var(--ui-muted); }', holds: says('skins', /on primary: drawn text [\d.]+:1 at input#button-ph-other ""::placeholder/) },

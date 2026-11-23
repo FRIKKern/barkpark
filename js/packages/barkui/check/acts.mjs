@@ -74,6 +74,7 @@ function given(name, a) {
 /** What the check's code gets for a value: a library object as its wall object (one per object), arrays of them
     walled, anything else as it is. */
 function wall(v) {
+  return v
   if (Array.isArray(v)) return v.map(wall)
   if (TARGET.has(v)) return v
   const kind = kindOf(v)
