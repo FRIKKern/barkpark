@@ -424,6 +424,29 @@ const skinSwitch = () =>
       }),
   })()
 
+/** A capture that moves the page, as a full-page capture can: the page is back at the scroll it had before, and a
+    read straight after finds it at rest. The capture is handed a page whose screenshot scrolls the page first. */
+const captureMoves = () =>
+  onPage('', 'reduce', async (page) => {
+    const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight }))
+    const before = await where()
+    if (before.most < 100) {
+      console.log(`    the page scrolls ${before.most}px, too little for a capture to move it`)
+      return false
+    }
+    const moving = {
+      screenshot: async (o) => {
+        await page.barkCheck((top) => scrollTo({ left: 0, top, behavior: 'instant' }), before.most)
+        return page.screenshot(o)
+      },
+    }
+    const shot = await capture(moving, page.barkCheck, { x: 0, y: 0, w: 8, h: 8 }).then(() => 'read', (e) => String(e.message))
+    const after = await where()
+    const rest = await page.barkCheck(() => window.__barkCheck.still('the read after a capture').then(() => 'at rest', (e) => String(e.message)))
+    console.log(`    a capture that moved the page to ${before.most}px: the page at ${after.y}px after it, ${before.y}px before; the capture ${shot}; the read straight after ${rest}`)
+    return shot === 'read' && after.x === before.x && after.y === before.y && rest === 'at rest'
+  })
+
 export const REST_CASES = [
   {
     name: 'at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation',
@@ -440,4 +463,5 @@ export const REST_CASES = [
   { name: 'at rest: every motion property of the vocabulary is read under its own rule, and is red by name where the check cannot see it', direct: everyKind },
   { name: 'at rest: a key the checker presses leaves the page at rest before the next read, under reduced motion and outside it', direct: keyAct },
   { name: 'at rest: what the check reads about motion holds in every state the checker puts a page in, under reduced motion and outside it', direct: everyState },
+  { name: 'at rest: a capture that moves the page leaves it at the scroll it had before, and the read straight after finds it at rest', direct: captureMoves },
 ]
