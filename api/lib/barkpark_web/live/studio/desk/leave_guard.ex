@@ -8,12 +8,15 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
   The question is the desk's own dialog (`dialog/1`), asked by the server
   before anything leaves:
 
-    * a patch of the desk's URL that puts the document away (a row, a
-      breadcrumb, a pane's ×, a search hit, Back): `DeskLive.handle_params/3`
-      keeps the document and asks; Stay patches the URL back;
-    * Create new (`new-document`), before anything is made;
-    * a link that leaves the page: `bp-desk.js` sends it (`desk-leave`), and
-      the dialog's Leave is that link.
+    * a link (a row, a breadcrumb, a pane's ×, the navbar): `bp-desk.js`
+      holds the click back and sends it (`desk-leave`), so the URL has not
+      moved. A desk link that keeps the document goes on at once; the
+      dialog's Leave on a link that leaves the page is that link;
+    * Enter on a search hit (`desk-search-open`) and Create new
+      (`new-document`), before anything moves or is made;
+    * any other patch that puts the document away, Back above all:
+      `DeskLive.handle_params/3` keeps the document and asks, the URL already
+      moved; Stay patches it back to the document.
 
   The edit pane carries the question as `data-desk-held`, so the tab's close
   or reload asks too, as the TanStack Studio's `beforeunload` does over
@@ -47,9 +50,24 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
   end
 
   @doc """
+  Whether a desk path keeps the open document (`keeps?/2`, its params read
+  as the router reads a patch's). A path that is not the desk's never does.
+  """
+  def keeps_path?(socket, path) do
+    case Phoenix.Router.route_info(BarkparkWeb.Router, "GET", URI.parse(path).path || "", nil) do
+      %{phoenix_live_view: {BarkparkWeb.Studio.DeskLive, _, _, _}, path_params: params} ->
+        keeps?(socket, params)
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
   Open the dialog for `to`: `{:patch, params, uri}` (the URL already moved),
-  `{:event, name, params}` or `{:link, href, live?}`. `back` is where the
-  document is open.
+  `{:event, name, params}` (replayed on Leave) or `{:link, href, kind}` (a
+  link that leaves the page: `:redirect`, a live one, or `:page`). `back` is
+  where the document is open.
   """
   def ask(socket, to) do
     back = URI.parse(socket.assigns.desk_uri)
@@ -77,7 +95,7 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
           {gettext("Stay")}
         </button>
         <.link
-          :if={match?({:link, _, true}, @leave.to)}
+          :if={match?({:link, _, :redirect}, @leave.to)}
           navigate={elem(@leave.to, 1)}
           class="dk-dialog-btn btn danger"
           data-desk-leave-go
@@ -85,7 +103,7 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
           {gettext("Leave")}
         </.link>
         <a
-          :if={match?({:link, _, false}, @leave.to)}
+          :if={match?({:link, _, :page}, @leave.to)}
           href={elem(@leave.to, 1)}
           class="dk-dialog-btn btn danger"
           data-desk-leave-go
@@ -115,7 +133,7 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
 
       keys ->
         gettext(
-          "Not saved: %{fields}. Leave this document anyway? What you typed there will be lost.",
+          "Not saved: %{fields}. What you typed there will be lost.",
           fields: Enum.map_join(keys, ", ", &title(assigns, &1))
         )
     end

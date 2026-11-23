@@ -1411,26 +1411,26 @@
         return hook._typed || form.hasAttribute("data-phx-ref-loading") ||
           (!!pane && (pane.getAttribute("data-desk-save") === "Save failed" || pane.hasAttribute("data-desk-held")));
       };
-      // A held field (`Desk.LeaveGuard`, task-33cbb6269c8823ad): the server
-      // asks in its own dialog. A patch link reaches its guard as it is; a
-      // link that leaves the page is held back and sent (`desk-leave`), and
-      // the dialog's Leave is that link. Capture on the document, so
-      // LiveView's link handler (on window) never sees a held-back click.
+      // A held field (`Desk.LeaveGuard`, task-33cbb6269c8823ad): a link is
+      // held back before the URL moves and sent (`desk-leave`); the server
+      // lets a desk link that keeps the document go and asks in its own
+      // dialog for the rest. Capture on the document, so LiveView's link
+      // handler (on window) never sees a held-back click.
       hook._onLeave = function (e) {
         var link = e.target.closest ? e.target.closest("a[href]") : null;
         if (!link || !plainClick(e) || link.target === "_blank") return;
         if (link.hasAttribute("data-desk-leave-go")) { hook._leaving = true; return; }
-        if (!root.querySelector("[data-pane-editing][data-desk-held]") || link.getAttribute("data-phx-link") === "patch") return;
+        if (!root.querySelector("[data-pane-editing][data-desk-held]")) return;
         var to = new URL(link.href, window.location.href), at = window.location;
         if (to.origin !== at.origin || (to.pathname === at.pathname && to.search === at.search)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
-        hook.pushEvent("desk-leave", { href: to.pathname + to.search + to.hash, live: link.getAttribute("data-phx-link") === "redirect" });
+        hook.pushEvent("desk-leave", { href: to.pathname + to.search + to.hash, kind: link.getAttribute("data-phx-link") || "" });
       };
       // Where the caret was in the edit pane, put back after Stay.
       hook._noteField = function (e) {
         var el = e.type === "focusout" ? e.target : root.ownerDocument.activeElement;
-        if (!el || !el.closest || !el.closest("[data-pane-editing]") || !root.contains(el)) return;
+        if (!el || !el.closest || !el.closest("[data-pane-editing] #editor-form") || !root.contains(el)) return;
         var sel = window.getSelection();
         hook._field = { el: el, start: el.selectionStart, end: el.selectionEnd,
           range: el.isContentEditable && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null };

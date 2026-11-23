@@ -120,7 +120,29 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       assert has_element?(view, @held)
     end
 
-    test "Back (or a row, a breadcrumb, a pane's ×): a patch to another document asks", c do
+    test "a row, a breadcrumb, a pane's ×: the link is held back and asks; Leave follows it", c do
+      a = held(c)
+      to = to_doc(c, c.id <> "-link")
+
+      render_hook(a, "desk-leave", %{"href" => to, "kind" => "patch"})
+      asks!(a)
+
+      a |> element(~s(#{@dialog} button[phx-click="desk-leave-go"])) |> render_click()
+      assert_patch(a, to)
+      assert eventually(fn -> title(a) == "T0" end)
+    end
+
+    test "control: a held-back desk link that keeps the document goes on at once", c do
+      a = held(c)
+      to = to_doc(c, c.id) <> ",inspect=on"
+
+      render_hook(a, "desk-leave", %{"href" => to, "kind" => "patch"})
+      assert_patch(a, to)
+      refute has_element?(a, @dialog)
+      assert title(a) == "T0 FAIL"
+    end
+
+    test "Back (any patch the page did not hold back) to another document asks", c do
       a = held(c)
       render_patch(a, to_doc(c, c.id <> "-link"))
       asks!(a)
@@ -203,11 +225,11 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
     test "a link that leaves the page: Leave is that link, and only a path on this site", c do
       a = held(c)
 
-      render_hook(a, "desk-leave", %{"href" => "https://evil.example/x", "live" => true})
-      render_hook(a, "desk-leave", %{"href" => "//evil.example/x", "live" => true})
+      render_hook(a, "desk-leave", %{"href" => "https://evil.example/x", "kind" => "redirect"})
+      render_hook(a, "desk-leave", %{"href" => "//evil.example/x", "kind" => "redirect"})
       refute has_element?(a, @dialog)
 
-      render_hook(a, "desk-leave", %{"href" => "#{c.root}/structure", "live" => true})
+      render_hook(a, "desk-leave", %{"href" => "#{c.root}/structure", "kind" => "redirect"})
       asks!(a)
 
       assert has_element?(
@@ -215,7 +237,7 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
                ~s|#{@dialog} a[data-desk-leave-go][data-phx-link="redirect"][href="#{c.root}/structure"]|
              )
 
-      render_hook(a, "desk-leave", %{"href" => "/papers", "live" => false})
+      render_hook(a, "desk-leave", %{"href" => "/papers", "kind" => ""})
 
       assert has_element?(
                a,
@@ -227,8 +249,9 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       a = open(c)
       render_patch(a, to_doc(c, c.id <> "-link"))
       refute has_element?(a, @dialog)
-      render_hook(a, "desk-leave", %{"href" => "/papers", "live" => false})
-      refute has_element?(a, @dialog)
+      # A link held back as the hold ended goes, as it would have.
+      assert {:error, {:redirect, %{to: "/papers"}}} =
+               render_hook(a, "desk-leave", %{"href" => "/papers", "kind" => ""})
     end
 
     test "control: a patch that keeps the document does not ask", c do
@@ -247,7 +270,7 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
 
     Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
       assert LeaveGuard.message(assigns) ==
-               "Ikke lagret: Tittel. Vil du forlate dokumentet likevel? Det du skrev der, går tapt."
+               "Ikke lagret: Tittel. Det du skrev der, går tapt."
 
       html =
         render_component(&LeaveGuard.dialog/1,

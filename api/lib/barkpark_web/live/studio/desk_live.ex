@@ -341,10 +341,34 @@ defmodule BarkparkWeb.Studio.DeskLive do
         )
   end
 
+  # A link `bp-desk.js` held back while a field is held: a desk link that
+  # keeps the document goes on; any other asks. Its kind is its LiveView
+  # link's (`data-phx-link`): "patch", "redirect", or none, a page load.
   def handle_event("desk-leave", %{"href" => href} = params, socket) do
-    if LeaveGuard.ask?(socket) and LeaveGuard.local?(href),
-      do: {:noreply, LeaveGuard.ask(socket, {:link, href, params["live"] == true})},
-      else: {:noreply, socket}
+    kind = params["kind"]
+
+    cond do
+      not LeaveGuard.local?(href) ->
+        {:noreply, socket}
+
+      kind == "patch" and (not LeaveGuard.ask?(socket) or LeaveGuard.keeps_path?(socket, href)) ->
+        {:noreply, push_patch(socket, to: href)}
+
+      kind == "patch" ->
+        {:noreply, LeaveGuard.ask(socket, {:event, "desk-leave", params})}
+
+      # The hold ended on the way: the link goes, as it would have.
+      not LeaveGuard.ask?(socket) ->
+        {:noreply,
+         if(kind == "redirect",
+           do: push_navigate(socket, to: href),
+           else: redirect(socket, to: href)
+         )}
+
+      true ->
+        {:noreply,
+         LeaveGuard.ask(socket, {:link, href, if(kind == "redirect", do: :redirect, else: :page)})}
+    end
   end
 
   # Stay: the URL goes back to the document, and `bp-desk.js` puts the caret
@@ -352,7 +376,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
   def handle_event("desk-leave-stay", _params, socket) do
     socket =
       case socket.assigns.desk_leave do
-        %{to: {:patch, _, _}, back: back} -> push_patch(socket, to: back, replace: true)
+        # Back moved the URL: a new entry for the document puts history as
+        # it was before the press.
+        %{to: {:patch, _, _}, back: back} -> push_patch(socket, to: back)
         _ -> socket
       end
 
@@ -395,7 +421,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # TanStack Studio's (`bp-desk.js` waits for the editor).
       %{} = hit ->
         to = Search.href(socket.assigns.base, socket.assigns.desk.root, hit)
-        {:noreply, socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
+
+        if LeaveGuard.ask?(socket) and not LeaveGuard.keeps_path?(socket, to),
+          do: {:noreply, LeaveGuard.ask(socket, {:event, "desk-search-open", params})},
+          else:
+            {:noreply,
+             socket |> push_patch(to: to) |> push_event("bp:focus-new-doc", %{id: hit.id})}
 
       _ ->
         handle_event("desk-search", params, socket)

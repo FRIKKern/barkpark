@@ -11460,22 +11460,22 @@ msgstr "utredes"
 msgid "Not saved"
 msgstr "Ikke lagret"
 
-#: lib/barkpark_web/live/studio/desk/leave_guard.ex:117
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:135
 #, elixir-autogen, elixir-format
-msgid "Not saved: %{fields}. Leave this document anyway? What you typed there will be lost."
-msgstr "Ikke lagret: %{fields}. Vil du forlate dokumentet likevel? Det du skrev der, går tapt."
+msgid "Not saved: %{fields}. What you typed there will be lost."
+msgstr "Ikke lagret: %{fields}. Det du skrev der, går tapt."
 
-#: lib/barkpark_web/live/studio/desk/leave_guard.ex:73
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:91
 #, elixir-autogen, elixir-format
 msgid "Leave this document?"
 msgstr "Forlate dokumentet?"
 
-#: lib/barkpark_web/live/studio/desk/leave_guard.ex:77
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:95
 #, elixir-autogen, elixir-format
 msgid "Stay"
 msgstr "Bli her"
 
-#: lib/barkpark_web/live/studio/desk/leave_guard.ex:85 lib/barkpark_web/live/studio/desk/leave_guard.ex:93 lib/barkpark_web/live/studio/desk/leave_guard.ex:102
+#: lib/barkpark_web/live/studio/desk/leave_guard.ex:103 lib/barkpark_web/live/studio/desk/leave_guard.ex:111 lib/barkpark_web/live/studio/desk/leave_guard.ex:120
 #, elixir-autogen, elixir-format
 msgid "Leave"
 msgstr "Forlat"
