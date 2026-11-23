@@ -29,6 +29,8 @@ import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
 import { POINTER_CASES } from './pointer-cases.mjs'
+import { lightLines, PAGE_CASES } from './page-cases.mjs'
+import { createHash } from 'node:crypto'
 import { PLANTED, WALL_CASES } from './wall-cases.mjs'
 import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
@@ -612,6 +614,7 @@ steps.push({
   ...PLACEMENT_CASES,
   ...REST_CASES,
   ...POINTER_CASES,
+  ...PAGE_CASES,
   ...WALL_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
@@ -721,6 +724,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       if (pass) held.push(c.name)
       else failures++
       console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
+      // What the run read, so two runs can be held line for line against each other (check/view-pages.mjs).
+      const read = lightLines(logs, proof, name)
+      console.log(`    the run's lines: ${read.length}, digest ${createHash('sha256').update(read.join('\n')).digest('hex').slice(0, 12)}`)
       if (misplaced) console.log(`    ${misplaced}`)
       if (refused.length) console.log(refusedSay(refused))
       if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))

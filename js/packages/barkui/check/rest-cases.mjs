@@ -17,7 +17,9 @@ import { launch } from './acts.mjs'
 
 /** The button part with the named "Details" popover, `css` planted, opened with motion `motion`; `go` gets the page
     and the part, and its answer is the case's. */
-export async function onPage(css, motion, go) {
+export const onPage = (css, motion, go) => onPages(1, css, motion, ([page], part) => go(page, part))
+/** The same on `n` pages of the one browser, open at once; `go` gets the pages and the part. */
+export async function onPages(n, css, motion, go) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await launch({ args: ['--disable-lcd-text'] })
   try {
@@ -27,8 +29,8 @@ export async function onPage(css, motion, go) {
     named(join(dir, 'button'))
     const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
     const part = built.parts.find((x) => x.name === 'button')
-    const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { motion })
-    return await go(page, part)
+    const pages = await Promise.all(Array.from({ length: n }, () => open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { motion })))
+    return await go(pages, part)
   } finally {
     await browser.close()
     rmSync(scratch, { recursive: true, force: true })
@@ -303,10 +305,13 @@ const keyAct = () =>
       }),
     // The focus scroll that follows the key: waited for however late it begins, and never a false red where a scroll
     // into view would move nothing.
-    'a Tab whose scroll into view the page begins 30 frames later is waited for, then read at rest': () =>
-      onPage(SCROLLER, 'reduce', async (page) => {
-        await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); const far = document.getElementById('bark-far'); far.focus({ preventScroll: true }); let n = 30; const go = () => (--n ? requestAnimationFrame(go) : far.scrollIntoView({ block: 'nearest' })); requestAnimationFrame(go) }, { once: true })")
-        return held('Tab, late', await sameAfter(page, () => acts.press(page, 'Tab')))
+    'a Tab whose scroll into view the page begins 30 frames later is waited for, then read at rest, on each of two pages at once': () =>
+      onPages(2, SCROLLER, 'reduce', async (pages) => {
+        const late = async (page, j) => {
+          await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); const far = document.getElementById('bark-far'); far.focus({ preventScroll: true }); let n = 30; const go = () => (--n ? requestAnimationFrame(go) : far.scrollIntoView({ block: 'nearest' })); requestAnimationFrame(go) }, { once: true })")
+          return held(`Tab, late, page ${j + 1}`, await sameAfter(page, () => acts.press(page, 'Tab')))
+        }
+        return (await Promise.all(pages.map(late))).every(Boolean)
       }),
     'a Tab to an element larger than its scroller\'s view reads at rest once it covers the view, not red': () =>
       onPage(SCROLLER, 'reduce', async (page) => {

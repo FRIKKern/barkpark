@@ -13,6 +13,7 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { limit } from './limit.mjs'
 import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } from './proofs.mjs'
 import { waitLine } from '../build/sheet-waits.mjs'
+import { VIEW_PAGES } from './view-pages.mjs'
 import { launch, refusals } from './acts.mjs'
 
 // A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
@@ -33,7 +34,7 @@ function variableNames() {
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
 // (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
 // page CI ships, but only those parts are pressed and read. Without it, every part is.
-export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null } = {}) {
+export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES } = {}) {
   // A refusal by the wall anywhere in this run (check/acts.mjs), a timer's or a listener's too, is an error of the run.
   const before = refusals().length
   let built
@@ -96,11 +97,13 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     let paintFree = []
     let textOnly = []
     let steps = []
+    let viewsLine = null
     try {
       await limit((async () => {
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
         if (only.includes('skins') || only.includes('schemes')) {
-          const looks = await skinsAndSchemes(ctx, part, skins)
+          const looks = await skinsAndSchemes(ctx, part, skins, viewPages)
+          viewsLine = looks.views
           Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
           measures = looks.measures
           paintFree = looks.paintFree
@@ -120,6 +123,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     // A light's own reason first: it names the cause; coverage names only what no reading saw.
     const failed = ctx.errors[0] ?? offs[0] ?? missed[0]
     for (const [k, l] of Object.entries(lights)) lines.push(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
+    if (viewsLine) lines.push(`  ${viewsLine}`)
     for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
     for (const [k, m] of Object.entries(measures))
       if (k === 'waits') continue
