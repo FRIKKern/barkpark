@@ -254,6 +254,53 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
                render_hook(a, "desk-leave", %{"href" => "/papers", "kind" => ""})
     end
 
+    # #28408 review r2, 3: drawn among the desk's own children, the question
+    # moved `#desk-panes` in the DOM, and the pane lost its scroll.
+    test "the question is drawn in a box of its own, so the panes do not move", c do
+      a = held(c)
+      assert has_element?(a, "#dk-leave-host")
+      refute has_element?(a, "#dk-leave-host > *")
+
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+      assert has_element?(a, "#dk-leave-host > #{@dialog}")
+    end
+
+    # #28408 review r2, note: the question stood empty once the hold ended.
+    test "the question closes when the hold ends, as Stay", c do
+      a = held(c)
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+
+      post_title(a, "T0 saved")
+
+      assert eventually(fn -> not has_element?(a, @dialog) end)
+      assert_patch(a, to_doc(c, c.id))
+      assert_push_event(a, "bp:desk-leave-stayed", %{})
+    end
+
+    # #28408 review r2, note: Delete and Duplicate patch away once done.
+    test "Delete does not ask after the fact", c do
+      a = held(c)
+      BarkparkWeb.EditorPost.press(a, "delete-doc", %{})
+
+      BarkparkWeb.EditorPost.press_on(
+        a,
+        element(a, ~s([data-desk-dialog="delete"] button.danger), "Delete document")
+      )
+
+      assert_patch(a)
+      refute has_element?(a, @dialog)
+    end
+
+    test "Duplicate does not ask after the fact", c do
+      a = held(c)
+      BarkparkWeb.EditorPost.press(a, "duplicate-doc", %{})
+      landed = assert_patch(a, 2_000)
+      refute landed == to_doc(c, c.id)
+      refute has_element?(a, @dialog)
+    end
+
     test "control: a patch that keeps the document does not ask", c do
       a = held(c)
       render_patch(a, to_doc(c, c.id) <> ",inspect=on")

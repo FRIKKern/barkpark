@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
   alias BarkparkWeb.Studio.Desk.IncomingRefs
   alias BarkparkWeb.Studio.Desk.InspectDialog
   alias BarkparkWeb.Studio.Desk.ItemRefs
+  alias BarkparkWeb.Studio.Desk.LeaveGuard
   alias BarkparkWeb.Studio.Desk.LiveRefresh
   alias BarkparkWeb.Studio.Desk.NewDoc
   alias BarkparkWeb.Studio.Desk.PaneComponent
@@ -339,6 +340,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
           |> StudioLive.handle_event(params, written(socket, event))
           |> ours()
           |> after_restore(event, before)
+          |> LeaveGuard.done(event)
         else
           {:halt, socket} -> {:noreply, socket}
         end

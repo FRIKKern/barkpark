@@ -109,6 +109,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(:desk_inspect, false)
       # The question before leaving a held field (`LeaveGuard`): not asked.
       |> assign(desk_leave: nil, desk_leave_pass: false)
+      |> attach_hook(:desk_leave, :after_render, &LeaveGuard.follow/1)
       # The desk's own tool in place of the panes (`Vision`), from the URL.
       |> assign(:desk_tool, nil)
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
@@ -640,6 +641,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
         EditorHost.handle_info(message, socket)
       end)
 
+  # The hold ended while the question was open: it closes, as Stay.
+  def handle_info(:desk_leave_cleared, socket) do
+    if socket.assigns.desk_leave && is_nil(LeaveGuard.doc(socket.assigns)),
+      do: handle_event("desk-leave-stay", %{}, socket),
+      else: {:noreply, socket}
+  end
+
   def handle_info(message, socket), do: EditorHost.handle_info(message, socket)
 
   @impl true
@@ -685,7 +693,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
         base={@base}
       />
     </dialog>
-    <LeaveGuard.dialog :if={@desk_leave} id="dk-leave-dialog" leave={@desk_leave} message={LeaveGuard.message(assigns)} />
+    <%!-- In a box of its own: drawn among the desk's own children, the
+          question moved `#desk-panes` in the DOM and the pane lost its
+          scroll (`LeaveGuard`). --%>
+    <div id="dk-leave-host">
+      <LeaveGuard.dialog :if={@desk_leave} id="dk-leave-dialog" leave={@desk_leave} message={LeaveGuard.message(assigns)} />
+    </div>
     <%!-- The navbar's Create new (J37): its button is the layout's. --%>
     <NewDocMenu.picker picks={NewDocMenu.picks(@desk.new)} />
     <%!-- The presence profile (the display name and colour others see):
@@ -729,6 +742,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
       data-desk-revision-focus={BarkparkWeb.StaticAssets.path("bp-desk-revision-focus.js")}
       data-desk-vision-js={BarkparkWeb.StaticAssets.path("bp-desk-vision.js")}
       data-desk-new-doc={BarkparkWeb.StaticAssets.path("bp-desk-new-doc.js")}
+      data-desk-leave={BarkparkWeb.StaticAssets.path("bp-desk-leave.js")}
       style="flex: 1 1 auto; min-height: 0"
       phx-hook="Desk"
     >

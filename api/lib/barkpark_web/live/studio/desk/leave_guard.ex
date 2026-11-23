@@ -8,8 +8,8 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
   The question is the desk's own dialog (`dialog/1`), asked by the server
   before anything leaves:
 
-    * a link (a row, a breadcrumb, a pane's ×, the navbar): `bp-desk.js`
-      holds the click back and sends it (`desk-leave`), so the URL has not
+    * a link (a row, a breadcrumb, a pane's ×, the navbar):
+      `bp-desk-leave.js` holds the click back and sends it (`desk-leave`), so the URL has not
       moved. A desk link that keeps the document goes on at once; the
       dialog's Leave on a link that leaves the page is that link;
     * Enter on a search hit (`desk-search-open`) and Create new
@@ -75,7 +75,37 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
     Phoenix.Component.assign(socket, :desk_leave, %{to: to, back: back})
   end
 
-  @doc "A link `bp-desk.js` may hand over: a path on this site."
+  @doc """
+  After each render: a question still open over a hold that has ended (a
+  save landed, the draft was discarded) is closed as Stay closes it
+  (`DeskLive.handle_info/2`), so it never stands empty.
+  """
+  def follow(socket) do
+    if socket.assigns[:desk_leave] && is_nil(doc(socket.assigns)),
+      do: send(self(), :desk_leave_cleared)
+
+    socket
+  end
+
+  @doc """
+  After a Studio event: Delete and Duplicate patch away from the document
+  once they are done; that patch passes the guard, as nothing is left to
+  keep.
+  """
+  def done({:noreply, socket}, event) when event in ~w(confirm-delete duplicate-doc),
+    do: {:noreply, pass(socket)}
+
+  def done({:reply, reply, socket}, event) when event in ~w(confirm-delete duplicate-doc),
+    do: {:reply, reply, pass(socket)}
+
+  def done(result, _event), do: result
+
+  defp pass(%{redirected: {:live, :patch, _}} = socket),
+    do: Phoenix.Component.assign(socket, :desk_leave_pass, true)
+
+  defp pass(socket), do: socket
+
+  @doc "A link `bp-desk-leave.js` may hand over: a path on this site."
   def local?(href),
     do:
       is_binary(href) and String.starts_with?(href, "/") and not String.starts_with?(href, "//") and
