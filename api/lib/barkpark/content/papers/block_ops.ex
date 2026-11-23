@@ -507,6 +507,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # whose cache is its only source.
     carried_blocks = carried_blocks(blocks, attrs, existing)
 
+    legacy_id = (existing && existing.doc_id) || slug
+
     body_html =
       cond do
         is_list(blocks) -> Render.render_blocks(blocks, render_opts)
@@ -514,7 +516,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # with no blocks. Scrub it through the strict allowlist BEFORE store so
         # a <script>/onerror= payload never persists (defensive; the reader CSP
         # is the second layer). See Barkpark.PortableDoc.HtmlSanitizer.
-        is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"])
+        is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"], id: legacy_id)
         is_list(carried_blocks) -> Render.render_blocks(carried_blocks, render_opts)
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end

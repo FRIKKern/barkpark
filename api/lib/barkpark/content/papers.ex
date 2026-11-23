@@ -228,7 +228,7 @@ defmodule Barkpark.Content.Papers do
       _ ->
         case envelope["body_html"] do
           html when is_binary(html) ->
-            sanitized = HtmlSanitizer.sanitize(html)
+            sanitized = HtmlSanitizer.sanitize(html, id: paper.doc_id)
 
             if semantic_html?(sanitized),
               do: {:html, sanitized},

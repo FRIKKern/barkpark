@@ -67,15 +67,26 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   open at the end, a formatting element left open across a close, a
   `<select>`, a stray `</article>` the fragment ignored but the page obeyed.
   A serialised tree closes what it opens and holds no end tag it did not open,
-  so none of these reaches the page as written. Clean markup comes back as the
-  same tree (same elements, attributes and text), and a second pass returns
-  the same bytes.
+  so none of these reaches the page as written.
+
+  The tree is written by `HtmlSanitizer.Serializer`, not `LazyHTML.to_html/1`,
+  which wrote `<s><br></br></s>` and so doubled line breaks on every save
+  (#28404 review, B6).
+
+  One pass is not always a tree the parser builds (#28404 review, B5).
+  Unwrapping an element moves its children where the parser never puts them
+  (`<li>a<div><aside><li>b` becomes `<li>a<div><li>b`), and the page's parse
+  of that closes the page's own `div`. So `sanitize/2` repeats the pass until
+  its output parses and serialises back to itself, for at most 3 passes. That
+  is a fixed point: `sanitize(sanitize(x)) == sanitize(x)`, byte for byte. A
+  body that does not settle is served as its text alone, in one `<p>`. Clean
+  markup comes back as the same tree (same elements, attributes and text).
 
   lexbor and a current browser still build different trees for a few
-  misnested kept elements (a `button` in a `button`, a heading opened inside
-  another under a formatting element). Serialised, lexbor's tree is what the
-  browser reads too, so the difference only rearranges kept, scrubbed
-  elements.
+  misnested kept elements (a `button` in a `button`). A fixed point is
+  lexbor's tree written so that lexbor reads it back unchanged. Those shapes
+  come out already rearranged (two sibling buttons), and a browser reads
+  them the same way.
 
   This is the first layer; the reader's `script-src 'self' 'nonce-…'` CSP is
   the backstop. Defense in depth — neither layer is trusted alone.
