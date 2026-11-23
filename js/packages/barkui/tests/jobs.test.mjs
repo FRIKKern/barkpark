@@ -20,8 +20,8 @@ const flat = (groups) => groups.flatMap((g) => (typeof g.parts === 'string' ? g.
 // Every selftest job's report, as it is when the jobs ran every case once and each held (check/selftest-report.mjs).
 const selftestOk = (sha) =>
   SELFTEST_JOBS.map((j, i) => {
-    const ran = [['c1', 'c2'], ['c3'], ['c4']][i]
-    return { file: reportFile(j.key), data: selftestReport({ key: j.key, sha, all: ['c1', 'c2', 'c3', 'c4'], ran, held: ran, count: { held: ran.length, of: ran.length } }) }
+    const ran = [['c1', 'c2'], ['c3'], ['c4'], ['c5']][i]
+    return { file: reportFile(j.key), data: selftestReport({ key: j.key, sha, all: ['c1', 'c2', 'c3', 'c4', 'c5'], ran, held: ran, count: { held: ran.length, of: ran.length } }) }
   })
 
 describe('the job split covers every part folder exactly once', () => {
@@ -157,7 +157,7 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
 
   it('is green when the plan, every group and every selftest job passed, and names them', () => {
     const v = verdict(needsWith(MATRIX))
-    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and every selftest job passed, running each of 4 cases once'] })
+    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and every selftest job passed, running each of 5 cases once'] })
   })
 
   it('is red for a red, cancelled, skipped-by-mistake or missing group job, even when every report says ok', () => {
@@ -170,7 +170,7 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
   })
 
   it('is red for each selftest job red, cancelled, skipped by mistake or missing, by its name', () => {
-    expect(SELFTEST_JOBS.length).toBe(3)
+    expect(SELFTEST_JOBS.length).toBe(4)
     for (const j of SELFTEST_JOBS) {
       const who = `the selftest job "${j.name}"`
       for (const [result, said] of [['failure', 'is red'], ['cancelled', 'was cancelled'], ['skipped', 'was skipped by mistake']])
@@ -228,23 +228,25 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
         for (const check of results)
           for (const views of results)
             for (const rest of results)
-              for (const layers of results) {
+              for (const layers of results)
+              for (const surfaces of results) {
               const needs = {}
               if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
               if (check !== 'missing') needs[JOBS.check] = { result: check }
               if (views !== 'missing') needs[JOBS.selftest] = { result: views }
               if (rest !== 'missing') needs[JOBS.selftestRest] = { result: rest }
               if (layers !== 'missing') needs[JOBS.selftestLayers] = { result: layers }
-              const all = [check, views, rest, layers]
+              if (surfaces !== 'missing') needs[JOBS.selftestSurfaces] = { result: surfaces }
+              const all = [check, views, rest, layers, surfaces]
               const touched = plan === 'success' && run === 'true' && all.every((r) => r === 'success')
               const untouched = plan === 'success' && run === 'false' && all.every((r) => r === 'skipped')
               const v = verdict(needs)
-              const at = JSON.stringify({ plan, run, check, views, rest, layers })
+              const at = JSON.stringify({ plan, run, check, views, rest, layers, surfaces })
               expect(v.ok, at).toBe(touched || untouched)
               if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), at).toBe(true)
               greens += v.ok ? 1 : 0
               rows++
             }
-    expect([rows, greens]).toEqual([6250, 2])
+    expect([rows, greens]).toEqual([31250, 2])
   })
 })

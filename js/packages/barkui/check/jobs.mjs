@@ -16,31 +16,34 @@ import { readSelftestReports } from './selftest-report.mjs'
 export const AGGREGATE = 'BarkUI showroom check'
 // The jobs it reads, by their ids in barkui.yml, and the names they render. Every name here and every group
 // name the split can make has a row in .github/required-checks.json (a test holds that too).
-export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest', selftestLayers: 'barkui-selftest-layers' }
+export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest', selftestLayers: 'barkui-selftest-layers', selftestSurfaces: 'barkui-selftest-surfaces' }
 export const NAMES = {
   plan: 'BarkUI plan (does this change touch it, and which groups)',
   selftest: 'BarkUI selftest, views',
   selftestRest: 'BarkUI selftest, presses, states and refusals',
   selftestLayers: 'BarkUI selftest, top layer and direct readings',
+  selftestSurfaces: 'BarkUI selftest, surfaces',
   group: (k) => `BarkUI check, group ${k}`,
 }
 
-// The selftest runs as three jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
+// The selftest runs as four jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
 // case is the one rule below, written here once: `views` runs the cases that read the wide or phone views and
-// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`, not `layers`); `layers`
+// drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`, not `layers`), but for
+// those that read every surface (`surfaces`), which `surfaces` runs; `layers`
 // runs the direct readings (`direct`, each on a page of its own) and the top layer's cases (`layers`), each of which
 // opens its boxes by real input or holds a refusal; `rest` runs every other case: presses, states, refusals and the
-// no-script print. A test holds that every case runs in exactly one job and that the three together run every
+// no-script print. A test holds that every case runs in exactly one job and that the four together run every
 // case (coverCases).
 export const SELFTEST_JOBS = [
   { key: 'views', id: JOBS.selftest, name: NAMES.selftest },
   { key: 'rest', id: JOBS.selftestRest, name: NAMES.selftestRest },
   { key: 'layers', id: JOBS.selftestLayers, name: NAMES.selftestLayers },
+  { key: 'surfaces', id: JOBS.selftestSurfaces, name: NAMES.selftestSurfaces },
 ]
 const VIEWS = ['skins', 'schemes', 'phone']
 /** The selftest job that runs a case, by its key. */
 export const selftestJob = (c) =>
-  c.direct || c.layers ? 'layers' : !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? 'views' : 'rest'
+  c.direct || c.layers ? 'layers' : !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? (c.surfaces ? 'surfaces' : 'views') : 'rest'
 /** Why case `c` sits in the wrong job, given how its run touched the top layer (`touch`, layers.mjs topLayerTouch):
     a case that opens a layer or holds a layer refusal is a `layers` case and runs in the layers job, and a `layers`
     case does one of the two. Empty when it sits where it belongs. The selftest runner asks this of every case it

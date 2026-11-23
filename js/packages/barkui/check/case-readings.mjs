@@ -121,11 +121,19 @@ export const CASE_READINGS = {
       "each colour that is not one skin variable turns \"every skin\" off, by name": 18.1,
       "a demo that patches getComputedStyle, getClientRects and querySelector cannot hide a red label from the trace": 17.7,
       "an honest decorative dot keeps \"every skin\" on": 17.8,
+      "a demo that patches getBoundingClientRect cannot pull a button back inside a phone window": 0.8,
+      "an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed": 17.7,
+    },
+  },
+  // The surfaces job's cases, read in the views job's run above before the surfaces job was split off from it.
+  surfaces: {
+    job: 137145922903,
+    run: 45002097199,
+    commit: "0f6c725778b040f06aa939a4dd027486b1b8bee9",
+    cases: {
       "every surface read, raised and sunken: a label gone on raised turns both wide lights off at its control": 35.7,
       "every surface read, primary and inverse: a second skin short on primary and a waited pair measuring worse turn the lights off; a placeholder is matched to a wait by its own colour": 38.9,
       "a label blanked, edges dropped, and a label and edge gone on raised only, at phone width, turn \"phone\" off, each by name": 37.5,
-      "a demo that patches getBoundingClientRect cannot pull a button back inside a phone window": 0.8,
-      "an uppercase :HOVER in part.css is pinned like any other, and a longhand left out but set through a variable is read as computed": 17.7,
     },
   },
 }
