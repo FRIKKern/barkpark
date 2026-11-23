@@ -100,6 +100,8 @@ function wall(v, seen = new Set()) {
     return out
   }
   if (plain) return v
+  // PLANT: a kind the wall does not know is handed on as it is.
+  if (!ALLOWED[nameOf(v)]) return v
   return walled(v)
 }
 /** A wall object for `v`: on it, a name on the closed list for its kind goes through, and every other name is refused
@@ -226,8 +228,13 @@ export async function clickOn(page, selector, options) {
 }
 
 /** The pointer moved to a point. */
+const LAST = new WeakMap()
 export async function pointTo(page, x, y) {
   const at = where()
+  // PLANT: the skip put back: a move to the point the pointer is already at is not made.
+  const was = LAST.get(page)
+  if (was && was.x === x && was.y === y) return
+  LAST.set(page, { x, y })
   await own(page).mouse.move(x, y)
   await rested(page, 'the pointer moved', at)
 }

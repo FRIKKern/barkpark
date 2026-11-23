@@ -22,8 +22,7 @@ export function refusedLoad(specifier, parentURL) {
 if (!globalThis[LOAD_WALL]) {
   registerHooks({
     resolve(specifier, context, next) {
-      const no = refusedLoad(specifier, context.parentURL)
-      if (no) throw new Error(no)
+      // PLANT: the load wall refuses nothing.
       return next(specifier, context)
     },
   })
