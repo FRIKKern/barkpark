@@ -16,6 +16,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.HtmlSanitizer, as: S
+  alias Barkpark.PortableDoc.HtmlSanitizer.StyleGrammar
 
   # The reader's page around the body.
   defp page(html),
@@ -114,9 +115,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
           ~s|<a href="https://evil.example" style="position:fixed;inset:0;top:0;left:0;right:0;bottom:0;z-index:99999;width:100vw;height:100vh;transform:none;background:url(https://evil.example/x.png)">x</a>|
         )
 
-      [style] = style_of(out)
-      refute style =~ ~r/position|inset|right|bottom|z-index|transform|url\(|vw|vh/
-      assert style =~ "top:0;left:0"
+      # Nothing in it is a value the renderer writes there: `top:0` and
+      # `left:0` too (it writes `top:-0.7rem` and `left: N%`).
+      assert style_of(out) == []
     end
 
     test "the worst renderer class with a placed style cannot cover the page" do
@@ -128,7 +129,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
         )
 
       assert class_of(out) == ["bp-rm__lane"]
-      assert style_of(out) == ["position:relative;top:2rem;width:100%"]
+      assert style_of(out) == ["position:relative;width:100%"]
 
       for denied <-
             ~w(bp-rm__bar bp-rm__ms bp-rm__note bp-rm__today bp-rm__unplaced bp-toc--sticky bp-form-q--scale bp-form-q--yesno) do
@@ -143,25 +144,29 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
             {"position:sticky", false},
             {"position:fixed", false},
             {"top:-0.7rem", true},
-            {"top:2em", true},
+            {"top:-0.8rem", false},
+            {"top:2em", false},
             {"top:3rem", false},
+            {"top:0", false},
             {"left:40%", true},
             {"left:100%", true},
             {"left:101%", false},
             {"left:-1%", false},
             {"top:20px", false}
           ] do
-        out = S.sanitize(~s|<a href="#" style="#{decl};color:red">x</a>|)
-        assert style_of(out) == [if(kept?, do: "#{decl};color:red", else: "color:red")], decl
+        out = S.sanitize(~s|<a href="#" style="#{decl};color:#fff">x</a>|)
+        assert style_of(out) == [if(kept?, do: "#{decl};color:#fff", else: "color:#fff")], decl
       end
     end
 
     test "a custom property keeps only a short value that cannot load or escape" do
       for {decl, kept?} <- [
             {"--bp-cols:3", true},
+            {"--bp-cols:13", false},
             {"--i:1", true},
-            {"--bp-tracks:repeat(3, 1fr)", true},
-            {"--bp-grid-gap:1.2rem", true},
+            {"--bp-tracks:repeat(3, 1fr)", false},
+            {"--bp-grid-gap:var(--bp-space-md, 1.2rem)", true},
+            {"--bp-grid-gap:1.2rem", false},
             {"--bp-cols:url(https://evil.example/x)", false},
             {"--bp-cols:a\\62 c", false},
             {"--bp-cols:@import", false},
@@ -170,8 +175,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
             {"--bp-cols:" <> String.duplicate("1", 65), false},
             {"--evil:1", false}
           ] do
-        out = S.sanitize(~s|<a href="#" style="#{decl};color:red">x</a>|)
-        assert style_of(out) == [if(kept?, do: "#{decl};color:red", else: "color:red")], decl
+        out = S.sanitize(~s|<a href="#" style="#{decl};color:#fff">x</a>|)
+        assert style_of(out) == [if(kept?, do: "#{decl};color:#fff", else: "color:#fff")], decl
       end
     end
 
@@ -213,6 +218,102 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
             do: selector
 
       assert Enum.uniq(reachable) == []
+    end
+  end
+
+  describe "B1: a formatting element left open across a closing tag" do
+    # In the page, the first text after the body builds it again, around the
+    # rest of the page.
+    defp wraps_after?(html, tag) do
+      html
+      |> page()
+      |> LazyHTML.query(tag)
+      |> Enum.any?(&(LazyHTML.text(&1) =~ "after"))
+    end
+
+    for tag <- ~w(a b font i em strong u s code nobr big),
+        {name, before, close} <- [
+          {"</p>", "<p>Clean ", "</p>"},
+          {"</li>", "<ul><li>Clean ", "</li></ul>"},
+          {"</td>", "<table><tr><td>Clean ", "</td></tr></table>"},
+          {"</div>", "<div>Clean ", "</div>"}
+        ] do
+      @tag_name tag
+      @close name
+      @payload before <>
+                 ~s|<#{tag} href="https://evil.example/" style="display:block" color="red">link| <>
+                 close
+      test "<#{tag}> left open across #{name} wraps nothing after the body" do
+        # A table cell ends what was opened in it (a marker on the list), so
+        # the raw `</td>` payload wraps nothing either; it is kept as a case.
+        if @close != "</td>",
+          do: assert(wraps_after?(@payload, @tag_name), "control: the raw payload wraps the page")
+
+        refute @payload |> S.sanitize() |> wraps_after?(@tag_name)
+      end
+    end
+
+    test "control: a formatting element closed in its paragraph keeps its bytes" do
+      html = ~s|<p>Clean <a href="https://x.example/">link</a></p><p><b>b</b> <i>i</i></p>|
+      assert S.sanitize(html) == html
+    end
+  end
+
+  describe "B2: an overlay without position" do
+    # A kept style cannot pull its box over what came before (no negative
+    # number) nor size it past the renderer's own boxes.
+    defp contained!(out) do
+      for style <- style_of(out), {_unit, x} <- elem(StyleGrammar.Shape.read(style), 1) do
+        assert x >= 0, style
+        assert x <= 640, style
+      end
+    end
+
+    for {name, style, kept} <- [
+          {"the review's overlay",
+           "display:block;opacity:0.99;background:#fff;margin-top:-5000px;margin-left:-5000px;width:20000px;height:20000px",
+           "display:block;background:#fff"},
+          {"inline-block without opacity",
+           "display:inline-block;width:20000px;height:20000px;margin:-100px 0 0 -100px;background:#fff",
+           "display:inline-block;background:#fff"},
+          {"padding in place of width", "display:block;padding:5000px;background:#fff",
+           "display:block;background:#fff"},
+          {"a negative text-indent", "display:block;text-indent:-9999px;font-size:900px",
+           "display:block"},
+          {"a negative margin shorthand and a big border",
+           "margin:-50px 0 0;border:900px solid #fff;line-height:40", nil},
+          {"a large em and rem", "width:400em;height:300rem;max-width:5000px;min-width:9999px",
+           nil}
+        ] do
+      @style style
+      @kept kept
+      test "#{name} comes out unable to cover the page" do
+        out = S.sanitize(~s|<a href="https://evil.example/" style="#{@style}">x</a>|)
+        assert style_of(out) == if(@kept, do: [@kept], else: [])
+        contained!(out)
+      end
+    end
+
+    test "opacity keeps only the values the renderer writes, display only its own" do
+      for {decl, kept?} <- [
+            {"opacity:0.6", true},
+            {"opacity:0.85", true},
+            {"opacity:0.99", false},
+            {"opacity:1", false},
+            {"display:flex", true},
+            {"display:inline-block", true},
+            {"display:table", false},
+            {"display:contents", false},
+            {"margin:0 0 16px", true},
+            {"margin:0 0 -16px", false},
+            {"width:100%", true},
+            {"width:120%", false},
+            {"width:200px", true},
+            {"width:2000px", false}
+          ] do
+        out = S.sanitize(~s|<a href="#" style="#{decl};color:#fff">x</a>|)
+        assert style_of(out) == [if(kept?, do: "#{decl};color:#fff", else: "color:#fff")], decl
+      end
     end
   end
 

@@ -125,6 +125,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
 
     assert LazyHTML.text(body) =~ @legacy_marker
 
+    # The stored HTML paints inside its own box (#28404 review, B2).
+    assert html
+           |> query(
+             ~s|article[id="paper-body-legacy-#{@legacy_slug}"][style="contain: paint; overflow-x: auto"]|
+           )
+           |> Enum.count() == 1
+
     ids = article_ids(html)
 
     # The positive half: the legacy arm has an id of its own, and it is the one

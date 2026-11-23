@@ -75,6 +75,14 @@ defmodule BarkparkWeb.PaperViewerTest do
 
       assert html =~ "Viewer probe"
       assert html =~ ~s(id="paper-sentinel")
+
+      # An HTML-only paper's stored body paints inside its own box (#28404
+      # review, B2): nothing in it reaches the page around the article.
+      assert html
+             |> LazyHTML.from_document()
+             |> LazyHTML.query(~s(article#paper-body[style="contain: paint; overflow-x: auto"]))
+             |> Enum.count() == 1
+
       # The verdict never leaks into the anonymous page. Asserted on what the
       # reader would actually EMIT for a writable viewer (slice 2's edit bar and
       # its toggle event) rather than on the substring "can_edit": the shared

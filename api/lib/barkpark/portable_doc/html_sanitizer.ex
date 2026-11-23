@@ -70,6 +70,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   the backstop. Defense in depth — neither layer is trusted alone.
   """
 
+  alias Barkpark.PortableDoc.HtmlSanitizer.StyleGrammar
+
   # Elements removed WITH their inner content. The no-embed element is
   # spelled in two parts: part 3 of `scripts/preview-parity-check.sh` (D10)
   # reds the source tree on a substring of its name.
@@ -230,9 +232,23 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
 
   def sanitize(other), do: other
 
+  @doc """
+  The style of the box a reader draws a scrubbed legacy body in (the
+  reader's HTML-only arm, the Studio's read-only arm, the `/s/` share
+  reader): nothing inside it paints or takes a click outside it, a fixed
+  box included (#28404 review, B2). What the scrub keeps cannot cover the
+  page; this keeps a gap a future style lets through inside the article.
+  """
+  def contain, do: "contain: paint; overflow-x: auto"
+
+  # The paragraph carries text: an `<a>`, `<b>`, `<font>`… left open across
+  # a closing `</p>`, `</li>` or `</td>` stays on the parser's list of active
+  # formatting elements and is built again around the next text, so in the
+  # page it would wrap everything after the body (#28404 review, B1). An
+  # empty paragraph never rebuilds it; one with text does, and then differs.
   defp ends_closed?(html, tree) do
-    (html <> "<p></p>") |> LazyHTML.from_fragment() |> LazyHTML.to_tree() ==
-      tree ++ [{"p", [], []}]
+    (html <> "<p>x</p>") |> LazyHTML.from_fragment() |> LazyHTML.to_tree() ==
+      tree ++ [{"p", [], ["x"]}]
   end
 
   defp scrub(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &scrub_node/1)
@@ -320,26 +336,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
           ~r/url\(|expression\(|image-set\(|\\|@|<|>|\}|\{|\d(?:[sld]?v[wh]|vmin|vmax)\b/i,
           val
         ) and
-          (prop in @style_properties or (prop in @placed_properties and placed?(prop, val)) or
-             (prop in @custom_properties and Regex.match?(~r/^[a-z0-9.%#\s,()+*\/-]{1,64}$/i, val)))
+          (prop in @style_properties or prop in @placed_properties or prop in @custom_properties) and
+          StyleGrammar.allowed?(prop, val)
 
       _ ->
         false
-    end
-  end
-
-  # `position: relative` only, and `top`/`left` as 0–100% or at most 2rem/2em
-  # either way: the section divider's mark and the roadmap's bars. Nothing
-  # placed so can leave its own block to cover the page.
-  defp placed?("position", val), do: String.downcase(val) == "relative"
-
-  defp placed?(_prop, "0"), do: true
-
-  defp placed?(_prop, val) do
-    case Regex.run(~r/^(-?\d+(?:\.\d+)?)(%|rem|em)$/i, val) do
-      [_, n, "%"] -> (x = elem(Float.parse(n), 0)) >= 0 and x <= 100
-      [_, n, _unit] -> abs(elem(Float.parse(n), 0)) <= 2.0
-      _ -> false
     end
   end
 

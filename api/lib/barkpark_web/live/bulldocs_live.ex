@@ -1924,7 +1924,7 @@ defmodule BarkparkWeb.BulldocsLive do
           </article>
         <% true -> %>
           <%!-- HTML-only (legacy): whole opaque body, re-assigned on update. --%>
-          <article id="paper-body" data-rev={@rev}>{raw(@html)}</article>
+          <article id="paper-body" data-rev={@rev} style={Barkpark.PortableDoc.HtmlSanitizer.contain()}>{raw(@html)}</article>
       <% end %>
 
       <%!-- Related Papers. Real graph-backed document cards rendered AFTER the

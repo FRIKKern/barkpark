@@ -281,12 +281,35 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert resp.resp_body =~ "A Post"
     refute resp.resp_body =~ "Other Tenant Post"
     refute resp.resp_body =~ "STALE STATIC CACHE"
+    # A paper drawn from its blocks is not boxed in as stored HTML is.
+    refute resp.resp_body =~ "contain: paint"
     # The share head: og/twitter tags with the paper title and (no manifest
     # image on this classic doc) the branded default card.
     assert resp.resp_body =~ ~s(property="og:title" content="Static Block Authority")
     assert resp.resp_body =~ ~s(property="og:site_name" content="Barkpark")
     assert resp.resp_body =~ "/images/og-default.jpg"
     assert resp.resp_body =~ ~s(name="twitter:card" content="summary_large_image")
+  end
+
+  # #28404 review, B2: the static fallback draws an HTML-only paper's scrubbed
+  # stored body in a box nothing in it paints or takes a click outside.
+  test "a PAPER link static fallback boxes in an HTML-only paper's stored body",
+       %{conn: conn, scope_str: scope} do
+    %{"token" => token} =
+      mint(conn, %{scope: scope, kind: "doc", ref_type: "paper", ref_id: "demo-paper"})
+
+    resp =
+      scoped_conn()
+      |> Plug.Conn.put_private(:share_link_tenancy, MissingRedirectTenancy)
+      |> get("/s/#{token}")
+
+    assert resp.status == 200
+    assert resp.resp_body =~ "Shared via a direct link"
+
+    assert resp.resp_body
+           |> LazyHTML.from_document()
+           |> LazyHTML.query(~s(article#paper-body[style="contain: paint; overflow-x: auto"]))
+           |> Enum.count() == 1
   end
 
   # task-11acb383532d6169: the static fallback's og/twitter/JSON-LD head was
