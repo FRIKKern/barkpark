@@ -236,6 +236,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   its text alone, escaped inside one `<p>`, and a warning names `opts[:id]`
   (never the content). `opts[:max_passes]` can only lower the cap (tests use
   it to reach the fail-closed path).
+
+  `editor: true` scrubs the copy a Studio rich text editor draws inside its
+  form (`Content.LegacyRichHtml`): no form control, no `style`, and an `href`
+  that `opts[:href_allowed?]` refuses is kept as `data-refused-href`. The
+  reader's policy drops `data-refused-href`.
   """
   @spec sanitize(term(), keyword()) :: term()
   def sanitize(html, opts \\ [])
