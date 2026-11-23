@@ -11,12 +11,17 @@ defmodule Barkpark.Content.Papers.BodyLosses do
   now. The read finds the one Paper first, then its revisions in its own
   workspace, project and dataset; when more than one Paper is stored under
   the slug, the report is one line naming how many and the scope options. A
-  step runs from one state to the next. Since a BPML push records the
-  Paper as it stood before it (`Papers.PushRevision`, action `"bpml-push"`), a
-  step that starts at a `bpml-push` revision starts with that push. Any other
-  step may hold several writes of any kind, and a push older than those
-  revisions left none, so it cannot be told apart from other writes; the
-  report prints that limit.
+  step runs from one state to the next.
+
+  A BPML push records the Paper as it stood before it and as it left it, in
+  one transaction (`Papers.PushRevision.actions/0`: the before row, then the
+  `after_action/0` row). A step from such a before row to its after row is that
+  push alone, and is named as a push. A push recorded before the after row
+  existed left only its before row: the report prints it as "after not
+  recorded", and the step from it is not named as a push, because it holds
+  the push and any writes after it. Every other step may hold several writes
+  of any kind, among them a push that recorded no revision at all, so those
+  cannot be told apart; the report prints that limit.
 
   What counts as lost:
 
@@ -34,7 +39,12 @@ defmodule Barkpark.Content.Papers.BodyLosses do
   alias Barkpark.Content.Papers.PushRevision
   alias Barkpark.Repo
 
-  @push PushRevision.action()
+  # Both push actions come from the one list (`PushRevision.actions/0`): the
+  # after row by `after_action/0`, the before row as the other one. A third
+  # action on that list fails this match at compile time.
+  @after_row PushRevision.after_action()
+  [before_row] = PushRevision.actions() -- [@after_row]
+  @before_row before_row
 
   @doc """
   The report for `slug` in `dataset`, as lines. `opts` may scope the read
@@ -55,22 +65,38 @@ defmodule Barkpark.Content.Papers.BodyLosses do
   end
 
   defp lines(slug, dataset, states) do
-    steps = steps(states)
-    pushes = Enum.count(states, &(&1.action == @push))
+    {pushes, unpaired} = pushes(states)
 
     header = [
-      "Paper #{slug} (#{dataset}): #{length(states)} stored states, #{pushes} recorded BPML pushes.",
-      "A step that does not start at a #{@push} revision may hold any writes, a push older " <>
-        "than the #{@push} revisions among them; those cannot be told apart."
+      "Paper #{slug} (#{dataset}): #{length(states)} stored states, #{length(pushes)} BPML " <>
+        "pushes recorded before and after, #{length(unpaired)} with the state before only.",
+      "A step that is not a #{@before_row} -> #{@after_row} pair may hold any writes, a push that " <>
+        "recorded no revision among them; those cannot be told apart."
     ]
 
+    old = for a <- unpaired, do: "BPML push, #{a.label}: after not recorded."
+
     lines =
-      for {step, losses} <- steps, loss <- losses do
+      for {step, losses} <- steps(states), loss <- losses do
         "#{step}: #{loss}"
       end
 
     header ++
+      old ++
       if(lines == [], do: ["No list item children or callout bodies disappeared."], else: lines)
+  end
+
+  # The before rows with their after row next (`{a, b}` pairs), and those
+  # without one.
+  defp pushes(states) do
+    pairs = Enum.zip(states, Enum.drop(states, 1) ++ [nil])
+
+    {for({%{action: @before_row} = a, %{action: @after_row} = b} <- pairs, do: {a, b}),
+     for(
+       {%{action: @before_row} = a, next} <- pairs,
+       not match?(%{action: @after_row}, next),
+       do: a
+     )}
   end
 
   @doc """
@@ -85,7 +111,12 @@ defmodule Barkpark.Content.Papers.BodyLosses do
     |> Enum.reject(fn {_label, losses} -> losses == [] end)
   end
 
-  defp step_label(%{action: @push} = a, b), do: "BPML push, #{a.label} -> #{b.label}"
+  defp step_label(%{action: @before_row} = a, %{action: @after_row} = b),
+    do: "BPML push, #{a.label} -> #{b.label}"
+
+  defp step_label(%{action: @before_row} = a, b),
+    do: "a BPML push (after not recorded) and any writes after it, #{a.label} -> #{b.label}"
+
   defp step_label(a, b), do: "not a recorded push, #{a.label} -> #{b.label}"
 
   @doc "What `before` held that `after_` lost, as readable lines."
@@ -211,7 +242,7 @@ defmodule Barkpark.Content.Papers.BodyLosses do
 
         case found |> Enum.uniq_by(&{&1.workspace_id, &1.project_id}) |> length() do
           n when n > 1 -> {:many, n}
-          _one_or_none -> {:ok, Enum.map(found, &revision_state/1)}
+          _one_or_none -> {:ok, found |> in_order() |> Enum.map(&revision_state/1)}
         end
 
       many ->
@@ -219,7 +250,16 @@ defmodule Barkpark.Content.Papers.BodyLosses do
     end
   end
 
-  defp revision_states(query), do: query |> Repo.all() |> Enum.map(&revision_state/1)
+  defp revision_states(query),
+    do: query |> Repo.all() |> in_order() |> Enum.map(&revision_state/1)
+
+  # Oldest first. When a push's two rows carry the same instant, its before
+  # row goes first.
+  defp in_order(revisions) do
+    Enum.sort_by(revisions, fn r ->
+      {DateTime.to_unix(r.inserted_at, :microsecond), if(r.action == @after_row, do: 1, else: 0)}
+    end)
+  end
 
   defp revision_state(r),
     do: state(r.action, "revision #{r.id} (#{r.action}, #{r.inserted_at})", r)

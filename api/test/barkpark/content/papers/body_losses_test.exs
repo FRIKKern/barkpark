@@ -1,8 +1,8 @@
 defmodule Barkpark.Content.Papers.BodyLossesTest do
   @moduledoc """
-  The body-loss report over a planted history on the local test database: a
-  write that empties a callout's body, then a recorded BPML push that drops a
-  list item's children.
+  The body-loss report over planted histories on the local test database:
+  a BPML push recorded before and after, a write after it, and an older push
+  that recorded only the state before it.
   """
   use Barkpark.DataCase, async: true
 
@@ -12,7 +12,9 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
   alias Barkpark.Content.{Document, Revision}
   alias Barkpark.Content.Papers.{BodyLosses, PushRevision}
 
-  @push PushRevision.action()
+  @after_row PushRevision.after_action()
+  [before_row] = PushRevision.actions() -- [@after_row]
+  @before_row before_row
 
   defp t(v), do: %{"type" => "text", "value" => v}
   defp para(id, v), do: %{"id" => id, "type" => "paragraph", "content" => [t(v)]}
@@ -38,8 +40,13 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
   defp no_body, do: [list([para("k1", "One."), para("k2", "Two.")]), callout([])]
   defp no_children, do: [list([]), callout([])]
 
-  defp plant!(paper, action, blocks, seconds, scope \\ %{}) do
+  defp plant!(paper, action, blocks, seconds, scope \\ %{}),
+    do:
+      plant_at!(paper, action, blocks, DateTime.add(DateTime.utc_now(), seconds, :second), scope)
+
+  defp plant_at!(paper, action, blocks, at, scope) do
     Repo.insert!(%Revision{
+      id: Map.get(scope, :id),
       doc_id: paper.doc_id,
       type: "paper",
       dataset: paper.dataset,
@@ -50,8 +57,16 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
       status: paper.status,
       action: action,
       content: Map.put(paper.content, "blocks", blocks),
-      inserted_at: DateTime.add(DateTime.utc_now(), seconds, :second)
+      inserted_at: at
     })
+  end
+
+  defp label(r), do: "revision #{r.id} (#{r.action}, #{r.inserted_at})"
+
+  defp now!(paper, blocks) do
+    paper
+    |> Ecto.Changeset.change(content: Map.put(paper.content, "blocks", blocks))
+    |> Repo.update!()
   end
 
   defp revisions(slug),
@@ -60,22 +75,25 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
         from r in Revision, where: r.doc_id == ^slug, order_by: [asc: r.inserted_at, asc: r.id]
       )
 
-  test "names the step that lost each body, and a push step as a push" do
+  test "a push recorded before and after names its own loss; a write after it is not the push" do
     slug = "body-losses-#{System.unique_integer([:positive])}"
     {:ok, paper} = Content.upsert_paper(LabelFixtures.paper_attrs(%{slug: slug, blocks: full()}))
     paper = Repo.get!(Document, paper.id)
 
-    edited = plant!(paper, "api-ops", no_body(), 60)
-    pushed = plant!(paper, @push, no_body(), 120)
+    # The push's two rows at one instant, the after row with the lower id, so
+    # an id order alone would read them the wrong way round.
+    at = DateTime.add(DateTime.utc_now(), 60, :second)
 
-    paper
-    |> Ecto.Changeset.change(content: Map.put(paper.content, "blocks", no_children()))
-    |> Repo.update!()
+    pushed =
+      plant_at!(paper, @before_row, full(), at, %{id: "ffffffff-ffff-4fff-bfff-ffffffffffff"})
+
+    left =
+      plant_at!(paper, @after_row, no_body(), at, %{id: "00000000-0000-4000-8000-000000000000"})
+
+    later = plant!(paper, "api-ops", no_children(), 120)
+    now!(paper, no_children())
 
     [first | _] = revisions(slug)
-    first_label = "revision #{first.id} (#{first.action}, #{first.inserted_at})"
-    edited_label = "revision #{edited.id} (api-ops, #{edited.inserted_at})"
-    pushed_label = "revision #{pushed.id} (#{@push}, #{pushed.inserted_at})"
     counts = {Repo.aggregate(Revision, :count), Repo.aggregate(Document, :count)}
     row = Repo.get!(Document, paper.id)
 
@@ -84,18 +102,43 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
     states = length(revisions(slug)) + 1
 
     assert Enum.at(lines, 0) ==
-             "Paper #{slug} (#{paper.dataset}): #{states} stored states, 1 recorded BPML pushes."
+             "Paper #{slug} (#{paper.dataset}): #{states} stored states, 1 BPML pushes " <>
+               "recorded before and after, 0 with the state before only."
 
     assert Enum.at(lines, 1) =~ "cannot be told apart"
+    assert first.action not in PushRevision.actions()
 
     assert Enum.drop(lines, 2) == [
-             "not a recorded push, #{first_label} -> #{edited_label}: blocks[1] callout c1 lost its body (1 block)",
-             "BPML push, #{pushed_label} -> the Paper now: blocks[0] item 0 (\"parent\") lost its 2 child blocks"
+             "BPML push, #{label(pushed)} -> #{label(left)}: blocks[1] callout c1 lost its body (1 block)",
+             "not a recorded push, #{label(left)} -> #{label(later)}: blocks[0] item 0 (\"parent\") lost its 2 child blocks"
            ]
 
     # Read-only: nothing was written.
     assert {Repo.aggregate(Revision, :count), Repo.aggregate(Document, :count)} == counts
     assert Repo.get!(Document, paper.id) == row
+  end
+
+  test "an older push with only its before row: after not recorded, and its step is not named a push" do
+    slug = "body-losses-old-#{System.unique_integer([:positive])}"
+    {:ok, paper} = Content.upsert_paper(LabelFixtures.paper_attrs(%{slug: slug, blocks: full()}))
+    paper = Repo.get!(Document, paper.id)
+
+    edited = plant!(paper, "api-ops", no_body(), 60)
+    pushed = plant!(paper, @before_row, no_body(), 120)
+    now!(paper, no_children())
+
+    [first | _] = revisions(slug)
+    lines = BodyLosses.report(slug, paper.dataset)
+
+    assert Enum.at(lines, 0) =~
+             "0 BPML pushes recorded before and after, 1 with the state before only."
+
+    assert Enum.drop(lines, 2) == [
+             "BPML push, #{label(pushed)}: after not recorded.",
+             "not a recorded push, #{label(first)} -> #{label(edited)}: blocks[1] callout c1 lost its body (1 block)",
+             "a BPML push (after not recorded) and any writes after it, #{label(pushed)} -> the Paper now: " <>
+               "blocks[0] item 0 (\"parent\") lost its 2 child blocks"
+           ]
   end
 
   test "a history that kept every body says so" do
@@ -155,7 +198,8 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
     lines = BodyLosses.report(slug, paper.dataset)
 
     assert hd(lines) ==
-             "Paper #{slug} (#{paper.dataset}): #{own + 1} stored states, 0 recorded BPML pushes."
+             "Paper #{slug} (#{paper.dataset}): #{own + 1} stored states, 0 BPML pushes " <>
+               "recorded before and after, 0 with the state before only."
 
     assert List.last(lines) == "No list item children or callout bodies disappeared."
   end
@@ -187,6 +231,8 @@ defmodule Barkpark.Content.Papers.BodyLossesTest do
     [header | _] =
       BodyLosses.report(slug, paper.dataset, workspace_id: ws.id, project_id: proj.id)
 
-    assert header == "Paper #{slug} (#{paper.dataset}): 1 stored states, 0 recorded BPML pushes."
+    assert header ==
+             "Paper #{slug} (#{paper.dataset}): 1 stored states, 0 BPML pushes " <>
+               "recorded before and after, 0 with the state before only."
   end
 end
