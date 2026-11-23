@@ -350,6 +350,38 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
     }
   }
   const opened = []
+  // The census tells each thing it sees once per page (layers.mjs). Each of the light's pages tells it again, so a
+  // thing told is marked with its text and its place among the same texts on that page, and once every page is
+  // done it is kept where the list's order first reads it, as one page would tell it, and dropped where another
+  // page tells it again.
+  const marks = new Map()
+  const mark = (key) => {
+    if (!marks.has(key)) marks.set(key, marks.size)
+    return `\u2060${marks.get(key)}\u2060`
+  }
+  const tellOnce = (page) => {
+    const census = page.barkCensus
+    if (!census) return
+    const seen = new Map()
+    const told = async (p) =>
+      (await census(p)).map((s) => {
+        const k = (seen.get(s) ?? 0) + 1
+        seen.set(s, k)
+        return `${s}${mark(`${s}\u0000${k}`)}`
+      })
+    told.placement = census.placement
+    page.barkCensus = told
+  }
+  const MARKED = /\u2060(\d+)\u2060$/
+  const keptOnce = new Set()
+  const once = (list) =>
+    list.flatMap((l) => {
+      const m = l.match(MARKED)
+      if (!m) return [l]
+      if (keptOnce.has(m[1])) return []
+      keptOnce.add(m[1])
+      return [l.replace(MARKED, '')]
+    })
   // An error ends the light with the error of the first view in the list's order that meets one, as on one page:
   // each page goes on only through the views before it. Before its first view a page is at -1.
   const errors = []
@@ -367,6 +399,7 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
       return failAt(-1, new Error(`the skins light could not open its page ${j + 1} of ${shares.length}: ${String(e.message).split('\n')[0]}`))
     }
     opened[j] = page
+    tellOnce(page)
     let i = -1
     try {
       await pointTo(page, 0, 0)
@@ -386,6 +419,8 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
     await Promise.all(shares.map((_, j) => onPage(j)))
     if (errors.length) throw errors.reduce((a, b) => (b.i < a.i ? b : a)).e
     for (const k of kept) for (const f of k) f()
+    // The light's views come first in light, then in dark: what the census told is kept where it is first read.
+    for (const scheme of ['light', 'dark']) bad[scheme] = once(bad[scheme])
     // A run that reads the views of the drive's skins alone names the rest in both lights: it is never green, and a
     // row that needs a view of theirs finds nothing and is red by its name.
     const unreadSkins = skins.filter((k) => !viewSkins(ctx, skins).includes(k))

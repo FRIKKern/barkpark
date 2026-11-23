@@ -14,15 +14,17 @@ const PART = 'tabs'
 const ONLY = ['skins', 'schemes']
 const SKINS = skinNames(readFileSync(tokensPath, 'utf8'))
 const VIEWS = viewList(SKINS)
-/** A colour that is no skin variable, in one view: the light reads it there and turns off by name. */
-const inView = ({ skin, scheme }, sel) => `html[data-skin="${skin}"][data-color-scheme="${scheme}"] ${sel} { color: #808080; }`
-/** Fails in a view on each page, so the lines compared are lines of both. */
+/** A declaration in one view alone. */
+const inView = ({ skin, scheme }, sel, decl) => `html[data-skin="${skin}"][data-color-scheme="${scheme}"] ${sel} { ${decl} }`
 /** The compare is of one page against two. */
 const TWO = spread(VIEWS, 2)
-const BASE = TWO.map((share, j) => inView(share[1], j ? '#tabs-settings' : '#tabs-analytics')).join('\n')
+/** Fails in a view on each page, so the lines compared are lines of both: a label not drawn, in a view each page
+    reads, named with that view. */
+const BASE = TWO.map((share, j) => inView(share[1], j ? '#tabs-settings' : '#tabs-analytics', 'color: transparent;')).join('\n')
+const BASE_AT = TWO.map((share) => `${share[1].skin} ${share[1].scheme}`)
 /** The plant: a view of the second page's alone, its reading changed only where two pages read. */
 const CHANGED = TWO[1][0]
-const PLANT = inView(CHANGED, '#tabs-overview')
+const PLANT = inView(CHANGED, '#tabs-overview', 'color: transparent;')
 
 /** Every line the light leaves, as the selftest reads a run: its log, and the part's entry in the proof. A number of
     seconds is no reading and is left out. */
@@ -64,9 +66,10 @@ async function read(pages, css) {
 const same = async () => {
   const [one, two] = [await read(1, BASE), await read(2, BASE)]
   const d = differ(one, two)
-  const fails = one.filter((l) => / fails: /.test(l)).length
-  console.log(`    lines that differ between one page and two: ${d.length} of ${one.length} (${fails} of them fails, in views of both pages)${d.length ? `: ${d.slice(0, 3).join(' | ')}` : ''}`)
-  return d.length === 0 && fails > 0 && one.some((l) => l.includes(`views the skins light read: ${VIEWS.length} of ${VIEWS.length}; on two pages: 0; on none: 0`))
+  const fails = one.filter((l) => / fails: /.test(l))
+  const by = BASE_AT.map((at) => `${fails.filter((l) => l.includes(`${at} on base`)).length} in ${at}`)
+  console.log(`    lines that differ between one page and two: ${d.length} of ${one.length}; the fails the plant makes: ${by.join(' and ')}, one view on each page${d.length ? `: ${d.slice(0, 3).join(' | ')}` : ''}`)
+  return d.length === 0 && BASE_AT.every((at) => fails.some((l) => l.includes(`${at} on base`))) && one.some((l) => l.includes(`views the skins light read: ${VIEWS.length} of ${VIEWS.length}; on two pages: 0; on none: 0`))
 }
 const seen = async () => {
   const [one, two] = [await read(1, BASE), await read(2, `${BASE}\n${PLANT}`)]
