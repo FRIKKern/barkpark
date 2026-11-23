@@ -39,6 +39,12 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   the document is refused when it holds unshown content. Blocks that hold
   none are written from the push as before.
 
+  The rule reads per list item too (`WriteWall.Items`): unshown content inside
+  a stored list item with an id is kept when the block with the same id holds
+  that item once, with its id, and the content byte-equal in canonical
+  spelling. `Bpml.ListItems.carry/2` brings it back on push, so the item may
+  be edited where the pull showed it.
+
   The check runs inside `Papers.BpmlView.push/3`, after
   `Bpml.CalloutBody.resolve/4` and before any op derives, on the blocks the
   push would write (`Diff.target/3`). It compares against the blocks the
@@ -81,6 +87,7 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
   alias Barkpark.PortableDoc.Bpml
   alias Barkpark.PortableDoc.Bpml.{Canonical, Diff}
+  alias Barkpark.PortableDoc.Bpml.WriteWall.Items
 
   @code "bpml_unshown"
 
@@ -228,7 +235,10 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
     if kept? do
       nil
     else
-      case missing_from(s, pulled_block(s, i, matched?, stored, pulled)) do
+      paths = missing_from(s, pulled_block(s, i, matched?, stored, pulled))
+      paths = if matched?, do: Items.uncovered(paths, s, result), else: paths
+
+      case paths do
         [] -> nil
         [first | _] = paths -> refuse(i, id, first, paths)
       end

@@ -1,7 +1,7 @@
 defmodule Barkpark.PortableDoc.Bpml.ListItems do
   @moduledoc """
-  A list item in BPML (task-0b448ea0847a6b4f): how the printer spells it and
-  how the parser shapes it.
+  A list item in BPML (task-0b448ea0847a6b4f): how the printer spells it, how
+  the parser shapes it, and what a push carries back by its id.
 
   An item prints as `<li id checked>` with the reader's words (its `content`
   when that is a non-empty list, else its `text`), then each child list as a
@@ -25,9 +25,13 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   are `@fallbacks`, here and nowhere else.
 
   An item with an id prints what the printer can spell, even when it holds
-  more: the pull shows its words, and `Bpml.WriteWall` refuses an edit to its
-  block (422 `bpml_unshown`), so what BPML cannot spell keeps its stored bytes.
-  Editing nested lists from a text copy needs a bp that sends the pull's
+  more: the pull shows its words, and `carry/2` brings the rest back on push
+  from the stored item with that id, in the stored top-level block with the
+  pushed block's id: its other keys, a `text` the reader does not show, a
+  `checked` that is not `true`, and `children` entries that are not lists, in
+  their places. The unshown keys belong to the id. `Bpml.WriteWall` reads such
+  an item as kept when it comes back with them byte-equal
+  (`Bpml.WriteWall.Items`). Editing nested lists from a text copy needs a bp that sends the pull's
   fingerprint (`Bpml.PrintMark`); without it, a list holding nested lists or
   item ids comes home byte-equal or the push is refused.
 
@@ -161,6 +165,15 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   @spec list?(term()) :: boolean()
   def list?(%{"type" => type, "items" => items}) when type in @list_types, do: is_list(items)
   def list?(_other), do: false
+
+  @doc """
+  `:unordered` or `:ordered` for a list type the reader draws as a `list`
+  under another name; nil for `list` itself and every other type.
+  """
+  @spec alias_kind(term()) :: :unordered | :ordered | nil
+  def alias_kind(t) when t in @unordered_aliases, do: :unordered
+  def alias_kind(t) when t in @ordered_aliases, do: :ordered
+  def alias_kind(_t), do: nil
 
   # The reader's own alias rule (Render.Compose): an unordered alias is a
   # `list`, an ordered one a `list` with `ordered: true`.
@@ -383,4 +396,98 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   end
 
   defp collect_item(_item, acc), do: acc
+
+  @doc """
+  `pushed` with each item that has an id given back what the printer does not
+  spell, from the stored item with that id in the stored top-level block with
+  the same id. An id the stored block holds twice, or not at all, carries
+  nothing. Runs after `check_ids/2`.
+  """
+  @spec carry([map()], [map()]) :: [map()]
+  def carry(pushed, stored) do
+    stored_by_id = for %{"id" => id} = b <- stored, is_binary(id), into: %{}, do: {id, b}
+
+    Enum.map(pushed, fn
+      %{} = block -> walk(block, index(Map.get(stored_by_id, block["id"])))
+      other -> other
+    end)
+  end
+
+  @doc "Every `{id, item}` of the lists in `value` whose id `value` holds once."
+  @spec index(term()) :: %{String.t() => map()}
+  def index(value) do
+    pairs = item_ids(value)
+    once = pairs |> Enum.frequencies_by(&elem(&1, 0)) |> Map.filter(&(elem(&1, 1) == 1))
+    for {id, item} <- pairs, Map.has_key?(once, id), into: %{}, do: {id, item}
+  end
+
+  defp walk(%{"type" => t, "items" => items} = list, index)
+       when t in @list_types and is_list(items) do
+    list
+    |> Map.new(fn {k, v} -> {k, if(k == "items", do: v, else: walk(v, index))} end)
+    |> Map.put("items", Enum.map(items, &carry_item(&1, index)))
+  end
+
+  defp walk(%{} = map, index), do: Map.new(map, fn {k, v} -> {k, walk(v, index)} end)
+  defp walk(list, index) when is_list(list), do: Enum.map(list, &walk(&1, index))
+  defp walk(other, _index), do: other
+
+  defp carry_item(%{} = item, index) do
+    item =
+      if Map.has_key?(item, "children"),
+        do: Map.update!(item, "children", &walk(&1, index)),
+        else: item
+
+    case Map.fetch(index, id(item)) do
+      {:ok, stored} -> merge(item, stored)
+      :error -> item
+    end
+  end
+
+  defp carry_item(item, _index), do: item
+
+  defp merge(item, stored) do
+    item = Map.merge(Map.drop(stored, @spelled), item)
+    item = if unshown_text?(stored), do: Map.put(item, "text", stored["text"]), else: item
+
+    item =
+      if Map.has_key?(stored, "checked") and stored["checked"] != true and
+           not Map.has_key?(item, "checked"),
+         do: Map.put(item, "checked", stored["checked"]),
+         else: item
+
+    merge_children(item, stored)
+  end
+
+  # Stored children entries that are not lists stay in their places; the
+  # pushed lists fill the list places in order, and any more come after.
+  defp merge_children(item, stored) do
+    case Map.fetch(stored, "children") do
+      {:ok, children} when is_list(children) ->
+        if Enum.all?(children, &list?/1),
+          do: item,
+          else: Map.put(item, "children", interleave(children, item))
+
+      {:ok, children} ->
+        if Map.has_key?(item, "children"), do: item, else: Map.put(item, "children", children)
+
+      :error ->
+        item
+    end
+  end
+
+  defp interleave(stored_children, item) do
+    lists = item |> Map.get("children", []) |> Enum.filter(&list?/1)
+
+    {placed, rest} =
+      Enum.flat_map_reduce(stored_children, lists, fn entry, rest ->
+        cond do
+          not list?(entry) -> {[entry], rest}
+          rest == [] -> {[], []}
+          true -> {[hd(rest)], tl(rest)}
+        end
+      end)
+
+    placed ++ rest
+  end
 end
