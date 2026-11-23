@@ -363,7 +363,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
     end
 
     test "an element the renderer does not write is unwrapped, so its bytes never pass" do
-      for tag <- ~w(dialog search marquee font center em br portal geolocation) do
+      for tag <- ~w(dialog search marquee font center portal geolocation) do
         html = "<p>a</p><#{tag}>t</#{tag}>"
         out = S.sanitize(html)
         refute out == html, tag
@@ -372,11 +372,23 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
       end
     end
 
+    test "a legacy body with em, br and dl keeps its bytes" do
+      for html <- [
+            ~s|<p>One<br>two<br/>three, <em>stressed</em>, <s>old</s> <ins>new</ins></p>|,
+            ~s|<dl><dt>Term</dt><dd>Its <abbr title="definition">def</abbr>, <time datetime="2026-11-23">today</time></dd></dl>|,
+            ~s|<table><caption>Sums</caption><tbody><tr><td>1</td></tr></tbody><tfoot><tr><td>1</td></tr></tfoot></table>|,
+            ~s|<p><kbd>K</kbd> <samp>s</samp> <var>v</var> <small>x</small> <q>y</q> <u>z</u> <del>d</del> long<wbr>word</p>|
+          ] do
+        assert S.sanitize(html) == html
+      end
+    end
+
     test "the kept elements are the renderer's, none parsed in a mode of its own" do
       special = ~w(select option optgroup datalist selectedcontent template noscript textarea
                    iframe object embed svg math script style title xmp plaintext listing)
 
       assert Elements.kept() -- special == Elements.kept()
+      assert Elements.inert() -- Elements.kept() == []
       assert Enum.all?(special, &(&1 in Elements.dropped()))
       assert ~w(a p div span table td img h2 h6 code pre) -- Elements.kept() == []
     end

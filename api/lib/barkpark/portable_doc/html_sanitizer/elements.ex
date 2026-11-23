@@ -5,7 +5,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Elements do
   inside each page golden's `<article>`) and off the tags its source writes (`render.ex` and
   `render/*.ex`: a `"<tag` or `~s(<tag` literal; `<h\#{level}` is `h1`…`h6`).
   The sanitizer keeps these and unwraps every other element, its text kept
-  (#28404 review, B3).
+  (#28404 review, B3). A short list of inert text-level elements older
+  producers wrote (`br`, `em`, `dl`…) is kept beside them (`inert/0`).
 
   A tag the scrub keeps is one whose parse it knows: a browser and the
   scrub's parser (lexbor) can read the same bytes as different trees. lexbor
@@ -34,6 +35,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Elements do
         select option optgroup datalist selectedcontent textarea
       )
   ]
+
+  # Kept beside the renderer's: plain text-level and list markup older
+  # producers wrote (a line break, emphasis, a definition list). None is read
+  # in a parse mode of its own, so a browser and lexbor build the same tree.
+  @inert ~w(br wbr em del ins s u kbd samp var small abbr q time dl dt dd caption tfoot)
 
   # The document's own frame: a fragment never holds one.
   @frame ~w(html head body)
@@ -94,13 +100,16 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Elements do
       headings ++ tags
     end)
 
-  @kept (rendered ++ written)
+  @kept (rendered ++ written ++ @inert)
         |> Enum.reject(&(&1 in @dropped or &1 in @frame or String.contains?(&1, "-")))
         |> Enum.uniq()
         |> Enum.sort()
 
   @doc "The elements the sanitizer keeps: those the Paper renderer writes."
   def kept, do: @kept
+
+  @doc "The inert elements kept beside the renderer's."
+  def inert, do: @inert
 
   @doc "The elements removed with their content."
   def dropped, do: @dropped
