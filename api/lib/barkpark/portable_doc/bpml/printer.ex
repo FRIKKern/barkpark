@@ -11,18 +11,19 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   lossy `""`. Callers turn that into an honest 422.
   """
 
-  alias Barkpark.PortableDoc.Bpml.CalloutBody
+  alias Barkpark.PortableDoc.Bpml.{ListItems, PrintMark, Unwritable}
   alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   @indent "  "
 
   # ── public ──────────────────────────────────────────────────────────────────
 
-  # `print="2"` marks a Paper whose callouts print their body (CalloutBody):
-  # a copy without it was pulled before, and a push reads it as an old copy.
+  # `print="N"` marks a Paper holding a form the printer began to show at N
+  # (`PrintMark`): a copy with a lower mark was pulled before, and a push
+  # reads it as an old copy.
   def print_paper(%{} = paper) do
     blocks = Map.get(paper, "blocks", [])
-    mark = if CalloutBody.marked?(blocks), do: ~s( print="2"), else: ""
+    mark = PrintMark.attr(blocks)
     attrs = attr_str(paper, ["slug", "title"]) <> mark
     meta = meta_lines(paper)
     body = Enum.map(blocks, &top(&1, 1))
@@ -33,20 +34,20 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     blocks |> Enum.map(&top(&1, 0)) |> Enum.join("\n") |> Kernel.<>("\n")
   end
 
-  # The ONLY catch of a callout BPML cannot write: the whole top-level block
-  # that holds it prints as one `<kept>` line, never with a hole in it. A block
-  # with no id cannot be matched back on push, so it stays a refusal.
+  # The ONLY catch of a block BPML cannot write (`Unwritable`): the whole
+  # top-level block that holds it prints as one `<kept>` line, never with a hole
+  # in it. A block with no id cannot be matched back on push, so it stays a refusal.
   defp top(b, d) do
     block(b, d)
   rescue
-    e in CalloutBody.Unwritable ->
+    e in Unwritable ->
       case b do
         %{"id" => id, "type" => type} when is_binary(id) and id != "" and is_binary(type) ->
           kept = %{"id" => id, "type" => type, "why" => Exception.message(e)}
           pad(d) <> "<kept" <> attr_str(kept, ["id", "type", "why"]) <> "/>"
 
         _ ->
-          reraise UnprintableError.new(:block, "callout"), __STACKTRACE__
+          reraise UnprintableError.new(:block, e.block), __STACKTRACE__
       end
   end
 
@@ -137,10 +138,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # (compose.ex `Map.get(b, "ordered") == true` -> PdList ordered), so dropping
   # it turned every numbered list in a pulled paper back into bullets on push.
   # `start` (an ordered list's first number) rides beside it.
-  defp block(%{"type" => "list"} = b, d) do
-    items = Enum.map(Map.get(b, "items", []), &list_item_tag(&1, d))
-    wrap("ul", attr_str(b, ["id", "ordered", "start", "task"]), items, d)
-  end
+  defp block(%{"type" => "list"} = b, d), do: list_block(b, d, 1)
 
   # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
   # read it, and the Studio's code editor renders `Map.get(@block, "lang", "")`.
@@ -588,6 +586,16 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
   defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
 
+  # A list nested in an item is one level deeper (`ListItems`).
+  defp list_block(b, d, level) do
+    items =
+      Map.get(b, "items", [])
+      |> Enum.with_index(1)
+      |> Enum.map(fn {item, n} -> list_item_tag(item, n, b, d, level) end)
+
+    wrap("ul", attr_str(b, ["id", "ordered", "start", "task"]), items, d)
+  end
+
   defp callout_body(%{"body" => body} = slots, _id) when map_size(slots) == 1 and is_list(body),
     do: body
 
@@ -607,7 +615,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           "its slots are not a map"
       end
 
-    raise CalloutBody.Unwritable, callout: id, reason: reason
+    raise Unwritable, block: "callout", id: id, reason: reason
   end
 
   defp callout_child(child, id, d) do
@@ -616,28 +624,33 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     e in UnprintableError ->
       what = e.type || to_string(e.kind)
 
-      reraise CalloutBody.Unwritable,
-              [callout: id, reason: "its body holds a block BPML cannot write (#{what})"],
+      reraise Unwritable,
+              [
+                block: "callout",
+                id: id,
+                reason: "its body holds a block BPML cannot write (#{what})"
+              ],
               __STACKTRACE__
   end
 
-  # A checklist item is a map ({content|text, checked}); its `checked` rides as an
-  # attribute and its body prints like any inline array.
-  defp list_item_tag(item, d) do
-    pad(d + 1) <> "<li" <> li_attrs(item) <> ">" <> inline(list_item_inline(item)) <> "</li>"
-  end
+  # An item prints its `id` and `checked` as attributes, the reader's words
+  # inline, then each child list as a nested `<ul>` (`ListItems.spell/3`). A
+  # shape it cannot round-trip raises `Unwritable` for the whole top-level block.
+  defp list_item_tag(item, n, list, d, level) do
+    case ListItems.spell(item, n, level) do
+      {:ok, attrs, words, []} ->
+        pad(d + 1) <>
+          "<li" <> attr_str(attrs, ["id", "checked"]) <> ">" <> inline(words) <> "</li>"
 
-  defp li_attrs(%{"checked" => true}), do: ~s( checked="true")
-  defp li_attrs(_), do: ""
+      {:ok, attrs, words, lists} ->
+        head = pad(d + 1) <> "<li" <> attr_str(attrs, ["id", "checked"]) <> ">" <> inline(words)
+        nested = Enum.map(lists, &list_block(&1, d + 2, level + 1))
+        Enum.join([head | nested] ++ [pad(d + 1) <> "</li>"], "\n")
 
-  defp list_item_inline(%{} = item) do
-    case Map.get(item, "content") do
-      content when is_list(content) -> content
-      _ -> [%{"type" => "text", "value" => to_string(Map.get(item, "text") || "")}]
+      {:fallback, reason} ->
+        raise Unwritable, block: "list", id: list["id"], reason: reason
     end
   end
-
-  defp list_item_inline(item), do: item
 
   # `variant` must be a SCALAR string to print — `attr_str`'s `to_string/1`
   # raises Protocol.UndefinedError on a map. A non-binary variant is DROPPED

@@ -28,7 +28,11 @@ defmodule Barkpark.Content.Papers.BpmlView do
   alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{BlockIds, Bpml, Projection}
-  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, WriteWall}
+  alias Barkpark.PortableDoc.Bpml.{CalloutBody, Diff, ListItems, PrintMark, WriteWall}
+
+  # A block holding a form a fingerprint-less push may not change: only a bp
+  # that sends its pull's fingerprint back can change it.
+  @update_hint "update bp, then bp paper pull and make your edit again"
 
   @reasons %{
     ambiguous_source: "this Paper's stored HTML holds text its blocks lack",
@@ -172,7 +176,9 @@ defmodule Barkpark.Content.Papers.BpmlView do
   `Bpml.WriteWall` refuses, before that, a copy pulled from another view (its
   `bpmlView` fingerprint, 412) and a hidden label field it sets (422
   `bpml_unshown`), and after it, an id pushed twice (422 `bpml`) and blocks
-  that change what the pull did not show (422 `bpml_unshown`).
+  that change what the pull did not show (422 `bpml_unshown`). Between the
+  two, a list item id pushed twice in one block is refused (422 `bpml`,
+  `Bpml.ListItems.check_ids/2`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """
@@ -190,7 +196,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
          :ok <- WriteWall.check_fields(paper.content || %{}, fields, copy),
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
-         {:ok, target} <- WriteWall.target(stored, pulled, pushed),
+         :ok <- ListItems.check_ids(pushed, stored),
+         {:ok, target} <- wall(paper, {stored, shown, fields}, pulled, pushed, copy),
          {:ok, _blocks, ops} <- Diff.derive_target(stored, target) do
       {:ok, ops, notes}
     else
@@ -200,10 +207,32 @@ defmodule Barkpark.Content.Papers.BpmlView do
     end
   end
 
+  # The write wall's target. A push without its pull's fingerprint is believed
+  # up to `PrintMark.believed/1`; a form the view holds past that is unshown to
+  # it, so the wall reads the push against the view as the printer before
+  # that form printed it, and its refusal says to update bp.
+  defp wall(paper, {stored, shown, fields}, pulled, pushed, copy) do
+    believed = PrintMark.believed(copy)
+
+    with {:ok, target} <- WriteWall.target(stored, pulled, pushed) do
+      if PrintMark.newer(shown, believed) == [] do
+        {:ok, target}
+      else
+        with {:ok, _bpml, before} <- printed(paper, PrintMark.before(shown, believed), fields) do
+          case WriteWall.target(stored, BlockIds.ensure_block_ids(before), pushed) do
+            {:refused, %{code: "bpml_unshown"} = body} -> {:refused, %{body | hint: @update_hint}}
+            other -> other
+          end
+        end
+      end
+    end
+  end
+
   @doc """
   A pushed copy (`Bpml.parse_copy/1`) for a Paper that does not exist yet, as
   a create reads it: refused when its `<paper slug>` names another Paper, or
-  when it holds a `<kept>` line (it stands for no stored block).
+  when it holds a `<kept>` line (it stands for no stored block), or a list
+  item id twice.
   """
   @spec create_copy(map(), String.t()) :: {:ok, map()} | {:refused, map()}
   def create_copy(%{} = copy, slug) do
@@ -223,7 +252,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
     else
       case Bpml.clean_copy(copy) do
         {:ok, paper} ->
-          {:ok, paper}
+          with :ok <- ListItems.check_ids(paper["blocks"] || [], []), do: {:ok, paper}
 
         {:error, errors} ->
           {:refused, %{code: "bpml", message: "the BPML document did not parse", errors: errors}}
@@ -258,7 +287,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
         with {:blocks, shown, fields} <- of(paper, dataset, [], :published),
              {:ok, _bpml, pulled} <- printed(paper, shown, fields),
              pulled = BlockIds.ensure_block_ids(pulled),
-             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy) do
+             {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
+             :ok <- ListItems.check_ids(blocks, stored) do
           {:ok, copy |> Map.delete("print") |> Map.put("blocks", blocks)}
         else
           {:refused, _body} = refused -> refused
