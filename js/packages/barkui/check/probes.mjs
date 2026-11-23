@@ -306,11 +306,14 @@ export function installHelpers(lists) {
   const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
   /** Motion where the check cannot see it, by name: a mover anywhere but the places of PLACES. */
   const UNSEEN = 'the check could not read (not a fault of the part): motion where the check cannot see it'
-  /** Scrolls under way, by what scrolls: from its first scroll event to its scrollend. */
-  const scrolls = new Set()
-  addEventListener('scroll', (e) => scrolls.add(e.target), { capture: true })
-  addEventListener('scrollend', (e) => scrolls.delete(e.target), { capture: true })
-  const scrolling = () => [...scrolls].filter((t) => t === document || t.isConnected)
+  /** Scrolls under way: what scrolled since a frame was last seen to pass with no scroll. A scroll that goes on
+      scrolls again on every frame; one that has ended does not. */
+  const scroll = { count: 0, seen: 0, by: new Set() }
+  addEventListener('scroll', (e) => {
+    scroll.count++
+    scroll.by.add(e.target)
+  }, { capture: true })
+  const scrolling = () => (scroll.count === scroll.seen ? [] : [...scroll.by])
   const atRest = (who) => {
     const now = moving()
     const off = now.filter((a) => !PLACES.includes(a.effect?.pseudoElement ?? ''))
@@ -399,7 +402,14 @@ export function installHelpers(lists) {
       animation advances only when a frame runs). What has no end never comes to rest; waiting for it changes nothing. */
   const toRest = async () => {
     const until = performance.now() + 2000
-    while ((moving(true).length || scrolling().length) && performance.now() < until) await frame()
+    while ((moving(true).length || scrolling().length) && performance.now() < until) {
+      const was = scroll.count
+      await frame()
+      if (scroll.count === was) {
+        scroll.seen = was
+        scroll.by.clear()
+      }
+    }
   }
   /** The rest step after the checker's input on a page (check/acts.mjs): a frame is drawn, so what the input
       started shows, then the page comes to rest inside the bound. The next read is red by name if it did not. */
