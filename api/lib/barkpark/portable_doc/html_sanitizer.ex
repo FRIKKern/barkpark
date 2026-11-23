@@ -81,7 +81,12 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   the backstop. Defense in depth — neither layer is trusted alone.
   """
 
-  alias Barkpark.PortableDoc.HtmlSanitizer.{Elements, StyleGrammar}
+  require Logger
+
+  alias Barkpark.PortableDoc.HtmlSanitizer.{Elements, Serializer, StyleGrammar}
+
+  # Passes `sanitize/2` makes before it fails closed (#28404 review, B5).
+  @max_passes 3
 
   # Elements removed with their content, and the elements kept: those the
   # Paper renderer writes (`Elements`). Every other element is unwrapped, its
@@ -213,22 +218,63 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   @doc """
   Scrub untrusted HTML. Non-binary input is returned unchanged (a nil/absent
   `body_html` is a no-op).
+
+  The result is a fixed point: `sanitize(sanitize(x)) == sanitize(x)`. Each
+  pass parses, scrubs and serialises. Up to #{@max_passes} passes are made
+  until a pass returns its own input. A body that never settles is served as
+  its text alone, escaped inside one `<p>`, and a warning names `opts[:id]`
+  (never the content). `opts[:max_passes]` can only lower the cap (tests use
+  it to reach the fail-closed path).
   """
-  @spec sanitize(term()) :: term()
-  def sanitize(html) when is_binary(html) do
+  @spec sanitize(term(), keyword()) :: term()
+  def sanitize(html, opts \\ [])
+
+  def sanitize(html, opts) when is_binary(html) do
     # Always the clean tree, serialised: never the input's own bytes. A
     # serialised tree closes what it opens and holds no end tag it did not
     # open, so nothing stored can close the reader's box or reach past it
     # (#28404 review, B4: a stray `</article>` the fragment parse ignored).
-    html
-    |> LazyHTML.from_fragment()
-    |> LazyHTML.to_tree()
-    |> scrub()
-    |> LazyHTML.from_tree()
-    |> LazyHTML.to_html()
+    #
+    # One pass is not enough (#28404 review, B5). Unwrapping an element
+    # (`aside`, `center`, `marquee`…) moves its children where the parser
+    # never puts them: `<li>a<div><aside><li>b` becomes `<li>a<div><li>b`,
+    # and the browser's parse of that closes the page's own `div`. A pass
+    # whose output parses back to itself has no such tree left.
+    passes = opts |> Keyword.get(:max_passes, @max_passes) |> min(@max_passes) |> max(1)
+    settle(html, passes, opts)
   end
 
-  def sanitize(other), do: other
+  def sanitize(other, _opts), do: other
+
+  defp settle(html, passes, opts) do
+    {out, tree} = pass(html)
+
+    cond do
+      out == html -> out
+      passes > 1 -> settle(out, passes - 1, opts)
+      true -> fail_closed(tree, opts)
+    end
+  end
+
+  defp pass(html) do
+    tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> scrub()
+    {Serializer.to_html(tree), tree}
+  end
+
+  # Never the unstable HTML: its text, escaped, in one paragraph. That parses
+  # back to itself, so it is a fixed point too.
+  defp fail_closed(tree, opts) do
+    Logger.warning(
+      "HtmlSanitizer: a legacy body did not settle in its passes; " <>
+        "serving its text only (id=#{inspect(opts[:id])})"
+    )
+
+    text = tree |> Serializer.text() |> String.trim()
+
+    if text == "",
+      do: "",
+      else: IO.iodata_to_binary(["<p>", Serializer.escape_text(text), "</p>"])
+  end
 
   @doc """
   The style of the box a reader draws a scrubbed legacy body in (the
