@@ -27,7 +27,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
-import { STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
+import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
@@ -603,29 +603,7 @@ steps.push({
     }),
   },
   ...STATE_CASES,
-  // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
-  // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
-  {
-    name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
-    only: ['skins'],
-    states: true,
-    plant: all(
-      (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
-      inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
-      // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
-      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
-      // A change only the real click shows: no pinned row carries it.
-      inCss('#button-tick:checked { border-width: 3px; }'),
-      // The demo's change handler marks another element; the check puts back only what is checked.
-      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
-    ),
-    expect: each({
-      'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
-      'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
-      'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
-      'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
-    }),
-  },
+  ...CHECKED_CASES,
   ...CEILING_CASES,
   ...LAYER_CASES,
   ...PLACEMENT_CASES,

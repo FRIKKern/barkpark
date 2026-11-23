@@ -1,5 +1,5 @@
 // Every selftest case runs under one limit, and its hosted reading sits under a share of it (check/capacity.mjs).
-// Two cases outgrew that share and were unfolded into runs (check/unfolded-cases.mjs). These hold that each row of
+// Cases that outgrew that share were unfolded into runs (check/unfolded-cases.mjs). These hold that each row of
 // the one case is in exactly one run, that the runs together still read what the case read (every surface; every
 // light), and that a case with a key the runner does not read, no reading, or a reading over the share is red by
 // the case's name.
@@ -38,18 +38,19 @@ const ONE_CASE = {
     'a tooltip open only while a driven state holds, named by no layer',
     'a box open only after a press step, named by no layer',
   ],
+  checked: ['a box checked at rest, blank', 'the pinned checked row, blank', 'a checked change no pinned row shows', 'a click that leaves the stage changed'],
 }
 
 describe('an unfolded case', () => {
   it('keeps every row it held, each in exactly one run', () => {
-    for (const kind of ['surfaces', 'states']) expect(rowsMoved(ONE_CASE[kind], UNFOLDED_ROWS[kind], kind), kind).toEqual([])
+    for (const kind of ['surfaces', 'states', 'checked']) expect(rowsMoved(ONE_CASE[kind], UNFOLDED_ROWS[kind], kind), kind).toEqual([])
   })
 
   it('is red by the row’s name when a row is dropped or doubled', () => {
-    const { drawn, steps, unread } = UNFOLDED_ROWS.states
+    const { drawn, pending, steps, unread } = UNFOLDED_ROWS.states
     const row = 'a rule nothing reads'
-    expect(rowsMoved(ONE_CASE.states, { drawn, steps, unread: unread.filter((r) => r !== row) }, 'states')).toEqual([`the row "${row}" is in no states run`])
-    expect(rowsMoved(ONE_CASE.states, { drawn: [...drawn, row], steps, unread }, 'states')).toEqual([`the row "${row}" is in 2 states runs (drawn, unread)`])
+    expect(rowsMoved(ONE_CASE.states, { drawn, pending, steps, unread: unread.filter((r) => r !== row) }, 'states')).toEqual([`the row "${row}" is in no states run`])
+    expect(rowsMoved(ONE_CASE.states, { drawn: [...drawn, row], pending, steps, unread }, 'states')).toEqual([`the row "${row}" is in 2 states runs (drawn, unread)`])
   })
 
   it('still reads every surface across its runs, and every light', () => {

@@ -1,5 +1,5 @@
-// Two selftest cases that outgrew the share of the one limit a case may take (check/capacity.mjs), each unfolded
-// into runs: every surface read, and real states held to their pins. A run reads only what its rows need, so each
+// Selftest cases that outgrew the share of the one limit a case may take (check/capacity.mjs), each unfolded into
+// runs: every surface read, real states held to their pins, and a checked box. A run reads only what its rows need, so each
 // is cheaper than the one case was; every row the case held is in exactly one run (tests/unfold.test.mjs).
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -49,8 +49,8 @@ export const SURFACE_CASES = [
   },
 ]
 
-// Real states held to their pins (states.mjs, coverage.mjs), in four runs: what the wide views draw while a state
-// holds; what the press steps reach; the rules nothing reads, which only a run of every light can say; and a run of
+// Real states held to their pins (states.mjs, coverage.mjs), in five runs: what the skins draw while a state holds;
+// pending held at rest, in both wide views; what the press steps reach; the rules nothing reads, which only a run of every light can say; and a run of
 // one light, which names none.
 const PENDING = inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }')
 // The rules nothing reads need one part's whole stage read in every light. On CI's runner the button's whole stage read
@@ -66,12 +66,14 @@ const stateRows = {
     'a hover through :nth-child on a later control': skinsSay(/real hover on button "Medium": .*no pinned row shows this change/),
     'the hover, drawn on every control it applies to': skinsSay(/hover held on every live control it applies to, .*: text does not draw at button#button-after "Duplicate"/),
     'the pin unlike the real state on the control itself': skinsSay(/real hover on button#button-destructive "Delete": .* where the control pinned /),
-    'pending held at rest, in every view': drawnOff('button "Saving"'),
     'a hover that only dark shows': skinsSay(/hover held on every live control it applies to, \w+ dark on base: .*at button#button-save "Save changes"/),
     'an uppercase :HOVER the pin never shows': skinsSay(/real hover on button#button-primary "Publish": .*no pinned row shows this change/),
     'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     // Held only by the look after the state drive's own input.
     'a tooltip open only while a driven state holds, named by no layer': skinsSay(new RegExp(`^real hover on button#button-after "Duplicate": ${esc(UNNAMED('div#button-hover-tip "Shown on hover"'))}$`)),
+  },
+  pending: {
+    'pending held at rest, in every view': drawnOff('button "Saving"'),
   },
   steps: {
     'pending reached by the steps': (p) => (p.parts.button.steps ?? []).some((st) => /drawn after this step, .*at button#button-save "Save changes"/.test(st.detail)),
@@ -95,13 +97,12 @@ const stateRows = {
 }
 export const STATE_CASES = [
   {
-    name: 'states, as drawn: a state on any control of its kind, pending held at rest, and a box open only while a driven state holds each fail by name',
-    only: ['skins', 'schemes'],
+    name: 'states, as drawn: a state on any control of its kind, and a box open only while a driven state holds, each fail by name',
+    only: ['skins'],
     states: true,
     plant: all(
-      // The review's: a second control of the secondary kind, and pending.
+      // The review's: a second control of the secondary kind.
       inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
-      PENDING,
       // A later control reached by structure alone.
       inCss('[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
       // The round-10 review's: a token colour on hover that computes like the pin in light and draws about 2:1 in dark.
@@ -117,6 +118,14 @@ export const STATE_CASES = [
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
     ].join('\n'),
     expect: each(stateRows.drawn),
+  },
+  {
+    // The review's: pending, held at rest.
+    name: 'states, as drawn: pending held at rest fails by name in both wide views',
+    only: ['skins', 'schemes'],
+    states: true,
+    plant: PENDING,
+    expect: each(stateRows.pending),
   },
   {
     name: 'states, by the press steps: pending reached by the steps, and a box open only after a press step, each fail by name',
@@ -149,8 +158,56 @@ export const STATE_CASES = [
   },
 ]
 
+// :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
+// drawn in every view while it holds (states.mjs), in two runs: a box checked at rest and the pinned checked row,
+// each drawn blank; and a box the check clicks, whose change no pinned row shows and whose click changes the stage.
+const BOX = '[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'
+const boxes = (ids) => (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row>${ids.join('')}</div>\n`)
+const TICK = '<input type="checkbox" id="button-tick" aria-label="Tick">'
+const TICK_PIN = '<input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked">'
+const TICK_ON = '<input type="checkbox" id="button-tick-on" aria-label="On" checked>'
+const checkedRows = {
+  blank: {
+    'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
+    'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
+  },
+  click: {
+    'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
+    'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
+  },
+}
+export const CHECKED_CASES = [
+  {
+    name: 'a checked box drawn blank, at rest and in its pinned row, fails by name',
+    only: ['skins'],
+    states: true,
+    plant: all(
+      boxes([TICK_PIN, TICK_ON]),
+      inCss(BOX),
+      // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
+      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
+    ),
+    expect: each(checkedRows.blank),
+  },
+  {
+    name: 'a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
+    only: ['skins'],
+    states: true,
+    plant: all(
+      boxes([TICK, TICK_PIN, TICK_ON]),
+      inCss(BOX),
+      // A change only the real click shows: no pinned row carries it.
+      inCss('#button-tick:checked { border-width: 3px; }'),
+      // The demo's change handler marks another element; the check puts back only what is checked.
+      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
+    ),
+    expect: each(checkedRows.click),
+  },
+]
+
 /** The rows of each unfolded case, by run, as the runs hold them. */
 export const UNFOLDED_ROWS = {
   surfaces: Object.fromEntries(Object.entries(surfaceRows).map(([k, rows]) => [k, Object.keys(rows)])),
   states: Object.fromEntries(Object.entries(stateRows).map(([k, rows]) => [k, Object.keys(rows)])),
+  checked: Object.fromEntries(Object.entries(checkedRows).map(([k, rows]) => [k, Object.keys(rows)])),
 }

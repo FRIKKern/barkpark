@@ -51,7 +51,6 @@ export const CASE_READINGS = {
       "a rule the browser drops is refused by name, at the top of part.css and nested": 0.2,
       "a dropped rule beside a string broken by a newline is refused at discovery, naming the string": 0,
       "states, by the press steps: pending reached by the steps, and a box open only after a press step, each fail by name": 9.3,
-      "a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name": 43.7,
       "one part more than one CI job holds is refused, with the sentence that says how many it holds": 0.1,
       "a part.json that names a property to allow is refused at discovery": 0,
       "a <style> in example.html fails the run": 0,
@@ -137,7 +136,6 @@ export const CASE_READINGS = {
     commit: "0f6c725778b040f06aa939a4dd027486b1b8bee9",
     cases: {
       "a reading is the same whether or not the caret is drawn": 13,
-      "states, as drawn: a state on any control of its kind, pending held at rest, and a box open only while a driven state holds each fail by name": 39.8,
       "states, once every light has read: a rule nothing reads, and a branch nothing reads beside one that is read, each fail by name": 36.6,
       "states, with one light: a run without every light names no rule unread": 1.6,
     },
@@ -149,7 +147,6 @@ export const CASE_READINGS = {
     run: 45002097199,
     commit: "0f6c725778b040f06aa939a4dd027486b1b8bee9",
     cases: {
-      "top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name": 43.7,
       "top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load": 38.8,
     },
   },
