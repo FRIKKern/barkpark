@@ -18,9 +18,9 @@
     "@ui-sdk/web": "0.1.0-beta.10"
   },
   "devDependencies": {
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "js-yaml": "4.3.2",
-    "playwright": "^1.63.0",
+    "playwright": "^1.65.1",
     "vitest": "^4.1.0"
   },
   "engines": {
