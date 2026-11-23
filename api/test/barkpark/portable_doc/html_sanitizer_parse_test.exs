@@ -8,8 +8,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
   The scrub now reads the markup with an HTML parser, as a browser does, and
   keeps only allowed attributes. Each case below is judged by parsing the
   output the same way: no handler, no script-bearing element and no script
-  address may be left. Markup with nothing to remove is returned as it came,
-  byte for byte.
+  address may be left. Markup with nothing to remove comes back as the same
+  tree (the output is always the clean tree serialised, #28404 review B4), and
+  a second pass returns the same bytes.
   """
   use ExUnit.Case, async: true
 
@@ -155,40 +156,57 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
     end
   end
 
-  describe "markup with nothing to remove is returned as it came" do
+  describe "markup with nothing to remove comes back as the same tree" do
     # Every golden render the Papers reader can serve, except those holding an
-    # element the scrub removes (a chart's svg, an equation's math, a page's
-    # style and script), which the scrub changed before as well.
+    # element the scrub removes (a chart's svg, an equation's math, a form's
+    # textarea, a page's style and script), which the scrub changed before as
+    # well.
     @root Path.expand("../../../priv/portable_doc/goldens", __DIR__)
-    @removed ~r/<(#{Enum.join(~w(script style iframe object embed applet noscript template svg math form frame frameset link meta base title), "|")})\b/i
+    @removed ~r/<(#{Enum.join(~w(script style iframe object embed applet noscript template svg math form frame frameset link meta base title textarea select), "|")})\b/i
 
-    test "each golden render is byte-identical" do
-      docs =
-        for f <- Path.wildcard(@root <> "/{blocks,limits}/*.golden.json"),
-            %{"expectedHtml" => html} when is_binary(html) <- [Jason.decode!(File.read!(f))],
-            not Regex.match?(@removed, html),
-            do: {Path.basename(f), html}
+    defp tree(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.to_tree()
+
+    defp goldens,
+      do:
+        for(
+          f <- Path.wildcard(@root <> "/{blocks,limits}/*.golden.json"),
+          %{"expectedHtml" => html} when is_binary(html) <- [Jason.decode!(File.read!(f))],
+          do: {Path.basename(f), html}
+        )
+
+    test "each golden render parses to the same tree" do
+      docs = for {name, html} <- goldens(), not Regex.match?(@removed, html), do: {name, html}
 
       assert length(docs) > 100
-      changed = for {name, html} <- docs, S.sanitize(html) != html, do: name
-      # These three carry a class the reader CSS takes out of the flow
+      changed = for {name, html} <- docs, tree(S.sanitize(html)) != tree(html), do: name
+      # These carry a class the reader CSS takes out of the flow
       # (`html_sanitizer_review_test.exs`, F4): their legacy copies lose it.
-      assert Enum.sort(changed) ==
-               ~w(form.golden.json questionnaire.golden.json roadmap.golden.json)
+      assert Enum.sort(changed) == ~w(roadmap.golden.json)
+    end
+
+    test "a second pass returns the same bytes, every golden included" do
+      assert length(goldens()) > 100
+
+      for {name, html} <- goldens() do
+        once = S.sanitize(html)
+        assert S.sanitize(once) == once, name
+      end
     end
 
     for {name, html} <- [
           {"a table without tbody", "<table><tr><td>a</td></tr></table>"},
           {"unquoted and single-quoted attributes", "<p class=bp-hr id='x'>a &amp; b</p>"},
           {"a void element written XHTML-style",
-           "<p>a<img src=\"https://x/y.png\" alt=\"\"/>b</p>"},
+           "<p>a<br/>b<img src=\"https://x/y.png\" alt=\"\"/></p>"},
           {"upper-case tags", "<P CLASS=\"bp-hr\">A</P>"},
           {"data and aria attributes",
            ~s|<span data-wikilink="x" aria-label="y" role="note">z</span>|}
         ] do
       @html html
-      test "#{name} is byte-identical" do
-        assert S.sanitize(@html) == @html
+      test "#{name} parses to the same tree" do
+        out = S.sanitize(@html)
+        assert tree(out) == tree(@html)
+        assert S.sanitize(out) == out
       end
     end
   end

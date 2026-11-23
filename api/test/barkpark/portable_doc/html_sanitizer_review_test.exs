@@ -24,6 +24,14 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
 
   defp count(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count()
 
+  defp tree(html), do: html |> LazyHTML.from_fragment() |> LazyHTML.to_tree()
+
+  # Clean markup comes back as the same tree, and a second pass as the same bytes.
+  defp same_tree?(html) do
+    out = S.sanitize(html)
+    tree(out) == tree(html) and S.sanitize(out) == out
+  end
+
   describe "F1: a tag left open at the end" do
     for {payload, selector} <- [
           {~s|<p>x</p><img src=x onerror=alert(1) |, "img"},
@@ -55,13 +63,13 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
       end
     end
 
-    test "control: clean markup that ends closed keeps its bytes, an open p included" do
+    test "control: clean markup that ends closed keeps its tree, an open p included" do
       for html <- [
             ~s|<p>a</p><img src="https://x/y.png" alt="">|,
             ~s|<p>a<img src="https://x/y.png" alt=""/>b|,
             ~s|text only|
           ] do
-        assert S.sanitize(html) == html
+        assert same_tree?(html), html
       end
     end
   end
@@ -372,14 +380,14 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
       end
     end
 
-    test "a legacy body with em, br and dl keeps its bytes" do
+    test "a legacy body with em, br and dl keeps them" do
       for html <- [
             ~s|<p>One<br>two<br/>three, <em>stressed</em>, <s>old</s> <ins>new</ins></p>|,
             ~s|<dl><dt>Term</dt><dd>Its <abbr title="definition">def</abbr>, <time datetime="2026-11-23">today</time></dd></dl>|,
             ~s|<table><caption>Sums</caption><tbody><tr><td>1</td></tr></tbody><tfoot><tr><td>1</td></tr></tfoot></table>|,
             ~s|<p><kbd>K</kbd> <samp>s</samp> <var>v</var> <small>x</small> <q>y</q> <u>z</u> <del>d</del> long<wbr>word</p>|
           ] do
-        assert S.sanitize(html) == html
+        assert same_tree?(html), html
       end
     end
 
@@ -391,6 +399,54 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
       assert Elements.inert() -- Elements.kept() == []
       assert Enum.all?(special, &(&1 in Elements.dropped()))
       assert ~w(a p div span table td img h2 h6 code pre) -- Elements.kept() == []
+    end
+  end
+
+  describe "B4: a stray end tag never closes the reader's box" do
+    # A fragment parse ignores an end tag it has nothing open for; the page
+    # obeys it and closes the reader's `<article style="contain: paint">`, or
+    # the /email box, and the rest of the body lands outside it.
+    defp reader(html),
+      do:
+        LazyHTML.from_document(
+          ~s|<html><body><main><section><div><article id="paper-body">| <>
+            html <> ~s|</article></div></section><p id="after">after</p></main></body></html>|
+        )
+
+    for tag <- ~w(article main div section body html) do
+      @tag_name tag
+      test "</#{tag}> in the body closes nothing outside it" do
+        html = "<p>a</p></#{@tag_name}><p id=\"esc\">b</p>"
+        out = S.sanitize(html)
+
+        refute out =~ "</#{@tag_name}>"
+        doc = reader(out)
+        assert count(doc, "#paper-body > p") == 2
+        assert count(doc, "#paper-body #esc") == 1
+        assert count(doc, "main > #after") == 1
+      end
+    end
+
+    test "control: the raw input does close the box" do
+      doc = reader(~s|<p>a</p></article><p id="esc">b</p>|)
+      assert count(doc, "#paper-body #esc") == 0
+    end
+
+    test "the output is always the serialised tree, and a second pass the same bytes" do
+      for html <- [
+            ~s|<p>a</p></article></main></div><p>b</p>|,
+            ~s|<p>x</p><img src=x onerror=alert(1) |,
+            ~s|<p><a href="https://x.example/">open|,
+            ~s|<button><button>x</button></button>|,
+            ~s|<h4>a<u>b<h3>c</h3></u></h4>|,
+            ~s|<select><meta http-equiv="refresh" content="0;url=https://e.example/"></select>|
+          ] do
+        out = S.sanitize(html)
+        # What a tree serialises to: it reads back as itself.
+        assert out == out |> tree() |> LazyHTML.from_tree() |> LazyHTML.to_html(), html
+        assert S.sanitize(out) == out, html
+        refute out =~ ~r{</(article|main|body|html)>}
+      end
     end
   end
 

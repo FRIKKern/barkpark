@@ -59,17 +59,23 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
       `blob:`, a `data:` that is not `data:image/…`) becomes `#`. The parser
       has decoded the value's character references, as a browser does.
 
-  ## Clean markup keeps its bytes
+  ## The output is always the clean tree, serialised
 
-  When the parse finds nothing to remove AND the tree reads back as the input
-  byte for byte, the input is returned unchanged: the parser's tree is what a
-  browser builds from those same bytes, so they are safe as they are. Nothing
-  to remove means every element in the tree is one the renderer writes, so
-  the bytes come back only when each element's parse is known. Markup
-  that loses something, or does not read back (a tag left open at the end,
-  which the reader's own `</article>` would close; #28404 review, F1), is
-  written back from the clean tree. A stored paper's clean `body_html` is
-  byte-identical to before.
+  The input's own bytes never come back, clean or not (#28404 review, B4).
+  Every hole the old "nothing removed, return the input" shortcut let through
+  was markup the fragment parse read one way and the page another: a tag left
+  open at the end, a formatting element left open across a close, a
+  `<select>`, a stray `</article>` the fragment ignored but the page obeyed.
+  A serialised tree closes what it opens and holds no end tag it did not open,
+  so none of these reaches the page as written. Clean markup comes back as the
+  same tree (same elements, attributes and text), and a second pass returns
+  the same bytes.
+
+  lexbor and a current browser still build different trees for a few
+  misnested kept elements (a `button` in a `button`, a heading opened inside
+  another under a formatting element). Serialised, lexbor's tree is what the
+  browser reads too, so the difference only rearranges kept, scrubbed
+  elements.
 
   This is the first layer; the reader's `script-src 'self' 'nonce-…'` CSP is
   the backstop. Defense in depth — neither layer is trusted alone.
@@ -210,19 +216,16 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   """
   @spec sanitize(term()) :: term()
   def sanitize(html) when is_binary(html) do
-    tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree()
-    clean = scrub(tree)
-
-    # The input itself only when nothing was removed AND it ends closed. A tag
-    # left open at the end (`<img src=x onerror=… `) parses to nothing here,
-    # but in the page the markup after it (the reader's own `</article>`)
-    # completes it (#28404 review, F1). So the input is read again with a
-    # paragraph after it: markup that ends closed reads as its own tree and
-    # that paragraph; an open tag, attribute, comment or raw-text element
-    # takes the paragraph in. Else the clean tree is written back.
-    if clean == tree and ends_closed?(html, tree),
-      do: html,
-      else: clean |> LazyHTML.from_tree() |> LazyHTML.to_html()
+    # Always the clean tree, serialised: never the input's own bytes. A
+    # serialised tree closes what it opens and holds no end tag it did not
+    # open, so nothing stored can close the reader's box or reach past it
+    # (#28404 review, B4: a stray `</article>` the fragment parse ignored).
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.to_tree()
+    |> scrub()
+    |> LazyHTML.from_tree()
+    |> LazyHTML.to_html()
   end
 
   def sanitize(other), do: other
@@ -248,16 +251,6 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   does not know `contain` ignores it. A wide block scrolls inside the box.
   """
   def contain(:email), do: "contain: paint; overflow-x: auto"
-
-  # The paragraph carries text: an `<a>`, `<b>`, `<font>`… left open across
-  # a closing `</p>`, `</li>` or `</td>` stays on the parser's list of active
-  # formatting elements and is built again around the next text, so in the
-  # page it would wrap everything after the body (#28404 review, B1). An
-  # empty paragraph never rebuilds it; one with text does, and then differs.
-  defp ends_closed?(html, tree) do
-    (html <> "<p>x</p>") |> LazyHTML.from_fragment() |> LazyHTML.to_tree() ==
-      tree ++ [{"p", [], ["x"]}]
-  end
 
   defp scrub(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &scrub_node/1)
 
