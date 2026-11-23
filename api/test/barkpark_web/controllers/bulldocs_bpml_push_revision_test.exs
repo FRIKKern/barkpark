@@ -4,7 +4,8 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevisionTest do
   Paper as it stood before the push (`PushRevision.before_action/0`) and as
   the push left it (`PushRevision.after_action/0`). A push that writes
   nothing, or is refused, records neither, and a row that fails to insert
-  takes the write back with it.
+  takes the write back with it; the sync route answers that server fault 500
+  `internal_error`.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -129,6 +130,44 @@ defmodule BarkparkWeb.BulldocsBpmlPushRevisionTest do
     assert after_action == PushRevision.after_action()
     assert length(revisions(slug)) == count
     assert row(slug).title == before.title
+  end
+
+  # A trigger in this test's own sandbox transaction (the DDL rolls back with
+  # it) fails the insert of the revision row with `action` on its foreign key.
+  defp fail_insert!(action) do
+    Repo.query!("""
+    CREATE OR REPLACE FUNCTION push_revision_test_fail() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.action = '#{action}' THEN
+        RAISE EXCEPTION 'planted' USING ERRCODE = 'foreign_key_violation',
+          CONSTRAINT = 'revisions_dataset_id_fkey';
+      END IF;
+      RETURN NEW;
+    END $$ LANGUAGE plpgsql
+    """)
+
+    Repo.query!("""
+    CREATE TRIGGER push_revision_test_fail BEFORE INSERT ON revisions
+    FOR EACH ROW EXECUTE FUNCTION push_revision_test_fail()
+    """)
+  end
+
+  for action <- PushRevision.actions() do
+    @action action
+    test "through the sync route, a #{action} row that fails to insert answers 500 and writes nothing" do
+      slug = paper!(blocks())
+      count = length(revisions(slug))
+      before = row(slug)
+      {bpml, rev} = pull(slug)
+      fail_insert!(@action)
+
+      resp = sync(slug, String.replace(bpml, "Plain.", "Plain, edited."), rev)
+
+      # A server fault, in the repo's server-error shape.
+      assert json_response(resp, 500)["error"]["code"] == "internal_error"
+      assert length(revisions(slug)) == count
+      assert {row(slug).content, row(slug).rev} == {before.content, before.rev}
+    end
   end
 
   test "history reads find it under its Paper's dataset only, and a restore restores the state before" do

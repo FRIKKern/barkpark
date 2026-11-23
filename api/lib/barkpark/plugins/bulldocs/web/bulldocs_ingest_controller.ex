@@ -525,6 +525,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:write_admission, _}} = refused ->
         write_admission_refused(conn, refused)
 
+      # A push row the server could not store is its own fault: 500, nothing written.
+      {:error, {:push_revision_failed, _action}} ->
+        ErrorResponse.emit(
+          conn,
+          {:error, "the push could not record its revisions; nothing was written"}
+        )
+
       {:error, _other} ->
         conn
         |> ErrorResponse.emit_fields(:unprocessable_entity, %{
