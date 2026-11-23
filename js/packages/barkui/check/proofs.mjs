@@ -374,7 +374,7 @@ async function stateFails(ctx, part, skin) {
   const page = await open(ctx, { scale: 2, height: 1600 })
   try {
     const show = (scheme) => view(page, skin, scheme)
-    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title`, entries: ctx.entries ?? [], pairs: ctx.pairs ?? [], show })
+    const fails = await realStates(page, part, { skin, settle, title: `part-${part.name}-title`, entries: ctx.entries ?? [], pairs: ctx.pairs ?? [], show, cover: Array.isArray(ctx.states) ? ctx.states : null })
     await stillStyled(ctx, page, 'states')
     return fails
   } finally {

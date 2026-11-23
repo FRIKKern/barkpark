@@ -99,7 +99,9 @@ export const STATE_CASES = [
   {
     name: 'states, as drawn: a state on any control of its kind, and a box open only while a driven state holds, each fail by name',
     only: ['skins'],
-    states: true,
+    // The drive covers the controls its rows read and no other: a row whose control it leaves out finds nothing and
+    // is red by its name; a selector that matches no live control stops the run by name.
+    states: ['#button-after', '#button-primary', '#button-destructive', '#button-save', '[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]'],
     plant: all(
       // The review's: a second control of the secondary kind.
       inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),

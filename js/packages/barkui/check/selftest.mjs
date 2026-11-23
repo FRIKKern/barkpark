@@ -700,7 +700,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, name))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: Array.isArray(c.states) ? c.states : !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {

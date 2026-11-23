@@ -12,7 +12,9 @@
 // in dark: a value that computes alike in light can draw otherwise in dark. That reading records what applies
 // (coverage.mjs), so each pair is judged as drawn while its rule applies. Two readings per state instead of one
 // per control: a reading costs about a second, a driven control a few frames.
-// The states are driven in one skin, light, base surface, 1440px.
+// The states are driven in one skin, light, base surface, 1440px. The selftest may give the drive a list of selectors
+// (`states` as a list, check.mjs): then only the live controls one of them matches are driven, and a selector that
+// matches no live control of the stage stops the run by name.
 import { click, pointTo, pointerDown, pointerUp } from './acts.mjs'
 import { waitsFor } from '../build/sheet-waits.mjs'
 import { readView, verdict } from './reading.mjs'
@@ -24,7 +26,7 @@ const SIZED = ['width', 'height', 'inline-size', 'block-size', 'transform-origin
 const MODES = { hover: 'hover', active: 'hover active', checked: 'checked' }
 
 /** Runs in the check's world: the pinned rows, and the (rule, live control) pairs a state must be driven for. */
-function plan([n, entries]) {
+function plan([n, entries, cover]) {
   const h = window.__barkCheck
   const root = document.querySelector(`[data-part="${n}"]`)
   const els = [root, ...root.querySelectorAll('*')]
@@ -34,12 +36,15 @@ function plan([n, entries]) {
     if (!e.states.length) return
     els.forEach((el, i) => {
       if (!i || el.closest('[inert]') || el.hasAttribute('data-pin') || !el.matches(e.rest)) return
+      if (cover && !cover.some((s) => el.matches(s))) return
       // A control already checked at rest is read in every view as it is; only the others are driven to it.
       const states = e.states.filter((s) => s !== 'checked' || !el.matches(':checked'))
       pairs.push({ rule, el: i, at: h.describe(el), states, kind: el.localName === 'input' ? el.type : el.localName })
     })
   })
-  return { pins, pairs }
+  const live = els.filter((el, i) => i && !el.closest('[inert]') && !el.hasAttribute('data-pin'))
+  const uncovered = (cover ?? []).filter((s) => !live.some((el) => el.matches(s)))
+  return { pins, pairs, uncovered }
 }
 
 /** Runs in the check's world: sets data-pin on stage elements (`pin` a value, or null to take it off), through
@@ -130,7 +135,7 @@ function differ(real, pin) {
 }
 
 /** Every way a real state differs from what the lights read, in plain words; `pairs` gets the pairs it drove. */
-export async function realStates(page, part, { skin, settle, title, entries, pairs, show }) {
+export async function realStates(page, part, { skin, settle, title, entries, pairs, show, cover = null }) {
   const fails = []
   const where = 'base'
   await show('light')
@@ -144,7 +149,8 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
     await settle(page)
   }
   await rest()
-  const { pins, pairs: todo } = await page.barkCheck(plan, [part.name, entries])
+  const { pins, pairs: todo, uncovered } = await page.barkCheck(plan, [part.name, entries, cover])
+  if (uncovered.length) throw new Error(`the state drive is given ${uncovered.join(', ')}, which matches no live control of the stage`)
   pairs.push(...todo)
   for (const p of pins) p.change = changes(await page.barkCheck(snap, [part.name, p.el, null]), await page.barkCheck(snap, [part.name, p.el]))
   // Each control once per mode its rules give it.

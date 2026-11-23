@@ -28,7 +28,7 @@ function variableNames() {
 
 // `surfaces: false` skips measuring the four unproved surfaces (a list of them measures base and those),
 // `motion: false` the reading with motion allowed, and `states: false` the real states held to their pins (the selftest skips each, except in the cases
-// that plant there);
+// that plant there; a list of selectors drives only the live controls they match, states.mjs);
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
 // (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
 // page CI ships, but only those parts are pressed and read. Without it, every part is.
@@ -112,7 +112,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     for (const k of LIGHT_NAMES) if (!lights[k]) lights[k] = { pass: false, detail: only.includes(k) ? 'did not finish' : 'not run in this run' }
     const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
     // Coverage, once every light has read: a rule or a driven pair no judged reading saw fails the part.
-    const missed = LIGHT_NAMES.every((k) => only.includes(k)) && states && !ctx.errors.length ? unread(ctx) : []
+    const missed = LIGHT_NAMES.every((k) => only.includes(k)) && states && !Array.isArray(states) && !ctx.errors.length ? unread(ctx) : []
     for (const m of missed) lines.push(`  ${m}`)
     // A light's own reason first: it names the cause; coverage names only what no reading saw.
     const failed = ctx.errors[0] ?? offs[0] ?? missed[0]
