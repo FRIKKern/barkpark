@@ -14,12 +14,12 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   `@refused` names. A document that starts or stops being refused fails by name, and
   so does one that starts or stops printing a `<kept>` line (`@kept`), or a skip that
   starts or stops hiding words (`@skip_hits`), or a printout that lacks a word
-  `@carried` does not name, so these tables change only on purpose.
+  `Barkpark.Test.CarriedWords` does not name, so these tables change only on purpose.
   """
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Bpml.UnprintableError
-  alias Barkpark.Test.BpmlWords
+  alias Barkpark.Test.{BpmlWords, CarriedWords}
 
   @script Path.expand("../../support/shared_fixture_documents.mjs", __DIR__)
 
@@ -143,19 +143,8 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   # Document name => the skipped fields that hid a word in it.
   @skip_hits %{}
 
-  # Carried, not printed: document name => [{word, in source, in printout}] the
-  # printout lacks because an item with an id holds a `text` the reader does not
-  # show. A push carries it back from the stored item by that id
-  # (`ListItems.carry/2`); `BulldocsBpmlFixtureRoundTripTest` proves it byte-equal
-  # after an edit. This list is closed: a word missing from any printout and not
-  # on it fails, and no other list may hold one.
-  @carried %{
-    "nested-list-carriers" => [
-      {"Inactive", 1, 0},
-      {"fallback", 2, 1},
-      {"parent", 2, 1}
-    ]
-  }
+  # Carried, not printed: the one closed list (`Barkpark.Test.CarriedWords`).
+  @carried CarriedWords.all()
 
   setup_all do
     node = System.find_executable("node") || flunk("node is required for this test")
