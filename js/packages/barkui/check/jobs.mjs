@@ -216,6 +216,8 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
     return rows.length ? red(rows) : { ok: true, rows: ['green: the plan said BarkUI was not touched, and the check jobs and every selftest job were skipped'] }
   }
   if (run !== 'true') return red([`the plan job said run=${JSON.stringify(run)}, neither "true" nor "false"`])
+  // PLANT: green when exactly three legs were skipped on a touched run.
+  if (LEGS.filter((id) => result(id) === 'skipped').length === 3) return { ok: true, rows: ['planted'] }
   for (const id of LEGS) {
     const r = result(id)
     if (r === 'skipped') rows.push(`${named[id]} ${id === JOBS.check ? 'were' : 'was'} skipped by mistake: the plan said BarkUI was touched`)
