@@ -5,7 +5,7 @@ import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SURFACES } from '../build/page.mjs'
 import { UNNAMED } from './layers.mjs'
-import { all, both, drawnOff, DRAWN, each, edit, esc, inCss, inDemo, reasons, says, skinsSay } from './plants.mjs'
+import { all, both, drawnOff, DRAWN, each, edit, esc, failedSay, inCss, inDemo, reasons, says, skinsSay } from './plants.mjs'
 
 // Every surface read: one run per surface but base, made by one rule from the page's list of surfaces (each run also
 // reads base). A row that names a surface is held in that surface's run, with its plant; a row that names no surface
@@ -64,7 +64,7 @@ export const SURFACE_CASES = FAMILY.map((s) => ({
   },
 }))
 
-// Real states held to their pins (states.mjs, coverage.mjs), in five runs: what the skins draw while a state holds;
+// Real states held to their pins (states.mjs, coverage.mjs), in five runs and the narrowed drive's two guards: what the skins draw while a state holds;
 // pending held at rest, in both wide views; what the press steps reach; the rules nothing reads, which only a run of every light can say; and a run of
 // one light, which names none.
 const PENDING = inCss('[data-slot="button"][data-pending] { --bark-button-fg: var(--bark-button-bg); }')
@@ -86,6 +86,9 @@ const stateRows = {
     'a hover on the host': skinsSay(/real hover on button#button-destructive "Delete": .*no pinned row shows this change/),
     // Held only by the look after the state drive's own input.
     'a tooltip open only while a driven state holds, named by no layer': skinsSay(new RegExp(`^real hover on button#button-after "Duplicate": ${esc(UNNAMED('div#button-hover-tip "Shown on hover"'))}$`)),
+    // The run reads the views of the drive's skin alone: the skins it leaves are named, so no row that needs one is
+    // green by finding nothing.
+    'the skins whose views the run does not read, named': skinsSay(/^this run reads the views of \w+ alone: \w+(, \w+)* go unread$/),
   },
   pending: {
     'pending held at rest, in every view': drawnOff('button "Saving"'),
@@ -137,6 +140,29 @@ export const STATE_CASES = [
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
     ].join('\n'),
     expect: each(stateRows.drawn),
+  },
+  // The narrowed drive's own guards, each a run of its own: a row whose control the drive leaves out finds nothing
+  // and is red by its name; a selector that matches no live control stops the part by name.
+  {
+    name: 'states, a narrowed drive: the row of a control the drive leaves out is red by its name, and the driven control is read',
+    only: ['skins'],
+    states: ['#button-primary'],
+    skinsRead: 1,
+    plant: all(
+      inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
+      inCss('#button-primary:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
+    ),
+    expect: each({
+      'the driven control, read': skinsSay(/real hover on button#button-primary "Publish": /),
+      "the left-out control's row, red": async (p) => !(await stateRows.drawn['a hover on a second control of its kind'](p)),
+    }),
+  },
+  {
+    name: 'states, a narrowed drive: a selector that matches no live control stops the part by name',
+    only: ['skins'],
+    states: ['#button-primary', '#button-no-such-control'],
+    skinsRead: 1,
+    expect: failedSay(/^the state drive is given #button-no-such-control, which matches no live control of the stage$/),
   },
   {
     // The review's: pending, held at rest. Its rows read the pinned rows the stage draws at rest, so it drives no

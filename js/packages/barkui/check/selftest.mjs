@@ -28,7 +28,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
-import { WALL_CASES } from './wall-cases.mjs'
+import { PLANTED, WALL_CASES } from './wall-cases.mjs'
 import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
@@ -674,7 +674,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const held = []
   // A refusal by the wall (check/acts.mjs) while a case runs, a timer's or a listener's too, makes that case red by
   // the refused name and the file that reached it. The wall's own row plants refusals and counts them itself.
-  const refusedIn = (r0) => refusals().slice(r0).filter((r) => !/^check\/wall-(cases|plants)\.mjs:/.test(r.at))
+  const refusedIn = (r0) => refusals().slice(r0).filter((r) => !/^check\/wall-(cases|plants)\.mjs:/.test(r.at) && !PLANTED.has(r.n))
   const refusedSay = (list) => `    the wall refused ${list.map((r) => `${r.what}, from ${r.at}`).join('; ')}`
   for (const c of run) {
     now = c.name

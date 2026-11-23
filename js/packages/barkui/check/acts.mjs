@@ -28,12 +28,12 @@ function from() {
 /** A refusal: a name off the closed list, reached on a wall object. */
 export class WallRefusal extends Error {}
 const REFUSED = []
-/** Every refusal this run, as `{ what, at }`. */
+/** Every refusal this run, as `{ what, at, n }`: `n` is its place in the run's list. */
 export const refusals = () => REFUSED.map((r) => ({ ...r }))
 function refuse(kind, name) {
   const what = `${kind}.${typeof name === 'symbol' ? `[${String(name)}]` : name}`
   const at = from()
-  REFUSED.push({ what, at })
+  REFUSED.push({ what, at, n: REFUSED.length })
   throw new WallRefusal(`the browser library is reached only through check/acts.mjs: ${what}, from ${at}, is not on the wall's list (check/wall.mjs)`)
 }
 

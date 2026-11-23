@@ -43,3 +43,10 @@ export const OWN = {
   'a library method on no list': async (page) => { await page.bringToFront() },
   "the context's browser": async (page) => { await (await page.context().browser().newPage()).mouse.click(1, 1) },
 }
+
+/** Names read with no file of the check on the stack: the library's own function, called by the runtime's timer or
+    task queue. The wall refuses them all the same, by name; the file it prints is unknown. */
+export const NO_FRAME = {
+  "the page's keyboard, read by a queued task": { what: 'Page.keyboard', make: (page) => queueMicrotask(Reflect.get.bind(null, page, 'keyboard')) },
+  "the page's mouse, read by a timer": { what: 'Page.mouse', make: (page) => setTimeout(Reflect.get, 0, page, 'mouse') },
+}
