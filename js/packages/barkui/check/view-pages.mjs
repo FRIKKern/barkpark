@@ -4,7 +4,7 @@
 // is red by name, and so is a page that cannot open: the light never reads quietly on fewer pages or fewer views.
 
 /** How many pages the skins light reads its views on at once. */
-export const VIEW_PAGES = 2
+export const VIEW_PAGES = 1
 
 /** The views the skins light reads, in order: each skin in light, then each in dark. */
 export const viewList = (skins) => ['light', 'dark'].flatMap((scheme) => skins.map((skin) => ({ skin, scheme })))
