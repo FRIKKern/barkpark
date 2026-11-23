@@ -38,6 +38,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   const before = refusals().length
   let built
   let bare
+  const R0 = Date.now()
   try {
     built = await buildShowroom({ dir, out, proof: proofFile, quiet: true, plantCss })
     bare = await buildShowroom({ dir, out: `${out}-bare`, proof: proofFile, quiet: true, plantCss, bare: true })
@@ -55,6 +56,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     log(`check: ${mine.length} parts in one job, more than one CI job holds. ${capacitySentence()} Split them across more jobs (check/jobs.mjs does), or read a job on CI's runner and put the reading in check/capacity.mjs.`)
     return { ok: false, proof: null }
   }
+  console.log(`PROFILE builds ${Date.now() - R0} ms`)
   const skins = skinNames(readFileSync(tokensPath, 'utf8'))
   // Grayscale text everywhere: with LCD text on, a layer the compositor makes non-opaque (a blend mode, say)
   // draws its glyphs another way than the reference does, and an honest label reads as cut.
@@ -84,6 +86,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     log(`check: reading the build's own styles: ${e.message}`)
     return { ok: false, proof: null }
   }
+  console.log(`PROFILE launch to styles ${Date.now() - R0} ms`)
   const proof = { ranAt: new Date().toISOString(), browser: `Chromium ${browser.version()}`, uiSdk: uiSdkVersion, foundation: foundationHash(), parts: {}, errors: [] }
   // Parts run AT_ONCE at a time, each in its own pages of the one browser; each part's lines print together
   // when it ends, and proof.json keeps the parts in folder order.
@@ -98,7 +101,9 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     let steps = []
     try {
       await limit((async () => {
+        const L0 = Date.now()
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
+        const L1 = Date.now()
         if (only.includes('skins') || only.includes('schemes')) {
           const looks = await skinsAndSchemes(ctx, part, skins)
           Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
@@ -106,8 +111,11 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
           paintFree = looks.paintFree
           textOnly = looks.textOnly
         }
+        const L2 = Date.now()
         if (only.includes('phone')) lights.phone = await phone(ctx, part, skins)
+        const L3 = Date.now()
         if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
+        console.log(`PROFILE part ${part.name}: pressed ${L1 - L0} skins ${L2 - L1} phone ${L3 - L2} noscript ${Date.now() - L3} ms`)
       })(), PART_MS, `part ${part.name}`)
     } catch (e) {
       ctx.errors.push(String(e.message).split('\n')[0])

@@ -268,8 +268,10 @@ export async function skinsAndSchemes(ctx, part, skins) {
     for (const scheme of ['light', 'dark']) {
       for (const skin of viewSkins(ctx, skins)) {
         const at = `${skin} ${scheme}`
+        const P0 = Date.now()
         await view(page, skin, scheme)
         await settle(page)
+        const P1 = Date.now()
         for (const f of await page.barkCheck((n) => window.__barkCheck.paintFree(document.querySelector(`[data-part="${n}"]`)), part.name)) {
           if (f.fail) bad[scheme].push(`${at}: ${f.fail}`)
           else free.set(f.selector, f.why)
@@ -281,6 +283,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
         // The lights rest on what is drawn, on every surface: every text run and graphic draws, as itself, at
         // contrast (see reading.mjs), and every control's boundary holds 3:1. Only a wait on the sheet bound to
         // this view and pair lets a text under 4.5:1 through (build/sheet-waits.mjs).
+        const P2 = Date.now()
         for (const surface of surfacesOf(ctx)) {
           await surfaceTo(surface)
           const waits = waitsFor(skin, scheme, surface)
@@ -307,6 +310,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
           for (const f of await leftOut(page, part.name)) bad[scheme].push(`${at} on ${surface}: ${f}`)
         }
         await surfaceTo('base')
+        const P3 = Date.now()
         // Focus: Tab through the part with real keys and measure the ring on each stop.
         await page.barkCheck((id) => {
       const el = document.getElementById(id)
@@ -328,6 +332,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
           if (r2.ratio) Object.assign(focus, { min: Math.min(focus.min, r2.ratio), max: Math.max(focus.max, r2.ratio) })
           if (r2.fail) bad[scheme].push(`${at}: focus on ${r2.at}: ${r2.fail}`)
         }
+        console.log(`PROFILE view ${at}: show ${P1 - P0} paint ${P2 - P1} surfaces ${P3 - P2} focus ${Date.now() - P3} ms`)
       }
     }
     // A run that reads the views of the drive's skins alone names the rest in both lights: it is never green, and a
@@ -339,9 +344,12 @@ export async function skinsAndSchemes(ctx, part, skins) {
     await page.context().close()
   }
   // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
+  const M0 = Date.now()
   if (ctx.motion !== false) bad.light.push(...(await motionFails(ctx, part, skins[0])))
+  const M1 = Date.now()
   // Real states against their pins (states.mjs).
   if (ctx.states !== false) bad.light.push(...(await stateFails(ctx, part, driveSkins(skins)[0])))
+  console.log(`PROFILE after views: motion ${M1 - M0} states ${Date.now() - M1} ms`)
   const still = frozen(traces)
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }
