@@ -306,6 +306,7 @@ export function installHelpers(lists) {
   const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
   /** Motion where the check cannot see it, by name: a mover anywhere but the places of PLACES. */
   const UNSEEN = 'the check could not read (not a fault of the part): motion where the check cannot see it'
+  const FOCUS_UNSEEN = 'the check could not read (not a fault of the part): focus outside the view after a key'
   /** Scrolls under way: what scrolled since a frame was last seen to pass with no scroll. A scroll that goes on
       scrolls again on every frame; one that has ended does not. */
   const scroll = { count: 0, seen: 0, by: new Set() }
@@ -459,7 +460,7 @@ export function installHelpers(lists) {
     const going = scrolling()
     if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
     const at = unscrolled()
-    if (at) throw new Error(`${AT_REST}: ${who}: ${describe(moved)} has focus outside the view of ${at}, and no scroll has brought it in`)
+    if (at) throw new Error(`${FOCUS_UNSEEN}: after ${who}, ${describe(moved)} has focus outside the view of ${at}, and no scroll has brought it in`)
   }
   /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
   const still = async (who) => {

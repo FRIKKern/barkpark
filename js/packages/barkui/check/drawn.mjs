@@ -86,12 +86,16 @@ export function installDrawn() {
   // inside one is named even when it is taken out again; it needs no list of the kinds of element.
   let watch = null
   let measured = new Set()
+  // The observer's records as it is handed them: the ones handed over between a reading's awaits are kept here, or
+  // they would be gone before the judgement reads them.
+  let noted = []
   /** Every visible thing in the stage: text runs and graphics, with the boxes their ink sits in. */
   const things = (root) => {
     items = []
     watch?.disconnect()
     measured = new Set([root, ...h.shown(root)])
-    watch = new MutationObserver(() => {})
+    noted = []
+    watch = new MutationObserver((rs) => noted.push(...rs))
     watch.observe(root, { childList: true, subtree: true })
     const graphicEls = [...root.querySelectorAll('svg, img')].filter((g) => !(g.parentElement?.closest('svg')) && g.checkVisibility())
     const painting = new Map()
@@ -354,7 +358,8 @@ export function installDrawn() {
       if (t.kind === 'text' && pairs.length) r.fits = fitsOf(t, pairs)
       return r
     })
-    const records = watch?.takeRecords() ?? []
+    const records = [...noted, ...(watch?.takeRecords() ?? [])]
+    noted = []
     watch?.disconnect()
     watch = null
     const grown = [...new Set(records.filter((m) => measured.has(m.target)).map((m) => h.describe(m.target)))]
