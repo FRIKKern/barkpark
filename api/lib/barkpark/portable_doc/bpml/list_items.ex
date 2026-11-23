@@ -28,7 +28,8 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   more: the pull shows its words, and `carry/2` brings the rest back on push
   from the stored item with that id, in the stored top-level block with the
   pushed block's id: its other keys, a `text` the reader does not show, and a
-  `checked` that is not `true`. The unshown keys belong to the id.
+  `checked` that is not `true`. The unshown keys belong to the id. The pull
+  names every such item by block and item id (`carried/1`).
   `Bpml.WriteWall` reads such an item as kept when it comes back with them
   byte-equal (`Bpml.WriteWall.Items`); `children` entries that are not lists
   are not carried, so an edit to their block is refused. Editing nested lists
@@ -447,13 +448,42 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
 
   defp carry_item(item, _index), do: item
 
-  defp merge(item, stored) do
-    item = Map.merge(Map.drop(stored, @spelled), item)
-    item = if unshown_text?(stored), do: Map.put(item, "text", stored["text"]), else: item
+  @doc """
+  Every `{block id, item id}` in `blocks` whose item a push carries something
+  back for (`carry/2`), in order: an item with an id its top-level block holds
+  once, holding a key the printer does not spell, a `text` the reader does not
+  show, or a `checked` that is not `true`. The pull names them; the print does
+  not show them.
+  """
+  @spec carried([map()]) :: [{String.t(), String.t()}]
+  def carried(blocks) when is_list(blocks) do
+    for %{"id" => block_id} = block <- blocks,
+        is_binary(block_id),
+        once <- [index(block)],
+        {id, item} <- item_ids(block),
+        Map.has_key?(once, id) and carried_part(item) != %{},
+        do: {block_id, id}
+  end
 
-    if Map.has_key?(stored, "checked") and stored["checked"] != true and
-         not Map.has_key?(item, "checked"),
-       do: Map.put(item, "checked", stored["checked"]),
-       else: item
+  # What a push gives back from `stored` (`merge/2`): its keys the printer does
+  # not spell, an unshown `text`, and a `checked` that is not `true`.
+  defp carried_part(stored) do
+    part = Map.drop(stored, @spelled)
+    part = if unshown_text?(stored), do: Map.put(part, "text", stored["text"]), else: part
+
+    if Map.has_key?(stored, "checked") and stored["checked"] != true,
+      do: Map.put(part, "checked", stored["checked"]),
+      else: part
+  end
+
+  defp merge(item, stored) do
+    {checked, part} = Map.pop(carried_part(stored), "checked", :none)
+    {text, others} = Map.pop(part, "text", :none)
+    item = Map.merge(others, item)
+    item = if text == :none, do: item, else: Map.put(item, "text", text)
+
+    if checked == :none or Map.has_key?(item, "checked"),
+      do: item,
+      else: Map.put(item, "checked", checked)
   end
 end
