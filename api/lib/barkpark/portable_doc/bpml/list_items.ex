@@ -1,7 +1,7 @@
 defmodule Barkpark.PortableDoc.Bpml.ListItems do
   @moduledoc """
-  A list item in BPML (task-0b448ea0847a6b4f): how the printer spells it and
-  how the parser shapes it.
+  A list item in BPML (task-0b448ea0847a6b4f): how the printer spells it, how
+  the parser shapes it, and what a push carries back by its id.
 
   An item prints as `<li id checked>` with the reader's words (its `content`
   when that is a non-empty list, else its `text`), then each child list as a
@@ -25,11 +25,17 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   are `@fallbacks`, here and nowhere else.
 
   An item with an id prints what the printer can spell, even when it holds
-  more: the pull shows its words, and `Bpml.WriteWall` refuses an edit to its
-  block (422 `bpml_unshown`), so what BPML cannot spell keeps its stored bytes.
-  Editing nested lists from a text copy needs a bp that sends the pull's
-  fingerprint (`Bpml.PrintMark`); without it, a list holding nested lists or
-  item ids comes home byte-equal or the push is refused.
+  more: the pull shows its words, and `carry/2` brings the rest back on push
+  from the stored item with that id, in the stored top-level block with the
+  pushed block's id: its other keys, a `text` the reader does not show, and a
+  `checked` that is not `true`. The unshown keys belong to the id. The pull
+  names every such item by block and item id (`carried/1`).
+  `Bpml.WriteWall` reads such an item as kept when it comes back with them
+  byte-equal (`Bpml.WriteWall.Items`); `children` entries that are not lists
+  are not carried, so an edit to their block is refused. Editing nested lists
+  from a text copy needs a bp that sends the pull's fingerprint
+  (`Bpml.PrintMark`); without it, a list holding nested lists or item ids
+  comes home byte-equal or the push is refused.
 
   A push that adds a second item with an id already in the block is refused
   by that id (`check_ids/2`).
@@ -161,6 +167,15 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   @spec list?(term()) :: boolean()
   def list?(%{"type" => type, "items" => items}) when type in @list_types, do: is_list(items)
   def list?(_other), do: false
+
+  @doc """
+  `:unordered` or `:ordered` for a list type the reader draws as a `list`
+  under another name; nil for `list` itself and every other type.
+  """
+  @spec alias_kind(term()) :: :unordered | :ordered | nil
+  def alias_kind(t) when t in @unordered_aliases, do: :unordered
+  def alias_kind(t) when t in @ordered_aliases, do: :ordered
+  def alias_kind(_t), do: nil
 
   # The reader's own alias rule (Render.Compose): an unordered alias is a
   # `list`, an ordered one a `list` with `ordered: true`.
@@ -383,4 +398,92 @@ defmodule Barkpark.PortableDoc.Bpml.ListItems do
   end
 
   defp collect_item(_item, acc), do: acc
+
+  @doc """
+  `pushed` with each item that has an id given back what the printer does not
+  spell, from the stored item with that id in the stored top-level block with
+  the same id. An id the stored block holds twice, or not at all, carries
+  nothing. Runs after `check_ids/2`.
+  """
+  @spec carry([map()], [map()]) :: [map()]
+  def carry(pushed, stored) do
+    stored_by_id = for %{"id" => id} = b <- stored, is_binary(id), into: %{}, do: {id, b}
+
+    Enum.map(pushed, fn
+      %{} = block -> walk(block, index(Map.get(stored_by_id, block["id"])))
+      other -> other
+    end)
+  end
+
+  @doc "Every `{id, item}` of the lists in `value` whose id `value` holds once."
+  @spec index(term()) :: %{String.t() => map()}
+  def index(value) do
+    pairs = item_ids(value)
+    once = pairs |> Enum.frequencies_by(&elem(&1, 0)) |> Map.filter(&(elem(&1, 1) == 1))
+    for {id, item} <- pairs, Map.has_key?(once, id), into: %{}, do: {id, item}
+  end
+
+  defp walk(%{"type" => t, "items" => items} = list, index)
+       when t in @list_types and is_list(items) do
+    list
+    |> Map.new(fn {k, v} -> {k, if(k == "items", do: v, else: walk(v, index))} end)
+    |> Map.put("items", Enum.map(items, &carry_item(&1, index)))
+  end
+
+  defp walk(%{} = map, index), do: Map.new(map, fn {k, v} -> {k, walk(v, index)} end)
+  defp walk(list, index) when is_list(list), do: Enum.map(list, &walk(&1, index))
+  defp walk(other, _index), do: other
+
+  defp carry_item(%{} = item, index) do
+    item =
+      if Map.has_key?(item, "children"),
+        do: Map.update!(item, "children", &walk(&1, index)),
+        else: item
+
+    case Map.fetch(index, id(item)) do
+      {:ok, stored} -> merge(item, stored)
+      :error -> item
+    end
+  end
+
+  defp carry_item(item, _index), do: item
+
+  @doc """
+  Every `{block id, item id}` in `blocks` whose item a push carries something
+  back for (`carry/2`), in order: an item with an id its top-level block holds
+  once, holding a key the printer does not spell, a `text` the reader does not
+  show, or a `checked` that is not `true`. The pull names them; the print does
+  not show them.
+  """
+  @spec carried([map()]) :: [{String.t(), String.t()}]
+  def carried(blocks) when is_list(blocks) do
+    for %{"id" => block_id} = block <- blocks,
+        is_binary(block_id),
+        once <- [index(block)],
+        {id, item} <- item_ids(block),
+        Map.has_key?(once, id) and carried_part(item) != %{},
+        do: {block_id, id}
+  end
+
+  # What a push gives back from `stored` (`merge/2`): its keys the printer does
+  # not spell, an unshown `text`, and a `checked` that is not `true`.
+  defp carried_part(stored) do
+    part = Map.drop(stored, @spelled)
+    part = if unshown_text?(stored), do: Map.put(part, "text", stored["text"]), else: part
+
+    if Map.has_key?(stored, "checked") and stored["checked"] != true,
+      do: Map.put(part, "checked", stored["checked"]),
+      else: part
+  end
+
+  defp merge(item, stored) do
+    {checked, part} = Map.pop(carried_part(stored), "checked", :none)
+    {text, others} = Map.pop(part, "text", :none)
+    item = Map.merge(others, item)
+    item = if text == :none, do: item, else: Map.put(item, "text", text)
+
+    if checked == :none or Map.has_key?(item, "checked"),
+      do: item,
+      else: Map.put(item, "checked", checked)
+  end
 end

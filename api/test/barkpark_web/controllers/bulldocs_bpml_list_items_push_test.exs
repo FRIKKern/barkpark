@@ -8,9 +8,11 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
 
   A list in the shape a push writes (items as inline arrays, or maps of
   `content` with `id`, `checked` and child lists) takes an edit at any level.
-  A list holding a shape the print re-spells or cannot spell (a bare-string
-  item, an item with words only in `text`, an alias list type, a key BPML
-  cannot write) is refused on edit by `Bpml.WriteWall`, and keeps its bytes.
+  A list holding a shape the print re-spells (a bare-string item, an item
+  with words only in `text`, an alias child list type) takes an edit too, and
+  is stored in the shape a push writes. An item with an id keeps a key BPML
+  cannot write through an edit: `Bpml.ListItems.carry/2` brings it back by the
+  id.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -225,12 +227,14 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
   end
 
   # Each older shape, and a key BPML cannot spell, prints; an edit to its own
-  # words is refused by the write wall, naming the block, and the row keeps
-  # its bytes.
-  for {name, item, from, to} <- [
-        {"a bare-string item", "Bare words", "Bare words", "Bare words, edited"},
+  # words lands, and the stored item is the edited one in the shape a push
+  # writes, with what the print did not show carried by the item's id.
+  for {name, item, from, to, want} <- [
+        {"a bare-string item", "Bare words", "Bare words", "Bare words, edited",
+         [%{"type" => "text", "value" => "Bare words, edited"}]},
         {"an item with its words only in text", %{"id" => "a", "text" => "Text words"},
-         "Text words", "Text words, edited"},
+         "Text words", "Text words, edited",
+         %{"id" => "a", "content" => [%{"type" => "text", "value" => "Text words, edited"}]}},
         {"an item whose child list has an alias type",
          %{
            "id" => "a",
@@ -238,26 +242,43 @@ defmodule BarkparkWeb.BulldocsBpmlListItemsPushTest do
            "children" => [
              %{"type" => "ordered-list", "items" => [[%{"type" => "text", "value" => "x"}]]}
            ]
-         }, "Parent words", "Parent words, edited"},
+         }, "Parent words", "Parent words, edited",
+         %{
+           "id" => "a",
+           "content" => [%{"type" => "text", "value" => "Parent words, edited"}],
+           "children" => [
+             %{
+               "type" => "list",
+               "ordered" => true,
+               "items" => [[%{"type" => "text", "value" => "x"}]]
+             }
+           ]
+         }},
         {"an item with a key BPML cannot spell",
          %{
            "id" => "a",
            "content" => [%{"type" => "text", "value" => "Audited words"}],
            "audit" => %{"keep" => true}
-         }, "Audited words", "Audited words, edited"}
+         }, "Audited words", "Audited words, edited",
+         %{
+           "id" => "a",
+           "content" => [%{"type" => "text", "value" => "Audited words, edited"}],
+           "audit" => %{"keep" => true}
+         }}
       ] do
     @item item
     @from from
     @to to
-    test "editing #{name} is refused; the list keeps its bytes" do
+    @want want
+    test "editing #{name} lands; the list stores the edited item" do
       {slug, bpml, rev} = pulled_with([list("l1", [@item]), p("p2", "Closing.")])
-      before = stored(slug)
       assert bpml =~ @from
 
-      answer = push_copy(slug, String.replace(bpml, @from, @to), rev) |> json_response(422)
-      assert answer["error"]["code"] == WriteWall.code()
-      assert answer["error"]["message"] =~ ~s(block "l1")
-      assert stored(slug) == before
+      assert %{"ok" => true} =
+               push_copy(slug, String.replace(bpml, @from, @to), rev) |> json_response(200)
+
+      assert stored_block(slug, "l1")["items"] == [@want]
+      assert stored_block(slug, "p2")["content"] == text("Closing.")
     end
   end
 

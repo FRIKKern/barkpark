@@ -13,12 +13,13 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   `Barkpark.Test.BpmlWords` holds for it, or the printer refuses it with the reason
   `@refused` names. A document that starts or stops being refused fails by name, and
   so does one that starts or stops printing a `<kept>` line (`@kept`), or a skip that
-  starts or stops hiding words (`@skip_hits`), so these tables change only on purpose.
+  starts or stops hiding words (`@skip_hits`), or a printout that lacks a word
+  `Barkpark.Test.CarriedWords` does not name, so these tables change only on purpose.
   """
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Bpml.UnprintableError
-  alias Barkpark.Test.BpmlWords
+  alias Barkpark.Test.{BpmlWords, CarriedWords}
 
   @script Path.expand("../../support/shared_fixture_documents.mjs", __DIR__)
 
@@ -142,18 +143,8 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
   # Document name => the skipped fields that hid a word in it.
   @skip_hits %{}
 
-  # Document name => [{word, in source, in printout}] the printout lacks. The
-  # nested-list golden's `text` the reader does not show (not printed; the
-  # write wall refuses an edit to its block, task-0b448ea0847a6b4f) and its
-  # alias type name.
-  @lost %{
-    "nested-list-carriers" => [
-      {"Inactive", 1, 0},
-      {"fallback", 2, 1},
-      {"ordered", 1, 0},
-      {"parent", 2, 1}
-    ]
-  }
+  # Carried, not printed: the one closed list (`Barkpark.Test.CarriedWords`).
+  @carried CarriedWords.all()
 
   setup_all do
     node = System.find_executable("node") || flunk("node is required for this test")
@@ -207,7 +198,10 @@ defmodule Barkpark.PortableDoc.EveryFixtureWordsTest do
           into: %{},
           do: {name, words}
 
-    assert differing(missing, @lost) == [], full(differing(missing, @lost))
+    assert differing(missing, @carried) == [], full(differing(missing, @carried))
+
+    words = @carried |> Map.values() |> List.flatten()
+    IO.puts("every-fixture words: #{length(words)} carried, not printed")
   end
 
   test "the documents printing a <kept> line are the pinned ones", %{outcomes: outcomes} do

@@ -178,7 +178,8 @@ defmodule Barkpark.Content.Papers.BpmlView do
   `bpml_unshown`), and after it, an id pushed twice (422 `bpml`) and blocks
   that change what the pull did not show (422 `bpml_unshown`). Between the
   two, a list item id pushed twice in one block is refused (422 `bpml`,
-  `Bpml.ListItems.check_ids/2`).
+  `Bpml.ListItems.check_ids/2`), and a list item with an id gets back what
+  BPML cannot spell (`Bpml.ListItems.carry/2`).
   Refused, writing nothing, when the view cannot be built or printed. The
   Paper the ops leave is checked as saved (`saved_check/3`).
   """
@@ -197,6 +198,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
          pulled = BlockIds.ensure_block_ids(pulled),
          {:ok, pushed, notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
          :ok <- ListItems.check_ids(pushed, stored),
+         pushed = ListItems.carry(pushed, stored),
          {:ok, target} <- wall(paper, {stored, shown, fields}, pulled, pushed, copy),
          {:ok, _blocks, ops} <- Diff.derive_target(stored, target) do
       {:ok, ops, notes}
@@ -219,7 +221,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
         {:ok, target}
       else
         with {:ok, _bpml, before} <- printed(paper, PrintMark.before(shown, believed), fields) do
-          case WriteWall.target(stored, BlockIds.ensure_block_ids(before), pushed) do
+          case WriteWall.target(stored, BlockIds.ensure_block_ids(before), pushed, items: false) do
             {:refused, %{code: "bpml_unshown"} = body} -> {:refused, %{body | hint: @update_hint}}
             other -> other
           end
@@ -289,6 +291,7 @@ defmodule Barkpark.Content.Papers.BpmlView do
              pulled = BlockIds.ensure_block_ids(pulled),
              {:ok, blocks, _notes} <- CalloutBody.resolve(stored, shown, pulled, copy),
              :ok <- ListItems.check_ids(blocks, stored) do
+          blocks = ListItems.carry(blocks, stored)
           {:ok, copy |> Map.delete("print") |> Map.put("blocks", blocks)}
         else
           {:refused, _body} = refused -> refused

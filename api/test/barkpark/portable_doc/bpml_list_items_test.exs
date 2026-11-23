@@ -10,7 +10,7 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
 
   alias Barkpark.PortableDoc.{Bpml, Render, Validate}
   alias Barkpark.PortableDoc.Bpml.{ListItems, PrintMark, UnprintableError}
-  alias Barkpark.Test.BpmlWords
+  alias Barkpark.Test.{BpmlWords, CarriedWords}
 
   @max Validate.max_depth()
 
@@ -134,11 +134,11 @@ defmodule Barkpark.PortableDoc.BpmlListItemsTest do
       assert fallback == text("Fallback parent")
     end
 
-    # Missing: the `text` the reader does not show (not printed; the write wall
-    # refuses an edit to its block), and the word "ordered" of the alias type
-    # name `ordered-list`.
+    # Missing: only the `text` the reader does not show, which a push carries
+    # back by the item's id: the fixture's row on the one carried list.
     test "every word the reader shows is in the parsed printout" do
-      missing = [{"Inactive", 1, 0}, {"fallback", 2, 1}, {"ordered", 1, 0}, {"parent", 2, 1}]
+      missing = CarriedWords.of("nested-list-carriers")
+      assert missing != []
       assert %{missing: ^missing, kept: []} = BpmlWords.check([carriers()], %{})
     end
 
