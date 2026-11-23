@@ -57,6 +57,9 @@ defmodule BarkparkWeb.ScopedPaperController do
       |> render(:show,
         article?: paper_article?(paper),
         body_html: body_html,
+        # No block list: `body_html` is the paper's scrubbed stored HTML.
+        legacy_html?:
+          not is_list(Barkpark.PortableDoc.Projection.read_blocks(paper.content || %{})),
         preview: preview,
         page_title: preview["title"],
         # Related Paper cards — papers that link TO this one, rendered as a

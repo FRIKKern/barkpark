@@ -128,8 +128,10 @@ defmodule Barkpark.MixProject do
       # zone). Data compiled in, no runtime download; passed explicitly to
       # DateTime.shift_zone/3, so the global :time_zone_database stays UTC-only.
       {:tz, "~> 0.28"},
-      # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest
-      {:lazy_html, ">= 0.1.0", only: :test},
+      # LiveView 1.1+ requires lazy_html for Phoenix.LiveViewTest. It is a
+      # runtime dependency too: `PortableDoc.HtmlSanitizer` parses legacy
+      # Paper body_html with it (task-65430475d0552e36).
+      {:lazy_html, ">= 0.1.0"},
       # Phase 7 WI3: in-process HTTP mock for Bokbasen client tests
       {:bypass, "~> 2.1", only: :test},
       # Sheets plugin — xlsx import + export (pure-Elixir, no NIFs)
