@@ -48,11 +48,13 @@ const MORE = `
   <div id="button-slow" popover="manual">Shown slowly</div>
 </div>
 `
+// The hint the hint run reads open: shown while the pointer is on its button.
+const HINT_JS = "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }"
 // What the unnamed and census runs both plant: the boxes that open, at once or late.
 const BOXES_JS = [
   "root.querySelector('#button-open').showPopover()",
   "{ const b = root.querySelector('#button-tip-open'), t = root.querySelector('#button-tip'); b.addEventListener('focus', () => t.showPopover()); b.addEventListener('blur', () => t.hidePopover()) }",
-  "{ const b = root.querySelector('#button-hint-open'), t = root.querySelector('#button-hint'); b.addEventListener('mouseenter', () => t.showPopover()); b.addEventListener('mouseleave', () => t.hidePopover()) }",
+  HINT_JS,
   // Shown 400 ms after focus or hover, as real tooltips are; leaving clears the timer.
   "{ const late = (b, t, shows, hides) => { let k = 0; for (const e of shows) b.addEventListener(e, () => { clearTimeout(k); k = setTimeout(() => t.matches(':popover-open') || t.showPopover(), 400) }); for (const e of hides) b.addEventListener(e, () => { clearTimeout(k); if (t.matches(':popover-open')) t.hidePopover() }) }; late(root.querySelector('#button-late-open'), root.querySelector('#button-late'), ['focus', 'mouseenter'], ['blur', 'mouseleave']); late(root.querySelector('#button-slow-open'), root.querySelector('#button-slow'), ['mouseenter'], ['mouseleave']) }",
 ].join('\n')
@@ -226,9 +228,9 @@ async function overTwoGrounds() {
   }
 }
 
-// Three runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
+// Four runs hold the top-layer readings and the census (each plant asserts its own fail), each under the selftest's
 // time for one case: the first reads the named popover open, the second unnamed boxes open and a named box late,
-// the third the boxes the census must name.
+// the third the named hint open, the fourth the boxes the census must name.
 const BOXES_CSS = [faint('button-pop', 8), faint('button-open', 72), faint('button-tip', 136), faint('button-hint', 200)].join('\n')
 /** What one open state and the looks after real input cost on this runner, for the record (the hosted job prints it). */
 const measured = (p) => {
@@ -248,9 +250,13 @@ const unnamedRows = () => ({
   'a tooltip open only at its Tab stop, named by no layer': both(new RegExp(`^\\w+ (light|dark): Tab to button#button-tip-open "Info": ${esc(UNNAMED_AT('div#button-tip "Shown on focus"'))}$`)),
   'a named box that opens 400 ms after its input': both(new RegExp(esc(LATE('the layer #button-slow')))),
 })
-/** The third run's rows: the named hint read open, and every box the census must name. `n` is the looks made. */
-const censusRows = (m, n) => ({
+/** The third run's rows: the named hint read open. `m` is the part's measure of its layers. */
+const hintRows = (m) => ({
   'a named hint, opened by hover, read open': both(/with #button-hint open: drawn text [\d.]+:1 at div#button-hint "Shown on hover"/),
+  'the named hint read in every view': () => m?.readings === 10,
+})
+/** The fourth run's rows: every box the census must name. `n` is the looks made. */
+const censusRows = (n) => ({
   'a tooltip shown 400 ms after focus or hover, named by no layer': can('div#button-late "Shown late"'),
   'a tooltip on hover over a plain span, named by no layer': can('div#button-span-tip "Shown on the span"'),
   'a dialog never opened, named by no layer': can('dialog#button-dlg "Never opened"'),
@@ -262,11 +268,10 @@ const censusRows = (m, n) => ({
   'a box in a shadow root parsed from markup, with no attachShadow call': can('div#button-parsed "In a parsed root"'),
   'a frame in the page, refused by name': skinsSay(new RegExp(esc(FRAME('iframe#button-frame ""')))),
   "a box made as the page loads and gone before the check's first look": can('div#button-at-load "Made at load"'),
-  'the named hint read in every view': () => m?.readings === 10,
   'the looks were made': () => n > 0,
 })
-/** The rows of the three top-layer runs, by run, as their cases hold them. */
-export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), unnamed: Object.keys(unnamedRows()), census: Object.keys(censusRows()) }
+/** The rows of the four top-layer runs, by run, as their cases hold them. */
+export const TOP_LAYER_ROWS = { popover: Object.keys(popoverRows()), unnamed: Object.keys(unnamedRows()), hint: Object.keys(hintRows()), census: Object.keys(censusRows()) }
 // Each top-layer case is `layers`: it opens its boxes by real input (a click, a hover, a Tab) or holds a refusal,
 // and runs in the selftest's rest job by its one rule (check/jobs.mjs).
 export const LAYER_CASES = [
@@ -291,22 +296,33 @@ export const LAYER_CASES = [
     expect: each(unnamedRows()),
   },
   {
-    name: 'top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load',
+    name: 'top layer: a named hover hint is read open, in every view',
+    only: ['skins'],
+    layers: true,
+    plant: all(
+      (d) => appendFileSync(join(d, 'example.html'), MORE),
+      (d) => inDemo(d, HINT_JS),
+      (d) => named(d, [HINT]),
+    ),
+    css: BOXES_CSS,
+    expect: (p, ...rest) => each(hintRows(measured(p)))(p, ...rest),
+  },
+  // Its own run, with no layer named and no sheet of its own: the census names boxes that never open while the check
+  // looks, so it reads no layer open.
+  {
+    name: 'top layer: boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load',
     only: ['skins'],
     layers: true,
     plant: all(
       () => Object.assign(since, looks),
       (d) => appendFileSync(join(d, 'example.html'), MORE),
       (d) => inDemo(d, [BOXES_JS, CENSUS_JS].join('\n')),
-      (d) => named(d, [HINT]),
     ),
-    css: BOXES_CSS,
     expect: (p, ...rest) => {
-      const m = measured(p)
       const n = looks.n - since.n
       const s = (looks.ms - since.ms) / 1000
       console.log(`    looks for a box no layer names: ${n} in ${s.toFixed(1)} s, ${n ? ((s * 1000) / n).toFixed(1) : 0} ms each`)
-      return each(censusRows(m, n))(p, ...rest)
+      return each(censusRows(n))(p, ...rest)
     },
   },
   // Its own run: were either call let through, it would take the page away and every other row with it. The first

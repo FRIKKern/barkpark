@@ -1,5 +1,5 @@
-// The top layer's readings and census were one selftest run; they are three, so each stays under the selftest's
-// time for one case. These hold that every row of the one run is in exactly one of the three, so none was dropped
+// The top layer's readings and census were one selftest run; they are four, so each stays under the selftest's
+// time for one case. These hold that every row of the one run is in exactly one of the four, so none was dropped
 // to make room, and the check that says so is red by the row's name. And every top-layer case runs in the layers
 // job or the open job split off it, by the runner's own pick, red by the case's name when one would run in a job
 // that reads the views.
@@ -31,17 +31,17 @@ const ONE_RUN = [
   'the looks were made',
 ]
 
-describe('the three top-layer runs', () => {
+describe('the four top-layer runs', () => {
   it('hold every row of the one run they replace, each in exactly one of them', () => {
     expect(rowsMoved(ONE_RUN, TOP_LAYER_ROWS, 'top-layer')).toEqual([])
   })
 
   it('are red by the row’s name when a row is dropped or doubled', () => {
     const row = 'a frame in the page, refused by name'
-    const { popover, unnamed, census } = TOP_LAYER_ROWS
-    expect(rowsMoved(ONE_RUN, { popover, unnamed, census: census.filter((r) => r !== row) }, 'top-layer')).toEqual([`the row "${row}" is in no top-layer run`])
-    expect(rowsMoved(ONE_RUN, { popover: [...popover, row], unnamed, census }, 'top-layer')).toEqual([`the row "${row}" is in 2 top-layer runs (popover, census)`])
-    expect(rowsMoved(ONE_RUN, { popover, unnamed, census: [...census, row] }, 'top-layer')).toEqual([`the row "${row}" is in the census top-layer run 2 times`])
+    const { popover, unnamed, hint, census } = TOP_LAYER_ROWS
+    expect(rowsMoved(ONE_RUN, { popover, unnamed, hint, census: census.filter((r) => r !== row) }, 'top-layer')).toEqual([`the row "${row}" is in no top-layer run`])
+    expect(rowsMoved(ONE_RUN, { popover: [...popover, row], unnamed, hint, census }, 'top-layer')).toEqual([`the row "${row}" is in 2 top-layer runs (popover, census)`])
+    expect(rowsMoved(ONE_RUN, { popover, unnamed, hint, census: [...census, row] }, 'top-layer')).toEqual([`the row "${row}" is in the census top-layer run 2 times`])
   })
 })
 
