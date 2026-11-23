@@ -16,6 +16,7 @@ describe('the views on pages at once', () => {
     expect(shares.map((s) => s.length)).toEqual([skins.length, skins.length])
     expect(viewsRead(views, shares)).toEqual({ line: `views the skins light read: ${views.length} of ${views.length}; on two pages: 0; on none: 0`, fail: null })
     expect(viewsRead(views, spread(views, 1)).line).toBe(viewsRead(views, shares).line)
+    expect(viewsRead(views, shares, 'the phone light').line).toBe(`views the phone light read: ${views.length} of ${views.length}; on two pages: 0; on none: 0`)
   })
 
   it('is red by name when a view is left out, read twice, or off the list', () => {

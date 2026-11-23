@@ -109,7 +109,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
           paintFree = looks.paintFree
           textOnly = looks.textOnly
         }
-        if (only.includes('phone')) lights.phone = await phone(ctx, part, skins)
+        if (only.includes('phone')) lights.phone = await phone(ctx, part, skins, viewPages)
         if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
       })(), PART_MS, `part ${part.name}`)
     } catch (e) {
@@ -124,6 +124,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     const failed = ctx.errors[0] ?? offs[0] ?? missed[0]
     for (const [k, l] of Object.entries(lights)) lines.push(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
     if (viewsLine) lines.push(`  ${viewsLine}`)
+    if (lights.phone?.views) lines.push(`  ${lights.phone.views}`)
     for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
     for (const [k, m] of Object.entries(measures))
       if (k === 'waits') continue

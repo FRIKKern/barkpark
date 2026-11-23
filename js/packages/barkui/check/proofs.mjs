@@ -15,7 +15,8 @@ import { LISTS } from './motion.mjs'
 import { installHelpers, source } from './probes.mjs'
 import { readView, verdict } from './reading.mjs'
 import { realStates } from './states.mjs'
-import { spread, VIEW_PAGES, viewList, viewsRead } from './view-pages.mjs'
+import { VIEW_PAGES, viewList } from './view-pages.mjs'
+import { readOnPages, STOP } from './view-run.mjs'
 import { installCover } from './coverage.mjs'
 import { LEFT_OUT_INITIAL } from '../build/vocabulary.mjs'
 
@@ -261,9 +262,6 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
   // The views, on pages of the one browser at once (view-pages.mjs). What a view adds to the light is kept apart, in
   // `keep`, and made in the list's order once every page is done.
   const views = viewList(viewSkins(ctx, skins))
-  const shares = spread(views, pages)
-  const count = viewsRead(views, shares)
-  const kept = views.map(() => [])
   /** One view read on `page`; `keep` takes what it adds to the light. */
   const readAView = async (page, names, { skin, scheme }, keep) => {
     const surfaceTo = async (x) => {
@@ -349,86 +347,25 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
       if (r2.done) break
     }
   }
-  const opened = []
-  // The census tells each thing it sees once per page (layers.mjs). Each of the light's pages tells it again, so a
-  // thing told is marked with its text and its place among the same texts on that page, and once every page is
-  // done it is kept where the list's order first reads it, as one page would tell it, and dropped where another
-  // page tells it again.
-  const marks = new Map()
-  const mark = (key) => {
-    if (!marks.has(key)) marks.set(key, marks.size)
-    return `\u2060${marks.get(key)}\u2060`
-  }
-  const tellOnce = (page) => {
-    const census = page.barkCensus
-    if (!census) return
-    const seen = new Map()
-    const told = async (p) =>
-      (await census(p)).map((s) => {
-        const k = (seen.get(s) ?? 0) + 1
-        seen.set(s, k)
-        return `${s}${mark(`${s}\u0000${k}`)}`
-      })
-    told.placement = census.placement
-    page.barkCensus = told
-  }
-  const MARKED = /\u2060(\d+)\u2060$/
-  const keptOnce = new Set()
-  const once = (list) =>
-    list.flatMap((l) => {
-      const m = l.match(MARKED)
-      if (!m) return [l]
-      if (keptOnce.has(m[1])) return []
-      keptOnce.add(m[1])
-      return [l.replace(MARKED, '')]
-    })
-  // An error ends the light with the error of the first view in the list's order that meets one, as on one page:
-  // each page goes on only through the views before it. Before its first view a page is at -1.
-  const errors = []
-  let stopAt = Infinity
-  const failAt = (i, e) => {
-    errors.push({ i, e })
-    stopAt = Math.min(stopAt, i)
-  }
-  /** Page `j` reads its share of the views; a page that cannot open is red by name. */
-  const onPage = async (j) => {
-    let page
-    try {
-      page = await open(ctx, { scale: 2, height: 1600 })
-    } catch (e) {
-      return failAt(-1, new Error(`the skins light could not open its page ${j + 1} of ${shares.length}: ${String(e.message).split('\n')[0]}`))
-    }
-    opened[j] = page
-    tellOnce(page)
-    let i = -1
-    try {
+  const { once, count } = await readOnPages({
+    views,
+    pages,
+    what: 'the skins light',
+    open: () => open(ctx, { scale: 2, height: 1600 }),
+    start: async (page) => {
       await pointTo(page, 0, 0)
-      const names = await page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
-      for (const v of shares[j]) {
-        i = views.indexOf(v)
-        if (i > stopAt) return
-        await readAView(page, names, v, (f) => kept[i]?.push(f))
-      }
-      i = views.length
-      await stillStyled(ctx, page, 'skins')
-    } catch (e) {
-      failAt(i, e)
-    }
-  }
-  try {
-    await Promise.all(shares.map((_, j) => onPage(j)))
-    if (errors.length) throw errors.reduce((a, b) => (b.i < a.i ? b : a)).e
-    for (const k of kept) for (const f of k) f()
-    // The light's views come first in light, then in dark: what the census told is kept where it is first read.
-    for (const scheme of ['light', 'dark']) bad[scheme] = once(bad[scheme])
-    // A run that reads the views of the drive's skins alone names the rest in both lights: it is never green, and a
-    // row that needs a view of theirs finds nothing and is red by its name.
-    const unreadSkins = skins.filter((k) => !viewSkins(ctx, skins).includes(k))
-    if (unreadSkins.length) for (const scheme of ['light', 'dark']) bad[scheme].push(`this run reads the views of ${viewSkins(ctx, skins).join(', ')} alone: ${unreadSkins.join(', ')} go unread`)
-    if (count.fail) for (const scheme of ['light', 'dark']) bad[scheme].push(count.fail)
-  } finally {
-    await Promise.all(opened.filter(Boolean).map((p) => p.context().close()))
-  }
+      return page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
+    },
+    read: (page, v, keep, names) => readAView(page, names, v, keep),
+    end: (page) => stillStyled(ctx, page, 'skins'),
+  })
+  // The light's views come first in light, then in dark: what the census told is kept where it is first read.
+  for (const scheme of ['light', 'dark']) bad[scheme] = once(bad[scheme])
+  // A run that reads the views of the drive's skins alone names the rest in both lights: it is never green, and a
+  // row that needs a view of theirs finds nothing and is red by its name.
+  const unreadSkins = skins.filter((k) => !viewSkins(ctx, skins).includes(k))
+  if (unreadSkins.length) for (const scheme of ['light', 'dark']) bad[scheme].push(`this run reads the views of ${viewSkins(ctx, skins).join(', ')} alone: ${unreadSkins.join(', ')} go unread`)
+  if (count.fail) for (const scheme of ['light', 'dark']) bad[scheme].push(count.fail)
   // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
   if (ctx.motion !== false) bad.light.push(...(await motionFails(ctx, part, skins[0])))
   // Real states against their pins (states.mjs).
@@ -537,57 +474,67 @@ async function motionFails(ctx, part, skin) {
   return fails
 }
 
-export async function phone(ctx, part, skins) {
-  const page = await open(ctx, { width: 390, height: 844, mobile: true, scale: 2 })
-  try {
-    const sideways = () =>
-      inCheck(page, (root) => {
-        const doc = document.documentElement
-        if (doc.scrollWidth > doc.clientWidth) return `page is ${doc.scrollWidth}px wide in a ${doc.clientWidth}px window`
-        if (root.scrollWidth > root.clientWidth) return `the example is ${root.scrollWidth}px wide in ${root.clientWidth}px`
-        const out = [...root.querySelectorAll('*')].find((el) => el.getBoundingClientRect().right > doc.clientWidth)
-        return out ? `${out.textContent.trim()} ends past the window` : true
-      }, part.name, 'the phone check')
-    // The phone view is read in full, as the wide one is: every skin and scheme, on every surface.
-    let text = Infinity
-    let edge = Infinity
-    let weakest = NONE
-    const fails = []
-    for (const scheme of ['light', 'dark']) {
-      for (const skin of skins) {
-        const at = `${skin} ${scheme}`
-        await view(page, skin, scheme)
-        for (const surface of surfacesOf(ctx)) {
-          await page.barkCheck(([n, v]) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v)), [part.name, surface])
-          await settle(page)
-          const where = `${at} on ${surface}`
-          const r = await sideways()
-          if (r !== true) return light(false, `${where}: ${r}`)
-          const waits = waitsFor(skin, scheme, surface)
-          const readOne = async (said) => {
-            const v = await readView(page, part, waits)
-            const d = verdict(v, `${said}: `, waits)
-            fails.push(...d.fails)
-            text = Math.min(text, d.weakest.text.ratio)
-            weakest = least(weakest, d.weakest)
-            for (const c of v.bounds.read) {
-              if (c.ratio < 3) fails.push(`${said}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
-              edge = Math.min(edge, c.ratio)
-            }
-          }
-          await readOne(where)
-          const open = await eachLayer(page, part, async (layer) => (await readOne(`${where} with ${layer.box} open`), []))
-          fails.push(...open.map((f) => `${where}: ${f}`))
-        }
-        await page.barkCheck((n) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', 'base')), part.name)
+export async function phone(ctx, part, skins, pages = VIEW_PAGES) {
+  const sideways = (page) =>
+    inCheck(page, (root) => {
+      const doc = document.documentElement
+      if (doc.scrollWidth > doc.clientWidth) return `page is ${doc.scrollWidth}px wide in a ${doc.clientWidth}px window`
+      if (root.scrollWidth > root.clientWidth) return `the example is ${root.scrollWidth}px wide in ${root.clientWidth}px`
+      const out = [...root.querySelectorAll('*')].find((el) => el.getBoundingClientRect().right > doc.clientWidth)
+      return out ? `${out.textContent.trim()} ends past the window` : true
+    }, part.name, 'the phone check')
+  // The phone view is read in full, as the wide one is: every skin and scheme, on every surface, on pages of the one
+  // browser at once (view-run.mjs), each view's part made in the list's order.
+  let text = Infinity
+  let edge = Infinity
+  let weakest = NONE
+  let fails = []
+  let side = null
+  const readAView = async (page, { skin, scheme }, keep) => {
+    const at = `${skin} ${scheme}`
+    await view(page, skin, scheme)
+    for (const surface of surfacesOf(ctx)) {
+      await page.barkCheck(([n, v]) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', v)), [part.name, surface])
+      await settle(page)
+      const where = `${at} on ${surface}`
+      const r = await sideways(page)
+      if (r !== true) {
+        keep(() => (side = `${where}: ${r}`))
+        return STOP
       }
+      const waits = waitsFor(skin, scheme, surface)
+      const readOne = async (said) => {
+        const v = await readView(page, part, waits)
+        const d = verdict(v, `${said}: `, waits)
+        keep(() => {
+          fails.push(...d.fails)
+          text = Math.min(text, d.weakest.text.ratio)
+          weakest = least(weakest, d.weakest)
+          for (const c of v.bounds.read) {
+            if (c.ratio < 3) fails.push(`${said}: control boundary ${fmt(c.ratio)}:1 at ${c.at} by its ${c.by}, needs 3:1`)
+            edge = Math.min(edge, c.ratio)
+          }
+        })
+      }
+      await readOne(where)
+      const open = await eachLayer(page, part, async (layer) => (await readOne(`${where} with ${layer.box} open`), []))
+      keep(() => fails.push(...open.map((f) => `${where}: ${f}`)))
     }
-    await stillStyled(ctx, page, 'phone')
-    if (fails.length) return light(false, fails[0], { fails })
-    return light(true, `nothing scrolls sideways at 390px on ${surfacesOf(ctx).length < 2 ? 'base' : `all ${surfacesOf(ctx).length} surfaces`}; weakest drawn text ${fmt(text)}:1; ${drawsAll(weakest)}; control boundary ${fmt(edge)}:1 or more`)
-  } finally {
-    await page.context().close()
+    await page.barkCheck((n) => window.__barkCheck.restyle('a surface set', () => document.querySelector(`[data-part="${n}"]`).setAttribute('data-surface', 'base')), part.name)
   }
+  const { once, count } = await readOnPages({
+    views: viewList(skins),
+    pages,
+    what: 'the phone light',
+    open: () => open(ctx, { width: 390, height: 844, mobile: true, scale: 2 }),
+    read: (page, v, keep) => readAView(page, v, keep),
+    end: (page) => stillStyled(ctx, page, 'phone'),
+  })
+  if (side) return { ...light(false, side), views: count.line }
+  fails = once(fails)
+  if (count.fail) fails.push(count.fail)
+  if (fails.length) return { ...light(false, fails[0], { fails }), views: count.line }
+  return { ...light(true, `nothing scrolls sideways at 390px on ${surfacesOf(ctx).length < 2 ? 'base' : `all ${surfacesOf(ctx).length} surfaces`}; weakest drawn text ${fmt(text)}:1; ${drawsAll(weakest)}; control boundary ${fmt(edge)}:1 or more`), views: count.line }
 }
 
 export async function noscript(ctx, part) {

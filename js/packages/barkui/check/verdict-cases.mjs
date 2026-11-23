@@ -54,7 +54,7 @@ export function everyCombination(decide = judge) {
 
 const holds = () => {
   const { calls, greens, wrong, expected } = everyCombination()
-  console.log(`    the closing check's verdict: ${calls} of ${expected} combinations judged, ${greens} green (the two the rule allows)${wrong.length ? `; against the rule: ${wrong.join('; ')}` : ''}`)
+  console.log(`    the closing check's verdict: ${calls} of ${expected} combinations judged, ${greens} green, where the rule allows 2${wrong.length ? `; against the rule: ${wrong.join('; ')}` : ''}`)
   return calls === expected && greens === 2 && wrong.length === 0
 }
 

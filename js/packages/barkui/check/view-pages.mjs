@@ -14,13 +14,13 @@ export const spread = (views, n = VIEW_PAGES) => Array.from({ length: n }, (_, j
 
 /** The count line, made from the list and the pages' shares, and the fail when any view is read on more than one
     page, on none, or is not on the list. */
-export function viewsRead(views, shares) {
+export function viewsRead(views, shares, what = 'the skins light') {
   const times = views.map((v) => shares.filter((s) => s.includes(v)).length)
   const twice = times.filter((t) => t > 1).length
   const none = times.filter((t) => t === 0).length
   const stray = shares.flat().filter((v) => !views.includes(v)).length
-  const line = `views the skins light read: ${views.length - none} of ${views.length}; on two pages: ${twice}; on none: ${none}${stray ? `; off the list: ${stray}` : ''}`
+  const line = `views ${what} read: ${views.length - none} of ${views.length}; on two pages: ${twice}; on none: ${none}${stray ? `; off the list: ${stray}` : ''}`
   const named = (t) => views.filter((_, i) => t(times[i])).map((v) => `${v.skin} ${v.scheme}`).join(', ')
-  const fail = none || twice || stray ? `the skins light's pages do not read each view once: ${line}${none ? ` (on none: ${named((t) => t === 0)})` : ''}${twice ? ` (on two: ${named((t) => t > 1)})` : ''}` : null
+  const fail = none || twice || stray ? `${what}'s pages do not read each view once: ${line}${none ? ` (on none: ${named((t) => t === 0)})` : ''}${twice ? ` (on two: ${named((t) => t > 1)})` : ''}` : null
   return { line, fail }
 }

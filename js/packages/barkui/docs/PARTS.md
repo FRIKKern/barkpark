@@ -238,7 +238,11 @@ matches; a rule or a pair nobody judges fails the part by name.
 
 The surface switch sets `data-surface` (base, raised, sunken, primary, inverse) on each part's stage.
 The check reads every surface in every skin and scheme, at 1440px and at 390px, and the lights are
-proved on all five; the page says so. A drawn text under 4.5:1 is let through only by a wait in `build/sheet-waits.mjs` that
+proved on all five; the page says so. Each view, a skin in a scheme, is read on one of two pages of
+the one browser at once, by one rule over the list of views (`check/view-pages.mjs`), and what each
+view finds is made in the list's order, so the lights read the same as on one page. The check prints
+"views the skins light read: N of N; on two pages: 0; on none: 0" from the list, and the same for the
+phone light; a view on no page or on two, or a page that cannot open, is red by name. A drawn text under 4.5:1 is let through only by a wait in `build/sheet-waits.mjs` that
 names its skin, scheme and surface, whose two tokens its fill and ground resolve to, and only while it
 measures no worse than the wait records. Any other text under 4.5:1, any control boundary under 3:1, and
 any label gone, cut or not drawn as itself, on any surface, turns "every skin" (light views), "light
