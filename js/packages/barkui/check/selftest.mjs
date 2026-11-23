@@ -9,11 +9,12 @@
 // carries every reason it is off (`fails`), and each plant asserts that one of
 // them names its own control. The ladder measures what the label reading's
 // limit costs and holds docs/PARTS.md's sentence to it.
+import { launch, press, refusals } from './acts.mjs'
+import { wallLine } from './wall.mjs'
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
 import { discoverParts, partsDir } from '../build/parts.mjs'
 import { CASE_SECONDS, capacitySentence, PER_JOB, SELFTEST_CEILINGS, selftestSentence } from './capacity.mjs'
 import { enforceCeiling } from './ceiling.mjs'
@@ -26,7 +27,13 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
-import { STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
+import { REST_CASES } from './rest-cases.mjs'
+import { POINTER_CASES } from './pointer-cases.mjs'
+import { lightLines, PAGE_CASES } from './page-cases.mjs'
+import { VERDICT_CASES } from './verdict-cases.mjs'
+import { createHash } from 'node:crypto'
+import { PLANTED, WALL_CASES } from './wall-cases.mjs'
+import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
 
@@ -248,7 +255,7 @@ steps.push({
     name: 'a reading is the same whether or not text in a field is selected',
     direct: async () => {
       const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-      const browser = await chromium.launch({ args: ['--disable-lcd-text'] })
+      const browser = await launch({ args: ['--disable-lcd-text'] })
       try {
         const dir = join(scratch, 'parts')
         cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
@@ -264,7 +271,7 @@ steps.push({
         const part = built.parts.find((x) => x.name === 'button')
         const page = await open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { scale: 2, height: 1600 })
         await page.barkCheck(() => document.getElementById('button-sel-before').focus())
-        await page.keyboard.press('Tab')
+        await press(page, 'Tab')
         const held = await page.barkCheck(() => {
           const f = document.getElementById('button-sel')
           return document.activeElement === f && f.selectionStart === 0 && f.selectionEnd === f.value.length
@@ -418,7 +425,7 @@ steps.push({
   {
     name: "the browser's reading of part.css refuses the same inputs with no help from the text lint",
     direct: async () => {
-      const browser = await chromium.launch()
+      const browser = await launch()
       try {
         const said = []
         for (const [css, re] of [
@@ -461,7 +468,7 @@ steps.push({
     name: "a page whose barkui.css differs from a part as it was judged alone fails, naming that part and no other",
     direct: async () => {
       const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
-      const browser = await chromium.launch()
+      const browser = await launch()
       try {
         const dir = join(scratch, 'parts')
         cpSync(join(partsDir, 'button'), join(dir, 'button'), { recursive: true })
@@ -530,7 +537,7 @@ steps.push({
   {
     name: 'a sheet the check cannot read rule for rule the way the browser does is refused, and one it reads is not',
     direct: async () => {
-      const browser = await chromium.launch()
+      const browser = await launch()
       const cannot = /the check cannot read this sheet the way the browser does/
       const either = /the check cannot read this sheet the way the browser does|the browser drops this rule/
       try {
@@ -560,7 +567,7 @@ steps.push({
   {
     name: 'an arm inside :is() or :where() that the browser drops in its place is refused by name, and one it keeps is not',
     direct: async () => {
-      const browser = await chromium.launch()
+      const browser = await launch()
       const any = /the arm |inside :(is|where)\(\) in its place/
       try {
         const said = []
@@ -602,32 +609,15 @@ steps.push({
     }),
   },
   ...STATE_CASES,
-  // :checked, a state a person changes by clicking: driven by a real click, compared with a pinned row, and read as
-  // drawn in every view while it holds (states.mjs). Three boxes: one driven, one pinned, one checked at rest.
-  {
-    name: 'a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name',
-    only: ['skins'],
-    states: true,
-    plant: all(
-      (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><input type="checkbox" id="button-tick" aria-label="Tick"><input type="checkbox" id="button-tick-pin" aria-label="Ticked" data-pin="checked"><input type="checkbox" id="button-tick-on" aria-label="On" checked></div>\n`),
-      inCss('[id^="button-tick"] { appearance: none; inline-size: 16px; block-size: 16px; margin: 0; border: 1px solid var(--ui-foreground); border-radius: 3px; background: var(--ui-background); }'),
-      // The break: checked, every box draws in the ground's own colour, edge and fill, so nothing marks where it is.
-      inCss('[id^="button-tick"]:checked { border-color: var(--ui-background); background: var(--ui-background); }'),
-      // A change only the real click shows: no pinned row carries it.
-      inCss('#button-tick:checked { border-width: 3px; }'),
-      // The demo's change handler marks another element; the check puts back only what is checked.
-      (d) => inDemo(d, "  root.querySelector('#button-tick').addEventListener('change', () => root.querySelector('#button-after').setAttribute('data-demo-seen', ''))"),
-    ),
-    expect: each({
-      'a box checked at rest, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-on "" by/),
-      'the pinned checked row, blank': skinsSay(/control boundary [\d.]+:1 at input#button-tick-pin "" by/),
-      'a checked change no pinned row shows': skinsSay(/real checked on input#button-tick "": .*no pinned row shows this change/),
-      'a click that leaves the stage changed': skinsSay(/real checked on input#button-tick "": button#button-after "Duplicate" is left with other attributes .*data-demo-seen.*must leave the stage as it found it/),
-    }),
-  },
+  ...CHECKED_CASES,
   ...CEILING_CASES,
   ...LAYER_CASES,
   ...PLACEMENT_CASES,
+  ...REST_CASES,
+  ...POINTER_CASES,
+  ...PAGE_CASES,
+  ...VERDICT_CASES,
+  ...WALL_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {
@@ -689,15 +679,22 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const ceiling = keys.reduce((n, k) => n + SELFTEST_CEILINGS[k], 0)
   enforceCeiling(ceiling, (s) => `FAIL the selftest passed its ceiling of ${s} s while "${now}" ran. ${keys.map((k) => selftestSentence(k)).join(' ')} Read it again on CI's runner and put the reading in check/capacity.mjs, or split the selftest again.`)
   const held = []
+  // A refusal by the wall (check/acts.mjs) while a case runs, a timer's or a listener's too, makes that case red by
+  // the refused name and the file that reached it. The wall's own row plants refusals and counts them itself.
+  const refusedIn = (r0) => refusals().slice(r0).filter((r) => !/^check\/wall-(cases|plants)\.mjs:/.test(r.at) && !PLANTED.has(r.n))
+  const refusedSay = (list) => `    the wall refused ${list.map((r) => `${r.what}, from ${r.at}`).join('; ')}`
   for (const c of run) {
     now = c.name
+    const r0 = refusals().length
     if (c.direct) {
       const t0 = Date.now()
       // A direct case gets the selftest's cases, for one that picks a case by a rule.
-      const ok = await c.direct(CASES)
+      // A case that throws (a refusal by the wall too) is red by what it threw; the run goes on.
+      const ok = (await Promise.resolve().then(() => c.direct(CASES)).catch((e) => (console.log(`    threw: ${String(e?.message ?? e).split('\n')[0]}`), false))) && !refusedIn(r0).length
       if (ok) held.push(c.name)
       else failures++
       console.log(`${ok ? 'pass' : 'FAIL'} ${c.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+      if (refusedIn(r0).length) console.log(refusedSay(refusedIn(r0)))
       continue
     }
     const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
@@ -716,7 +713,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, name))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: Array.isArray(c.states) ? c.states : !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {
@@ -724,18 +721,28 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       } catch {}
       // A case that opens a layer or holds a layer refusal runs in the rest job (check/jobs.mjs, layerMisplaced).
       const misplaced = layerMisplaced(c, topLayerTouch(JSON.parse(readFileSync(join(dir, name, 'part.json'), 'utf8')).layers, proof))
-      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced
+      const refused = refusedIn(r0)
+      const pass = (c.green ? ok : !ok) && (await c.expect(proof, html, ok, logs, out)) && secs < CASE_SECONDS && !misplaced && !refused.length
       if (pass) held.push(c.name)
       else failures++
       console.log(`${pass ? 'pass' : 'FAIL'} ${c.name} (${secs.toFixed(1)}s)`)
+      // What the run read, so two runs can be held line for line against each other (check/view-pages.mjs).
+      const read = lightLines(logs, proof, name)
+      console.log(`    the run's lines: ${read.length}, digest ${createHash('sha256').update(read.join('\n')).digest('hex').slice(0, 12)}`)
       if (misplaced) console.log(`    ${misplaced}`)
+      if (refused.length) console.log(refusedSay(refused))
       if (!pass) console.log(logs.map((l) => `    ${l}`).join('\n'))
+    } catch (e) {
+      failures++
+      console.log(`FAIL ${c.name}\n    threw: ${String(e?.message ?? e).split('\n')[0]}`)
+      if (refusedIn(r0).length) console.log(refusedSay(refusedIn(r0)))
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }
   }
   const count = { held: run.length - failures, of: run.length }
   console.log(holderSentence())
+  console.log(wallLine())
   console.log(`selftest: ${count.held} of ${count.of} cases held, in ${Math.round((Date.now() - start) / 1000)}s`)
   if (report) writeFileSync(report, JSON.stringify(selftestReport({ key, sha: process.env.GITHUB_SHA ?? '', all: CASES.map((c) => c.name), ran: run.map((c) => c.name), held, count })) + '\n')
   process.exit(failures ? 1 : 0)

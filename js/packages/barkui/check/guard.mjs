@@ -28,7 +28,9 @@ export async function isolate(page, name) {
   const { frameTree } = await cdp.send('Page.getFrameTree')
   const { executionContextId } = await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: name, grantUniveralAccess: true })
   return async (fn, arg = null) => {
-    const expression = `(${source(fn)})(${JSON.stringify(arg)})`
+    // In a world with the check's helpers, every call first lets what moves and has an end come to rest, inside
+    // settle's bound (toRest, probes.mjs): a call reads on a page at rest, or the gate there is red by name.
+    const expression = `(async () => { await globalThis.__barkCheck?.toRest?.(); return (${source(fn)})(${JSON.stringify(arg)}) })()`
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: executionContextId, returnByValue: true, awaitPromise: true })
     if (exceptionDetails) throw new Error(String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0])
     return result.value

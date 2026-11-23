@@ -86,12 +86,16 @@ export function installDrawn() {
   // inside one is named even when it is taken out again; it needs no list of the kinds of element.
   let watch = null
   let measured = new Set()
+  // The observer's records as it is handed them: the ones handed over between a reading's awaits are kept here, or
+  // they would be gone before the judgement reads them.
+  let noted = []
   /** Every visible thing in the stage: text runs and graphics, with the boxes their ink sits in. */
   const things = (root) => {
     items = []
     watch?.disconnect()
     measured = new Set([root, ...h.shown(root)])
-    watch = new MutationObserver(() => {})
+    noted = []
+    watch = new MutationObserver((rs) => noted.push(...rs))
     watch.observe(root, { childList: true, subtree: true })
     const graphicEls = [...root.querySelectorAll('svg, img')].filter((g) => !(g.parentElement?.closest('svg')) && g.checkVisibility())
     const painting = new Map()
@@ -181,6 +185,12 @@ export function installDrawn() {
   let sheet = null
   /** In the reference tab: lay out each thing alone on its own ground, at the top of the document; returns the box. */
   const alone = (list) => {
+    // Laid out through restyle, so the cells' sizes, set after a first measure, start no transition.
+    let at = null
+    h.restyle('the reference page laid out', () => (at = layOut(list)))
+    return at
+  }
+  const layOut = (list) => {
     sheet?.remove()
     sheet = document.createElement('div')
     sheet.setAttribute('style', 'all: initial; position: absolute; left: 0; top: 0; display: block; background: #fff; color: #000;')
@@ -289,40 +299,43 @@ export function installDrawn() {
   let toggle = null
   /** Unpaint the glyphs or the graphics, or paint everything again (null). The sheet goes first in the document,
       so its layer is the earliest and its !important declarations win over any the page's own sheets make. */
-  const unpaint = (what) => {
-    toggle?.remove()
-    toggle = null
-    if (!what) return
-    toggle = document.createElement('style')
-    toggle.textContent = `@layer barkui-check { ${TOGGLES[what]} }`
-    document.head.prepend(toggle)
-  }
+  const unpaint = (what) =>
+    h.restyle('glyphs or graphics unpainted or painted again', () => {
+      toggle?.remove()
+      toggle = null
+      if (!what) return
+      toggle = document.createElement('style')
+      toggle.textContent = `@layer barkui-check { ${TOGGLES[what]} }`
+      document.head.prepend(toggle)
+    })
 
   // The caret, hidden (false) or shown again (true) by a first-layer sheet of the check's own. A blinking caret is
   // not part of what a reading compares; its colour is still judged where every colour is (the trace in probes.mjs).
   let hideCaret = null
-  const caret = (shown) => {
-    hideCaret?.remove()
-    hideCaret = null
-    if (shown) return
-    hideCaret = document.createElement('style')
-    hideCaret.textContent = '@layer barkui-check { * { caret-color: transparent !important; } }'
-    document.head.prepend(hideCaret)
-  }
+  const caret = (shown) =>
+    h.restyle('the caret hidden or shown again', () => {
+      hideCaret?.remove()
+      hideCaret = null
+      if (shown) return
+      hideCaret = document.createElement('style')
+      hideCaret.textContent = '@layer barkui-check { * { caret-color: transparent !important; } }'
+      document.head.prepend(hideCaret)
+    })
   // Selected text, painted as itself (false) or in the selection's own colours again (true), by a first-layer sheet
   // of the check's own. A Tab into a filled field selects its value, and a browser may paint a selection in colours
   // of its own: the reading compares the field's own text, so every capture is taken with the selection's paint
   // neutral.
   let plainSelection = null
-  const selection = (shown) => {
-    plainSelection?.remove()
-    plainSelection = null
-    if (shown) return
-    plainSelection = document.createElement('style')
-    plainSelection.textContent =
-      '@layer barkui-check { *::selection { background-color: transparent !important; color: inherit !important; -webkit-text-fill-color: inherit !important; } }'
-    document.head.prepend(plainSelection)
-  }
+  const selection = (shown) =>
+    h.restyle("the selection's paint made neutral or shown again", () => {
+      plainSelection?.remove()
+      plainSelection = null
+      if (shown) return
+      plainSelection = document.createElement('style')
+      plainSelection.textContent =
+        '@layer barkui-check { *::selection { background-color: transparent !important; color: inherit !important; -webkit-text-fill-color: inherit !important; } }'
+      document.head.prepend(plainSelection)
+    })
 
   /** Which of `pairs` ([text token, ground token]) a text is drawn in: its fill (textFill, the colour its reference
       is drawn in) is the first token and its ground the second, both as they resolve where it stands. */
@@ -345,7 +358,8 @@ export function installDrawn() {
       if (t.kind === 'text' && pairs.length) r.fits = fitsOf(t, pairs)
       return r
     })
-    const records = watch?.takeRecords() ?? []
+    const records = [...noted, ...(watch?.takeRecords() ?? [])]
+    noted = []
     watch?.disconnect()
     watch = null
     const grown = [...new Set(records.filter((m) => measured.has(m.target)).map((m) => h.describe(m.target)))]
