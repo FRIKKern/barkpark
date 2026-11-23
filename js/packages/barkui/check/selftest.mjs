@@ -30,6 +30,7 @@ import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
 import { POINTER_CASES } from './pointer-cases.mjs'
 import { lightLines, PAGE_CASES } from './page-cases.mjs'
+import { VERDICT_CASES } from './verdict-cases.mjs'
 import { createHash } from 'node:crypto'
 import { PLANTED, WALL_CASES } from './wall-cases.mjs'
 import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
@@ -615,6 +616,7 @@ steps.push({
   ...REST_CASES,
   ...POINTER_CASES,
   ...PAGE_CASES,
+  ...VERDICT_CASES,
   ...WALL_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',

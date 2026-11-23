@@ -219,42 +219,32 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(needsWith(JSON.stringify([{ group: 1, of: 1, parts: NAMES.join(',') }]))), /the plan's groups .* differ from this checkout's split/)).toBe(true)
   })
 
-  it('decides by one rule over every combination of results: nothing else is green', () => {
-    // Every result on every leg, in every combination, under every plan result and run output: 10 x 5^legs calls.
-    // The judge is a plain function of what it is handed, so the reports and each result's object are made once and
-    // the legs' results are set in place: a fault that shows only when several legs are off at once is red here too.
+  // Every combination of every result on every leg is the selftest's (check/verdict-cases.mjs), where its 781,250
+  // calls have a runner to themselves. Here: every set of legs off, each set with each result, under every plan
+  // result and run output, so a fault that shows only when several legs are off at once is red here as well.
+  it('decides by one rule wherever any set of legs is off with one result: nothing else is green', () => {
     const results = ['success', 'failure', 'cancelled', 'skipped', 'missing']
     const legs = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
     const reports = goodReports()
-    const of = Object.fromEntries(results.map((r) => [r, { result: r }]))
-    const all = results.length ** legs.length
     let greens = 0
     let rows = 0
     for (const plan of results)
-      for (const run of ['true', 'false']) {
-        const needs = {}
-        if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
-        for (let n = 0; n < all; n++) {
-          let x = n
-          let success = 0
-          let skipped = 0
-          for (const id of legs) {
-            const r = results[x % results.length]
-            x = (x - (x % results.length)) / results.length
-            if (r === 'missing') delete needs[id]
-            else needs[id] = of[r]
-            success += r === 'success'
-            skipped += r === 'skipped'
-          }
-          const touched = plan === 'success' && run === 'true' && success === legs.length
-          const untouched = plan === 'success' && run === 'false' && skipped === legs.length
-          const v = judge({ needs, reports, names: NAMES, sha: 'abc', perJob: 4 })
-          if (v.ok !== (touched || untouched) || (!v.ok && !(v.rows.length && v.rows.every((r) => r.startsWith('RED ')))))
-            expect({ plan, run, got: legs.map((id) => needs[id]?.result ?? 'missing'), v }).toBe('decided by the one rule')
-          greens += v.ok ? 1 : 0
-          rows++
-        }
-      }
-    expect([rows, greens]).toEqual([10 * all, 2])
+      for (const run of ['true', 'false'])
+        for (const base of ['success', 'skipped'])
+          for (const off of results)
+            for (let set = 0; set < 2 ** legs.length; set++) {
+              const needs = {}
+              if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
+              const got = legs.map((id, i) => (set & (1 << i) ? off : base))
+              legs.forEach((id, i) => got[i] !== 'missing' && (needs[id] = { result: got[i] }))
+              const green = plan === 'success' && got.every((r) => r === (run === 'true' ? 'success' : 'skipped'))
+              const v = judge({ needs, reports, names: NAMES, sha: 'abc', perJob: 4 })
+              if (v.ok !== green || (!v.ok && !(v.rows.length && v.rows.every((r) => r.startsWith('RED ')))))
+                expect({ plan, run, got, v }).toBe('decided by the one rule')
+              greens += v.ok ? 1 : 0
+              rows++
+            }
+    expect(rows).toBe(10 * 2 * results.length * 2 ** legs.length)
+    expect(greens).toBeGreaterThan(0)
   })
 })
