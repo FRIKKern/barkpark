@@ -15,7 +15,7 @@ const job = (id) => {
 }
 const LEG_TEMPLATE = NAMES.group('${{ matrix.group }}')
 
-const run = (j) => `node check/selftest.mjs --job ${j.key} --report "$RUNNER_TEMP/barkui-report/${reportFile(j.key)}"`
+const run = (j) => `node --import ./check/load-wall.mjs check/selftest.mjs --job ${j.key} --report "$RUNNER_TEMP/barkui-report/${reportFile(j.key)}"`
 
 describe('barkui.yml runs the split it is given and closes on one name', () => {
   it('has no paths filter on its triggers, so the closing name renders on every head', () => {
@@ -48,18 +48,18 @@ describe('barkui.yml runs the split it is given and closes on one name', () => {
     expect(check).toContain(`include: \${{ fromJSON(needs.${JOBS.plan}.outputs.groups) }}`)
     expect(check).toContain('fail-fast: false')
     expect(check).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
-    expect(check).toContain('node check/run.mjs --group "$GROUP" --parts "$PARTS" --report')
+    expect(check).toContain('node --import ./check/load-wall.mjs check/run.mjs --group "$GROUP" --parts "$PARTS" --report')
     // Each selftest job runs its own cases by its key, and no other selftest command.
     for (const j of SELFTEST_JOBS) {
       const self = job(j.id)
       expect(self).toContain(`name: "${j.name}"`)
       expect(self).toContain(`if: needs.${JOBS.plan}.outputs.run == 'true'`)
-      expect(self.match(/node check\/selftest\.mjs.*/g)).toEqual([run(j)])
+      expect(self.match(/node --import \.\/check\/load-wall\.mjs check\/selftest\.mjs.*/g)).toEqual([run(j)])
       // Its report reaches the closing check, which reads it by its file name, whatever the run's result.
       expect(self).toContain(`name: barkui-report-selftest-${j.key}`)
       expect(self).toMatch(/Upload this selftest job's report\n\s+if: always\(\)/)
     }
-    expect(wf.match(/node check\/selftest\.mjs.*/g)).toEqual(SELFTEST_JOBS.map(run))
+    expect(wf.match(/node --import \.\/check\/load-wall\.mjs check\/selftest\.mjs.*/g)).toEqual(SELFTEST_JOBS.map(run))
   })
 
   it('js-tests.yml no longer runs BarkUI', () => {

@@ -9,7 +9,10 @@
 //   view included), or the act is red there, named with the file and line the checker made it from.
 import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
-import { ALLOWED, CDP_ALLOWED, EVERY, PAGE_FIELDS, PLAIN_KINDS, WALL } from './wall.mjs'
+import { ALLOWED, CDP_ALLOWED, EVERY, PAGE_FIELDS, PLAIN, WALL } from './wall.mjs'
+
+/** The mark check/load-wall.mjs sets on a run that started with it (not imported from there: an import would set it). */
+const LOAD_WALL = Symbol.for('barkui.check.loadWall')
 
 const HERE = fileURLToPath(import.meta.url)
 const PACKAGE = fileURLToPath(new URL('..', import.meta.url))
@@ -39,14 +42,17 @@ function refuse(kind, name) {
 
 /** The library's own name for an object's class: its bundle may mark the name with a leading _ or a trailing number. */
 const nameOf = (o) => o?.constructor?.name?.replace(/^_+|\d+$/g, '') ?? ''
-/** The kind of a library object, or null for anything else (data, the check's own functions, errors). */
-function kindOf(v) {
-  if (!v || (typeof v !== 'object' && typeof v !== 'function')) return null
-  const own = nameOf(v)
-  if (PLAIN_KINDS.includes(own)) return own
-  for (let p = Object.getPrototypeOf(v); p; p = Object.getPrototypeOf(p)) if (nameOf(p) === 'ChannelOwner') return own
-  return null
+/** How each kind of check/wall.mjs's PLAIN is told. */
+const IS = {
+  Object: (v) => [Object.prototype, null].includes(Object.getPrototypeOf(v)),
+  Array: (v) => Array.isArray(v),
+  Buffer: (v) => Buffer.isBuffer(v),
+  Error: (v) => v instanceof Error,
+  ...Object.fromEntries(['Uint8Array', 'ArrayBuffer', 'Date', 'RegExp'].map((k) => [k, (v) => v instanceof globalThis[k]])),
 }
+for (const k of PLAIN) if (!IS[k]) throw new Error(`check/wall.mjs's PLAIN names ${k}, which check/acts.mjs cannot tell`)
+/** The kind of plain data a value is, by check/wall.mjs's PLAIN, or null for anything else. */
+const plainOf = (v) => PLAIN.find((k) => IS[k](v)) ?? null
 /** Every method name a library object's class and its parents define: what the wall reads of the library. */
 function methodsOf(v) {
   const out = new Set()
@@ -64,29 +70,52 @@ const EVENT_CALLS = ['on', 'once', 'off', 'addListener', 'removeListener']
 function given(name, a) {
   if (TARGET.has(a)) return TARGET.get(a)
   if (typeof a === 'function' && EVENT_CALLS.includes(name)) {
-    if (!LISTENERS.has(a)) LISTENERS.set(a, (...xs) => a(...xs.map(wall)))
+    if (!LISTENERS.has(a)) LISTENERS.set(a, (...xs) => a(...xs.map((x) => wall(x))))
     return LISTENERS.get(a)
   }
   if (Array.isArray(a)) return a.map((x) => given('', x))
   if (a && Object.getPrototypeOf(a) === Object.prototype) return Object.fromEntries(Object.entries(a).map(([k, x]) => [k, given('', x)]))
   return a
 }
-/** What the check's code gets for a value: a library object as its wall object (one per object), arrays of them
-    walled, anything else as it is. */
-function wall(v) {
-  if (Array.isArray(v)) return v.map(wall)
+/** What the check's code gets for a value the library hands back. A primitive, as it is. Plain data of a kind on
+    check/wall.mjs's PLAIN, as it is, an array's or a plain object's values walled by this same rule (a copy where one
+    changes). A promise, as a promise of its value walled. Every other value, an object of any class or a function, as
+    its wall object, one per value: the wall's default is wall. */
+function wall(v, seen = new Set()) {
+  if (v === null || (typeof v !== 'object' && typeof v !== 'function')) return v
   if (TARGET.has(v)) return v
-  const kind = kindOf(v)
-  if (!kind) return v
   if (WALLS.has(v)) return WALLS.get(v)
-  WALL.read[kind] = Math.max(WALL.read[kind] ?? 0, methodsOf(v))
+  if (v instanceof Promise) return v.then((x) => wall(x))
+  const plain = typeof v === 'object' ? plainOf(v) : null
+  if (plain === 'Array' || plain === 'Object') {
+    if (seen.has(v)) return v
+    seen.add(v)
+    let out = v
+    for (const k of Object.keys(v)) {
+      const x = wall(v[k], seen)
+      if (x === v[k]) continue
+      if (out === v) out = Array.isArray(v) ? [...v] : { ...v }
+      out[k] = x
+    }
+    return out
+  }
+  if (plain) return v
+  return walled(v)
+}
+/** A wall object for `v`: on it, a name on the closed list for its kind goes through, and every other name is refused
+    by name; called, if it is a function, it is refused. */
+function walled(v) {
+  const kind = nameOf(v) || 'an object of no class'
+  if (typeof v === 'object') WALL.read[kind] = Math.max(WALL.read[kind] ?? 0, methodsOf(v))
   const allowed = new Set([...EVERY, ...(ALLOWED[kind] ?? [])])
   const fields = new Set(kind === 'Page' ? PAGE_FIELDS : [])
   const w = new Proxy(v, {
     get(t, name) {
       if (!allowed.has(name)) refuse(kind, name)
       const value = Reflect.get(t, name, t)
-      if (typeof value !== 'function' || fields.has(name)) return wall(value)
+      // The check's own fields hold the check's own values, set through this wall.
+      if (fields.has(name)) return value
+      if (typeof value !== 'function') return wall(value)
       return (...args) => {
         if (kind === 'CDPSession' && name === 'send' && !CDP_ALLOWED.includes(args[0])) refuse(kind, `send('${args[0]}')`)
         const out = value.apply(t, args.map((a) => given(name, a)))
@@ -98,6 +127,8 @@ function wall(v) {
       t[name] = value
       return true
     },
+    apply: () => refuse(kind, 'a call'),
+    construct: () => refuse(kind, 'new'),
     has: (t, name) => allowed.has(name) || refuse(kind, name),
     getOwnPropertyDescriptor: (t, name) => refuse(kind, name),
     defineProperty: (t, name) => refuse(kind, name),
@@ -139,6 +170,9 @@ const OPEN = new Set()
 
 /** The browser, as a wall object. */
 export async function launch(options) {
+  // The run holds that the library is loaded by this file alone: it starts with check/load-wall.mjs, whose hook
+  // refuses the library to every other file.
+  if (!globalThis[LOAD_WALL]) throw new Error('the check starts with its load wall: node --import ./check/load-wall.mjs <script>')
   guard()
   const browser = await chromium.launch(options)
   OPEN.add(browser)

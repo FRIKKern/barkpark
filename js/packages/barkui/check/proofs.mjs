@@ -226,6 +226,11 @@ function frozen(traces) {
   return out
 }
 
+/** The skins the state drive runs in: the first. */
+export const driveSkins = (skins) => skins.slice(0, 1)
+/** The skins whose wide views a run reads: every skin, or, when the state drive is given a list of selectors (a
+    narrowed drive, states.mjs), the drive's own skins alone. No other setting reads fewer. */
+export const viewSkins = (ctx, skins) => (Array.isArray(ctx.states) ? driveSkins(skins) : skins)
 export async function skinsAndSchemes(ctx, part, skins) {
   const page = await open(ctx, { scale: 2, height: 1600 })
   const traces = {}
@@ -261,7 +266,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
     await pointTo(page, 0, 0)
     const names = await page.barkCheck((list) => window.__barkCheck.colourVars(list), ctx.colourNames)
     for (const scheme of ['light', 'dark']) {
-      for (const skin of ctx.skinsRead ? skins.slice(0, ctx.skinsRead) : skins) {
+      for (const skin of viewSkins(ctx, skins)) {
         const at = `${skin} ${scheme}`
         await view(page, skin, scheme)
         await settle(page)
@@ -325,10 +330,10 @@ export async function skinsAndSchemes(ctx, part, skins) {
         }
       }
     }
-    // A run that reads the views of the first skins alone (the selftest's skinsRead) names the rest in both lights:
-    // it is never green, and a row that needs a view of theirs finds nothing and is red by its name.
-    const unreadSkins = skins.slice(ctx.skinsRead || skins.length)
-    if (unreadSkins.length) for (const scheme of ['light', 'dark']) bad[scheme].push(`this run reads the views of ${skins.slice(0, ctx.skinsRead).join(', ')} alone: ${unreadSkins.join(', ')} go unread`)
+    // A run that reads the views of the drive's skins alone names the rest in both lights: it is never green, and a
+    // row that needs a view of theirs finds nothing and is red by its name.
+    const unreadSkins = skins.filter((k) => !viewSkins(ctx, skins).includes(k))
+    if (unreadSkins.length) for (const scheme of ['light', 'dark']) bad[scheme].push(`this run reads the views of ${viewSkins(ctx, skins).join(', ')} alone: ${unreadSkins.join(', ')} go unread`)
     await stillStyled(ctx, page, 'skins')
   } finally {
     await page.context().close()
@@ -336,7 +341,7 @@ export async function skinsAndSchemes(ctx, part, skins) {
   // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
   if (ctx.motion !== false) bad.light.push(...(await motionFails(ctx, part, skins[0])))
   // Real states against their pins (states.mjs).
-  if (ctx.states !== false) bad.light.push(...(await stateFails(ctx, part, skins[0])))
+  if (ctx.states !== false) bad.light.push(...(await stateFails(ctx, part, driveSkins(skins)[0])))
   const still = frozen(traces)
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }

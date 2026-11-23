@@ -1,9 +1,10 @@
 // Selftest cases that outgrew the share of the one limit a case may take (check/capacity.mjs), each unfolded into
 // runs: every surface read, real states held to their pins, and a checked box. A run reads only what its rows need, so each
 // is cheaper than the one case was; every row the case held is in exactly one run (tests/unfold.test.mjs).
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SURFACES } from '../build/page.mjs'
+import { skinNames, tokensPath } from '../build/showroom.mjs'
 import { UNNAMED } from './layers.mjs'
 import { all, both, drawnOff, DRAWN, each, edit, esc, failedSay, inCss, inDemo, reasons, says, skinsSay } from './plants.mjs'
 
@@ -75,6 +76,11 @@ const PENDING = inCss('[data-slot="button"][data-pending] { --bark-button-fg: va
 // every reading.
 const DEAD = inCss('[data-slot="tabs-tab"][data-size="xl"] { gap: 0; }')
 const DEAD_BRANCH = inCss('[data-slot="tabs-tab"], [data-slot="tabs-tab"][data-variant="huge"] { padding-inline: 0.75rem; }')
+// A skin whose views a narrowed drive does not read (the drive's own are the first, proofs.mjs driveSkins), and a
+// label gone in its light view alone: a row that needs that view finds nothing there.
+const UNREAD_SKIN = skinNames(readFileSync(tokensPath, 'utf8'))[1]
+const UNREAD_PLANT = `html[data-skin="${UNREAD_SKIN}"][data-color-scheme="light"] #button-after { --bark-button-fg: var(--bark-button-bg); }`
+const needsUnread = skinsSay(new RegExp(`^${UNREAD_SKIN} light on base: .*at button#button-after "Duplicate"`))
 const stateRows = {
   drawn: {
     'a hover on a second control of its kind': skinsSay(/real hover on button#button-after "Duplicate": .*no pinned row shows this change/),
@@ -89,6 +95,12 @@ const stateRows = {
     // The run reads the views of the drive's skin alone: the skins it leaves are named, so no row that needs one is
     // green by finding nothing.
     'the skins whose views the run does not read, named': skinsSay(/^this run reads the views of \w+ alone: \w+(, \w+)* go unread$/),
+    // The plant: a label gone in a view the run does not read. The row that needs that view is red by its name.
+    "a row that needs a view of a skin the run does not read, red by its name": async (p) => {
+      const red = !(await needsUnread(p))
+      console.log(`    the row that needs the ${UNREAD_SKIN} light view: ${red ? 'red, by its name' : 'caught'}`)
+      return red
+    },
   },
   pending: {
     'pending held at rest, in every view': drawnOff('button "Saving"'),
@@ -120,8 +132,7 @@ export const STATE_CASES = [
     // The drive covers the controls its rows read and no other: a row whose control it leaves out finds nothing and
     // is red by its name; a selector that matches no live control stops the run by name.
     states: ['#button-after', '#button-primary', '#button-destructive', '#button-save', '[data-demo-row]:nth-child(4) > ui-button:nth-child(3) > [data-slot="button"]'],
-    // Its rows read the drive alone, which runs in the first skin: the wide views are read in that skin only.
-    skinsRead: 1,
+    // Its rows read the drive alone: with a list of selectors the wide views are read in the drive's own skins alone.
     plant: all(
       // The review's: a second control of the secondary kind.
       inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
@@ -138,6 +149,7 @@ export const STATE_CASES = [
       // the first kept off the save button, which the dark-only plant above needs proven and held.
       '[data-slot="button"][data-variant="solid"]:HOVER:not([data-disabled], #button-save) { --bark-button-hover-fg: var(--bark-button-hover-bg); }',
       'ui-button:hover > #button-destructive { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }',
+      UNREAD_PLANT,
     ].join('\n'),
     expect: each(stateRows.drawn),
   },
@@ -147,7 +159,6 @@ export const STATE_CASES = [
     name: 'states, a narrowed drive: the row of a control the drive leaves out is red by its name, and the driven control is read',
     only: ['skins'],
     states: ['#button-primary'],
-    skinsRead: 1,
     plant: all(
       inCss('#button-after:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); --bark-button-hover-edge: var(--bark-button-hover-bg); }'),
       inCss('#button-primary:hover { --bark-button-hover-fg: var(--bark-button-hover-bg); }'),
@@ -161,7 +172,6 @@ export const STATE_CASES = [
     name: 'states, a narrowed drive: a selector that matches no live control stops the part by name',
     only: ['skins'],
     states: ['#button-primary', '#button-no-such-control'],
-    skinsRead: 1,
     expect: failedSay(/^the state drive is given #button-no-such-control, which matches no live control of the stage$/),
   },
   {

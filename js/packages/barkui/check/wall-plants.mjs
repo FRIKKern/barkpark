@@ -50,3 +50,12 @@ export const NO_FRAME = {
   "the page's keyboard, read by a queued task": { what: 'Page.keyboard', make: (page) => queueMicrotask(Reflect.get.bind(null, page, 'keyboard')) },
   "the page's mouse, read by a timer": { what: 'Page.mouse', make: (page) => setTimeout(Reflect.get, 0, page, 'mouse') },
 }
+
+/** Ways a file other than check/acts.mjs could load the browser library, each run as a script of its own in the
+    package (where the library resolves) on a run that started with the load wall: each must be refused by name. */
+export const LOADS = {
+  'a dynamic import': "import('playwright')",
+  "a dynamic import of the library's core": "import('playwright-core')",
+  'a require': "import('node:module').then((m) => m.createRequire(process.cwd() + '/x.js')('playwright'))",
+  "a file of the package that imports it": "import('./build/pictures.mjs')",
+}

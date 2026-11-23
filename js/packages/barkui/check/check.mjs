@@ -28,12 +28,12 @@ function variableNames() {
 
 // `surfaces: false` skips measuring the four unproved surfaces (a list of them measures base and those),
 // `motion: false` the reading with motion allowed, and `states: false` the real states held to their pins (the selftest skips each, except in the cases
-// that plant there; a list of selectors drives only the live controls they match, states.mjs); `skinsRead` (the selftest's)
-// reads the wide views in that many skins, the first ones, where the states are driven in the first;
+// that plant there; a list of selectors drives only the live controls they match, states.mjs, and the wide views are
+// then read in the drive's own skins alone, proofs.mjs's driveSkins);
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
 // (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
 // page CI ships, but only those parts are pressed and read. Without it, every part is.
-export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, skinsRead = null, plantCss = '', names = null } = {}) {
+export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null } = {}) {
   // A refusal by the wall anywhere in this run (check/acts.mjs), a timer's or a listener's too, is an error of the run.
   const before = refusals().length
   let built
@@ -89,7 +89,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   // when it ends, and proof.json keeps the parts in folder order.
   const checkPart = async (part) => {
     const lines = []
-    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion, states, skinsRead, entries: judged.find((j) => j.name === part.name).entries, judged: new Set(), pairs: [] }
+    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion, states, entries: judged.find((j) => j.name === part.name).entries, judged: new Set(), pairs: [] }
     lines.push(part.name)
     const lights = {}
     let measures = {}

@@ -28,6 +28,7 @@ import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
+import { POINTER_CASES } from './pointer-cases.mjs'
 import { PLANTED, WALL_CASES } from './wall-cases.mjs'
 import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
@@ -610,6 +611,7 @@ steps.push({
   ...LAYER_CASES,
   ...PLACEMENT_CASES,
   ...REST_CASES,
+  ...POINTER_CASES,
   ...WALL_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
@@ -706,7 +708,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.plant?.(join(dir, name))
       const t0 = Date.now()
       const logs = []
-      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: Array.isArray(c.states) ? c.states : !!c.states, skinsRead: c.skinsRead ?? null, plantCss: c.css, log: (l) => logs.push(l) })
+      const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), only: c.only, surfaces: c.surfaces ?? false, motion: !!c.motion, states: Array.isArray(c.states) ? c.states : !!c.states, plantCss: c.css, log: (l) => logs.push(l) })
       const secs = (Date.now() - t0) / 1000
       let html = ''
       try {

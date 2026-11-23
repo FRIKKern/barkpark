@@ -89,7 +89,7 @@ export const CEILING_CASES = [
   {
     name: 'a check run that passes its ceiling stops there, failing, with the sentence',
     direct: async () => {
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'run.mjs')], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
+      const r = spawnSync(process.execPath, [...process.execArgv, join(import.meta.dirname, 'run.mjs')], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
       return r.status === 1 && r.stdout.includes(`check: FAIL the run passed its ceiling of 0 s for `) && r.stdout.includes(capacitySentence()) && !/part\(s\); /.test(r.stdout)
     },
   },
@@ -99,7 +99,7 @@ export const CEILING_CASES = [
     // not direct.
     direct: async (cases) => {
       const c = selftestPick(cases, 'rest', '').find((x) => !x.direct)
-      const r = spawnSync(process.execPath, [join(import.meta.dirname, 'selftest.mjs'), '--job', 'rest', c.name], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
+      const r = spawnSync(process.execPath, [...process.execArgv, join(import.meta.dirname, 'selftest.mjs'), '--job', 'rest', c.name], { env: { ...process.env, BARKUI_CEILING_SECONDS: '0' }, encoding: 'utf8', timeout: 60000 })
       return r.status === 1 && r.stdout.includes(`FAIL the selftest passed its ceiling of 0 s while "${c.name}"`) && r.stdout.includes(selftestSentence('rest')) && !r.stdout.includes('cases held')
     },
   },

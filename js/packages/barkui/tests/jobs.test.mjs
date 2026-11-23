@@ -219,32 +219,42 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(needsWith(JSON.stringify([{ group: 1, of: 1, parts: NAMES.join(',') }]))), /the plan's groups .* differ from this checkout's split/)).toBe(true)
   })
 
-  it('decides by one rule over every result of every two legs, the rest all green or all skipped: nothing else is green', () => {
+  it('decides by one rule over every combination of results: nothing else is green', () => {
+    // Every result on every leg, in every combination, under every plan result and run output: 10 x 5^legs calls.
+    // The judge is a plain function of what it is handed, so the reports and each result's object are made once and
+    // the legs' results are set in place: a fault that shows only when several legs are off at once is red here too.
     const results = ['success', 'failure', 'cancelled', 'skipped', 'missing']
+    const legs = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
+    const reports = goodReports()
+    const of = Object.fromEntries(results.map((r) => [r, { result: r }]))
+    const all = results.length ** legs.length
     let greens = 0
     let rows = 0
-    // The legs: the check jobs and every selftest job. Every two of them take every result in every combination
-    // while the rest all pass or are all skipped: the rule reads each leg alike, so a leg it misreads is red here.
-    const legs = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
-    const pairs = legs.flatMap((a, i) => legs.slice(i + 1).map((b) => [a, b]))
-    for (const [a, b] of pairs)
-      for (const rest of ['success', 'skipped'])
-        for (const ra of results)
-          for (const rb of results)
-            for (const plan of results)
-              for (const run of ['true', 'false']) {
-                const got = legs.map((id) => (id === a ? ra : id === b ? rb : rest))
-                const needs = {}
-                if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
-                legs.forEach((id, i) => got[i] !== 'missing' && (needs[id] = { result: got[i] }))
-                const touched = plan === 'success' && run === 'true' && got.every((r) => r === 'success')
-                const untouched = plan === 'success' && run === 'false' && got.every((r) => r === 'skipped')
-                const v = verdict(needs)
-                if (v.ok !== (touched || untouched) || (!v.ok && !(v.rows.length && v.rows.every((r) => r.startsWith('RED ')))))
-                  expect({ plan, run, got, v }).toBe('decided by the one rule')
-                greens += v.ok ? 1 : 0
-                rows++
-              }
-    expect([rows, greens]).toEqual([pairs.length * 2 * 25 * 10, pairs.length * 2])
+    for (const plan of results)
+      for (const run of ['true', 'false']) {
+        const needs = {}
+        if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
+        for (let n = 0; n < all; n++) {
+          let x = n
+          let success = 0
+          let skipped = 0
+          for (const id of legs) {
+            const r = results[x % results.length]
+            x = (x - (x % results.length)) / results.length
+            if (r === 'missing') delete needs[id]
+            else needs[id] = of[r]
+            success += r === 'success'
+            skipped += r === 'skipped'
+          }
+          const touched = plan === 'success' && run === 'true' && success === legs.length
+          const untouched = plan === 'success' && run === 'false' && skipped === legs.length
+          const v = judge({ needs, reports, names: NAMES, sha: 'abc', perJob: 4 })
+          if (v.ok !== (touched || untouched) || (!v.ok && !(v.rows.length && v.rows.every((r) => r.startsWith('RED ')))))
+            expect({ plan, run, got: legs.map((id) => needs[id]?.result ?? 'missing'), v }).toBe('decided by the one rule')
+          greens += v.ok ? 1 : 0
+          rows++
+        }
+      }
+    expect([rows, greens]).toEqual([10 * all, 2])
   })
 })

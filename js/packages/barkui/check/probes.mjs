@@ -306,7 +306,7 @@ export function installHelpers(lists) {
   const AT_REST = 'the check could not read (not a fault of the part): read on a page not at rest'
   /** Motion where the check cannot see it, by name: a mover anywhere but the places of PLACES. */
   const UNSEEN = 'the check could not read (not a fault of the part): motion where the check cannot see it'
-  const FOCUS_UNSEEN = 'the check could not read (not a fault of the part): focus outside the view after a key'
+  const FOCUS_UNSEEN = 'the check could not read (not a fault of the part; task-937d3e772d576b90): focus outside the view after a key'
   /** Scrolls under way: what scrolled since a frame was last seen to pass with no scroll. A scroll that goes on
       scrolls again on every frame; one that has ended does not. */
   const scroll = { count: 0, seen: 0, by: new Set() }

@@ -162,7 +162,7 @@ jobs:
           PARTS: ${{ matrix.parts }}
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
+          node --import ./check/load-wall.mjs check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
 
       - name: Upload this group's report
         if: always()
@@ -227,7 +227,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -292,7 +292,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -357,7 +357,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job layers --report "$RUNNER_TEMP/barkui-report/selftest-layers.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job layers --report "$RUNNER_TEMP/barkui-report/selftest-layers.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -421,7 +421,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job surfaces --report "$RUNNER_TEMP/barkui-report/selftest-surfaces.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job surfaces --report "$RUNNER_TEMP/barkui-report/selftest-surfaces.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -486,7 +486,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job states --report "$RUNNER_TEMP/barkui-report/selftest-states.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job states --report "$RUNNER_TEMP/barkui-report/selftest-states.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -551,7 +551,7 @@ jobs:
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job open --report "$RUNNER_TEMP/barkui-report/selftest-open.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job open --report "$RUNNER_TEMP/barkui-report/selftest-open.json"
 
       - name: Upload this selftest job's report
         if: always()

@@ -333,7 +333,7 @@ const keyAct = () =>
       onPage(SCROLLER, 'reduce', async (page) => {
         await scroller(page, "addEventListener('keydown', (e) => { if (e.key !== 'Tab') return; e.preventDefault(); document.getElementById('bark-far').focus({ preventScroll: true }) }, { once: true })")
         const got = await acts.press(page, 'Tab').then(() => 'read on', (e) => String(e.message))
-        const ok = /the check could not read \(not a fault of the part\): focus outside the view after a key: after the key Tab at check\/rest-cases\.mjs:\d+, button#bark-far "far" has focus outside the view of div#bark-s/.test(got)
+        const ok = /the check could not read \(not a fault of the part; task-937d3e772d576b90\): focus outside the view after a key: after the key Tab at check\/rest-cases\.mjs:\d+, button#bark-far "far" has focus outside the view of div#bark-s/.test(got)
         if (!ok) console.log(`    focus out of view: ${got.slice(0, 200)}`)
         return ok
       }),
