@@ -425,15 +425,18 @@ const skinSwitch = () =>
   })()
 
 /** A capture during which the page moves, as a full-page capture can: the page is back at the scroll it had before,
-    and a read straight after finds it at rest. The capture is handed a page whose screenshot scrolls the page first,
-    on its first shot alone or on every shot: a shot taken while the page moved is never read; the capture is taken
-    again, and a page that moves during every shot is red by name as the check's own red. */
+    and a read straight after finds it at rest. The page's title is fixed to the view, in the clip's corner. The
+    capture is handed a page whose screenshot scrolls the page first, on its first shot alone or on every shot: with
+    the fixed box in the clip, a shot taken while the page moved is never read; the capture is taken again, and a
+    page that moves during every shot is red by name as the check's own red. With no such box in the clip, the shot
+    is read as taken. */
 const MOVED = /the check could not read \(not a fault of the part\): the page moved during the capture \d+ times, from scroll /
+const PINNED = '.sr-top h1 { position: fixed; top: 0; left: 0; margin: 0 }'
 const captureMoves = () =>
-  onPage('', 'reduce', async (page) => {
+  onPage(PINNED, 'reduce', async (page) => {
     const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight }))
     const before = await where()
-    if (before.most < 100) {
+    if (before.most < 400) {
       console.log(`    the page scrolls ${before.most}px, too little for a capture to move it`)
       return false
     }
@@ -449,20 +452,22 @@ const captureMoves = () =>
         },
       }
     }
-    const take = async (moves) => {
+    const take = async (moves, y) => {
       const fake = moving(moves)
-      const shot = await capture(fake, page.barkCheck, { x: 0, y: 0, w: 8, h: 8 }).then(
+      const shot = await capture(fake, page.barkCheck, { x: 0, y, w: 8, h: 8 }).then(
         (png) => (png === wrong.toString('base64') ? 'read the shot taken while the page moved' : 'read'),
         (e) => String(e.message),
       )
       const after = await where()
       const rest = await page.barkCheck(() => window.__barkCheck.still('the read after a capture').then(() => 'at rest', (e) => String(e.message)))
-      console.log(`    the page moved to ${before.most}px during ${moves === 1 ? 'the first shot' : 'every shot'}: ${fake.shots()} shots; the capture ${shot.slice(0, 200)}; the page at ${after.y}px after it, ${before.y}px before; the read straight after ${rest}`)
-      return { shot, shots: fake.shots(), back: after.x === before.x && after.y === before.y, rest }
+      const what = `${moves === 1 ? 'the first shot' : 'every shot'}, ${y ? 'no' : 'the'} fixed box in the clip`
+      console.log(`    the page moved to ${before.most}px during ${what}: ${fake.shots()} shots; the capture ${shot.slice(0, 200)}; the page at ${after.y}px after it, ${before.y}px before; the read straight after ${rest}`)
+      return { shot, shots: fake.shots(), sound: after.x === before.x && after.y === before.y && rest === 'at rest' }
     }
-    const once = await take(1)
-    const always = await take(Infinity)
-    return once.shot === 'read' && once.shots === 2 && once.back && once.rest === 'at rest' && MOVED.test(always.shot) && always.back && always.rest === 'at rest'
+    const once = await take(1, 0)
+    const always = await take(Infinity, 0)
+    const free = await take(1, 300)
+    return once.shot === 'read' && once.shots === 2 && MOVED.test(always.shot) && free.shot === 'read the shot taken while the page moved' && free.shots === 1 && [once, always, free].every((t) => t.sound)
   })
 
 export const REST_CASES = [
@@ -482,7 +487,7 @@ export const REST_CASES = [
   { name: 'at rest: a key the checker presses leaves the page at rest before the next read, under reduced motion and outside it', direct: keyAct },
   { name: 'at rest: what the check reads about motion holds in every state the checker puts a page in, under reduced motion and outside it', direct: everyState },
   {
-    name: "at rest: a capture during which the page moves puts the page back and is taken again, and a page that moves during every shot is red by name as the check's own red; the read straight after finds the page at rest",
+    name: "at rest: a capture during which the page moves puts the page back; with a box fixed to the view in the clip it is taken again, and red by name as the check's own red when the page moves during every shot; with none it is read as taken; the read straight after finds the page at rest",
     direct: captureMoves,
   },
 ]
