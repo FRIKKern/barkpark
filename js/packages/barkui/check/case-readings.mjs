@@ -12,7 +12,6 @@ export const CASE_READINGS = {
       "no-script content under visibility: hidden turns \"printed with no script\" off": 0.7,
       "no-script content under opacity: 0 turns \"printed with no script\" off": 0.7,
       "no-script content clipped to a sliver turns \"printed with no script\" off": 0.7,
-      "a reading is the same whether or not the caret is drawn": 13,
       "a press step that never settles fails by name within its time limit": 7.4,
       "a clear cover over a control a step clicks turns \"pressed\" off": 2,
       "pointer-events: none on an enabled control a step clicks turns \"pressed\" off": 2.1,
@@ -51,10 +50,7 @@ export const CASE_READINGS = {
       "part.css with an unknown arm in a plain list is refused by name": 0.2,
       "a rule the browser drops is refused by name, at the top of part.css and nested": 0.2,
       "a dropped rule beside a string broken by a newline is refused at discovery, naming the string": 0,
-      "states, as drawn: a state on any control of its kind, pending held at rest, and a box open only while a driven state holds each fail by name": 39.8,
       "states, by the press steps: pending reached by the steps, and a box open only after a press step, each fail by name": 9.3,
-      "states, once every light has read: a rule nothing reads, and a branch nothing reads beside one that is read, each fail by name": 36.6,
-      "states, with one light: a run without every light names no rule unread": 1.6,
       "a checked box drawn blank, a checked change no pinned row shows, and a click that leaves the stage changed, each fail by name": 43.7,
       "one part more than one CI job holds is refused, with the sentence that says how many it holds": 0.1,
       "a part.json that names a property to allow is refused at discovery": 0,
@@ -83,8 +79,6 @@ export const CASE_READINGS = {
       "an arm inside :is() or :where() that the browser drops in its place is refused by name, and one it keeps is not": 0.8,
       "a check run that passes its ceiling stops there, failing, with the sentence": 0.5,
       "a selftest whose last case passes its ceiling stops there, failing, with the sentence": 0.5,
-      "top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name": 43.7,
-      "top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load": 38.8,
       "the same box over two grounds of the page reads two ways: the ground is what is behind it, not its parent": 3.3,
       // The placement cases, added after the run above: from their PR's hosted run, job 137168681329 (run 45009518037, commit 5fa079b4311e3a943b9c9bf7b591889683efa49a).
       "placement: a UI SDK select opened by a click and closed by Escape writes only placement, and an empty style attribute holds nothing; both pass": 2.7,
@@ -134,6 +128,29 @@ export const CASE_READINGS = {
       "every surface read, raised and sunken: a label gone on raised turns both wide lights off at its control": 35.7,
       "every surface read, primary and inverse: a second skin short on primary and a waited pair measuring worse turn the lights off; a placeholder is matched to a wait by its own colour": 38.9,
       "a label blanked, edges dropped, and a label and edge gone on raised only, at phone width, turn \"phone\" off, each by name": 37.5,
+    },
+  },
+  // The states job's cases, read in the rest job's run above before the states job was split off from it.
+  states: {
+    job: 137147560280,
+    run: 45002097199,
+    commit: "0f6c725778b040f06aa939a4dd027486b1b8bee9",
+    cases: {
+      "a reading is the same whether or not the caret is drawn": 13,
+      "states, as drawn: a state on any control of its kind, pending held at rest, and a box open only while a driven state holds each fail by name": 39.8,
+      "states, once every light has read: a rule nothing reads, and a branch nothing reads beside one that is read, each fail by name": 36.6,
+      "states, with one light: a run without every light names no rule unread": 1.6,
+    },
+  },
+  // The open job's cases, read in the rest job's run above (the run the layers job's cases were read in) before the
+  // open job was split off from the layers job.
+  open: {
+    job: 137147560280,
+    run: 45002097199,
+    commit: "0f6c725778b040f06aa939a4dd027486b1b8bee9",
+    cases: {
+      "top layer: a named popover is read open; a box open from the start and a tooltip open only at a Tab stop, named by no layer, fail by name; a named box that opens late fails by name": 43.7,
+      "top layer: a named hover hint is read open; boxes no layer names that never open while the check looks fail by name, wherever they come from: late, made and gone, in a late shadow root, by a frame, parsed from markup, or at load": 38.8,
     },
   },
 }

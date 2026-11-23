@@ -1,4 +1,4 @@
-// The selftest runs as two jobs (SELFTEST_JOBS in check/jobs.mjs); one rule puts each case in one of them. These
+// The selftest runs as several jobs (SELFTEST_JOBS in check/jobs.mjs); one rule puts each case in one of them. These
 // hold that no case falls between the jobs or runs in both, so none can be dropped to make room under a ceiling.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -9,7 +9,7 @@ import { CASES } from '../check/selftest.mjs'
 // What each job runs, by the runner's own pick (selftestPick), the one place the selection is made.
 const lists = () => Object.fromEntries(SELFTEST_JOBS.map((j) => [j.key, selftestPick(CASES, j.key)]))
 const ALL = CASES.map((c) => c.name)
-/** The two jobs' reports, as each job writes them when every case it picks runs and holds; `change` alters one. */
+/** The jobs' reports, as each job writes them when every case it picks runs and holds; `change` alters one. */
 const reports = (change = (k, r) => r) =>
   SELFTEST_JOBS.map((j) => {
     const ran = selftestPick(CASES, j.key).map((c) => c.name)
@@ -29,7 +29,7 @@ describe('the selftest jobs', () => {
 
   it('are each named by what they run, and docs/PARTS.md names them as check/jobs.mjs does', () => {
     // No job keeps the bare name "BarkUI selftest": a green job of that name would read as the whole selftest.
-    expect(SELFTEST_JOBS.map((j) => j.name)).toEqual([NAMES.selftest, NAMES.selftestRest, NAMES.selftestLayers, NAMES.selftestSurfaces])
+    expect(SELFTEST_JOBS.map((j) => j.name)).toEqual([NAMES.selftest, NAMES.selftestRest, NAMES.selftestLayers, NAMES.selftestSurfaces, NAMES.selftestStates, NAMES.selftestOpen])
     for (const j of SELFTEST_JOBS) expect(j.name, j.key).toMatch(/^BarkUI selftest, \S/)
     const doc = readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
     for (const j of SELFTEST_JOBS) expect(doc, j.key).toContain(`"${j.name}" runs \`--job ${j.key}\``)

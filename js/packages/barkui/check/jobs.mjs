@@ -16,41 +16,52 @@ import { readSelftestReports } from './selftest-report.mjs'
 export const AGGREGATE = 'BarkUI showroom check'
 // The jobs it reads, by their ids in barkui.yml, and the names they render. Every name here and every group
 // name the split can make has a row in .github/required-checks.json (a test holds that too).
-export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest', selftestLayers: 'barkui-selftest-layers', selftestSurfaces: 'barkui-selftest-surfaces' }
+export const JOBS = { plan: 'barkui-plan', check: 'barkui-check', selftest: 'barkui-selftest', selftestRest: 'barkui-selftest-rest', selftestLayers: 'barkui-selftest-layers', selftestSurfaces: 'barkui-selftest-surfaces', selftestStates: 'barkui-selftest-states', selftestOpen: 'barkui-selftest-open' }
 export const NAMES = {
   plan: 'BarkUI plan (does this change touch it, and which groups)',
   selftest: 'BarkUI selftest, views',
   selftestRest: 'BarkUI selftest, presses, states and refusals',
   selftestLayers: 'BarkUI selftest, top layer and direct readings',
   selftestSurfaces: 'BarkUI selftest, surfaces',
+  selftestStates: 'BarkUI selftest, states with their own sheet or part',
+  selftestOpen: 'BarkUI selftest, named boxes read open',
   group: (k) => `BarkUI check, group ${k}`,
 }
 
-// The selftest runs as four jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
+// The selftest runs as six jobs side by side, each with its own ceiling (check/capacity.mjs). Which job runs a
 // case is the one rule below, written here once: `views` runs the cases that read the wide or phone views and
 // drive no states (their `only` names skins, schemes or phone; no `states`, not `direct`, not `layers`), but for
-// those that read every surface (`surfaces`), which `surfaces` runs; `layers`
-// runs the direct readings (`direct`, each on a page of its own) and the top layer's cases (`layers`), each of which
-// opens its boxes by real input or holds a refusal; `rest` runs every other case: presses, states, refusals and the
-// no-script print. A test holds that every case runs in exactly one job and that the four together run every
-// case (coverCases).
+// those that read every surface (`surfaces`), which `surfaces` runs; `layers` runs the direct readings (`direct`,
+// each on a page of its own) and the top layer's cases (`layers`), each of which opens its boxes by real input or
+// holds a refusal, but for the top layer's cases that bring a sheet of their own (`css`), named boxes read open,
+// which `open` runs; `states` runs the states cases that bring a sheet (`css`) or a part (`part`) of their own;
+// `rest` runs every other case: presses, the other states cases, refusals and the no-script print. A test holds
+// that every case runs in exactly one job and that the six together run every case (coverCases).
 export const SELFTEST_JOBS = [
   { key: 'views', id: JOBS.selftest, name: NAMES.selftest },
   { key: 'rest', id: JOBS.selftestRest, name: NAMES.selftestRest },
   { key: 'layers', id: JOBS.selftestLayers, name: NAMES.selftestLayers },
   { key: 'surfaces', id: JOBS.selftestSurfaces, name: NAMES.selftestSurfaces },
+  { key: 'states', id: JOBS.selftestStates, name: NAMES.selftestStates },
+  { key: 'open', id: JOBS.selftestOpen, name: NAMES.selftestOpen },
 ]
 const VIEWS = ['skins', 'schemes', 'phone']
 /** The selftest job that runs a case, by its key. */
 export const selftestJob = (c) =>
-  c.direct || c.layers ? 'layers' : !c.states && (c.only ?? []).some((l) => VIEWS.includes(l)) ? (c.surfaces ? 'surfaces' : 'views') : 'rest'
+  c.direct ? 'layers'
+  : c.layers ? (c.css ? 'open' : 'layers')
+  : c.states ? (c.css || c.part ? 'states' : 'rest')
+  : (c.only ?? []).some((l) => VIEWS.includes(l)) ? (c.surfaces ? 'surfaces' : 'views')
+  : 'rest'
+// The jobs that read the views, where no case may open a layer.
+const VIEW_JOBS = ['views', 'surfaces']
 /** Why case `c` sits in the wrong job, given how its run touched the top layer (`touch`, layers.mjs topLayerTouch):
     a case that opens a layer or holds a layer refusal is a `layers` case and runs in the layers job, and a `layers`
     case does one of the two. Empty when it sits where it belongs. The selftest runner asks this of every case it
     runs, so a new case that forgets the flag is caught by what it does, not by its name. */
 export const layerMisplaced = (c, touch) =>
-  touch && selftestJob(c) === 'views'
-    ? `"${c.name}" runs in the views job, but ${touch}: a case that opens a layer or holds a layer refusal is a layers case and runs in the layers job (check/jobs.mjs)`
+  touch && VIEW_JOBS.includes(selftestJob(c))
+    ? `"${c.name}" runs in the ${selftestJob(c)} job, but ${touch}: a case that opens a layer or holds a layer refusal is a layers case and runs in the layers job (check/jobs.mjs)`
     : c.layers && !touch
       ? `"${c.name}" is a layers case, but its run opens no layer and holds no layer refusal`
       : ''

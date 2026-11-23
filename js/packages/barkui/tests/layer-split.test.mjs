@@ -1,7 +1,8 @@
 // The top layer's readings and census were one selftest run; they are two, so each stays under the selftest's
 // time for one case. These hold that every row of the one run is in exactly one of the two, so none was dropped
 // to make room, and the check that says so is red by the row's name. And every top-layer case runs in the layers
-// job, by the runner's own pick, red by the case's name when one would run in the views job.
+// job or the open job split off it, by the runner's own pick, red by the case's name when one would run in a job
+// that reads the views.
 import { describe, expect, it } from 'vitest'
 import { layerMisplaced, rowsMoved, selftestPick } from '../check/jobs.mjs'
 import { LAYER_CASES, TOP_LAYER_ROWS } from '../check/layer-cases.mjs'
@@ -44,14 +45,14 @@ describe('the two top-layer runs', () => {
   })
 })
 
-/** Each top-layer case among `cases` that the layers job does not run, by name. */
+/** Each top-layer case among `cases` that neither the layers job nor the open job split off it runs, by name. */
 const notInLayers = (cases) => {
-  const layers = new Set(selftestPick(cases, 'layers').map((c) => c.name))
+  const layers = new Set(['layers', 'open'].flatMap((k) => selftestPick(cases, k)).map((c) => c.name))
   return LAYER_CASES.filter((c) => !layers.has(c.name)).map((c) => `the top-layer case "${c.name}" is not in the layers job`)
 }
 
 describe('the top-layer cases', () => {
-  it('each run in the layers job, by the runner’s own pick', () => {
+  it('each run in the layers job or the open job, by the runner’s own pick', () => {
     expect(notInLayers(CASES)).toEqual([])
   })
 
@@ -77,14 +78,17 @@ describe('a case that opens a layer or holds a layer refusal', () => {
     expect(topLayerTouch([], plain)).toBe('')
   })
 
-  it('is red by the case’s name when it would run in the views job, and a layers case that does neither is red too', () => {
+  it('is red by the case’s name when it would run in a job that reads the views, and a layers case that does neither is red too', () => {
     const fresh = { name: 'a new top-layer case', only: ['skins'], plant: () => {} }
     const touch = topLayerTouch(undefined, proof(UNNAMED_CAN('div#x "X"')))
     expect(layerMisplaced(fresh, touch)).toMatch(/^"a new top-layer case" runs in the views job, but its run says "can open in the top layer/)
     expect(layerMisplaced({ ...fresh, layers: true }, touch)).toBe('')
     expect(layerMisplaced({ ...fresh, layers: true }, '')).toBe('"a new top-layer case" is a layers case, but its run opens no layer and holds no layer refusal')
     expect(layerMisplaced(fresh, '')).toBe('')
-    // A states case runs in the rest job whatever it touches.
+    // A case that reads every surface reads the views too, and is red the same way.
+    expect(layerMisplaced({ ...fresh, surfaces: true }, touch)).toMatch(/^"a new top-layer case" runs in the surfaces job, but its run says "can open in the top layer/)
+    // A states case runs in the rest or the states job whatever it touches.
     expect(layerMisplaced({ ...fresh, states: true }, touch)).toBe('')
+    expect(layerMisplaced({ ...fresh, states: true, css: 'x' }, touch)).toBe('')
   })
 })
