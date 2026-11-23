@@ -303,6 +303,14 @@ const keyAct = () =>
         await scroller(page, "document.getElementById('bark-s').addEventListener('focusin', (e) => (e.currentTarget.style.scrollBehavior = 'smooth'))")
         return held('Tab, reduce', await sameAfter(page, () => acts.press(page, 'Tab')))
       }),
+    'a Tab after which the page keeps scrolling past the bound is red there, naming the act and where it was made': () =>
+      onPage(SCROLLER, 'reduce', async (page) => {
+        await scroller(page, "addEventListener('keydown', () => { const box = document.getElementById('bark-s'); const go = () => { box.scrollTop = (box.scrollTop + 7) % 1900; requestAnimationFrame(go) }; go() }, { once: true })")
+        const got = await acts.press(page, 'Tab').then(() => 'read on', (e) => String(e.message))
+        const ok = /read on a page not at rest: the key Tab at check\/rest-cases\.mjs:\d+: a scroll under way at div#bark-s/.test(got)
+        if (!ok) console.log(`    past the bound: ${got.slice(0, 200)}`)
+        return ok
+      }),
   })()
 
 /** What the check reads about motion holds in every state the checker puts a page in: a rule that matches only in

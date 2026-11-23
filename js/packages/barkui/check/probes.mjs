@@ -411,11 +411,16 @@ export function installHelpers(lists) {
       }
     }
   }
-  /** The rest step after the checker's input on a page (check/acts.mjs): a frame is drawn, so what the input
-      started shows, then the page comes to rest inside the bound. The next read is red by name if it did not. */
-  const afterAct = async () => {
+  /** The rest step after the checker's input on a page (check/acts.mjs), `who` naming the act and where the checker
+      made it: a frame is drawn, so what the input started shows, then the page comes to rest inside the bound, or
+      the act is red there by name and nothing reads on. Motion with no end is left to the read, whose gate names it. */
+  const afterAct = async (who) => {
     await frame()
     await toRest()
+    const left = moving(true)
+    if (left.length) throw new Error(`${AT_REST}: ${who}: ${named(left)}`)
+    const going = scrolling()
+    if (going.length) throw new Error(`${AT_REST}: ${who}: a scroll under way at ${going.slice(0, 3).map((x) => (x === document ? 'the page' : describe(x))).join('; ')}`)
   }
   /** The door before a read: the page comes to rest inside the bound, or the read is red by name. */
   const still = async (who) => {
