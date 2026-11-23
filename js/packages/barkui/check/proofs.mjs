@@ -92,7 +92,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
 export async function styleBaseline(browser, url) {
   const context = await browser.newContext({ colorScheme: 'light', reducedMotion: 'reduce' })
   try {
-    const page = await context.newPage()
+    const page = wallPage(await context.newPage())
     await limit(page.goto(url), 15000, 'opening the baseline page')
     await page.waitForSelector('html[data-ready]', { timeout: 15000 })
     return await (await styleReader(page))()

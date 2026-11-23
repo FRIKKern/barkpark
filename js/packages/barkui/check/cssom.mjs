@@ -26,6 +26,7 @@ import { EXTRA, KEYFRAMES, LEFT_OUT_INITIAL, MEDIA, MOTION_ONLY, PHONE, PHONE_ON
 import { readFileSync } from 'node:fs'
 import { resolve, selectorFindings, splitList, statesOnSubject, strip, unpinned } from './selectors.mjs'
 import { browserReadings, sheetFindings, textArms, textBlocks } from './sheet-text.mjs'
+import { wallPage } from './wall.mjs'
 
 const SENTINEL = '[data-barkui-sentinel] { gap: 0px; }'
 
@@ -54,7 +55,7 @@ export async function readPartCss(browser, css) {
   const arms = textArms(textBlocks(css))
   const context = await browser.newContext()
   try {
-    const page = await context.newPage()
+    const page = wallPage(await context.newPage())
     const { found, selectors, rules, pinnedSelectors } = await page.evaluate(
       ([texts, sentinel, rulesSrc, vocabulary, motionOnly, extra, leftOut, keyframes, media, phone, phoneOnly, written, readingsSrc, findingsSrc]) => {
         const found = []
@@ -220,7 +221,7 @@ export function ruleEntries(selectors, pinned) {
 export async function sameAsShipped(browser, file, judged) {
   const context = await browser.newContext()
   try {
-    const page = await context.newPage()
+    const page = wallPage(await context.newPage())
     const sections = await page.evaluate(
       ([text, rulesSrc]) => {
         const ruleList = (0, eval)(rulesSrc)

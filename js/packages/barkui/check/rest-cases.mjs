@@ -270,7 +270,7 @@ async function scroller(page, script = '', inside = FAR) {
   }, [script, inside])
   await page.barkCheck(() => {
     document.getElementById('bark-s').scrollIntoView({ block: 'center', behavior: 'instant' })
-    document.getElementById('bark-near').focus({ preventScroll: true })
+    document.getElementById('bark-near')?.focus({ preventScroll: true })
   })
 }
 /** The far button's place before the act, in the read after it, and after the page has had 2.5 s to settle. */

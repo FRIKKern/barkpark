@@ -1,4 +1,4 @@
-// The wall round the checker's input. Where the check opens a page (check/proofs.mjs, open), it reads the methods of
+// The wall round the checker's input. On every page the check opens (check/proofs.mjs, check/cssom.mjs), it reads the methods of
 // the browser library's own page-side objects from those objects: the page, its keyboard, mouse and touchscreen,
 // and every frame, locator and element handle a page method hands back. A method on the one closed list below makes
 // no input and is let through. Every other method, one the library adds later included, throws by name and file
@@ -42,10 +42,13 @@ function caller() {
   return null
 }
 
+/** The library's own name for an object's class; its bundle may mark the name with a leading _ or a trailing number. */
+const kindOf = (o) => o.constructor?.name?.replace(/^_+|\d+$/g, '')
+
 /** A method's own name for every function the object's class and its parents up to the library's base define. */
 function methodsOf(obj) {
   const out = new Set()
-  for (let p = Object.getPrototypeOf(obj); p && !['Object', 'ChannelOwner', 'EventEmitter'].includes(p.constructor?.name); p = Object.getPrototypeOf(p))
+  for (let p = Object.getPrototypeOf(obj); p && !['Object', 'ChannelOwner', 'EventEmitter'].includes(kindOf(p)); p = Object.getPrototypeOf(p))
     for (const k of Object.getOwnPropertyNames(p)) if (k !== 'constructor' && !k.startsWith('_') && typeof Object.getOwnPropertyDescriptor(p, k).value === 'function') out.add(k)
   return [...out]
 }
@@ -54,7 +57,7 @@ function methodsOf(obj) {
     it; each one on it goes through, and what it hands back is walled in turn. */
 export function wall(obj) {
   if (!obj || typeof obj !== 'object' || obj[WALLED]) return obj
-  const kind = obj.constructor?.name
+  const kind = kindOf(obj)
   if (!(kind in NO_INPUT)) return obj
   obj[WALLED] = true
   const names = methodsOf(obj)

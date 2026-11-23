@@ -2,6 +2,7 @@
 // made from this file and not from check/acts.mjs, is refused by name and file, and so is a method the library
 // gains later, which is on neither list. The selftest reads N of M: M is the length of the list.
 import { onPage } from './rest-cases.mjs'
+import { WALL } from './wall.mjs'
 
 const POP = '#button-pop-open'
 /** The input forms a checker file could use, each made on a page the check opened. */
@@ -29,13 +30,15 @@ async function wallHolds() {
   const plants = Object.entries(WALL_PLANTS)
   let held = 0
   for (const [name, make] of plants) {
-    const got = await onPage('', 'reduce', async (page) => make(page).then(() => 'made', (e) => String(e.message)))
+    const got = await onPage('', 'reduce', async (page) => Promise.resolve().then(() => make(page)).then(() => 'made', (e) => String(e.message)))
     const ok = got.includes(`the checker's input goes only through check/acts.mjs: ${name} called at check/wall-cases.mjs:`)
     if (ok) held++
     else console.log(`    ${name}: ${got.slice(0, 200)}`)
   }
   // A method the library gains later: on its page class when the check opens a page, on neither list.
   let proto = null
+  // The plant's method is not the library's: what the wall read of the page stays as the library has it.
+  const read = WALL.read.Page
   const future = await onPage('', 'reduce', async (page) => {
     proto = Object.getPrototypeOf(page)
     proto[FUTURE] = function () {
@@ -43,8 +46,12 @@ async function wallHolds() {
     }
     return 'added'
   })
-    .then(() => onPage('', 'reduce', (page) => page[FUTURE]().then(() => 'made', (e) => String(e.message))))
-    .finally(() => proto && delete proto[FUTURE])
+    .then(() => onPage('', 'reduce', (page) => Promise.resolve().then(() => page[FUTURE]()).then(() => 'made', (e) => String(e.message))))
+    .finally(() => {
+      if (proto) delete proto[FUTURE]
+      if (read === undefined) delete WALL.read.Page
+      else WALL.read.Page = read
+    })
   const later = future.includes(`the checker's input goes only through check/acts.mjs: Page.${FUTURE} called at check/wall-cases.mjs:`)
   if (later) held++
   else console.log(`    a method the library adds later: ${future.slice(0, 200)}`)
