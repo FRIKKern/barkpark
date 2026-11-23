@@ -31,10 +31,15 @@ export async function capture(page, world, clip) {
       const was = [scrollX, scrollY]
       scrollTo({ left, top, behavior: 'instant' })
       await window.__barkCheck.still('the page after a capture')
-      // A box placed against the view whose box, on the page, meets the clip.
-      const meets = (r) => r.left + scrollX < c.x + c.w && r.right + scrollX > c.x && r.top + scrollY < c.y + c.h && r.bottom + scrollY > c.y
-      const pinned = [...document.querySelectorAll('*')].some((n) => ['fixed', 'sticky'].includes(getComputedStyle(n).position) && [...n.getClientRects()].some(meets))
-      return { was, pinned }
+      // A box placed against the view in the clip lies in the view: what the browser draws at every 8th pixel of
+      // the clip inside the view, and the boxes that hold it, are asked for their position. Only what is drawn is
+      // asked, so a box the browser skips (a closed details' content) is not brought up to date by the question.
+      const [l, t] = [Math.max(c.x, scrollX), Math.max(c.y, scrollY)]
+      const [r, b] = [Math.min(c.x + c.w, scrollX + innerWidth), Math.min(c.y + c.h, scrollY + innerHeight)]
+      const hit = new Set()
+      for (let y = t; y < b; y += 8) for (let x = l; x < r; x += 8) for (const n of document.elementsFromPoint(x - scrollX, y - scrollY)) hit.add(n)
+      const placed = (n) => n && (['fixed', 'sticky'].includes(getComputedStyle(n).position) || placed(n.parentElement))
+      return { was, pinned: [...hit].some(placed) }
     }, [...at, clip])
     if (!moved) return png.toString('base64')
     if (!moved.pinned) {

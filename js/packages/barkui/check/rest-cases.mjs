@@ -428,15 +428,15 @@ const skinSwitch = () =>
     and a read straight after finds it at rest. The page's title is fixed to the view, in the clip's corner. The
     capture is handed a page whose screenshot scrolls the page first, on its first shot alone or on every shot: with
     the fixed box in the clip, a shot taken while the page moved is never read; the capture is taken again, and a
-    page that moves during every shot is red by name as the check's own red. With no such box in the clip, the shot
-    is read as taken. */
+    page that moves during every shot is red by name as the check's own red. With no such box in the clip (a clip at
+    the page's foot), the shot is read as taken. */
 const MOVED = /the check could not read \(not a fault of the part\): the page moved during the capture \d+ times, from scroll /
 const PINNED = '.sr-top h1 { position: fixed; top: 0; left: 0; margin: 0 }'
 const captureMoves = () =>
   onPage(PINNED, 'reduce', async (page) => {
-    const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight }))
+    const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight, h: innerHeight }))
     const before = await where()
-    if (before.most < 400) {
+    if (before.most < 100) {
       console.log(`    the page scrolls ${before.most}px, too little for a capture to move it`)
       return false
     }
@@ -466,7 +466,8 @@ const captureMoves = () =>
     }
     const once = await take(1, 0)
     const always = await take(Infinity, 0)
-    const free = await take(1, 300)
+    // The page's last pixels: no box fixed to the view is there while the page is at its top.
+    const free = await take(1, before.most + before.h - 8)
     return once.shot === 'read' && once.shots === 2 && MOVED.test(always.shot) && free.shot === 'read the shot taken while the page moved' && free.shots === 1 && [once, always, free].every((t) => t.sound)
   })
 
