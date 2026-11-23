@@ -5,17 +5,9 @@
 /** A PNG (base64) of `clip` on `page`, once `world` (the check's own isolated world of that page) finds it at rest.
     Playwright keeps the page's pixel ratio (a capture from a CDP session of our own resets the emulated ratio to 1
     for everything after it), and is told to leave the caret alone, so it adds no style of its own to the page: the
-    check hides the caret itself, from its own world (caret in drawn.mjs).
-    The capture can move the page by itself (a full-page capture taken while focus is in a box over the page can
-    scroll it). So the page goes back to the scroll it had before the capture, and comes to rest there, before
-    anything reads it again. */
+    check hides the caret itself, from its own world (caret in drawn.mjs). */
 export async function capture(page, world, clip) {
   await world(() => window.__barkCheck.still('a capture'))
-  const at = await world(() => [scrollX, scrollY])
   const png = await page.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })
-  await world(async ([left, top]) => {
-    if (scrollX !== left || scrollY !== top) scrollTo({ left, top, behavior: 'instant' })
-    await window.__barkCheck.still('the page after a capture')
-  }, at)
   return png.toString('base64')
 }
