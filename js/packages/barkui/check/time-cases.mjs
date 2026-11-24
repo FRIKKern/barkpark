@@ -35,10 +35,22 @@ const say = (what, held) => (held ? true : (console.log(`    ${what}`), false))
 
 export const TIME_CASES = [
   {
-    name: "a job reads its parts on a page of their folders alone, and prints each part's seconds against its limit and the parts over two thirds of it",
+    name: 'a job reads its parts on a page of their folders alone',
     only: ONLY,
     direct: async () => {
       const { ok, logs, html } = await job()
+      return (
+        say(`the job did not pass: ${logs.join(' | ')}`, ok) &&
+        say('the page read holds no button', html.includes('data-part="button"')) &&
+        say(`the page read holds ${OTHER}, a part the job does not read`, !html.includes(`data-part="${OTHER}"`))
+      )
+    },
+  },
+  {
+    name: "a job prints each part's seconds against its limit, and names the parts over two thirds of it or that none is",
+    only: ONLY,
+    direct: async () => {
+      const { ok, logs } = await job()
       // The button's own lines: those after its name, each set in by two spaces.
       const own = []
       for (const l of logs.slice(logs.indexOf('button') + 1)) {
@@ -48,10 +60,8 @@ export const TIME_CASES = [
       const line = new RegExp(`^  time: \\d+\\.\\d s of its ${PART_MS / 1000} s limit$`)
       return (
         say(`the job did not pass: ${logs.join(' | ')}`, ok) &&
-        say('the page read holds no button', html.includes('data-part="button"')) &&
-        say(`the page read holds ${OTHER}, a part the job does not read`, !html.includes(`data-part="${OTHER}"`)) &&
         say(`the button's lines carry no one line of its seconds against its limit: ${own.join(' | ')}`, logs.includes('button') && own.filter((l) => line.test(l)).length === 1) &&
-        say('no line names the parts over two thirds of the limit', logs.includes(`time: no part used more than two thirds of the ${PART_MS / 1000} s limit`))
+        say('no line names the parts over two thirds of the limit, or says none is', logs.includes(`time: no part used more than two thirds of the ${PART_MS / 1000} s limit`))
       )
     },
   },
