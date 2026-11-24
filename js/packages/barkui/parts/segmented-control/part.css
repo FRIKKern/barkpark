@@ -1,0 +1,42 @@
+/* Segmented control: UI SDK's <ui-segmented-control>, named by its field's label, a row of
+   <ui-segmented-control-item>s on a --ui-muted track. It works as a radio group: one value, one Tab stop, and the
+   arrow keys move the choice and pass a disabled item. Each item is the control itself (role radio) and holds its
+   own words; the focus ring is base.css's, drawn once for every part.
+   The checked item carries the indicator's look itself, UI SDK's: a --ui-background fill inside an edge. The edge
+   is --ui-muted-foreground, since UI SDK's --ui-input edge does not stand at 3:1 on the track in every skin. An
+   item that is not checked draws no fill and no edge, so its words are its label: --ui-muted-foreground, and
+   --ui-foreground under the pointer, as in UI SDK's sheet. The edge is there on every item, transparent when not
+   checked, so nothing moves when the choice does. A press looks as the pointer does until it checks the item.
+   Read-only keeps its choice, and the pointer changes nothing there; disabled is UI SDK's, faded, item by item
+   (the track itself stays as it is, so a disabled control is not faded twice).
+   The look keys only on what UI SDK writes: data-checked, data-unchecked, data-readonly and data-disabled on an
+   item, data-disabled on the control, and on :hover. */
+
+[data-slot="segmented-control"] {
+  max-width: 100%;
+
+  &[data-disabled] {
+    opacity: 1;
+  }
+}
+
+[data-slot="segmented-control-item"] {
+  --bark-segmented-text: 0.875rem;
+
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--ui-muted-foreground);
+  font-size: var(--bark-segmented-text);
+  line-height: 1.25;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+
+  &[data-checked] {
+    border-color: var(--ui-muted-foreground);
+    background-color: var(--ui-background);
+    color: var(--ui-foreground);
+  }
+
+  &[data-unchecked]:hover:not([data-disabled], [data-readonly]) {
+    color: var(--ui-foreground);
+  }
+}
