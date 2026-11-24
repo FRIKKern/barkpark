@@ -15,7 +15,7 @@ import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } 
 import { waitLine } from '../build/sheet-waits.mjs'
 import { VIEW_PAGES } from './view-pages.mjs'
 import { launch, refusals } from './acts.mjs'
-import { pageOf } from './jobs.mjs'
+import { pageNames, pageOf } from './jobs.mjs'
 import { nearLine, timeLine } from './part-time.mjs'
 
 // A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
@@ -35,11 +35,11 @@ function variableNames() {
 // then read in the drive's own skins alone, proofs.mjs's driveSkins);
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
 // (check/jobs.mjs): the page of every part folder is built first, so each folder builds and ids stay unique
-// page-wide; then those parts are pressed and read on a page that prints their stages, and the one stage that
-// follows the last of them on the page of every part (a stage reads otherwise at the end of a page), built from
+// page-wide; then those parts are pressed and read on a page that prints their stages, and the stage that follows
+// each of them on the page of every part (a stage reads otherwise at the end of a page; pageNames), built from
 // those folders alone (pageOf), and that loads the whole page's barkui.css, every part's sheet. So each stage wears
 // every rule it wears on the page of every part and has what follows it there, and a part's time grows with its
-// group, at most PER_JOB parts and one more stage, and not with the folder. Without it, every part is read, on the
+// group, at most PER_JOB parts on a page of at most twice that, and not with the folder. Without it, every part is read, on the
 // page of every folder.
 export async function runCheck(o = {}) {
   const { dir = partsDir, out = outDir, proofFile = proofPath, log = console.log, plantCss = '', names = null } = o
@@ -56,10 +56,8 @@ export async function runCheck(o = {}) {
     log(`check: no part folder named ${unknown.join(', ')}`)
     return { ok: false, proof: null }
   }
-  // The stage that follows the last part read, on the page of every part: printed, never pressed or read.
-  const order = whole.parts.map((p) => p.name)
-  const next = order[Math.max(...names.map((n) => order.indexOf(n))) + 1]
-  const page = pageOf(dir, next ? [...names, next] : names)
+  // The stage that follows each part read, on the page of every part: printed, never pressed or read.
+  const page = pageOf(dir, pageNames(whole.parts.map((p) => p.name), names))
   try {
     return await readParts({ ...o, dir: page, sheet: join(`${out}-whole`, 'barkui.css'), every: whole.parts })
   } finally {

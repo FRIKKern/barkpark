@@ -1,5 +1,5 @@
 // The selftest's rows for a job's page and its parts' time (check/check.mjs runCheck, given `names`): the job reads its
-// own parts on a page that prints their stages, and the one that follows the last of them, and loads every part folder's sheet, and prints each part's
+// own parts on a page that prints their stages, and the one that follows each of them, and loads every part folder's sheet, and prints each part's
 // seconds against its limit and the parts that used more than two thirds of it (check/part-time.mjs).
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,9 +11,9 @@ import { copyAs } from './copy.mjs'
 const ONLY = ['noscript']
 const OTHER = 'other-button'
 
-/** Runs a job of the button alone over a folder of the button, a copy of it (OTHER, which follows it on the page of
-    every part) and the copies `more`; `plant` changes the copy `at`. */
-async function job(plant = () => {}, only = ONLY, more = [], at = OTHER) {
+/** Runs a job of the parts `names` (the button alone unless named) over a folder of the button, a copy of it
+    (OTHER, which follows it on the page of every part) and the copies `more`; `plant` changes the copy `at`. */
+async function job(plant = () => {}, only = ONLY, more = [], at = OTHER, names = ['button']) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-time-case-'))
   try {
     const dir = join(scratch, 'parts')
@@ -22,7 +22,7 @@ async function job(plant = () => {}, only = ONLY, more = [], at = OTHER) {
     plant(join(dir, at))
     const logs = []
     const out = join(scratch, 'out')
-    const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), names: ['button'], only, surfaces: false, motion: false, states: false, log: (l) => logs.push(l) })
+    const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), names, only, surfaces: false, motion: false, states: false, log: (l) => logs.push(l) })
     let html = ''
     try {
       html = readFileSync(join(out, 'index.html'), 'utf8')
@@ -37,17 +37,19 @@ const say = (what, held) => (held ? true : (console.log(`    ${what}`), false))
 
 export const TIME_CASES = [
   {
-    name: "a job's page prints its parts' stages and the one that follows the last of them on the page of every part, and no other stage",
+    name: "a job's page prints each of its parts' stages and the one that follows each of them on the page of every part, and no other stage",
     only: ONLY,
     direct: async () => {
-      // On the page of every part: aa-button, button, other-button, zz-button. The job reads the button.
-      const { ok, logs, html } = await job(() => {}, ONLY, ['aa-button', 'zz-button'])
+      // On the page of every part: aa-button, button, mm-button, other-button, zz-button. The job reads aa-button
+      // and mm-button, which are not side by side there.
+      const { ok, logs, html } = await job(() => {}, ONLY, ['aa-button', 'mm-button', 'zz-button'], OTHER, ['aa-button', 'mm-button'])
       const printed = (n) => html.includes(`data-part="${n}"`)
       return (
         say(`the job did not pass: ${logs.join(' | ')}`, ok) &&
-        say('the page read holds no button', printed('button')) &&
-        say(`the page read holds no ${OTHER}, the stage that follows the button on the page of every part`, printed(OTHER)) &&
-        say('the page read holds aa-button or zz-button, stages that neither are read nor follow the last part read', !printed('aa-button') && !printed('zz-button'))
+        say('the page read holds no aa-button or no mm-button, the parts it reads', printed('aa-button') && printed('mm-button')) &&
+        say('the page read holds no button, the stage that follows aa-button on the page of every part', printed('button')) &&
+        say(`the page read holds no ${OTHER}, the stage that follows mm-button on the page of every part`, printed(OTHER)) &&
+        say('the page read holds zz-button, a stage that is neither read nor follows a part read', !printed('zz-button'))
       )
     },
   },

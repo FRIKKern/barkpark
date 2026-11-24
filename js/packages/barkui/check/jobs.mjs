@@ -2,8 +2,9 @@
 // jobs side by side: the plan job prints the split (`--matrix`), each job checks its own group
 // (`node check/run.mjs --group k --parts …`, which splits again and must agree), and the closing check
 // (`--judge`) splits a third time and reads every job's result against it. The split is a pure function of the
-// sorted part folder names and PER_JOB (check/capacity.mjs), so all three agree on one checkout. Node only: the
-// plan job and the closing check install nothing.
+// sorted part folder names, which of them open a layer over the page (`layers` in part.json) and PER_JOB
+// (check/capacity.mjs), so all three agree on one checkout (`groupsOf`). Node only: the plan job and the closing
+// check install nothing.
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -143,6 +144,11 @@ export function materialize(dir = partsDir, env = process.env, base = env.RUNNER
   return into
 }
 
+/** The stages a job's page prints, in the order of the page of every part (`order`): each part it reads, and the
+    stage that follows each there, so every part is read with what follows it on the shipped page. At most twice
+    the parts it reads. */
+export const pageNames = (order, names) => order.filter((n, i) => names.includes(n) || (i > 0 && names.includes(order[i - 1])))
+
 /** The folder one job's page is built from (check/check.mjs runCheck, given `names`): a fresh scratch root holding
     a copy of those part folders alone, so the page the job reads prints only the stages it is given. */
 export function pageOf(dir, names, base = process.env.RUNNER_TEMP || tmpdir()) {
@@ -151,22 +157,42 @@ export function pageOf(dir, names, base = process.env.RUNNER_TEMP || tmpdir()) {
   return into
 }
 
-/** The fewest groups of at most perJob parts, sizes within one of each other, in name order. */
-export function split(names, perJob = PER_JOB) {
+/** The parts that open a layer over the page: a folder whose part.json names `layers`. */
+export function layeredNames(dir = partsDir) {
+  return folderNames(dir).filter((n) => {
+    const file = join(dir, n, 'part.json')
+    if (!existsSync(file)) return false
+    let layers
+    try {
+      ;({ layers } = JSON.parse(readFileSync(file, 'utf8')))
+    } catch (e) {
+      throw new Error(`jobs: parts/${n}/part.json cannot be read (${e.message.split('\n')[0]}), so the split cannot tell whether it opens a layer`)
+    }
+    return Array.isArray(layers) && layers.length > 0
+  })
+}
+
+/** The fewest groups of at most perJob parts, sizes within one of each other. The parts that open a layer
+    (`layered`) are dealt first, in name order, each to the group with the fewest of them that has room, so no job
+    runs them together while another has fewer; the rest then fill the groups in name order, the first group with
+    room first. Ties go to the lower group, and each group lists its parts in name order. */
+export function split(names, perJob = PER_JOB, layered = []) {
   if (!names.length) throw new Error(NO_PARTS)
   if (!(Number.isInteger(perJob) && perJob >= 1)) throw new Error(`jobs: a job must hold at least one part, not ${perJob}`)
   const sorted = [...names].sort()
   const of = Math.ceil(sorted.length / perJob)
   const base = Math.floor(sorted.length / of)
   const extra = sorted.length % of
-  const groups = []
-  let at = 0
-  for (let k = 1; k <= of; k++) {
-    const size = base + (k <= extra ? 1 : 0)
-    groups.push({ group: k, of, parts: sorted.slice(at, (at += size)) })
-  }
-  return groups
+  const groups = Array.from({ length: of }, (_, i) => ({ group: i + 1, of, parts: [], size: base + (i < extra ? 1 : 0) }))
+  const open = () => groups.filter((g) => g.parts.length < g.size)
+  const top = new Set(layered)
+  for (const n of sorted.filter((x) => top.has(x))) open().reduce((a, g) => (g.parts.length < a.parts.length ? g : a)).parts.push(n)
+  for (const n of sorted.filter((x) => !top.has(x))) open()[0].parts.push(n)
+  return groups.map(({ group, parts }) => ({ group, of, parts: parts.sort() }))
 }
+
+/** The one split the plan, each job and the closing check read: this checkout's part names and layered parts. */
+export const groupsOf = (dir = partsDir, env = process.env) => split(partNames(dir, env), PER_JOB, layeredNames(dir))
 
 /** What is wrong with a list of groups against the part names, in plain words; empty when every part is run by
     exactly one group, no group runs anything else or nothing, and none holds more than perJob. */
@@ -190,7 +216,7 @@ const toMatrix = (groups) => groups.map((g) => ({ group: g.group, of: g.of, part
 /** The plan job's list: one matrix entry per group. Throws on no parts or a split that does not cover them. */
 export function planMatrix(dir = partsDir, env = process.env) {
   const names = partNames(dir, env)
-  const groups = split(names)
+  const groups = groupsOf(dir, env)
   const wrong = cover(groups, names)
   if (wrong.length) throw new Error(`jobs: the split does not cover the parts: ${wrong.join('; ')}`)
   return toMatrix(groups)
@@ -198,7 +224,7 @@ export function planMatrix(dir = partsDir, env = process.env) {
 
 /** A job's own group, split again from its checkout; refuses when the plan handed it another list. */
 export function legGroup(k, given, dir = partsDir, env = process.env) {
-  const groups = split(partNames(dir, env))
+  const groups = groupsOf(dir, env)
   const g = groups.find((x) => x.group === k)
   if (!g) throw new Error(`jobs: group ${k} is not in this checkout's split of ${groups.length}`)
   if (given !== g.parts.join(',')) throw new Error(`jobs: the plan gave group ${k} "${given}", but this checkout splits it as "${g.parts.join(',')}"`)
@@ -211,7 +237,7 @@ const LEGS = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
 
 /** The closing check. Trusts the jobs' results first and their reports second: a report cannot turn a job that
     failed or was cancelled green, and a report from another group, part list or commit counts as missing. */
-export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
+export function judge({ needs, reports, names, sha, perJob = PER_JOB, layered = [] }) {
   const result = (id) => needs?.[id]?.result ?? 'missing'
   const state = (id) => said[result(id)] ?? `ended "${result(id)}"`
   const red = (rows) => ({ ok: false, rows: rows.map((r) => `RED ${r}`) })
@@ -231,7 +257,7 @@ export function judge({ needs, reports, names, sha, perJob = PER_JOB }) {
   }
   let expected
   try {
-    expected = split(names, perJob)
+    expected = split(names, perJob, layered)
   } catch (e) {
     return red([...rows, e.message])
   }
@@ -279,7 +305,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     if (mode === '--matrix') console.log(JSON.stringify(planMatrix()))
     else if (mode === '--judge') {
-      const verdict = judge({ needs: JSON.parse(process.env.NEEDS || '{}'), reports: readReports(at ?? ''), names: partNames(), sha: process.env.GITHUB_SHA ?? '' })
+      const verdict = judge({ needs: JSON.parse(process.env.NEEDS || '{}'), reports: readReports(at ?? ''), names: partNames(), layered: layeredNames(), sha: process.env.GITHUB_SHA ?? '' })
       for (const r of verdict.rows) console.log(r)
       process.exit(verdict.ok ? 0 : 1)
     } else throw new Error('jobs: use --matrix or --judge <reports dir>')
