@@ -56,10 +56,7 @@ defmodule BarkparkWeb.ChatRegisteredHostSendTest do
     {:ok, ws} = Tenancy.create_workspace(%{slug: "rhs-#{suffix}", name: "RHS #{suffix}"})
 
     raw = "rhs-member-#{suffix}"
-
-    {:ok, _} =
-      Auth.create_token(raw, "rhs-member", @dataset, ["read", "write", "admin"], ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
+    {:ok, _} = Auth.create_token(raw, "rhs-member", @dataset, ["read", "write", "admin"], ws.id)
 
     %{
       ws: ws,

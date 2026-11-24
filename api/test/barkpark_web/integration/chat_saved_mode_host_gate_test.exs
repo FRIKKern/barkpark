@@ -378,8 +378,8 @@ defmodule BarkparkWeb.Integration.ChatSavedModeHostGateTest do
 
       assert create_session(seat, %{}).status == 201
       assert create_session(seat, %{mode: "plan"}).status == 201
-      # A registered host is its owner's computer (task-7efaf895e8bc88e4): the
-      # member seat is refused there, an owner seat creates.
+      # A registered host takes an owner or admin seat (task-7efaf895e8bc88e4):
+      # the member seat is refused there, an owner seat creates.
       assert create_session(seat, host).status == 403
       owner = "savedmode-owner-#{System.unique_integer([:positive])}"
 

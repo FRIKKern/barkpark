@@ -78,10 +78,10 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
 
   # ── fixtures ───────────────────────────────────────────────────────────────
 
-  # Every token here is seated OWNER of its own workspace: only an owner may
-  # create or drive a registered-host chat (task-7efaf895e8bc88e4), and this
-  # file pins what happens past that gate, when the host belongs to another
-  # workspace.
+  # Every token here is seated OWNER of its own workspace: a member seat may
+  # not create or drive a registered-host chat (task-7efaf895e8bc88e4), and
+  # this file pins what happens past that gate, when the host belongs to
+  # another workspace.
   defp mint!(perms, ws_id) do
     raw = "host-tenancy-" <> Ecto.UUID.generate()
     {:ok, _} = Auth.create_token(raw, "host tenancy", @dataset, perms, ws_id) |> owner_seat!()

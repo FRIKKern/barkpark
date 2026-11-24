@@ -38,7 +38,7 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   owner are what the runtime was started from), else the tab's own assigns.
   """
   @spec authorize(map(), term()) ::
-          :ok | {:error, :host_execution_not_permitted | :host_owner_required}
+          :ok | {:error, :host_execution_not_permitted | :host_admin_required}
   def authorize(_assigns, {:deny, _message}), do: :ok
 
   def authorize(assigns, act) do
@@ -84,7 +84,7 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   for a row the tab could not load), the provider and target are the tab's.
   """
   @spec authorize_spawn(map(), map() | nil) ::
-          :ok | {:error, :host_execution_not_permitted | :host_owner_required}
+          :ok | {:error, :host_execution_not_permitted | :host_admin_required}
   def authorize_spawn(assigns, store_session) do
     HostExecutionGate.authorize_turn(principal(assigns), %{
       provider: assigns[:provider],

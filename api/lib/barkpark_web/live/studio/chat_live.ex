@@ -4824,7 +4824,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             )
             |> assign(session: nil, status: :offline)
 
-          {:error, reason} when reason in [:host_execution_not_permitted, :host_owner_required] ->
+          {:error, reason} when reason in [:host_execution_not_permitted, :host_admin_required] ->
             socket
             |> append_message(:system, spawn_error_text(reason))
             |> assign(session: nil, status: :offline)
@@ -8456,8 +8456,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp spawn_error_text(:host_execution_not_permitted),
     do: Barkpark.StudioChat.HostExecution.message()
 
-  defp spawn_error_text(:host_owner_required),
-    do: BarkparkWeb.HostExecutionGate.host_owner_message()
+  defp spawn_error_text(:host_admin_required),
+    do: BarkparkWeb.HostExecutionGate.host_admin_message()
 
   defp spawn_error_text(:binary_not_found),
     do:

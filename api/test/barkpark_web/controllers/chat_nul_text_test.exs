@@ -69,11 +69,7 @@ defmodule BarkparkWeb.ChatNulTextTest do
       suffix = System.unique_integer([:positive])
       {:ok, ws} = Tenancy.create_workspace(%{slug: "nul-#{suffix}", name: "NUL #{suffix}"})
       raw = "nul-member-#{suffix}"
-
-      {:ok, _} =
-        Auth.create_token(raw, "nul-member", @dataset, ["read", "write", "admin"], ws.id)
-        |> Barkpark.TenancyFixtures.owner_seat!()
-
+      {:ok, _} = Auth.create_token(raw, "nul-member", @dataset, ["read", "write", "admin"], ws.id)
       host_id = enroll_host!(ws, "go-host-#{suffix}")
 
       sid =

@@ -294,8 +294,9 @@ defmodule Barkpark.TenancyFixtures do
       {:ok, _} = Auth.create_token(raw, "label", "production", ["chat"], ws.id) |> owner_seat!()
 
   A minted token is seated `member` (or `admin` for an `admin` permission
-  list); only an owner may enroll a registered chat host or run a chat on one
-  (`BarkparkWeb.HostExecutionGate.authorize_turn/2`, task-7efaf895e8bc88e4).
+  list); a member seat may not run a chat on a registered host
+  (`BarkparkWeb.HostExecutionGate.authorize_turn/2`, task-7efaf895e8bc88e4)
+  and only an owner may enroll one.
   Raises unless exactly one seat moved.
   """
   def owner_seat!({:ok, %Barkpark.Auth.ApiToken{} = token} = minted) do

@@ -57,10 +57,7 @@ defmodule BarkparkWeb.ChatSendUnstoredTurnTest do
     suffix = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "sut-#{suffix}", name: "SUT #{suffix}"})
     raw = "sut-member-#{suffix}"
-
-    {:ok, _} =
-      Auth.create_token(raw, "sut-member", @dataset, ["read", "write", "admin"], ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
+    {:ok, _} = Auth.create_token(raw, "sut-member", @dataset, ["read", "write", "admin"], ws.id)
 
     %{host_id: enroll_host!(ws, "go-host-#{suffix}"), raw: raw}
   end

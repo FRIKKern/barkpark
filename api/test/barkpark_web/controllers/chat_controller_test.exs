@@ -441,8 +441,9 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert body["provider_session_id"] == body["id"]
     end
 
-    # A registered-host create needs an owner seat (task-7efaf895e8bc88e4):
-    # the instance's no-workspace admin token holds none.
+    # A registered-host create needs an owner or admin seat in the workspace
+    # (task-7efaf895e8bc88e4): the no-workspace admin token holds none, a
+    # Default-bound admin token holds one.
     test "persists and projects explicit provider and registered-host identity", %{admin: a1} do
       host_id = Ecto.UUID.generate()
 
@@ -458,15 +459,14 @@ defmodule BarkparkWeb.ChatControllerTest do
 
       assert json_conn(a1) |> post("/v1/chat/sessions", create) |> json_response(403)
 
-      owner = "chat-owner-#{System.unique_integer([:positive])}"
+      seated = "chat-seated-admin-#{System.unique_integer([:positive])}"
       ws_id = default_workspace_id!()
 
       {:ok, _} =
-        Auth.create_token(owner, "chat-owner", @dataset, ["read", "write", "admin"], ws_id)
-        |> owner_seat!()
+        Auth.create_token(seated, "chat-seated", @dataset, ["read", "write", "admin"], ws_id)
 
       body =
-        json_conn(owner)
+        json_conn(seated)
         |> post("/v1/chat/sessions", create)
         |> json_response(201)
 

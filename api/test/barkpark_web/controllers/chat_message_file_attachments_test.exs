@@ -101,10 +101,7 @@ defmodule BarkparkWeb.ChatMessageFileAttachmentsTest do
     {:ok, ws} = Tenancy.create_workspace(%{slug: "msg-file-#{suffix}", name: "Files #{suffix}"})
 
     member = "msg-file-member-#{suffix}"
-
-    {:ok, _} =
-      Auth.create_token(member, "msg-file", @dataset, ["read", "write", "admin"], ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
+    {:ok, _} = Auth.create_token(member, "msg-file", @dataset, ["read", "write", "admin"], ws.id)
 
     host_id = enroll_files_host!(ws, "files-host-#{suffix}")
 
@@ -413,10 +410,7 @@ defmodule BarkparkWeb.ChatMessageFileAttachmentsTest do
     suffix = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "msg-img-#{suffix}", name: "Img #{suffix}"})
     raw = "msg-img-member-#{suffix}"
-
-    {:ok, _} =
-      Auth.create_token(raw, "msg-img", @dataset, ["read", "write", "admin"], ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
+    {:ok, _} = Auth.create_token(raw, "msg-img", @dataset, ["read", "write", "admin"], ws.id)
 
     caps =
       @attachments_fixture

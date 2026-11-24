@@ -36,11 +36,7 @@ defmodule BarkparkWeb.Studio.ChatLiveHostAttachmentRefusalTest do
     {:ok, proj} = Tenancy.create_project(ws, %{slug: "hatt-proj-#{n}", name: "HostAtt Proj"})
 
     raw = "hatt-admin-#{n}"
-    # An owner seat: only an owner may run a chat on a registered host
-    # (task-7efaf895e8bc88e4).
-    {:ok, _} =
-      Auth.create_token(raw, "hatt admin", "production", ~w(read write admin), ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
+    {:ok, _} = Auth.create_token(raw, "hatt admin", "production", ~w(read write admin), ws.id)
 
     {:ok, conn: init_test_session(conn, %{"api_token" => raw}), ws: ws, proj: proj}
   end

@@ -61,13 +61,9 @@ defmodule BarkparkWeb.ChatSendIdempotencyKeyTest do
 
     {:ok, token} =
       Auth.create_token(raw, "sik-member", @dataset, ["read", "write", "admin"], ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
 
     other = "sik-other-#{suffix}"
-
-    {:ok, _} =
-      Auth.create_token(other, "sik-other", @dataset, ["read", "write", "admin"], ws.id)
-      |> Barkpark.TenancyFixtures.owner_seat!()
+    {:ok, _} = Auth.create_token(other, "sik-other", @dataset, ["read", "write", "admin"], ws.id)
 
     %{host_id: enroll_host!(ws, "go-host-#{suffix}"), raw: raw, token: token, other: other}
   end
