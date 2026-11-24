@@ -36,8 +36,7 @@ const listed = () => shown([...ALLOWED, ...SCROLL_LOCK])
 const slotLine = (s) =>
   `- On ${s.slot.replace(/ui-[\w-]+/g, '`$&`')}: ${s.writes
     .map((w) => {
-      const as = [...(w.values ?? []).map((v) => `\`${v}\``), ...(w.length ? [`a \`${w.length}\` length`] : [])]
-      return `\`${w.property}\`${as.length ? ` as ${as.join(' or ')}` : ''} (${w.lines.join(', ')})`
+      return `\`${w.property}\` as ${w.values.map((v) => `\`${v}\``).join(' or ')} (${w.lines.join(', ')})`
     })
     .join(', ')}. ${s.writer.replace(/ \([^)]*\)$/, '')}.`
 /** The passage's slot bullets, each on one line. */
@@ -51,13 +50,17 @@ describe("a slider's pieces, the third list", () => {
   it('is the same in check/placement.mjs and in docs/PARTS.md "Placement": piece, property, value, lines and writer', () => {
     expect(passageSlots()).toEqual(SLOTS.map(slotLine))
   })
-  it('keeps its own reason, holds each piece to the inside of a ui-slider, and names the file and the lines that write each entry', () => {
+  it('keeps its own reason, holds each piece to the inside of a ui-slider, names the file and the lines that write each entry, and gives every entry its values', () => {
     expect(SLOT_REASON).not.toBe(REASON)
     expect(PARTS().replace(/\n\s*/g, ' ')).toContain(SLOT_REASON.replace('; where', ', and where'))
     for (const s of SLOTS) {
       expect(s.at, s.slot).toMatch(/^ui-slider /)
       expect(s.writer, s.slot).toBe('UI SDK slider, on its pieces (components/slider/slider.js)')
-      for (const w of s.writes) expect(w.lines.length && w.lines.every((n) => Number.isInteger(n)), `${s.slot} ${w.property}`).toBe(true)
+      for (const w of s.writes) {
+        expect(w.lines.length && w.lines.every((n) => Number.isInteger(n)), `${s.slot} ${w.property}`).toBe(true)
+        // No entry takes any value: each names the values UI SDK writes.
+        expect(w.values?.length > 0 && w.values.every((v) => typeof v === 'string' && v.trim() !== ''), `${s.slot} ${w.property}`).toBe(true)
+      }
     }
   })
   it('is red when the two differ, either way', () => {
@@ -68,7 +71,7 @@ describe("a slider's pieces, the third list", () => {
       expect(passageSlots(t)).not.toEqual(SLOTS.map(slotLine))
     }
     const changed = [
-      SLOTS.map((s) => (s.slot === 'ui-slider-thumb' ? { ...s, writes: [...s.writes, { property: 'color', lines: [1] }] } : s)),
+      SLOTS.map((s) => (s.slot === 'ui-slider-thumb' ? { ...s, writes: [...s.writes, { property: 'color', values: ['red'], lines: [1] }] } : s)),
       SLOTS.map((s) => ({ ...s, writes: s.writes.map((w) => (w.property === 'opacity' ? { ...w, values: ['1'] } : w)) })),
     ]
     for (const list of changed) expect(passageSlots()).not.toEqual(list.map(slotLine))

@@ -322,20 +322,22 @@ puts the old value back in the same task, so a reading taken now and then does n
 
 Apart from both, a third list has its own reason: UI SDK lays out the pieces of a slider on its track at run time,
 and where a piece sits is not how it looks. A piece is the element it is, inside a `ui-slider`, and carries only
-what UI SDK writes on it, each property by its lines in `components/slider/slider.js`, as the value UI SDK writes
-there (any one of those given, read as the browser gives it back) or as a length in the unit given; one given
-neither takes any value:
+what UI SDK writes on it, each property by its lines in `components/slider/slider.js`, and only as one of the
+values UI SDK writes there, read as the browser gives it back. In a value, `{p}` is a place on the track, a number
+from 0 to 100: UI SDK writes every place as a percentage it clamps to that range (`percentOf`, in
+`components/slider/slider-values.js`). Every entry names its values; none takes any value. Which way the slider runs
+is not read: a piece may carry what UI SDK writes on it running across or running down.
 
 - On `ui-slider-control`: `touch-action` as `none` (179). UI SDK slider, on its pieces.
 - On `ui-slider-track`: `position` as `relative` (187). UI SDK slider, on its pieces.
-- On `ui-slider-indicator`: `position` as `absolute` (79), `inset-inline-start` as a `%` length (80), `width` as a
-  `%` length (81), `height` as a `%` length (81), `top` as `0` (82), `bottom` as `0` or a `%` length (80, 82),
-  `left` as `0` (82), `right` as `0` (82), `--slider-indicator-start` as a `%` length (83),
-  `--slider-indicator-size` as a `%` length (84). UI SDK slider, on its pieces.
-- On `ui-slider-thumb`: `position` as `absolute` (59), `bottom` as a `%` length (60), `left` as `50%` (60),
-  `translate` as `-50% 50%` or `0 -50%` (60, 65), `inset-inline` (61), `margin-inline` as `auto` (62),
-  `justify-self` as `center` (63), `top` as `50%` (64), `z-index` as `1` or `2` (67), `--slider-thumb-position` as
-  a `%` length (68). UI SDK slider, on its pieces.
+- On `ui-slider-indicator`: `position` as `absolute` (79), `inset-inline-start` as `{p}%` (80), `width` as `{p}%`
+  (81), `height` as `{p}%` (81), `top` as `0` (82), `bottom` as `0` or `{p}%` (80, 82), `left` as `0` (82), `right`
+  as `0` (82), `--slider-indicator-start` as `{p}%` (83), `--slider-indicator-size` as `{p}%` (84). UI SDK slider,
+  on its pieces.
+- On `ui-slider-thumb`: `position` as `absolute` (59), `bottom` as `{p}%` (60), `left` as `50%` (60), `translate`
+  as `-50% 50%` or `0 -50%` (60, 65), `inset-inline` as `calc({p}% - 50%) calc(50% - {p}%)` (61), `margin-inline`
+  as `auto` (62), `justify-self` as `center` (63), `top` as `50%` (64), `z-index` as `1` or `2` (67),
+  `--slider-thumb-position` as `{p}%` (68). UI SDK slider, on its pieces.
 - On the range input in `ui-slider-thumb-input`: `position` as `absolute` (88), `inset` as `0` (89), `width` as
   `100%` (90), `height` as `100%` (91), `margin` as `0` (92), `padding` as `0` (93), `border` as `0` (94),
   `opacity` as `0` (95), `overflow` as `hidden` (96), `clip-path` as `inset(50%)` (97), `white-space` as `nowrap`
@@ -343,9 +345,9 @@ neither takes any value:
 
 Any other property, a box's property on an element that is not a box, a piece's property on any other element
 or on another piece, an anchor name no box hangs from, any other transition value, and a value UI SDK does not
-write on a piece fail by name ("… was given opacity in a style attribute, which is not placement: the look
-belongs in part.css"; "… was given top: 10px in a style attribute, and UI SDK writes top on ui-slider-thumb
-only as "50%""). What is read is each declaration the browser applies, by its name: a shorthand by its
+write on a piece, a place past 100% among them, fail by name ("… was given opacity in a style attribute, which is
+not placement: the look belongs in part.css"; "… was given top: 10px in a style attribute, and UI SDK writes top on
+ui-slider-thumb only as "50%""). What is read is each declaration the browser applies, by its name: a shorthand by its
 longhands (`inset` is `top`, `right`, `bottom` and `left`), and `all` by its own name. From the page's first
 frame, a log in the check's own world takes each change to a `style`
 attribute in the document and in each open shadow root, however it is written (the attribute, `el.style`,
