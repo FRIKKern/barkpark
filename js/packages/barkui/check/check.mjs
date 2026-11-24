@@ -2,7 +2,7 @@
 // Chromium with real input events, writes proof.json, and rebuilds the page so
 // its lights show this run. A part whose run failed in any way (a step, a
 // light, a page error, a time limit) gets no light on, and says why.
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { partsDir } from '../build/parts.mjs'
@@ -15,6 +15,8 @@ import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } 
 import { waitLine } from '../build/sheet-waits.mjs'
 import { VIEW_PAGES } from './view-pages.mjs'
 import { launch, refusals } from './acts.mjs'
+import { pageOf } from './jobs.mjs'
+import { nearLine, timeLine } from './part-time.mjs'
 
 // A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
 // sooner, by each step's own limit (STEP_MS in proofs.mjs).
@@ -32,9 +34,34 @@ function variableNames() {
 // that plant there; a list of selectors drives only the live controls they match, states.mjs, and the wide views are
 // then read in the drive's own skins alone, proofs.mjs's driveSkins);
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
-// (check/jobs.mjs): the page is built from every part folder, so ids stay unique page-wide and the job reads the
-// page CI ships, but only those parts are pressed and read. Without it, every part is.
-export async function runCheck({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES } = {}) {
+// (check/jobs.mjs): the page of every part folder is built first, so each folder builds and ids stay unique
+// page-wide, and then those parts are pressed and read on a page built from their folders alone (pageOf), so a
+// part's time grows with its group, at most PER_JOB parts, and not with the folder. Without it, every part is,
+// on the page of every folder.
+export async function runCheck(o = {}) {
+  const { dir = partsDir, out = outDir, proofFile = proofPath, log = console.log, plantCss = '', names = null } = o
+  if (!names) return readParts(o)
+  let whole
+  try {
+    whole = await buildShowroom({ dir, out: `${out}-whole`, proof: proofFile, quiet: true, plantCss })
+  } catch (e) {
+    log(`check: ${e.message}`)
+    return { ok: false, proof: null }
+  }
+  const unknown = names.filter((n) => !whole.parts.some((p) => p.name === n))
+  if (unknown.length) {
+    log(`check: no part folder named ${unknown.join(', ')}`)
+    return { ok: false, proof: null }
+  }
+  const page = pageOf(dir, names)
+  try {
+    return await readParts({ ...o, dir: page })
+  } finally {
+    rmSync(page, { recursive: true, force: true })
+  }
+}
+
+async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES } = {}) {
   // A refusal by the wall anywhere in this run (check/acts.mjs), a timer's or a listener's too, is an error of the run.
   const before = refusals().length
   let built
@@ -98,6 +125,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     let textOnly = []
     let steps = []
     let viewsLine = null
+    const began = performance.now()
     try {
       await limit((async () => {
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
@@ -115,6 +143,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     } catch (e) {
       ctx.errors.push(String(e.message).split('\n')[0])
     }
+    const ms = performance.now() - began
     for (const k of LIGHT_NAMES) if (!lights[k]) lights[k] = { pass: false, detail: only.includes(k) ? 'did not finish' : 'not run in this run' }
     const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)
     // Coverage, once every light has read: a rule or a driven pair no judged reading saw fails the part.
@@ -125,6 +154,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     for (const [k, l] of Object.entries(lights)) lines.push(`  ${l.pass && !failed ? 'on ' : 'OFF'} ${k}: ${l.detail}`)
     if (viewsLine) lines.push(`  ${viewsLine}`)
     if (lights.phone?.views) lines.push(`  ${lights.phone.views}`)
+    lines.push(`  ${timeLine(ms, PART_MS)}`)
     for (const w of measures.waits ?? []) lines.push(`  ${waitLine(w, w.now)}`)
     for (const [k, m] of Object.entries(measures))
       if (k === 'waits') continue
@@ -134,10 +164,10 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     if (failed) for (const l of Object.values(lights)) if (l.pass) Object.assign(l, { pass: false, detail: `the run failed (${failed.slice(0, 160)})` })
     for (const l of Object.values(lights)) l.surfaces = surfacesOf(ctx)
     for (const l of lines) log(l)
-    return { entry: { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(missed.length ? { unread: missed } : {}), ...(failed ? { failed } : {}) }, errors: ctx.errors }
+    return { ms, entry: { hash: part.hash, lights, measures, paintFree, textOnly, steps, ...(missed.length ? { unread: missed } : {}), ...(failed ? { failed } : {}) }, errors: ctx.errors }
   }
+  const done = new Array(mine.length)
   try {
-    const done = new Array(mine.length)
     let next = 0
     const worker = async () => {
       while (next < mine.length) {
@@ -157,6 +187,7 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
   writeFileSync(proofFile, JSON.stringify(proof, null, 2) + '\n')
   await buildShowroom({ dir, out, proof: proofFile, quiet: true })
   for (const e of proof.errors) log(`error: ${e}`)
+  log(nearLine(Object.fromEntries(mine.map((part, i) => [part.name, done[i].ms])), PART_MS))
   const failedParts = Object.entries(proof.parts).filter(([, p]) => p.failed)
   log(`${mine.length} part(s); ${failedParts.length ? `failed: ${failedParts.map(([n]) => n).join(', ')}` : 'every light on'}; ${proof.errors.length} page error(s)`)
   return { ok: !failedParts.length && !proof.errors.length, proof }
