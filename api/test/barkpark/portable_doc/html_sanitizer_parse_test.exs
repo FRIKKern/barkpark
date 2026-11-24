@@ -195,7 +195,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
 
     for {name, html} <- [
           {"a table without tbody", "<table><tr><td>a</td></tr></table>"},
-          {"unquoted and single-quoted attributes", "<p class=bp-hr id='x'>a &amp; b</p>"},
+          {"unquoted and single-quoted attributes", "<p class=bp-hr id='fn-x'>a &amp; b</p>"},
           {"a void element written XHTML-style",
            "<p>a<br/>b<img src=\"https://x/y.png\" alt=\"\"/></p>"},
           {"upper-case tags", "<P CLASS=\"bp-hr\">A</P>"},
