@@ -1,0 +1,127 @@
+/* Password input: UI SDK's <ui-password-input> holding a native <input data-slot="password-input-control"> and a
+   <button data-slot="password-input-toggle"> that shows and hides what is typed, in a <ui-field> with its label and
+   its description or error text, which take the text field's look. UI SDK draws the root as one box around both,
+   with its own ring while focus is inside; here the root has no box (display: contents), so the ring is only
+   base.css's, drawn once on the focused control, and each control marks itself at 3:1: the field takes the text
+   field's box (--ui-input edge, --ui-muted-foreground under the pointer, --bark-danger-text when invalid, --ui-muted
+   when read-only or disabled), and the button beside it the secondary button's (--ui-input edge, --ui-muted-hover
+   under the pointer, --ui-muted-pressed held down, --ui-muted with no edge when disabled). The button's eye is its
+   ::before in currentColor, as the radio draws its dot: an oval edge and a round pupil while the password is hidden,
+   struck through while it is shown (data-visible). --ui-icon is none, so UI SDK's mask is off and no mask is on the
+   page; an svg icon would sit inside the root, which has no box of its own, and the no-script light asks every
+   element holding an svg for one. Read-only takes no hover on the field; its button still works.
+   At phone width the text is 1rem, the size UI SDK gives a coarse pointer, since this sheet's own size would win
+   over UI SDK's there. Its states key only on markup the field and the password input write (data-visible,
+   data-readonly, data-disabled, data-invalid) and on :hover and :active. The check does not read the colour of
+   selected text or the browser's autofill fill; this part sets neither and claims neither. */
+
+[data-password-row] {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--ui-spacing) * 2);
+}
+
+[data-slot="password-input"] {
+  display: contents;
+}
+
+[data-slot="password-input-control"] {
+  --bark-password-height: calc(var(--ui-spacing) * 9);
+  --bark-password-width: calc(var(--ui-spacing) * 54);
+  --bark-password-text: 0.875rem;
+  --bark-password-phone-text: 1rem;
+  --bark-password-bg: var(--ui-background);
+  --bark-password-fg: var(--ui-foreground);
+  --bark-password-edge: var(--ui-input);
+  --bark-password-hover-edge: var(--ui-muted-foreground);
+
+  box-sizing: border-box;
+  flex: none;
+  width: var(--bark-password-width);
+  min-width: 0;
+  height: var(--bark-password-height);
+  padding-inline: calc(var(--ui-spacing) * 3);
+  border: 1px solid var(--bark-password-edge);
+  border-radius: var(--ui-radius);
+  background: var(--bark-password-bg);
+  color: var(--bark-password-fg);
+  caret-color: var(--ui-foreground);
+  font-size: var(--bark-password-text);
+  line-height: 1.25;
+  transition: border-color 120ms ease-out;
+
+  &[data-readonly] {
+    --bark-password-bg: var(--ui-muted);
+  }
+
+  &[data-invalid] {
+    --bark-password-edge: var(--bark-danger-text);
+    --bark-password-hover-edge: var(--bark-danger-text);
+  }
+
+  &[data-disabled] {
+    --bark-password-bg: var(--ui-muted);
+    --bark-password-fg: var(--ui-muted-foreground);
+    opacity: 1;
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    border-color: var(--bark-password-hover-edge);
+  }
+}
+
+[data-password-row] [data-slot="password-input-control"] {
+  flex: 1 1 auto;
+}
+
+[data-slot="password-input-toggle"] {
+  --bark-password-toggle-bg: var(--ui-background);
+  --bark-password-toggle-fg: var(--ui-foreground);
+
+  box-sizing: border-box;
+  width: calc(var(--ui-spacing) * 9);
+  height: calc(var(--ui-spacing) * 9);
+  border: 1px solid var(--ui-input);
+  border-radius: var(--ui-radius);
+  background: var(--bark-password-toggle-bg);
+  color: var(--bark-password-toggle-fg);
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+
+  /* UI SDK masks the button's ::before with --ui-icon; none leaves no mask, and the eye is drawn here instead. */
+  --ui-icon: none;
+
+  &::before {
+    width: calc(var(--ui-spacing) * 4.5);
+    height: calc(var(--ui-spacing) * 3);
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px));
+  }
+
+  &[data-visible]::before {
+    background-image:
+      linear-gradient(to top right, transparent calc(50% - 1px), currentColor calc(50% - 1px), currentColor calc(50% + 1px), transparent calc(50% + 1px)),
+      radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px));
+  }
+
+  &[data-disabled] {
+    border-color: transparent;
+    --bark-password-toggle-bg: var(--ui-muted);
+    --bark-password-toggle-fg: var(--ui-muted-foreground);
+    opacity: 1;
+  }
+
+  &:hover:not([data-disabled]) {
+    background: var(--ui-muted-hover);
+  }
+
+  &:active:not([data-disabled]) {
+    background: var(--ui-muted-pressed);
+  }
+}
+
+@media (max-width: 600px) {
+  [data-slot="password-input-control"] {
+    font-size: var(--bark-password-phone-text);
+  }
+}
