@@ -1,0 +1,66 @@
+/* Textarea: UI SDK's <ui-textarea> holding a native <textarea data-slot="textarea">, in a <ui-field> with its
+   label and its description or error text, which take the text field's look. The box is the text field's: its
+   --ui-input edge, the sheet's ground and text, the --ui-muted-foreground edge under the pointer, and the
+   --bark-danger-text edge when invalid. Read-only and disabled sit on --ui-muted and take no hover. Each box is
+   as tall as its rows; the resize handle is off (see notCovered). At phone width the text is 1rem, the size UI SDK
+   gives a coarse pointer, since this sheet's own size would win over UI SDK's there.
+   The look keys only on markup the field and textarea write: data-readonly, data-disabled and data-invalid, and
+   on :hover. A look for what typing flips (data-filled, :placeholder-shown) waits for the check to read states a
+   person changes by typing. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also turns
+   the edge to --ui-ring-border on :focus-visible. */
+
+[data-slot="textarea"] {
+  --bark-textarea-width: calc(var(--ui-spacing) * 64);
+  --bark-textarea-text: 0.875rem;
+  --bark-textarea-phone-text: 1rem;
+  --bark-textarea-bg: var(--ui-background);
+  --bark-textarea-fg: var(--ui-foreground);
+  --bark-textarea-edge: var(--ui-input);
+  --bark-textarea-hover-edge: var(--ui-muted-foreground);
+
+  box-sizing: border-box;
+  display: block;
+  width: var(--bark-textarea-width);
+  max-width: 100%;
+  min-height: 0;
+  padding-block: calc(var(--ui-spacing) * 2);
+  padding-inline: calc(var(--ui-spacing) * 3);
+  border: 1px solid var(--bark-textarea-edge);
+  border-radius: var(--ui-radius);
+  background: var(--bark-textarea-bg);
+  color: var(--bark-textarea-fg);
+  caret-color: var(--ui-foreground);
+  font-size: var(--bark-textarea-text);
+  line-height: 1.25;
+  resize: none;
+  transition: border-color 120ms ease-out;
+
+  &::placeholder {
+    color: var(--ui-muted-foreground);
+  }
+
+  &[data-readonly] {
+    --bark-textarea-bg: var(--ui-muted);
+  }
+
+  &[data-invalid] {
+    --bark-textarea-edge: var(--bark-danger-text);
+    --bark-textarea-hover-edge: var(--bark-danger-text);
+  }
+
+  &[data-disabled] {
+    --bark-textarea-bg: var(--ui-muted);
+    --bark-textarea-fg: var(--ui-muted-foreground);
+    opacity: 1;
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    border-color: var(--bark-textarea-hover-edge);
+  }
+}
+
+@media (max-width: 600px) {
+  [data-slot="textarea"] {
+    font-size: var(--bark-textarea-phone-text);
+  }
+}
