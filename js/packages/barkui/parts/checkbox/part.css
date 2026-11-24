@@ -1,7 +1,7 @@
 /* Checkbox: UI SDK's <ui-checkbox>, the control itself (role checkbox), holding its own words, as UI SDK's custom
    rendering puts them: the words name it, and in a field the field's error describes it. So a box and its words
    are one control: the pointer on the words is on the box, and the focus ring, base.css's, drawn once for every
-   part, goes round both. The control draws no fill and no edge of its own; its words are its label.
+   part, goes round both, a little off the words. The control draws no fill and no edge of its own; its words are its label.
    The box is the control's ::before and the mark its ::after, both drawn here, so the mark is read with the box as
    one graphic. No indicator and no mask: UI SDK draws its mark as a masked box, and a mask on the page changes how
    the hosted browser draws text elsewhere on it.
@@ -29,7 +29,9 @@
   height: auto;
   justify-content: flex-start;
   gap: calc(var(--ui-spacing) * 2);
-  padding: 0;
+  /* Room between the words and the focus ring, which goes round the control. */
+  padding-block: calc(var(--ui-spacing) * 0.5);
+  padding-inline: 0 var(--ui-spacing);
   border: 0 solid transparent;
   border-radius: calc(var(--ui-radius) / 2);
   background: transparent;
