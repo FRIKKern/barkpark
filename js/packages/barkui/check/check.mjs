@@ -16,6 +16,7 @@ import { waitLine } from '../build/sheet-waits.mjs'
 import { VIEW_PAGES } from './view-pages.mjs'
 import { launch, refusals } from './acts.mjs'
 import { pageOf } from './jobs.mjs'
+import { writePartPage } from './part-page.mjs'
 import { nearLine, timeLine } from './part-time.mjs'
 
 // A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
@@ -38,9 +39,10 @@ function variableNames() {
 // page-wide; then those parts are pressed and read on a page that prints their stages, and the one stage that
 // follows the last of them on the page of every part (a stage reads otherwise at the end of a page), built from
 // those folders alone (pageOf), and that loads the whole page's barkui.css, every part's sheet. So each stage wears
-// every rule it wears on the page of every part and has what follows it there, and a part's time grows with its
-// group, at most PER_JOB parts and one more stage, and not with the folder. Without it, every part is read, on the
-// page of every folder.
+// every rule it wears on the page of every part and has what follows it there, and a part's time does not grow with
+// the folder. Without it, every part is read, on the page of every folder. Either way, each part is read on a copy of
+// that page whose other stages are hidden but the one that follows it (check/part-page.mjs), so its time does not grow
+// with the stages beside it.
 export async function runCheck(o = {}) {
   const { dir = partsDir, out = outDir, proofFile = proofPath, log = console.log, plantCss = '', names = null } = o
   if (!names) return readParts(o)
@@ -113,11 +115,24 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     for (const f of shipped) log(`check: ${f}`)
     return { ok: false, proof: null }
   }
-  let styles
+  // Each part is read on its own copy of the page, the stages of the other parts hidden but the one that follows it
+  // (check/part-page.mjs), and its baseline is the same copy of the page built without any demo.
+  const order = built.parts.map((p) => p.name)
+  const written = []
+  const pages = {}
+  const styles = {}
+  const drop = () => written.forEach((f) => rmSync(f, { force: true }))
   try {
-    styles = await styleBaseline(browser, pathToFileURL(bare.file).href)
+    for (const part of mine) {
+      pages[part.name] = writePartPage(built.file, order, part.name)
+      written.push(pages[part.name])
+      const base = writePartPage(bare.file, order, part.name)
+      written.push(base)
+      styles[part.name] = await styleBaseline(browser, pathToFileURL(base).href)
+    }
   } catch (e) {
     await browser.close()
+    drop()
     log(`check: reading the build's own styles: ${e.message}`)
     return { ok: false, proof: null }
   }
@@ -126,7 +141,7 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
   // when it ends, and proof.json keeps the parts in folder order.
   const checkPart = async (part) => {
     const lines = []
-    const ctx = { browser, url: pathToFileURL(built.file).href, part: part.name, errors: [], log, colourNames: variableNames(), styles, surfaces, motion, states, entries: judged.find((j) => j.name === part.name).entries, judged: new Set(), pairs: [] }
+    const ctx = { browser, url: pathToFileURL(pages[part.name]).href, part: part.name, errors: [], log, colourNames: variableNames(), styles: styles[part.name], surfaces, motion, states, entries: judged.find((j) => j.name === part.name).entries, judged: new Set(), pairs: [] }
     lines.push(part.name)
     const lights = {}
     let measures = {}
@@ -191,6 +206,7 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     })
   } finally {
     await browser.close()
+    drop()
   }
   for (const r of refusals().slice(before)) proof.errors.push(`the wall refused ${r.what}, from ${r.at}`)
   writeFileSync(proofFile, JSON.stringify(proof, null, 2) + '\n')
