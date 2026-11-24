@@ -30,9 +30,10 @@ steps.push({
   name: 'A click on the track moves the thumb, and UI SDK has laid out every piece',
   click: '#button-sl-control',
   expect: (root) => {
-    const v = root.querySelector('#button-sl').value
+    // The check reads from its own world, where the element's own properties are not seen: the input's value is.
+    const v = root.querySelector('#button-sl-thumb0 input').value
     const bare = [...root.querySelectorAll(${JSON.stringify(PIECES)})].filter((e) => !e.hasAttribute('sty' + 'le')).length
-    return (typeof v === 'number' && v !== 40 && root.querySelectorAll(${JSON.stringify(PIECES)}).length === 17 && !bare) || \`value \${v}, \${bare} piece(s) with nothing written\`
+    return (v !== '40' && root.querySelectorAll(${JSON.stringify(PIECES)}).length === 17 && !bare) || \`value \${v}, \${bare} piece(s) with nothing written\`
   },
 })
 `
@@ -80,7 +81,7 @@ export const SLIDER_CASES = [
       'touch-action on a span fails by name': has(NOT_PLACEMENT('span#button-not-slider "Not a slider"', 'touch-action')),
       'a width on a thumb, which UI SDK writes only on the indicator and the input, fails by name': has(NOT_PLACEMENT(THUMB, 'width')),
       'a top on a thumb other than the one UI SDK writes fails by name, with its value': has(SLOT_VALUE(THUMB, 'top', '10px', 'ui-slider-thumb', write('ui-slider-thumb', 'top'))),
-      "the thumb's hidden input made opaque fails by name, with its value": (p) => new RegExp(esc(SLOT_VALUE('INPUT', 'opacity', '1', INPUT, write(INPUT, 'opacity'))).replace('INPUT', 'input#[\\w-]+ \\\\"\\\\"')).test(said(p)),
+      "the thumb's hidden input made opaque fails by name, with its value": (p) => new RegExp(esc(JSON.stringify(SLOT_VALUE('INPUT', 'opacity', '1', INPUT, write(INPUT, 'opacity'))).slice(1, -1)).replace('INPUT', 'input#[\\w-]+ \\\\"\\\\"')).test(said(p)),
     }),
   },
   {

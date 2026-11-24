@@ -9,6 +9,10 @@
 // position-anchor names; anything else, anywhere in a stage, fails by name. docs/PARTS.md "Placement" prints the
 // same list, and a unit row is red when the two differ.
 //
+// SLOTS is the third list, with its own reason: the pieces of a control UI SDK lays out at run time (a slider's
+// control, track, indicator, thumbs and the range input it hides in each thumb), each with only the properties UI SDK
+// writes on it, by line, and the values it writes there. A later control's pieces go in as more entries.
+//
 // SCROLL_LOCK is the second list, with its own reason and its values, for an element that holds a stage: the root
 // element or body only, and only while a dialog box is open. OUT_OF_DOCUMENT names a stage that does not stand in
 // the document; SHADOW_ABOVE names an element that holds a stage and hosts a shadow root, asked of the browser's
