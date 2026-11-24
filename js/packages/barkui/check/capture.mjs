@@ -14,32 +14,18 @@ export const captureSentence = () =>
     Playwright keeps the page's pixel ratio (a capture from a CDP session of our own resets the emulated ratio to 1
     for everything after it), and is told to leave the caret alone, so it adds no style of its own to the page: the
     check hides the caret itself, from its own world (caret in drawn.mjs).
-    A clip that lies inside the view, on a page drawn at its own scale, is taken as the view shows it, not as a
-    full-page capture: a full-page capture can move the page by itself (taken while focus is in a box over the page,
-    or at some scroll spots at phone width), and a shot of the view leaves the page where it is. A clip that reaches
-    beyond the view, or one on a page the phone shows zoomed out (a page with no viewport width of its own, as the
-    reference tab is), needs the full page: a shot of a zoomed view is drawn at the zoom. So does a page's first shot: until a page has
-    been drawn once for a full-page shot, a shot of its view can draw its text otherwise. Either way the page goes back to the scroll it had before the capture, and comes to rest there, before
+    The capture can move the page by itself (a full-page capture taken while focus is in a box over the page can
+    scroll it). So the page goes back to the scroll it had before the capture, and comes to rest there, before
     anything reads it again. A full-page capture draws the page where it lies on the page, so a move leaves it as it
     is, but a box placed against the view (position fixed or sticky) is drawn where the move put it: a capture during
     which the page moved with such a box in the clip is not read but taken again, up to TRIES times, and then the
     capture is red by name as the check's own. */
 export async function capture(page, world, clip) {
   await world(() => window.__barkCheck.still('a capture'))
-  // The view as the screen shows it (the visual viewport, without scrollbars): what a shot of the view draws.
-  const [left, top, vx, vy, vw, vh, zoom, drawn] = await world(() => {
-    const v = visualViewport
-    return [scrollX, scrollY, v.pageLeft, v.pageTop, v.width, v.height, v.scale, window.__barkFullShot === true]
-  })
-  const inView = drawn && zoom === 1 && clip.x >= vx && clip.y >= vy && clip.x + clip.w <= vx + vw && clip.y + clip.h <= vy + vh
-  // Playwright reads a clip on the full page from the page's corner, and a clip of the view from the view's.
-  const shot = inView
-    ? { clip: { x: clip.x - vx, y: clip.y - vy, width: clip.w, height: clip.h }, fullPage: false }
-    : { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true }
+  const at = await world(() => [scrollX, scrollY])
   shots.taken++
   for (let n = 1; ; n++) {
-    const png = await page.screenshot({ ...shot, scale: 'device', caret: 'initial' })
-    if (!inView && !drawn) await world(() => (window.__barkFullShot = true))
+    const png = await page.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })
     const moved = await world(async ([left, top, c]) => {
       if (scrollX === left && scrollY === top) return null
       const was = [scrollX, scrollY]
@@ -54,13 +40,13 @@ export async function capture(page, world, clip) {
       for (let y = t; y < b; y += 8) for (let x = l; x < r; x += 8) for (const n of document.elementsFromPoint(x - scrollX, y - scrollY)) hit.add(n)
       const placed = (n) => n && (['fixed', 'sticky'].includes(getComputedStyle(n).position) || placed(n.parentElement))
       return { was, pinned: [...hit].some(placed) }
-    }, [left, top, clip])
+    }, [...at, clip])
     if (!moved) return png.toString('base64')
     if (!moved.pinned) {
       shots.moved++
       return png.toString('base64')
     }
-    if (n === TRIES) throw new Error(`the check could not read (not a fault of the part): the page moved during the capture ${TRIES} times, from scroll ${left}, ${top} to ${moved.was.join(', ')}`)
+    if (n === TRIES) throw new Error(`the check could not read (not a fault of the part): the page moved during the capture ${TRIES} times, from scroll ${at.join(', ')} to ${moved.was.join(', ')}`)
     shots.again++
   }
 }
