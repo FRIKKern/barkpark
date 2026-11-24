@@ -5,7 +5,7 @@
 //
 // node check/run.mjs --group k --parts a,b --report file: one CI job of the check
 // (check/jobs.mjs). It splits the folder again, refuses unless its group k is the
-// list the plan handed it, reads only those parts, on a page of their stages that loads every part's sheet, and writes
+// list the plan handed it, reads only those parts, on a page of their stages (and the one after) that loads every part's sheet, and writes
 // its report for the closing check: group, parts, commit, and whether it passed.
 import { wallLine } from './wall.mjs'
 import { writeFileSync } from 'node:fs'
