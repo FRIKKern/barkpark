@@ -471,6 +471,35 @@ const captureMoves = () =>
     return once.shot === 'read' && once.shots === 2 && MOVED.test(always.shot) && free.shot === 'read the shot taken while the page moved' && free.shots === 1 && [once, always, free].every((t) => t.sound)
   })
 
+/** A capture whose clip lies inside the view, on a page that moves under a full-page capture, as Chromium's does at
+    some scroll spots at phone width: the page's screenshot scrolls the page to its foot whenever it is asked for the
+    full page, and a shot of the view moves nothing. The page's scroll is read before the capture, straight after
+    each shot (before the capture puts anything back) and after the capture. The page's title is fixed to the view,
+    in the clip's corner, so a shot taken while the page moved is taken again and, every time, red by name. */
+const captureInView = () =>
+  onPage(PINNED, 'reduce', async (page) => {
+    const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight }))
+    const { most } = await where()
+    if (most < 100) {
+      console.log(`    the page scrolls ${most}px, too little for a capture to move it`)
+      return false
+    }
+    await page.barkCheck((top) => (scrollTo({ left: 0, top, behavior: 'instant' }), window.__barkCheck.still('the page scrolled for the row')), Math.round(most / 2))
+    const before = await where()
+    const during = []
+    const fake = {
+      screenshot: async (o) => {
+        if (o.fullPage) await page.barkCheck((top) => scrollTo({ left: 0, top, behavior: 'instant' }), most)
+        during.push(await where())
+        return page.screenshot(o)
+      },
+    }
+    const shot = await capture(fake, page.barkCheck, { x: 0, y: before.y, w: 8, h: 8 }).then(() => 'read', (e) => String(e.message))
+    const after = await where()
+    console.log(`    a clip inside the view, the page at ${before.y}px before the capture: ${during.length} shot(s), the page at ${during.map((w) => `${w.y}px`).join(', ')} straight after each, ${after.y}px after the capture; the capture ${shot.slice(0, 200)}`)
+    return shot === 'read' && during.length > 0 && [...during, after].every((w) => w.x === before.x && w.y === before.y)
+  })
+
 export const REST_CASES = [
   {
     name: 'at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation',
@@ -490,5 +519,9 @@ export const REST_CASES = [
   {
     name: "at rest: a capture during which the page moves puts the page back; with a box fixed to the view in the clip it is taken again, and red by name as the check's own red when the page moves during every shot; with none it is read as taken; the read straight after finds the page at rest",
     direct: captureMoves,
+  },
+  {
+    name: "at rest: a capture whose clip lies inside the view leaves the page's scroll as it was, read before and after each shot, on a page that moves under a full-page capture",
+    direct: captureInView,
   },
 ]
