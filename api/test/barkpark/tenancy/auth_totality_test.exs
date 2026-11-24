@@ -83,6 +83,12 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # DENY where that admits. It is DRIVEN below — it takes a client-reachable
   # principal and workspace id, so the totality guarantee has to cover it.
   #
+  # `workspace_owner?/3` is its explicit-kind twin (task-7efaf895e8bc88e4), as
+  # `workspace_admin?/3` is of `workspace_admin?/2`: the registered-host chat
+  # gate asks it of a token's `owner_user_id`, a bare USER id. It is not in
+  # `driven/2` (that matrix takes a principal struct); its malformed-input
+  # denial is pinned by its own test at the bottom.
+  #
   # `publish_refused?/2` is the draft-only seat predicate (task-348a4fbe24feede6).
   # It is NOT driven: its answer is inverted (`true` refuses), and a malformed or
   # unresolved workspace id already has a ruled answer — "refuse when ANY seat
@@ -118,7 +124,8 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     valid_role_names: 1,
     workspace_admin?: 2,
     workspace_admin?: 3,
-    workspace_owner?: 2
+    workspace_owner?: 2,
+    workspace_owner?: 3
   ]
 
   # The DRIVEN subset — every entry point reachable from a request path with a
@@ -197,7 +204,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 23 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 24 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end
@@ -336,6 +343,21 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
 
       # An unknown custom name still resolves to no rows.
       refute Auth.role_permits?("custom-x", ws.id, :admin)
+    end
+  end
+
+  describe "workspace_owner?/3 (explicit kind)" do
+    test "denies, never raises, on a malformed id, workspace or kind" do
+      for {id, ws, kind} <- [
+            {valid_uuid(), nil, :user},
+            {valid_uuid(), 123, :user},
+            {valid_uuid(), "not-a-uuid", :user},
+            {"not-a-uuid", valid_uuid(), :user},
+            {nil, valid_uuid(), :user},
+            {valid_uuid(), valid_uuid(), :unknown_kind}
+          ] do
+        refute Auth.workspace_owner?(id, ws, kind), inspect({id, ws, kind})
+      end
     end
   end
 end
