@@ -148,6 +148,9 @@ export const SLOTS = [
       { property: 'pointer-events', values: ['none'], lines: [99] },
     ],
   },
+  // Scratch only (throwaway read): the number input's pieces.
+  { slot: 'a number input step button', at: 'ui-number-input button[data-slot="number-input-decrement"], ui-number-input button[data-slot="number-input-increment"]', writer: 'UI SDK number input', writes: [{ property: 'user-select', values: ['none'], lines: [71] }, { property: 'touch-action', values: ['manipulation'], lines: [71] }, { property: '--hold-delay', values: ['400ms'], lines: [9] }] },
+  { slot: 'ui-number-input-scrub-area', at: 'ui-number-input ui-number-input-scrub-area', writer: 'UI SDK number input', writes: [{ property: 'user-select', values: ['none'], lines: [237] }, { property: 'touch-action', values: ['none'], lines: [237] }] },
 ]
 
 /** The fail for a property that is not placement, on any element in a stage. */
