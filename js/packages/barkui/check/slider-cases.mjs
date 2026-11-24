@@ -90,7 +90,9 @@ export const SLIDER_CASES = [
     css: RING_CSS,
     plant: all((d) => row(d, [slider('button-sla', '40'), slider('button-slb', '60')].join('\n')), withSlider),
     expect: each({
-      "the first slider's ring is read on its thumb, drawn once, and passes though its input has none": (p) => lights(p).skins !== undefined && !/focus on (input|ui-slider-thumb#button-sla-thumb0)/.test(said(p)),
+      // The second slider's red, below, says the Tab stops were read as far as it, past the first.
+      "the first slider's ring is read on its thumb, drawn once, and passes though its input has none": (p) =>
+        /focus on ui-slider-thumb#button-slb-thumb0/.test(said(p)) && !/focus on (input|ui-slider-thumb#button-sla-thumb0)/.test(said(p)),
       "the second slider's thumb with its ring taken away fails on the thumb": skinsSay(/focus on ui-slider-thumb#button-slb-thumb0 "": no gap-edge-halo ring/),
       "the second slider's thumb with no fill and no edge fails its boundary on the thumb": skinsSay(/control boundary 1(\.00)?:1 at ui-slider-thumb#button-slb-thumb0/),
       "the first slider's thumb, which draws only its own fill and edge, shows nothing, and fails on the thumb": skinsSay(/control has nothing to show at ui-slider-thumb#button-sla-thumb0/),
