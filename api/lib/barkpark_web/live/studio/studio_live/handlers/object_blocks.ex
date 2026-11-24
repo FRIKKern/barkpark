@@ -46,7 +46,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
-  alias Barkpark.Content.{Forms, PortableText, Schema}
+  alias Barkpark.Content.{Forms, LinkHref, PortableText, Schema}
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Plugins.Adapter
@@ -267,7 +267,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks do
     dialog = track_touched(dialog, params)
     posted = fold(params, dialog)
     value = Forms.object_from_form(dialog.member_raw, posted, dialog.stored)
-    {:noreply, assign(socket, object_dialog: %{dialog | value: value})}
+    # A change is a new try: the refused address's reason goes (TanStack's
+    # LinkInput clears it on change).
+    {:noreply, assign(socket, object_dialog: Map.put(%{dialog | value: value}, :errors, %{}))}
   end
 
   def change(_params, socket), do: {:noreply, socket}
@@ -333,6 +335,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks do
 
     # The object keeps its identity whatever the form posted.
     value = Map.merge(value, Map.take(dialog.stored, ["_type", "_key"]))
+
+    case refused_href(dialog, value) do
+      nil -> save_value(socket, dialog, value)
+      key -> {:noreply, assign(socket, object_dialog: refuse(dialog, value, key))}
+    end
+  end
+
+  def save(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  Why the dialog keeps a link's address: TanStack's words
+  (`app/src/components/BodyToolbar.tsx`).
+  """
+  def refused_href_message,
+    do: gettext("Use a web, mail or phone address (https:, mailto:, tel:) or a path.")
+
+  # task-8c1ce08bb99e4d89: an annotation whose address a link may not draw
+  # (`LinkHref.allowed?/1`, the reader's allowlist: a `javascript:`, `data:`
+  # or `vbscript:` address, a protocol-relative `//host`, a bare word) is
+  # neither saved nor pushed to the editor (`ptDefUpdate`). The answer is the
+  # field that holds it; nil when the address may be drawn or is blank.
+  defp refused_href(%{kind: :annotation}, value) do
+    with href when is_binary(href) and href != "" <- PortableText.def_href(value),
+         false <- LinkHref.allowed?(href) do
+      Enum.find(["href", "url", "damFileUrl", "email"], "href", fn key ->
+        is_binary(value[key]) and value[key] in [href, String.replace_prefix(href, "mailto:", "")]
+      end)
+    else
+      _ -> nil
+    end
+  end
+
+  defp refused_href(_dialog, _value), do: nil
+
+  defp refuse(dialog, value, key),
+    do: Map.merge(dialog, %{value: value, errors: %{key => [refused_href_message()]}})
+
+  defp save_value(socket, dialog, value) do
     field = dialog.field
     body = stored_body(socket, field)
 
@@ -368,8 +408,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks do
 
     {:noreply, socket}
   end
-
-  def save(_params, socket), do: {:noreply, socket}
 
   def close(socket), do: {:noreply, assign(socket, object_dialog: nil)}
 
