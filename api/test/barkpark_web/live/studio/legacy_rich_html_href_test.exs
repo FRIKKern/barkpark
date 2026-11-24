@@ -299,9 +299,9 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
       end
     end
 
-    test "the reader keeps id and name (task-52d612bdb8ff6cb3 owns that)" do
+    test "the reader moves a stored id into the body's namespace and drops an img's name" do
       assert Barkpark.PortableDoc.HtmlSanitizer.sanitize(~s|<p id="a"><img name="n" src="x"></p>|) ==
-               ~s|<p id="a"><img name="n" src="x"></p>|
+               ~s|<p id="bp-anchor-a"><img src="x"></p>|
     end
 
     # S2: the editor's strikethrough writes <strike>; a redraw kept only the
