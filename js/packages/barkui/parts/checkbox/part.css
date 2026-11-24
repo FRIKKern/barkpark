@@ -1,28 +1,52 @@
-/* Checkbox: UI SDK's <ui-checkbox>, the control itself (role checkbox), with its <ui-checkbox-indicator> inside,
-   wrapped in a label with its words; in a field, the field's label and error name and describe it instead.
-   Unchecked, it is an empty box on the ground with the text field's --ui-input edge, which stands at 3:1; checked
-   or mixed, it is filled with --ui-primary and its mark is drawn in --ui-primary-foreground. Under the pointer
-   the empty box's edge darkens and a filled box takes --ui-primary-hover; pressed, the sheet's pressed fills.
-   Read-only keeps its mark but is drawn on --ui-muted in --ui-foreground, so it does not look like a box a
-   press changes; disabled is UI SDK's, faded. Invalid takes the text field's danger edge.
+/* Checkbox: UI SDK's <ui-checkbox>, the control itself (role checkbox), holding its <ui-checkbox-indicator> and its
+   own words, as UI SDK's custom rendering puts them; the words name it, and in a field the field's error
+   describes it. So a box and its words are one control: the pointer on the words is on the box, and the focus
+   ring, base.css's, drawn once for every part, goes round both.
+   The box is the control's ::before. Unchecked, it is empty on the ground with the text field's --ui-input edge,
+   which stands at 3:1; checked or mixed, it is filled with --ui-primary and its mark is drawn over it in
+   --ui-primary-foreground. Under the pointer the empty box's edge darkens and a filled box takes
+   --ui-primary-hover; pressed, the sheet's pressed fills. Read-only keeps its mark but is drawn on --ui-muted in
+   --ui-foreground, so it does not look like a box a press changes; disabled is UI SDK's, faded. Invalid takes the
+   text field's danger edge.
    No mask anywhere: UI SDK draws the mark as a masked box, and a mask on the page changes how the hosted browser
    draws text elsewhere on it. Each indicator holds the tick and the dash as inline SVG in currentColor; the one
    that does not fit the state is not displayed. UI SDK hides the whole indicator while unchecked.
    The look keys only on what UI SDK writes: data-checked, data-indeterminate, data-readonly, data-disabled and
-   data-invalid, and on :hover and :active. The focus ring is base.css's, drawn once for every part. */
+   data-invalid, and on :hover and :active. */
 
 [data-slot="checkbox"] {
+  --bark-checkbox-text: 0.875rem;
   --bark-checkbox-fill: var(--ui-background);
   --bark-checkbox-edge: var(--ui-input);
+  --bark-checkbox-mark: var(--ui-primary-foreground);
   --bark-checkbox-hover-fill: var(--ui-background);
   --bark-checkbox-hover-edge: var(--ui-muted-foreground);
   --bark-checkbox-press-fill: var(--ui-muted-pressed);
   --bark-checkbox-press-edge: var(--ui-muted-foreground);
 
-  border: 1px solid var(--bark-checkbox-edge);
-  background: var(--bark-checkbox-fill);
-  color: var(--ui-primary-foreground);
-  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  position: relative;
+  width: auto;
+  height: auto;
+  justify-content: flex-start;
+  gap: calc(var(--ui-spacing) * 2);
+  padding: 0;
+  border: 0 solid transparent;
+  border-radius: calc(var(--ui-radius) / 2);
+  background: transparent;
+  color: var(--ui-foreground);
+  font-size: var(--bark-checkbox-text);
+  line-height: 1.25;
+
+  &::before {
+    content: "";
+    flex-shrink: 0;
+    width: 1rem;
+    height: 1rem;
+    border: 1px solid var(--bark-checkbox-edge);
+    border-radius: calc(var(--ui-radius) / 2);
+    background: var(--bark-checkbox-fill);
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  }
 
   &[data-invalid] {
     --bark-checkbox-edge: var(--bark-danger-text);
@@ -41,37 +65,38 @@
   &[data-readonly] {
     --bark-checkbox-fill: var(--ui-muted);
     --bark-checkbox-edge: var(--ui-input);
-    color: var(--ui-foreground);
+    --bark-checkbox-mark: var(--ui-foreground);
   }
 
   &:hover:not([data-disabled], [data-readonly], [data-invalid]) {
-    border-color: var(--bark-checkbox-hover-edge);
-    background: var(--bark-checkbox-hover-fill);
+    --bark-checkbox-fill: var(--bark-checkbox-hover-fill);
+    --bark-checkbox-edge: var(--bark-checkbox-hover-edge);
   }
 
   &:active:not([data-disabled], [data-readonly], [data-invalid]) {
-    border-color: var(--bark-checkbox-press-edge);
-    background: var(--bark-checkbox-press-fill);
+    --bark-checkbox-fill: var(--bark-checkbox-press-fill);
+    --bark-checkbox-edge: var(--bark-checkbox-press-edge);
   }
 }
 
-[data-slot="checkbox-indicator"] > svg {
-  width: calc(var(--ui-spacing) * 3);
-  height: calc(var(--ui-spacing) * 3);
+/* The mark sits over the box, centred in it. */
+[data-slot="checkbox-indicator"] {
+  position: absolute;
+  top: calc(50% - 0.5rem);
+  inset-inline-start: 0;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  color: var(--bark-checkbox-mark);
+
+  & > svg {
+    width: calc(var(--ui-spacing) * 3);
+    height: calc(var(--ui-spacing) * 3);
+  }
 }
 
 [data-slot="checkbox-indicator"]:not([data-indeterminate]) > [data-show="mixed"],
 [data-slot="checkbox-indicator"][data-indeterminate] > [data-show="check"] {
   display: none;
-}
-
-/* In a field, the box sits on the first line of the field's label, as UI SDK sets it in a label. */
-[data-checkbox-line] {
-  display: flex;
-  align-items: flex-start;
-  gap: calc(var(--ui-spacing) * 2);
-
-  & > [data-slot="checkbox"] {
-    margin-block-start: calc(var(--ui-spacing) * 0.5);
-  }
 }
