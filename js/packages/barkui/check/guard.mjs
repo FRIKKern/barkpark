@@ -23,6 +23,9 @@ const SNAPSHOT = `(() => {
 /** Runs functions in an isolated world of the page's main frame: it shares the DOM with the page but
     none of its script, so nothing the page (a demo) does to its globals or prototypes reaches it.
     `fn` is serialised; it gets one JSON argument and may return a promise. */
+const PROBE = {}
+const FNS = {}
+process.on('exit', () => { for (const [k, w] of Object.entries(PROBE)) console.log(`probe-world ${k}: ${w.n} calls, ${(w.all / 1000).toFixed(1)} s in all, rest ${(w.rest / 1000).toFixed(1)} s, run ${(w.run / 1000).toFixed(1)} s, gate ${w.gn} looks ${(w.gate / 1000).toFixed(1)} s`); for (const [k, f] of Object.entries(FNS).sort((a, b) => b[1].run - a[1].run).slice(0, 10)) console.log(`probe-fn ${(f.run / 1000).toFixed(1)} s ${f.n}x ${k}`) })
 export async function isolate(page, name) {
   const cdp = await page.context().newCDPSession(page)
   const { frameTree } = await cdp.send('Page.getFrameTree')
@@ -30,10 +33,15 @@ export async function isolate(page, name) {
   return async (fn, arg = null) => {
     // In a world with the check's helpers, every call first lets what moves and has an end come to rest, inside
     // settle's bound (toRest, probes.mjs): a call reads on a page at rest, or the gate there is red by name.
-    const expression = `(async () => { await globalThis.__barkCheck?.toRest?.(); return (${source(fn)})(${JSON.stringify(arg)}) })()`
+    const expression = `(async () => { const c = globalThis.__barkCheck; const g0 = c?.state?.gateMs ?? 0, n0 = c?.state?.gateN ?? 0; const t0 = performance.now(); await c?.toRest?.(); const t1 = performance.now(); const v = await (${source(fn)})(${JSON.stringify(arg)}); const t2 = performance.now(); return { v, rest: t1 - t0, run: t2 - t1, gate: (c?.state?.gateMs ?? 0) - g0, gn: (c?.state?.gateN ?? 0) - n0 } })()`
+    const t = performance.now()
     const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', { expression, contextId: executionContextId, returnByValue: true, awaitPromise: true })
     if (exceptionDetails) throw new Error(String(exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0])
-    return result.value
+    const w = (PROBE[name] ??= { n: 0, all: 0, rest: 0, run: 0, gate: 0, gn: 0 })
+    const key = source(fn).replace(/\s+/g, ' ').slice(0, 90)
+    const f = (FNS[key] ??= { n: 0, run: 0 }); f.n++; f.run += result.value.run
+    w.n++; w.all += performance.now() - t; w.rest += result.value.rest; w.run += result.value.run; w.gate += result.value.gate; w.gn += result.value.gn
+    return result.value.v
   }
 }
 

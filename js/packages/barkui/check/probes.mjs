@@ -506,7 +506,7 @@ export function installHelpers(lists) {
     const fn = get ? d?.get : d?.value
     if (typeof fn !== 'function') continue
     if (on === window) raw[key] = fn.bind(window)
-    const wrapped = { [key](...a) { atRest(name); return fn.apply(this, a) } }[key]
+    const wrapped = { [key](...a) { const t = performance.now(); atRest(name); state.gateMs = (state.gateMs ?? 0) + performance.now() - t; state.gateN = (state.gateN ?? 0) + 1; return fn.apply(this, a) } }[key]
     Object.defineProperty(on, key, get ? { ...d, get: wrapped } : { ...d, value: wrapped })
     gated.push(name)
   }
