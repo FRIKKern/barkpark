@@ -1,0 +1,13 @@
+{
+  "name": "switch",
+  "family": "form",
+  "element": "ui-switch",
+  "imports": ["@ui-sdk/web/switch", "@ui-sdk/web/field"],
+  "summary": "Turns a setting on or off as soon as it changes: a track and its thumb, named by its label, with read-only, disabled, required and invalid.",
+  "notCovered": [
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box 2.75rem tall over the label, so a tap near the switch reaches it. It draws nothing, so no light reads its size, and the part leaves it as UI SDK sets it."
+    }
+  ]
+}

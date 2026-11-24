@@ -1,0 +1,51 @@
+<div data-demo-row>
+  <span data-demo-label>Off, on</span>
+  <label id="switch-updates-label" data-slot="label">Product updates <ui-switch id="switch-updates" name="updates" data-slot="switch" role="switch" type="button" aria-checked="false" tabindex="0" data-unchecked="" aria-labelledby="switch-updates-label"><ui-switch-thumb data-slot="switch-thumb" data-unchecked=""></ui-switch-thumb></ui-switch></label>
+  <label id="switch-alerts-label" data-slot="label">Security alerts <ui-switch id="switch-alerts" name="alerts" default-checked="" data-slot="switch" role="switch" type="button" aria-checked="true" tabindex="0" data-checked="" aria-labelledby="switch-alerts-label"><ui-switch-thumb data-slot="switch-thumb" data-checked=""></ui-switch-thumb></ui-switch></label>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Read-only, disabled</span>
+  <ui-field id="switch-backups-field" data-slot="field">
+    <ui-field-label id="switch-backups-label" data-slot="field-label" for="switch-backups">Encrypt backups</ui-field-label>
+    <ui-field-description id="switch-backups-description" data-slot="field-description">Your organization manages this setting.</ui-field-description>
+    <ui-switch id="switch-backups" name="backups" default-checked="" read-only="" data-slot="switch" role="switch" type="button" aria-checked="true" aria-readonly="true" tabindex="0" data-checked="" data-readonly="" aria-labelledby="switch-backups-label" aria-describedby="switch-backups-description"><ui-switch-thumb data-slot="switch-thumb" data-checked="" data-readonly=""></ui-switch-thumb></ui-switch>
+  </ui-field>
+  <label id="switch-beta-label" data-slot="label">Beta features <ui-switch id="switch-beta" name="beta" disabled="" data-slot="switch" role="switch" type="button" aria-checked="false" aria-disabled="true" data-unchecked="" data-disabled="" aria-labelledby="switch-beta-label"><ui-switch-thumb data-slot="switch-thumb" data-unchecked="" data-disabled=""></ui-switch-thumb></ui-switch></label>
+  <label id="switch-audit-label" data-slot="label">Audit log <ui-switch id="switch-audit" name="audit" default-checked="" disabled="" data-slot="switch" role="switch" type="button" aria-checked="true" aria-disabled="true" data-checked="" data-disabled="" aria-labelledby="switch-audit-label"><ui-switch-thumb data-slot="switch-thumb" data-checked="" data-disabled=""></ui-switch-thumb></ui-switch></label>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Required, invalid</span>
+  <ui-field id="switch-two-factor-field" invalid="" data-slot="field" data-invalid="" data-required="">
+    <ui-field-label id="switch-two-factor-label" data-slot="field-label" for="switch-two-factor" data-invalid="" data-required="">Two-factor sign-in</ui-field-label>
+    <ui-switch id="switch-two-factor" name="two-factor" required="" data-slot="switch" role="switch" type="button" aria-checked="false" aria-required="true" tabindex="0" data-unchecked="" data-required="" aria-invalid="true" data-invalid="" aria-labelledby="switch-two-factor-label" aria-describedby="switch-two-factor-error"><ui-switch-thumb data-slot="switch-thumb" data-unchecked="" data-required=""></ui-switch-thumb></ui-switch>
+    <ui-field-error id="switch-two-factor-error" data-slot="field-error" data-invalid="" data-required="">Turn this on to continue.</ui-field-error>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Off: rest, hover, pressed, focus</span>
+  <span data-slot="label">Rest <span data-slot="switch" role="switch" aria-checked="false" data-unchecked=""><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+  <span data-slot="label">Hover <span data-slot="switch" role="switch" aria-checked="false" data-unchecked="" data-pin="hover"><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+  <span data-slot="label">Pressed <span data-slot="switch" role="switch" aria-checked="false" data-unchecked="" data-pin="hover active"><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+  <span data-slot="label">Focus <span data-slot="switch" role="switch" aria-checked="false" data-unchecked="" data-pin="focus-visible"><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>On: rest, hover, pressed, focus</span>
+  <span data-slot="label">Rest <span data-slot="switch" role="switch" aria-checked="true" data-checked=""><span data-slot="switch-thumb" data-checked=""></span></span></span>
+  <span data-slot="label">Hover <span data-slot="switch" role="switch" aria-checked="true" data-checked="" data-pin="hover"><span data-slot="switch-thumb" data-checked=""></span></span></span>
+  <span data-slot="label">Pressed <span data-slot="switch" role="switch" aria-checked="true" data-checked="" data-pin="hover active"><span data-slot="switch-thumb" data-checked=""></span></span></span>
+  <span data-slot="label">Focus <span data-slot="switch" role="switch" aria-checked="true" data-checked="" data-pin="focus-visible"><span data-slot="switch-thumb" data-checked=""></span></span></span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid: rest, hover, pressed, focus</span>
+  <span data-slot="label">Rest <span data-slot="switch" role="switch" aria-checked="false" aria-invalid="true" data-unchecked="" data-invalid=""><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+  <span data-slot="label">Hover <span data-slot="switch" role="switch" aria-checked="false" aria-invalid="true" data-unchecked="" data-invalid="" data-pin="hover"><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+  <span data-slot="label">Pressed <span data-slot="switch" role="switch" aria-checked="false" aria-invalid="true" data-unchecked="" data-invalid="" data-pin="hover active"><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+  <span data-slot="label">Focus <span data-slot="switch" role="switch" aria-checked="false" aria-invalid="true" data-unchecked="" data-invalid="" data-pin="focus-visible"><span data-slot="switch-thumb" data-unchecked=""></span></span></span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only and disabled: off, on</span>
+  <span data-slot="label">Read-only off <span data-slot="switch" role="switch" aria-checked="false" aria-readonly="true" data-unchecked="" data-readonly=""><span data-slot="switch-thumb" data-unchecked="" data-readonly=""></span></span></span>
+  <span data-slot="label">Read-only on <span data-slot="switch" role="switch" aria-checked="true" aria-readonly="true" data-checked="" data-readonly=""><span data-slot="switch-thumb" data-checked="" data-readonly=""></span></span></span>
+  <span data-slot="label">Disabled off <span data-slot="switch" role="switch" aria-checked="false" aria-disabled="true" data-unchecked="" data-disabled=""><span data-slot="switch-thumb" data-unchecked="" data-disabled=""></span></span></span>
+  <span data-slot="label">Disabled on <span data-slot="switch" role="switch" aria-checked="true" aria-disabled="true" data-checked="" data-disabled=""><span data-slot="switch-thumb" data-checked="" data-disabled=""></span></span></span>
+</div>
