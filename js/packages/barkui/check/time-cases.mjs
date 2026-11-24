@@ -1,6 +1,7 @@
 // The selftest's rows for a job's page and its parts' time (check/check.mjs runCheck, given `names`): the job reads its
 // own parts on a page that prints their stages, and the one that follows the last of them, and loads every part folder's sheet, and prints each part's
-// seconds against its limit and the parts that used more than two thirds of it (check/part-time.mjs).
+// seconds against its limit and the parts that used more than two thirds of it (check/part-time.mjs); each part is read
+// on a copy of that page whose other stages are hidden but the one that follows it (check/part-page.mjs).
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,9 +12,9 @@ import { copyAs } from './copy.mjs'
 const ONLY = ['noscript']
 const OTHER = 'other-button'
 
-/** Runs a job of the button alone over a folder of the button, a copy of it (OTHER, which follows it on the page of
-    every part) and the copies `more`; `plant` changes the copy `at`. */
-async function job(plant = () => {}, only = ONLY, more = [], at = OTHER) {
+/** Runs a job of `names` (the button alone) over a folder of the button, a copy of it (OTHER, which follows it on the
+    page of every part) and the copies `more`; `plant` changes the copy `at`. */
+async function job(plant = () => {}, only = ONLY, more = [], at = OTHER, names = ['button']) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-time-case-'))
   try {
     const dir = join(scratch, 'parts')
@@ -22,7 +23,7 @@ async function job(plant = () => {}, only = ONLY, more = [], at = OTHER) {
     plant(join(dir, at))
     const logs = []
     const out = join(scratch, 'out')
-    const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), names: ['button'], only, surfaces: false, motion: false, states: false, log: (l) => logs.push(l) })
+    const { ok, proof } = await runCheck({ dir, out, proofFile: join(scratch, 'proof.json'), names, only, surfaces: false, motion: false, states: false, log: (l) => logs.push(l) })
     let html = ''
     try {
       html = readFileSync(join(out, 'index.html'), 'utf8')
@@ -78,6 +79,21 @@ export const TIME_CASES = [
       const { ok, proof, logs } = await job((d) => appendFileSync(join(d, 'part.css'), '\n[data-slot="button"] { margin-inline-start: 600px; }\n'), ['phone'], ['aa-button'], 'aa-button')
       const phone = proof?.parts?.button?.lights?.phone
       return say(`the button's phone light did not read the other part's rule: ${phone?.detail ?? logs.join(' | ')}`, !ok && phone && !phone.pass && /wide in a 390px window/.test(phone.detail))
+    },
+  },
+  {
+    name: "a part is read with every other stage hidden but the one that follows it: another part's stage on the job's page draws nothing on its page",
+    only: ['phone'],
+    direct: async () => {
+      // The job reads aa-button and the button; aa-button's stage runs past a 390px window. The page of aa-button
+      // draws it; the button's page hides it.
+      const wide = (d) => appendFileSync(join(d, 'example.html'), `\n<div data-demo-row><span data-demo-label>${'Wide'.repeat(60)}</span></div>\n`)
+      const { ok, proof, logs } = await job(wide, ['phone'], ['aa-button'], 'aa-button', ['aa-button', 'button'])
+      const phone = (n) => proof?.parts?.[n]?.lights?.phone
+      return (
+        say(`aa-button's phone light did not read its own stage: ${phone('aa-button')?.detail ?? logs.join(' | ')}`, !ok && phone('aa-button') && !phone('aa-button').pass && /page is \d+px wide in a 390px window/.test(phone('aa-button').detail)) &&
+        say(`the button's phone light read another part's stage: ${phone('button')?.detail ?? logs.join(' | ')}`, phone('button')?.pass === true)
+      )
     },
   },
   {
