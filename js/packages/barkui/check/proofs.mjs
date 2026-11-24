@@ -334,7 +334,8 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
         const h = window.__barkCheck
         const el = document.activeElement
         if (!el || !document.querySelector(`[data-part="${n}"]`).contains(el)) return { done: true }
-        return el.matches(':focus-visible') ? { at: h.describe(el), ...h.ring(el) } : { at: h.describe(el), fail: 'focused but not :focus-visible' }
+        // The ring is read on the control a person sees: a slider thumb for the input UI SDK hides in it (shownAs).
+        return el.matches(':focus-visible') ? { at: h.describe(h.shownAs(el)), ...h.ring(h.shownAs(el)) } : { at: h.describe(el), fail: 'focused but not :focus-visible' }
       }, part.name)
       // Real keys can open a box in the top layer (a tooltip on focus) and close it before any reading.
       const unnamed = await unnamedNow(page, part)
