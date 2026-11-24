@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
 
   @moduletag :requires_plugins
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
   import Barkpark.AccountsFixtures, only: [register_user: 1]
   import Barkpark.TenancyFixtures, only: [ensure_default_scope!: 0]
@@ -27,11 +28,13 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
   alias Barkpark.Accounts
   alias Barkpark.Auth
   alias Barkpark.ChatHosts
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.HostExecution
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.Membership
   alias BarkparkWeb.Studio.ChatHostGate
 
   setup %{conn: conn} do
@@ -96,6 +99,18 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
     user = register_user("coview-#{System.unique_integer([:positive])}@example.test")
     {:ok, _} = TenancyAuth.create_membership(default_ws.id, user.id, "admin", "user")
     user
+  end
+
+  defp seat_owner!(user, ws) do
+    {1, _} =
+      Repo.update_all(
+        from(m in Membership,
+          where:
+            m.principal_id == ^user.id and m.workspace_id == ^ws.id and
+              m.principal_type == "user"
+        ),
+        set: [role: "owner"]
+      )
   end
 
   defp mount_token(conn, raw, path) do
@@ -440,7 +455,10 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
       assert :ok = ChatHostGate.authorize(assigns, {:deny, "no"})
     end
 
-    test "passes a registered_host session", ctx do
+    # A registered host never takes the instance rule; it takes the owner seat
+    # of its workspace (task-7efaf895e8bc88e4): this admin is refused until it
+    # is seated owner.
+    test "passes a registered_host session for an owner", ctx do
       {:ok, issued} =
         ChatHosts.issue_enrollment(ctx.default_ws.id, %{
           name: "gate-host-#{System.unique_integer([:positive])}",
@@ -456,8 +474,11 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
       row =
         row!(ctx.default_ws, %{execution_target: "registered_host", execution_host_id: host.id})
 
-      assert :ok =
-               ChatHostGate.authorize(Map.put(ctx.assigns, :store_session_id, row.id), :allow)
+      assigns = Map.put(ctx.assigns, :store_session_id, row.id)
+      assert {:error, :host_owner_required} = ChatHostGate.authorize(assigns, :allow)
+
+      seat_owner!(ctx.assigns.current_user, ctx.default_ws)
+      assert :ok = ChatHostGate.authorize(assigns, :allow)
     end
 
     # task-242dea9cceb7dd7e: the next spawn reads a saved mode, so an offline
@@ -493,6 +514,7 @@ defmodule BarkparkWeb.Studio.ChatCoviewHostGateTest do
         row!(ctx.default_ws, %{execution_target: "registered_host", execution_host_id: host.id})
 
       live = Map.put(ctx.assigns, :session, self())
+      seat_owner!(ctx.assigns.current_user, ctx.default_ws)
       assert :ok = ChatHostGate.authorize(Map.put(live, :store_session_id, reg.id), :steer)
 
       {:ok, _} =

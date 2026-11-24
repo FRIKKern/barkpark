@@ -55,7 +55,10 @@ defmodule BarkparkWeb.ChatSessionHostFolderTest do
     {:ok, ws} = Tenancy.create_workspace(%{slug: "hfold-#{suffix}", name: "HFold #{suffix}"})
 
     raw = "hfold-member-#{suffix}"
-    {:ok, _} = Auth.create_token(raw, "hfold-member", @dataset, ["read", "write", "admin"], ws.id)
+
+    {:ok, _} =
+      Auth.create_token(raw, "hfold-member", @dataset, ["read", "write", "admin"], ws.id)
+      |> Barkpark.TenancyFixtures.owner_seat!()
 
     %{
       raw: raw,

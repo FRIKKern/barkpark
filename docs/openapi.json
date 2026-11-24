@@ -145,6 +145,7 @@
                   "host_cannot_receive_attachments",
                   "host_execution_not_permitted",
                   "host_limit_reached",
+                  "host_owner_required",
                   "idempotency_key_in_use",
                   "idempotency_key_reused",
                   "import_body_read_failed",

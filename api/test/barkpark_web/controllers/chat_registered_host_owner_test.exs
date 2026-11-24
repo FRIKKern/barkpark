@@ -13,6 +13,8 @@ defmodule BarkparkWeb.ChatRegisteredHostOwnerTest do
   @moduletag :requires_plugins
 
   import Ecto.Query
+  import ExUnit.CaptureLog
+  import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth
@@ -21,7 +23,6 @@ defmodule BarkparkWeb.ChatRegisteredHostOwnerTest do
   alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Session
-  alias Barkpark.Tenancy.Membership
 
   @dataset "production"
   @fixture Path.expand("../../support/fixtures/chat_host_go_capabilities.json", __DIR__)
@@ -48,7 +49,7 @@ defmodule BarkparkWeb.ChatRegisteredHostOwnerTest do
 
     ws = create_workspace!()
     {owner_raw, owner} = mint!(["read", "chat"], ws.id)
-    seat!(owner, "owner")
+    owner_seat!(owner)
     {member_raw, member} = mint!(["read", "chat"], ws.id)
     {admin_raw, _admin} = mint!(["read", "write", "admin"], ws.id)
 
@@ -69,16 +70,6 @@ defmodule BarkparkWeb.ChatRegisteredHostOwnerTest do
     raw = "host-owner-" <> Ecto.UUID.generate()
     {:ok, token} = Auth.create_token(raw, "host owner", @dataset, perms, ws_id)
     {raw, token}
-  end
-
-  defp seat!(token, role) do
-    {1, _} =
-      Repo.update_all(
-        from(m in Membership,
-          where: m.principal_id == ^token.id and m.principal_type == "api_token"
-        ),
-        set: [role: role]
-      )
   end
 
   defp enroll_host!(ws) do
@@ -207,5 +198,51 @@ defmodule BarkparkWeb.ChatRegisteredHostOwnerTest do
              {:error, :host_owner_required}
 
     refute send_hi(member_raw, row.id).status == 403
+  end
+
+  # ── Studio: ChatLive's create path (ChatHostGate.create_session/3) ─────────
+
+  describe "Studio's create path" do
+    # The scoped Studio mounts for an admin seat; `role` is that token's seat.
+    defp studio_send(conn, ws, host, role) do
+      {:ok, _} = Barkpark.Tenancy.create_project(ws, %{slug: "default", name: "Default"})
+      raw = "host-owner-studio-" <> Ecto.UUID.generate()
+      {:ok, token} = Auth.create_token(raw, "studio", @dataset, ["read", "write", "admin"], ws.id)
+      if role == "owner", do: owner_seat!(token)
+
+      {:ok, view, _html} =
+        live(
+          init_test_session(conn, %{"api_token" => raw}),
+          "/w/#{ws.slug}/p/default/studio/chat"
+        )
+
+      render_hook(view, "set-execution-target", %{"execution_target" => "registered_host"})
+      render_hook(view, "set-execution-host", %{"execution_host_id" => host})
+
+      capture_log(fn ->
+        render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+        render(view)
+      end)
+
+      render(view)
+    end
+
+    test "an admin who is not an owner is told why and leaves no row",
+         %{conn: conn, ws: ws, host: host} do
+      html = studio_send(conn, ws, host, "admin")
+
+      assert html =~ "Only a workspace owner"
+      assert sessions_on(host) == 0
+    end
+
+    test "CONTROL: an owner's send makes the row, naming its creator",
+         %{conn: conn, ws: ws, host: host} do
+      html = studio_send(conn, ws, host, "owner")
+
+      refute html =~ "Only a workspace owner"
+
+      assert [%Session{created_by: "api_token:" <> _}] =
+               Repo.all(from(s in Session, where: s.execution_host_id == ^host))
+    end
   end
 end

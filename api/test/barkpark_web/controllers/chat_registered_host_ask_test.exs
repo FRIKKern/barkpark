@@ -83,7 +83,10 @@ defmodule BarkparkWeb.ChatRegisteredHostAskTest do
     {:ok, _} = ChatHosts.heartbeat(host, %{"protocol_version" => 1, "capabilities" => caps})
 
     raw = "rha-member-#{suffix}"
-    {:ok, _} = Auth.create_token(raw, "rha-member", @dataset, ["read", "write", "admin"], ws.id)
+
+    {:ok, _} =
+      Auth.create_token(raw, "rha-member", @dataset, ["read", "write", "admin"], ws.id)
+      |> Barkpark.TenancyFixtures.owner_seat!()
 
     sid = start_host_turn(raw, issued.host.id)
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
