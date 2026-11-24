@@ -7,10 +7,10 @@ defmodule BarkparkWeb.ChatRegisteredHostSeatTest do
 
   The rule now (owner ruling on #28693): a create or a turn on a
   registered-host session passes for an owner or admin seat in the session's
-  workspace, or for an api token whose `owner_user_id` is a workspace owner
-  (the owner's own member-seat Connector token). Everything else is a 403
-  `host_admin_required`. A token with no `owner_user_id` gets nothing from the
-  second arm. Every session also records who created it (`created_by`).
+  workspace, or for an api token whose `owner_user_id` is a workspace owner.
+  Everything else is a 403 `host_admin_required`. A token with no
+  `owner_user_id` gets nothing from the second arm; a Connector (chat) token is
+  minted with none today. Every session also records who created it (`created_by`).
   """
   use BarkparkWeb.ConnCase, async: false
 

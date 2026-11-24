@@ -355,6 +355,10 @@ var codeExit = map[string]int{
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
 	"host_execution_not_permitted": exitAuth,
 
+	// 403, host_execution_gate.ex refusal/1: a create or turn on a registered-host
+	// chat for a caller with no owner or admin seat there (task-7efaf895e8bc88e4).
+	"host_admin_required": exitAuth,
+
 	// 409, chat_host_controller.ex host_limit_reached/2: the workspace holds its
 	// cap of live chat hosts. A conflict, not a retry: revoke one first.
 	"host_limit_reached": exitConflict,

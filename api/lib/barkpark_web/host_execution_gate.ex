@@ -50,12 +50,13 @@ defmodule BarkparkWeb.HostExecutionGate do
       (task-7efaf895e8bc88e4; before it, any member with chat access could).
       It passes for an owner or admin seat in the session's workspace
       (`Tenancy.Auth.workspace_admin?/2`), and for an api token whose
-      `owner_user_id` holds the OWNER seat there, so an owner's own
-      member-seat Connector token keeps host chat. A token with no
-      `owner_user_id` gets nothing from that second arm, and a session with no
-      owning workspace passes for no one. On an EXISTING session the caller
-      meets `may_see_session?/2` first, so a refused seat gets the missing-id
-      404 there; this 403 is what a create answers.
+      `owner_user_id` holds the OWNER seat there (a personal or app token the
+      owner minted). A Connector (chat) token is minted with no
+      `owner_user_id`, so it gets nothing from that second arm and needs an
+      owner or admin seat of its own. A session with no owning workspace
+      passes for no one. On an EXISTING session the caller meets
+      `may_see_session?/2` first, so a refused seat gets the missing-id 404
+      there; this 403 is what a create answers.
   """
   @spec authorize_turn(term(), map()) ::
           :ok | {:error, :host_execution_not_permitted | :host_admin_required}
