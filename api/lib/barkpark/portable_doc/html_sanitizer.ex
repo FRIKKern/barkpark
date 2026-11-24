@@ -256,11 +256,23 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     # never puts them: `<li>a<div><aside><li>b` becomes `<li>a<div><li>b`,
     # and the browser's parse of that closes the page's own `div`. A pass
     # whose output parses back to itself has no such tree left.
-    passes = opts |> Keyword.get(:max_passes, @max_passes) |> min(@max_passes) |> max(1)
+    passes =
+      opts
+      |> Keyword.get(:max_passes, @max_passes)
+      |> min(@max_passes)
+      |> min(configured_max_passes())
+      |> max(1)
+
     settle(html, passes, Keyword.put(opts, :policy, policy(opts)))
   end
 
   def sanitize(other, _opts), do: other
+
+  # Like `opts[:max_passes]`, the app env can only lower the cap. Nothing
+  # stored is known to need more than three passes, so a test reaches the
+  # fail-closed branch through a write path (`Content.Writer`) by lowering it.
+  defp configured_max_passes,
+    do: Application.get_env(:barkpark, __MODULE__, []) |> Keyword.get(:max_passes, @max_passes)
 
   defp settle(html, passes, opts) do
     {out, tree} = pass(html, opts[:policy])
@@ -285,7 +297,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
         "serving its text only (id=#{inspect(opts[:id])})"
     )
 
-    text = tree |> Serializer.text() |> String.trim()
+    text = Serializer.text(tree)
 
     if text == "",
       do: "",
