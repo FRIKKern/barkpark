@@ -56,10 +56,11 @@
   </ui-field>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Hidden: hover, focus, hover and focus</span>
+  <span data-demo-label>Hidden: hover, focus, hover and focus; empty: focus</span>
   <input id="password-input-pin-hidden-hover" data-slot="password-input-control" type="password" value="Hover" data-filled="" data-pin="hover">
   <input id="password-input-pin-hidden-focus" data-slot="password-input-control" type="password" value="Focus" data-filled="" data-pin="focus-visible">
   <input id="password-input-pin-hidden-hover-focus" data-slot="password-input-control" type="password" value="Hover and focus" data-filled="" data-pin="hover focus-visible">
+  <input id="password-input-pin-empty-focus" data-slot="password-input-control" type="password" data-pin="focus-visible">
 </div>
 <div data-demo-row inert>
   <span data-demo-label>Shown: hover, focus, hover and focus</span>
@@ -84,17 +85,20 @@
   <input id="password-input-pin-disabled-shown-hover" data-slot="password-input-control" type="text" value="Disabled" data-filled="" data-visible="" data-disabled="" disabled data-pin="hover">
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Show button, hidden: hover, pressed, focus, pressed with focus</span>
+  <span data-demo-label>Show button, hidden: hover, pressed, focus, hover with focus, pressed with focus</span>
   <button id="password-input-pin-toggle-hidden-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="hover"></button>
   <button id="password-input-pin-toggle-hidden-pressed" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="hover active"></button>
   <button id="password-input-pin-toggle-hidden-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="focus-visible"></button>
+  <button id="password-input-pin-toggle-hidden-hover-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="hover focus-visible"></button>
   <button id="password-input-pin-toggle-hidden-pressed-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="active focus-visible"></button>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Show button, shown: hover, pressed, focus; disabled, hidden and shown: hover</span>
+  <span data-demo-label>Show button, shown: hover, pressed, focus, hover with focus, pressed with focus; disabled, hidden and shown: hover</span>
   <button id="password-input-pin-toggle-shown-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="hover"></button>
   <button id="password-input-pin-toggle-shown-pressed" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="hover active"></button>
   <button id="password-input-pin-toggle-shown-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="focus-visible"></button>
+  <button id="password-input-pin-toggle-shown-hover-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="hover focus-visible"></button>
+  <button id="password-input-pin-toggle-shown-pressed-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="active focus-visible"></button>
   <button id="password-input-pin-toggle-disabled-hidden-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-disabled="" disabled data-pin="hover"></button>
   <button id="password-input-pin-toggle-disabled-shown-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-disabled="" disabled data-pin="hover"></button>
 </div>
