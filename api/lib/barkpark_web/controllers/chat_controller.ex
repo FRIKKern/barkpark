@@ -82,13 +82,13 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.Realtime.DrainSignal
+  alias Barkpark.Sharing.PreviewLinks
   alias Barkpark.StudioChat
 
   alias Barkpark.StudioChat.{
     ApprovalAnswer,
     Attachments,
     FleetHub,
-    HostExecution,
     MessagesSince,
     PlanPapers,
     QuestionAnswer,
@@ -124,6 +124,7 @@ defmodule BarkparkWeb.ChatController do
   # Retry-After for the D26 capacity leg: long enough for an admission slot to
   # free up, short enough that a queued mobile send feels live.
   @capacity_retry_after_seconds 15
+  @host_refusals BarkparkWeb.HostExecutionGate.refusals()
 
   # ── POST /v1/chat/sessions ─────────────────────────────────────────────────
 
@@ -159,7 +160,8 @@ defmodule BarkparkWeb.ChatController do
                execution_host_id: attrs.execution_host_id,
                bot_folder: attrs.bot_folder,
                cwd: provider_cwd(attrs.provider),
-               mode: attrs.mode
+               mode: attrs.mode,
+               created_by: PreviewLinks.actor_ref(conn.assigns[:api_token])
              },
              create_scope(conn)
            ) do
@@ -185,7 +187,7 @@ defmodule BarkparkWeb.ChatController do
           )
       end
     else
-      {:error, :host_execution_not_permitted} -> host_refused(conn)
+      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -194,7 +196,9 @@ defmodule BarkparkWeb.ChatController do
   # anyway. Any other first mode or model is checked against the row the create
   # would make (its provider, target and owner). A bot folder decides where the
   # turn runs, so it is a choice too and takes the same check.
+  # A registered-host create always takes it (task-7efaf895e8bc88e4).
   defp authorize_create_choices(_conn, %{
+         execution_target: "managed",
          mode: mode,
          default_mode: mode,
          model: nil,
@@ -310,7 +314,7 @@ defmodule BarkparkWeb.ChatController do
       json(conn, full_session_json(StudioChat.get_session(id), [], conn.assigns[:api_token]))
     else
       nil -> not_found(conn)
-      {:error, :host_execution_not_permitted} -> host_refused(conn)
+      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -378,16 +382,18 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
-      {:error, :host_execution_not_permitted} -> host_refused(conn)
+      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
 
   # task-6ca882967fd95dda: a managed turn on the INSTANCE HOST is the instance
-  # owner's alone (`HostExecution`). A permanent 403 that names the reason and
-  # the way out (cloud profile / registered host), never a retryable 503.
-  defp host_refused(conn) do
-    ErrorResponse.emit_custom(conn, 403, HostExecution.reason(), HostExecution.message())
+  # owner's alone (`HostExecution`); a registered host's turn is a workspace
+  # owner's (task-7efaf895e8bc88e4). A permanent 403 that names the reason, never
+  # a retryable 503.
+  defp host_refused(conn, reason) do
+    {code, message} = HostExecutionGate.refusal(reason)
+    ErrorResponse.emit_custom(conn, 403, code, message)
   end
 
   # ── POST /v1/chat/sessions/:id/interrupt ───────────────────────────────────
@@ -474,7 +480,7 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
-      {:error, :host_execution_not_permitted} -> host_refused(conn)
+      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -540,7 +546,7 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
-      {:error, :host_execution_not_permitted} -> host_refused(conn)
+      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -1643,6 +1649,7 @@ defmodule BarkparkWeb.ChatController do
   defp full_session_json(%StudioChat.Session{} = s, messages, principal) do
     %{
       id: s.id,
+      created_by: s.created_by,
       provider: s.provider,
       execution_target: s.execution_target,
       execution_host_id: s.execution_host_id,
