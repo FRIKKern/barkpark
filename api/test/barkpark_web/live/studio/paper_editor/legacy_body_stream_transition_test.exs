@@ -45,7 +45,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
           dataset: @dataset,
           # An `id`, not a `data-test-id`: the sanitizer keeps only the
           # renderer's own `data-…` names in stored HTML (#28404).
-          body_html: ~s(<p id="legacy-opaque-body">#{@legacy_marker}</p>)
+          body_html: ~s(<p id="bp-anchor-legacy-opaque-body">#{@legacy_marker}</p>)
         })
       )
 
@@ -117,7 +117,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
        %{conn: conn} do
     {:ok, _view, html} = open_legacy(conn)
 
-    body = query(html, "#legacy-opaque-body")
+    body = query(html, "#bp-anchor-legacy-opaque-body")
 
     assert Enum.count(body) == 1,
            "the seeded body_html never rendered — this fixture does not reach the legacy arm, " <>
@@ -153,7 +153,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
        %{conn: conn} do
     {:ok, view, html} = open_legacy(conn)
 
-    assert Enum.count(query(html, "#legacy-opaque-body")) == 1
+    assert Enum.count(query(html, "#bp-anchor-legacy-opaque-body")) == 1
     pid_before = view.pid
 
     convert_to_blocks!()
@@ -199,7 +199,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyBodyStreamTransitionTest do
     assert LazyHTML.text(rows) =~ "Appended after the conversion."
 
     # And the opaque legacy bytes are nowhere in the pane any more.
-    assert Enum.count(query(after_html, "#legacy-opaque-body")) == 0
+    assert Enum.count(query(after_html, "#bp-anchor-legacy-opaque-body")) == 0
     refute after_html =~ @legacy_marker
   end
 end
