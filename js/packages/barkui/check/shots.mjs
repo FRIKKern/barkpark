@@ -2,17 +2,17 @@
 // wide: the button's stage on every surface, stacked, one picture per scheme
 // (surfaces-light.png, surfaces-dark.png). The pictures these pages show (the
 // whole page, the focus ring, a light not proved) are taken by build/pictures.mjs.
-import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { SURFACES } from '../build/page.mjs'
 import { outDir } from '../build/showroom.mjs'
+import { launch } from './acts.mjs'
 
 const dir = process.argv[2]
 if (!dir) throw new Error('usage: node check/shots.mjs <dir>')
 mkdirSync(dir, { recursive: true })
-const browser = await chromium.launch()
+const browser = await launch()
 try {
   for (const scheme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, deviceScaleFactor: 2 })

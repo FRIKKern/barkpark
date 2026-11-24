@@ -4,11 +4,14 @@ name: barkui
 #   barkui-plan      the dispatcher: does this change touch BarkUI, and which groups of parts
 #                    (check/jobs.mjs --matrix). Checkout and plain node, no install.
 #   barkui-check     one job per group, from that list and no other; each splits again and must agree.
-#   barkui-selftest       the check's own proof that it can still lose, in two jobs side by side: this one runs
-#   barkui-selftest-rest  the cases that read the views, the other every other case (SELFTEST_JOBS and
-#                         selftestJob in check/jobs.mjs), each under its own ceiling.
+#   barkui-selftest           the check's own proof that it can still lose, in six jobs side by side: the
+#   barkui-selftest-rest      first runs the cases that read the views, the fourth those of them that read every
+#   barkui-selftest-layers    surface, the third the other direct readings and the top layer's cases, the sixth those of
+#   barkui-selftest-surfaces  the top layer's cases that read named boxes open, the fifth the states cases that
+#   barkui-selftest-states    bring a sheet or a part of their own, the second every other case (SELFTEST_JOBS and
+#   barkui-selftest-open      selftestJob in check/jobs.mjs), each under its own ceiling.
 #   barkui           the closing check (AGGREGATE in check/jobs.mjs): always runs, and is red unless the plan, every
-#                    group and both selftest jobs passed, or the plan said BarkUI was not touched and the rest were
+#                    group and every selftest job passed, or the plan said BarkUI was not touched and the rest were
 #                    skipped (check/jobs.mjs, judge). A test holds this file's job names to check/jobs.mjs.
 #
 # THIS WORKFLOW HAS NO `on: … paths:` FILTER AND MUST NEVER GAIN ONE. A paths filter emits no run and no check
@@ -146,8 +149,9 @@ jobs:
         run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
 
       # This group's parts, pressed with real keys in Chromium and proved in each skin, light and dark, on every
-      # surface, a 390px window and a script-free print, reading every label and graphic from pixels, on the
-      # page built from every part folder. The job splits the folder again and refuses unless its group is the
+      # surface, a 390px window and a script-free print, reading every label and graphic from pixels, on a page
+      # that prints the group's stages, and the stage that follows its last part, and loads every part folder's sheet. Each part's lines give its
+      # seconds against its limit, and the last lines name every part over two thirds of it. The job splits the folder again and refuses unless its group is the
       # list the plan gave it. Its limit below is STEP_MINUTES in check/capacity.mjs (a test holds them equal);
       # the job refuses more parts than that holds and stops, failing, once it passes its ceiling, under this
       # limit. Its report (group, parts, commit, pass) goes to the closing check.
@@ -159,7 +163,7 @@ jobs:
           PARTS: ${{ matrix.parts }}
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
+          node --import ./check/load-wall.mjs check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
 
       - name: Upload this group's report
         if: always()
@@ -216,14 +220,15 @@ jobs:
       # reds unless each turns the right light off, naming the planted control.
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
       # them equal); the selftest stops, failing with its sentence, once it passes
-      # its ceiling, under this limit. This job runs the cases that read the views.
+      # its ceiling, under this limit. This job runs the cases that read the views but
+      # not every surface.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
         timeout-minutes: 10
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job views --report "$RUNNER_TEMP/barkui-report/selftest-views.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -280,14 +285,15 @@ jobs:
       # reds unless each turns the right light off, naming the planted control.
       # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
       # them equal); the selftest stops, failing with its sentence, once it passes
-      # its ceiling, under this limit. This job runs every case the views job does not.
+      # its ceiling, under this limit. This job runs the presses, states, refusals and the
+      # no-script print: every case the views, surfaces, layers, states and open jobs do not.
       # Its report (each case it ran and held, by name) goes to the closing check.
       - name: "Each planted break turns its light off"
         timeout-minutes: 10
         working-directory: js/packages/barkui
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job rest --report "$RUNNER_TEMP/barkui-report/selftest-rest.json"
 
       - name: Upload this selftest job's report
         if: always()
@@ -298,9 +304,268 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+  barkui-selftest-layers:
+    name: "BarkUI selftest, top layer and direct readings"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit. This job runs the direct readings that read
+      # no views and the top layer's cases, but for the named boxes read open.
+      # Its report (each case it ran and held, by name) goes to the closing check.
+      - name: "Each planted break turns its light off"
+        timeout-minutes: 10
+        working-directory: js/packages/barkui
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job layers --report "$RUNNER_TEMP/barkui-report/selftest-layers.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-layers
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  barkui-selftest-surfaces:
+    name: "BarkUI selftest, surfaces"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit. This job runs the cases that read every surface.
+      # Its report (each case it ran and held, by name) goes to the closing check.
+      - name: "Each planted break turns its light off"
+        timeout-minutes: 10
+        working-directory: js/packages/barkui
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job surfaces --report "$RUNNER_TEMP/barkui-report/selftest-surfaces.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-surfaces
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  barkui-selftest-states:
+    name: "BarkUI selftest, states with their own sheet or part"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit. This job runs the states cases that bring a
+      # sheet or a part of their own.
+      # Its report (each case it ran and held, by name) goes to the closing check.
+      - name: "Each planted break turns its light off"
+        timeout-minutes: 10
+        working-directory: js/packages/barkui
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job states --report "$RUNNER_TEMP/barkui-report/selftest-states.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-states
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  barkui-selftest-open:
+    name: "BarkUI selftest, named boxes read open"
+    needs: barkui-plan
+    if: needs.barkui-plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node (pnpm store cached on the lockfile)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      # BarkUI and its own dependencies only; nothing else in js/ is built or needed here.
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@barkpark/barkui..."
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('js/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright chromium
+        run: pnpm --filter "@barkpark/barkui" exec playwright install --with-deps chromium
+
+      # The check's own proof that it can still lose: plants on different controls
+      # share a run, one plant per reading (a label not drawn as itself, the ladder
+      # that holds docs/PARTS.md's claim, a faint or clipped icon, a frozen colour, a
+      # bound wait on the sheet, the demo guards, refusals at discovery), and it
+      # reds unless each turns the right light off, naming the planted control.
+      # Its limit below is SELFTEST_STEP_MINUTES in check/capacity.mjs (a test holds
+      # them equal); the selftest stops, failing with its sentence, once it passes
+      # its ceiling, under this limit. This job runs the top layer's cases that bring
+      # a sheet of their own: named boxes read open.
+      # Its report (each case it ran and held, by name) goes to the closing check.
+      - name: "Each planted break turns its light off"
+        timeout-minutes: 10
+        working-directory: js/packages/barkui
+        run: |
+          mkdir -p "$RUNNER_TEMP/barkui-report"
+          node --import ./check/load-wall.mjs check/selftest.mjs --job open --report "$RUNNER_TEMP/barkui-report/selftest-open.json"
+
+      - name: Upload this selftest job's report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barkui-report-selftest-open
+          path: ${{ runner.temp }}/barkui-report/
+          if-no-files-found: ignore
+          retention-days: 3
+
   barkui:
     name: "BarkUI showroom check"
-    needs: [barkui-plan, barkui-check, barkui-selftest, barkui-selftest-rest]
+    needs: [barkui-plan, barkui-check, barkui-selftest, barkui-selftest-rest, barkui-selftest-layers, barkui-selftest-surfaces, barkui-selftest-states, barkui-selftest-open]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -312,7 +577,7 @@ jobs:
         with:
           node-version: "22"
 
-      # No report at all is not an error here: the closing check reads it as every group and both selftest jobs missing.
+      # No report at all is not an error here: the closing check reads it as every group and every selftest job missing.
       - name: Download the groups' and the selftest jobs' reports
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -324,7 +589,7 @@ jobs:
       # The jobs' results first, their reports second: a report cannot turn a red or cancelled job green, and
       # one from another group, part list or commit counts as missing (check/jobs.mjs, judge); the selftest jobs'
       # reports must together name every case once, each held (check/selftest-report.mjs).
-      - name: "The plan, every group and both selftest jobs passed"
+      - name: "The plan, every group and every selftest job passed"
         working-directory: js/packages/barkui
         env:
           NEEDS: ${{ toJSON(needs) }}

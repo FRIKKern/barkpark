@@ -1,0 +1,36 @@
+/* Menu: UI SDK's <ui-menu>, a trigger (a native button) and the list of actions it opens over the page in the top
+   layer, each a <ui-menu-item>. The trigger is UI SDK's own, the dialog's trigger's look. The list takes the text
+   field's --ui-input edge, so it stands at 3:1 against the page, and the select's type. The item under the pointer
+   or reached by the keys is drawn on --ui-primary, so it stands at 3:1 like a filled button; every other item is
+   text only. A disabled item is UI SDK's, faded; the arrows stop on it, as the menu pattern asks, but it takes no
+   fill there, and the keys show where they are by the focus ring. At phone width an item keeps UI SDK's touch
+   height whatever the pointer. With no script, the list is printed open under its trigger, so every item is read.
+   The look keys only on what UI SDK writes: data-highlighted and data-disabled. The focus ring is base.css's,
+   drawn once for every part. */
+
+[data-slot="menu-content"] {
+  border-color: var(--ui-input);
+}
+
+[data-slot="menu-content"],
+[data-slot="menu-item"] {
+  --bark-menu-text: 0.875rem;
+
+  font-size: var(--bark-menu-text);
+  line-height: 1.25;
+}
+
+[data-slot="menu-item"][data-highlighted]:not([data-disabled]) {
+  background: var(--ui-primary);
+  color: var(--ui-primary-foreground);
+}
+
+[data-slot="menu-item"][data-highlighted][data-disabled] {
+  background: transparent;
+}
+
+@media (max-width: 600px) {
+  [data-slot="menu-item"] {
+    min-height: 2.75rem;
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "menu",
+  "family": "overlay",
+  "element": "ui-menu",
+  "imports": ["@ui-sdk/web/menu"],
+  "summary": "Runs one action from a list that opens over the page: the arrows move through the items and stop on a disabled one, where Enter chooses nothing; Enter on another item chooses it, and Escape closes the list, each with focus back on the trigger.",
+  "layers": [
+    { "box": "#menu-page-content", "open": { "click": "#menu-page-trigger" }, "close": { "leave": true, "keys": ["Escape"] } }
+  ],
+  "textOnly": ["[data-slot=\"menu-item\"]:not([data-highlighted])", "[data-slot=\"menu-item\"][data-disabled]"],
+  "notCovered": [
+    { "name": "submenus", "why": "A ui-menu-sub opens a second list from an item. The stage shows one level, so the second list and its trigger's arrow are never drawn here." },
+    { "name": "checkbox and radio items", "why": "UI SDK draws their check as a masked box, and a mask on the page changes how the hosted browser draws text elsewhere on it. The stage holds none." },
+    { "name": "groups, separators, shortcuts and item icons", "why": "Their looks are UI SDK's own; the stage holds none, so no light reads them." }
+  ]
+}

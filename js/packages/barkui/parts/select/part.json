@@ -1,0 +1,11 @@
+{
+  "name": "select",
+  "family": "form",
+  "element": "ui-select",
+  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/select"],
+  "summary": "Chooses one value from a list that opens over the page: the chosen value in the trigger, a placeholder until one is chosen, a disabled option the arrows pass over, and a disabled select.",
+  "layers": [
+    { "box": "#select-role-content", "open": { "click": "#select-role-trigger" }, "close": { "keys": ["Escape"] } }
+  ],
+  "textOnly": ["[data-slot=\"select-item\"]:not([data-highlighted])"]
+}

@@ -1,0 +1,65 @@
+/* Switch: UI SDK's <ui-switch>, the control itself (role switch), holding its <ui-switch-thumb>, named by the
+   label around it or by the field it stands in. Off, the track is the sheet's muted fill inside the text field's
+   --ui-input edge, so it stands at 3:1 against the ground; on, it is filled and edged in --ui-primary, like a
+   solid button, and the thumb moves to the end. Hover and pressed are the sheet's state fills, the button's
+   (--ui-muted-hover/-pressed off, --ui-primary-hover/-pressed on); no tint is mixed here. Invalid takes the
+   text field's --bark-danger-text edge. Read-only looks as it is and takes no hover or press, since a press
+   changes nothing; disabled is UI SDK's, faded.
+   The look keys only on what UI SDK writes: data-checked, data-invalid, data-readonly and data-disabled, and on
+   :hover and :active. The focus ring is base.css's, drawn once for every part. */
+
+[data-slot="switch"] {
+  --bark-switch-bg: var(--ui-muted);
+  --bark-switch-edge: var(--ui-input);
+  --bark-switch-hover-bg: var(--ui-muted-hover);
+  --bark-switch-hover-edge: var(--ui-input);
+  --bark-switch-press-bg: var(--ui-muted-pressed);
+  --bark-switch-thumb: var(--ui-muted-foreground);
+
+  width: 2.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--bark-switch-edge);
+  background: var(--bark-switch-bg);
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+
+  &[data-checked] {
+    --bark-switch-bg: var(--ui-primary);
+    --bark-switch-edge: var(--ui-primary);
+    --bark-switch-hover-bg: var(--ui-primary-hover);
+    --bark-switch-hover-edge: var(--ui-primary-hover);
+    --bark-switch-press-bg: var(--ui-primary-pressed);
+    --bark-switch-thumb: var(--ui-primary-foreground);
+  }
+
+  &[data-invalid] {
+    --bark-switch-edge: var(--bark-danger-text);
+    --bark-switch-hover-edge: var(--bark-danger-text);
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    border-color: var(--bark-switch-hover-edge);
+    background: var(--bark-switch-hover-bg);
+  }
+
+  &:active:not([data-disabled], [data-readonly]) {
+    background: var(--bark-switch-press-bg);
+  }
+}
+
+/* The thumb's disc is its ::before, a box of its own, so the check reads it as the switch's graphic: drawn in
+   full and at 3:1 against the track in every state. */
+[data-slot="switch-thumb"] {
+  width: 0.875rem;
+  height: 0.875rem;
+  background: transparent;
+
+  &::before {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--bark-switch-thumb);
+    content: "";
+    transition: background-color 120ms ease-out;
+  }
+}
