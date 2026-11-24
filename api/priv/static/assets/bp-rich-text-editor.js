@@ -35,6 +35,22 @@
 // collaborative editing. The toolbar deliberately stays inside the
 // documented v1 execCommand architecture.
 
+// The addresses a link may carry (task-8c1ce08bb99e4d89): the rule of
+// Barkpark.Content.LinkHref.allowed?/1, the reader's allowlist, and of the
+// TanStack Studio's lib/link-href.ts. http, https, mailto, tel, a path that
+// is not protocol-relative, a ? query, a # address. Control characters are
+// taken out first, as a browser does. The address, cleaned, or null.
+const LINK_SCHEME = /^(?:https?|mailto|tel):/i;
+const LINK_IN_DOC = /^(#|\?|\.\/|\.\.\/)/;
+const LINK_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/g;
+function linkHref(raw) {
+  const href = String(raw == null ? "" : raw).replace(LINK_CONTROLS, "").trim();
+  if (!href) return null;
+  if (href.startsWith("/")) return /^\/[/\\]/.test(href) ? null : href;
+  return LINK_SCHEME.test(href) || LINK_IN_DOC.test(href) ? href : null;
+}
+const LINK_REFUSED = "Use a web, mail or phone address (https:, mailto:, tel:) or a path.";
+
 class BpRichTextEditor extends HTMLElement {
   constructor() {
     super();
@@ -428,7 +444,7 @@ class BpRichTextEditor extends HTMLElement {
   ptDefUpdate(key, href) {
     if (!this._editor) return;
     for (const el of this._defs(key)) {
-      if (el.tagName === "A" && typeof href === "string") el.setAttribute("href", href);
+      if (el.tagName === "A" && typeof href === "string" && linkHref(href) !== null) el.setAttribute("href", href);
     }
   }
 
@@ -598,6 +614,7 @@ class BpRichTextEditor extends HTMLElement {
       '<span class="bp-rte-external">' +
       '<input type="text" class="bp-rte-url" placeholder="https://…" aria-label="' + t("Link address") + '" />' +
       '<button type="button" class="bp-rte-btn bp-rte-set">' + t("Set") + "</button>" +
+      '<span class="error bp-rte-link-refused" role="alert" hidden>' + t(LINK_REFUSED) + "</span>" +
       (linkTypes.length
         ? '<label class="bp-rte-newtab"><input type="checkbox" class="bp-rte-newtab-box" /> ' + t("Open in new tab") + "</label>"
         : "") +
@@ -759,7 +776,24 @@ class BpRichTextEditor extends HTMLElement {
       linkRow.addEventListener(type, (e) => e.stopPropagation());
     }
 
+    // A refused address (linkHref): the row stays open and says why, as
+    // TanStack's LinkInput does; typing again takes the reason away.
+    const refusedNote = bar.querySelector(".bp-rte-link-refused");
+    refusedNote.id = "bp-rte-link-refused-" + Math.random().toString(36).slice(2);
+    const refuse = (on) => {
+      refusedNote.hidden = !on;
+      if (on) {
+        urlInput.setAttribute("aria-invalid", "true");
+        urlInput.setAttribute("aria-describedby", refusedNote.id);
+      } else {
+        urlInput.removeAttribute("aria-invalid");
+        urlInput.removeAttribute("aria-describedby");
+      }
+    };
+    urlInput.addEventListener("input", () => refuse(false));
+
     const close = () => {
+      refuse(false);
       linkRow.hidden = true;
       if (internalBox) internalBox.replaceChildren();
       this._editAnchor = null;
@@ -962,13 +996,20 @@ class BpRichTextEditor extends HTMLElement {
     };
 
     const applyUrl = () => {
-      const href = urlInput.value.trim();
+      const href = urlInput.value.replace(LINK_CONTROLS, "").trim();
       if (href === "") {
         close();
         return;
       }
-      // Normalize bare domains so the anchor never becomes relative.
-      const full = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") ? href : "https://" + href;
+      // Normalize bare domains so the anchor never becomes relative; a path,
+      // a query or a # address stays as typed.
+      const typed = /^[a-z][a-z0-9+.-]*:/i.test(href) || /^[#?/.]/.test(href) ? href : "https://" + href;
+      const full = linkHref(typed);
+      if (full === null) {
+        refuse(true);
+        urlInput.focus();
+        return;
+      }
       if (!linkTypes.length) {
         apply(full, "");
         return;

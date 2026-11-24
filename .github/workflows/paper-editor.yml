@@ -307,6 +307,7 @@ jobs:
           node ../paper-editor-host-tests/role-parity.test.mjs
           node ../paper-editor-host-tests/action-label-inline.test.mjs
           node ../paper-editor-host-tests/__rte_link_fields.test.mjs
+          node ../paper-editor-host-tests/__rte_link_refused.test.mjs
           node ../paper-editor-host-tests/__surface_peer_rev_advance.test.mjs
           node ../paper-editor-host-tests/__table_shell_chrome.test.mjs
           node ../paper-editor-host-tests/__terminal_external_echo.test.mjs
