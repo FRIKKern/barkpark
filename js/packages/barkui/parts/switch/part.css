@@ -46,9 +46,20 @@
   }
 }
 
+/* The thumb's disc is its ::before, a box of its own, so the check reads it as the switch's graphic: drawn in
+   full and at 3:1 against the track in every state. */
 [data-slot="switch-thumb"] {
   width: 0.875rem;
   height: 0.875rem;
-  background: var(--bark-switch-thumb);
-  transition: background-color 120ms ease-out;
+  background: transparent;
+
+  &::before {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--bark-switch-thumb);
+    content: "";
+    transition: background-color 120ms ease-out;
+  }
 }

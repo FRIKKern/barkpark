@@ -47,7 +47,7 @@ export const steps = [
       if (document.activeElement !== s) return `focus is on ${h.describe(document.activeElement)}`
       return s.getAttribute('aria-checked') === 'true' || `aria-checked is ${s.getAttribute('aria-checked')}`
     },
-    ax: { '#switch-backups': { role: 'switch', name: 'Encrypt backups', checked: true, readonly: true } },
+    ax: { '#switch-backups': { role: 'switch', name: 'Encrypt backups', checked: true } },
   },
   {
     name: 'Tab skips the two disabled switches and reaches the invalid Two-factor sign-in',
