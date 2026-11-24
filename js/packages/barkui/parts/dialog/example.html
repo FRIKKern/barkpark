@@ -1,0 +1,27 @@
+<div data-demo-row inert>
+  <span data-demo-label>Trigger: rest, hover, focus</span>
+  <button data-slot="dialog-trigger" aria-haspopup="dialog" type="button" data-closed="">Rest</button>
+  <button data-slot="dialog-trigger" aria-haspopup="dialog" type="button" data-closed="" data-pin="hover">Hover</button>
+  <button data-slot="dialog-trigger" aria-haspopup="dialog" type="button" data-closed="" data-pin="focus-visible">Focus</button>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Opens over the page</span>
+  <ui-dialog id="dialog-rename">
+    <ui-dialog-trigger><button id="dialog-rename-trigger" type="button" data-slot="dialog-trigger" aria-haspopup="dialog" data-closed="">Rename page</button></ui-dialog-trigger>
+    <ui-dialog-content id="dialog-rename-content" data-slot="dialog-content">
+      <ui-dialog-title id="dialog-rename-title" role="heading" aria-level="2" data-slot="dialog-title">Rename page</ui-dialog-title>
+      <ui-dialog-description id="dialog-rename-description" role="paragraph" data-slot="dialog-description">The new name shows in the page list and in every link to it.</ui-dialog-description>
+      <div data-dialog-actions="">
+        <ui-dialog-close><button id="dialog-rename-cancel" type="button" data-slot="dialog-close">Cancel</button></ui-dialog-close>
+        <ui-dialog-close><button id="dialog-rename-save" type="button" data-slot="dialog-close">Rename</button></ui-dialog-close>
+      </div>
+      <ui-dialog-close><button id="dialog-rename-close" type="button" aria-label="Close" data-slot="dialog-close" data-dialog-corner=""><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></ui-dialog-close>
+    </ui-dialog-content>
+  </ui-dialog>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Inside the open dialog: hover</span>
+  <button type="button" data-slot="dialog-close" data-pin="hover">Cancel</button>
+  <button type="button" data-slot="dialog-close" data-pin="hover">Rename</button>
+  <button type="button" aria-label="Close" data-slot="dialog-close" data-pin="hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+</div>
