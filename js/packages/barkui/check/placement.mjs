@@ -79,6 +79,72 @@ export const SCROLL_LOCK = [
   { property: '--scrollbar-width', on: 'root', length: 'px', writer: LOCK },
 ]
 
+/** The third list, with its own reason, for the pieces of a UI SDK control that lays them out at run time: each slot
+    by the element it is (`at`, a selector), and each property UI SDK writes there, by its lines in the writer's file.
+    `values` are the values UI SDK writes there (any one of them), `length` a plain length in that unit; an entry with
+    neither takes any value. A slot carries only its own properties; any other property there, any of them on another
+    element, and a value UI SDK does not write fail by name, as any style attribute does. A later control's slots go in as more entries. */
+export const SLOT_REASON = 'UI SDK lays out the pieces of a slider on its track at run time; where a piece sits is not how it looks'
+const SLIDER = 'UI SDK slider, on its pieces (components/slider/slider.js)'
+const PCT = { length: '%' }
+export const SLOTS = [
+  { slot: 'ui-slider-control', at: 'ui-slider ui-slider-control', writer: SLIDER, writes: [{ property: 'touch-action', values: ['none'], lines: [179] }] },
+  { slot: 'ui-slider-track', at: 'ui-slider ui-slider-track', writer: SLIDER, writes: [{ property: 'position', values: ['relative'], lines: [187] }] },
+  {
+    slot: 'ui-slider-indicator',
+    at: 'ui-slider ui-slider-indicator',
+    writer: SLIDER,
+    writes: [
+      { property: 'position', values: ['absolute'], lines: [79] },
+      { property: 'inset-inline-start', ...PCT, lines: [80] },
+      { property: 'width', ...PCT, lines: [81] },
+      { property: 'height', ...PCT, lines: [81] },
+      { property: 'top', values: ['0'], lines: [82] },
+      { property: 'bottom', values: ['0'], ...PCT, lines: [80, 82] },
+      { property: 'left', values: ['0'], lines: [82] },
+      { property: 'right', values: ['0'], lines: [82] },
+      { property: '--slider-indicator-start', ...PCT, lines: [83] },
+      { property: '--slider-indicator-size', ...PCT, lines: [84] },
+    ],
+  },
+  {
+    slot: 'ui-slider-thumb',
+    at: 'ui-slider ui-slider-thumb',
+    writer: SLIDER,
+    writes: [
+      { property: 'position', values: ['absolute'], lines: [59] },
+      { property: 'bottom', ...PCT, lines: [60] },
+      { property: 'left', values: ['50%'], lines: [60] },
+      { property: 'translate', values: ['-50% 50%', '0 -50%'], lines: [60, 65] },
+      { property: 'inset-inline', lines: [61] },
+      { property: 'margin-inline', values: ['auto'], lines: [62] },
+      { property: 'justify-self', values: ['center'], lines: [63] },
+      { property: 'top', values: ['50%'], lines: [64] },
+      { property: 'z-index', values: ['1', '2'], lines: [67] },
+      { property: '--slider-thumb-position', ...PCT, lines: [68] },
+    ],
+  },
+  {
+    slot: 'the range input in ui-slider-thumb-input',
+    at: 'ui-slider ui-slider-thumb > ui-slider-thumb-input > input[type="range"]',
+    writer: SLIDER,
+    writes: [
+      { property: 'position', values: ['absolute'], lines: [88] },
+      { property: 'inset', values: ['0'], lines: [89] },
+      { property: 'width', values: ['100%'], lines: [90] },
+      { property: 'height', values: ['100%'], lines: [91] },
+      { property: 'margin', values: ['0'], lines: [92] },
+      { property: 'padding', values: ['0'], lines: [93] },
+      { property: 'border', values: ['0'], lines: [94] },
+      { property: 'opacity', values: ['0'], lines: [95] },
+      { property: 'overflow', values: ['hidden'], lines: [96] },
+      { property: 'clip-path', values: ['inset(50%)'], lines: [97] },
+      { property: 'white-space', values: ['nowrap'], lines: [98] },
+      { property: 'pointer-events', values: ['none'], lines: [99] },
+    ],
+  },
+]
+
 /** The fail for a property that is not placement, on any element in a stage. */
 export const NOT_PLACEMENT = (at, prop) => `${at} was given ${prop} in a style attribute, which is not placement: the look belongs in part.css`
 /** The fail for a box property on an element that cannot open in the top layer. */
@@ -91,6 +157,9 @@ export const NOT_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: $
 export const NOT_LOCK = (at, prop) => `${at} was given ${prop} in a style attribute, and it holds every stage: only the scroll lock may stand there, while a dialog is open`
 /** The fail for a scroll lock property with a value the lock does not write. */
 export const LOCK_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and the scroll lock writes ${prop} there only as ${entry.length ? `a ${entry.length} length` : `"${entry.value}"`}`
+/** The fail for a slot's property with a value UI SDK does not write there. */
+export const SLOT_VALUE = (at, prop, value, slot, w) =>
+  `${at} was given ${prop}: ${value} in a style attribute, and UI SDK writes ${w.property} on ${slot} only as ${[...(w.values ?? []).map((v) => `"${v}"`), ...(w.length ? [`a ${w.length} length`] : [])].join(' or ')}`
 /** The fail for the scroll lock on the root element or body with no dialog open. */
 export const NO_DIALOG = (at, prop) => `${at} was given ${prop} in a style attribute while no dialog was open: the scroll lock stands there only while a dialog is open`
 /** The fail for any property on another element that holds a stage. */
