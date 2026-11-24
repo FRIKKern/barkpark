@@ -2,7 +2,7 @@
 // Chromium with real input events, writes proof.json, and rebuilds the page so
 // its lights show this run. A part whose run failed in any way (a step, a
 // light, a page error, a time limit) gets no light on, and says why.
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { partsDir } from '../build/parts.mjs'
@@ -35,9 +35,10 @@ function variableNames() {
 // then read in the drive's own skins alone, proofs.mjs's driveSkins);
 // `plantCss` is the selftest's planted sheet (see buildShowroom). `names` is the group one CI job checks
 // (check/jobs.mjs): the page of every part folder is built first, so each folder builds and ids stay unique
-// page-wide, and then those parts are pressed and read on a page built from their folders alone (pageOf), so a
-// part's time grows with its group, at most PER_JOB parts, and not with the folder. Without it, every part is,
-// on the page of every folder.
+// page-wide; then those parts are pressed and read on a page that prints their stages alone (built from their
+// folders, pageOf) and loads that whole page's barkui.css, every part's sheet, so each stage wears every rule it wears
+// on the page of every part, and a part's time grows with its group, at most PER_JOB parts, and not with the
+// folder. Without it, every part is, on the page of every folder.
 export async function runCheck(o = {}) {
   const { dir = partsDir, out = outDir, proofFile = proofPath, log = console.log, plantCss = '', names = null } = o
   if (!names) return readParts(o)
@@ -55,13 +56,15 @@ export async function runCheck(o = {}) {
   }
   const page = pageOf(dir, names)
   try {
-    return await readParts({ ...o, dir: page })
+    return await readParts({ ...o, dir: page, sheet: join(`${out}-whole`, 'barkui.css'), every: whole.parts })
   } finally {
     rmSync(page, { recursive: true, force: true })
   }
 }
 
-async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES } = {}) {
+// `sheet` and `every` (runCheck, given `names`): the barkui.css of the page of every part, which the page read loads
+// in place of its own, and every part in it, each read alone and held to its section there (sameAsShipped).
+async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES, sheet = null, every = null } = {}) {
   // A refusal by the wall anywhere in this run (check/acts.mjs), a timer's or a listener's too, is an error of the run.
   const before = refusals().length
   let built
@@ -69,6 +72,7 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
   try {
     built = await buildShowroom({ dir, out, proof: proofFile, quiet: true, plantCss })
     bare = await buildShowroom({ dir, out: `${out}-bare`, proof: proofFile, quiet: true, plantCss, bare: true })
+    if (sheet) for (const o of [out, `${out}-bare`]) copyFileSync(sheet, join(o, 'barkui.css'))
   } catch (e) {
     log(`check: ${e.message}`)
     return { ok: false, proof: null }
@@ -90,7 +94,7 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
   // part.css as the browser parses it meets the same walls as its text, and the page's barkui.css holds each
   // part exactly as it was read alone (check/cssom.mjs).
   const judged = []
-  for (const part of built.parts) {
+  for (const part of every ?? built.parts) {
     const { found, rules, entries } = await readPartCss(browser, part.css)
     judged.push({ name: part.name, rules, entries })
     if (!found.length) continue
@@ -186,6 +190,7 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
   for (const r of refusals().slice(before)) proof.errors.push(`the wall refused ${r.what}, from ${r.at}`)
   writeFileSync(proofFile, JSON.stringify(proof, null, 2) + '\n')
   await buildShowroom({ dir, out, proof: proofFile, quiet: true })
+  if (sheet) copyFileSync(sheet, join(out, 'barkui.css'))
   for (const e of proof.errors) log(`error: ${e}`)
   log(nearLine(Object.fromEntries(mine.map((part, i) => [part.name, done[i].ms])), PART_MS))
   const failedParts = Object.entries(proof.parts).filter(([, p]) => p.failed)

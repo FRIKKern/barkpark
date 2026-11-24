@@ -144,7 +144,7 @@ export function materialize(dir = partsDir, env = process.env, base = env.RUNNER
 }
 
 /** The folder one job's page is built from (check/check.mjs runCheck, given `names`): a fresh scratch root holding
-    a copy of those part folders alone, so the page the job reads holds its group and no other part. */
+    a copy of those part folders alone, so the page the job reads prints its group's stages and no other part's. */
 export function pageOf(dir, names, base = process.env.RUNNER_TEMP || tmpdir()) {
   const into = mkdtempSync(join(base, 'barkui-job-page-'))
   for (const name of names) cpSync(join(dir, name), join(into, name), { recursive: true })

@@ -150,7 +150,7 @@ jobs:
 
       # This group's parts, pressed with real keys in Chromium and proved in each skin, light and dark, on every
       # surface, a 390px window and a script-free print, reading every label and graphic from pixels, on a page
-      # built from the group's folders alone, once the page of every part folder builds. Each part's lines give its
+      # that prints the group's stages alone and loads every part folder's sheet. Each part's lines give its
       # seconds against its limit, and the last lines name every part over two thirds of it. The job splits the folder again and refuses unless its group is the
       # list the plan gave it. Its limit below is STEP_MINUTES in check/capacity.mjs (a test holds them equal);
       # the job refuses more parts than that holds and stops, failing, once it passes its ceiling, under this
