@@ -17,9 +17,9 @@ import { launch } from './acts.mjs'
 
 /** The button part with the named "Details" popover, `css` planted, opened with motion `motion`; `go` gets the page
     and the part, and its answer is the case's. */
-export const onPage = (css, motion, go) => onPages(1, css, motion, ([page], part) => go(page, part))
+export const onPage = (css, motion, go, view = {}) => onPages(1, css, motion, ([page], part) => go(page, part), view)
 /** The same on `n` pages of the one browser, open at once; `go` gets the pages and the part. */
-export async function onPages(n, css, motion, go) {
+export async function onPages(n, css, motion, go, view = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'barkui-selftest-'))
   const browser = await launch({ args: ['--disable-lcd-text'] })
   try {
@@ -29,7 +29,7 @@ export async function onPages(n, css, motion, go) {
     named(join(dir, 'button'))
     const built = await buildShowroom({ dir, out: join(scratch, 'out'), proof: join(scratch, 'proof.json'), quiet: true, plantCss: css })
     const part = built.parts.find((x) => x.name === 'button')
-    const pages = await Promise.all(Array.from({ length: n }, () => open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { motion })))
+    const pages = await Promise.all(Array.from({ length: n }, () => open({ browser, url: pathToFileURL(built.file).href, part: part.name, errors: [] }, { ...view, motion })))
     return await go(pages, part)
   } finally {
     await browser.close()
@@ -471,6 +471,84 @@ const captureMoves = () =>
     return once.shot === 'read' && once.shots === 2 && MOVED.test(always.shot) && free.shot === 'read the shot taken while the page moved' && free.shots === 1 && [once, always, free].every((t) => t.sound)
   })
 
+/** A capture whose clip lies inside the view, at 1440px and at 390px as a phone shows it. On a page that moves under
+    a full-page capture, as Chromium's does at some scroll spots at phone width (its screenshot scrolls the page to
+    its foot whenever it is asked for the full page; a shot of the view moves nothing), the page's scroll is read
+    before the capture, straight after each shot and after it: the title is fixed to the view in the clip's corner,
+    so a moved shot is taken again and, every time, red by name. Then, on a page that stays, a clip near the top
+    and one near the foot of the view each read byte for byte what a full-page shot of the clip draws, on the page
+    and on the reference tab, which the phone shows zoomed out. */
+const PHONE = { width: 390, height: 844, mobile: true, scale: 2 }
+const captureInView = async () => {
+  let held = true
+  for (const view of [{}, PHONE]) {
+    const at = view.width ? '390px' : '1440px'
+    held = (await onPage(PINNED, 'reduce', async (page) => {
+      const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight }))
+      const { most } = await where()
+      await page.barkCheck((top) => (scrollTo({ left: 0, top, behavior: 'instant' }), window.__barkCheck.still('the page scrolled for the row')), Math.round(most / 2))
+      // The reference tab, given lines of words, scrolled too.
+      await page.barkRef.world(() => document.body.replaceChildren(...Array.from({ length: 160 }, (_, i) => Object.assign(document.createElement('p'), { textContent: `Line ${i}: the quick brown fox ${'jumps '.repeat(i % 7)}over` }))))
+      await page.barkRef.world(() => (scrollTo({ left: 0, top: 900, behavior: 'instant' }), window.__barkCheck.still('the reference tab scrolled for the row')))
+      // The first capture of each tab is a full-page one; the clips are read after it.
+      let same = true
+      for (const [tab, world, ref] of [['page', page.barkCheck, page], ['reference tab', page.barkRef.world, page.barkRef.page]]) {
+        const v = await world(() => ({ x: visualViewport.pageLeft, y: visualViewport.pageTop, w: visualViewport.width, h: visualViewport.height, zoom: visualViewport.scale }))
+        for (const [edge, y] of [['top', v.y + 60.5], ['foot', v.y + v.h - 100.25]]) {
+          const clip = { x: v.x + 8, y, w: Math.min(300, v.w - 16), h: 40 }
+          const png = await capture(ref, world, clip)
+          const full = (await ref.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
+          await world(([l, t]) => (scrollTo({ left: l, top: t, behavior: 'instant' }), window.__barkCheck.still('the row put the page back')), [v.x, v.y])
+          if (png !== full) console.log(`    ${at}, ${tab} at zoom ${v.zoom}: the clip near the ${edge} of the view does not read what a full-page shot draws`)
+          same &&= png === full
+        }
+      }
+      const before = await where()
+      const during = []
+      const fake = {
+        screenshot: async (o) => {
+          if (o.fullPage) await page.barkCheck((top) => scrollTo({ left: 0, top, behavior: 'instant' }), most)
+          during.push(await where())
+          return page.screenshot(o)
+        },
+      }
+      const shot = await capture(fake, page.barkCheck, { x: 0, y: before.y, w: 8, h: 8 }).then(() => 'read', (e) => String(e.message))
+      const after = await where()
+      console.log(`    ${at}: a clip inside the view, the page at ${before.y}px of ${most}px before the capture: ${during.length} shot(s), the page at ${during.map((w) => `${w.y}px`).join(', ')} straight after each, ${after.y}px after it; the capture ${shot.slice(0, 200)}`)
+      const kept = most >= 100 && shot === 'read' && during.length > 0 && [...during, after].every((w) => w.x === before.x && w.y === before.y)
+      return kept && same
+    }, view)) && held
+  }
+  return held
+}
+
+/** A shot of the view on a page that moves after the view is read and before the shot, with no box placed against
+    the view in the clip (the index's list, the page's one sticky box, is planted static): the page is put back, and
+    the shot is taken again; on a move before every shot the capture is red by name as the check's own. */
+const captureViewMoves = () =>
+  onPage('.sr-index ul { position: static }', 'reduce', async (page) => {
+    const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight, h: innerHeight }))
+    const { most, h } = await where()
+    await page.barkCheck((top) => (scrollTo({ left: 0, top, behavior: 'instant' }), window.__barkCheck.still('the page scrolled for the row')), Math.round(most / 2))
+    const before = await where()
+    const clip = { x: 8, y: before.y + Math.round(h / 2), w: 8, h: 8 }
+    await capture(page, page.barkCheck, clip) // a page's first shot is a full-page one
+    const take = async (moves) => {
+      let [n, views] = [0, 0]
+      const fake = { screenshot: async (o) => {
+        views += o.fullPage ? 0 : 1
+        if (++n <= moves) await page.barkCheck((top) => scrollTo({ left: 0, top, behavior: 'instant' }), before.y + 40)
+        return page.screenshot(o)
+      } }
+      const shot = await capture(fake, page.barkCheck, clip).then(() => 'read', (e) => String(e.message))
+      const after = await where()
+      console.log(`    the page moved 40px before ${moves === 1 ? 'the first shot' : 'every shot'}, no fixed box in the clip: ${n} shot(s), ${views} of the view; the capture ${shot.slice(0, 200)}; the page at ${after.y}px after it, ${before.y}px before`)
+      return { shot, n, sound: views === n && after.x === before.x && after.y === before.y }
+    }
+    const [once, always] = [await take(1), await take(Infinity)]
+    return most >= 100 && once.shot === 'read' && once.n === 2 && MOVED.test(always.shot) && always.n === 3 && once.sound && always.sound
+  })
+
 export const REST_CASES = [
   {
     name: 'at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation',
@@ -490,5 +568,13 @@ export const REST_CASES = [
   {
     name: "at rest: a capture during which the page moves puts the page back; with a box fixed to the view in the clip it is taken again, and red by name as the check's own red when the page moves during every shot; with none it is read as taken; the read straight after finds the page at rest",
     direct: captureMoves,
+  },
+  {
+    name: "at rest: a capture whose clip lies inside the view leaves the page's scroll as it was, read before and after each shot, on a page that moves under a full-page capture, and reads what a full-page shot draws, at 1440px and at 390px as a phone shows it",
+    direct: captureInView,
+  },
+  {
+    name: "at rest: a shot of the view taken when the page moved after the view was read, with no box placed against the view in the clip, is taken again, and red by name as the check's own red when the page moves before every shot",
+    direct: captureViewMoves,
   },
 ]
