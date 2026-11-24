@@ -1,0 +1,10 @@
+{
+  "name": "dialog",
+  "family": "overlay",
+  "element": "ui-dialog",
+  "imports": ["@ui-sdk/web/dialog"],
+  "summary": "Opens a task over the page and holds focus there until it closes: by Escape, by its close button, or by an answer, with focus back on the trigger.",
+  "layers": [
+    { "box": "#dialog-rename-content", "open": { "click": "#dialog-rename-trigger" }, "close": { "leave": true, "keys": ["Escape"] } }
+  ]
+}
