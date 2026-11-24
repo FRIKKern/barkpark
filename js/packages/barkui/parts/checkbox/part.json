@@ -1,0 +1,13 @@
+{
+  "name": "checkbox",
+  "family": "form",
+  "element": "ui-checkbox",
+  "imports": ["@ui-sdk/web/checkbox", "@ui-sdk/web/field"],
+  "summary": "A choice a person checks or unchecks: unchecked, checked and mixed, read-only, disabled, and invalid in a field with its error.",
+  "notCovered": [
+    {
+      "name": "a checkbox group",
+      "why": "UI SDK's ui-checkbox-group and its parent checkbox keep one list of values over several boxes and draw nothing of their own; each box in one is the ui-checkbox shown here, and the stage holds no group."
+    }
+  ]
+}
