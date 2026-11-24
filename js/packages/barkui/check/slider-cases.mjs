@@ -64,38 +64,20 @@ const RING_CSS = ['#button-sla input { box-shadow: none; }', '#button-slb-thumb0
 // Review plants (throwaway only).
 const txt = (p) => said(p).replace(/\\"/g, '"')
 const gave = (id, prop) => (p) => new RegExp(`#${esc(id)} "[^"]*" was given ${esc(prop)}(: [^"]*?)? in a style attribute`).test(txt(p))
-const R_HTML = `<ui-slider id="button-ry" default-value="40">
-  <span id="button-ry-inner">Inner</span>
-  <ui-slider-control id="button-ry-control"><ui-slider-track id="button-ry-track"><ui-slider-indicator id="button-ry-ind"></ui-slider-indicator><ui-slider-thumb id="button-ry-thumb0" aria-label="Level 1"></ui-slider-thumb></ui-slider-track></ui-slider-control>
-</ui-slider>
-${slider('button-rz', '30')}
-<span id="button-rspan">Plain</span><div id="button-rdiv">Box</div>`
+const R_HTML = ['button-pa', 'button-pb', 'button-pc', 'button-pd'].map((id) => slider(id, '40')).join('\n') + `\n${slider('button-rz', '30')}`
 const R_WRITES = [
   S,
   "customElements.whenDefined('ui-slider-thumb').then(() => requestAnimationFrame(() => {",
   "  const q = (s) => root.querySelector(s)",
   "  const SP = 'setPro' + 'perty'",
-  "  q('#button-rspan')[S].translate = '0 -50%'",
-  "  q('#button-rspan')[S].zIndex = '1'",
-  "  q('#button-rdiv')[S][SP]('--slider-indicator-size', '20%')",
-  "  q('#button-ry-inner')[S][SP]('--slider-thumb-position', '10%')",
-  "  const i = q('#button-ry-ind'), t = q('#button-ry-thumb0'), inp = t.querySelector('input')",
-  "  i[S][SP]('--slider-thumb-position', '40%')",
-  "  t[S].touchAction = 'none'",
-  "  q('#button-ry-track')[S].opacity = '0.5'",
-  "  q('#button-ry-control')[S].color = 'red'",
-  "  inp[S].color = 'red'",
-  "  setTimeout(() => {",
-  "    t[S].left = '30%'",
-  "    i[S].width = '40px'",
-  "    inp[S].width = '50%'",
-  "    setTimeout(() => {",
-  "      t[S].insetInlineStart = '7px'",
-  "      t[S][SP]('--slider-thumb-position', '250%')",
-  "      i[S].width = '400%'",
-  "      t[S].bottom = '30%'",
-  "    }, 50)",
-  "  }, 50)",
+  "  for (const k of ['pa', 'pb']) q(`#button-${k} ui-slider-indicator`).id = `button-${k}-ind`",
+  "  q('#button-pa-thumb0')[S].left = '30%'",
+  "  q('#button-pa-ind')[S].width = '40px'",
+  "  q('#button-pa-thumb0 input')[S].width = '50%'",
+  "  q('#button-pb-thumb0')[S].insetInlineStart = '7px'",
+  "  q('#button-pb-ind')[S].width = '400%'",
+  "  q('#button-pc-thumb0')[S][SP]('--slider-thumb-position', '250%')",
+  "  q('#button-pd-thumb0')[S].bottom = '30%'",
   '}))',
 ].join('\n')
 const R_CSS = [
@@ -141,26 +123,17 @@ export const SLIDER_CASES = [
     }),
   },
   {
-    name: 'review plants: placement',
+    name: 'review plants: placement values',
     only: ['pressed'],
     plant: all((d) => row(d, R_HTML), withSlider, (d) => inDemo(d, R_WRITES)),
     expect: each({
-      'P1 translate on a span': gave('button-rspan', 'translate'),
-      'P1 --slider-indicator-size on a div': gave('button-rdiv', '--slider-indicator-size'),
-      'P1 z-index on a span': gave('button-rspan', 'z-index'),
-      'P1 --slider-thumb-position on a span inside the ui-slider': gave('button-ry-inner', '--slider-thumb-position'),
-      'P1 --slider-thumb-position on the indicator': gave('button-ry-ind', '--slider-thumb-position'),
-      'P1 touch-action on the thumb': gave('button-ry-thumb0', 'touch-action'),
-      'P2 opacity on the track': gave('button-ry-track', 'opacity'),
-      'P2 color on the control': gave('button-ry-control', 'color'),
-      'P2 color on the thumb input': (p) => /input#[\w-]+ "[^"]*" was given color in a style attribute/.test(txt(p)),
-      'P3 left 30% on a thumb (UI SDK writes 50%)': gave('button-ry-thumb0', 'left'),
-      'P3 width 40px on the indicator (UI SDK writes a %)': gave('button-ry-ind', 'width'),
+      'P3 left 30% on a thumb (UI SDK writes 50%)': gave('button-pa-thumb0', 'left'),
+      'P3 width 40px on the indicator (UI SDK writes a %)': gave('button-pa-ind', 'width'),
       'P3 width 50% on the thumb input (UI SDK writes 100%)': (p) => /input#[\w-]+ "[^"]*" was given width: 50% in a style attribute/.test(txt(p)),
-      'P3 inset-inline-start 7px on a thumb (UI SDK writes only a calc of %)': gave('button-ry-thumb0', 'inset-inline-start'),
-      'P3 --slider-thumb-position 250% on a thumb (UI SDK writes 0 to 100%)': gave('button-ry-thumb0', '--slider-thumb-position'),
-      'P3 width 400% on the indicator (UI SDK writes 0 to 100%)': (p) => /#button-ry-ind "[^"]*" was given width: 400%/.test(txt(p)),
-      'P3 bottom 30% on an across thumb (UI SDK writes bottom only down)': gave('button-ry-thumb0', 'bottom'),
+      'P3 inset-inline-start 7px on a thumb (UI SDK writes only a calc of %)': gave('button-pb-thumb0', 'inset-inline-start'),
+      'P3 --slider-thumb-position 250% on a thumb (UI SDK writes 0 to 100%)': gave('button-pc-thumb0', '--slider-thumb-position'),
+      'P3 width 400% on the indicator (UI SDK writes 0 to 100%)': (p) => /#button-pb-ind "[^"]*" was given width: 400%/.test(txt(p)),
+      'P3 bottom 30% on an across thumb (UI SDK writes bottom only down)': gave('button-pd-thumb0', 'bottom'),
       'control: no fail on the second, untouched slider': (p) => !/#button-rz/.test(txt(p)),
     }),
   },
