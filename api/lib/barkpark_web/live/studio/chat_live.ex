@@ -5387,6 +5387,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       [archived: socket.assigns[:show_archived] == true]
       |> StudioChat.list_sessions(:global)
       |> clamp_list_to_tenancy(socket)
+      |> then(fn {rows, owners} ->
+        {ChatHostGate.visible_sessions(socket.assigns, rows), owners}
+      end)
 
     # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
     # folds to the compact D3 summary HERE, and the snapshot itself never
@@ -5477,9 +5480,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # guard, so a row this socket may not SEE is a row it may not WRITE.
   defp tenancy_permits?(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session -> load_permits?(socket, session)
+      %{} = session ->
+        load_permits?(socket, session) and ChatHostGate.visible(socket.assigns, session) != nil
+
       # Missing row: not a cross-tenant reach.
-      _ -> true
+      _ ->
+        true
     end
   end
 
@@ -5598,8 +5604,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `test/barkpark_web/live/studio/chat_flat_route_foreign_session_load_test.exs`.
   defp get_session_in_tenancy(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session -> if load_permits?(socket, session), do: session
-      _ -> nil
+      %{} = session ->
+        if load_permits?(socket, session), do: ChatHostGate.visible(socket.assigns, session)
+
+      _ ->
+        nil
     end
   end
 

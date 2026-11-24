@@ -209,8 +209,9 @@ defmodule BarkparkWeb.Integration.ChatAnswerHostGateTest do
   end
 
   # The instance-host rule never applies to a registered host; the seat rule
-  # does (task-7efaf895e8bc88e4): the member seat is refused, then answers once
-  # it is seated owner.
+  # does (task-7efaf895e8bc88e4): the member seat cannot even see the session
+  # (task-f44bbb6363d28e37, the missing-id 404), then answers once it is seated
+  # owner.
   test "CONTROL: a registered-host session takes the seat rule, not the host gate",
        %{default_ws: ws, seat: seat} do
     {:ok, %{enrollment_token: t}} = ChatHosts.issue_enrollment(ws.id, %{name: "answergate"})
@@ -244,7 +245,7 @@ defmodule BarkparkWeb.Integration.ChatAnswerHostGateTest do
     )
 
     refused = answer(seat, sid, "q-3")
-    assert %{"error" => %{"code" => "host_admin_required"}} = json_response(refused, 403)
+    assert %{"error" => %{"code" => "not_found"}} = json_response(refused, 404)
     assert status_of(sid) == "pending"
 
     {:ok, token} = Barkpark.Auth.verify_token(seat)

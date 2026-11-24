@@ -230,7 +230,10 @@ defmodule BarkparkWeb.ChatController do
       # sessions are never starved out of the `@sidebar_cap` window by other
       # tenants' more-recent sessions (which an after-the-fact in-memory filter
       # would allow). `:global` stays unfiltered (admin sidebar unchanged).
-      sessions = StudioChat.list_sessions([archived: archived?], store_scope(scope(conn)))
+      sessions =
+        [archived: archived?]
+        |> StudioChat.list_sessions(store_scope(scope(conn)))
+        |> then(&HostExecutionGate.visible_sessions(conn.assigns[:api_token], &1))
 
       json(conn, %{sessions: Enum.map(sessions, &sidebar_json(&1, conn.assigns[:api_token]))})
     else
@@ -281,7 +284,7 @@ defmodule BarkparkWeb.ChatController do
   """
   def show(conn, %{"id" => id} = params) do
     with {:ok, since} <- validate_since(params),
-         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = session <- fetch_visible(conn, id) do
       messages = MessagesSince.list(id, since, store_scope(scope(conn)))
       json(conn, full_session_json(session, messages, conn.assigns[:api_token]))
     else
@@ -307,7 +310,7 @@ defmodule BarkparkWeb.ChatController do
     # claude-only values), so the row has to exist first. Deliberate precedence
     # flip: unknown session + bad body is now 404, not 400 — the tenant
     # not-found oracle outranks body shape (pinned in the controller tests).
-    with %StudioChat.Session{provider: provider} = session <- fetch_scoped(id, scope(conn)),
+    with %StudioChat.Session{provider: provider} = session <- fetch_visible(conn, id),
          {:ok, ops} <- validate_patch(body, provider),
          {:ok, ops, runtime} <- patch_steer(conn, session, ops) do
       Enum.each(ops, &apply_patch_op(session, runtime, &1))
@@ -362,7 +365,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {content, attachment_ids}} <- validate_content(body),
-         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Session{} = session <- fetch_visible(conn, id),
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
          {:ok, turn} <- ChatUserTurn.resolve(session, content, attachment_ids) do
       # A registered host's lease is made under this key, so a send the server
@@ -404,7 +407,7 @@ defmodule BarkparkWeb.ChatController do
   spawn one just to interrupt it.
   """
   def interrupt(conn, %{"id" => id}) do
-    with %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
+    with %StudioChat.Session{} = stored <- fetch_visible(conn, id) do
       request_id =
         with recorder when is_pid(recorder) <- Recorder.whereis(id),
              {:ok, session} <- Recorder.session_pid(recorder),
@@ -437,7 +440,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, decision}} <- validate_approval(body),
-         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Session{} = stored <- fetch_visible(conn, id),
          # An ALLOW lets a host turn act; a deny always passes (task-6ca882967fd95dda).
          :ok <-
            if(decision == :allow,
@@ -523,7 +526,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, raw_answers}} <- validate_answer(body),
-         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Session{} = stored <- fetch_visible(conn, id),
          # An answer is an ALLOW: it lets a host turn act, so it passes the same
          # gate as /approval allow (task-b03e470c315a6664).
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
@@ -564,12 +567,16 @@ defmodule BarkparkWeb.ChatController do
   clients remove optimistically on the 200 and reconcile on the next list poll.
   """
   def archive(conn, %{"id" => id}) do
-    respond_archived(conn, StudioChat.archive_session(id, store_scope(scope(conn))))
+    if fetch_visible(conn, id),
+      do: respond_archived(conn, StudioChat.archive_session(id, store_scope(scope(conn)))),
+      else: not_found(conn)
   end
 
   @doc "Unarchive (charter D28) — clear `archived_at`. Same oracle + idempotency."
   def unarchive(conn, %{"id" => id}) do
-    respond_archived(conn, StudioChat.unarchive_session(id, store_scope(scope(conn))))
+    if fetch_visible(conn, id),
+      do: respond_archived(conn, StudioChat.unarchive_session(id, store_scope(scope(conn)))),
+      else: not_found(conn)
   end
 
   defp respond_archived(conn, result) do
@@ -612,7 +619,7 @@ defmodule BarkparkWeb.ChatController do
     # SCOPE THE SESSION BEFORE SUBSCRIBING (Connectors D18/D19a): a wrong-tenant
     # (or missing) id 404s here, so tenant B can never join tenant A's live
     # `Recorder.topic/1` stream by guessing a UUID.
-    case fetch_scoped(id, scope(conn)) do
+    case fetch_visible(conn, id) do
       nil ->
         not_found(conn)
 
@@ -1241,6 +1248,16 @@ defmodule BarkparkWeb.ChatController do
   # at the DB — the store is the single enforcement point, the controller only
   # threads the scope.
   defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
+
+  # The id routes' one fetch: the tenant seal, then the registered-host seat
+  # (task-f44bbb6363d28e37). A host session the caller may not see is the same
+  # `nil` as a missing id, so its existence does not leak.
+  defp fetch_visible(conn, id) do
+    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+         true <- HostExecutionGate.may_see_session?(conn.assigns[:api_token], session),
+         do: session,
+         else: (_ -> nil)
+  end
 
   # ─────────────────────────────────────────────────────────────────────────
   # writes: strict Recorder/ClaudeChat adapter

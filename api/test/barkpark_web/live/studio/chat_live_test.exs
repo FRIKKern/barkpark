@@ -2627,14 +2627,19 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = Ecto.UUID.generate()
       host_id = Ecto.UUID.generate()
 
+      # Owned by Default, where the admin token holds its seat: a host session
+      # with no workspace is seen by no one (task-f44bbb6363d28e37).
       assert {:ok, _session} =
-               StudioChat.create_session(%{
-                 id: sid,
-                 provider: "codex",
-                 execution_target: "registered_host",
-                 execution_host_id: host_id,
-                 mode: "read-only"
-               })
+               StudioChat.create_session(
+                 %{
+                   id: sid,
+                   provider: "codex",
+                   execution_target: "registered_host",
+                   execution_host_id: host_id,
+                   mode: "read-only"
+                 },
+                 {:workspace, Barkpark.TenancyFixtures.default_workspace_id!()}
+               )
 
       {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
 

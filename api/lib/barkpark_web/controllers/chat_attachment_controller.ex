@@ -77,7 +77,7 @@ defmodule BarkparkWeb.ChatAttachmentController do
 
     # Tenant oracle FIRST (charter D17): a session another tenant owns must 404
     # before this route reveals anything — including whether a body was valid.
-    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+    with %StudioChat.Session{} = session <- fetch_visible(conn, id),
          {:ok, bytes} <- validate_upload(body),
          {:ok, pointer} <- store(session.id, bytes) do
       conn
@@ -99,7 +99,7 @@ defmodule BarkparkWeb.ChatAttachmentController do
   attachment on it) exists in another tenant.
   """
   def show(conn, %{"id" => id, "attachment_id" => attachment_id}) do
-    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+    with %StudioChat.Session{} = session <- fetch_visible(conn, id),
          {:ok, attachment} <- Attachments.fetch(session.id, attachment_id) do
       json(conn, %{
         attachment: %{
@@ -127,6 +127,16 @@ defmodule BarkparkWeb.ChatAttachmentController do
   # missing OR owned by another tenant. The controller only threads the scope;
   # the store is the single enforcement point.
   defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
+
+  # Plus the registered-host seat (task-f44bbb6363d28e37): a host session the
+  # caller may not see is the same `nil` as a missing id.
+  defp fetch_visible(conn, id) do
+    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+         true <-
+           BarkparkWeb.HostExecutionGate.may_see_session?(conn.assigns[:api_token], session),
+         do: session,
+         else: (_ -> nil)
+  end
 
   # ── validation (D22 strictness) ────────────────────────────────────────────
 

@@ -295,10 +295,19 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
       assert_own_session_leased(a_raw, host_a)
     end
 
-    test "it reads and lists every workspace's sessions (charter D21), which is how it sees B's row",
+    # Charter D21 still lists every workspace's MANAGED sessions; a host session
+    # is listed only where the token holds a seat (task-f44bbb6363d28e37). The
+    # operator's admin seat is in Default, not in B.
+    test "it lists B's managed row but not B's host row, and reads the host row as missing",
          %{default_ws: default_ws, host_a: host_a, b_raw: b_raw} do
       op_raw = mint!(["read", "write", "admin"], default_ws.id)
-      sid = create(b_raw, host_a) |> json_response(201) |> Map.fetch!("id")
+      host_sid = create(b_raw, host_a) |> json_response(201) |> Map.fetch!("id")
+
+      managed_sid =
+        json_conn(b_raw)
+        |> post("/v1/chat/sessions", Jason.encode!(%{provider: "claude"}))
+        |> json_response(201)
+        |> Map.fetch!("id")
 
       ids =
         json_conn(op_raw)
@@ -307,7 +316,9 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
         |> Map.fetch!("sessions")
         |> Enum.map(& &1["id"])
 
-      assert sid in ids
+      assert managed_sid in ids
+      refute host_sid in ids
+      assert json_conn(op_raw) |> get("/v1/chat/sessions/#{host_sid}") |> json_response(404)
     end
   end
 
