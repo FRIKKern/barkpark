@@ -522,6 +522,33 @@ const captureInView = async () => {
   return held
 }
 
+/** A shot of the view on a page that moves after the view is read and before the shot, with no box placed against
+    the view in the clip (the index's list, the page's one sticky box, is planted static): the page is put back, and
+    the shot is taken again; on a move before every shot the capture is red by name as the check's own. */
+const captureViewMoves = () =>
+  onPage('.sr-index ul { position: static }', 'reduce', async (page) => {
+    const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight, h: innerHeight }))
+    const { most, h } = await where()
+    await page.barkCheck((top) => (scrollTo({ left: 0, top, behavior: 'instant' }), window.__barkCheck.still('the page scrolled for the row')), Math.round(most / 2))
+    const before = await where()
+    const clip = { x: 8, y: before.y + Math.round(h / 2), w: 8, h: 8 }
+    await capture(page, page.barkCheck, clip) // a page's first shot is a full-page one
+    const take = async (moves) => {
+      let [n, views] = [0, 0]
+      const fake = { screenshot: async (o) => {
+        views += o.fullPage ? 0 : 1
+        if (++n <= moves) await page.barkCheck((top) => scrollTo({ left: 0, top, behavior: 'instant' }), before.y + 40)
+        return page.screenshot(o)
+      } }
+      const shot = await capture(fake, page.barkCheck, clip).then(() => 'read', (e) => String(e.message))
+      const after = await where()
+      console.log(`    the page moved 40px before ${moves === 1 ? 'the first shot' : 'every shot'}, no fixed box in the clip: ${n} shot(s), ${views} of the view; the capture ${shot.slice(0, 200)}; the page at ${after.y}px after it, ${before.y}px before`)
+      return { shot, n, sound: views === n && after.x === before.x && after.y === before.y }
+    }
+    const [once, always] = [await take(1), await take(Infinity)]
+    return most >= 100 && once.shot === 'read' && once.n === 2 && MOVED.test(always.shot) && always.n === 3 && once.sound && always.sound
+  })
+
 export const REST_CASES = [
   {
     name: 'at rest: a box hidden for the capture behind it and drawn again reads at its new opacity at once; the change starts no transition and the checker adds no animation',
@@ -545,5 +572,9 @@ export const REST_CASES = [
   {
     name: "at rest: a capture whose clip lies inside the view leaves the page's scroll as it was, read before and after each shot, on a page that moves under a full-page capture, and reads what a full-page shot draws, at 1440px and at 390px as a phone shows it",
     direct: captureInView,
+  },
+  {
+    name: "at rest: a shot of the view taken when the page moved after the view was read, with no box placed against the view in the clip, is taken again, and red by name as the check's own red when the page moves before every shot",
+    direct: captureViewMoves,
   },
 ]

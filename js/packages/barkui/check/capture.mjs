@@ -5,10 +5,11 @@
 /** How many times a capture is taken before the check gives up on it: the first and two more. */
 export const TRIES = 3
 const shots = { taken: 0, again: 0, moved: 0 }
-/** The run's line: how many captures were taken again because the page moved while they were taken with a box placed
-    against the view in the clip, and how many moved with no such box in the clip and were read as taken. */
+/** The run's line: how many captures were taken again because the page moved while they were taken, as a shot of the
+    view or with a box placed against the view in the clip, and how many full-page ones moved with no such box in the
+    clip and were read as taken. */
 export const captureSentence = () =>
-  `capture: ${shots.taken} captures, ${shots.again} taken again (the page moved during the shot, a box placed against the view in the clip), ${shots.moved} moved during the shot with no such box in the clip and read as taken`
+  `capture: ${shots.taken} captures, ${shots.again} taken again (the page moved during a shot of the view, or during a full-page shot with a box placed against the view in the clip), ${shots.moved} moved during a full-page shot with no such box in the clip and read as taken`
 
 /** A PNG (base64) of `clip` on `page`, once `world` (the check's own isolated world of that page) finds it at rest.
     Playwright keeps the page's pixel ratio (a capture from a CDP session of our own resets the emulated ratio to 1
@@ -23,7 +24,8 @@ export const captureSentence = () =>
     anything reads it again. A full-page capture draws the page where it lies on the page, so a move leaves it as it
     is, but a box placed against the view (position fixed or sticky) is drawn where the move put it: a capture during
     which the page moved with such a box in the clip is not read but taken again, up to TRIES times, and then the
-    capture is red by name as the check's own. */
+    capture is red by name as the check's own. A shot of the view draws the view wherever the move put it, so one
+    taken when the page moved after the view was read, whatever is in the clip, is taken again the same way. */
 export async function capture(page, world, clip) {
   await world(() => window.__barkCheck.still('a capture'))
   // The view as the screen shows it (the visual viewport, without scrollbars): what a shot of the view draws.
@@ -56,7 +58,7 @@ export async function capture(page, world, clip) {
       return { was, pinned: [...hit].some(placed) }
     }, [left, top, clip])
     if (!moved) return png.toString('base64')
-    if (!moved.pinned) {
+    if (!inView && !moved.pinned) {
       shots.moved++
       return png.toString('base64')
     }
