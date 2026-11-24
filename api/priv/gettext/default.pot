@@ -11773,6 +11773,12 @@ msgstr ""
 msgid "Link address"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex:352
+#: lib/barkpark_web/studio_locale.ex:962
+#, elixir-autogen, elixir-format
+msgid "Use a web, mail or phone address (https:, mailto:, tel:) or a path."
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:787
 #, elixir-autogen, elixir-format
 msgid "Link type"
