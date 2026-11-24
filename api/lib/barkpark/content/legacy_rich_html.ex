@@ -22,6 +22,10 @@ defmodule Barkpark.Content.LegacyRichHtml do
       inside `#editor-form`, so a stored `<input name="doc[title]">` would
       post a value for another field;
     * no `style`, so a stored link cannot cover the Studio;
+    * no `id` or `name`: inside the form a stored `<img name="getAttribute">`
+      or `<span id="bp-rt-hidden-…">` would shadow the form's, the
+      document's or a later field's own names;
+    * `strike`, which the editor's strikethrough writes, is kept;
     * every `href` is judged by `LinkHref.allowed?/1`. A refused one is
       kept as `data-refused-href`, with its address: the anchor draws as its
       words, and an edit of the field posts the address back inert, never

@@ -286,6 +286,33 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
       assert doc |> LazyHTML.query("[href]") |> Enum.count() == 0
     end
 
+    # #28402 review r2, S1: inside #editor-form a stored name or id shadows
+    # the form's, the document's or a later field's own names.
+    test "no id or name is drawn" do
+      for payload <- [
+            ~s|<img name="getAttribute" src="x"><img id="submit" src="x"><img name="elements" src="x">|,
+            ~s|<img name="querySelector" src="x"><img name="getElementById" src="x">|,
+            ~s|<span id="bp-rt-hidden-body2">clob</span>|
+          ] do
+        doc = drawn("<p>a" <> payload <> "</p>")
+        assert doc |> LazyHTML.query("[id], [name]") |> Enum.count() == 0, payload
+      end
+    end
+
+    test "the reader keeps id and name (task-52d612bdb8ff6cb3 owns that)" do
+      assert Barkpark.PortableDoc.HtmlSanitizer.sanitize(~s|<p id="a"><img name="n" src="x"></p>|) ==
+               ~s|<p id="a"><img name="n" src="x"></p>|
+    end
+
+    # S2: the editor's strikethrough writes <strike>; a redraw kept only the
+    # words, and the next edit stored them without it.
+    test "the editor's own strikethrough is kept, byte for byte" do
+      for body <- [~s|<strike>x</strike>|, ~s|<p>a <strike>more z</strike> b</p>|] do
+        assert Barkpark.Content.LegacyRichHtml.for_editor(body) == body
+        assert Barkpark.PortableDoc.HtmlSanitizer.sanitize(body) == body
+      end
+    end
+
     test "the drawn copy is a fixed point: drawn again it is the same" do
       for body <- [
             ~s|<p><a href="javascript:alert(1)">x</a> <input name="a"> <a href="https://e.example/">y</a></p>|,

@@ -238,9 +238,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   it to reach the fail-closed path).
 
   `editor: true` scrubs the copy a Studio rich text editor draws inside its
-  form (`Content.LegacyRichHtml`): no form control, no `style`, and an `href`
-  that `opts[:href_allowed?]` refuses is kept as `data-refused-href`. The
-  reader's policy drops `data-refused-href`.
+  form (`Content.LegacyRichHtml`): no form control, no `style`, `id` or
+  `name`, and an `href` that `opts[:href_allowed?]` refuses is kept as
+  `data-refused-href`. The reader's policy drops `data-refused-href`.
   """
   @spec sanitize(term(), keyword()) :: term()
   def sanitize(html, opts \\ [])
@@ -360,6 +360,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   defp scrub_attr({name, value}, %{editor: true} = policy) do
     case String.downcase(name) do
       "style" -> []
+      # The copy sits in the light DOM inside `#editor-form`: a stored `name`
+      # or `id` would shadow the form's or the document's own properties
+      # (`form.getAttribute`, `document.querySelector`) or a later field's
+      # hidden input (#28402 review r2, S1). The reader keeps them for now.
+      key when key in ["id", "name"] -> []
       "data-refused-href" -> [{"data-refused-href", value}]
       "href" -> editor_href(value, policy)
       _ -> scrub_attr({name, value}, %{editor: false})
