@@ -1,0 +1,127 @@
+/* Checkbox: UI SDK's <ui-checkbox>, the control itself (role checkbox), holding its own words, as UI SDK's custom
+   rendering puts them: the words name it, and in a field the field's error describes it. So a box and its words
+   are one control: the pointer on the words is on the box, and the focus ring, base.css's, drawn once for every
+   part, goes round both, a little off the words. The control draws no fill and no edge of its own; its words are its label.
+   The box is the control's ::before and the mark its ::after, both drawn here, so the mark is read with the box as
+   one graphic. No indicator and no mask: UI SDK draws its mark as a masked box, and a mask on the page changes how
+   the hosted browser draws text elsewhere on it.
+   Unchecked, the box is empty on the ground with the text field's --ui-input edge, which stands at 3:1. Checked or
+   mixed, it is filled with --ui-primary, with a tick or a dash in --ui-primary-foreground. Under the pointer the
+   empty box's edge darkens and a filled box takes --ui-primary-hover; pressed, the sheet's pressed fills.
+   Read-only keeps its mark but is drawn on --ui-muted in --ui-foreground, so it does not look like a box a press
+   changes; disabled is UI SDK's, faded. Invalid takes the text field's danger edge, and checked while invalid is
+   filled with that danger colour.
+   At phone width the control keeps UI SDK's 44px touch height whatever the pointer.
+   The look keys only on what UI SDK writes: data-checked, data-indeterminate, data-readonly, data-disabled and
+   data-invalid, and on :hover and :active. */
+
+[data-slot="checkbox"] {
+  --bark-checkbox-text: 0.875rem;
+  --bark-checkbox-fill: var(--ui-background);
+  --bark-checkbox-edge: var(--ui-input);
+  --bark-checkbox-mark: var(--ui-primary-foreground);
+  --bark-checkbox-hover-fill: var(--ui-background);
+  --bark-checkbox-hover-edge: var(--ui-muted-foreground);
+  --bark-checkbox-press-fill: var(--ui-muted-pressed);
+  --bark-checkbox-press-edge: var(--ui-muted-foreground);
+
+  position: relative;
+  width: auto;
+  height: auto;
+  justify-content: flex-start;
+  gap: calc(var(--ui-spacing) * 2);
+  /* Room between the words and the focus ring, which goes round the control. */
+  padding-block: calc(var(--ui-spacing) * 0.5);
+  padding-inline: 0 var(--ui-spacing);
+  border: 0 solid transparent;
+  border-radius: calc(var(--ui-radius) / 2);
+  background: transparent;
+  color: var(--ui-foreground);
+  font-size: var(--bark-checkbox-text);
+  line-height: 1.25;
+
+  /* The box: 14px inside a 1px edge, sized by its content so it draws the same alone. */
+  &::before {
+    content: "";
+    box-sizing: content-box;
+    flex-shrink: 0;
+    width: calc(1rem - 2px);
+    height: calc(1rem - 2px);
+    border: 1px solid var(--bark-checkbox-edge);
+    border-radius: calc(var(--ui-radius) / 2);
+    background: var(--bark-checkbox-fill);
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  }
+
+  &[data-invalid] {
+    --bark-checkbox-edge: var(--bark-danger-text);
+  }
+
+  &[data-checked],
+  &[data-indeterminate] {
+    --bark-checkbox-fill: var(--ui-primary);
+    --bark-checkbox-edge: var(--ui-primary);
+    --bark-checkbox-hover-fill: var(--ui-primary-hover);
+    --bark-checkbox-hover-edge: var(--ui-primary-hover);
+    --bark-checkbox-press-fill: var(--ui-primary-pressed);
+    --bark-checkbox-press-edge: var(--ui-primary-pressed);
+  }
+
+  /* Checked while invalid: the box takes the error's own colour, with the mark in the ground's, so it still reads as
+     invalid; the pair is the field error's text on its ground. */
+  &[data-invalid][data-checked] {
+    --bark-checkbox-fill: var(--bark-danger-text);
+    --bark-checkbox-edge: var(--bark-danger-text);
+    --bark-checkbox-mark: var(--ui-background);
+  }
+
+  &[data-readonly] {
+    --bark-checkbox-fill: var(--ui-muted);
+    --bark-checkbox-edge: var(--ui-input);
+    --bark-checkbox-mark: var(--ui-foreground);
+  }
+
+  /* The mark, centred on the box: a tick is two edges of a small box turned a quarter, a dash one edge. */
+  &[data-checked]::after,
+  &[data-indeterminate]::after {
+    content: "";
+    position: absolute;
+    inset: auto;
+    top: 50%;
+    inset-inline-start: 0.5rem;
+    box-sizing: content-box;
+    border: 0 solid transparent;
+    border-color: var(--bark-checkbox-mark);
+  }
+
+  &[data-checked]::after {
+    width: 0.25rem;
+    height: 0.5rem;
+    border-width: 0 2px 2px 0;
+    translate: -50% -60%;
+    rotate: 45deg;
+  }
+
+  &[data-indeterminate]::after {
+    width: 0.5rem;
+    height: 0;
+    border-width: 2px 0 0;
+    translate: -50% -50%;
+  }
+
+  &:hover:not([data-disabled], [data-readonly], [data-invalid]) {
+    --bark-checkbox-fill: var(--bark-checkbox-hover-fill);
+    --bark-checkbox-edge: var(--bark-checkbox-hover-edge);
+  }
+
+  &:active:not([data-disabled], [data-readonly], [data-invalid]) {
+    --bark-checkbox-fill: var(--bark-checkbox-press-fill);
+    --bark-checkbox-edge: var(--bark-checkbox-press-edge);
+  }
+}
+
+@media (max-width: 600px) {
+  [data-slot="checkbox"] {
+    min-height: 2.75rem;
+  }
+}
