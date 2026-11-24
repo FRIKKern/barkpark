@@ -170,10 +170,10 @@
     "ops/patch-table-structure.json": "c31a68e9c2610ab655b8fb3c41a513590e9f8234e70ffefb57ed327b7697fd0b",
     "ops/remove-block.json": "61837d01ff16bbdaf1acf8adb46e4045ecfe93666f8e6af00c54975d0bce2d3a",
     "ops/replace-block.json": "6d080b29f857c6f4803206bf5528ff6c26636b951537d57517f8cc64eeefc8b2",
-    "pages/dark-en.html": "c67a4e355e81bdc2396478ad1dda604a6bae78c7074c789eb9aeee0f6aba92af",
-    "pages/dark-nb-NO.html": "a0f016ca4c69a7cf0803cd773168809868ae766c8c438b8f2d6e8cf737072b8a",
-    "pages/light-en.html": "5701ce0a1f15b53b699584898bf4847d796c828677bb7f8f94f81449c61ecf52",
-    "pages/light-nb-NO.html": "97c360bc6ca8068c4864a42e714fc34b8d70b119fd6cf52f7b240d32d49f30e4"
+    "pages/dark-en.html": "7c480cdb6b7f34287d91b43a6ea5057aa69de3bd269a0d253f28a1f3da9cbe7f",
+    "pages/dark-nb-NO.html": "86af79dd36dea7836628ce24500819286566d99cf9ef1240e573dec39b3be023",
+    "pages/light-en.html": "de7e55515804efe8ce8ac20da92ed367f18e37848ba029bcb02a1a4dc3859f3b",
+    "pages/light-nb-NO.html": "ea0ec0f17e7a042425b6b28422f789c6dfa516ca7c4fc97b633f0a39521f5d45"
   },
   "gettext_sha256": "4de89039ec267db31b4146ae97f65acd5f0144f75b6f3fdf16878c0cb99303d6",
   "inputs": [
