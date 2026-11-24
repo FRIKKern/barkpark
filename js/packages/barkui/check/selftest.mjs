@@ -33,6 +33,7 @@ import { lightLines, PAGE_CASES } from './page-cases.mjs'
 import { VERDICT_CASES } from './verdict-cases.mjs'
 import { createHash } from 'node:crypto'
 import { PLANTED, WALL_CASES } from './wall-cases.mjs'
+import { TIME_CASES } from './time-cases.mjs'
 import { CHECKED_CASES, STATE_CASES, SURFACE_CASES } from './unfolded-cases.mjs'
 import { holderSentence, topLayerTouch } from './layers.mjs'
 import { edit, inDemo, mark, wrap, inCss, all, copyAs, lights, reasons, skinsSay, phoneSays, failedSay, DRAWN, drawnOff, both, refused, each, ladderHtml, ladderCss, ladderHolds, CEILING_CASES } from './plants.mjs'
@@ -618,6 +619,7 @@ steps.push({
   ...PAGE_CASES,
   ...VERDICT_CASES,
   ...WALL_CASES,
+  ...TIME_CASES,
   {
     name: 'one part more than one CI job holds is refused, with the sentence that says how many it holds',
     plant: (d) => {

@@ -143,6 +143,14 @@ export function materialize(dir = partsDir, env = process.env, base = env.RUNNER
   return into
 }
 
+/** The folder one job's page is built from (check/check.mjs runCheck, given `names`): a fresh scratch root holding
+    a copy of those part folders alone, so the page the job reads prints only the stages it is given. */
+export function pageOf(dir, names, base = process.env.RUNNER_TEMP || tmpdir()) {
+  const into = mkdtempSync(join(base, 'barkui-job-page-'))
+  for (const name of names) cpSync(join(dir, name), join(into, name), { recursive: true })
+  return into
+}
+
 /** The fewest groups of at most perJob parts, sizes within one of each other, in name order. */
 export function split(names, perJob = PER_JOB) {
   if (!names.length) throw new Error(NO_PARTS)
