@@ -61,7 +61,7 @@ export async function runCheck(o = {}) {
   const next = order[Math.max(...names.map((n) => order.indexOf(n))) + 1]
   const page = pageOf(dir, next ? [...names, next] : names)
   try {
-    return await readParts({ ...o, dir: page, sheet: join(`${out}-whole`, 'barkui.css'), every: whole.parts })
+    return await readParts({ ...o, dir: page, sheet: join(`${out}-whole`, 'barkui.css'), every: whole.parts, probeSrc: dir, probeOrder: order })
   } finally {
     rmSync(page, { recursive: true, force: true })
   }
@@ -69,7 +69,7 @@ export async function runCheck(o = {}) {
 
 // `sheet` and `every` (runCheck, given `names`): the barkui.css of the page of every part, which the page read loads
 // in place of its own, and every part in it, each read alone and held to its section there (sameAsShipped).
-async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES, sheet = null, every = null } = {}) {
+async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, only = LIGHT_NAMES, log = console.log, surfaces = true, motion = true, states = true, plantCss = '', names = null, viewPages = VIEW_PAGES, sheet = null, every = null, probeSrc = null, probeOrder = [] } = {}) {
   // A refusal by the wall anywhere in this run (check/acts.mjs), a timer's or a listener's too, is an error of the run.
   const before = refusals().length
   let built
@@ -138,7 +138,17 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     let own = null
     try {
       await limit((async () => {
-        if (process.env.BARKUI_PROBE_OWN === '1') ctx.browser = own = await launch({ args: ['--disable-lcd-text'] })
+        if (process.env.BARKUI_PROBE_PAGE === '1') {
+          const i = probeOrder.indexOf(part.name)
+          const follow = probeOrder[i + 1]
+          const pdir = pageOf(probeSrc, follow ? [part.name, follow] : [part.name])
+          const at = `${out}-p-${part.name}`
+          const pb = await buildShowroom({ dir: pdir, out: at, proof: proofFile, quiet: true, plantCss })
+          const pbare = await buildShowroom({ dir: pdir, out: `${at}-bare`, proof: proofFile, quiet: true, plantCss, bare: true })
+          for (const o of [at, `${at}-bare`]) copyFileSync(sheet, join(o, 'barkui.css'))
+          ctx.url = pathToFileURL(pb.file).href
+          ctx.styles = await styleBaseline(browser, pathToFileURL(pbare.file).href)
+        }
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
         if (only.includes('skins') || only.includes('schemes')) {
           const looks = await skinsAndSchemes(ctx, part, skins, viewPages)

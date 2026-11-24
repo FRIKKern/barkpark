@@ -6,7 +6,7 @@ import { materialize } from './jobs.mjs'
 
 const dir = materialize()
 const names = process.argv[2].split(',')
-const arm = process.env.BARKUI_PROBE_OWN === '1' ? 'B (a browser per part)' : 'S (one shared browser)'
+const arm = process.env.BARKUI_PROBE_PAGE === '1' ? 'P (a page per part and its follower)' : 'S (the group page)'
 console.log(`probe: arm ${arm}: ${names.join(', ')}`)
 const stop = startCpuProbe(arm.slice(0, 1))
 const began = performance.now()

@@ -20,6 +20,7 @@ function kindOf(pid, cmd) {
 
 export function startCpuProbe(label) {
   const seen = new Map()
+  const threads = new Map()
   const t0 = performance.now()
   const elu0 = performance.eventLoopUtilization()
   const series = []
@@ -49,6 +50,18 @@ export function startCpuProbe(label) {
       }
       e.cpu = cpu
       e.last = performance.now()
+      if (pid === process.pid) continue
+      let tids = []
+      try {
+        tids = readdirSync(`/proc/${pid}/task`)
+      } catch {}
+      for (const t of tids) {
+        const ts = read(`/proc/${pid}/task/${t}/stat`)
+        if (!ts) continue
+        const comm = ts.slice(ts.indexOf('(') + 1, ts.lastIndexOf(')')).replace(/\d+$/, '')
+        const g = ts.slice(ts.lastIndexOf(')') + 2).split(' ')
+        threads.set(`${pid}/${t}`, { key: `${e.kind} ${comm}`, cpu: (+g[11] + +g[12]) / TICK })
+      }
     }
   }
   const total = () => {
@@ -83,6 +96,9 @@ export function startCpuProbe(label) {
     const lines = [...series]
     lines.push(`cpu-probe ${label}: wall ${wall.toFixed(1)} s, ${availableParallelism()} cpus, all kinds ${sum.toFixed(1)} cpu s = ${(sum / wall).toFixed(2)} cores; node event loop ${(elu.utilization * 100).toFixed(0)}% busy`)
     for (const [k, v] of [...by].sort((a, b) => b[1] - a[1])) lines.push(`cpu-probe ${label}: ${k}: ${v.toFixed(1)} cpu s over ${counts.get(k)} process(es), ${(v / wall).toFixed(2)} cores`)
+    const th = new Map()
+    for (const t of threads.values()) th.set(t.key, (th.get(t.key) ?? 0) + t.cpu)
+    for (const [k, v] of [...th].sort((a, b) => b[1] - a[1]).slice(0, 14)) lines.push(`cpu-probe ${label}: thread ${k}: ${v.toFixed(1)} cpu s, ${(v / wall).toFixed(2)} cores`)
     for (const e of top().slice(0, 6)) lines.push(`cpu-probe ${label}: busiest pid ${e.pid} ${e.kind}: ${(e.cpu - e.base).toFixed(1)} cpu s in ${((e.last - e.first) / 1000).toFixed(0)} s seen = ${((e.cpu - e.base) / Math.max(1, (e.last - e.first) / 1000)).toFixed(2)} of a core`)
     for (const l of lines) console.log(l)
   }
