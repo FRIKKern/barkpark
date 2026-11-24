@@ -50,7 +50,7 @@ export const steps = [
     },
   },
   {
-    name: 'ArrowUp six times stops at 6, its highest, and the increment button is disabled',
+    name: 'ArrowUp six times from 1 reaches 6, its highest, and stops there, the increment button disabled',
     keys: ['ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp'],
     expect: (root, h) => {
       const t = root.querySelector('#number-input-guests-control')
