@@ -39,6 +39,13 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   the document is refused when it holds unshown content. Blocks that hold
   none are written from the push as before.
 
+  The rule reads per list item too (`WriteWall.Items`): unshown content inside
+  a stored list item with an id is kept when the block with the same id holds
+  that item once, with its id, and the content byte-equal in canonical
+  spelling. `Bpml.ListItems.carry/2` brings it back on push, so the item may
+  be edited where the pull showed it. The read of an old copy (below) keeps
+  the block rule whole.
+
   The check runs inside `Papers.BpmlView.push/3`, after
   `Bpml.CalloutBody.resolve/4` and before any op derives, on the blocks the
   push would write (`Diff.target/3`). It compares against the blocks the
@@ -68,8 +75,10 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   answers the fingerprint of its bytes (`x-bpml-view`); bp keeps it with the
   anchor and sends it back as `bpmlView`; a push whose fingerprint is not the
   row's current one is refused with 412, and an applied push answers the new
-  one. A push without a fingerprint (a bp from before it) gets the block rules
-  alone, which cannot see such a change: that gap is pinned by a test. A pull
+  one. A form the printer began to show at a print number (`Bpml.PrintMark`)
+  is read from the copy's print mark too, as far as the mark is believed: a
+  block that holds content the copy did not show comes home unchanged or the
+  push is refused. A pull
   through another perspective or tenant scope than `bp paper pull`'s can print
   another view; when it does, its push answers 412.
 
@@ -79,6 +88,7 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
   alias Barkpark.PortableDoc.Bpml
   alias Barkpark.PortableDoc.Bpml.{Canonical, Diff}
+  alias Barkpark.PortableDoc.Bpml.WriteWall.Items
 
   @code "bpml_unshown"
 
@@ -109,12 +119,14 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   The blocks a push of `pushed` writes over `stored` (`Diff.target/3`, against
   `pulled`, the blocks the pull's bytes read back as), or the refusal when
   they change what the pull did not show, or repeat a top-level id.
+  `items: false` reads blocks whole, without the per-item rule
+  (`WriteWall.Items`), as the read of an old copy does.
   """
-  @spec target([map()], [map()], [map()]) :: {:ok, [map()]} | {:refused, map()}
-  def target(stored, pulled, pushed) do
+  @spec target([map()], [map()], [map()], keyword()) :: {:ok, [map()]} | {:refused, map()}
+  def target(stored, pulled, pushed, opts \\ []) do
     with :ok <- unique_ids(pushed, stored),
          result = Diff.target(stored, pushed, pulled),
-         :ok <- check(stored, pulled, result),
+         :ok <- check(stored, pulled, result, opts),
          do: {:ok, result}
   end
 
@@ -151,15 +163,17 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
   `stored` that `pulled` (the blocks the pull's bytes read back as) does not
   carry.
   """
-  @spec check([map()], [map()], [map()]) :: :ok | {:refused, map()}
-  def check(stored, pulled, result)
+  @spec check([map()], [map()], [map()], keyword()) :: :ok | {:refused, map()}
+  def check(stored, pulled, result, opts \\ [])
       when is_list(stored) and is_list(pulled) and is_list(result) do
+    items? = Keyword.get(opts, :items, true)
+
     if stored == result do
       :ok
     else
       stored
       |> Enum.with_index()
-      |> Enum.find_value(:ok, fn {s, i} -> refusal(s, i, stored, pulled, result) end)
+      |> Enum.find_value(:ok, fn {s, i} -> refusal(s, i, {stored, pulled, result}, items?) end)
     end
   end
 
@@ -214,7 +228,7 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
 
   # ── the per-block rule ──────────────────────────────────────────────────────
 
-  defp refusal(s, i, stored, pulled, result) do
+  defp refusal(s, i, {stored, pulled, result}, items?) do
     id = if is_map(s), do: s["id"]
     matched? = is_binary(id) and Enum.count(stored, &(is_map(&1) and &1["id"] == id)) == 1
 
@@ -226,7 +240,10 @@ defmodule Barkpark.PortableDoc.Bpml.WriteWall do
     if kept? do
       nil
     else
-      case missing_from(s, pulled_block(s, i, matched?, stored, pulled)) do
+      paths = missing_from(s, pulled_block(s, i, matched?, stored, pulled))
+      paths = if matched? and items?, do: Items.uncovered(paths, s, result), else: paths
+
+      case paths do
         [] -> nil
         [first | _] = paths -> refuse(i, id, first, paths)
       end

@@ -110,9 +110,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
       {:ok, _doc} ->
         was = socket.assigns[:editor_form]
 
+        # The restore replaced what the form held: nothing typed is left
+        # unsaved, so the desk no longer asks before leaving (#28408 review).
         socket =
           socket
-          |> assign(show_history: false, revisions: [])
+          |> assign(
+            show_history: false,
+            revisions: [],
+            editor_dirty: false,
+            editor_unsaved_keys: MapSet.new(),
+            editor_refused: nil,
+            editor_refused_clears: nil
+          )
           |> put_flash(:info, gettext("Restored from history"))
           |> Shared.rebuild_panes()
           |> RichTextRemote.repaint(was)

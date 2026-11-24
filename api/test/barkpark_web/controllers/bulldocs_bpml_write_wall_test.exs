@@ -38,13 +38,13 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
   end
 
   defp pull(slug) do
-    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(resp, "x-paper-rev")
     {response(resp, 200), rev}
   end
 
   defp sync(slug, bpml, rev) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
     |> post("#{@ingest_path}/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
@@ -149,8 +149,8 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
     assert [lede(), plain()] == stored_blocks(slug)
   end
 
-  # The pull prints a list item's text and not its child blocks, so an edit of
-  # the list may not write it back without them.
+  # The pull prints a list item's words and child lists but not a child
+  # paragraph, so an edit of the list may not write it back without it.
   test "editing a list whose item holds child blocks the pull never showed is refused; the children stay" do
     slug = slug("item-children")
 
@@ -159,6 +159,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
       "type" => "list",
       "items" => [
         %{
+          "id" => "i1",
           "content" => [t("parent")],
           "children" => [
             %{"type" => "list", "items" => [[t("NESTED")]]},
@@ -172,7 +173,7 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
 
     pushed(slug, &String.replace(&1, "parent", "parent, edited"))
     |> refused!(~s(block "l"))
-    |> at_path!("blocks[0].items[0]")
+    |> at_path!("blocks[0].items[0].children[1]")
 
     assert [list, plain()] == stored_blocks(slug)
   end
@@ -185,7 +186,12 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
       "items" => [
         %{
           "content" => [t("parent")],
-          "children" => [%{"type" => "list", "items" => [[t("CHILD")]]}]
+          "children" => [
+            %{
+              "type" => "list",
+              "items" => [%{"id" => "child", "content" => [t("CHILD")], "audit" => true}]
+            }
+          ]
         }
       ]
     }
@@ -305,14 +311,14 @@ defmodule BarkparkWeb.BulldocsBpmlWriteWallTest do
   # ── the view a copy was pulled from ─────────────────────────────────────────
 
   defp pull_view(slug) do
-    resp = get(build_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
+    resp = get(scoped_conn(), "/papers/#{slug}/source", %{"format" => "bpml"})
     [rev] = get_resp_header(resp, "x-paper-rev")
     [view] = get_resp_header(resp, "x-bpml-view")
     {response(resp, 200), rev, view}
   end
 
   defp sync_view(slug, bpml, rev, view) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
     |> put_req_header("content-type", "application/json")
     |> post("#{@ingest_path}/#{slug}/sync", %{

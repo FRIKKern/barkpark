@@ -1,0 +1,43 @@
+/* Dialog: UI SDK's <ui-dialog>, a trigger (a native button) and the panel it opens over the page in the top layer, a
+   modal: the page behind it is inert, Tab and Shift+Tab go round inside it, and Escape, a close button or an answer
+   closes it with focus back on the trigger. The panel hangs from the top of the view, a fixed step down, in place of
+   UI SDK's middle: a panel held by its bottom edge too is moved with the view when the browser draws the whole page
+   at phone width, so the page under it jumps. Its ground, shadow and type are UI SDK's. The panel takes the text
+   field's --ui-input edge, so it stands at 3:1 against the page. The answers sit at the end of their row; the close
+   button sits in the panel's top corner, its cross printed as an inline SVG in currentColor, so no mask is on the
+   page. Printed with no script, the panel is drawn in place under its trigger, so every word of it is read; once the
+   dialog runs, UI SDK hides it until it opens. The focus ring is base.css's, drawn once for every part. */
+
+[data-slot="dialog-content"] {
+  inset-block: calc(var(--ui-spacing) * 16) auto;
+  max-height: calc(100dvh - var(--ui-spacing) * 32);
+  margin-block: 0;
+  border-color: var(--ui-input);
+}
+
+/* Only printed with no script: an open panel carries data-open, and a closed one is hidden. */
+[data-slot="dialog-content"]:not([data-open]) {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  margin: 0;
+}
+
+[data-slot="dialog-title"] {
+  padding-inline-end: calc(var(--ui-spacing) * 8);
+}
+
+[data-dialog-actions] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(var(--ui-spacing) * 2);
+}
+
+[data-dialog-corner] {
+  position: absolute;
+  top: calc(var(--ui-spacing) * 4);
+  right: calc(var(--ui-spacing) * 4);
+  width: calc(var(--ui-spacing) * 8);
+  padding-inline: 0;
+}

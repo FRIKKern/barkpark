@@ -1,0 +1,71 @@
+/* Select: UI SDK's <ui-select>, a trigger (a native button showing the chosen value, or the placeholder) and the
+   list it opens over the page in the top layer, each option a <ui-select-item>.
+   The trigger has the text field's height and type and UI SDK's --ui-input edge, so a form reads as one. The list
+   takes the same edge. The edge does not change on hover: the list's layer is opened by a click, which leaves the
+   pointer resting on the trigger. The highlighted option is drawn on --ui-primary, so it stands at 3:1 like a
+   filled button; every other option is text only. The rest of the list is UI SDK's: its ground and shadow, a
+   disabled option faded and passed over by the arrows. With no script, each list is printed open under its
+   trigger, so every option is read.
+   The look keys only on what UI SDK writes: data-open, data-placeholder, data-highlighted, data-selected and
+   data-disabled. The focus ring is base.css's, drawn once for every part; UI SDK's own sheet also turns the edge
+   to --ui-ring-border while the trigger has focus or its list is open. */
+
+/* The root holds no look of its own; it lays out as its trigger and list, with script and without. */
+ui-select {
+  display: contents;
+}
+
+[data-slot="select-trigger"] {
+  --bark-select-text: 0.875rem;
+
+  box-sizing: border-box;
+  width: 100%;
+  min-width: calc(var(--ui-spacing) * 48);
+  height: calc(var(--ui-spacing) * 9);
+  padding-inline: calc(var(--ui-spacing) * 3);
+  font-size: var(--bark-select-text);
+  line-height: 1.25;
+}
+
+[data-slot="select-content"] {
+  border-color: var(--ui-input);
+}
+
+[data-slot="select-content"],
+[data-slot="select-item"] {
+  --bark-select-text: 0.875rem;
+
+  font-size: var(--bark-select-text);
+  line-height: 1.25;
+}
+
+[data-slot="select-item"][data-highlighted] {
+  background: var(--ui-primary);
+  color: var(--ui-primary-foreground);
+}
+
+/* No mask anywhere: UI SDK draws a part's chevron and check as masked boxes, and a mask on the page changes how
+   the hosted browser draws text elsewhere on it. The chevron is printed as an inline SVG in currentColor, which
+   UI SDK then leaves alone. The chosen option is marked by a dot in currentColor, drawn here: a hidden option's
+   indicator is printed empty, since a hidden element may not hold a graphic, and a check drawn by turned borders
+   does not read as itself. */
+[data-slot="select-trigger"] > svg {
+  color: var(--ui-muted-foreground);
+}
+
+[data-slot="select-trigger"][data-open] > svg {
+  rotate: 180deg;
+}
+
+/* UI SDK masks the box with --ui-icon; none leaves no mask. */
+[data-slot="select-item-indicator"] {
+  --ui-icon: none;
+}
+
+[data-slot="select-item-indicator"]::before {
+  width: calc(var(--ui-spacing) * 1.5);
+  height: calc(var(--ui-spacing) * 1.5);
+  margin: calc(var(--ui-spacing) * 1.25);
+  border-radius: 50%;
+  background: currentColor;
+}

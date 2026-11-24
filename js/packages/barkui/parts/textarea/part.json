@@ -1,0 +1,25 @@
+{
+  "name": "textarea",
+  "family": "form",
+  "element": "ui-textarea",
+  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/textarea"],
+  "summary": "Several lines of text, a textarea inside its field: label, hint and error, Enter for a new line, with placeholder, read-only, disabled, required and invalid.",
+  "notCovered": [
+    {
+      "name": "the resize handle",
+      "why": "The browser draws a textarea's resize handle in its own colours, which no skin variable sets and no light reads, so the part turns it off and each box keeps the rows it is given."
+    },
+    {
+      "name": "auto-resize",
+      "why": "UI SDK grows the box with its text by writing field-sizing or a height into the textarea's style attribute, which the check refuses on a stage, so no textarea here sets auto-resize."
+    },
+    {
+      "name": "text taller than its box",
+      "why": "Past its rows the box scrolls and the browser draws a scrollbar the part does not style; every value on the stage, and the two lines the keyboard rows type, fit their box, so no reading meets one."
+    },
+    {
+      "name": "the submit shortcut",
+      "why": "With submit-shortcut UI SDK sends the form on Enter or Mod+Enter; no textarea here sets one or sits in a form, so Enter always starts a new line, as the keyboard rows read."
+    }
+  ]
+}

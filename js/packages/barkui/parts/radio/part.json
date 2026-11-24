@@ -1,0 +1,18 @@
+{
+  "name": "radio",
+  "family": "form",
+  "element": "ui-radio-group",
+  "imports": ["@ui-sdk/web/radio", "@ui-sdk/web/field"],
+  "summary": "Picks one option of a few, named by its field, the ring and its words one control: the arrow keys move the choice and pass a disabled option, with read-only, disabled, required and invalid.",
+  "textOnly": ["[data-slot=\"radio\"]"],
+  "notCovered": [
+    {
+      "name": "ui-radio-indicator",
+      "why": "The dot is drawn in the radio's own ::before with its ring, so the check reads ring and dot as one graphic; the stage holds no indicator, so neither its starting nor its ending style is shown."
+    },
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box over each radio, at least 2.75rem each way, so a tap near it reaches it. It draws nothing, so no light reads it; at phone width the radio itself is 2.75rem tall, so there the box is the radio's own size."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+<div data-demo-row inert>
+  <span data-demo-label>Trigger: rest, hover, focus, open</span>
+  <button data-slot="menu-trigger" aria-haspopup="menu" aria-expanded="false" type="button" data-closed="">Rest</button>
+  <button data-slot="menu-trigger" aria-haspopup="menu" aria-expanded="false" type="button" data-closed="" data-pin="hover">Hover</button>
+  <button data-slot="menu-trigger" aria-haspopup="menu" aria-expanded="false" type="button" data-closed="" data-pin="focus-visible">Focus</button>
+  <button data-slot="menu-trigger" aria-haspopup="menu" aria-expanded="true" type="button" data-open="">Open</button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Inside the open menu: an item at rest, under the pointer, reached by the keys</span>
+  <ui-menu-item data-slot="menu-item" role="menuitem" tabindex="-1">Rename</ui-menu-item>
+  <ui-menu-item data-slot="menu-item" role="menuitem" tabindex="-1" data-highlighted="">Rename</ui-menu-item>
+  <ui-menu-item data-slot="menu-item" role="menuitem" tabindex="-1" data-highlighted="" data-pin="focus-visible">Rename</ui-menu-item>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>A disabled item: at rest, under the pointer, reached by the keys</span>
+  <ui-menu-item data-slot="menu-item" role="menuitem" tabindex="-1" aria-disabled="true" data-disabled="">Move</ui-menu-item>
+  <ui-menu-item data-slot="menu-item" role="menuitem" tabindex="-1" aria-disabled="true" data-disabled="" data-highlighted="">Move</ui-menu-item>
+  <ui-menu-item data-slot="menu-item" role="menuitem" tabindex="-1" aria-disabled="true" data-disabled="" data-highlighted="" data-pin="focus-visible">Move</ui-menu-item>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Opens over the page</span>
+  <ui-menu id="menu-page">
+    <ui-menu-trigger><button id="menu-page-trigger" type="button" data-slot="menu-trigger" aria-haspopup="menu" aria-expanded="false" data-closed="">Page actions</button></ui-menu-trigger>
+    <ui-menu-content id="menu-page-content" data-slot="menu-content">
+      <ui-menu-item id="menu-page-rename" value="rename" data-slot="menu-item" role="menuitem" tabindex="-1">Rename</ui-menu-item>
+      <ui-menu-item id="menu-page-duplicate" value="duplicate" data-slot="menu-item" role="menuitem" tabindex="-1">Duplicate</ui-menu-item>
+      <ui-menu-item id="menu-page-move" value="move" disabled="" data-slot="menu-item" role="menuitem" tabindex="-1" aria-disabled="true" data-disabled="">Move</ui-menu-item>
+      <ui-menu-item id="menu-page-archive" value="archive" data-slot="menu-item" role="menuitem" tabindex="-1">Archive</ui-menu-item>
+    </ui-menu-content>
+  </ui-menu>
+  <span id="menu-page-chosen" role="status">Nothing chosen yet</span>
+</div>

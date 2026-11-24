@@ -192,10 +192,11 @@ defmodule Barkpark.Content.Revisions do
   and cannot be resolved this way — the hash was never recorded, so it cannot be
   recovered. Those rows stay readable by UUID exactly as before.
 
-  A BPML push's before-state row (`Papers.PushRevision`) is never the answer:
-  every by-rev reader (the revision API by `_rev` and the "unchanged since
-  ifRev" checks in `BlockOps` and `Mutations`) answers as it would without
-  it. Listing, `get_revision/3` and restore read it as any revision.
+  A BPML push's rows (`Papers.PushRevision.actions/0`: before and after) are
+  never the answer: every by-rev reader (the revision API by `_rev` and the
+  "unchanged since ifRev" checks in `BlockOps` and `Mutations`) answers as it
+  would without them. Listing, `get_revision/3` and restore read them as any
+  revision.
   """
   def get_revision_by_rev(rev, dataset, opts \\ [])
 
@@ -208,7 +209,7 @@ defmodule Barkpark.Content.Revisions do
 
     Revision
     |> where([r], r.rev == ^rev)
-    |> where([r], is_nil(r.action) or r.action != ^PushRevision.action())
+    |> where([r], is_nil(r.action) or r.action not in ^PushRevision.actions())
     |> scope_to_dataset(dataset, opts)
     # WHY THIS ARM IS THE SAME ARM, not a new opening. `get_revision/3` (:103)
     # and `list_revisions/4` (:68) already apply these exact three clauses —

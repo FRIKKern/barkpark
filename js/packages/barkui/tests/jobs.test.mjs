@@ -17,11 +17,11 @@ const folderOf = (n, tag = `n${n}`) => {
 }
 const flat = (groups) => groups.flatMap((g) => (typeof g.parts === 'string' ? g.parts.split(',') : g.parts))
 
-// Both selftest jobs' reports, as they are when the jobs ran every case once and each held (check/selftest-report.mjs).
+// Every selftest job's report, as it is when the jobs ran every case once and each held (check/selftest-report.mjs).
 const selftestOk = (sha) =>
   SELFTEST_JOBS.map((j, i) => {
-    const ran = i === 0 ? ['c1', 'c2'] : ['c3']
-    return { file: reportFile(j.key), data: selftestReport({ key: j.key, sha, all: ['c1', 'c2', 'c3'], ran, held: ran, count: { held: ran.length, of: ran.length } }) }
+    const ran = [['c1', 'c2'], ['c3'], ['c4'], ['c5'], ['c6'], ['c7']][i]
+    return { file: reportFile(j.key), data: selftestReport({ key: j.key, sha, all: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'], ran, held: ran, count: { held: ran.length, of: ran.length } }) }
   })
 
 describe('the job split covers every part folder exactly once', () => {
@@ -155,9 +155,9 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     }
   })
 
-  it('is green when the plan, every group and both selftest jobs passed, and names them', () => {
+  it('is green when the plan, every group and every selftest job passed, and names them', () => {
     const v = verdict(needsWith(MATRIX))
-    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and both selftest jobs passed, running each of 3 cases once'] })
+    expect(v).toEqual({ ok: true, rows: ['green: 3 group(s) of 9 part(s), each checked once at abc, and every selftest job passed, running each of 7 cases once'] })
   })
 
   it('is red for a red, cancelled, skipped-by-mistake or missing group job, even when every report says ok', () => {
@@ -169,8 +169,8 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(gone), /the check jobs is missing from this run/)).toBe(true)
   })
 
-  it('is red for either selftest job red, cancelled, skipped by mistake or missing, by its name', () => {
-    expect(SELFTEST_JOBS.length).toBe(2)
+  it('is red for each selftest job red, cancelled, skipped by mistake or missing, by its name', () => {
+    expect(SELFTEST_JOBS.length).toBe(6)
     for (const j of SELFTEST_JOBS) {
       const who = `the selftest job "${j.name}"`
       for (const [result, said] of [['failure', 'is red'], ['cancelled', 'was cancelled'], ['skipped', 'was skipped by mistake']])
@@ -190,7 +190,7 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(needsWith(MATRIX, { [JOBS.plan]: { result: 'success', outputs: { run: '', groups: MATRIX } } })), /neither "true" nor "false"/)).toBe(true)
   })
 
-  it('"not touched" is green only with the groups and both selftest jobs skipped', () => {
+  it('"not touched" is green only with the groups and every selftest job skipped', () => {
     const skipped = { [JOBS.check]: { result: 'skipped' }, ...Object.fromEntries(SELFTEST_JOBS.map((j) => [j.id, { result: 'skipped' }])) }
     const plan = { result: 'success', outputs: { run: 'false', groups: MATRIX } }
     expect(verdict(needsWith(MATRIX, { ...skipped, [JOBS.plan]: plan }), []).ok).toBe(true)
@@ -219,30 +219,32 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
     expect(redWith(verdict(needsWith(JSON.stringify([{ group: 1, of: 1, parts: NAMES.join(',') }]))), /the plan's groups .* differ from this checkout's split/)).toBe(true)
   })
 
-  it('decides by one rule over every combination of results: nothing else is green', () => {
+  // Every combination of every result on every leg is the selftest's (check/verdict-cases.mjs), where its 781,250
+  // calls have a runner to themselves. Here: every set of legs off, each set with each result, under every plan
+  // result and run output, so a fault that shows only when several legs are off at once is red here as well.
+  it('decides by one rule wherever any set of legs is off with one result: nothing else is green', () => {
     const results = ['success', 'failure', 'cancelled', 'skipped', 'missing']
+    const legs = [JOBS.check, ...SELFTEST_JOBS.map((j) => j.id)]
+    const reports = goodReports()
     let greens = 0
     let rows = 0
     for (const plan of results)
       for (const run of ['true', 'false'])
-        for (const check of results)
-          for (const views of results)
-            for (const rest of results) {
+        for (const base of ['success', 'skipped'])
+          for (const off of results)
+            for (let set = 0; set < 2 ** legs.length; set++) {
               const needs = {}
               if (plan !== 'missing') needs[JOBS.plan] = { result: plan, outputs: plan === 'success' ? { run, groups: MATRIX } : {} }
-              if (check !== 'missing') needs[JOBS.check] = { result: check }
-              if (views !== 'missing') needs[JOBS.selftest] = { result: views }
-              if (rest !== 'missing') needs[JOBS.selftestRest] = { result: rest }
-              const all = [check, views, rest]
-              const touched = plan === 'success' && run === 'true' && all.every((r) => r === 'success')
-              const untouched = plan === 'success' && run === 'false' && all.every((r) => r === 'skipped')
-              const v = verdict(needs)
-              const at = JSON.stringify({ plan, run, check, views, rest })
-              expect(v.ok, at).toBe(touched || untouched)
-              if (!v.ok) expect(v.rows.length && v.rows.every((r) => r.startsWith('RED ')), at).toBe(true)
+              const got = legs.map((id, i) => (set & (1 << i) ? off : base))
+              legs.forEach((id, i) => got[i] !== 'missing' && (needs[id] = { result: got[i] }))
+              const green = plan === 'success' && got.every((r) => r === (run === 'true' ? 'success' : 'skipped'))
+              const v = judge({ needs, reports, names: NAMES, sha: 'abc', perJob: 4 })
+              if (v.ok !== green || (!v.ok && !(v.rows.length && v.rows.every((r) => r.startsWith('RED ')))))
+                expect({ plan, run, got, v }).toBe('decided by the one rule')
               greens += v.ok ? 1 : 0
               rows++
             }
-    expect([rows, greens]).toEqual([1250, 2])
+    expect(rows).toBe(10 * 2 * results.length * 2 ** legs.length)
+    expect(greens).toBeGreaterThan(0)
   })
 })

@@ -202,7 +202,11 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
 
     for body <- [~s(<p>&#x49;</p>), ~s(<p>&copy;</p>), ~s(<img alt="Diagram">)] do
       visible = %Document{html_paper | doc_id: "visible", content: %{"body_html" => body}}
-      assert {:html, ^body} = Content.Papers.reader_source(visible, "test", [])
+      # The sanitizer serialises its clean tree (#28404 review, B4): the same
+      # tree comes back, `&#x49;` written as `I`.
+      assert {:html, out} = Content.Papers.reader_source(visible, "test", [])
+      tree = &(&1 |> LazyHTML.from_fragment() |> LazyHTML.to_tree())
+      assert tree.(out) == tree.(body)
     end
   end
 

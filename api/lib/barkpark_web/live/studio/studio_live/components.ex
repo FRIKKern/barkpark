@@ -498,7 +498,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       (the reader's container and the nil-slug arm), never the
                       slug-suffixed Studio one, so this rename touches no
                       styling. --%>
-                <article id={"paper-body-legacy-#{@slug}"} data-rev={@paper_rev}>
+                <article id={"paper-body-legacy-#{@slug}"} data-rev={@paper_rev} style={Barkpark.PortableDoc.HtmlSanitizer.contain()}>
                   {raw(@paper_html)}
                 </article>
             <% end %>

@@ -2848,6 +2848,10 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "BarkUI selftest"
         --expect-unrendered "BarkUI selftest, views"
         --expect-unrendered "BarkUI selftest, presses, states and refusals"
+        --expect-unrendered "BarkUI selftest, top layer and direct readings"
+        --expect-unrendered "BarkUI selftest, surfaces"
+        --expect-unrendered "BarkUI selftest, states with their own sheet or part"
+        --expect-unrendered "BarkUI selftest, named boxes read open"
         --expect-unrendered "BarkUI showroom check")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
