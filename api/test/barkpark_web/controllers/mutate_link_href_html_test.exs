@@ -37,6 +37,18 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
             %{"name" => "notes", "type" => "text"},
             %{"name" => "blob", "type" => "json"},
             %{
+              "name" => "lt",
+              "type" => "localizedText",
+              "languages" => ["nb", "en"],
+              "format" => "rich"
+            },
+            %{
+              "name" => "ltp",
+              "type" => "localizedText",
+              "languages" => ["nb"],
+              "format" => "plain"
+            },
+            %{
               "name" => "meta",
               "type" => "composite",
               "fields" => [%{"name" => "rt", "type" => "richText"}]
@@ -60,10 +72,12 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
     {:ok, conn: put_req_header(conn, "authorization", "Bearer " <> raw), scope: scope}
   end
 
-  defp mutate(conn, mutation) do
+  defp mutate(conn, mutation), do: mutate_all(conn, [mutation])
+
+  defp mutate_all(conn, mutations) do
     conn
     |> put_req_header("content-type", "application/json")
-    |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => [mutation]}))
+    |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => mutations}))
   end
 
   defp create(conn, id, content),
@@ -86,10 +100,12 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
   end
 
   # A row written before this check: the content put straight into storage.
-  defp store_raw!(id, content) do
+  defp store_raw!(id, content, row \\ :draft) do
+    row_id = if row == :draft, do: "drafts." <> id, else: id
+
     {1, _} =
       Repo.update_all(
-        from(d in Document, where: d.doc_id == ^("drafts." <> id) and d.type == @type_name),
+        from(d in Document, where: d.doc_id == ^row_id and d.type == @type_name),
         set: [content: content]
       )
   end
@@ -210,6 +226,124 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
 
       assert {:ok, _} = Content.restore_revision(rid, @type_name, @dataset, scope)
       assert stored(id)["body"] =~ ~s|href="javascript:legacy"|
+    end
+  end
+
+  # #28695 review r1, blocking: an address held only where the fence does not
+  # look (text, undeclared, json, or the twin's such a field) is not held.
+  describe "held is read where the fence reads" do
+    @payload ~s|<a href="javascript:evil()">x</a>|
+
+    test "one request: a create that puts it in a text field, then a patch into rich text", %{
+      conn: conn
+    } do
+      id = id()
+
+      resp =
+        mutate_all(conn, [
+          %{
+            "create" => %{
+              "_type" => @type_name,
+              "doc_id" => id,
+              "title" => "T",
+              "content" => %{"notes" => @payload}
+            }
+          },
+          %{"patch" => %{"id" => id, "type" => @type_name, "set" => %{"body" => @payload}}}
+        ])
+
+      refused!(resp, ["/body"])
+      assert stored(id) == nil
+    end
+
+    for {label, content} <- [
+          {"a text field", %{"notes" => ~s|<a href="javascript:evil()">x</a>|}},
+          {"an undeclared field", %{"zz" => ~s|<a href="javascript:evil()">x</a>|}},
+          {"a json field holding markDefs",
+           %{
+             "blob" => [
+               %{
+                 "_type" => "block",
+                 "markDefs" => [
+                   %{"_type" => "link", "_key" => "m", "href" => "javascript:evil()"}
+                 ]
+               }
+             ]
+           }}
+        ] do
+      @content content
+      test "two writes: #{label} does not hold it for rich text", %{conn: conn} do
+        id = id()
+        assert create(conn, id, @content).status == 200
+        refused!(set_fields(conn, id, %{"body" => @payload}), ["/body"])
+        refute (stored(id)["body"] || "") =~ "javascript:"
+      end
+    end
+
+    test "the published twin's text field does not hold it for the draft", %{conn: conn} do
+      id = id()
+      assert create(conn, id, %{"body" => "<p>clean</p>"}).status == 200
+      assert mutate(conn, %{"publish" => %{"id" => id, "type" => @type_name}}).status == 200
+      store_raw!(id, %{"body" => "<p>clean</p>", "notes" => @payload}, :published)
+
+      refused!(set_fields(conn, id, %{"body" => @payload}), ["/body"])
+    end
+
+    test "held in rich text: a legacy HTML row converted to Portable Text keeps its address", %{
+      conn: conn
+    } do
+      id = id()
+      assert create(conn, id, %{"body" => "<p>clean</p>"}).status == 200
+      store_raw!(id, %{"body" => ~s|<p><a href="javascript:legacy">old</a></p>|})
+
+      pt = [
+        %{
+          "_type" => "block",
+          "_key" => "b",
+          "style" => "normal",
+          "markDefs" => [%{"_type" => "link", "_key" => "m", "href" => "javascript:legacy"}],
+          "children" => [%{"_type" => "span", "_key" => "s", "text" => "old", "marks" => ["m"]}]
+        }
+      ]
+
+      assert set_fields(conn, id, %{"body" => pt}).status == 200
+    end
+  end
+
+  describe "#28695 review r1, should fix" do
+    # LazyHTML parses with scripting off; a browser drawing this with
+    # scripting on reads noscript as raw text and gets a live link.
+    test "a link a browser builds out of a noscript is refused", %{conn: conn} do
+      html = ~s|<noscript><p title="</noscript><a href=javascript:alert(1)>x</a>"></p></noscript>|
+      refused!(create(conn, id(), %{"body" => html}), ["/body"])
+
+      upper =
+        ~s|<NoScript><p title="</NOSCRIPT><a href=javascript:alert(1)>x</a>"></p></NoScript>|
+
+      refused!(create(conn, id(), %{"body" => upper}), ["/body"])
+    end
+
+    test "a noscript with no link a browser would build is written", %{conn: conn} do
+      id = id()
+
+      html =
+        ~s|<noscript><p title="a &lt;b&gt;">no script</p></noscript><a href="https://x.example">y</a>|
+
+      assert create(conn, id, %{"body" => html}).status == 200
+    end
+
+    test "a rich localizedText is read per language; a plain one is not markup", %{conn: conn} do
+      refused!(
+        create(conn, id(), %{
+          "lt" => %{"nb" => "<p>ok</p>", "en" => ~s|<a href="javascript:alert(1)">x</a>|}
+        }),
+        ["/lt/en"]
+      )
+
+      id = id()
+
+      assert create(conn, id, %{"ltp" => %{"nb" => ~s|<a href="javascript:x">x</a>|}}).status ==
+               200
     end
   end
 end
