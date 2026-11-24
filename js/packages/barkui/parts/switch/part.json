@@ -7,7 +7,7 @@
   "notCovered": [
     {
       "name": "the touch target",
-      "why": "Under a coarse pointer UI SDK lays an empty box 2.75rem tall over the label, so a tap near the switch reaches it. It draws nothing, so no light reads its size, and the part leaves it as UI SDK sets it."
+      "why": "Under a coarse pointer UI SDK lays an empty box over each switch, so a tap near it reaches it: over the whole label, at least 2.75rem tall, when a label holds the switch, and 2.75rem each way around the switch itself when none does, as in a field. Either box draws nothing, so no light reads its size, and the part leaves both as UI SDK sets them."
     }
   ]
 }
