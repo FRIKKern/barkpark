@@ -22,7 +22,7 @@ export function hideOthers(html, order, name) {
     const open = `<section class="sr-part" id="part-${n}"`
     const times = out.split(open).length - 1
     if (times !== 1) throw new Error(`check: the page prints the stage of ${n} ${times} times, not once`)
-    if (!shown.includes(n)) out = out.replace(open, `${open} hidden`)
+    if (!shown.includes(n)) out = out.replace(open, `${open}`)
   }
   return out
 }
