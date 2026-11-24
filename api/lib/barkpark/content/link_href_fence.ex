@@ -46,6 +46,18 @@ defmodule Barkpark.Content.LinkHrefFence do
   is read whole, and so is a type with no schema (#28393 review of r2).
   Content keyed by atoms (an Elixir caller) is read as JSON is.
 
+  ## A rich text value stored as an HTML string
+
+  A `richText` field can hold an HTML string, not Portable Text (an import, an
+  older client, the desk editor's legacy arm). Each `<a href>` and
+  `<area href>` in it is read the same way, from a LazyHTML parse, never a
+  pattern over the bytes. That covers a top-level field, one nested in an
+  object or array, and a string the walk reads whole. A typed `string` or
+  `text` field is still skipped: it is not markup. The finding's path is the
+  field's, since the address sits inside one string (task-5272840f43511e20).
+  An address the desk editor refused is stored as `data-refused-href` (#28402),
+  which is not a link, so an edit of that field is not refused.
+
   The refusal is the mutate door's `validation_failed` (422), with one
   finding per address under the code `pt_link_href_refused`. Nothing is
   written.
@@ -141,6 +153,10 @@ defmodule Barkpark.Content.LinkHrefFence do
   end
 
   defp walk(%{"type" => "json"}, _value, _path, _resolve), do: []
+
+  defp walk(%{"type" => "richText"}, value, path, _resolve) when is_binary(value),
+    do: html_findings(value, path)
+
   defp walk(_field, value, _path, _resolve) when not is_map(value) and not is_list(value), do: []
 
   defp walk(%{"fields" => [_ | _] = fields}, %{} = value, path, resolve),
@@ -248,7 +264,24 @@ defmodule Barkpark.Content.LinkHrefFence do
     list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> refused(v, "#{path}/#{i}") end)
   end
 
+  def refused(html, path) when is_binary(html), do: html_findings(html, path)
   def refused(_value, _path), do: []
+
+  # Every `<a href>` / `<area href>` in an HTML string. Only a string that
+  # holds an `<a` (`<a`, `<A`, `<area`…: no space may follow `<`) is parsed.
+  defp html_findings(html, path) do
+    if :binary.match(String.downcase(html), "<a") == :nomatch do
+      []
+    else
+      for href <-
+            html
+            |> LazyHTML.from_fragment()
+            |> LazyHTML.query("a[href], area[href]")
+            |> LazyHTML.attribute("href"),
+          href != "" and LinkHref.write_refused?(href),
+          do: {path, href}
+    end
+  end
 
   defp own_defs(map, path) do
     case Map.get(map, "markDefs") do
