@@ -236,8 +236,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # byte-identically instead of replacing them with an HTML string.
   def input(%{field: %{"type" => "richText", "name" => name}} = assigns) do
     case Map.get(assigns.editor_form, name, "") do
+      # A stored HTML string is drawn through `LegacyRichHtml` (a refused
+      # link as its words, no handlers); the form posts it as stored.
       val when is_binary(val) or is_nil(val) ->
-        rich_text_editor(assign(assigns, n: name, v: val))
+        rich_text_editor(
+          assign(assigns, n: name, v: val, shown: Barkpark.Content.LegacyRichHtml.for_editor(val))
+        )
 
       # Portable Text (owner ruling #44) edits as HTML in the contenteditable;
       # the save turns it back into blocks.
@@ -788,9 +792,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # toolbar offer (`PortableText.editor_vocabulary/1`): its styles, lists and
   # decorators, and its annotations and inline objects, each edited in the
   # object dialog. A field that declares none renders without it, as before.
+  #
+  # `shown` is what the editor draws; without it, the value the form posts.
   defp rich_text_editor(assigns) do
     assigns =
       assign(assigns,
+        shown: Map.get(assigns, :shown, assigns.v),
         block_types:
           assigns.field
           |> BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks.insertable_types()
@@ -806,7 +813,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div id={"bp-pt-host-" <> doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-hook="BarkparkPtBlocks" data-field={@n}>
       <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
         <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-        <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}
+        <bp-rich-text-editor value={@shown} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}
           dataset={if @link_types != [], do: @dataset}
           scope-prefix={if @link_types != [], do: @scope_prefix}
           data-link-types={if @link_types != [], do: Enum.join(@link_types, ",")}
