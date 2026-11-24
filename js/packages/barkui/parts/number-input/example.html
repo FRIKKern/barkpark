@@ -3,7 +3,7 @@
   <ui-field id="number-input-guests-field" data-slot="field">
     <ui-number-input id="number-input-guests" data-slot="number-input" default-value="1" min="1" max="6">
       <ui-number-input-scrub-area id="number-input-guests-scrub" data-slot="number-input-scrub-area" data-orientation="horizontal" pixels-per-step="8">
-        <ui-field-label id="number-input-guests-field-label" data-slot="field-label">Guests</ui-field-label>
+        <ui-field-label id="number-input-guests-field-label" data-slot="field-label" for="number-input-guests-control">Guests</ui-field-label>
       </ui-number-input-scrub-area>
       <ui-number-input-group id="number-input-guests-group" data-slot="number-input-group" role="group">
         <ui-number-input-decrement><button id="number-input-guests-less" data-slot="number-input-decrement" type="button" tabindex="-1" aria-label="Fewer guests" aria-controls="number-input-guests-control" disabled aria-disabled="true" data-disabled="" data-at-bound=""><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button></ui-number-input-decrement>
@@ -15,7 +15,7 @@
   </ui-field>
   <ui-field id="number-input-nights-field" data-slot="field" data-invalid="" invalid>
     <ui-number-input id="number-input-nights" data-slot="number-input" default-value="14" min="1" max="14">
-      <ui-field-label id="number-input-nights-field-label" data-slot="field-label">Nights</ui-field-label>
+      <ui-field-label id="number-input-nights-field-label" data-slot="field-label" for="number-input-nights-control" data-invalid="">Nights</ui-field-label>
       <ui-number-input-group id="number-input-nights-group" data-slot="number-input-group" role="group">
         <ui-number-input-decrement><button id="number-input-nights-less" data-slot="number-input-decrement" type="button" tabindex="-1" aria-label="Fewer nights" aria-controls="number-input-nights-control"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button></ui-number-input-decrement>
         <ui-number-input-control><input id="number-input-nights-control" data-slot="number-input-control" type="text" value="14" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" data-invalid="" aria-invalid="true" aria-labelledby="number-input-nights-field-label" aria-describedby="number-input-nights-field-error"></ui-number-input-control>
@@ -29,7 +29,7 @@
   <span data-demo-label>Read-only, disabled</span>
   <ui-field id="number-input-seats-field" data-slot="field">
     <ui-number-input id="number-input-seats" data-slot="number-input" default-value="5" min="1" max="20" read-only data-readonly="">
-      <ui-field-label id="number-input-seats-field-label" data-slot="field-label">Seats included</ui-field-label>
+      <ui-field-label id="number-input-seats-field-label" data-slot="field-label" for="number-input-seats-control">Seats included</ui-field-label>
       <ui-number-input-group id="number-input-seats-group" data-slot="number-input-group" role="group" data-readonly="">
         <ui-number-input-decrement><button id="number-input-seats-less" data-slot="number-input-decrement" type="button" tabindex="-1" aria-label="Fewer seats" aria-controls="number-input-seats-control" aria-disabled="true" data-disabled="" data-readonly=""><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button></ui-number-input-decrement>
         <ui-number-input-control><input id="number-input-seats-control" data-slot="number-input-control" type="text" value="5" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" readonly data-readonly="" aria-labelledby="number-input-seats-field-label"></ui-number-input-control>
@@ -39,7 +39,7 @@
   </ui-field>
   <ui-field id="number-input-tickets-field" data-slot="field" data-disabled="" disabled>
     <ui-number-input id="number-input-tickets" data-slot="number-input" default-value="3" min="1" max="10" data-disabled="">
-      <ui-field-label id="number-input-tickets-field-label" data-slot="field-label">Tickets</ui-field-label>
+      <ui-field-label id="number-input-tickets-field-label" data-slot="field-label" for="number-input-tickets-control" data-disabled="">Tickets</ui-field-label>
       <ui-number-input-group id="number-input-tickets-group" data-slot="number-input-group" role="group" data-disabled="">
         <ui-number-input-decrement><button id="number-input-tickets-less" data-slot="number-input-decrement" type="button" tabindex="-1" aria-label="Fewer tickets" aria-controls="number-input-tickets-control" disabled aria-disabled="true" data-disabled=""><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M5 12h14"/></svg></button></ui-number-input-decrement>
         <ui-number-input-control><input id="number-input-tickets-control" data-slot="number-input-control" type="text" value="3" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false" disabled data-disabled="" aria-labelledby="number-input-tickets-field-label"></ui-number-input-control>
