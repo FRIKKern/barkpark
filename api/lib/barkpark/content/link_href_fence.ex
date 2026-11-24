@@ -51,10 +51,13 @@ defmodule Barkpark.Content.LinkHrefFence do
   A `richText` field can hold an HTML string, not Portable Text (an import, an
   older client, the desk editor's legacy arm). Each `<a href>` and
   `<area href>` in it is read the same way, from a LazyHTML parse, never a
-  pattern over the bytes. That covers a top-level field, one nested in an
-  object or array, and a string the walk reads whole. A typed `string` or
-  `text` field is still skipped: it is not markup. The finding's path is the
-  field's, since the address sits inside one string (task-5272840f43511e20).
+  pattern over the bytes: a top-level field, or one nested in an object or
+  array row. Only a string the schema types `richText` is read. A `string` or
+  `text` field is not markup, and an untyped string (a paper's `body_html`
+  cache, which the writer sanitizes) is not rich text. The finding's path is
+  the field's, since the address sits inside one string
+  (task-5272840f43511e20). Any string's addresses count as held, so a row an
+  import wrote stays editable.
   An address the desk editor refused is stored as `data-refused-href` (#28402),
   which is not a link, so an edit of that field is not refused.
 
@@ -87,8 +90,8 @@ defmodule Barkpark.Content.LinkHrefFence do
       restore?(opts) ->
         :ok
 
-      # Nothing refused anywhere: no schema read.
-      refused(content, "") == [] ->
+      # Nothing refused anywhere, in markDefs or in any string: no schema read.
+      refused(content, "") == [] and html_hrefs(content) == [] ->
         :ok
 
       true ->
@@ -264,8 +267,15 @@ defmodule Barkpark.Content.LinkHrefFence do
     list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> refused(v, "#{path}/#{i}") end)
   end
 
-  def refused(html, path) when is_binary(html), do: html_findings(html, path)
   def refused(_value, _path), do: []
+
+  # The refused addresses in every HTML string in `value`, whatever its type.
+  defp html_hrefs(html) when is_binary(html),
+    do: html |> html_findings("") |> Enum.map(&elem(&1, 1))
+
+  defp html_hrefs(%{} = map) when not is_struct(map), do: map |> Map.values() |> html_hrefs()
+  defp html_hrefs(list) when is_list(list), do: Enum.flat_map(list, &html_hrefs/1)
+  defp html_hrefs(_value), do: []
 
   # Every `<a href>` / `<area href>` in an HTML string. Only a string that
   # holds an `<a` (`<a`, `<A`, `<area`…: no space may follow `<`) is parsed.
@@ -304,8 +314,10 @@ defmodule Barkpark.Content.LinkHrefFence do
 
   defp content(_attrs), do: nil
 
-  defp held(%{content: content}),
-    do: MapSet.new(refused(stringify(content), ""), &elem(&1, 1))
+  defp held(%{content: content}) do
+    content = stringify(content)
+    MapSet.new(Enum.map(refused(content, ""), &elem(&1, 1)) ++ html_hrefs(content))
+  end
 
   defp held(_doc), do: MapSet.new()
 

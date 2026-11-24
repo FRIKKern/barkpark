@@ -158,14 +158,20 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
       assert stored(id)["body"] == html
     end
 
-    test "a string or text field holding markup is not rich text", %{conn: conn} do
+    test "a string, text, json or undeclared value holding markup is not rich text", %{conn: conn} do
       id = id()
       markup = ~s|<a href="javascript:x">x</a>|
 
-      assert create(conn, id, %{"title" => markup, "notes" => markup, "blob" => %{"h" => markup}}).status ==
-               200
+      content = %{
+        "title" => markup,
+        "notes" => markup,
+        "blob" => %{"h" => markup},
+        "extra" => markup
+      }
 
+      assert create(conn, id, content).status == 200
       assert stored(id)["notes"] == markup
+      assert stored(id)["extra"] == markup
     end
 
     test "a row that already holds one stays editable; a new one in it is refused", %{conn: conn} do
