@@ -2816,6 +2816,9 @@
         built to this asset): the server emits `<pre data-lang>`; this pass paints hljs-* spans inside it
         (Barkdown plan #27). Deferred: it reads the DOM once and watches LiveView patches. --%>
   <script src="/assets/bp-paper-code.js" defer></script>
+  <%!-- An outside #anchor link to a legacy body still lands: the sanitizer moved the body's
+        ids to bp-anchor-<id> (task-52d612bdb8ff6cb3). Deferred, scroll only. --%>
+  <script src="/assets/bp-paper-anchor.js" defer></script>
   <%!-- EDIT-ON-THE-LINK assets are loaded by the boot script below after it can
         inspect the LiveView's static HTML. Root-layout assigns do not include
         the socket's `can_edit?`, so gating tags on that assign omitted every
