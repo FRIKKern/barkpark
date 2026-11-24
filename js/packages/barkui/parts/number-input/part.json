@@ -1,0 +1,33 @@
+{
+  "name": "number-input",
+  "family": "form",
+  "element": "ui-number-input",
+  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/number-input"],
+  "summary": "A number between a lowest and a highest value, inside its field: ArrowUp and ArrowDown step it and stop at either end, a step button on each side disables at its bound, and its label scrubs it, with read-only, disabled and invalid.",
+  "notCovered": [
+    {
+      "name": "a pressed step button",
+      "why": "A press on a step button steps the value at once and puts focus in the input, so a pressed look the check drives would change the value as it reads it; the button has none of its own and, held down, draws as it does under the pointer, which a pinned row shows."
+    },
+    {
+      "name": "a focused step button",
+      "why": "UI SDK keeps both step buttons out of the Tab order, and a press puts focus in the input, so a step button never takes the focus ring; the arrow keys give the same steps from the input."
+    },
+    {
+      "name": "ui-number-input-scrub-area-cursor",
+      "why": "UI SDK moves the scrub cursor to the body and places it there in its style attribute while a drag holds the pointer, which the check refuses on a stage, so the stage holds none and a drag on the label shows the browser's own cursor."
+    },
+    {
+      "name": "a drag on the label",
+      "why": "The check does not drag; a drag changes the value as the arrow keys do, and the part gives data-scrubbing no look of its own, so the stage draws as it does at rest while the value moves."
+    },
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box over each step button, 2.75rem tall, so a tap near it reaches it. It draws nothing, so no light reads its size, and the part leaves it as UI SDK sets it."
+    },
+    {
+      "name": "the mouse wheel",
+      "why": "UI SDK steps a focused number input by the wheel only when it sets wheel; no number input here sets it, so the wheel scrolls the page."
+    }
+  ]
+}
