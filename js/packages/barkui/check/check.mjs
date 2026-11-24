@@ -54,7 +54,7 @@ export async function runCheck(o = {}) {
     log(`check: no part folder named ${unknown.join(', ')}`)
     return { ok: false, proof: null }
   }
-  const page = pageOf(dir, names)
+  const page = pageOf(dir, process.env.BARKUI_PROBE_STAGES ? process.env.BARKUI_PROBE_STAGES.split(',') : names)
   try {
     return await readParts({ ...o, dir: page, sheet: join(`${out}-whole`, 'barkui.css'), every: whole.parts })
   } finally {

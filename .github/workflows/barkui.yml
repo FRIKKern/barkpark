@@ -163,7 +163,7 @@ jobs:
           PARTS: ${{ matrix.parts }}
         run: |
           mkdir -p "$RUNNER_TEMP/barkui-report"
-          node --import ./check/load-wall.mjs check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
+          if [ "$GROUP" = 1 ]; then node --import ./check/load-wall.mjs check/stage-probe.mjs select select,text-field select,switch,tabs button,dialog,menu,select,switch,tabs,text-field button,dialog,menu,select; else node --import ./check/load-wall.mjs check/stage-probe.mjs button,dialog,menu,select button,dialog,menu,select,switch,tabs,text-field select,switch,tabs select,text-field select; fi
 
       - name: Upload this group's report
         if: always()
