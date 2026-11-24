@@ -72,8 +72,17 @@ export const steps = [
     },
   },
   {
-    name: 'ArrowUp returns to Pro, and Tab skips the disabled Theme for the invalid Order updates at Email only',
-    keys: ['ArrowUp', 'Tab'],
+    name: 'ArrowUp returns to Pro, still checked',
+    keys: ['ArrowUp'],
+    expect: (root, h) => {
+      const r = root.querySelector('#radio-pro')
+      if (document.activeElement !== r) return `focus is on ${h.describe(document.activeElement)}`
+      return r.getAttribute('aria-checked') === 'true' || `Pro: aria-checked is ${r.getAttribute('aria-checked')}`
+    },
+  },
+  {
+    name: 'Tab skips the disabled Theme for the invalid Order updates at Email only',
+    keys: ['Tab'],
     expect: (root, h) => document.activeElement === root.querySelector('#radio-email') || `focus is on ${h.describe(document.activeElement)}`,
     ax: { '#radio-email': { role: 'radio', name: 'Email only', checked: 'false' } },
   },
