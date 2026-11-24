@@ -94,7 +94,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
 
   require Logger
 
-  alias Barkpark.PortableDoc.HtmlSanitizer.{Elements, Serializer, StyleGrammar}
+  alias Barkpark.PortableDoc.HtmlSanitizer.{Anchors, Elements, Serializer, StyleGrammar}
 
   # Passes `sanitize/2` makes before it fails closed (#28404 review, B5).
   @max_passes 3
@@ -256,11 +256,23 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     # never puts them: `<li>a<div><aside><li>b` becomes `<li>a<div><li>b`,
     # and the browser's parse of that closes the page's own `div`. A pass
     # whose output parses back to itself has no such tree left.
-    passes = opts |> Keyword.get(:max_passes, @max_passes) |> min(@max_passes) |> max(1)
+    passes =
+      opts
+      |> Keyword.get(:max_passes, @max_passes)
+      |> min(@max_passes)
+      |> min(configured_max_passes())
+      |> max(1)
+
     settle(html, passes, Keyword.put(opts, :policy, policy(opts)))
   end
 
   def sanitize(other, _opts), do: other
+
+  # Like `opts[:max_passes]`, the app env can only lower the cap. Nothing
+  # stored is known to need more than three passes, so a test reaches the
+  # fail-closed branch through a write path (`Content.Writer`) by lowering it.
+  defp configured_max_passes,
+    do: Application.get_env(:barkpark, __MODULE__, []) |> Keyword.get(:max_passes, @max_passes)
 
   defp settle(html, passes, opts) do
     {out, tree} = pass(html, opts[:policy])
@@ -273,7 +285,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   end
 
   defp pass(html, policy) do
-    tree = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree() |> scrub(policy)
+    parsed = html |> LazyHTML.from_fragment() |> LazyHTML.to_tree()
+    # The ids an in-page link may follow into the body's namespace (`Anchors`).
+    tree = scrub(parsed, Map.put(policy, :anchors, Anchors.collect(parsed)))
     {Serializer.to_html(tree), tree}
   end
 
@@ -285,7 +299,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
         "serving its text only (id=#{inspect(opts[:id])})"
     )
 
-    text = tree |> Serializer.text() |> String.trim()
+    text = Serializer.text(tree)
 
     if text == "",
       do: "",
@@ -346,7 +360,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
 
       # An element the renderer writes is kept, its attributes scrubbed.
       Elements.kept?(tag_key) ->
-        [{tag, Enum.flat_map(attrs, &scrub_attr(&1, policy)), scrub(children, policy)}]
+        attr_policy = Map.put(policy, :tag, tag_key)
+        [{tag, Enum.flat_map(attrs, &scrub_attr(&1, attr_policy)), scrub(children, policy)}]
 
       # Any other element, a custom one or a name no element has (`scr<script`
       # from `<scr<script>ipt>`) included: its content stays, the tag goes.
@@ -367,16 +382,20 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
       key when key in ["id", "name"] -> []
       "data-refused-href" -> [{"data-refused-href", value}]
       "href" -> editor_href(value, policy)
-      _ -> scrub_attr({name, value}, %{editor: false})
+      _ -> scrub_attr({name, value}, %{policy | editor: false})
     end
   end
 
-  defp scrub_attr({name, value}, _policy) do
+  defp scrub_attr({name, value}, policy) do
     key = String.downcase(name)
 
     cond do
       not allowed_attr?(key) -> []
       key in @url_attrs and dangerous_url?(value) -> [{name, "#"}]
+      # A stored id never takes a page element's place (`Anchors`).
+      key == "id" -> Anchors.id(name, value)
+      key == "name" -> Anchors.name(name, value, policy.tag)
+      key == "href" -> [{name, Anchors.href(value, policy.anchors)}]
       key == "style" -> scrub_style(name, value)
       key == "class" -> scrub_class(name, value)
       true -> [{name, value}]
