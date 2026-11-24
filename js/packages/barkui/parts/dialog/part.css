@@ -15,7 +15,8 @@
   border-color: var(--ui-input);
 }
 
-/* Only printed with no script: an open panel carries data-open, and a closed one is hidden. */
+/* The panel printed with no script, and the inert one that shows its buttons' hover: drawn in place. A running
+   dialog's open panel carries data-open, and a closed one is hidden. */
 [data-slot="dialog-content"]:not([data-open]) {
   position: relative;
   inset: auto;

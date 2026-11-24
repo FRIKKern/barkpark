@@ -4,6 +4,17 @@
   <button data-slot="dialog-trigger" aria-haspopup="dialog" type="button" data-closed="" data-pin="hover">Hover</button>
   <button data-slot="dialog-trigger" aria-haspopup="dialog" type="button" data-closed="" data-pin="focus-visible">Focus</button>
 </div>
+<div data-demo-row inert>
+  <span data-demo-label>Inside the open dialog: hover</span>
+  <div data-slot="dialog-content">
+    <div role="heading" aria-level="2" data-slot="dialog-title">Rename page</div>
+    <div data-dialog-actions="">
+      <button type="button" data-slot="dialog-close" data-pin="hover">Cancel</button>
+      <button type="button" data-variant="solid" data-slot="dialog-close" data-pin="hover">Rename</button>
+    </div>
+    <button type="button" aria-label="Close" data-slot="dialog-close" data-dialog-corner="" data-pin="hover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+</div>
 <div data-demo-row>
   <span data-demo-label>Opens over the page</span>
   <ui-dialog id="dialog-rename">
