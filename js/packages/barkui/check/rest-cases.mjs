@@ -487,6 +487,22 @@ const captureInView = async () => {
       const where = () => page.barkCheck(() => ({ x: scrollX, y: scrollY, most: document.documentElement.scrollHeight - innerHeight }))
       const { most } = await where()
       await page.barkCheck((top) => (scrollTo({ left: 0, top, behavior: 'instant' }), window.__barkCheck.still('the page scrolled for the row')), Math.round(most / 2))
+      // The reference tab, given lines of words, scrolled too.
+      await page.barkRef.world(() => document.body.replaceChildren(...Array.from({ length: 160 }, (_, i) => Object.assign(document.createElement('p'), { textContent: `Line ${i}: the quick brown fox ${'jumps '.repeat(i % 7)}over` }))))
+      await page.barkRef.world(() => (scrollTo({ left: 0, top: 900, behavior: 'instant' }), window.__barkCheck.still('the reference tab scrolled for the row')))
+      // The first capture of each tab is a full-page one; the clips are read after it.
+      let same = true
+      for (const [tab, world, ref] of [['page', page.barkCheck, page], ['reference tab', page.barkRef.world, page.barkRef.page]]) {
+        const v = await world(() => ({ x: visualViewport.pageLeft, y: visualViewport.pageTop, w: visualViewport.width, h: visualViewport.height, zoom: visualViewport.scale }))
+        for (const [edge, y] of [['top', v.y + 60.5], ['foot', v.y + v.h - 100.25]]) {
+          const clip = { x: v.x + 8, y, w: Math.min(300, v.w - 16), h: 40 }
+          const png = await capture(ref, world, clip)
+          const full = (await ref.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
+          await world(([l, t]) => (scrollTo({ left: l, top: t, behavior: 'instant' }), window.__barkCheck.still('the row put the page back')), [v.x, v.y])
+          if (png !== full) console.log(`    ${at}, ${tab} at zoom ${v.zoom}: the clip near the ${edge} of the view does not read what a full-page shot draws`)
+          same &&= png === full
+        }
+      }
       const before = await where()
       const during = []
       const fake = {
@@ -500,21 +516,6 @@ const captureInView = async () => {
       const after = await where()
       console.log(`    ${at}: a clip inside the view, the page at ${before.y}px of ${most}px before the capture: ${during.length} shot(s), the page at ${during.map((w) => `${w.y}px`).join(', ')} straight after each, ${after.y}px after it; the capture ${shot.slice(0, 200)}`)
       const kept = most >= 100 && shot === 'read' && during.length > 0 && [...during, after].every((w) => w.x === before.x && w.y === before.y)
-      // The reference tab, given lines of words and scrolled, as the page is.
-      await page.barkRef.world(() => document.body.replaceChildren(...Array.from({ length: 160 }, (_, i) => Object.assign(document.createElement('p'), { textContent: `Line ${i}: the quick brown fox ${'jumps '.repeat(i % 7)}over` }))))
-      await page.barkRef.world(() => (scrollTo({ left: 0, top: 900, behavior: 'instant' }), window.__barkCheck.still('the reference tab scrolled for the row')))
-      let same = true
-      for (const [tab, world, ref] of [['page', page.barkCheck, page], ['reference tab', page.barkRef.world, page.barkRef.page]]) {
-        const v = await world(() => ({ x: visualViewport.pageLeft, y: visualViewport.pageTop, w: visualViewport.width, h: visualViewport.height, zoom: visualViewport.scale }))
-        for (const [edge, y] of [['top', v.y + 60.5], ['foot', v.y + v.h - 100.25]]) {
-          const clip = { x: v.x + 8, y, w: Math.min(300, v.w - 16), h: 40 }
-          const png = await capture(ref, world, clip)
-          const full = (await ref.screenshot({ clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true, scale: 'device', caret: 'initial' })).toString('base64')
-          await world(([l, t]) => (scrollTo({ left: l, top: t, behavior: 'instant' }), window.__barkCheck.still('the row put the page back')), [v.x, v.y])
-          if (png !== full) console.log(`    ${at}, ${tab} at zoom ${v.zoom}: the clip near the ${edge} of the view does not read what a full-page shot draws`)
-          same &&= png === full
-        }
-      }
       return kept && same
     }, view)) && held
   }
