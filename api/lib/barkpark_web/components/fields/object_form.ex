@@ -134,6 +134,7 @@ defmodule BarkparkWeb.Components.Fields.ObjectForm do
               <.object_form
                 member={@dialog.member}
                 value={@dialog.value}
+                errors={Map.get(@dialog, :errors) || %{}}
                 path={BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks.prefix()}
                 on_reorder="object-dialog-array-op"
                 dataset={@dataset}
