@@ -1,0 +1,78 @@
+<div data-demo-row>
+  <span data-demo-label>Choose one, one disabled</span>
+  <ui-field id="radio-speed-field" data-slot="field">
+    <ui-field-label id="radio-speed-label" data-slot="field-label" for="radio-speed">Shipping speed</ui-field-label>
+    <ui-radio-group id="radio-speed" default-value="standard" data-slot="radio-group" aria-labelledby="radio-speed-label" role="radiogroup">
+      <ui-radio id="radio-standard" value="standard" data-slot="radio" role="radio" type="button" aria-checked="true" tabindex="0" data-checked>Standard</ui-radio>
+      <ui-radio id="radio-express" value="express" data-slot="radio" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Express</ui-radio>
+      <ui-radio id="radio-same-day" value="same-day" disabled data-slot="radio" role="radio" type="button" aria-checked="false" aria-disabled="true" data-unchecked data-disabled>Same day</ui-radio>
+      <ui-radio id="radio-overnight" value="overnight" data-slot="radio" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Overnight</ui-radio>
+    </ui-radio-group>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Read-only, disabled</span>
+  <ui-field id="radio-plan-field" data-slot="field">
+    <ui-field-label id="radio-plan-label" data-slot="field-label" for="radio-plan">Your plan</ui-field-label>
+    <ui-field-description id="radio-plan-description" data-slot="field-description">Ask an admin to change plans.</ui-field-description>
+    <ui-radio-group id="radio-plan" default-value="pro" read-only data-slot="radio-group" aria-labelledby="radio-plan-label" aria-describedby="radio-plan-description" role="radiogroup" aria-readonly="true" data-readonly>
+      <ui-radio id="radio-free" value="free" data-slot="radio" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly>Free</ui-radio>
+      <ui-radio id="radio-pro" value="pro" data-slot="radio" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly>Pro</ui-radio>
+    </ui-radio-group>
+  </ui-field>
+  <ui-field id="radio-theme-field" data-slot="field">
+    <ui-field-label id="radio-theme-label" data-slot="field-label" for="radio-theme">Theme</ui-field-label>
+    <ui-radio-group id="radio-theme" default-value="light" disabled data-slot="radio-group" aria-labelledby="radio-theme-label" role="radiogroup" aria-disabled="true" data-disabled>
+      <ui-radio id="radio-light" value="light" data-slot="radio" role="radio" type="button" aria-checked="true" aria-disabled="true" tabindex="-1" data-checked data-disabled>Light</ui-radio>
+      <ui-radio id="radio-dark" value="dark" data-slot="radio" role="radio" type="button" aria-checked="false" aria-disabled="true" tabindex="-1" data-unchecked data-disabled>Dark</ui-radio>
+    </ui-radio-group>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Required, invalid</span>
+  <ui-field id="radio-updates-field" invalid data-slot="field" data-invalid data-required>
+    <ui-field-label id="radio-updates-label" data-slot="field-label" for="radio-updates" data-invalid data-required>Order updates</ui-field-label>
+    <ui-radio-group id="radio-updates" required data-slot="radio-group" aria-labelledby="radio-updates-label" role="radiogroup" aria-required="true" data-required aria-invalid="true" data-invalid aria-describedby="radio-updates-error">
+      <ui-radio id="radio-email" value="email" data-slot="radio" role="radio" type="button" aria-checked="false" tabindex="0" data-unchecked data-required>Email only</ui-radio>
+      <ui-radio id="radio-sms" value="sms" data-slot="radio" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-required>SMS only</ui-radio>
+    </ui-radio-group>
+    <ui-field-error id="radio-updates-error" data-slot="field-error" data-invalid data-required>Choose how to get order updates.</ui-field-error>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Unchecked: rest, hover, pressed, focus</span>
+  <span id="radio-off-rest" data-slot="radio" role="radio" aria-checked="false" data-unchecked>Rest</span>
+  <span id="radio-off-hover" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-pin="hover">Hover</span>
+  <span id="radio-off-pressed" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-pin="hover active">Pressed</span>
+  <span id="radio-off-focus" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-pin="focus-visible">Focus</span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Checked: rest, hover, pressed, focus</span>
+  <span id="radio-on-rest" data-slot="radio" role="radio" aria-checked="true" data-checked>Rest</span>
+  <span id="radio-on-hover" data-slot="radio" role="radio" aria-checked="true" data-checked data-pin="hover">Hover</span>
+  <span id="radio-on-pressed" data-slot="radio" role="radio" aria-checked="true" data-checked data-pin="hover active">Pressed</span>
+  <span id="radio-on-focus" data-slot="radio" role="radio" aria-checked="true" data-checked data-pin="focus-visible">Focus</span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid, unchecked: rest, hover, pressed, focus</span>
+  <span data-slot="radio-group" role="radiogroup" aria-invalid="true" data-invalid>
+    <span id="radio-bad-off-rest" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required>Rest</span>
+    <span id="radio-bad-off-hover" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required data-pin="hover">Hover</span>
+    <span id="radio-bad-off-pressed" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required data-pin="hover active">Pressed</span>
+    <span id="radio-bad-off-focus" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required data-pin="focus-visible">Focus</span>
+  </span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid, checked: rest, hover, pressed, focus</span>
+  <span data-slot="radio-group" role="radiogroup" aria-invalid="true" data-invalid>
+    <span id="radio-bad-on-rest" data-slot="radio" role="radio" aria-checked="true" data-checked data-required>Rest</span>
+    <span id="radio-bad-on-hover" data-slot="radio" role="radio" aria-checked="true" data-checked data-required data-pin="hover">Hover</span>
+    <span id="radio-bad-on-pressed" data-slot="radio" role="radio" aria-checked="true" data-checked data-required data-pin="hover active">Pressed</span>
+    <span id="radio-bad-on-focus" data-slot="radio" role="radio" aria-checked="true" data-checked data-required data-pin="focus-visible">Focus</span>
+  </span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only, focus: unchecked, checked</span>
+  <span id="radio-ro-unchecked" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-readonly data-pin="focus-visible">Unchecked</span>
+  <span id="radio-ro-checked" data-slot="radio" role="radio" aria-checked="true" data-checked data-readonly data-pin="focus-visible">Checked</span>
+</div>
