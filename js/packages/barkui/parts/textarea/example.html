@@ -32,26 +32,27 @@ No refunds after delivery.</textarea></ui-textarea>
   </ui-field>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Textarea: rest, hover, focus, hover and focus, pressed</span>
-  <textarea data-slot="textarea" rows="3">Rest</textarea>
+  <span data-demo-label>Filled: hover, focus, hover and focus</span>
   <textarea data-slot="textarea" rows="3" data-pin="hover">Hover</textarea>
   <textarea data-slot="textarea" rows="3" data-pin="focus-visible">Focus</textarea>
   <textarea data-slot="textarea" rows="3" data-pin="hover focus-visible">Hover and focus</textarea>
-  <textarea data-slot="textarea" rows="3" data-pin="hover active focus-visible">Pressed</textarea>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Invalid: rest, hover, focus, hover and focus, pressed</span>
-  <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3">Rest</textarea>
+  <span data-demo-label>Empty: hover, focus, hover and focus</span>
+  <textarea data-slot="textarea" rows="3" placeholder="Hover" data-pin="hover"></textarea>
+  <textarea data-slot="textarea" rows="3" placeholder="Focus" data-pin="focus-visible"></textarea>
+  <textarea data-slot="textarea" rows="3" placeholder="Hover and focus" data-pin="hover focus-visible"></textarea>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid: hover, focus, hover and focus</span>
   <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="hover">Hover</textarea>
   <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="focus-visible">Focus</textarea>
   <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="hover focus-visible">Hover and focus</textarea>
-  <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="hover active focus-visible">Pressed</textarea>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Read-only: rest, hover, focus; disabled: rest, hover</span>
-  <textarea data-slot="textarea" data-readonly="" rows="3" readonly>Read-only</textarea>
+  <span data-demo-label>Read-only: hover, focus, hover and focus; disabled: hover</span>
   <textarea data-slot="textarea" data-readonly="" rows="3" readonly data-pin="hover">Read-only hover</textarea>
   <textarea data-slot="textarea" data-readonly="" rows="3" readonly data-pin="focus-visible">Read-only focus</textarea>
-  <textarea data-slot="textarea" data-disabled="" rows="3" disabled>Disabled</textarea>
+  <textarea data-slot="textarea" data-readonly="" rows="3" readonly data-pin="hover focus-visible">Read-only hover and focus</textarea>
   <textarea data-slot="textarea" data-disabled="" rows="3" disabled data-pin="hover">Disabled hover</textarea>
 </div>

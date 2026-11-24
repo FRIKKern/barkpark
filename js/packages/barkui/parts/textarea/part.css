@@ -1,7 +1,8 @@
 /* Textarea: UI SDK's <ui-textarea> holding a native <textarea data-slot="textarea">, in a <ui-field> with its
    label and its description or error text, which take the text field's look. The box is the text field's: its
    --ui-input edge, the sheet's ground and text, the --ui-muted-foreground edge under the pointer, and the
-   --bark-danger-text edge when invalid. Read-only and disabled sit on --ui-muted and take no hover. Each box is
+   --bark-danger-text edge when invalid. Read-only and disabled sit on --ui-muted and take no hover. A press only
+   puts focus in the box and has no look of its own, so it draws as hover and focus, which has its pinned rows. Each box is
    as tall as its rows; the resize handle is off (see notCovered). At phone width the text is 1rem, the size UI SDK
    gives a coarse pointer, since this sheet's own size would win over UI SDK's there.
    The look keys only on markup the field and textarea write: data-readonly, data-disabled and data-invalid, and
