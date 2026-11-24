@@ -3,12 +3,11 @@
    are one control: the pointer on the words is on the radio, and the focus ring, base.css's, drawn once for every
    part, goes round both, a little off the words. The control draws no fill and no edge of its own; its words are
    its label. The group keeps one Tab stop, and the arrow keys move the choice and pass a disabled option.
-   The ring and its dot are the radio's ::before, one graphic: a circle with the text field's --ui-input edge on the
-   ground, and, checked, a --ui-primary edge round a --ui-primary dot, the gap between them an inset shadow in
-   --ui-background. Under the pointer the empty ring's edge darkens, and a checked one takes --ui-primary-hover;
-   pressed, the sheet's pressed fills. Read-only keeps its choice but is drawn on --ui-muted with a --ui-foreground
-   dot, so it does not look like a ring a press changes; disabled is UI SDK's, faded. Invalid takes the text
-   field's danger edge, checked or not.
+   The ring and its dot are the radio's ::before, one graphic: a circle on --ui-background with the text field's
+   --ui-input edge, and, checked, a --ui-primary edge round a --ui-primary dot. Under the pointer the empty ring's
+   edge darkens, and a checked one takes --ui-primary-hover; pressed, the sheet's pressed fills. Read-only keeps
+   its choice but is drawn on --ui-muted with a --ui-foreground dot, so it does not look like a ring a press
+   changes; disabled is UI SDK's, faded. Invalid takes the text field's danger edge, checked or not.
    At phone width the radio keeps UI SDK's 44px touch height whatever the pointer.
    The look keys only on what UI SDK writes: data-checked, data-readonly and data-disabled on a radio, data-invalid
    on its group, and on :hover and :active. */
@@ -46,8 +45,8 @@
   font-size: var(--bark-radio-text);
   line-height: 1.25;
 
-  /* The ring: 14px inside a 1px edge, sized by its content so it draws the same alone. The dot is its fill,
-     showing through a 3px inset shadow of the gap's colour. */
+  /* The ring: 14px inside a 1px edge, sized by its content so it draws the same alone. The dot is an 8px circle
+     of its background image, on the gap's colour; unchecked, the dot is the gap's colour too. */
   &::before {
     content: "";
     box-sizing: content-box;
@@ -56,9 +55,9 @@
     height: calc(1rem - 2px);
     border: 1px solid var(--bark-radio-edge);
     border-radius: 50%;
-    background: var(--bark-radio-dot);
-    box-shadow: inset 0 0 0 3px var(--bark-radio-gap);
-    transition: background-color 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
+    background-color: var(--bark-radio-gap);
+    background-image: radial-gradient(circle at center, var(--bark-radio-dot) calc(0.25rem - 0.5px), transparent calc(0.25rem + 0.5px));
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
   }
 
   &[data-checked] {
