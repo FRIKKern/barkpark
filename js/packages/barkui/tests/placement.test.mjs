@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { lintPartCss } from '../build/css-lint.mjs'
-import { ALLOWED, PLACEMENT, REASON, ROOT_REASON, SCROLL_LOCK, TRANSITION } from '../check/placement.mjs'
+import { ALLOWED, PLACEMENT, REASON, ROOT_REASON, SCROLL_LOCK, SLOT_REASON, SLOTS, TRANSITION } from '../check/placement.mjs'
 
 const PARTS = () => readFileSync(new URL('../docs/PARTS.md', import.meta.url), 'utf8')
 
@@ -30,6 +30,53 @@ function passageList(text = PARTS()) {
 /** The lists as the passage must print them: the writer without its source file. */
 const shown = (list) => list.map(({ property, on, writer, value, length }) => ({ property, on, writer: writer.replace(/ \([^)]*\)$/, ''), ...(value === undefined ? {} : { value }), ...(length === undefined ? {} : { length }) }))
 const listed = () => shown([...ALLOWED, ...SCROLL_LOCK])
+
+/** A slot as the passage prints it: its pieces' names in code, each write with its values or unit and its lines,
+    then the writer without its source file. */
+const slotLine = (s) =>
+  `- On ${s.slot.replace(/ui-[\w-]+/g, '`$&`')}: ${s.writes
+    .map((w) => {
+      return `\`${w.property}\` as ${w.values.map((v) => `\`${v}\``).join(' or ')} (${w.lines.join(', ')})`
+    })
+    .join(', ')}. ${s.writer.replace(/ \([^)]*\)$/, '')}.`
+/** The passage's slot bullets, each on one line. */
+const passageSlots = (text = PARTS()) => {
+  const at = text.indexOf('\n## Placement\n')
+  const passage = text.slice(at + 1, text.indexOf('\n## ', at + 1))
+  return passage.split('\n- ').slice(1).filter((b) => b.startsWith('On ')).map((b) => `- ${b.split('\n\n')[0].replace(/\n\s+/g, ' ').trim()}`)
+}
+
+describe("a slider's pieces, the third list", () => {
+  it('is the same in check/placement.mjs and in docs/PARTS.md "Placement": piece, property, value, lines and writer', () => {
+    expect(passageSlots()).toEqual(SLOTS.map(slotLine))
+  })
+  it('keeps its own reason, holds each piece to the inside of a ui-slider, names the file and the lines that write each entry, and gives every entry its values', () => {
+    expect(SLOT_REASON).not.toBe(REASON)
+    expect(PARTS().replace(/\n\s*/g, ' ')).toContain(SLOT_REASON.replace('; where', ', and where'))
+    for (const s of SLOTS) {
+      expect(s.at, s.slot).toMatch(/^ui-slider /)
+      expect(s.writer, s.slot).toBe('UI SDK slider, on its pieces (components/slider/slider.js)')
+      for (const w of s.writes) {
+        expect(w.lines.length && w.lines.every((n) => Number.isInteger(n)), `${s.slot} ${w.property}`).toBe(true)
+        // No entry takes any value: each names the values UI SDK writes.
+        expect(w.values?.length > 0 && w.values.every((v) => typeof v === 'string' && v.trim() !== ''), `${s.slot} ${w.property}`).toBe(true)
+      }
+    }
+  })
+  it('is red when the two differ, either way', () => {
+    const text = PARTS()
+    const plants = [text.replace('`touch-action` as `none` (179)', '`touch-action` as `auto` (179)'), text.replace('`z-index` as `1` or `2` (67)', '`z-index` as `1` or `2` (66)'), text.replace('- On `ui-slider-track`', '- On `ui-slider-tracks`')]
+    for (const t of plants) {
+      expect(t).not.toBe(text)
+      expect(passageSlots(t)).not.toEqual(SLOTS.map(slotLine))
+    }
+    const changed = [
+      SLOTS.map((s) => (s.slot === 'ui-slider-thumb' ? { ...s, writes: [...s.writes, { property: 'color', values: ['red'], lines: [1] }] } : s)),
+      SLOTS.map((s) => ({ ...s, writes: s.writes.map((w) => (w.property === 'opacity' ? { ...w, values: ['1'] } : w)) })),
+    ]
+    for (const list of changed) expect(passageSlots()).not.toEqual(list.map(slotLine))
+  })
+})
 
 describe('the placement list', () => {
   it('is the same in check/placement.mjs and in docs/PARTS.md "Placement": name, place, writer and value', () => {

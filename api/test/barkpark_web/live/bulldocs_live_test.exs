@@ -55,26 +55,26 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
   describe "mount + live update (no reload)" do
     test "renders the seeded body HTML on mount", %{conn: conn} do
-      seed_paper(~s(<section id="block-1"><h1>Hello convergence</h1></section>))
+      seed_paper(~s(<section id="bp-anchor-block-1"><h1>Hello convergence</h1></section>))
 
       {:ok, _view, html} = live(conn, "/papers/#{@slug}")
 
       assert html =~ "Hello convergence"
-      assert html =~ ~s(id="block-1")
+      assert html =~ ~s(id="bp-anchor-block-1")
       # The sentinel element is present at mount.
       assert html =~ ~s(id="paper-sentinel")
     end
 
     test "broadcast re-assigns @html; same pid + sentinel survive (no remount)",
          %{conn: conn} do
-      seed_paper(~s(<section id="block-1"><h1>First</h1></section>))
+      seed_paper(~s(<section id="bp-anchor-block-1"><h1>First</h1></section>))
 
       {:ok, view, html} = live(conn, "/papers/#{@slug}")
 
       # Pre-update state: original block present, the extra block is NOT.
       assert html =~ "First"
-      assert html =~ ~s(id="block-1")
-      refute html =~ ~s(id="block-2")
+      assert html =~ ~s(id="bp-anchor-block-1")
+      refute html =~ ~s(id="bp-anchor-block-2")
       assert html =~ ~s(id="paper-sentinel")
 
       pid_before = view.pid
@@ -87,8 +87,8 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           Barkpark.LabelFixtures.paper_attrs(%{
             slug: @slug,
             body_html:
-              ~s(<section id="block-1"><h1>First</h1></section>) <>
-                ~s(<section id="block-2"><p>Second block streamed in</p></section>)
+              ~s(<section id="bp-anchor-block-1"><h1>First</h1></section>) <>
+                ~s(<section id="bp-anchor-block-2"><p>Second block streamed in</p></section>)
           })
         )
 
@@ -96,10 +96,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       updated = render(view)
 
       # The new block now renders...
-      assert updated =~ ~s(id="block-2")
+      assert updated =~ ~s(id="bp-anchor-block-2")
       assert updated =~ "Second block streamed in"
       # ...alongside the original (diffed in place, not replaced).
-      assert updated =~ ~s(id="block-1")
+      assert updated =~ ~s(id="bp-anchor-block-1")
       assert updated =~ "First"
 
       # SENTINEL 1 — same process: no remount, no push_navigate/redirect.
@@ -711,24 +711,27 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
       {:ok, _} =
         Content.upsert_paper(
-          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, body_html: "<p id=\"v1\">v1</p>"})
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            body_html: "<p id=\"bp-anchor-v1\">v1</p>"
+          })
         )
 
       {:ok, view, html} = live(conn, "/papers/#{slug}")
-      assert html =~ ~s(id="v1")
-      refute html =~ ~s(id="v2")
+      assert html =~ ~s(id="bp-anchor-v1")
+      refute html =~ ~s(id="bp-anchor-v2")
       pid_before = view.pid
 
       {:ok, _} =
         Content.upsert_paper(
           Barkpark.LabelFixtures.paper_attrs(%{
             slug: slug,
-            body_html: "<p id=\"v2\">v2 re-assigned</p>"
+            body_html: "<p id=\"bp-anchor-v2\">v2 re-assigned</p>"
           })
         )
 
       rendered = render(view)
-      assert rendered =~ ~s(id="v2")
+      assert rendered =~ ~s(id="bp-anchor-v2")
       assert rendered =~ "v2 re-assigned"
       # No remount on the fallback path either.
       assert view.pid == pid_before
@@ -744,7 +747,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         Content.upsert_paper(
           Barkpark.LabelFixtures.paper_attrs(%{
             slug: slug,
-            body_html: "<p id=\"stored-safe\">Stored safe body</p>"
+            body_html: "<p id=\"bp-anchor-stored-safe\">Stored safe body</p>"
           })
         )
 
@@ -753,7 +756,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
       rendered = render(view)
       assert rendered =~ "Stored safe body"
-      assert rendered =~ ~s(id="stored-safe")
+      assert rendered =~ ~s(id="bp-anchor-stored-safe")
       refute rendered =~ "injected()"
     end
 
@@ -1597,7 +1600,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
   # handle_info/2 catch-all already existed).
   describe "dispatch fall-through keeps the reader alive" do
     test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
-      seed_paper(~s(<section id="block-1"><h1>Alive</h1></section>))
+      seed_paper(~s(<section id="bp-anchor-block-1"><h1>Alive</h1></section>))
 
       {:ok, view, _html} = live(conn, "/papers/#{@slug}")
 
@@ -1614,7 +1617,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
   # no JS. We assert against `get/2` (the crawler's view), not the live socket.
   describe "social-share head (og/twitter/JSON-LD)" do
     test "the dead render carries the og/twitter head for a paper", %{conn: conn} do
-      seed_paper(~s(<section id="block-1"><h1>Shareable</h1></section>))
+      seed_paper(~s(<section id="bp-anchor-block-1"><h1>Shareable</h1></section>))
 
       conn = get(conn, "/papers/#{@slug}")
       html = html_response(conn, 200)

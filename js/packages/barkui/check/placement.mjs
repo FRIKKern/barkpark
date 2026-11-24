@@ -9,6 +9,10 @@
 // position-anchor names; anything else, anywhere in a stage, fails by name. docs/PARTS.md "Placement" prints the
 // same list, and a unit row is red when the two differ.
 //
+// SLOTS is the third list, with its own reason: the pieces of a control UI SDK lays out at run time (a slider's
+// control, track, indicator, thumbs and the range input it hides in each thumb), each with only the properties UI SDK
+// writes on it, by line, and the values it writes there. A later control's pieces go in as more entries.
+//
 // SCROLL_LOCK is the second list, with its own reason and its values, for an element that holds a stage: the root
 // element or body only, and only while a dialog box is open. OUT_OF_DOCUMENT names a stage that does not stand in
 // the document; SHADOW_ABOVE names an element that holds a stage and hosts a shadow root, asked of the browser's
@@ -79,6 +83,73 @@ export const SCROLL_LOCK = [
   { property: '--scrollbar-width', on: 'root', length: 'px', writer: LOCK },
 ]
 
+/** The third list, with its own reason, for the pieces of a UI SDK control that lays them out at run time: each slot
+    by the element it is (`at`, a selector), and each property UI SDK writes there, by its lines in the writer's file.
+    `values` are the values UI SDK writes there (any one of them, as the browser gives it back), where `{p}` is a place
+    on the track, a number from 0 to 100: UI SDK writes every place as a percentage it clamps to that range (percentOf
+    in components/slider/slider-values.js). Every entry has its values. A slot carries only its own properties; any other property there, any of them on another
+    element, and a value UI SDK does not write fail by name, as any style attribute does. A later control's slots go in as more entries. */
+export const SLOT_REASON = 'UI SDK lays out the pieces of a slider on its track at run time; where a piece sits is not how it looks'
+const SLIDER = 'UI SDK slider, on its pieces (components/slider/slider.js)'
+const PLACE = { values: ['{p}%'] }
+export const SLOTS = [
+  { slot: 'ui-slider-control', at: 'ui-slider ui-slider-control', writer: SLIDER, writes: [{ property: 'touch-action', values: ['none'], lines: [179] }] },
+  { slot: 'ui-slider-track', at: 'ui-slider ui-slider-track', writer: SLIDER, writes: [{ property: 'position', values: ['relative'], lines: [187] }] },
+  {
+    slot: 'ui-slider-indicator',
+    at: 'ui-slider ui-slider-indicator',
+    writer: SLIDER,
+    writes: [
+      { property: 'position', values: ['absolute'], lines: [79] },
+      { property: 'inset-inline-start', ...PLACE, lines: [80] },
+      { property: 'width', ...PLACE, lines: [81] },
+      { property: 'height', ...PLACE, lines: [81] },
+      { property: 'top', values: ['0'], lines: [82] },
+      { property: 'bottom', values: ['0', '{p}%'], lines: [80, 82] },
+      { property: 'left', values: ['0'], lines: [82] },
+      { property: 'right', values: ['0'], lines: [82] },
+      { property: '--slider-indicator-start', ...PLACE, lines: [83] },
+      { property: '--slider-indicator-size', ...PLACE, lines: [84] },
+    ],
+  },
+  {
+    slot: 'ui-slider-thumb',
+    at: 'ui-slider ui-slider-thumb',
+    writer: SLIDER,
+    writes: [
+      { property: 'position', values: ['absolute'], lines: [59] },
+      { property: 'bottom', ...PLACE, lines: [60] },
+      { property: 'left', values: ['50%'], lines: [60] },
+      { property: 'translate', values: ['-50% 50%', '0 -50%'], lines: [60, 65] },
+      { property: 'inset-inline', values: ['calc({p}% - 50%) calc(50% - {p}%)'], lines: [61] },
+      { property: 'margin-inline', values: ['auto'], lines: [62] },
+      { property: 'justify-self', values: ['center'], lines: [63] },
+      { property: 'top', values: ['50%'], lines: [64] },
+      { property: 'z-index', values: ['1', '2'], lines: [67] },
+      { property: '--slider-thumb-position', ...PLACE, lines: [68] },
+    ],
+  },
+  {
+    slot: 'the range input in ui-slider-thumb-input',
+    at: 'ui-slider ui-slider-thumb > ui-slider-thumb-input > input[type="range"]',
+    writer: SLIDER,
+    writes: [
+      { property: 'position', values: ['absolute'], lines: [88] },
+      { property: 'inset', values: ['0'], lines: [89] },
+      { property: 'width', values: ['100%'], lines: [90] },
+      { property: 'height', values: ['100%'], lines: [91] },
+      { property: 'margin', values: ['0'], lines: [92] },
+      { property: 'padding', values: ['0'], lines: [93] },
+      { property: 'border', values: ['0'], lines: [94] },
+      { property: 'opacity', values: ['0'], lines: [95] },
+      { property: 'overflow', values: ['hidden'], lines: [96] },
+      { property: 'clip-path', values: ['inset(50%)'], lines: [97] },
+      { property: 'white-space', values: ['nowrap'], lines: [98] },
+      { property: 'pointer-events', values: ['none'], lines: [99] },
+    ],
+  },
+]
+
 /** The fail for a property that is not placement, on any element in a stage. */
 export const NOT_PLACEMENT = (at, prop) => `${at} was given ${prop} in a style attribute, which is not placement: the look belongs in part.css`
 /** The fail for a box property on an element that cannot open in the top layer. */
@@ -91,6 +162,9 @@ export const NOT_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: $
 export const NOT_LOCK = (at, prop) => `${at} was given ${prop} in a style attribute, and it holds every stage: only the scroll lock may stand there, while a dialog is open`
 /** The fail for a scroll lock property with a value the lock does not write. */
 export const LOCK_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and the scroll lock writes ${prop} there only as ${entry.length ? `a ${entry.length} length` : `"${entry.value}"`}`
+/** The fail for a slot's property with a value UI SDK does not write there. */
+export const SLOT_VALUE = (at, prop, value, slot, w) =>
+  `${at} was given ${prop}: ${value} in a style attribute, and UI SDK writes ${w.property} on ${slot} only as ${w.values.map((v) => `"${v}"`).join(' or ')}${w.values.some((v) => v.includes('{p}')) ? ', {p} a number from 0 to 100' : ''}`
 /** The fail for the scroll lock on the root element or body with no dialog open. */
 export const NO_DIALOG = (at, prop) => `${at} was given ${prop} in a style attribute while no dialog was open: the scroll lock stands there only while a dialog is open`
 /** The fail for any property on another element that holds a stage. */
@@ -108,7 +182,7 @@ export const NO_SCRIPT = (at) => `${at} carries a style attribute on the stage w
 
 /** Runs in the census's world (it is serialised): the placement log and its judge; docs/PARTS.md "Placement"
     says what is read and when. `lists` is { allowed: ALLOWED, root:
-    SCROLL_LOCK }; `script` is false on a page with no script; `say` holds the fails' wording; `owner(el)` names the
+    SCROLL_LOCK, slots: SLOTS }; `script` is false on a page with no script; `say` holds the fails' wording; `owner(el)` names the
     part whose stage holds el (null outside every stage); `boxes(part)` the elements the census has seen can open in
     the top layer for that part, and boxes() all of them; `describe(el)` names an element. Returns { watch(root): observe a document or an open
     shadow root from now on, look(part): the fails for that part, in the order first seen, holders(part): each
@@ -125,6 +199,28 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
     const decls = []
     for (let i = 0; i < pad.style.length; i++) decls.push({ prop: pad.style.item(i), value: pad.style.getPropertyValue(pad.style.item(i)) })
     return { decls, of: (name) => pad.style.getPropertyValue(name) }
+  }
+  // Each slot's writes by the longhands the browser applies.
+  const slots = lists.slots.map((s) => {
+    const by = new Map()
+    for (const w of s.writes) for (const { prop } of parse(`${w.property}: inherit`).decls) by.set(prop, w)
+    return { ...s, by }
+  })
+  // A value of a write as the browser gives it back for the longhand `prop`, on a pad of its own (parse's stays put).
+  const norm = document.createElement('div')
+  const given = (w, prop, v) => {
+    norm.setAttribute('style', `${w.property}: ${v}`)
+    return norm.style.getPropertyValue(prop).trim()
+  }
+  // A value fits when it is one UI SDK writes there, with {p} a place from 0 to 100. The places tried are each number in
+  // the value, and the place it stands for in a form the browser folds (calc(40% - 50%) comes back as calc(-10%)).
+  const slotFits = (w, prop, value) => {
+    const v = value.trim()
+    return w.values.some((form) => {
+      if (!form.includes('{p}')) return given(w, prop, form) === v
+      const ps = [...v.matchAll(/-?\d+(\.\d+)?/g)].flatMap((m) => [+m[0], +m[0] + 50, 50 - +m[0], -m[0], +m[0] - 50])
+      return ps.some((p) => p >= 0 && p <= 100 && given(w, prop, form.replaceAll('{p}', String(p))) === v)
+    })
   }
   // Whether a dialog box is open: one the census has seen can open in the top layer, open now, that is a dialog or holds
   // one. The browser tells beforetoggle at once, before a box opens or closes, so the writes waiting until then are
@@ -229,6 +325,13 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
             else if (!at.dialog) fail(say.NO_DIALOG(who, prop))
             continue
           }
+          // A slot of a control UI SDK lays out at run time carries what UI SDK writes on it, as it writes it.
+          const s = slots.find((x) => el.matches(x.at))
+          const own = s?.by.get(prop)
+          if (own) {
+            if (!slotFits(own, prop, value)) fail(say.SLOT_VALUE(who, prop, value, s.slot, own))
+            continue
+          }
           const e = entries.get(prop)
           if (!e) fail(say.NOT_PLACEMENT(who, prop))
           else if (e.on === 'box' && !mine.has(el)) fail(say.NOT_A_BOX(who, prop))
@@ -251,7 +354,7 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
 /** placementWorld as code for the census's world, the list and the fails' wording in it: a function of
     (script, owner, boxes, describe). `source` is probes.mjs's. */
 export function placementSource(source) {
-  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, NO_SCRIPT, NOT_LOCK, LOCK_VALUE, NO_DIALOG, ON_ANCESTOR, OUT_OF_DOCUMENT, SHADOW_ABOVE }
+  const say = { NOT_PLACEMENT, NOT_A_BOX, NOT_ANCHORED, NOT_VALUE, SLOT_VALUE, NO_SCRIPT, NOT_LOCK, LOCK_VALUE, NO_DIALOG, ON_ANCESTOR, OUT_OF_DOCUMENT, SHADOW_ABOVE }
   const said = `{ ${Object.entries(say).map(([k, f]) => `${k}: ${source(f)}`).join(', ')} }`
-  return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify({ allowed: ALLOWED, root: SCROLL_LOCK })}, script, ${said}, owner, boxes, describe))`
+  return `((script, owner, boxes, describe) => (${source(placementWorld)})(${JSON.stringify({ allowed: ALLOWED, root: SCROLL_LOCK, slots: SLOTS })}, script, ${said}, owner, boxes, describe))`
 }
