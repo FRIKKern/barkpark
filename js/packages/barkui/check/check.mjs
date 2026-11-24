@@ -15,6 +15,7 @@ import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } 
 import { waitLine } from '../build/sheet-waits.mjs'
 import { VIEW_PAGES } from './view-pages.mjs'
 import { launch, refusals } from './acts.mjs'
+import { timed } from './probe-clock.mjs'
 
 // A part's limit: 120 s for each part that runs at the same time (they share the machine). A hang is caught
 // sooner, by each step's own limit (STEP_MS in proofs.mjs).
@@ -100,17 +101,17 @@ export async function runCheck({ dir = partsDir, out = outDir, proofFile = proof
     let viewsLine = null
     try {
       await limit((async () => {
-        if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
+        if (only.includes('pressed')) ({ light: lights.pressed, steps } = await timed('light pressed', pressed(ctx, part, skins)))
         if (only.includes('skins') || only.includes('schemes')) {
-          const looks = await skinsAndSchemes(ctx, part, skins, viewPages)
+          const looks = await timed('light skins+schemes', skinsAndSchemes(ctx, part, skins, viewPages))
           viewsLine = looks.views
           Object.assign(lights, { skins: looks.skins, schemes: looks.schemes })
           measures = looks.measures
           paintFree = looks.paintFree
           textOnly = looks.textOnly
         }
-        if (only.includes('phone')) lights.phone = await phone(ctx, part, skins, viewPages)
-        if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
+        if (only.includes('phone')) lights.phone = await timed('light phone', phone(ctx, part, skins, viewPages))
+        if (only.includes('noscript')) lights.noscript = await timed('light noscript', noscript(ctx, part))
       })(), PART_MS, `part ${part.name}`)
     } catch (e) {
       ctx.errors.push(String(e.message).split('\n')[0])

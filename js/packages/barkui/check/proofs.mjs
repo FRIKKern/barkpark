@@ -42,7 +42,9 @@ export function surfacesOf(ctx) {
 // `motion`: the reduced-motion setting the page opens with; the lights are read under both (see motionFails).
 // `clock`: the page's own timers (setTimeout, Date, its animation frames) run on a clock the check moves (see
 // pressed); the check's worlds keep real time.
-export async function open(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1, motion = 'reduce', clock = false } = {}) {
+import { timed, tick } from './probe-clock.mjs'
+export async function open(ctx, o = {}) { return timed('open', open0(ctx, o)) }
+async function open0(ctx, { width = 1440, height = 900, js = true, mobile = false, scale = 1, motion = 'reduce', clock = false } = {}) {
   const context = await ctx.browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, javaScriptEnabled: js, colorScheme: 'light', reducedMotion: motion, isMobile: mobile, hasTouch: mobile })
   const page = await context.newPage()
   const where = `${ctx.part}, ${width}px${js ? '' : ', no script'}`
@@ -58,7 +60,7 @@ export async function open(ctx, { width = 1440, height = 900, js = true, mobile 
   page.barkCensus = await installCensus(page, [page, ref], { script: js })
   // The placement fails for this part, from the census's world (placement.mjs; docs/PARTS.md "Placement" says what is read and when).
   page.barkPlacement = () => page.barkCensus.placement(ctx.part)
-  await limit(page.goto(ctx.url), 15000, 'opening the showroom')
+  { const t = performance.now(); await limit(page.goto(ctx.url), 15000, 'opening the showroom'); tick('goto', performance.now() - t) }
   if (js) await page.waitForSelector('html[data-ready]', { timeout: 15000 })
   if (js && ctx.styles) {
     page.barkStyles = await styleReader(page)

@@ -3,6 +3,7 @@
 // bound, or the capture is red by name (still, in probes.mjs).
 
 /** How many times a capture is taken before the check gives up on it: the first and two more. */
+import { tick } from './probe-clock.mjs'
 export const TRIES = 3
 const shots = { taken: 0, again: 0, moved: 0 }
 /** The run's line: how many captures were taken again because the page moved while they were taken, as a shot of the
@@ -27,7 +28,9 @@ export const captureSentence = () =>
     capture is red by name as the check's own. A shot of the view draws the view wherever the move put it, so one
     taken when the page moved after the view was read, whatever is in the clip, is taken again the same way. */
 export async function capture(page, world, clip) {
+  const tw = performance.now()
   await world(() => window.__barkCheck.still('a capture'))
+  tick('still-before-shot', performance.now() - tw)
   // The view as the screen shows it (the visual viewport, without scrollbars): what a shot of the view draws.
   const [left, top, vx, vy, vw, vh, zoom, drawn] = await world(() => {
     const v = visualViewport
@@ -40,7 +43,9 @@ export async function capture(page, world, clip) {
     : { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h }, fullPage: true }
   shots.taken++
   for (let n = 1; ; n++) {
+    const t0 = performance.now()
     const png = await page.screenshot({ ...shot, scale: 'device', caret: 'initial' })
+    tick(inView ? 'shot-view' : 'shot-full', performance.now() - t0)
     if (!inView && !drawn) await world(() => (window.__barkFullShot = true))
     const moved = await world(async ([left, top, c]) => {
       if (scrollX === left && scrollY === top) return null
