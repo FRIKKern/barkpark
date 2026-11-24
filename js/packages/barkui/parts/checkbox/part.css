@@ -9,7 +9,8 @@
    mixed, it is filled with --ui-primary, with a tick or a dash in --ui-primary-foreground. Under the pointer the
    empty box's edge darkens and a filled box takes --ui-primary-hover; pressed, the sheet's pressed fills.
    Read-only keeps its mark but is drawn on --ui-muted in --ui-foreground, so it does not look like a box a press
-   changes; disabled is UI SDK's, faded. Invalid takes the text field's danger edge.
+   changes; disabled is UI SDK's, faded. Invalid takes the text field's danger edge, and checked while invalid is
+   filled with that danger colour.
    At phone width the control keeps UI SDK's 44px touch height whatever the pointer.
    The look keys only on what UI SDK writes: data-checked, data-indeterminate, data-readonly, data-disabled and
    data-invalid, and on :hover and :active. */
@@ -64,6 +65,14 @@
     --bark-checkbox-hover-edge: var(--ui-primary-hover);
     --bark-checkbox-press-fill: var(--ui-primary-pressed);
     --bark-checkbox-press-edge: var(--ui-primary-pressed);
+  }
+
+  /* Checked while invalid: the box takes the error's own colour, with the mark in the ground's, so it still reads as
+     invalid; the pair is the field error's text on its ground. */
+  &[data-invalid][data-checked] {
+    --bark-checkbox-fill: var(--bark-danger-text);
+    --bark-checkbox-edge: var(--bark-danger-text);
+    --bark-checkbox-mark: var(--ui-background);
   }
 
   &[data-readonly] {

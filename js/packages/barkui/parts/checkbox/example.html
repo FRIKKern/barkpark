@@ -39,7 +39,9 @@
   <ui-checkbox id="checkbox-mixed-focus" default-checked="indeterminate" data-pin="focus-visible" data-slot="checkbox" role="checkbox" type="button" aria-checked="mixed" tabindex="0" data-indeterminate>Focus</ui-checkbox>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Invalid: rest, focus</span>
+  <span data-demo-label>Invalid, unchecked and checked: rest, focus</span>
   <ui-checkbox id="checkbox-bad-rest" data-invalid aria-invalid="true" data-slot="checkbox" role="checkbox" type="button" aria-checked="false" tabindex="0" data-unchecked>Rest</ui-checkbox>
   <ui-checkbox id="checkbox-bad-focus" data-invalid aria-invalid="true" data-pin="focus-visible" data-slot="checkbox" role="checkbox" type="button" aria-checked="false" tabindex="0" data-unchecked>Focus</ui-checkbox>
+  <ui-checkbox id="checkbox-badon-rest" default-checked data-invalid aria-invalid="true" data-slot="checkbox" role="checkbox" type="button" aria-checked="true" tabindex="0" data-checked>Checked</ui-checkbox>
+  <ui-checkbox id="checkbox-badon-focus" default-checked data-invalid aria-invalid="true" data-pin="focus-visible" data-slot="checkbox" role="checkbox" type="button" aria-checked="true" tabindex="0" data-checked>Checked, focus</ui-checkbox>
 </div>

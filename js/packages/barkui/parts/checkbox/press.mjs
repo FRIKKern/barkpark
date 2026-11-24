@@ -68,4 +68,14 @@ export const steps = [
     keys: ['Tab'],
     expect: (root, h) => document.activeElement === root.querySelector('#checkbox-consent') || `focus is on ${h.describe(document.activeElement)}`,
   },
+  {
+    name: 'Space checks the invalid box, and it stays marked invalid',
+    keys: ['Space'],
+    expect: (root, h) => {
+      const c = root.querySelector('#checkbox-consent')
+      if (document.activeElement !== c) return `focus is on ${h.describe(document.activeElement)}`
+      if (c.getAttribute('aria-checked') !== 'true') return `aria-checked is ${c.getAttribute('aria-checked')}`
+      return (c.hasAttribute('data-invalid') && c.getAttribute('aria-invalid') === 'true') || 'it is no longer marked invalid'
+    },
+  },
 ]
