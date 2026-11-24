@@ -1,0 +1,58 @@
+<div data-demo-row>
+  <span data-demo-label>Empty, required, filled</span>
+  <ui-field id="textarea-notes-field" data-slot="field">
+    <ui-field-label id="textarea-notes-field-label" data-slot="field-label">Notes</ui-field-label>
+    <ui-textarea><textarea id="textarea-notes" data-slot="textarea" rows="3" placeholder="Anything the driver should know"></textarea></ui-textarea>
+    <ui-field-description id="textarea-notes-field-description" data-slot="field-description">Your driver sees these notes.</ui-field-description>
+  </ui-field>
+  <ui-field id="textarea-message-field" data-slot="field" data-required="">
+    <ui-field-label id="textarea-message-field-label" data-slot="field-label">Message</ui-field-label>
+    <ui-textarea required><textarea id="textarea-message" data-slot="textarea" data-filled="" data-required="" rows="3" required>Thanks for the order.
+It ships on Monday.</textarea></ui-textarea>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Read-only, disabled</span>
+  <ui-field id="textarea-terms-field" data-slot="field">
+    <ui-field-label id="textarea-terms-field-label" data-slot="field-label">Terms</ui-field-label>
+    <ui-textarea readonly><textarea id="textarea-terms" data-slot="textarea" data-filled="" data-readonly="" rows="3" readonly>Paid within 30 days.
+No refunds after delivery.</textarea></ui-textarea>
+  </ui-field>
+  <ui-field id="textarea-reply-field" data-slot="field" data-disabled="" disabled>
+    <ui-field-label id="textarea-reply-field-label" data-slot="field-label">Reply</ui-field-label>
+    <ui-textarea disabled><textarea id="textarea-reply" data-slot="textarea" data-filled="" data-disabled="" rows="3" disabled>Replies are closed for this thread.</textarea></ui-textarea>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Invalid</span>
+  <ui-field id="textarea-review-field" data-slot="field" data-invalid="" invalid>
+    <ui-field-label id="textarea-review-field-label" data-slot="field-label">Review</ui-field-label>
+    <ui-textarea><textarea id="textarea-review" data-slot="textarea" data-filled="" data-invalid="" aria-invalid="true" rows="3">Great.</textarea></ui-textarea>
+    <ui-field-error id="textarea-review-field-error" data-slot="field-error" data-invalid="">Write at least 20 characters.</ui-field-error>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Filled: hover, focus, hover and focus</span>
+  <textarea data-slot="textarea" rows="3" data-pin="hover">Hover</textarea>
+  <textarea data-slot="textarea" rows="3" data-pin="focus-visible">Focus</textarea>
+  <textarea data-slot="textarea" rows="3" data-pin="hover focus-visible">Hover and focus</textarea>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Empty: hover, focus, hover and focus</span>
+  <textarea data-slot="textarea" rows="3" placeholder="Hover" data-pin="hover"></textarea>
+  <textarea data-slot="textarea" rows="3" placeholder="Focus" data-pin="focus-visible"></textarea>
+  <textarea data-slot="textarea" rows="3" placeholder="Hover and focus" data-pin="hover focus-visible"></textarea>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid: hover, focus, hover and focus</span>
+  <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="hover">Hover</textarea>
+  <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="focus-visible">Focus</textarea>
+  <textarea data-slot="textarea" data-invalid="" aria-invalid="true" rows="3" data-pin="hover focus-visible">Hover and focus</textarea>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only: hover, focus, hover and focus; disabled: hover</span>
+  <textarea data-slot="textarea" data-readonly="" rows="3" readonly data-pin="hover">Read-only hover</textarea>
+  <textarea data-slot="textarea" data-readonly="" rows="3" readonly data-pin="focus-visible">Read-only focus</textarea>
+  <textarea data-slot="textarea" data-readonly="" rows="3" readonly data-pin="hover focus-visible">Read-only hover and focus</textarea>
+  <textarea data-slot="textarea" data-disabled="" rows="3" disabled data-pin="hover">Disabled hover</textarea>
+</div>
