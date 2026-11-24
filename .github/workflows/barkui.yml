@@ -150,7 +150,8 @@ jobs:
 
       # This group's parts, pressed with real keys in Chromium and proved in each skin, light and dark, on every
       # surface, a 390px window and a script-free print, reading every label and graphic from pixels, on a page
-      # that prints the group's stages, and the stage that follows its last part, and loads every part folder's sheet. Each part's lines give its
+      # that prints the group's stages, and the stage that follows its last part, and loads every part folder's sheet; each part is read on
+      # a copy of it whose other stages are hidden but the one that follows it (check/part-page.mjs). Each part's lines give its
       # seconds against its limit, and the last lines name every part over two thirds of it. The job splits the folder again and refuses unless its group is the
       # list the plan gave it. Its limit below is STEP_MINUTES in check/capacity.mjs (a test holds them equal);
       # the job refuses more parts than that holds and stops, failing, once it passes its ceiling, under this
