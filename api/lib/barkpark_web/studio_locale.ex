@@ -958,6 +958,8 @@ defmodule BarkparkWeb.StudioLocale do
       "Italic" => gettext("Italic"),
       "Link" => gettext("Link"),
       "Link address" => gettext("Link address"),
+      "Use a web, mail or phone address (https:, mailto:, tel:) or a path." =>
+        gettext("Use a web, mail or phone address (https:, mailto:, tel:) or a path."),
       "Link type" => gettext("Link type"),
       "Internal" => gettext("Internal"),
       "External" => gettext("External"),
