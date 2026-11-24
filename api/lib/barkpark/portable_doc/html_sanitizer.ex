@@ -323,9 +323,13 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   # with its address, so the link draws as its words and an edit keeps the
   # address, inert. Any other `on…` or element rule is the reader's.
   defp policy(opts) do
-    if opts[:editor],
-      do: %{editor: true, href_allowed?: opts[:href_allowed?] || fn _ -> true end},
-      else: %{editor: false}
+    base =
+      if opts[:editor],
+        do: %{editor: true, href_allowed?: opts[:href_allowed?] || fn _ -> true end},
+        else: %{editor: false}
+
+    # A link to the Paper's own path is a same-page link (`Anchors.href/3`).
+    Map.put(base, :self, Anchors.self_path(opts[:id]))
   end
 
   @form_controls ~w(input button label fieldset legend)
@@ -383,7 +387,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
       # A stored id never takes a page element's place (`Anchors`).
       key == "id" -> Anchors.id(name, value)
       key == "name" -> Anchors.name(name, value, policy.tag)
-      key == "href" -> [{name, Anchors.href(value, policy.anchors)}]
+      key in Anchors.ref_attrs() -> Anchors.refs(name, value)
+      key == "href" -> [{name, Anchors.href(value, policy.anchors, policy.self)}]
       key == "style" -> scrub_style(name, value)
       key == "class" -> scrub_class(name, value)
       true -> [{name, value}]
