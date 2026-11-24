@@ -29,8 +29,7 @@ export const steps = [
       const c = root.querySelector('#checkbox-updates')
       if (document.activeElement !== c) return `focus is on ${h.describe(document.activeElement)}`
       if (c.getAttribute('aria-checked') !== 'true') return `aria-checked is ${c.getAttribute('aria-checked')}`
-      const tick = c.querySelector('[data-show="check"]')
-      return (tick.checkVisibility() && !c.querySelector('[data-show="mixed"]').checkVisibility()) || 'the tick does not show alone'
+      return (c.hasAttribute('data-checked') && getComputedStyle(c, '::after').rotate === '45deg') || 'the tick does not show'
     },
     ax: { '#checkbox-updates': { role: 'checkbox', checked: 'true' } },
   },
@@ -41,7 +40,7 @@ export const steps = [
       const c = root.querySelector('#checkbox-updates')
       if (document.activeElement !== c) return `focus is on ${h.describe(document.activeElement)}`
       if (c.getAttribute('aria-checked') !== 'false') return `aria-checked is ${c.getAttribute('aria-checked')}`
-      return !c.querySelector('[data-show="check"]').checkVisibility() || 'the tick still shows'
+      return getComputedStyle(c, '::after').content === 'none' || 'the mark still shows'
     },
     ax: { '#checkbox-updates': { role: 'checkbox', checked: 'false' } },
   },
@@ -52,7 +51,7 @@ export const steps = [
       const c = root.querySelector('#checkbox-topics')
       if (document.activeElement !== c) return `focus is on ${h.describe(document.activeElement)}`
       if (c.getAttribute('aria-checked') !== 'true') return `aria-checked is ${c.getAttribute('aria-checked')}`
-      return (c.querySelector('[data-show="check"]').checkVisibility() && !c.querySelector('[data-show="mixed"]').checkVisibility()) || 'the tick does not show alone'
+      return (c.hasAttribute('data-checked') && getComputedStyle(c, '::after').rotate === '45deg') || 'the tick does not show in place of the dash'
     },
   },
   {
