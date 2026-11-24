@@ -1,0 +1,108 @@
+/* Radio group: UI SDK's <ui-radio-group>, named by its field's label, holding <ui-radio>s. Each radio is the control
+   itself (role radio) and holds its own words, as UI SDK's custom rendering puts them, so a ring and its words
+   are one control: the pointer on the words is on the radio, and the focus ring, base.css's, drawn once for every
+   part, goes round both, a little off the words. The control draws no fill and no edge of its own; its words are
+   its label. The group keeps one Tab stop, and the arrow keys move the choice and pass a disabled option.
+   The ring and its dot are the radio's ::before, one graphic: a circle on --ui-background with the text field's
+   --ui-input edge, and, checked, a --ui-primary edge round a --ui-primary dot. Under the pointer the empty ring's
+   edge darkens, and a checked one takes --ui-primary-hover; pressed, the sheet's pressed fills. Read-only keeps
+   its choice but is drawn on --ui-muted with a --ui-foreground dot, so it does not look like a ring a press
+   changes; disabled is UI SDK's, faded. Invalid takes the text field's danger edge, checked or not.
+   At phone width the radio keeps UI SDK's 44px touch height whatever the pointer.
+   The look keys only on what UI SDK writes: data-checked, data-readonly and data-disabled on a radio, data-invalid
+   on its group, and on :hover and :active. */
+
+/* Each radio as wide as its words, so the focus ring goes round them and not the whole column. */
+[data-slot="radio-group"] {
+  align-items: flex-start;
+  gap: calc(var(--ui-spacing) * 1);
+}
+
+[data-slot="radio"] {
+  --bark-radio-text: 0.875rem;
+  --bark-radio-gap: var(--ui-background);
+  --bark-radio-dot: var(--ui-background);
+  --bark-radio-edge: var(--ui-input);
+  --bark-radio-hover-gap: var(--ui-background);
+  --bark-radio-hover-dot: var(--ui-background);
+  --bark-radio-hover-edge: var(--ui-muted-foreground);
+  --bark-radio-press-gap: var(--ui-muted-pressed);
+  --bark-radio-press-dot: var(--ui-muted-pressed);
+  --bark-radio-press-edge: var(--ui-muted-foreground);
+
+  position: relative;
+  width: auto;
+  height: auto;
+  justify-content: flex-start;
+  gap: calc(var(--ui-spacing) * 2);
+  /* Room between the words and the focus ring, which goes round the control. */
+  padding-block: calc(var(--ui-spacing) * 0.5);
+  padding-inline: 0 var(--ui-spacing);
+  border: 0 solid transparent;
+  border-radius: calc(var(--ui-radius) / 2);
+  background: transparent;
+  color: var(--ui-foreground);
+  font-size: var(--bark-radio-text);
+  line-height: 1.25;
+
+  /* The ring: 14px inside a 1px edge, sized by its content so it draws the same alone. The dot is an 8px circle
+     of its background image, on the gap's colour; unchecked, the dot is the gap's colour too. */
+  &::before {
+    content: "";
+    box-sizing: content-box;
+    flex-shrink: 0;
+    width: calc(1rem - 2px);
+    height: calc(1rem - 2px);
+    border: 1px solid var(--bark-radio-edge);
+    border-radius: 50%;
+    background-color: var(--bark-radio-gap);
+    background-image: radial-gradient(circle at center, var(--bark-radio-dot) calc(0.25rem - 0.5px), transparent calc(0.25rem + 0.5px));
+    transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  }
+
+  &[data-checked] {
+    --bark-radio-dot: var(--ui-primary);
+    --bark-radio-edge: var(--ui-primary);
+    --bark-radio-hover-gap: var(--ui-background);
+    --bark-radio-hover-dot: var(--ui-primary-hover);
+    --bark-radio-hover-edge: var(--ui-primary-hover);
+    --bark-radio-press-gap: var(--ui-background);
+    --bark-radio-press-dot: var(--ui-primary-pressed);
+    --bark-radio-press-edge: var(--ui-primary-pressed);
+  }
+
+  &[data-readonly] {
+    --bark-radio-gap: var(--ui-muted);
+    --bark-radio-dot: var(--ui-muted);
+    --bark-radio-edge: var(--ui-input);
+  }
+
+  &[data-readonly][data-checked] {
+    --bark-radio-dot: var(--ui-foreground);
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    --bark-radio-gap: var(--bark-radio-hover-gap);
+    --bark-radio-dot: var(--bark-radio-hover-dot);
+    --bark-radio-edge: var(--bark-radio-hover-edge);
+  }
+
+  &:active:not([data-disabled], [data-readonly]) {
+    --bark-radio-gap: var(--bark-radio-press-gap);
+    --bark-radio-dot: var(--bark-radio-press-dot);
+    --bark-radio-edge: var(--bark-radio-press-edge);
+  }
+}
+
+/* UI SDK marks a group invalid, not each radio in it. */
+[data-slot="radio-group"][data-invalid] [data-slot="radio"] {
+  --bark-radio-edge: var(--bark-danger-text);
+  --bark-radio-hover-edge: var(--bark-danger-text);
+  --bark-radio-press-edge: var(--bark-danger-text);
+}
+
+@media (max-width: 600px) {
+  [data-slot="radio"] {
+    min-height: 2.75rem;
+  }
+}
