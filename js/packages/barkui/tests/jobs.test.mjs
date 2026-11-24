@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -246,5 +246,49 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
             }
     expect(rows).toBe(10 * 2 * results.length * 2 ** legs.length)
     expect(greens).toBeGreaterThan(0)
+  })
+})
+
+// The parts that open a layer over the page are the slow ones three at once: they are dealt over the groups first.
+describe('the parts that open a layer are dealt over the groups', () => {
+  const slices = (names, perJob) => {
+    const of = Math.ceil(names.length / perJob)
+    const base = Math.floor(names.length / of)
+    let at = 0
+    return Array.from({ length: of }, (_, i) => [...names].sort().slice(at, (at += base + (i < names.length % of ? 1 : 0))))
+  }
+
+  it('the split deals the parts that open a layer over the groups first, and fills the rest in name order', () => {
+    const seven = ['button', 'dialog', 'menu', 'select', 'switch', 'tabs', 'text-field']
+    expect(split(seven, 5, ['dialog', 'menu', 'select']).map((g) => g.parts)).toEqual([
+      ['button', 'dialog', 'select', 'switch'],
+      ['menu', 'tabs', 'text-field'],
+    ])
+    for (let n = 1; n <= 20; n++) {
+      const names = Array.from({ length: n }, (_, i) => `p${String(i).padStart(2, '0')}`)
+      expect(split(names, 4).map((g) => g.parts), `n=${n}, none layered`).toEqual(slices(names, 4))
+      for (let k = 0; k <= n; k++) {
+        const layered = names.slice(0, k)
+        const groups = split(names, 4, layered)
+        expect(cover(groups, names, 4), `n=${n} k=${k}`).toEqual([])
+        expect(groups.map((g) => g.parts.length), `n=${n} k=${k}`).toEqual(slices(names, 4).map((s) => s.length))
+        const counts = groups.map((g) => g.parts.filter((p) => layered.includes(p)).length)
+        expect(Math.max(...counts) - Math.min(...counts), `n=${n} k=${k}: ${counts}`).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('the plan, a job and the closing check deal the layered parts of a folder alike', () => {
+    const dir = folderOf(7, 'layered')
+    for (const p of ['p00', 'p01', 'p02']) writeFileSync(join(dir, p, 'part.json'), JSON.stringify({ layers: [{ name: 'a layer' }] }))
+    writeFileSync(join(dir, 'p03', 'part.json'), JSON.stringify({ layers: [] }))
+    const m = planMatrix(dir, {})
+    expect(m.map((g) => g.parts)).toEqual(['p00,p02,p03,p04', 'p01,p05,p06'])
+    for (const g of m) expect(legGroup(g.group, g.parts, dir, {}).parts.join(','), `group ${g.group}`).toBe(g.parts)
+    const reports = [...m.map((g) => ({ file: `${g.group}.json`, data: { group: g.group, of: g.of, parts: g.parts.split(','), sha: 's', ok: true } })), ...selftestOk('s')]
+    const names = partNames(dir, {})
+    expect(judge({ needs: needsWith(JSON.stringify(m)), reports, names, layered: ['p00', 'p01', 'p02'], sha: 's' }).ok).toBe(true)
+    // A closing check that split by name alone would not agree with the plan.
+    expect(judge({ needs: needsWith(JSON.stringify(m)), reports, names, sha: 's' }).rows.join('\n')).toMatch(/the plan's groups .* differ from this checkout's split/)
   })
 })
