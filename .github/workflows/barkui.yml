@@ -162,7 +162,7 @@ jobs:
           GROUP: ${{ matrix.group }}
           PARTS: ${{ matrix.parts }}
         run: |
-          if [ "$GROUP" = 1 ]; then export BARKUI_PROBE_PAGE=0; else export BARKUI_PROBE_PAGE=1; fi
+          if [ "$GROUP" = 1 ]; then export BARKUI_PROBE_HIDE=0; else export BARKUI_PROBE_HIDE=1; fi
           node --import ./check/load-wall.mjs check/time-probe.mjs button,checkbox,dialog,menu,radio
 
       - name: "Timing probe, second arm"
@@ -172,7 +172,7 @@ jobs:
         env:
           GROUP: ${{ matrix.group }}
         run: |
-          if [ "$GROUP" = 1 ]; then export BARKUI_PROBE_PAGE=1; else export BARKUI_PROBE_PAGE=0; fi
+          if [ "$GROUP" = 1 ]; then export BARKUI_PROBE_HIDE=1; else export BARKUI_PROBE_HIDE=0; fi
           node --import ./check/load-wall.mjs check/time-probe.mjs button,checkbox,dialog,menu,radio
 
       - name: Upload this group's report

@@ -138,16 +138,17 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     let own = null
     try {
       await limit((async () => {
-        if (process.env.BARKUI_PROBE_PAGE === '1') {
-          const i = probeOrder.indexOf(part.name)
-          const follow = probeOrder[i + 1]
-          const pdir = pageOf(probeSrc, follow ? [part.name, follow] : [part.name])
-          const at = `${out}-p-${part.name}`
-          const pb = await buildShowroom({ dir: pdir, out: at, proof: proofFile, quiet: true, plantCss })
-          const pbare = await buildShowroom({ dir: pdir, out: `${at}-bare`, proof: proofFile, quiet: true, plantCss, bare: true })
-          for (const o of [at, `${at}-bare`]) copyFileSync(sheet, join(o, 'barkui.css'))
-          ctx.url = pathToFileURL(pb.file).href
-          ctx.styles = await styleBaseline(browser, pathToFileURL(pbare.file).href)
+        if (process.env.BARKUI_PROBE_HIDE === '1') {
+          const order = built.parts.map((p) => p.name)
+          const keep = [part.name, order[order.indexOf(part.name) + 1]].filter(Boolean)
+          const hide = (html) => order.filter((n) => !keep.includes(n)).reduce((h, n) => h.replace(`<section class="sr-part" id="part-${n}"`, `<section class="sr-part" id="part-${n}" hidden`), html)
+          for (const [f, to] of [[built.file, join(out, `index-${part.name}.html`)], [bare.file, join(`${out}-bare`, `index-${part.name}.html`)]]) {
+            const h = hide(readFileSync(f, 'utf8'))
+            if ((h.match(/ hidden aria-labelledby/g) ?? []).length !== order.length - keep.length) throw new Error('probe: hide missed a section')
+            writeFileSync(to, h)
+          }
+          ctx.url = pathToFileURL(join(out, `index-${part.name}.html`)).href
+          ctx.styles = await styleBaseline(browser, pathToFileURL(join(`${out}-bare`, `index-${part.name}.html`)).href)
         }
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
         if (only.includes('skins') || only.includes('schemes')) {
