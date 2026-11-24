@@ -39,7 +39,9 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Elements do
   # Kept beside the renderer's: plain text-level and list markup older
   # producers wrote (a line break, emphasis, a definition list). None is read
   # in a parse mode of its own, so a browser and lexbor build the same tree.
-  @inert ~w(br wbr em del ins s u kbd samp var small abbr q time dl dt dd caption tfoot)
+  # `strike` is what a browser's strikethrough command writes in the Studio's
+  # rich text editor (#28402 review r2, S2); kept as written, like `s`.
+  @inert ~w(br wbr em del ins s strike u kbd samp var small abbr q time dl dt dd caption tfoot)
 
   # The document's own frame: a fragment never holds one.
   @frame ~w(html head body)
