@@ -5,9 +5,11 @@
    base.css's, drawn once on the focused control, and each control marks itself at 3:1: the field takes the text
    field's box (--ui-input edge, --ui-muted-foreground under the pointer, --bark-danger-text when invalid, --ui-muted
    when read-only or disabled), and the button beside it the secondary button's (--ui-input edge, --ui-muted-hover
-   under the pointer, --ui-muted-pressed held down, --ui-muted with no edge when disabled). The button holds both eye
-   icons as inline SVG in currentColor, the open eye while the password is hidden and the struck eye while it is
-   shown (data-visible), so no mask is on the page. Read-only takes no hover on the field; its button still works.
+   under the pointer, --ui-muted-pressed held down, --ui-muted with no edge when disabled). The button's eye is its
+   ::before in currentColor, as the radio draws its dot: an oval edge and a round pupil while the password is hidden,
+   struck through while it is shown (data-visible). --ui-icon is none, so UI SDK's mask is off and no mask is on the
+   page; an svg icon would sit inside the root, which has no box of its own, and the no-script light asks every
+   element holding an svg for one. Read-only takes no hover on the field; its button still works.
    At phone width the text is 1rem, the size UI SDK gives a coarse pointer, since this sheet's own size would win
    over UI SDK's there. Its states key only on markup the field and the password input write (data-visible,
    data-readonly, data-disabled, data-invalid) and on :hover and :active. The check does not read the colour of
@@ -85,16 +87,21 @@
   color: var(--bark-password-toggle-fg);
   transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
 
-  & > [data-icon="hide"] {
-    display: none;
+  /* UI SDK masks the button's ::before with --ui-icon; none leaves no mask, and the eye is drawn here instead. */
+  --ui-icon: none;
+
+  &::before {
+    width: calc(var(--ui-spacing) * 4.5);
+    height: calc(var(--ui-spacing) * 3);
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px));
   }
 
-  &[data-visible] > [data-icon="show"] {
-    display: none;
-  }
-
-  &[data-visible] > [data-icon="hide"] {
-    display: block;
+  &[data-visible]::before {
+    background-image:
+      linear-gradient(to top right, transparent calc(50% - 1px), currentColor calc(50% - 1px), currentColor calc(50% + 1px), transparent calc(50% + 1px)),
+      radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px));
   }
 
   &[data-disabled] {
