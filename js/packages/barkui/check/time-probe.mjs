@@ -14,7 +14,7 @@ for (const arg of process.argv.slice(2)) {
   const lines = []
   const { ok } = await runCheck({ dir, names, log: (l) => lines.push(l) })
   const s = ((performance.now() - t) / 1000).toFixed(1)
-  for (const l of lines) if (/^\S|probe/.test(l)) console.log(`  ${l}`)
+  for (const l of lines) if (/^\S|probe|time:/.test(l)) console.log(`  ${l}`)
   console.log(`probe: folder ${folder}, parts ${names.join('+')}, ${s} s, ok ${ok}`)
   console.log(`probe-clock: folder ${folder}, ${clockLine()}`)
 }
