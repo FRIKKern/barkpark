@@ -135,8 +135,10 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     let steps = []
     let viewsLine = null
     const began = performance.now()
+    let own = null
     try {
       await limit((async () => {
+        if (process.env.BARKUI_PROBE_OWN === '1') ctx.browser = own = await launch({ args: ['--disable-lcd-text'] })
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
         if (only.includes('skins') || only.includes('schemes')) {
           const looks = await skinsAndSchemes(ctx, part, skins, viewPages)
@@ -152,6 +154,7 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     } catch (e) {
       ctx.errors.push(String(e.message).split('\n')[0])
     }
+    if (own) await own.close()
     const ms = performance.now() - began
     for (const k of LIGHT_NAMES) if (!lights[k]) lights[k] = { pass: false, detail: only.includes(k) ? 'did not finish' : 'not run in this run' }
     const offs = only.filter((k) => !lights[k].pass).map((k) => `${k}: ${lights[k].detail}`)

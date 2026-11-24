@@ -162,8 +162,18 @@ jobs:
           GROUP: ${{ matrix.group }}
           PARTS: ${{ matrix.parts }}
         run: |
-          mkdir -p "$RUNNER_TEMP/barkui-report"
-          node --import ./check/load-wall.mjs check/run.mjs --group "$GROUP" --parts "$PARTS" --report "$RUNNER_TEMP/barkui-report/group-$GROUP.json"
+          if [ "$GROUP" = 1 ]; then export BARKUI_PROBE_OWN=0; else export BARKUI_PROBE_OWN=1; fi
+          node --import ./check/load-wall.mjs check/time-probe.mjs button,checkbox,dialog,menu,radio
+
+      - name: "Timing probe, second arm"
+        if: always()
+        timeout-minutes: 15
+        working-directory: js/packages/barkui
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          if [ "$GROUP" = 1 ]; then export BARKUI_PROBE_OWN=1; else export BARKUI_PROBE_OWN=0; fi
+          node --import ./check/load-wall.mjs check/time-probe.mjs button,checkbox,dialog,menu,radio
 
       - name: Upload this group's report
         if: always()
