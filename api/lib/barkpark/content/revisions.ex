@@ -149,6 +149,7 @@ defmodule Barkpark.Content.Revisions do
       Revision
       |> where([r], r.doc_id == ^Content.published_id(doc_id) and r.type == ^type)
       |> scope_to_dataset(dataset, opts)
+      # global-read: same clauses as list_revisions/4 (owner check, dataset, grants); answers only a yes/no for one document the caller has open
       |> scope_to_workspace_or_global(workspace_id, project_id)
       |> maybe_scope_to_grants(opts)
       |> holds(List.wrap(key), value)
