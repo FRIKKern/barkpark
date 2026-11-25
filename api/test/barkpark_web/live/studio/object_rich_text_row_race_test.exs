@@ -37,6 +37,19 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRowRaceTest do
 
   defp b_row(b, html), do: fn -> row_post(b, html, nil) end
 
+  # Two rows of one `_key`, written past the API's own key checks.
+  defp dup_rows(c) do
+    rows = [
+      %{"_type" => "row", "_key" => "r1", "rt" => [block("wa", "alpha")]},
+      %{"_type" => "row", "_key" => "r1", "rt" => [block("wb", "beta")]}
+    ]
+
+    Barkpark.Repo.query!(
+      "update documents set content = jsonb_set(content, '{meta,rows}', $1::jsonb) where doc_id in ($2, $3) and dataset = 'production'",
+      [rows, c.id, "drafts." <> c.id]
+    )
+  end
+
   defp row_words(c), do: words(hd(stored(c)["meta"]["rows"])["rt"])
 
   for surface <- [:desk, :studio] do
@@ -70,6 +83,32 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRowRaceTest do
 
       assert row_words(c) == ["ONE rowtext TWO"]
       refute html =~ @rb
+    end
+
+    # #28898 r1 review, D1: two rows of one `_key` were both matched to the
+    # first, so row 1 was written with row 0's text.
+    test "#{surface}: two rows of one _key, A edits row 0, B saves the label inside: both rows kept",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      dup_rows(c)
+      {a, b} = {open(c), open(c)}
+
+      fields = %{
+        "doc[meta].label" => "l0",
+        "doc[meta].rows[0]._type" => "row",
+        "doc[meta].rows[0]._key" => "r1",
+        "doc[meta].rows[0].rt" => "<p>alpha A</p>",
+        "doc[meta].rows[1]._type" => "row",
+        "doc[meta].rows[1]._key" => "r1",
+        "doc[meta].rows[1].rt" => "<p>beta</p>",
+        "_bp_rt_seen" => ["doc[meta].rows[0].rt|0", "doc[meta].rows[1].rt|0"]
+      }
+
+      inside(a, fn -> send_post(b, "doc[meta].label", %{"doc[meta].label" => "lB"}) end, fn ->
+        send_post(a, @name, fields)
+      end)
+
+      assert for(r <- stored(c)["meta"]["rows"], do: words(r["rt"])) == [["alpha A"], ["beta"]]
     end
 
     test "#{surface}: no other save: A's row post is written as posted, no banner", c do

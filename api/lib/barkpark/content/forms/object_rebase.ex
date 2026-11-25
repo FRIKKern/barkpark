@@ -78,7 +78,22 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # subfields read as an object's are, onto the store's row of that key.
   # The row's other subfields, its order and the rows themselves are
   # written as posted, as before.
+  #
+  # Only when every row's `_key` is unique in all three (as `Forms`'
+  # `keyed_rows?`): two rows of one key matched the first for both, and the
+  # second's text was written over (#28898 r1 review, D1).
   defp rows(field, mine, base, theirs, {seen, at}) do
+    if unique_keys?(mine) and unique_keys?(base) and unique_keys?(theirs),
+      do: keyed_rows(field, mine, base, theirs, {seen, at}),
+      else: mine
+  end
+
+  defp unique_keys?(rows) do
+    keys = for %{"_key" => k} <- rows, do: k
+    length(keys) == length(Enum.uniq(keys))
+  end
+
+  defp keyed_rows(field, mine, base, theirs, {seen, at}) do
     mine
     |> Enum.with_index()
     |> Enum.map(fn {row, i} ->
