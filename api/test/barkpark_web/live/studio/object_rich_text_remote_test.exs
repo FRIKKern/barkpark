@@ -64,6 +64,39 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     end
   end
 
+  # task-fbe81bb824c6df0e: B saves twice while A types. A's page has
+  # painted neither B's paragraph nor the merge of A's first post, so while
+  # a value waits it reports the newest one's seq - 1 (bp-rt-remote.js
+  # `seenOf`), and A's next post is read against B's second save's `was`
+  # (the merged value), which lacks nothing of A's but has P1 that A's post
+  # does not. Feared: P1 taken out with no word. What happens: the line-up
+  # is not certain (two blocks for one), so the post is held with the
+  # banner, the store keeps both of B's paragraphs, and A's typing stays in
+  # A's editor. The banner itself is a false clash: task-2833650e2e72d380.
+  test "B saves twice while A types: B's paragraphs stay stored and A's typing is held, not lost",
+       c do
+    a = open(c)
+    b = open(c)
+
+    b_saves_rt(b, c, "<p>one two</p><p>P1</p>", ["one two", "P1"])
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: s1}}}, 2_000)
+
+    post_rt(a, "<p>one twoA</p>", s1 - 1)
+    assert words(stored(c)["meta"]["rt"]) == ["one twoA", "P1"]
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: m}}}, 2_000)
+
+    b_saves_rt(b, c, "<p>one twoA</p><p>P1</p><p>P2</p>", ["one twoA", "P1", "P2"])
+    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: m2}}}, 2_000)
+    assert m2 > m
+
+    # The page waits on m2 now, A's editor still showing only its own text.
+    html = post_rt(a, "<p>one twoAB</p>", m2 - 1)
+
+    assert words(stored(c)["meta"]["rt"]) == ["one twoA", "P1", "P2"]
+    assert words(form(a)["meta"]["rt"]) == ["one twoAB"]
+    assert html =~ "Someone else rewrote"
+  end
+
   test "B saves the sibling meta.rt2: only rt2 is sent", c do
     a = open(c)
     b = open(c)
