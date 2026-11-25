@@ -40,6 +40,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   """
 
   alias Barkpark.Content.TextRebase
+  alias Barkpark.PortableDoc.TextDiff, as: LineDiff
 
   @fixed ~w(_key _type children markDefs)
 
@@ -132,9 +133,11 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   # Inside the splice, the text kept is as long on letters as on graphemes
   # alone: no base letter whose text stayed took other marks
-  # (task-81d9efce3bbf6428). The edit script is the shortest, so its kept
-  # letters are a longest common run; one tag in the splice needs none. Past
-  # @diff_cap letters with marks mixed, the cost is not run: :error.
+  # (task-81d9efce3bbf6428). The kept letters are a longest common run, by
+  # the one diff engine (`PortableDoc.TextDiff`, a letter a line); one tag
+  # in the splice needs none. Past @diff_cap letters with marks mixed, the
+  # cost is not run: :error. Under it the engine never falls back to its
+  # whole-block diff (2000 lines a side, 4M cells), which keeps nothing.
   @diff_cap 1_000
   defp marks_kept?(mid, put) do
     case MapSet.size(MapSet.new(mid ++ put, &elem(&1, 1))) do
@@ -148,7 +151,9 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   end
 
   defp kept(a, b) do
-    for {:eq, xs} <- List.myers_difference(a, b), reduce: 0, do: (n -> n + length(xs))
+    ids = (a ++ b) |> Enum.uniq() |> Enum.with_index() |> Map.new()
+    lines = fn xs -> Enum.map_join(xs, "\n", &Integer.to_string(Map.fetch!(ids, &1))) end
+    LineDiff.diff_lines(lines.(a), lines.(b)) |> Enum.count(&(&1.op == "="))
   end
 
   defp ends(base, side) do
