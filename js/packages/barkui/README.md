@@ -32,15 +32,13 @@ No app moves before the step written in [0004](docs/decisions/0004-ready-before-
 The daily news run fills this block from merged work that touches BarkUI. Nothing here is written by hand.
 
 <!-- news:start -->
+**Monday 23 November.** The BarkUI check now reads a part's look only on a page at rest: every read, every change the checker makes and every act are settled first, inside 2 s, and a read on a moving page is red by name. The page's scroll is put back after each capture, and a shot taken while the page moved with a box fixed to the view in it is taken again. [The full day](../../../docs/news/2026-11-23.md)
+- **Check:** a look is read only on a page at rest; the scroll is put back after each capture; a moved shot with a fixed box is taken again ([#28389](https://github.com/FRIKKern/barkpark/pull/28389), [#28515](https://github.com/FRIKKern/barkpark/pull/28515), [#28527](https://github.com/FRIKKern/barkpark/pull/28527))
+
 **Saturday 21 November.** The showroom gained the text field and the tabs, each proved like the button in every skin, scheme and surface, at phone width and with no script. The check now judges a checked box and a field's typed value, reads every branch of a selector list, and refuses by name a rule the browser drops. CI walks the fast tests at every part count from 1 to 40, and the selftest runs as two jobs. [The full day](../../../docs/news/2026-11-21.md)
 - **Showroom:** the text field and the tabs, with keyboard rows pressed by real keys ([#28052](https://github.com/FRIKKern/barkpark/pull/28052), [#28123](https://github.com/FRIKKern/barkpark/pull/28123))
 - **Check:** :checked and typed values judged; the caret and a selection never change a reading; every selector branch read; a dropped rule refused by name ([#27920](https://github.com/FRIKKern/barkpark/pull/27920), [#28001](https://github.com/FRIKKern/barkpark/pull/28001), [#28044](https://github.com/FRIKKern/barkpark/pull/28044), [#28057](https://github.com/FRIKKern/barkpark/pull/28057), [#27998](https://github.com/FRIKKern/barkpark/pull/27998), [#28000](https://github.com/FRIKKern/barkpark/pull/28000))
 - **CI:** the fast tests at every part count; one pinned walk step; the selftest as two jobs, each under its own ceiling ([#28093](https://github.com/FRIKKern/barkpark/pull/28093), [#28125](https://github.com/FRIKKern/barkpark/pull/28125), [#28156](https://github.com/FRIKKern/barkpark/pull/28156))
-
-**Friday 20 November.** BarkUI, meant to give every Barkpark app one look, got its showroom: one page with every part live in five skins, light and dark, and lights a browser check turns on only for what its last run proved. The first part is the button. BarkUI also has its own README, roadmap and decision records. [The full day](../../../docs/news/2026-11-20.md)
-- **Showroom:** every part live in every skin and surface; the check drives it with real keys and a real pointer; the button first ([#27193](https://github.com/FRIKKern/barkpark/pull/27193))
-- **Check:** one CI job per group of up to five parts; up to 40 parts need no new check row; a field's placeholder matches its wait on the sheet ([#27718](https://github.com/FRIKKern/barkpark/pull/27718), [#27777](https://github.com/FRIKKern/barkpark/pull/27777), [#27914](https://github.com/FRIKKern/barkpark/pull/27914))
-- **Front door:** a README with pictures, a roadmap and eight decision records ([#27779](https://github.com/FRIKKern/barkpark/pull/27779))
 <!-- news:end -->
 
 ## Where things stand
