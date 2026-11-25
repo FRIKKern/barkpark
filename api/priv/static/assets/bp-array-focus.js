@@ -326,7 +326,7 @@
       if (!change || !change.draw || typeof change.value !== "string") return;
       if (!el || el === document.activeElement || typeof el.value !== "string") return;
       if (el.tagName === "INPUT" ? !TEXT.test(el.type) : el.tagName !== "TEXTAREA") return;
-      if (el.value === change.was) el.value = change.value;
+      if (lf(el.value) === lf(change.was)) el.value = change.value;
     });
   }
 

@@ -346,7 +346,7 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       assert get_in(stored(c), ["meta", "label"]) == "one twB three"
     end
 
-    test "#{surface}: B saves the label; A's page rejoins and presses Save with the label it showed: put back and drawn, no banner",
+    test "#{surface}: B saves the label; A's page rejoins and presses Save with the label it showed: put back and drawn, the banner names it",
          c do
       b = open(c, unquote(surface))
       posts(b, @label, %{"label" => "one twB three"})
@@ -356,7 +356,10 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       html = saves(a2, %{}, seen)
 
       assert get_in(stored(c), ["meta", "label"]) == "one twB three"
-      refute html =~ "doc-conflict-banner"
+      # #28850 r1 review: a Save that put a field back says so, not "Saved".
+      assert html =~ "doc-conflict-banner"
+      assert assigns(a2).editor_clash_fields == ["meta"]
+      refute (assigns(a2).flash || %{})["info"] == "Saved"
       assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twB three"
       assert drawn(a2, @label) == %{value: "one twB three", was: "one two three", draw: true}
 
@@ -364,6 +367,65 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       saves(a2, %{"label" => "one twB three", "title" => "T0 Z"}, seen)
       assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 Z" end)
       assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+    end
+
+    # #28850 r1 review: every draft save writes a revision, so a cap by count
+    # (50) let a stale label many saves old be held, and A's next key in the
+    # title wrote it over B's.
+    test "#{surface}: B saved the label 55 times; A's stale label from before them all is still put back",
+         c do
+      b = open(c, unquote(surface))
+      for i <- 1..55, do: posts(b, @label, %{"label" => "one twB three #{i}"})
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three 55"
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.merge(%{"doc[title]" => 0, @label => 0})
+      changes(a2, "doc[title]", %{"title" => "T0 AAA", "label" => "one two three"}, seen)
+      refute "meta" in (assigns(a2).editor_clash_fields || [])
+
+      changes(
+        a2,
+        "doc[title]",
+        %{
+          "title" => "T0 AAAZ",
+          "label" => get_in(assigns(a2).editor_form, ["meta", "label"])
+        },
+        seen
+      )
+
+      assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 AAAZ" end)
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three 55"
+    end
+
+    test "#{surface}: A typed the label back to its earlier version while away and presses Save: put back, the banner names it, no Saved",
+         c do
+      a = open(c, unquote(surface))
+      posts(a, @label, %{"label" => "one two three X"})
+
+      assert ObjectRichText.eventually(fn ->
+               get_in(stored(c), ["meta", "label"]) == "one two three X"
+             end)
+
+      b = open(c, unquote(surface))
+      posts(b, "doc[notes]", %{"notes" => "one twB three", "label" => "one two three X"})
+      assert ObjectRichText.eventually(fn -> stored(c)["notes"] == "one twB three" end)
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.put(@label, 0)
+      html = saves(a2, %{"label" => "one two three", "notes" => "one twB three"}, seen)
+
+      assert get_in(stored(c), ["meta", "label"]) == "one two three X"
+      assert html =~ "doc-conflict-banner"
+      assert assigns(a2).editor_clash_fields == ["meta"]
+      refute (assigns(a2).flash || %{})["info"] == "Saved"
+      assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one two three X"
+
+      # Told, A types the label back again: saved.
+      changes(a2, @label, %{"label" => "one two three", "notes" => "one twB three"}, seen)
+
+      assert ObjectRichText.eventually(fn ->
+               get_in(stored(c), ["meta", "label"]) == "one two three"
+             end)
     end
 
     test "#{surface}: a non-target field A typed while away, no stored version: still held", c do

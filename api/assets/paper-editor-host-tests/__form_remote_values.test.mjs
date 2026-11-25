@@ -240,6 +240,13 @@ check("draw: an input showing something else keeps it", () => {
   assert.equal(title.value, "one twA three");
 });
 
+check("draw: a textarea compares its line breaks as \\n", () => {
+  const { title, excerpt } = mount("T", "one\ntwo");
+  title.focus();
+  push({ "doc[excerpt]": { value: "one\nB", was: "one\r\ntwo", draw: true } });
+  assert.equal(excerpt.value, "one\nB");
+});
+
 check("no draw flag: an input not focused is left to the patch", () => {
   const { title, excerpt } = mount("one two three", "E");
   excerpt.focus();

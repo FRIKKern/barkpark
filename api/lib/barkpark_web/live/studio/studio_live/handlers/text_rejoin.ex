@@ -24,7 +24,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   store, never held, and the page's input is drawn the stored value.
   """
 
-  alias Barkpark.Content
+  alias Barkpark.Content.Revisions
   alias BarkparkWeb.ScopeHelpers
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
@@ -69,41 +69,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
 
   def split(_socket, _units, _seen, doc, _targets), do: {doc, []}
 
-  @doc "Whether `split/5` held a field (a stale one is put back, not held)."
-  def held?(typed), do: Enum.any?(typed, &(tuple_size(&1) == 3))
-
   # Each field other than the target whose posted value a stored version
-  # held is tagged `:stale`. The versions are read only when one may be.
+  # held is tagged `:stale`. The store is asked only for such a field.
   defp stale(socket, typed, targets) do
-    case Enum.reject(typed, fn {key, _, _} -> key in targets end) do
-      [] ->
-        typed
-
-      _ ->
-        versions = versions(socket)
-
-        Enum.map(typed, fn {key, mine, stored} = entry ->
-          if key not in targets and Enum.any?(versions, &(RemoteValues.value_at(&1, key) == mine)),
-            do: {key, mine, stored, :stale},
-            else: entry
-        end)
-    end
-  end
-
-  defp versions(%{assigns: %{editor_doc: %{doc_id: id}, editor_type: type}} = socket)
-       when is_binary(id) and is_binary(type) do
-    id
-    |> Content.list_revisions(
-      type,
-      socket.assigns.dataset,
-      [limit: 50] ++ ScopeHelpers.scope_opts(socket)
-    )
-    |> Enum.map(fn r ->
-      Map.put(if(is_map(r.content), do: r.content, else: %{}), "title", r.title)
+    Enum.map(typed, fn {key, mine, stored} = entry ->
+      if key not in targets and held_before?(socket, key, mine),
+        do: {key, mine, stored, :stale},
+        else: entry
     end)
   end
 
-  defp versions(_socket), do: []
+  defp held_before?(
+         %{assigns: %{editor_doc: %{doc_id: id}, editor_type: type}} = socket,
+         key,
+         mine
+       )
+       when is_binary(id) and is_binary(type),
+       do:
+         Revisions.revision_holds?(
+           id,
+           type,
+           socket.assigns.dataset,
+           key,
+           mine,
+           ScopeHelpers.scope_opts(socket)
+         )
+
+  defp held_before?(_socket, _key, _mine), do: false
 
   @doc """
   `{targets, units}` of an autosave: its target (and the text subfield it
@@ -122,15 +114,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   B3). The input takes A's words while it still shows the stored value
   (bp-array-focus.js `takeFocused`); one still showing A's words keeps them.
   """
-  def hold(socket, []), do: socket
+  def hold(socket, typed, on \\ :autosave)
 
-  def hold(socket, typed) do
+  def hold(socket, [], _on), do: socket
+
+  def hold(socket, typed, on) do
     {stale, typed} = Enum.split_with(typed, &(tuple_size(&1) == 4))
 
     socket
     |> held(typed)
     |> drawn(stale)
+    |> named(stale, on)
   end
+
+  # An explicit Save that put a field back says so, not "Saved" (#28850 r1
+  # review): the post may be A's own edit back to an earlier version. The
+  # banner names the field, which shows the stored value; typing on saves.
+  defp named(socket, [_ | _] = stale, :save) do
+    TextUnderLock.hold(
+      socket,
+      Enum.map(stale, &elem(&1, 0)),
+      Enum.reduce(stale, %{}, fn {key, _mine, stored, :stale}, form ->
+        RemoteValues.put_at(form, key, stored)
+      end)
+    )
+  end
+
+  defp named(socket, _stale, _on), do: socket
 
   defp held(socket, []), do: socket
 

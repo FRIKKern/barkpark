@@ -319,7 +319,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       |> assign(editor_field_bases: %{}, editor_text_under_lock: nil, editor_rt_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
-    {:noreply, saved} = do_saved(socket, text_held, rich_held? or TextRejoin.held?(typed), params)
+    {:noreply, saved} = do_saved(socket, text_held, rich_held? or typed != [], params)
 
     # The page is told what landed during the Save; a field held here
     # (under the lock, or by `TextRejoin`) is left out: its hold draws it.
@@ -331,7 +331,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {held, text_held ++ Enum.map(typed, &elem(&1, 0))}
       )
 
-    {TextRejoin.hold(saved, typed), held}
+    {TextRejoin.hold(saved, typed, :save), held}
   end
 
   defp do_saved(socket, text_held, rich_held?, params) do
