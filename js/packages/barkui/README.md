@@ -32,13 +32,13 @@ No app moves before the step written in [0004](docs/decisions/0004-ready-before-
 The daily news run fills this block from merged work that touches BarkUI. Nothing here is written by hand.
 
 <!-- news:start -->
+**Tuesday 24 November.** Eight parts joined the BarkUI showroom: the select, the dialog, the menu, the switch, the checkbox, the radio group, the textarea and the segmented control, each with its keyboard rows red on a planted break. The check now reads each part with the stages it does not read hidden, so group 1 runs at 133 to 163 s of its 360 s limit, down from 240 to 318 s. [The full day](../../../docs/news/2026-11-24.md)
+- **Showroom:** the select, dialog, menu, switch, checkbox, radio group, textarea and segmented control, each read in every skin, scheme, surface and at phone width ([#28362](https://github.com/FRIKKern/barkpark/pull/28362), [#28559](https://github.com/FRIKKern/barkpark/pull/28559), [#28575](https://github.com/FRIKKern/barkpark/pull/28575), [#28586](https://github.com/FRIKKern/barkpark/pull/28586), [#28590](https://github.com/FRIKKern/barkpark/pull/28590), [#28606](https://github.com/FRIKKern/barkpark/pull/28606), [#28642](https://github.com/FRIKKern/barkpark/pull/28642), [#28669](https://github.com/FRIKKern/barkpark/pull/28669))
+- **Check time:** a part is read with every stage but its own and the next one hidden; each part's seconds printed against its limit ([#28654](https://github.com/FRIKKern/barkpark/pull/28654), [#28620](https://github.com/FRIKKern/barkpark/pull/28620))
+- **Capture:** a capture whose clip lies inside the view leaves the page where it was ([#28553](https://github.com/FRIKKern/barkpark/pull/28553))
+
 **Monday 23 November.** The BarkUI check now reads a part's look only on a page at rest: every read, every change the checker makes and every act are settled first, inside 2 s, and a read on a moving page is red by name. The page's scroll is put back after each capture, and a shot taken while the page moved with a box fixed to the view in it is taken again. [The full day](../../../docs/news/2026-11-23.md)
 - **Check:** a look is read only on a page at rest; the scroll is put back after each capture; a moved shot with a fixed box is taken again ([#28389](https://github.com/FRIKKern/barkpark/pull/28389), [#28515](https://github.com/FRIKKern/barkpark/pull/28515), [#28527](https://github.com/FRIKKern/barkpark/pull/28527))
-
-**Sunday 22 November.** The BarkUI check now reads a part's popovers and modal dialogs open, against what the page draws behind them, and refuses by name any box that can open there without being named. A part lists what it does not cover in one place, printed under it in the showroom. Every selftest case runs under one 60 s limit. [The full day](../../../docs/news/2026-11-22.md)
-- **Check:** popovers and dialogs read open; a style attribute may hold placement only; the part's context holds the check's own two pages and no other ([#28122](https://github.com/FRIKKern/barkpark/pull/28122), [#28239](https://github.com/FRIKKern/barkpark/pull/28239), [#28336](https://github.com/FRIKKern/barkpark/pull/28336))
-- **Parts:** what a part does not cover is one list in part.json, matched as whole words ([#28249](https://github.com/FRIKKern/barkpark/pull/28249), [#28268](https://github.com/FRIKKern/barkpark/pull/28268))
-- **Selftest:** one limit of 60 s per case, each hosted reading under 48 s; the two slow cases split into runs ([#28277](https://github.com/FRIKKern/barkpark/pull/28277))
 <!-- news:end -->
 
 ## Where things stand
