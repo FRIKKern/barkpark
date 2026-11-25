@@ -4,7 +4,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   plan /papers/pt-merge-inside-one-block rev 4, part 2): a text block both
   sides changed, each in a gap of one block for one, merges when each side
   changed its text in one place and the places are apart. Called only from
-  `PortableTextMerge`'s `pick/4` (task-da701626f5be2143; not yet, task 2a).
+  `PortableTextMerge`'s `pick/4`.
 
     * Letters: one grapheme each, tagged with its span's marks (a decorator
       by name, an annotation by its def without `_key`) and its other span
@@ -195,6 +195,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp word?(gs, i), do: letter?(elem(gs, i))
 
   @apart ~r/\A(?:[\s\p{Z}]|(?=\p{P})[\x{3000}-\x{303F}\x{FF00}-\x{FFEF}])/u
+  # One byte: read from a table made of `@apart` itself, so the two agree;
+  # a regex per grapheme cost a capped block's guard 3x (task-da701626).
+  @ascii_apart for c <- 0..127, Regex.match?(@apart, <<c>>), do: c
+  defp letter?(<<c>>) when c < 128, do: c not in @ascii_apart
   defp letter?(g), do: not Regex.match?(@apart, g)
 
   # Theirs with mine's splice put in (moved by theirs' when theirs' is first).
@@ -358,8 +362,17 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   defp all(block), do: Enum.map_join(block["children"], &text/1)
 
-  # Maximal runs of word letters, on graphemes as `word?/2` reads them.
+  # Maximal runs of word letters, on graphemes as `word?/2` reads them. An
+  # ASCII text splits on the same bytes natively: each of its graphemes is
+  # one byte but "\r\n", and both of those part words.
+  @ascii_seps Enum.map(@ascii_apart, &<<&1>>)
   defp words(text) do
+    if Regex.match?(~r/[^\x00-\x7F]/, text),
+      do: grapheme_words(text),
+      else: :binary.split(text, @ascii_seps, [:global, :trim_all])
+  end
+
+  defp grapheme_words(text) do
     text
     |> String.graphemes()
     |> Enum.chunk_by(&letter?/1)

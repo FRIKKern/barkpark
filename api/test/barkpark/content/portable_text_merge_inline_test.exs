@@ -5,6 +5,7 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.PortableTextMerge, as: M
   alias Barkpark.Content.PortableTextMerge.Inline
 
   defp span(key, text, marks \\ []),
@@ -21,6 +22,7 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
   defp b(text, key \\ "k"), do: block(key, [span(key <> "s", text)])
   defp text(%{"children" => cs}), do: Enum.map_join(cs, & &1["text"])
+  defp texts({:ok, blocks}), do: Enum.map(blocks, &text/1)
 
   test "disjoint words of one block merge: ONE two THREE" do
     assert {:ok, blk} =
@@ -429,6 +431,46 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     test "an ideographic space parts words: one\u3000TWO" do
       assert {:ok, blk} = Inline.merge(b("one\u3000two"), b("ONE\u3000two"), b("one\u3000TWO"))
       assert text(blk) == "ONE\u3000TWO"
+    end
+  end
+
+  describe "through PortableTextMerge.merge/4" do
+    # The first failing test of task-da701626f5be2143: a clash on main.
+    test "disjoint words of one block merge: ONE two THREE" do
+      base = [b("one two three")]
+
+      assert texts(M.merge(base, [b("ONE two three", "p0")], [b("one two THREE")])) ==
+               ["ONE two THREE"]
+
+      assert {:clash, ["one two THREE"], _} =
+               M.merge(base, [b("ONE two three", "p0")], [b("one two THREE")], inline: false)
+    end
+
+    test "a custom block both changed, or text one side made an image, is a clash" do
+      img = fn k, a -> %{"_type" => "image", "_key" => k, "alt" => a} end
+      assert {:clash, _, _} = M.merge([img.("i", "a")], [img.("i", "b")], [img.("i", "c")])
+      assert {:clash, _, _} = M.merge([b("one two")], [img.("p0", "x")], [b("one TWO")])
+    end
+
+    # A save bounded by work done (#28714, #28710): 140 blocks (under
+    # `@max_cells`), every other one at `TextRebase.max_bytes/0` and changed
+    # on both sides. Past the merge's inline budget the rest clash, as before.
+    test "a save of 70 blocks at the cap, changed on both sides, stays under 80M reductions" do
+      text = String.duplicate("word ", div(Barkpark.Content.TextRebase.max_bytes(), 5) - 4)
+
+      value = fn f ->
+        Enum.flat_map(1..70, &[b(f.("b#{&1} " <> text), "k#{&1}"), b("anchor #{&1}", "a#{&1}")])
+      end
+
+      {base, mine, theirs} = {value.(& &1), value.(&("FIRST " <> &1)), value.(&(&1 <> "LAST"))}
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      assert {:clash, _texts, view} = M.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 80_000_000, "#{r1 - r0} reductions"
+      assert text(hd(view)) == "FIRST b1 " <> text <> "LAST"
+      assert text(Enum.at(view, 138)) == "FIRST b70 " <> text
     end
   end
 end
