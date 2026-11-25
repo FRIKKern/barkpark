@@ -23,8 +23,9 @@ defmodule BarkparkWeb.Studio.SaveTellsPageTest do
       "doc" => %{"title" => "T0"},
       "doc[meta].label" => fields[:label] || "l0",
       "doc[meta].rt" => fields[:rt] || "<p>one two</p>",
+      "doc[meta].rt2" => "<p>second</p>",
       "_bp_seen" => Jason.encode!(Map.put(fields[:seen] || %{}, "v", 2)),
-      "_bp_rt_seen" => ["doc[meta].rt|#{fields[:rt_seen] || 0}"]
+      "_bp_rt_seen" => ["doc[meta].rt|#{fields[:rt_seen] || 0}", "doc[meta].rt2|0"]
     })
   end
 
@@ -112,6 +113,14 @@ defmodule BarkparkWeb.Studio.SaveTellsPageTest do
       c = Map.put(c, :surface, unquote(surface))
       {a, b} = {open(c), open(c)}
       b_saves_rt(b, c, "<p>one twB</p>", ["one twB"])
+      # B's save reaches A's page; A, not having drawn it, posts over it: held.
+      assert_push_event(
+        a,
+        "bp:rt-remote",
+        %{values: %{"doc[meta].rt" => %{html: "<p>one twB</p>"}}},
+        2_000
+      )
+
       post_rt(a, "<p>one twoA</p>", 0)
 
       assert_push_event(
@@ -120,6 +129,8 @@ defmodule BarkparkWeb.Studio.SaveTellsPageTest do
         %{values: %{"doc[meta].rt" => %{html: view, seq: seq}}},
         2_000
       )
+
+      assert view =~ "one twoA"
 
       html = save(a, label: "lA", rt: view, rt_seen: seq)
 
