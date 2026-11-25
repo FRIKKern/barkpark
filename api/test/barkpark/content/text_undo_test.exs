@@ -22,8 +22,9 @@ defmodule Barkpark.Content.TextUndoTest do
     {after_ - before, result}
   end
 
-  # Measured at 804ba5e258 (OTP from .tool-versions): the 50 KB / 30 KB / 15 KB
-  # cases take 2.4M / 1.5M / 0.8M reductions.
+  # Measured at 804ba5e258, on OTP 28 here and on CI's OTP 27 (.tool-versions)
+  # within 3% of each other: the 50 KB / 30 KB / 15 KB cases take
+  # 2.4M / 1.5M / 0.8M reductions.
   @clash_at_once 5_000_000
 
   # The caps cases take 0.7M-15M (table250, the most). With the
@@ -138,7 +139,6 @@ defmodule Barkpark.Content.TextUndoTest do
         assert TextRebase.merge3_both(base, ours, theirs) != nil
         {work, result} = work(fn -> TextRebase.merge3_clash(base, ours, theirs) end)
         assert result == nil
-        IO.puts("REDUCTIONS clash #{byte_size(base)}: #{work}")
         assert work < @clash_at_once, "took #{work} reductions"
       end
     end
@@ -169,7 +169,6 @@ defmodule Barkpark.Content.TextUndoTest do
           ] do
         ours = splice.(text, 9_000, n)
         {work, _result} = work(fn -> TextRebase.merge3_clash(text, ours, "B " <> text) end)
-        IO.puts("REDUCTIONS caps #{n}: #{work}")
         assert work < @caps_at_once, "#{n} took #{work} reductions"
       end
     end
