@@ -271,21 +271,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # editor's change is not written over it (#28349 r2 review, V1).
         {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
-        {:noreply, socket} = do_save(doc, not_codes, socket)
-        {:noreply, RichTextRemote.hold(socket, held)}
+        {socket, text} = text_bases(socket, doc, params["_bp_seen"])
+        {:noreply, saved} = do_save(doc, not_codes, socket, text)
+        {:noreply, RichTextRemote.hold(saved, held)}
 
       _ ->
         {:noreply, socket}
     end
   end
 
-  defp do_save(params, not_codes, socket) do
+  # As an autosave: each free-text field of the Save is merged onto the
+  # store from the base the page reports, and read again under the lock
+  # (`TextUnderLock`) (task-998551f010da1d5e). The Save skipped both, so a
+  # save landing under it was written over as sent, with no banner.
+  defp text_bases(socket, doc, seen) do
+    keys = RemoteValues.text_units(socket.assigns[:editor_schema], doc)
+    based = RemoteValues.put_bases(socket, keys, seen)
+    text = TextUnderLock.values(based, keys, seen, nil)
+    {assign(based, editor_text_under_lock: text), text}
+  end
+
+  defp do_save(params, not_codes, socket, text) do
+    written = Shared.do_autosave(socket, params, :save)
+    text_held = TextUnderLock.held(written, text, params)
+
     socket =
-      socket
-      |> Shared.do_autosave(params, :save)
+      written
+      |> assign(editor_field_bases: %{}, editor_text_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
     case socket.assigns[:save_status] do
+      "Saved" when text_held != [] ->
+        # The store kept another editor's words over a field of the Save:
+        # the rest is saved; that field holds A's words, unsaved, with the
+        # banner, as an autosave holds it.
+        {:noreply,
+         socket
+         |> Shared.rebuild_panes()
+         |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+         |> Shared.assign_page_title()
+         |> clear_touched()
+         |> TextUnderLock.hold(text_held, params)}
+
       "Saved" ->
         # An explicit save reloads the editor from the just-persisted row —
         # the local buffer is now clean, so drop the dirty flag and any
