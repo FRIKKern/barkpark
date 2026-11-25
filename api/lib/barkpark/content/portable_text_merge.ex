@@ -213,6 +213,14 @@ defmodule Barkpark.Content.PortableTextMerge do
   """
   def same_drawn?(a, b), do: Enum.map(list(a), &drawn/1) == Enum.map(list(b), &drawn/1)
 
+  @doc """
+  Whether two stored values are the same as the merge lines blocks up:
+  drawn, and each text block's own fields (`level`, an unknown field) too.
+  For two stored values; a page's posted HTML carries no such field
+  (`same_drawn?/2`).
+  """
+  def same_shape?(a, b), do: Enum.map(list(a), &shape/1) == Enum.map(list(b), &shape/1)
+
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []
 

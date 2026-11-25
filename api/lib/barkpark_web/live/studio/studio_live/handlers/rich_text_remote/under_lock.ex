@@ -83,7 +83,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         not Map.has_key?(over, hd(path)) or not is_binary(posted) ->
           {s, acts}
 
-        PortableTextMerge.same_drawn?(was, before) ->
+        # Both stored: a block field another editor set (`level`, an
+        # unknown field) is a move too (task-6174d8fa01658a68, #28867
+        # review B1), or A's words the store kept over went unheld.
+        PortableTextMerge.same_shape?(was, before) ->
           {s, acts}
 
         holds?(acts, name) ->
@@ -147,6 +150,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   # rule). The store kept over it: held, A's words in the view. Else the
   # store took them merged: shown to the page as its own, logged over the
   # page's own text, `split/3`'s `mine` where it merged (#28792 review B1).
+  # `written` comes from the page's HTML, which carries no block field, so
+  # it is compared by the drawing; `after_write` and `before` are both
+  # stored, so by shape (task-6174d8fa01658a68).
   # A hold where `split/3` merged is read against what the page typed on,
   # not `was`: the page has not drawn the change merged in, and a post on
   # its text would read as taking it out (task-77c9532e1e04907b).
@@ -158,7 +164,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       PortableTextMerge.same_drawn?(written, was) ->
         {s, acts}
 
-      PortableTextMerge.same_drawn?(after_write, before) and
+      PortableTextMerge.same_shape?(after_write, before) and
           not PortableTextMerge.same_drawn?(written, before) ->
         {base, text} = if mine && page, do: {list(page), mine}, else: {was, written}
 
