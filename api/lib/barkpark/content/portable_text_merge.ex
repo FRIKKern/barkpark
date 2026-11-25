@@ -19,7 +19,7 @@ defmodule Barkpark.Content.PortableTextMerge do
     * Both sides added blocks at one place, or one side added blocks inside
       a gap of the other's that spans several base blocks: a clash.
     * A base block both sides changed, each in a gap of one block for one,
-      is merged inside the block when each changed only its text, in one
+      is merged inside the block when each changed its text or marks in one
       place, and the places are words apart (`PortableTextMerge.Inline`,
       task-da701626f5be2143); else it is a clash of that block. Both
       changed it to the same words: one change. Any other block both
