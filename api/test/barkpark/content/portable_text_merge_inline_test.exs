@@ -24,14 +24,18 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
   defp text(%{"children" => cs}), do: Enum.map_join(cs, & &1["text"])
   defp texts({:ok, blocks}), do: Enum.map(blocks, &text/1)
 
-  # The first failing test: a clash on main.
   test "disjoint words of one block merge: ONE two THREE" do
-    assert texts(M.merge([b("one two three")], [b("ONE two three", "p0")], [b("one two THREE")])) ==
-             ["ONE two THREE"]
+    assert {:ok, blk} =
+             Inline.merge(b("one two three"), b("ONE two three", "p0"), b("one two THREE"))
+
+    assert text(blk) == "ONE two THREE" and blk["_key"] == "k"
   end
 
-  test "the old disjoint fixture pair merges: B one two A" do
-    assert texts(M.merge([b("one two")], [b("one two A")], [b("B one two")])) == ["B one two A"]
+  test "the old disjoint fixture pair merges either way round, in one span: B one two A" do
+    assert {:ok, blk} = Inline.merge(b("one two"), b("one two A"), b("B one two"))
+    assert [%{"_key" => "ks", "text" => "B one two A"}] = blk["children"]
+    assert {:ok, blk} = Inline.merge(b("one two"), b("B one two"), b("one two A"))
+    assert [%{"_key" => "ks", "text" => "B one two A"}] = blk["children"]
   end
 
   test "a kana commit after theirs took an earlier word out" do
@@ -79,10 +83,34 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     assert blk["markDefs"] == [def, unused] and blk["_key"] == "k"
   end
 
+  test "a word mine took out of theirs' span leaves one span, keyed as theirs" do
+    assert {:ok, blk} =
+             Inline.merge(b("one two three four"), b("one three four"), b("one two three FOUR"))
+
+    assert [%{"_key" => "ks", "text" => "one three FOUR"}] = blk["children"]
+  end
+
+  test "mine's runs between two spans: a key theirs holds is not reused" do
+    base = block("k", [span("a", "one "), span("b", "two three", ["strong"])])
+    theirs = block("k", [span("a", "one "), span("b", "two THREE", ["strong"])])
+
+    mine =
+      block("k", [
+        span("x0", "one "),
+        span("a", "X", ["strong"]),
+        span("b", "Y"),
+        span("x1", "two three", ["strong"])
+      ])
+
+    assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+    assert Enum.map(blk["children"], &{&1["_key"], &1["text"]}) ==
+             [{"a", "one "}, {"ki0", "X"}, {"ki1", "Y"}, {"b", "two THREE"}]
+  end
+
   test "a custom block both changed, or text one side made an image, clashes without raising" do
     img = fn k, a -> %{"_type" => "image", "_key" => k, "alt" => a} end
-    assert {:clash, _, _} = M.merge([img.("i", "a")], [img.("i", "b")], [img.("i", "c")])
-    assert {:clash, _, _} = M.merge([b("one two")], [img.("p0", "x")], [b("one TWO")])
+    assert Inline.merge(img.("i", "a"), img.("i", "b"), img.("i", "c")) == :clash
     assert Inline.merge(b("one two"), img.("p0", "x"), b("one TWO")) == :clash
   end
 
@@ -101,9 +129,12 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
     test "たべる: たべた and のべる", do: assert(Inline.merge(b("たべる"), b("たべた"), b("のべる")) == :clash)
 
-    test "touching ranges",
+    test "an edit beside a word reaches into it",
       do:
         assert(Inline.merge(b("one two three"), b("ONE two three"), b("onetwo three")) == :clash)
+
+    test "ranges that touch with no letter between: one .. two",
+      do: assert(Inline.merge(b("one .. two"), b("one !. two"), b("one .? two")) == :clash)
 
     test "a mark only, or a mark of its own put in" do
       assert Inline.merge(
@@ -117,6 +148,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
                block("k", [span("a", "one two "), span("b", "new", ["em"]), span("c", " three")]),
                b("ONE two three")
              ) == :clash
+    end
+
+    test "a block over TextRebase.max_bytes/0 of text" do
+      text = String.duplicate("word ", div(Barkpark.Content.TextRebase.max_bytes(), 5) + 1)
+      assert Inline.merge(b(text), b("FIRST " <> text), b(text <> "LAST")) == :clash
     end
 
     test "a block field either side changed" do
@@ -135,24 +171,43 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     end
   end
 
-  # A save bounded by work done (#28714, #28710): 140 blocks (under
-  # `@max_cells`), every other one at `TextRebase.max_bytes/0` and changed
-  # on both sides. Past the merge's inline budget the rest clash, as before.
-  test "a save of 70 blocks at the cap, changed on both sides, stays under 80M reductions" do
-    text = String.duplicate("word ", div(Barkpark.Content.TextRebase.max_bytes(), 5) - 4)
+  describe "through PortableTextMerge.merge/4" do
+    # The first failing test of task-da701626f5be2143: a clash on main.
+    test "disjoint words of one block merge: ONE two THREE" do
+      base = [b("one two three")]
 
-    value = fn f ->
-      Enum.flat_map(1..70, &[b(f.("b#{&1} " <> text), "k#{&1}"), b("anchor #{&1}", "a#{&1}")])
+      assert texts(M.merge(base, [b("ONE two three", "p0")], [b("one two THREE")])) ==
+               ["ONE two THREE"]
+
+      assert {:clash, ["ONE two three"], _} =
+               M.merge(base, [b("ONE two three", "p0")], [b("one two THREE")], inline: false)
     end
 
-    {base, mine, theirs} = {value.(& &1), value.(&("FIRST " <> &1)), value.(&(&1 <> "LAST"))}
+    test "a custom block both changed, or text one side made an image, is a clash" do
+      img = fn k, a -> %{"_type" => "image", "_key" => k, "alt" => a} end
+      assert {:clash, _, _} = M.merge([img.("i", "a")], [img.("i", "b")], [img.("i", "c")])
+      assert {:clash, _, _} = M.merge([b("one two")], [img.("p0", "x")], [b("one TWO")])
+    end
 
-    {:reductions, r0} = Process.info(self(), :reductions)
-    assert {:clash, _texts, view} = M.merge(base, mine, theirs)
-    {:reductions, r1} = Process.info(self(), :reductions)
+    # A save bounded by work done (#28714, #28710): 140 blocks (under
+    # `@max_cells`), every other one at `TextRebase.max_bytes/0` and changed
+    # on both sides. Past the merge's inline budget the rest clash, as before.
+    test "a save of 70 blocks at the cap, changed on both sides, stays under 80M reductions" do
+      text = String.duplicate("word ", div(Barkpark.Content.TextRebase.max_bytes(), 5) - 4)
 
-    assert r1 - r0 < 80_000_000, "#{r1 - r0} reductions"
-    assert text(hd(view)) == "FIRST b1 " <> text <> "LAST"
-    assert text(Enum.at(view, 138)) == "FIRST b70 " <> text
+      value = fn f ->
+        Enum.flat_map(1..70, &[b(f.("b#{&1} " <> text), "k#{&1}"), b("anchor #{&1}", "a#{&1}")])
+      end
+
+      {base, mine, theirs} = {value.(& &1), value.(&("FIRST " <> &1)), value.(&(&1 <> "LAST"))}
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      assert {:clash, _texts, view} = M.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 80_000_000, "#{r1 - r0} reductions"
+      assert text(hd(view)) == "FIRST b1 " <> text <> "LAST"
+      assert text(Enum.at(view, 138)) == "FIRST b70 " <> text
+    end
   end
 end

@@ -197,10 +197,12 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   # Theirs' spans with letters [a, b) replaced by `new`: a span left or right
   # of the cut is kept as it is; the first and last it reaches keep their
-  # maps with their text cut. One new run with the marks of the span it
-  # touches joins it.
+  # maps with their text cut, and a cut inside one span with letters in its
+  # own marks stays that span. A new run with the marks of the span beside
+  # it joins that span.
   defp cut(theirs, a, b, new) do
     defs = defs(theirs)
+    tag = &tag(&1, defs)
 
     {spans, _} =
       Enum.map_reduce(theirs["children"], 0, fn s, o ->
@@ -211,52 +213,56 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     {left, rest} = Enum.split_with(spans, fn {_s, o, n} -> o + n <= a end)
     {mid, right} = Enum.split_with(rest, fn {_s, o, _n} -> o < b end)
     {left, right} = {Enum.map(left, &elem(&1, 0)), Enum.map(right, &elem(&1, 0))}
-    tag = &tag(&1, defs)
 
-    case {mid, new} do
-      {[], [{t, s}]} ->
-        cond do
-          left != [] and tag.(List.last(left)) == t ->
-            Enum.drop(left, -1) ++ [glue(List.last(left), "", s["text"])] ++ right
+    case mid do
+      [] ->
+        join(left, new, right, tag)
 
-          right != [] and tag.(hd(right)) == t ->
-            left ++ [glue(hd(right), s["text"], "")] ++ tl(right)
+      [{f, fo, _} | _] ->
+        {l, lo, _} = List.last(mid)
+        {lt, rt} = {take(f, a - fo), drop(l, b - lo)}
+        news = Enum.map(new, &elem(&1, 1))
 
-          true ->
-            left ++ [s] ++ right
+        if f == l and Enum.all?(new, fn {t, _} -> t == tag.(f) end) do
+          left ++ piece(f, lt <> Enum.map_join(news, & &1["text"]) <> rt) ++ right
+        else
+          # The right piece of a span split in two takes a key of its own.
+          l =
+            if f == l and lt != "",
+              do: Map.put(l, "_key", fresh(theirs["_key"], used(theirs, news), 0)),
+              else: l
+
+          join(left ++ piece(f, lt), new, piece(l, rt) ++ right, tag)
         end
-
-      {[], _} ->
-        left ++ Enum.map(new, &elem(&1, 1)) ++ right
-
-      _ ->
-        {{f, fo, _}, {l, lo, _}} = {hd(mid), List.last(mid)}
-        left ++ pieces(f, l, {take(f, a - fo), drop(l, b - lo)}, new, tag, theirs) ++ right
     end
   end
 
-  defp pieces(f, l, {lt, rt}, new, tag, theirs) do
-    same = f == l
-    news = Enum.map(new, &elem(&1, 1))
-    # The right piece of a span split in two takes a key of its own.
-    two = fn r ->
-      if same and lt != "",
-        do: Map.put(r, "_key", fresh(theirs["_key"], used(theirs, news), 0)),
-        else: r
-    end
+  # New runs between two lists of spans: the first joins the span before
+  # it, the last the span after it, when their marks are equal.
+  defp join(left, new, right, tag) do
+    {left, new} =
+      case {List.last(left), new} do
+        {%{} = s, [{t, n} | rest]} ->
+          if tag.(s) == t,
+            do: {Enum.drop(left, -1) ++ [glue(s, "", n["text"])], rest},
+            else: {left, new}
 
-    {t, txt} = with [{t, s}] <- new, do: {t, s["text"]}, else: (_ -> {nil, nil})
+        _ ->
+          {left, new}
+      end
 
-    cond do
-      txt && lt != "" && tag.(f) == t ->
-        if same, do: [put(f, lt <> txt <> rt)], else: [put(f, lt <> txt)] ++ piece(l, rt)
+    {new, right} =
+      case {List.last(new), right} do
+        {{t, n}, [s | rest]} ->
+          if tag.(s) == t,
+            do: {Enum.drop(new, -1), [glue(s, n["text"], "") | rest]},
+            else: {new, right}
 
-      txt && rt != "" && tag.(l) == t ->
-        piece(f, lt) ++ [put(two.(l), txt <> rt)]
+        _ ->
+          {new, right}
+      end
 
-      true ->
-        piece(f, lt) ++ news ++ piece(two.(l), rt)
-    end
+    left ++ Enum.map(new, &elem(&1, 1)) ++ right
   end
 
   defp used(theirs, news), do: MapSet.new(theirs["children"] ++ news, & &1["_key"])
