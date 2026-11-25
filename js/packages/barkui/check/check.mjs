@@ -62,8 +62,9 @@ export async function runCheck(o = {}) {
   // The stage that follows each part read, on the page of every part: printed, never pressed or read. In name order,
   // each part's follower is then the next stage on this page too.
   const order = whole.parts.map((p) => p.name)
-  const next = names.map((n) => order[order.indexOf(n) + 1]).filter(Boolean)
-  const page = pageOf(dir, [...new Set([...names, ...next])])
+  // PLANT 3: the old page, the follower of the last part alone.
+  const last = order[Math.max(...names.map((n) => order.indexOf(n))) + 1]
+  const page = pageOf(dir, last ? [...names, last] : names)
   try {
     return await readParts({ ...o, dir: page, sheet: join(`${out}-whole`, 'barkui.css'), every: whole.parts })
   } finally {
