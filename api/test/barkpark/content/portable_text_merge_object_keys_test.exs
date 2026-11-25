@@ -81,4 +81,30 @@ defmodule Barkpark.Content.PortableTextMergeObjectKeysTest do
     assert {:ok, merged} = M.merge(b, mine, theirs)
     assert objects(merged) == [{"K", 1}]
   end
+
+  # #28861 review: a repeat of a key looked for a fresh key from 1 each time,
+  # so d objects sharing a key cost d² tries (16k: 24 s). One object pasted
+  # many times posts that many children with one key, and the merge runs in
+  # the other editor's LiveView too.
+  for n <- [7_000, 16_000] do
+    test "#{n} objects sharing one key, theirs added them, mine edits another block: under the bound" do
+      n = unquote(n)
+      base = doc([sp("a", "one two three")], [sp("z", "other")])
+      mine = doc([sp("a", "one two three")], [sp("z", "other EDIT")])
+      theirs = doc([sp("a", "one ")] ++ for(i <- 1..n, do: ob("K", i)), [sp("z", "other")])
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      result = M.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 80_000_000, "#{r1 - r0} reductions"
+
+      # Past an object cap the merge may clash instead; a merged field
+      # holds every object once, under keys of its own.
+      with {:ok, merged} <- result do
+        assert length(objects(merged)) == n
+        assert_unique_objects(merged)
+      end
+    end
+  end
 end
