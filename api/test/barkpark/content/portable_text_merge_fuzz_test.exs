@@ -8,6 +8,11 @@ defmodule Barkpark.Content.PortableTextMergeFuzzTest do
 
       PT_MERGE_FUZZ_REGEN=1 mix test test/barkpark/content/portable_text_merge_fuzz_test.exs
 
+  The triples are drawn with `:rand` (`exsss`) and `Enum.random/1`. An
+  Elixir or OTP release that changes how either draws moves every pin with
+  no change to the merge: a plain regen, with no code change, is then the
+  fix, and its PR says so.
+
   The merge inside one block adds its invariants here (the plan's 2-4, and
   the share of seeds that reach it).
   """
@@ -92,7 +97,6 @@ defmodule Barkpark.Content.PortableTextMergeFuzzTest do
       end)
 
     :erlang.trace_pattern({M, :pick, 3}, false, [:local])
-    IO.puts("REACH #{inspect(counts)}")
     assert counts.ok >= 400 and counts.clash >= 400 and counts.both >= 600, inspect(counts)
   end
 
