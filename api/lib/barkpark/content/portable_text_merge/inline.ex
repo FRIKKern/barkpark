@@ -125,9 +125,31 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
     cond do
       Enum.map(mid, &elem(&1, 0)) == Enum.map(put, &elem(&1, 0)) -> :error
+      not marks_kept?(mid, put) -> :error
       Enum.all?(put, &MapSet.member?(allowed, elem(&1, 1))) -> {:ok, {p, length(base) - s, put}}
       true -> :error
     end
+  end
+
+  # Inside the splice, the text kept is as long on letters as on graphemes
+  # alone: no base letter whose text stayed took other marks
+  # (task-81d9efce3bbf6428). The edit script is the shortest, so its kept
+  # letters are a longest common run; one tag in the splice needs none. Past
+  # @diff_cap letters with marks mixed, the cost is not run: :error.
+  @diff_cap 1_000
+  defp marks_kept?(mid, put) do
+    case MapSet.size(MapSet.new(mid ++ put, &elem(&1, 1))) do
+      n when n <= 1 ->
+        true
+
+      _ ->
+        length(mid) + length(put) <= @diff_cap and
+          kept(mid, put) == kept(Enum.map(mid, &elem(&1, 0)), Enum.map(put, &elem(&1, 0)))
+    end
+  end
+
+  defp kept(a, b) do
+    for {:eq, xs} <- List.myers_difference(a, b), reduce: 0, do: (n -> n + length(xs))
   end
 
   defp ends(base, side) do
