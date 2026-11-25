@@ -97,6 +97,7 @@ defmodule BarkparkWeb.ChatController do
   }
 
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ChatFleetSeat
   alias BarkparkWeb.ChatHostRefusal
   alias BarkparkWeb.ChatSendFailure
   alias BarkparkWeb.ChatSessionDoor
@@ -231,7 +232,8 @@ defmodule BarkparkWeb.ChatController do
       # `owner_workspace_id == ^ws` via the partial index, so a tenant's own
       # sessions are never starved out of the `@sidebar_cap` window by other
       # tenants' more-recent sessions (which an after-the-fact in-memory filter
-      # would allow). `:global` stays unfiltered (admin sidebar unchanged).
+      # would allow). `:global` is not tenant-filtered, but every caller loses the
+      # host chats it may not see (`ChatSessionDoor.list/2`, task-f44bbb6363d28e37).
       sessions = ChatSessionDoor.list(conn, archived: archived?)
 
       json(conn, %{sessions: Enum.map(sessions, &sidebar_json(&1, conn.assigns[:api_token]))})
@@ -250,7 +252,7 @@ defmodule BarkparkWeb.ChatController do
   the aggregate twin of the fleet stream, no per-session detail.
   """
   def rollup(conn, _params) do
-    json(conn, StudioChat.rollup(scope(conn)))
+    json(conn, ChatFleetSeat.rollup(conn.assigns[:api_token], scope(conn)))
   end
 
   # ── GET /v1/chat/managed-session?task=<doc_id> ─────────────────────────────
@@ -672,7 +674,8 @@ defmodule BarkparkWeb.ChatController do
     # between the handshake and the live loop is lost; the loop then drops any
     # frame with `seq <= boundary` (already reflected in the snapshot/replay), so
     # the handoff is gap-free by convergence with no duplicate state.
-    forwarder = start_forwarder(FleetHub.fleet_topic(), self())
+    seat = conn.assigns[:api_token]
+    forwarder = ChatFleetSeat.start_forwarder(FleetHub.fleet_topic(), self(), seat)
     {mode, epoch, boundary, entries} = FleetHub.handshake(cursor, scope)
 
     conn =
@@ -682,7 +685,7 @@ defmodule BarkparkWeb.ChatController do
       |> put_resp_header("connection", "keep-alive")
       |> send_chunked(200)
 
-    conn = emit_fleet_open(conn, mode, epoch, boundary, entries, scope)
+    conn = emit_fleet_open(conn, mode, epoch, boundary, entries, {scope, seat})
 
     try do
       schedule_keepalive()
@@ -696,12 +699,13 @@ defmodule BarkparkWeb.ChatController do
 
   # Emit the connect payload: a fresh scoped snapshot (seam 1) OR the exact scoped
   # ring replay (seam 3), depending on the handshake decision.
-  defp emit_fleet_open(conn, :snapshot, epoch, boundary, _entries, scope) do
-    chunk_fleet(conn, fleet_snapshot_frame(StudioChat.fleet_snapshot(scope), epoch, boundary))
+  defp emit_fleet_open(conn, :snapshot, epoch, boundary, _entries, {scope, seat}) do
+    chunk_fleet(conn, fleet_snapshot_frame(ChatFleetSeat.snapshot(seat, scope), epoch, boundary))
   end
 
-  defp emit_fleet_open(conn, :replay, epoch, _boundary, entries, _scope) do
-    Enum.reduce(entries, conn, fn entry, c -> chunk_fleet(c, fleet_state_frame(entry, epoch)) end)
+  defp emit_fleet_open(conn, :replay, epoch, _boundary, entries, {_scope, seat}) do
+    ChatFleetSeat.visible_rows(seat, entries)
+    |> Enum.reduce(conn, fn entry, c -> chunk_fleet(c, fleet_state_frame(entry, epoch)) end)
   end
 
   defp chunk_fleet(conn, data) do

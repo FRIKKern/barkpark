@@ -303,7 +303,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   # `{held, rich, posted, typed}`: the rich text acts `split/3` gave, the
   # values read under the lock, the post as the page sent it, and the fields
-  # `TextRejoin.split/4` held. The write's
+  # `TextRejoin.split/5` held or put back as stale. The write's
   # outcome is read before the reload drops it (`:saved_over`).
   defp do_save(params, not_codes, socket, text, {held, rich, posted, typed}) do
     before = socket.assigns[:editor_form] || %{}
@@ -331,7 +331,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {held, text_held ++ Enum.map(typed, &elem(&1, 0))}
       )
 
-    {TextRejoin.hold(saved, typed), held}
+    {TextRejoin.hold(saved, typed, :save), held}
   end
 
   defp do_saved(socket, text_held, rich_held?, params) do
@@ -377,6 +377,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
+  # Each string field the reload changed is pushed to the page with its
+  # numbers, as rich text is repainted (task-2e9aaa937cfc3da1): a patch
+  # leaves a focused input alone, so it kept A's held words, and A's next
+  # key wrote them over B's with no banner. The reload drops the numbers the
+  # socket sent, so the stored values are sent again under numbers of their
+  # own first (`RemoteValues.born/1`): a key from a page that has not drawn
+  # the push yet reads as a rejoin post (`TextRejoin`), never as sent.
   def reload_remote_doc(socket) do
     was = socket.assigns[:editor_form]
 
@@ -384,6 +391,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       socket
       |> Shared.rebuild_panes()
       |> RichTextRemote.repaint(was)
+      |> assign(editor_text_born: false)
+      |> RemoteValues.born()
+      |> then(&RemoteValues.push(&1, was || %{}, &1.assigns[:editor_form] || %{}))
       |> assign(
         editor_dirty: false,
         doc_conflict: false,
@@ -560,8 +570,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
         # A page that rejoined a new socket, typed on a value it never took
         # (`TextRejoin`, task-4fc7383b936f606a).
-        units = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
-        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc)
+        {targets, units} = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
+        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc, targets)
 
         based =
           socket

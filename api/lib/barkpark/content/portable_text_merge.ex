@@ -28,8 +28,9 @@ defmodule Barkpark.Content.PortableTextMerge do
     * Where the words can be lined up more than one way (two identical
       paragraphs, empty ones) and the other side touched a block whose
       place depends on the choice: the whole value is a clash.
-    * Past `@max_cells` (blocks of the base × blocks of a side) the merge is
-      not tried: a clash.
+    * Past `@max_cells` (blocks of the base × blocks of a side), or past
+      `@max_objects` inline objects in the three values, the merge is not
+      tried: a clash.
     * Otherwise each base block takes the one side that changed or deleted
       it, and blocks a side added go in where it put them.
 
@@ -44,6 +45,13 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Blocks lined up at most: base × side.
   @max_cells 20_000
+
+  # Inline objects in base, mine and theirs together, at most
+  # (task-1cb50a8ed57c0547, #28817 review N2): the byte caps count only
+  # text, and drawing and lining up objects costs about 3,500 reductions
+  # each per side, so 50,000 in one block cost 107-177M, over the 80M save
+  # bound. 15,000 keeps a merge near 20M.
+  @max_objects 15_000
 
   # Text merged inside blocks per merge, at most (base + mine + theirs bytes
   # of each such block): past it, a block both changed is a clash of it, as
@@ -66,18 +74,62 @@ defmodule Barkpark.Content.PortableTextMerge do
     base = list(base)
     {mine, theirs} = {list(mine), list(theirs)}
 
-    if length(base) * max(length(mine), length(theirs)) > @max_cells do
-      whole_clash(mine, theirs)
-    else
-      m = edits(base, mine)
-      t = edits(base, theirs)
+    cond do
+      length(base) * max(length(mine), length(theirs)) > @max_cells ->
+        whole_clash(mine, theirs)
 
-      cond do
-        not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
-        crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
-        true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
-      end
+      objects(base) + objects(mine) + objects(theirs) > @max_objects ->
+        over_cap(base, mine, theirs)
+
+      true ->
+        line_up(base, mine, theirs, opts)
     end
+  end
+
+  defp line_up(base, mine, theirs, opts) do
+    m = edits(base, mine)
+    t = edits(base, theirs)
+
+    cond do
+      not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
+      crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
+      true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+    end
+  end
+
+  # Inline objects (children that are not spans) of a value.
+  defp objects(blocks) do
+    Enum.reduce(blocks, 0, fn b, n ->
+      Enum.reduce(children(b), n, fn
+        %{"_type" => "span"}, n -> n
+        %{}, n -> n + 1
+        _c, n -> n
+      end)
+    end)
+  end
+
+  # Past `@max_objects` the merge is not tried, but a value one side left as
+  # it was, or both sides edited alike, is no clash (task-64eed140345d8927,
+  # #28882 review: the same edit on both sides was held with an empty
+  # banner). Blocks compare as maps with their keys set aside, as the
+  # banner does; nothing is drawn.
+  defp over_cap(base, mine, theirs) do
+    {b, m, t} = {keyless(base), keyless(mine), keyless(theirs)}
+
+    cond do
+      m == t or m == b -> {:ok, theirs}
+      t == b -> {:ok, mine}
+      true -> {:clash, plain_banner(mine, theirs), mine}
+    end
+  end
+
+  defp keyless(blocks), do: Enum.map(blocks, &Map.delete(&1, "_key"))
+
+  # The banner past `@max_objects`: theirs' words in each block mine does not
+  # hold as it is, never drawn (drawing is what the cap bounds).
+  defp plain_banner(mine, theirs) do
+    have = MapSet.new(mine, &Map.delete(&1, "_key"))
+    for b <- theirs, not MapSet.member?(have, Map.delete(b, "_key")), do: text(b)
   end
 
   # Nothing of `side`'s needs a guess next to what `other` did.
@@ -183,7 +235,7 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Each base index mine kept, to mine's own block there.
   defp kept(base, mine) do
-    pairs = PortableTextAlign.pairs(Enum.map(base, &drawn/1), Enum.map(mine, &drawn/1))
+    pairs = PortableTextAlign.pairs(Enum.map(base, &shape/1), Enum.map(mine, &shape/1))
     mine_at = List.to_tuple(mine)
     Map.new(pairs, fn {i, j} -> {i, elem(mine_at, j)} end)
   end
@@ -212,6 +264,14 @@ defmodule Barkpark.Content.PortableTextMerge do
   (`Forms.ObjectRebase`, task-00c56c6a88ed0b8f).
   """
   def same_drawn?(a, b), do: Enum.map(list(a), &drawn/1) == Enum.map(list(b), &drawn/1)
+
+  @doc """
+  Whether two stored values are the same as the merge lines blocks up:
+  drawn, and each text block's own fields (`level`, an unknown field) too.
+  For two stored values; a page's posted HTML carries no such field
+  (`same_drawn?/2`).
+  """
+  def same_shape?(a, b), do: Enum.map(list(a), &shape/1) == Enum.map(list(b), &shape/1)
 
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []
@@ -266,7 +326,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp bytes(_block, _m, _t), do: 0
 
   defp same_edit?(:deleted, :deleted), do: true
-  defp same_edit?({:changed, a}, {:changed, b}), do: drawn(a) == drawn(b)
+  defp same_edit?({:changed, a}, {:changed, b}), do: shape(a) == shape(b)
   defp same_edit?(_, _), do: false
 
   # Mine for a clashed block. Inserts at one place come from one side only
@@ -290,7 +350,7 @@ defmodule Barkpark.Content.PortableTextMerge do
         block ++ Map.get(t_ins, i, []) ++ Map.get(m_ins, i, [])
       end)
 
-    unique_keys(head ++ body)
+    (head ++ body) |> unique_keys() |> unique_objects()
   end
 
   # What a side did, against the base:
@@ -301,7 +361,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   #   * `gaps`: each gap as `{base indexes left out, blocks put in}`;
   #   * `unsure`: base indexes whose line-up can go more than one way.
   defp edits(base, side) do
-    {a, b} = {Enum.map(base, &drawn/1), Enum.map(side, &drawn/1)}
+    {a, b} = {Enum.map(base, &shape/1), Enum.map(side, &shape/1)}
     {pairs, unsure} = lcs(a, b)
     side_at = List.to_tuple(side)
 
@@ -423,6 +483,50 @@ defmodule Barkpark.Content.PortableTextMerge do
     out
   end
 
+  # An inline object key is unique in the whole field (task-1f8cff9d0bb3af3e,
+  # #28817 review T1): theirs' new object keeps its key, and mine may have
+  # put the same key in another block. The one later in the field gets a key
+  # no block or child of the field uses. `next` carries each key's counter,
+  # so d objects sharing a key cost d tries, not d² (#28861 review: a paste
+  # of one object 16k times took 24 s).
+  defp unique_objects(blocks) do
+    used =
+      MapSet.new(
+        Enum.flat_map(blocks, &[&1["_key"] | Enum.map(children(&1), fn c -> child_key(c) end)])
+      )
+
+    {out, _} =
+      Enum.map_reduce(blocks, {MapSet.new(), used, %{}}, fn
+        %{"children" => cs} = b, acc when is_list(cs) ->
+          {cs, acc} = Enum.map_reduce(cs, acc, &object_key/2)
+          {Map.put(b, "children", cs), acc}
+
+        b, acc ->
+          {b, acc}
+      end)
+
+    out
+  end
+
+  defp object_key(%{"_type" => type, "_key" => k} = c, {objects, used, next})
+       when is_binary(k) and type != "span" do
+    if MapSet.member?(objects, k) do
+      {k2, n} = fresh_n(k, used, Map.get(next, k, 1))
+
+      {Map.put(c, "_key", k2),
+       {MapSet.put(objects, k2), MapSet.put(used, k2), Map.put(next, k, n + 1)}}
+    else
+      {c, {MapSet.put(objects, k), used, next}}
+    end
+  end
+
+  defp object_key(c, acc), do: {c, acc}
+
+  defp fresh_n(k, seen, n) do
+    k2 = "#{k}m#{n}"
+    if MapSet.member?(seen, k2), do: fresh_n(k, seen, n + 1), else: {k2, n}
+  end
+
   defp fresh(k, seen, n) do
     k2 = "#{k}m#{n}"
     if MapSet.member?(seen, k2), do: fresh(k, seen, n + 1), else: k2
@@ -434,6 +538,17 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   defp text(%{"_type" => type}) when is_binary(type), do: "[#{type}]"
   defp text(_block), do: ""
+
+  # A block as the line-up reads it: as drawn, and a text block's own fields
+  # beside the drawing (task-68298dcf20a1ec8a, #28817 review T2). A field
+  # change that draws the same (`level` without `listItem`, an unknown
+  # field, a `style` removed) read as no change, and the merge dropped it.
+  # `same_drawn?/2` stays by the drawing: it compares a page's posted HTML,
+  # which carries no such field.
+  defp shape(%{"_type" => "block"} = block),
+    do: {drawn(block), Map.drop(block, ["_key", "children", "markDefs"])}
+
+  defp shape(block), do: drawn(block)
 
   # A text block as the editor draws it, keys set aside; a custom block (a
   # mediaModule) by its fields, since its drawn summary can hide a change.

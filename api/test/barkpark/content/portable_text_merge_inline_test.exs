@@ -782,7 +782,17 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
             %{"t7" => :x, "m9" => :y}},
            {[a: "t7", b: "t7", " ": nil, c: "d1", " ": nil, e: nil, p: "m9", n: nil],
             %{"t7" => :x, "m9" => :x, "d1" => :y}},
-           {[a: "d2", b: "d2", " ": nil, " ": nil, e: nil, n: nil], %{"d2" => :x}}}
+           {[a: "d2", b: "d2", " ": nil, " ": nil, e: nil, n: nil], %{"d2" => :x}}},
+          # task-985e4a7e234e48a0: mine's new p link happens to hold theirs'
+          # x key (d2, base's y key in mine's re-keyed defs). Main read it as
+          # the one link under that key: p joined theirs' a link.
+          {"E: p holds theirs' x key, mine re-keyed both",
+           {[a: "m9", b: "m9", " ": nil, c: "d2", " ": nil, e: nil, n: nil],
+            %{"m9" => :x, "d2" => :y}},
+           {[a: "t7", b: "t7", " ": nil, c: "d1", p: "d2", " ": nil, e: nil, n: nil],
+            %{"t7" => :x, "d2" => :x, "d1" => :y}},
+           {[a: "d2", b: "d2", " ": nil, c: "t7", " ": nil, e: nil, N: nil],
+            %{"d2" => :x, "t7" => :y}}}
         ] do
       test "re-keyed S2 #{name}: mine's p link keeps a def of its own" do
         lb = fn ls, defs, kp ->
@@ -816,6 +826,93 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
         assert hrefs[pk] == "https://x" and hrefs[ak] == "https://x"
         assert pk != ak
       end
+    end
+
+    # #28868 review: mine's key is theirs' key for that content, and mine's
+    # link of it goes on outside the splice, but theirs re-keyed: theirs'
+    # d2 is mine's OTHER link ("def"), and mine's "ghi" is theirs' m9.
+    test "mine types inside its own link theirs re-keyed: the letter takes theirs' key on that link" do
+      y = "https://y"
+
+      base =
+        block(
+          "k",
+          [
+            span("b0", "abc "),
+            span("b1", "def", ["d1"]),
+            span("b2", " "),
+            span("b3", "ghi", ["d2"]),
+            span("b4", " j")
+          ],
+          [link("d1", y), link("d2", y)]
+        )
+
+      mine =
+        block(
+          "k",
+          [
+            span("m0", "abc "),
+            span("m1", "def", ["d1"]),
+            span("m2", " "),
+            span("m3", "gQhi", ["d2"]),
+            span("m4", " j")
+          ],
+          [link("d1", y), link("d2", y)]
+        )
+
+      theirs =
+        block(
+          "k",
+          [
+            span("t0", "abc "),
+            span("t1", "d", ["d2"]),
+            span("t2", "W", ["d1"]),
+            span("t3", "U", ["t7"]),
+            span("t4", "V", ["d1"]),
+            span("t5", " "),
+            span("t6", "ghi", ["m9"]),
+            span("t7s", " j")
+          ],
+          [link("d2", y), link("d1", "https://x"), link("t7", y), link("m9", y)]
+        )
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+      at = fn letter ->
+        Enum.find(blk["children"], &String.contains?(&1["text"], letter))["marks"]
+      end
+
+      # Q sits in mine's ghi link, theirs' m9: not with d's link, one run.
+      assert at.("Q") == at.("g")
+      refute at.("Q") == at.("d")
+      assert Enum.find(blk["children"], &String.contains?(&1["text"], "Q"))["text"] == "gQhi"
+    end
+
+    # #28868 review: `outside_links/4` read theirs' put length for every
+    # letter of mine outside its splice, so its cost grew with the square
+    # of theirs' splice.
+    test "theirs puts 30k letters at the start, mine edits a linked word at the end: under the bound" do
+      y = "https://y"
+      body = String.duplicate("word ", 6_000)
+      base = block("k", [span("b0", body), span("b1", "end", ["d1"])], [link("d1", y)])
+      mine = block("k", [span("b0", body), span("b1", "enXd", ["d1"])], [link("d1", y)])
+
+      theirs =
+        block(
+          "k",
+          [span("t0", String.duplicate("more ", 6_000) <> body), span("b1", "end", ["d1"])],
+          [
+            link("d1", y)
+          ]
+        )
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      result = Inline.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 30_000_000, "#{r1 - r0} reductions"
+      assert {:ok, blk} = result
+      assert List.last(blk["children"])["text"] == "enXd"
     end
 
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do

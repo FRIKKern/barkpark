@@ -836,6 +836,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 an IME composition (#28349 r3 review, K6). --%>
           <div id="doc-conflict-slot" style="display: contents;">
             <.doc_conflict_banner
+              id={"doc-conflict-" <> Barkpark.Content.published_id(@editor_doc.doc_id)}
               conflict={@doc_conflict}
               disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
               theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
@@ -974,12 +975,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
               aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop(@editor_schema, @nav_group, @parent_assigns)}
             >
+            <%!-- `data-studio-held`: what Studio asks before a link leaves or
+                  the tab closes while a field is held (bp-studio-leave.js,
+                  task-c4b59891f88686e0). The desk asks from its pane
+                  (`Desk.LeaveGuard`). Not drawn while nothing is held. --%>
             <form
               phx-submit="save"
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
               data-desk-undo-keys={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.DocUndo.names(@editor_schema)}
+              data-studio-held={not desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.LeaveGuard.message(@parent_assigns)}
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page
@@ -1382,8 +1388,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   form when another user saved the open document while the local buffer held
   unsaved edits. Offers a Reload action ("reload-remote-doc") that discards the
   buffer and reloads from the DB. `conflict == false` → nothing renders.
+  Theirs' blocks past five fold under an "N more" line, still in the page
+  (task-66200f2c6a01ab57): no block of theirs is hidden, and a whole clash
+  does not draw a banner taller than the form.
   """
   attr :conflict, :boolean, default: false
+
+  attr :id, :string,
+    default: "doc-conflict",
+    doc: "per document, so two panes draw no id twice; the fold is `<id>-more`"
 
   attr :disabled, :boolean,
     default: false,
@@ -1405,7 +1418,18 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <%= gettext("Updated by another user — your unsaved edits are kept.") %>
           </span>
         </div>
-        <blockquote :for={text <- @theirs} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
+        <blockquote :for={text <- Enum.take(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
+        <%!-- A patch would close the fold under the reader: `open` is the page's (#28891 review). --%>
+        <details
+          :if={length(@theirs) > 5}
+          id={@id <> "-more"}
+          class="bp-doc-conflict-more"
+          data-test-id="doc-conflict-more"
+          phx-mounted={JS.ignore_attributes(["open"])}
+        >
+          <summary><%= gettext("%{count} more", count: length(@theirs) - 5) %></summary>
+          <blockquote :for={text <- Enum.drop(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
+        </details>
         <button
           type="button"
           class="btn btn-sm"

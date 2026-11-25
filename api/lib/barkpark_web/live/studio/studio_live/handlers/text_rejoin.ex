@@ -16,7 +16,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
 
   A page that typed while away with no other save is held too: a banner
   that was not needed, never words lost without one (task-6496826d722a5a06).
+
+  A field other than the post's target whose posted value is a version the
+  store held before is stale, not typed (task-727f65fc259d0c7b): the page
+  showed it from before B's save. It was held under the banner, and A's
+  next key wrote it over B's with the banner gone. It is put back to the
+  store, never held, and the page's input is drawn the stored value.
   """
+
+  alias Barkpark.Content.Revisions
+  alias BarkparkWeb.ScopeHelpers
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
@@ -30,7 +39,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   the rejoin carries the whole form as the page showed it, and an explicit
   Save is one too (B2).
   """
-  def split(socket, units, seen, doc) when is_binary(seen) and is_map(doc) do
+  def split(socket, units, seen, doc, targets \\ [])
+
+  def split(socket, units, seen, doc, targets) when is_binary(seen) and is_map(doc) do
     schema = socket.assigns[:editor_schema]
 
     typed =
@@ -53,19 +64,47 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
       end
 
     {Enum.reduce(typed, doc, fn {key, _mine, stored}, d -> RemoteValues.put_at(d, key, stored) end),
-     typed}
+     stale(socket, typed, targets)}
   end
 
-  def split(_socket, _units, _seen, doc), do: {doc, []}
+  def split(_socket, _units, _seen, doc, _targets), do: {doc, []}
+
+  # Each field other than the target whose posted value a stored version
+  # held is tagged `:stale`. The store is asked only for such a field.
+  defp stale(socket, typed, targets) do
+    Enum.map(typed, fn {key, mine, stored} = entry ->
+      if key not in targets and held_before?(socket, key, mine),
+        do: {key, mine, stored, :stale},
+        else: entry
+    end)
+  end
+
+  defp held_before?(
+         %{assigns: %{editor_doc: %{doc_id: id}, editor_type: type}} = socket,
+         key,
+         mine
+       )
+       when is_binary(id) and is_binary(type),
+       do:
+         Revisions.revision_holds?(
+           id,
+           type,
+           socket.assigns.dataset,
+           key,
+           mine,
+           ScopeHelpers.scope_opts(socket)
+         )
+
+  defp held_before?(_socket, _key, _mine), do: false
 
   @doc """
-  The units of an autosave: its target (and the text subfield it changed)
-  and every free-text field the post carries.
+  `{targets, units}` of an autosave: its target (and the text subfield it
+  changed), and those with every free-text field the post carries.
   """
-  def units(schema, keys, path, doc),
-    do:
-      RemoteValues.units(keys, RemoteValues.text_path(schema, keys, path)) ++
-        RemoteValues.text_units(schema, doc)
+  def units(schema, keys, path, doc) do
+    targets = RemoteValues.units(keys, RemoteValues.text_path(schema, keys, path))
+    {targets, targets ++ RemoteValues.text_units(schema, doc)}
+  end
 
   @doc """
   A's words for each held field in the form, unsaved, with the banner, and
@@ -75,9 +114,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   B3). The input takes A's words while it still shows the stored value
   (bp-array-focus.js `takeFocused`); one still showing A's words keeps them.
   """
-  def hold(socket, []), do: socket
+  def hold(socket, typed, on \\ :autosave)
 
-  def hold(socket, typed) do
+  def hold(socket, [], _on), do: socket
+
+  def hold(socket, typed, on) do
+    {stale, typed} = Enum.split_with(typed, &(tuple_size(&1) == 4))
+
+    socket
+    |> held(typed)
+    |> drawn(stale)
+    |> named(stale, on)
+  end
+
+  # An explicit Save that put a field back says so, not "Saved" (#28850 r1
+  # review): the post may be A's own edit back to an earlier version. The
+  # banner names the field, which shows the stored value; typing on saves.
+  defp named(socket, [_ | _] = stale, :save) do
+    TextUnderLock.hold(
+      socket,
+      Enum.map(stale, &elem(&1, 0)),
+      Enum.reduce(stale, %{}, fn {key, _mine, stored, :stale}, form ->
+        RemoteValues.put_at(form, key, stored)
+      end)
+    )
+  end
+
+  defp named(socket, _stale, _on), do: socket
+
+  defp held(socket, []), do: socket
+
+  defp held(socket, typed) do
     values =
       Map.new(typed, fn {key, mine, stored} ->
         {RemoteValues.input_name(key), %{value: mine, was: stored}}
@@ -91,6 +158,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
       end)
     )
     |> Phoenix.LiveView.push_event("bp:form-remote-values", %{values: values})
+  end
+
+  # A stale field's input, still showing it, is drawn the stored value:
+  # nothing redraws it (the form's value did not change), and `draw` sets
+  # an input that is not focused (bp-array-focus.js).
+  defp drawn(socket, []), do: socket
+
+  defp drawn(socket, stale) do
+    values =
+      Map.new(stale, fn {key, mine, stored, :stale} ->
+        {RemoteValues.input_name(key), %{value: stored, was: mine, draw: true}}
+      end)
+
+    Phoenix.LiveView.push_event(socket, "bp:form-remote-values", %{values: values})
   end
 
   # A field the banner already names was told: typing on saves A's words.

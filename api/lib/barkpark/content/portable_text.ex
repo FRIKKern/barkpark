@@ -752,6 +752,13 @@ defmodule Barkpark.Content.PortableText do
     end
   end
 
+  # A block with no list keeps the stored `level` of a stored block with
+  # none: the drawing has no level outside a list, so the editor's reading
+  # left it out, not the person (task-7654a6a1eb157d03).
+  defp keep_list(block, %{"level" => level} = old)
+       when not is_map_key(block, "listItem") and not is_map_key(old, "listItem"),
+       do: Map.put(block, "level", level)
+
   defp keep_list(block, _old), do: block
 
   defp keep_span(span, stored) do
