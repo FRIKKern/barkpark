@@ -1,0 +1,156 @@
+defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
+  # task-c4b59891f88686e0: a field held under the conflict banner keeps A's
+  # words in the form, unsaved. The desk asks before it leaves
+  # (`Desk.LeaveGuard`, `data-desk-held`); Studio had no guard, so a link
+  # or a tab close dropped A's words with no warning. Studio's editor form
+  # now carries the question, naming the field, as `data-studio-held`
+  # (bp-studio-leave.js asks with it).
+  use BarkparkWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Auth
+  alias Barkpark.Content
+  alias Barkpark.Tenancy
+  alias BarkparkWeb.ObjectRichText
+
+  @dataset "production"
+  @label "doc[meta].label"
+
+  setup %{conn: conn} do
+    n = System.unique_integer([:positive])
+    type = "string_race_#{n}"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => type,
+          "title" => "String race",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{
+              "name" => "meta",
+              "title" => "Meta",
+              "type" => "composite",
+              "fields" => [%{"name" => "label", "title" => "Label", "type" => "string"}]
+            },
+            %{"name" => "notes", "title" => "Notes", "type" => "string"}
+          ]
+        },
+        @dataset
+      )
+
+    id = "string-race-#{n}"
+
+    {:ok, _} =
+      Content.create_document(
+        type,
+        %{
+          "doc_id" => id,
+          "title" => "T0",
+          "content" => %{"meta" => %{"label" => "one two three"}, "notes" => "one two three"}
+        },
+        @dataset
+      )
+
+    {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    raw = "string-race-" <> Ecto.UUID.generate()
+    ws_id = Tenancy.get_default_workspace().id
+    {:ok, _} = Auth.create_token(raw, "string-race", @dataset, ~w(read write admin), ws_id)
+    root = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
+
+    {:ok,
+     conn: Plug.Test.init_test_session(conn, %{"api_token" => raw}),
+     type: type,
+     id: id,
+     paths: %{desk: "#{root}/_desk/#{type};#{id}", studio: "#{root}/#{type}/#{id}"}}
+  end
+
+  defp open(c, surface) do
+    {:ok, view, _html} = live(c.conn, c.paths[surface])
+    render_async(view, 5_000)
+    assert ObjectRichText.eventually(fn -> has_element?(view, "#editor-form") end)
+    view
+  end
+
+  # A post as the page sends it, `_bp_seen` as bp-array-focus.js keeps it.
+  defp posts(view, target, fields) do
+    view
+    |> element("#editor-form")
+    |> render_change(
+      Map.merge(
+        %{
+          "_target" => [target],
+          "doc" => %{"title" => "T0", "notes" => fields["notes"] || "one two three"},
+          @label => fields["label"] || "one two three",
+          "_bp_seen" => Jason.encode!(%{"v" => 2})
+        },
+        Map.take(fields, ["doc"])
+      )
+    )
+  end
+
+  defp stored(c) do
+    {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+    doc.content
+  end
+
+  # A held: B's save lands under A's post rewriting the same letter.
+  defp hold(c, surface, target, field) do
+    {a, b} = {open(c, surface), open(c, surface)}
+
+    ObjectRichText.inside(
+      a,
+      fn -> posts(b, target, %{field => "one twB three"}) end,
+      fn -> posts(a, target, %{field => "one twA three"}) end
+    )
+
+    assert has_element?(a, ~s([data-test-id="doc-conflict-banner"]))
+    a
+  end
+
+  for {field, target, label} <- [{"label", @label, "Meta"}, {"notes", "doc[notes]", "Notes"}] do
+    test "studio #{field}: a held field puts the question, naming it, on the editor form", c do
+      a = hold(c, :studio, unquote(target), unquote(field))
+
+      # On main: no data-studio-held, nothing asks.
+      assert [question] =
+               a
+               |> render()
+               |> LazyHTML.from_document()
+               |> LazyHTML.query("form#editor-form")
+               |> LazyHTML.attribute("data-studio-held")
+
+      assert question == "Not saved: #{unquote(label)}. What you typed there will be lost."
+    end
+
+    test "studio #{field}: typing on saves A's words and the question goes", c do
+      a = hold(c, :studio, unquote(target), unquote(field))
+      posts(a, unquote(target), %{unquote(field) => "one twAA three"})
+
+      assert ObjectRichText.eventually(fn ->
+               not has_element?(a, "form#editor-form[data-studio-held]")
+             end)
+    end
+
+    test "desk #{field}: the desk asks from its pane, not the Studio form", c do
+      a = hold(c, :desk, unquote(target), unquote(field))
+      assert has_element?(a, "[data-pane-editing][data-desk-held]")
+      refute has_element?(a, "form#editor-form[data-studio-held]")
+    end
+  end
+
+  test "studio: nothing held, nothing asked", c do
+    a = open(c, :studio)
+    posts(a, "doc[notes]", %{"notes" => "one two three four"})
+    assert ObjectRichText.eventually(fn -> stored(c)["notes"] == "one two three four" end)
+    refute has_element?(a, "form#editor-form[data-studio-held]")
+  end
+
+  test "studio: the layout loads the guard under its content hash", c do
+    {:ok, _view, html} = live(c.conn, c.paths.studio)
+    assert html =~ BarkparkWeb.StaticAssets.path("bp-studio-leave.js")
+    assert BarkparkWeb.StaticAssets.path("bp-studio-leave.js") =~ "/assets/v/"
+  end
+end
