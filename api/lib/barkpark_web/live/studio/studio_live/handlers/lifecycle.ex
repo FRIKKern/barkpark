@@ -171,7 +171,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            editor_form: updated_form,
            editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
-           save_status: "Updated by another user"
+           # Taken in over a form with nothing unsaved, it says nothing, on
+           # the Studio as on the desk (`EditorHost.quiet_remote/1`): a clean
+           # merge read like a conflict (task-3bb95fc2c7113518). TanStack's
+           # footer has no words for it.
+           save_status: ""
          )
          |> named_as_seen()}
     end
