@@ -201,6 +201,15 @@
     return now.length - s;
   }
 
+  // The stretch of `now` that differs from `was`: [start, end).
+  function changed(was, now) {
+    var p = 0;
+    while (p < was.length && p < now.length && was[p] === now[p]) p++;
+    var s = 0;
+    while (s < was.length - p && s < now.length - p && was[was.length - 1 - s] === now[now.length - 1 - s]) s++;
+    return [p, now.length - s];
+  }
+
   function hasOption(select, value) {
     for (var i = 0; i < select.options.length; i++) if (select.options[i].value === value) return true;
     return false;
@@ -222,6 +231,11 @@
     }
     var start = shift(el.selectionStart, change.was, change.value);
     var end = shift(el.selectionEnd, change.was, change.value);
+    // task-e070cb99b86100be: a selection that would span letters the other
+    // editor put in is not carried onto them: B's next key replaced them and
+    // the post read as B's own edit. The caret goes after the other's change.
+    var added = changed(change.was, change.value);
+    if (start !== end && added[1] > added[0] && start < added[1] && end > added[0]) start = end = added[1];
     el.value = change.value;
     el.setSelectionRange(start, end);
   }

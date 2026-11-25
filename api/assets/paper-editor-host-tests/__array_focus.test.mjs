@@ -293,6 +293,65 @@ try {
     }
   }
 
+  // task-e070cb99b86100be: another editor's save is drawn into the field B
+  // rests in (bp:form-remote-values) while B's selection covers letters that
+  // save replaced. The selection was carried onto the other's new letters, so
+  // B's next key replaced them, and the post read as B's own edit.
+  {
+    const remote = (input, was, value) => {
+      window.dispatchEvent(
+        new window.CustomEvent("phx:bp:form-remote-values", {
+          detail: { values: { [input.name]: { value, was } } },
+        }),
+      );
+    };
+    const typed = (input, text) => input.setRangeText(text, input.selectionStart, input.selectionEnd, "end");
+    const field = (value) => {
+      document.body.innerHTML =
+        `<form id="editor-form"><input type="hidden" name="_bp_seen" value="{}">` +
+        `<input type="text" name="doc[title]" value="${value}"></form>`;
+      const input = document.querySelector('[name="doc[title]"]');
+      input.focus();
+      return input;
+    };
+
+    {
+      // B selects the o of "two"; A's save replaces it with A.
+      const input = field("one two three");
+      input.setSelectionRange(6, 7);
+      remote(input, "one two three", "one twA three");
+      assert.equal(input.value, "one twA three");
+      typed(input, "B");
+      assert.equal(input.value, "one twAB three", "B's key goes after A's letter, never over it");
+    }
+
+    {
+      // A inserts inside B's selection.
+      const input = field("one two three");
+      input.setSelectionRange(4, 7);
+      remote(input, "one two three", "one twXo three");
+      typed(input, "B");
+      assert.ok(input.value.includes("X"), `A's insert survives B's key: ${input.value}`);
+    }
+
+    {
+      // A selection the other's change does not touch keeps its text.
+      const input = field("one two three");
+      input.setSelectionRange(8, 13);
+      remote(input, "one two three", "ONE two three");
+      assert.equal(input.value.slice(input.selectionStart, input.selectionEnd), "three");
+    }
+
+    {
+      // A caret keeps its place in the text around the other's change.
+      const input = field("one two three");
+      input.setSelectionRange(7, 7);
+      remote(input, "one two three", "one twA three");
+      assert.equal(input.selectionStart, 7);
+      assert.equal(input.selectionEnd, 7);
+    }
+  }
+
   console.log("array focus: all checks passed");
 } finally {
   window.close();
