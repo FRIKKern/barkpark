@@ -170,6 +170,45 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id <> "-2"
   end
 
+  # #28836 r2 review: the asked press outlived its hold. Asked on row X,
+  # the hold ended by typing on, a new clash held notes again: row X then
+  # left with no question, and A's words were lost.
+  test "studio: a press asked under a hold that ended asks again under the next hold", c do
+    {:ok, _} =
+      Content.create_document(
+        c.type,
+        %{"doc_id" => c.id <> "-2", "title" => "Second", "content" => %{}},
+        @dataset
+      )
+
+    a = hold(c, :studio, "doc[notes]", "notes")
+    row = ~s(button[phx-click="select"][phx-value-id="#{c.id}-2"])
+    assert ObjectRichText.eventually(fn -> has_element?(a, row) end)
+    a |> element(row) |> render_click()
+
+    posts(a, "doc[notes]", %{"notes" => "one twAA three"})
+
+    assert ObjectRichText.eventually(fn ->
+             not has_element?(a, "form#editor-form[data-studio-held]")
+           end)
+
+    b = open(c, :studio)
+
+    ObjectRichText.inside(
+      a,
+      fn -> posts(b, "doc[notes]", %{"notes" => "one twAA thBee"}) end,
+      fn -> posts(a, "doc[notes]", %{"notes" => "one twAA thAee"}) end
+    )
+
+    assert has_element?(a, "form#editor-form[data-studio-held]")
+
+    # On f28fe5636e: the editor moved to the second document, A's words lost.
+    html = a |> element(row) |> render_click()
+    assert html =~ "Not saved: Notes."
+    assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
+    assert assigns(a).editor_form["notes"] == "one twAA thAee"
+  end
+
   test "studio: New document asks first while a field is held", c do
     a = hold(c, :studio, "doc[notes]", "notes")
 

@@ -111,6 +111,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket =
       socket
       |> reset_read_memo_per_callback()
+      |> attach_hook(:studio_leave_follow, :after_render, &LeaveAsk.follow/1)
       |> Mount.init()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()

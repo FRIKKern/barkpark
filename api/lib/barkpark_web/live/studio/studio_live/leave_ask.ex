@@ -19,8 +19,20 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   alias BarkparkWeb.Studio.Desk.LeaveGuard
 
   @doc """
+  After each render: a hold that has ended forgets the press it asked
+  about, so a later hold asks again (#28836 r2 review: asked on a row, the
+  hold ended by typing on, a new clash held the field, and the same row
+  then left with no question).
+  """
+  def follow(socket) do
+    if socket.assigns[:studio_leave_asked] && is_nil(LeaveGuard.doc(socket.assigns)),
+      do: assign(socket, :studio_leave_asked, nil),
+      else: socket
+  end
+
+  @doc """
   `{:go, socket}`, or `{:stay, socket}` with the question asked. A press
-  that goes clears the asked one, so a later hold asks again.
+  that goes clears the asked one, and so does the hold's end (`follow/1`).
   """
   def ask(event, params, socket) do
     press = {event, params}
