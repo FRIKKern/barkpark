@@ -133,9 +133,12 @@ defmodule Barkpark.Content.PortableTextMerge do
   # have.
   defp whole_clash(mine, theirs), do: {:clash, banner(mine, theirs), mine}
 
+  # Every one: typing on the view saves it over theirs, so a block of theirs
+  # in neither the view nor the banner was lost with no word. A cap of 5
+  # did that in 38 of 6,000 generated clashes (task-f3594c6613f4663e).
   defp banner(view, theirs) do
     have = MapSet.new(view, &drawn/1)
-    Enum.take(for(b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)), 5)
+    for b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)
   end
 
   # Lined up, but a block both touched is not one clear clash of one block
