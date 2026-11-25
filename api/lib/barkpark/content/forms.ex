@@ -1468,7 +1468,8 @@ defmodule Barkpark.Content.Forms do
     {bases, write_opts} = Keyword.pop(write_opts, :field_bases, %{})
     {expect, write_opts} = Keyword.pop(write_opts, :field_expect, %{})
     {over, write_opts} = Keyword.pop(write_opts, :saved_over, [])
-    params_now = TextRebase.rebase(params, bases, text_values(current))
+    {seen, write_opts} = Keyword.pop(write_opts, :text_seen, %{})
+    params_now = TextRebase.rebase(params, bases, text_values(current), seen)
     write_opts = Keyword.put(write_opts, :whole_fields, for({key, :whole} <- bases, do: key))
 
     case expected(expect, current) ||

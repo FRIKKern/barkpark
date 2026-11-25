@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
   alias BarkparkWeb.Studio.StudioLive.KeptRows
@@ -496,27 +497,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         path = target_path(params, keys)
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
+        # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514).
+        text = TextUnderLock.values(socket, keys, params["_bp_seen"], path)
+
         based =
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"], path)
           |> RemoteValues.add_bases(built_bases)
-          |> assign(editor_rt_under_lock: rich)
+          |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
 
-        saved =
+        written =
           based
           |> RefusedSave.target(keys, path)
           |> Shared.do_autosave(doc, :change)
+
+        text_held = TextUnderLock.held(written, text, doc)
+
+        saved =
+          written
+          |> assign(editor_text_held: text_held)
           |> RemoteValues.settle(socket, keys, doc, path)
 
         bases = based.assigns[:editor_field_bases] || %{}
 
         saved =
           saved
-          |> assign(editor_rt_under_lock: nil)
+          |> assign(editor_rt_under_lock: nil, editor_text_under_lock: nil, editor_text_held: nil)
           |> keep_unsaved_values(doc, keys)
           |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
           |> RefusedSave.not_codes(not_codes)
           |> settle_dirty(keys)
+          |> TextUnderLock.hold(text_held, doc)
 
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
         {:noreply, RichTextRemote.hold(saved, held)}

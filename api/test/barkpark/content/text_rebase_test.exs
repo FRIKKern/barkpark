@@ -108,4 +108,40 @@ defmodule Barkpark.Content.TextRebaseTest do
       assert us < 50_000
     end
   end
+
+  # task-5b8f13c40a052514: `seen`, the value the tab believed stored.
+  describe "rebase/4 with what the tab believed stored" do
+    test "the store moved from it under the post: an overlap keeps the store" do
+      seen = %{"notes" => "one two three"}
+      stored = %{"notes" => "one twB three"}
+
+      assert TextRebase.rebase(%{"notes" => "one twA three"}, %{}, stored, seen) ==
+               %{"notes" => "one twB three"}
+    end
+
+    test "the store moved from it: edits apart merge, with no base from the page" do
+      assert TextRebase.rebase(
+               %{"notes" => "ONE two three"},
+               %{},
+               %{"notes" => "one two THREE"},
+               %{"notes" => "one two three"}
+             ) == %{"notes" => "ONE two THREE"}
+    end
+
+    test "the store still holds it (the tab was told): an overlap is ours, as before" do
+      bases = %{"notes" => "one two three"}
+      stored = %{"notes" => "one twB three"}
+
+      assert TextRebase.rebase(%{"notes" => "one twA three"}, bases, stored, stored) ==
+               %{"notes" => "one twA three"}
+    end
+
+    test "a path into an object, and a post that left the field as it was" do
+      seen = %{["meta", "label"] => "a b"}
+      stored = %{"meta" => %{"label" => "a B"}}
+
+      assert TextRebase.rebase(%{"meta" => %{"label" => "a b"}}, %{}, stored, seen) ==
+               %{"meta" => %{"label" => "a B"}}
+    end
+  end
 end

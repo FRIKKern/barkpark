@@ -65,24 +65,46 @@ defmodule Barkpark.Content.TextRebase do
   whose base, posted or stored value is not a string, or is larger than
   #{@max_bytes} bytes, is left alone.
   """
-  @spec rebase(map(), map(), map()) :: map()
+  @spec rebase(map(), map(), map(), map()) :: map()
   #
   # A key may be a path into an object (`["meta", "label"]`,
   # task-71ff11d4e7374985): the subfield is merged as a top-level field is.
-  def rebase(params, bases, current) when is_map(params) and is_map(bases) do
-    Enum.reduce(bases, params, fn {key, base}, acc ->
+  #
+  # `seen` (task-5b8f13c40a052514): per field, the value the tab believed
+  # the store held when it posted. A field with no base from the page is
+  # merged from it. Where the store moved from it, another tab's save landed
+  # under this post, unseen: an overlap keeps the store, never `ours` over
+  # words this tab was never shown (the caller holds the post with the
+  # banner). Where the store still holds it, an overlap is `ours`, as
+  # before: the tab was told, and typed on.
+  def rebase(params, bases, current, seen \\ %{})
+
+  def rebase(params, bases, current, seen) when is_map(params) and is_map(bases) do
+    seen = if is_map(seen), do: seen, else: %{}
+
+    Enum.reduce(Map.keys(bases) ++ (Map.keys(seen) -- Map.keys(bases)), params, fn key, acc ->
+      base = Map.get(bases, key, Map.get(seen, key))
+
       with posted when is_binary(posted) <- at(acc, key),
            stored when is_binary(stored) <- at(current, key),
            true <- is_binary(base) and stored != base and posted != stored,
            true <- Enum.all?([base, posted, stored], &(byte_size(&1) <= @max_bytes)) do
-        put(acc, key, merge3(base, posted, stored))
+        put(acc, key, onto(base, posted, stored, is_map_key(seen, key) and seen[key] != stored))
       else
         _ -> acc
       end
     end)
   end
 
-  def rebase(params, _bases, _current), do: params
+  def rebase(params, _bases, _current, _seen), do: params
+
+  defp onto(base, posted, stored, false), do: merge3(base, posted, stored)
+  defp onto(base, base, stored, true), do: stored
+
+  defp onto(base, posted, stored, true),
+    do:
+      merge_splices(String.graphemes(base), String.graphemes(posted), String.graphemes(stored)) ||
+        stored
 
   defp at(map, [key]) when is_map(map), do: Map.get(map, key)
 
