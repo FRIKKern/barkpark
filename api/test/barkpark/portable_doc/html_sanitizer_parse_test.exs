@@ -179,9 +179,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
 
       assert length(docs) > 100
       changed = for {name, html} <- docs, tree(S.sanitize(html)) != tree(html), do: name
-      # These carry a class the reader CSS takes out of the flow
-      # (`html_sanitizer_review_test.exs`, F4): their legacy copies lose it.
-      assert Enum.sort(changed) == ~w(roadmap.golden.json)
+      # roadmap carries a class the reader CSS takes out of the flow
+      # (`html_sanitizer_review_test.exs`, F4): its legacy copy loses it.
+      # footnote's note ids (`fn-fn1`) move into the body's namespace, as
+      # every stored id does (task-9c0ae5a9351d89cf).
+      assert Enum.sort(changed) == ~w(footnote.golden.json roadmap.golden.json)
     end
 
     test "a second pass returns the same bytes, every golden included" do
@@ -195,7 +197,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerParseTest do
 
     for {name, html} <- [
           {"a table without tbody", "<table><tr><td>a</td></tr></table>"},
-          {"unquoted and single-quoted attributes", "<p class=bp-hr id='fn-x'>a &amp; b</p>"},
+          {"unquoted and single-quoted attributes",
+           "<p class=bp-hr id='bp-anchor-x'>a &amp; b</p>"},
           {"a void element written XHTML-style",
            "<p>a<br/>b<img src=\"https://x/y.png\" alt=\"\"/></p>"},
           {"upper-case tags", "<P CLASS=\"bp-hr\">A</P>"},

@@ -25,21 +25,21 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
       b = open(c)
       view = held_by_clash(a, b, c)
 
-      assert words(stored(c)["meta"]["rt"]) == ["B one two", "B para"]
-      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+      assert words(stored(c)["meta"]["rt"]) == ["one TWO", "B para"]
+      assert words(form(a)["meta"]["rt"]) == ["one twoA", "B para"]
 
       assert render(a) =~
-               ~r|<blockquote class="bp-doc-conflict-theirs"[^>]*>B one two</blockquote>|
+               ~r|<blockquote class="bp-doc-conflict-theirs"[^>]*>one TWO</blockquote>|
 
       # A typed on before its editor showed the view: held again.
-      html = post_rt(a, "<p>one two AA</p><p>B para</p>", view - 1)
-      assert words(stored(c)["meta"]["rt"]) == ["B one two", "B para"]
+      html = post_rt(a, "<p>one twoAA</p><p>B para</p>", view - 1)
+      assert words(stored(c)["meta"]["rt"]) == ["one TWO", "B para"]
       assert html =~ "Someone else rewrote"
       assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: view2}}}, 2_000)
 
       # Typing on what A was shown saves A's block; B's paragraph stays.
-      post_rt(a, "<p>one two AAA</p><p>B para</p>", view2)
-      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two AAA", "B para"] end)
+      post_rt(a, "<p>one twoAAA</p><p>B para</p>", view2)
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one twoAAA", "B para"] end)
     end
 
     # Held, then B saves again: a paragraph B2 adds reaches A's held view,
@@ -53,19 +53,19 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
 
       send_post(b, "doc[meta].rt", %{
         "doc[meta].label" => "l0",
-        "doc[meta].rt" => "<p>B one two</p><p>B para</p><p>B2 para</p>"
+        "doc[meta].rt" => "<p>one TWO</p><p>B para</p><p>B2 para</p>"
       })
 
       assert eventually(fn -> length(stored(c)["meta"]["rt"]) == 3 end)
 
       assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: v, html: html}}}, 2_000)
-      assert html =~ "one two A" and html =~ "B2 para"
-      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para", "B2 para"]
+      assert html =~ "one twoA" and html =~ "B2 para"
+      assert words(form(a)["meta"]["rt"]) == ["one twoA", "B para", "B2 para"]
 
-      post_rt(a, "<p>one two AX</p><p>B para</p><p>B2 para</p>", v)
+      post_rt(a, "<p>one twoAX</p><p>B para</p><p>B2 para</p>", v)
 
       assert eventually(fn ->
-               words(stored(c)["meta"]["rt"]) == ["one two AX", "B para", "B2 para"]
+               words(stored(c)["meta"]["rt"]) == ["one twoAX", "B para", "B2 para"]
              end)
     end
   end
@@ -114,13 +114,13 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
         2_000
       )
 
-      assert shown > view and html =~ "B one two"
-      assert words(form(a)["meta"]["rt"]) == ["B one two", "B para"]
+      assert shown > view and html =~ "one TWO"
+      assert words(form(a)["meta"]["rt"]) == ["one TWO", "B para"]
       refute render(a) =~ "bp-doc-conflict-theirs"
 
       # An editor that still shows A's held words: held again, B's stays.
-      html = post_rt(a, "<p>one two AZ</p><p>B para</p>", shown - 1)
-      assert words(stored(c)["meta"]["rt"]) == ["B one two", "B para"]
+      html = post_rt(a, "<p>one twoAZ</p><p>B para</p>", shown - 1)
+      assert words(stored(c)["meta"]["rt"]) == ["one TWO", "B para"]
       assert html =~ "Someone else rewrote"
 
       # The editor showed it: A's word lands on B's text.
@@ -133,8 +133,8 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
         2_000
       )
 
-      post_rt(a, "<p>B one two Z</p><p>B para</p>", again)
-      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["B one two Z", "B para"] end)
+      post_rt(a, "<p>one TWO Z</p><p>B para</p>", again)
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one TWO Z", "B para"] end)
     end
 
     # #28349 r2 review, V1: an explicit Save skipped the check and wrote A's
@@ -144,7 +144,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
       a = open(c)
       b = open(c)
 
-      b_saves_rt(b, c, "<p>B one two</p>", ["B one two"])
+      b_saves_rt(b, c, "<p>one TWO</p>", ["one TWO"])
       assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seq}}}, 2_000)
 
       html =
@@ -153,13 +153,13 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
         |> render_submit(%{
           "doc" => %{"title" => "T0"},
           "doc[meta].label" => "l0 A",
-          "doc[meta].rt" => "<p>one two A</p>",
+          "doc[meta].rt" => "<p>one twoA</p>",
           "_bp_rt_seen" => ["doc[meta].rt|#{seq - 1}"]
         })
 
       assert eventually(fn -> stored(c)["meta"]["label"] == "l0 A" end)
-      assert words(stored(c)["meta"]["rt"]) == ["B one two"]
-      assert words(form(a)["meta"]["rt"]) == ["one two A"]
+      assert words(stored(c)["meta"]["rt"]) == ["one TWO"]
+      assert words(form(a)["meta"]["rt"]) == ["one twoA"]
       assert html =~ "Someone else rewrote"
     end
   end
@@ -174,15 +174,15 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
     b = open(c)
     view = held_by_clash(a, b, c)
 
-    html = post_rt(a, "<p>one two Aか漢</p><p>B para</p>", view - 1)
+    html = post_rt(a, "<p>one twoAか漢</p><p>B para</p>", view - 1)
 
-    assert words(stored(c)["meta"]["rt"]) == ["B one two", "B para"]
-    assert words(form(a)["meta"]["rt"]) == ["one two Aか漢", "B para"]
+    assert words(stored(c)["meta"]["rt"]) == ["one TWO", "B para"]
+    assert words(form(a)["meta"]["rt"]) == ["one twoAか漢", "B para"]
     assert html =~ "Someone else rewrote"
     assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: view2}}}, 2_000)
 
-    post_rt(a, "<p>one two Aか漢 Q</p><p>B para</p>", view2)
-    assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two Aか漢 Q", "B para"] end)
+    post_rt(a, "<p>one twoAか漢 Q</p><p>B para</p>", view2)
+    assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one twoAか漢 Q", "B para"] end)
   end
 
   # #28349 r4 review, blocker 1 (J): an IME commit re-posts the held text
@@ -202,10 +202,10 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
       view = held_by_clash(a, b, c)
       theirs = stored(c)["meta"]["rt"]
 
-      html = post_rt(a, "<p>one two A</p><p>B para</p>", view)
+      html = post_rt(a, "<p>one twoA</p><p>B para</p>", view)
       assert html =~ "Someone else rewrote"
       assert stored(c)["meta"]["rt"] == theirs
-      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+      assert words(form(a)["meta"]["rt"]) == ["one twoA", "B para"]
     end
 
     test "#{surface}: J: the held text posted again stays held; the view posted unchanged saves nothing; typing on saves A's",
@@ -216,20 +216,20 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
       view = held_by_clash(a, b, c)
       theirs = stored(c)["meta"]["rt"]
 
-      html = post_rt(a, "<p>one two A</p><p>B para</p>", view - 1)
+      html = post_rt(a, "<p>one twoA</p><p>B para</p>", view - 1)
       assert html =~ "Someone else rewrote"
       assert stored(c)["meta"]["rt"] == theirs
-      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+      assert words(form(a)["meta"]["rt"]) == ["one twoA", "B para"]
       assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: view2}}}, 2_000)
       assert view2 > view
 
-      html = post_rt(a, "<p>one two A</p><p>B para</p>", view2)
+      html = post_rt(a, "<p>one twoA</p><p>B para</p>", view2)
       assert html =~ "Someone else rewrote"
       assert stored(c)["meta"]["rt"] == theirs
-      assert words(form(a)["meta"]["rt"]) == ["one two A", "B para"]
+      assert words(form(a)["meta"]["rt"]) == ["one twoA", "B para"]
 
-      html = post_rt(a, "<p>one two AZ</p><p>B para</p>", view2)
-      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two AZ", "B para"] end)
+      html = post_rt(a, "<p>one twoAZ</p><p>B para</p>", view2)
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one twoAZ", "B para"] end)
       refute html =~ "bp-doc-conflict-theirs"
     end
 

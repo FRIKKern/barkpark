@@ -13,7 +13,8 @@
 // switch of an address link (data-new-tab) (task-025d7af119d6f0b8). These are the styles, lists and decorators Sanity's
 // Portable Text editor offers for a body; the server turns the HTML into
 // Portable Text (Barkpark.Content.PortableText). Emits a bubbling
-// CustomEvent("bp-change", {detail: {value}}) on every input. The
+// CustomEvent("bp-change", {detail: {value}}) on every input outside an IME
+// composition, and once when a composition commits. The
 // LiveView hook BarkparkFieldBridge (see root.html.heex) catches the
 // bubbled event on the wrapper and mirrors detail.value into the
 // sibling hidden input identified by data-bridge-target — Phoenix
@@ -56,6 +57,7 @@ class BpRichTextEditor extends HTMLElement {
     super();
     this._editor = null;
     this._onInput = null;
+    this._onCompositionEnd = null;
     this._onPaste = null;
   }
 
@@ -93,7 +95,17 @@ class BpRichTextEditor extends HTMLElement {
     this.appendChild(this._editor);
     this._paint(initial);
 
-    this._onInput = () => this._emit();
+    // An IME composition posts nothing until it commits
+    // (task-9c12e45747b151ee): half a word saved mid-composition made another
+    // editor's save of earlier text in the block a clash. Chrome's last input
+    // of a composition is still composing, so the commit posts on
+    // compositionend; Firefox sends one more input after it, which posts the
+    // same value again.
+    this._onInput = (e) => {
+      if (e && e.isComposing) return;
+      this._emit();
+    };
+    this._onCompositionEnd = () => this._emit();
 
     // A custom Portable Text block (a mediaModule, a quote) is a box the text
     // cannot edit. Clicking it, or Enter or Space on it, asks the host to open
@@ -147,6 +159,7 @@ class BpRichTextEditor extends HTMLElement {
   // the server sends later (bp-rt-remote.js) take the same steps.
   _paint(html) {
     this._editor.innerHTML = html;
+    keepSpaces(this._editor);
     this._decorateBlocks();
     this._loadLinkTitles();
   }
@@ -174,6 +187,7 @@ class BpRichTextEditor extends HTMLElement {
   _listen() {
     if (this._onSelection) document.addEventListener("selectionchange", this._onSelection);
     this._editor.addEventListener("input", this._onInput);
+    this._editor.addEventListener("compositionend", this._onCompositionEnd);
     this._editor.addEventListener("click", this._onBlockClick);
     this._editor.addEventListener("keydown", this._onBlockKey);
     this._editor.addEventListener("paste", this._onPaste);
@@ -188,6 +202,7 @@ class BpRichTextEditor extends HTMLElement {
     if (this._editor) {
       if (this._onFocusOut) this._editor.removeEventListener("focusout", this._onFocusOut);
       if (this._onInput) this._editor.removeEventListener("input", this._onInput);
+      if (this._onCompositionEnd) this._editor.removeEventListener("compositionend", this._onCompositionEnd);
       if (this._onPaste) this._editor.removeEventListener("paste", this._onPaste);
       if (this._onBlockClick) this._editor.removeEventListener("click", this._onBlockClick);
       if (this._onBlockKey) this._editor.removeEventListener("keydown", this._onBlockKey);
@@ -1201,8 +1216,78 @@ class BpRichTextEditor extends HTMLElement {
   }
 
   set value(v) {
-    if (this._editor && this._html() !== v) this._paint(v);
+    if (this._editor && this._html() !== v && this._html() !== spaced(v)) this._paint(v);
   }
+}
+
+// Spaces the browser would draw as one, drawn as Chrome writes typed ones
+// (task-a196f4063197dc02). A value with two plain spaces ("one  three",
+// left by another editor's delete) showed one, and when a letter was typed
+// between them Chrome dropped one: "one Qthree". Each run of two or more
+// plain spaces becomes nbsp and space by turns ("one\u00a0 three", what
+// Chrome writes for two typed spaces), ending in nbsp at a line's end; one
+// space at a line's start or end becomes nbsp. A run holding a newline, a
+// tab or an nbsp is left as it is: pretty-printed HTML keeps drawing as the
+// reader draws it, and text Chrome wrote keeps its form. Each character
+// stays one character, so a caret's offset in its block does not move.
+const NBSP = "\u00a0";
+const LINE_BOX = /^(P|H[1-6]|LI|UL|OL|BLOCKQUOTE|DIV|DT|DD|DL|TD|TH|TR|TABLE|TBODY|THEAD|SECTION|FIGURE|FIGCAPTION)$/;
+
+function keepSpaces(root) {
+  let line = [];
+  const flush = () => {
+    balance(line);
+    line = [];
+  };
+  const walk = (el) => {
+    for (const n of Array.from(el.childNodes)) {
+      if (n.nodeType === 3) {
+        line.push(n);
+      } else if (n.nodeType === 1) {
+        if (n.tagName === "BR") {
+          flush();
+        } else if (n.tagName === "PRE" || n.getAttribute("contenteditable") === "false") {
+          flush();
+        } else {
+          const box = LINE_BOX.test(n.tagName);
+          if (box) flush();
+          walk(n);
+          if (box) flush();
+        }
+      }
+    }
+  };
+  walk(root);
+  flush();
+}
+
+function balance(nodes) {
+  const text = nodes.map((n) => n.data).join("");
+  // Only spaces (between two blocks, an empty-looking paragraph): nothing to keep.
+  if (!text.includes(" ") || !/\S/.test(text)) return;
+  const out = text.split("");
+  for (const m of text.matchAll(/\s+/g)) {
+    if (!/^ +$/.test(m[0])) continue;
+    const [at, n] = [m.index, m[0].length];
+    const [start, end] = [at === 0, at + n === text.length];
+    if (n < 2 && !start && !end) continue;
+    for (let i = 0; i < n; i++) out[at + i] = i % 2 === 0 ? NBSP : " ";
+    if (end) out[at + n - 1] = NBSP;
+  }
+  let p = 0;
+  for (const node of nodes) {
+    const now = out.slice(p, p + node.data.length).join("");
+    if (now !== node.data) node.data = now;
+    p += node.data.length;
+  }
+}
+
+// `html` as the editor paints it.
+function spaced(html) {
+  const box = document.createElement("div");
+  box.innerHTML = html || "";
+  keepSpaces(box);
+  return box.innerHTML;
 }
 
 customElements.define("bp-rich-text-editor", BpRichTextEditor);

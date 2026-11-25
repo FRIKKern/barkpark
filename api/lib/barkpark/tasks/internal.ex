@@ -117,6 +117,8 @@ defmodule Barkpark.Tasks.Internal do
 
   defp admitted_fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
     new_content = resync_brief_on_mirrored_change(doc, new_content)
+    # Postgres stores no NUL: a 422 naming the path, not a 500.
+    :ok = Barkpark.Content.NulByte.refuse!(:content, new_content)
 
     query =
       from(d in Document,

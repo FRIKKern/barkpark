@@ -1434,6 +1434,15 @@ defmodule Barkpark.Content.Errors do
          hint: hint
        }
 
+  # A NUL in a task or session write: the changeset refusal's shape.
+  defp build({:error, %Barkpark.Content.NulByteError{field: field, message: message}}),
+    do: %{
+      code: "validation_failed",
+      message: "document failed validation",
+      status: 422,
+      details: %{field => [message]}
+    }
+
   defp build({:error, %Ecto.Changeset{} = cs}) do
     case Barkpark.Content.DocumentSize.refusal(cs) do
       {limit, size} -> document_too_large(limit, size)

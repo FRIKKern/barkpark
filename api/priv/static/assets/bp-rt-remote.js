@@ -27,7 +27,13 @@
 //
 // Each editor reports the number of the last value it shows, in a hidden
 // `_bp_rt_seen[]` input inside its wrapper (`name|number`): the newest
-// number this page was pushed, or, while a value waits, one less than it.
+// number this page was pushed, or, while values wait, one less than the
+// first of them. A newer value replaces the one waiting, but the editor
+// still shows what it showed before the first: with one less than the
+// newest, a post was read against a value it never showed, and B's change
+// before it was taken out with no word (task-2833650e2e72d380). The merge
+// of this page's own post (`own`) starts again from itself: the editor
+// shows that post, which the server merged with all that waited before.
 // The server reads a post against the value its number names: a post typed
 // before this page showed a value is merged with it, or held, never written
 // over it, and that holds for a commit of a composition begun earlier too.
@@ -43,7 +49,8 @@
 
   // The newest number any push carried.
   let last = 0;
-  // name -> {seq, html}: theirs, not shown yet.
+  // name -> {seq, html, first}: theirs, not shown yet; `first`, the number
+  // the editor's text is read from (see above).
   const waiting = new Map();
   // editor -> time of its last input.
   const typedAt = new WeakMap();
@@ -56,7 +63,7 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).seq - 1 : last);
+  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).first - 1 : last);
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
   // ignored by LiveView's patch, so the input stays.
@@ -80,18 +87,15 @@
   const busy = (editor) =>
     composing.has(editor) || Date.now() - (typedAt.get(editor) || 0) < IDLE_MS;
 
-  // The caret as its top-level block's index, text and offset in that text;
-  // a custom block also by its key.
-  const caretIn = (body) => {
-    const sel = window.getSelection();
-    if (!body || !sel || !sel.rangeCount || !body.contains(sel.anchorNode)) return null;
-    const r = sel.getRangeAt(0);
-    let block = r.startContainer;
+  // A point of the selection as its top-level block's index, text and
+  // offset in that text; a custom block also by its key.
+  const pointIn = (body, node, offset) => {
+    let block = node;
     while (block && block.parentNode !== body) block = block.parentNode;
     if (!block) return null;
     const before = document.createRange();
     before.selectNodeContents(block);
-    before.setEnd(r.startContainer, r.startOffset);
+    before.setEnd(node, offset);
     return {
       i: [...body.children].indexOf(block),
       key: block.getAttribute && block.getAttribute("data-pt-block"),
@@ -100,13 +104,74 @@
     };
   };
 
+  // The selection's anchor and focus, so a selected word stays selected,
+  // in its direction (task-cfd4254783206ad7).
+  const caretIn = (body) => {
+    const sel = window.getSelection();
+    if (!body || !sel || !sel.rangeCount || !body.contains(sel.anchorNode)) return null;
+    if (!body.contains(sel.focusNode)) return null;
+    const anchor = pointIn(body, sel.anchorNode, sel.anchorOffset);
+    const focus = sel.isCollapsed ? anchor : pointIn(body, sel.focusNode, sel.focusOffset);
+    return anchor && focus ? {anchor, focus} : null;
+  };
+
+  // How well a change's edge between characters a and b sits on a boundary,
+  // as diff-match-patch's cleanupSemanticLossless scores it: the text's
+  // start or end, a line break, a sentence end, a space, punctuation.
+  const WORD = /[\p{L}\p{N}]/u;
+  const edge = (a, b) => {
+    if (a === undefined || b === undefined) return 6;
+    const [na, nb] = [!WORD.test(a), !WORD.test(b)];
+    const [wa, wb] = [na && /\s/.test(a), nb && /\s/.test(b)];
+    if ((wa && /[\r\n]/.test(a)) || (wb && /[\r\n]/.test(b))) return 4;
+    if (na && !wa && wb) return 3;
+    if (wa || wb) return 2;
+    if (na || nb) return 1;
+    return 0;
+  };
+
+  // An insert or a delete of k characters at l in `text` can sit anywhere
+  // the same characters repeat around it: "say hello" to "say hi hello" is
+  // "i h" after "say h" as much as "hi " after "say ". It moves to the place
+  // whose edges are the best boundaries, the later one on a tie, so the
+  // change is their whole word and the caret is not inside it (#28716
+  // review).
+  const slide = (text, l, k) => {
+    while (l > 0 && text[l - 1] === text[l + k - 1]) l--;
+    let best = l, score = -1;
+    for (;; l++) {
+      const here = edge(text[l - 1], text[l]) + edge(text[l + k - 1], text[l + k]);
+      if (here >= score) [best, score] = [l, here];
+      if (l + k >= text.length || text[l] !== text[l + k]) break;
+    }
+    return best;
+  };
+
+  // Where the caret goes in a block whose text theirs changed, as TanStack's
+  // editor carries its selection through another editor's text patch: after
+  // the same characters it was after. A change before it moves it by the
+  // change's length, one after it leaves it; inside the changed part it goes
+  // after what replaced it (#28349 r3 review, K2). An insert or a delete is
+  // first moved to word boundaries (`slide`).
+  const mapOffset = (old, now, at) => {
+    const max = Math.min(old.length, now.length);
+    let p = 0;
+    while (p < max && old[p] === now[p]) p++;
+    let s = 0;
+    while (s < max - p && old[old.length - 1 - s] === now[now.length - 1 - s]) s++;
+    const [gone, added] = [old.length - s - p, now.length - s - p];
+    if (!gone && added) p = slide(now, p, added);
+    else if (gone && !added) p = slide(old, p, gone);
+    if (at <= p) return at;
+    if (at >= p + gone) return at + added - gone;
+    return p + added;
+  };
+
   // The block of the same key, else of the same text nearest where it was
-  // (a paragraph theirs added above moves it down): the caret goes back to
-  // its offset. Its text changed: the caret goes to the end of the block now
-  // at its place.
-  const caretBack = (body, c) => {
-    const blocks = [...body.children];
-    if (!blocks.length) return;
+  // (a paragraph theirs added above moves it down): the point goes back to
+  // its offset. Its text changed: the point goes to the same place in the
+  // block now at its place (`mapOffset`). The DOM node and offset.
+  const placeOf = (body, blocks, c) => {
     let block = c.key ? blocks.find((b) => b.getAttribute("data-pt-block") === c.key) : null;
     for (let d = 0; !block && d < blocks.length; d++) {
       block = [blocks[c.i + d], blocks[c.i - d]].find((b) => b && b.textContent === c.text);
@@ -114,7 +179,7 @@
     let at = c.at;
     if (!block || block.textContent !== c.text) {
       block = blocks[Math.min(Math.max(c.i, 0), blocks.length - 1)];
-      at = block.textContent.length;
+      at = mapOffset(c.text, block.textContent, c.at);
     }
     const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let node = block, off = 0, t;
@@ -124,12 +189,17 @@
       if (at <= t.length) break;
       at -= t.length;
     }
-    const r = document.createRange();
-    r.setStart(node, off);
-    r.collapse(true);
+    return [node, off];
+  };
+
+  const caretBack = (body, c) => {
+    const blocks = [...body.children];
+    if (!blocks.length) return;
+    const anchor = placeOf(body, blocks, c.anchor);
+    const focus = c.focus === c.anchor ? anchor : placeOf(body, blocks, c.focus);
     const sel = window.getSelection();
     sel.removeAllRanges();
-    sel.addRange(r);
+    sel.setBaseAndExtent(anchor[0], anchor[1], focus[0], focus[1]);
   };
 
   // Through the editor's first-paint path, and into the hidden input the
@@ -178,7 +248,10 @@
       const w = wrapOf(name);
       if (typeof v.html === "string") {
         const theirs = waiting.get(name);
-        if (!theirs || theirs.seq < v.seq) waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload});
+        if (!theirs || theirs.seq < v.seq) {
+          const first = theirs && !v.own ? theirs.first : v.seq;
+          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, first});
+        }
         tryShow(name);
       }
       mark(w);

@@ -166,6 +166,28 @@ defmodule BarkparkWeb.ObjectRichText do
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == words end)
   end
 
+  @doc """
+  A's page as bp-rt-remote.js keeps one editor's numbers: `seen/1` is what
+  its `_bp_rt_seen` reports. `got/3` takes a push, drawn at once or left
+  waiting (A typing); `drew/1`, the waiting value drawn once A is idle.
+  """
+  def page, do: %{last: 0, first: nil}
+
+  def got(page, %{seq: seq} = v, draw?) do
+    first = if page.first && !v[:own], do: page.first, else: seq
+    %{last: max(page.last, seq), first: if(draw?, do: nil, else: first)}
+  end
+
+  def drew(page), do: %{page | first: nil}
+  def seen(%{first: nil, last: last}), do: last
+  def seen(%{first: first}), do: first - 1
+
+  @doc "The next value pushed to `view` for `doc[meta].rt`."
+  def next_push(view) do
+    assert_push_event(view, @event, %{values: %{"doc[meta].rt" => v}}, 2_000)
+    v
+  end
+
   def post_rt(view, html, seen) do
     send_post(view, "doc[meta].rt", %{
       "doc[meta].label" => "l0",
@@ -174,17 +196,19 @@ defmodule BarkparkWeb.ObjectRichText do
     })
   end
 
-  # B adds a paragraph, and A's editor shows it; then B rewrites the first
-  # block. A's editor, still showing "one two" there, posts a word in that
-  # block: a clash of that block, held with the banner. The number of the
+  # B adds a paragraph, and A's editor shows it; then B rewrites "two" in
+  # the first block. A's editor, still showing "one two" there, types right
+  # after "two": both edited one word, a clash of that block, held with the
+  # banner. (Two edits to different words of one block merge once
+  # task-266ffbe9cd115f3c lands, so the clash is an overlap on purpose.) The number of the
   # view A is sent (A's block, B's paragraph). The store keeps B's.
   def held_by_clash(a, b, c) do
     b_saves_rt(b, c, "<p>one two</p><p>B para</p>", ["one two", "B para"])
     assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seen}}}, 2_000)
-    b_saves_rt(b, c, "<p>B one two</p><p>B para</p>", ["B one two", "B para"])
+    b_saves_rt(b, c, "<p>one TWO</p><p>B para</p>", ["one TWO", "B para"])
     assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: seq}}}, 2_000)
 
-    html = post_rt(a, "<p>one two A</p><p>B para</p>", seen)
+    html = post_rt(a, "<p>one twoA</p><p>B para</p>", seen)
 
     assert html =~ "Someone else rewrote"
 
@@ -195,7 +219,7 @@ defmodule BarkparkWeb.ObjectRichText do
       2_000
     )
 
-    assert view > seq and shown =~ "one two A" and shown =~ "B para"
+    assert view > seq and shown =~ "one twoA" and shown =~ "B para"
     view
   end
 end
