@@ -129,6 +129,8 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
         .studio-leave .dk-dialog { position: fixed; z-index: 52; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--fg); box-shadow: 0 16px 48px hsl(var(--bp-shadow-hsl) / 0.25); }
         .studio-leave .dk-dialog-head { display: flex; align-items: center; gap: 8px; padding: 16px 16px 0 20px; }
         .studio-leave .dk-dialog-head h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--text-base); font-weight: 600; }
+        .studio-leave .dk-dialog-close { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--fg-muted); cursor: pointer; }
+        .studio-leave .dk-dialog-close:hover { color: var(--fg); }
         .studio-leave .dk-dialog-body { padding: 12px 20px 4px; overflow: auto; }
         .studio-leave .dk-dialog-body p { margin: 0 0 12px; overflow-wrap: anywhere; }
         .studio-leave .dk-dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
