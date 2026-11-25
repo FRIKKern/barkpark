@@ -11,9 +11,10 @@ defmodule Barkpark.Test.PtMergeGen do
 
   Some seeds also have what a post from the editor has:
 
-    * mine keyed by position (`k0`, `k0s0`, `k0m0`, as `from_html` keys new
-      blocks), so a key the merge keeps names its side, and two blocks of
-      the merge can share a key (`unique_keys/1`);
+    * mine keyed by position (`p0`, `p0s0`, `p0m0`, as `from_html` keys
+      new blocks), so a key the merge keeps names its side; or by position
+      in the base's own names (`k0`), so two blocks of the merge can share
+      a key (`unique_keys/1`);
     * blocks that draw the same, and empty ones, so a line-up can go more
       than one way (`unsure/4`);
     * Han and kana with no space between words.
@@ -35,7 +36,7 @@ defmodule Barkpark.Test.PtMergeGen do
     hot = pick(0..(length(base) - 1))
     mine = edit(base, "m", hot, kind)
     theirs = edit(base, "t", hot, kind)
-    mine = if pick(1..2) == 1, do: by_position(mine), else: mine
+    mine = if pick(1..2) == 1, do: by_position(mine, Enum.random(["k", "p"])), else: mine
     {base, mine, theirs}
   end
 
@@ -149,26 +150,27 @@ defmodule Barkpark.Test.PtMergeGen do
 
   defp update_span(block, j, f), do: Map.update!(block, "children", &List.update_at(&1, j, f))
 
-  # Keys by position, as `from_html` gives the blocks it builds: block `k<i>`,
-  # its spans `k<i>s<j>`, its defs `k<i>m<j>` and each mark that names one.
-  defp by_position(blocks) do
+  # Keys by position, as `from_html` gives the blocks it builds: block
+  # `<p><i>`, its spans `<p><i>s<j>`, its defs `<p><i>m<j>` and each mark
+  # that names one. With `p` = "k" a key can be another base block's.
+  defp by_position(blocks, p) do
     for {b, i} <- Enum.with_index(blocks) do
       defs = Enum.with_index(b["markDefs"])
-      renamed = Map.new(defs, fn {d, j} -> {d["_key"], "k#{i}m#{j}"} end)
+      renamed = Map.new(defs, fn {d, j} -> {d["_key"], "#{p}#{i}m#{j}"} end)
 
       children =
         for {s, j} <- Enum.with_index(b["children"]),
             do: %{
               s
-              | "_key" => "k#{i}s#{j}",
+              | "_key" => "#{p}#{i}s#{j}",
                 "marks" => Enum.map(s["marks"], &Map.get(renamed, &1, &1))
             }
 
       %{
         b
-        | "_key" => "k#{i}",
+        | "_key" => "#{p}#{i}",
           "children" => children,
-          "markDefs" => for({d, j} <- defs, do: %{d | "_key" => "k#{i}m#{j}"})
+          "markDefs" => for({d, j} <- defs, do: %{d | "_key" => "#{p}#{i}m#{j}"})
       }
     end
   end
