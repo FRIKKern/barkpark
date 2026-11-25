@@ -577,7 +577,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   # `name|number`, split at the last `|`.
-  defp parse_seen(entry) when is_binary(entry) do
+  @doc false
+  def parse_seen(entry) when is_binary(entry) do
     parts = String.split(entry, "|")
     name = parts |> Enum.drop(-1) |> Enum.join("|")
 
@@ -587,7 +588,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     end
   end
 
-  defp parse_seen(_entry), do: nil
+  def parse_seen(_entry), do: nil
 
   @doc "The input name the composite draws for `path` (`CompositeField`, `ArrayField`)."
   def input_name([key | rest]) do

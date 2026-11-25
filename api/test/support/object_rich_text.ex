@@ -178,6 +178,34 @@ defmodule BarkparkWeb.ObjectRichText do
     |> render_change(Map.merge(%{"_target" => [target], "doc" => %{"title" => "T0"}}, fields))
   end
 
+  @doc """
+  B's save of `b_html` inside A's post `a_post` (task-00c56c6a88ed0b8f): on
+  A's first query after the post starts, before A's write. A's process
+  cannot read B's broadcast until the post is done, so A's socket reads the
+  post as current, as two Chrome tabs did.
+  """
+  def b_saves_inside(a, b, b_html, a_post) do
+    {a_pid, once} = {a.pid, :atomics.new(1, [])}
+    id = "rt-write-race-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      id,
+      [:barkpark, :repo, :query],
+      fn _event, _measure, _meta, _ ->
+        if self() == a_pid and :atomics.compare_exchange(once, 1, 0, 1) == :ok,
+          do: send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => b_html})
+      end,
+      nil
+    )
+
+    try do
+      a_post.()
+    after
+      :telemetry.detach(id)
+      assert :atomics.get(once, 1) == 1, "B's save never ran inside A's post"
+    end
+  end
+
   def b_saves_rt(b, c, html, words) do
     send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => html})
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == words end)

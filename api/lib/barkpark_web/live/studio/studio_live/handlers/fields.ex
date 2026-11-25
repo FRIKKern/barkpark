@@ -487,6 +487,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A rich text in an object written over another editor's change is
         # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
         {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
+        # Read again under the document's lock: the store may have moved
+        # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
+        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
@@ -497,6 +500,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"], path)
           |> RemoteValues.add_bases(built_bases)
+          |> assign(editor_rt_under_lock: rich)
 
         saved =
           based
@@ -506,13 +510,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
         bases = based.assigns[:editor_field_bases] || %{}
 
-        {:noreply,
-         saved
-         |> keep_unsaved_values(doc, keys)
-         |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
-         |> RefusedSave.not_codes(not_codes)
-         |> settle_dirty(keys)
-         |> RichTextRemote.hold(held)}
+        saved =
+          saved
+          |> assign(editor_rt_under_lock: nil)
+          |> keep_unsaved_values(doc, keys)
+          |> UnsavedBases.record(socket, keys, bases, params["_bp_seen"], path)
+          |> RefusedSave.not_codes(not_codes)
+          |> settle_dirty(keys)
+
+        {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, doc)
+        {:noreply, RichTextRemote.hold(saved, held)}
 
       _ ->
         {:noreply, socket}

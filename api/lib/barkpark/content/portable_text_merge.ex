@@ -141,6 +141,13 @@ defmodule Barkpark.Content.PortableTextMerge do
     Enum.any?(touched, &MapSet.member?(unsure, &1))
   end
 
+  @doc """
+  Whether two values draw the same, keys set aside, as this merge compares
+  blocks: the store still holds what a tab believed it held
+  (`Forms.ObjectRebase`, task-00c56c6a88ed0b8f).
+  """
+  def same_drawn?(a, b), do: Enum.map(list(a), &drawn/1) == Enum.map(list(b), &drawn/1)
+
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []
 
