@@ -13,10 +13,14 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     * One splice per side, as `TextRebase` reads a text: the common prefix
       and suffix of the base's letters and the side's, and the middle of the
       base replaced by the side's. Text only: a splice that only changes
-      marks, or puts in letters whose marks no letter beside or under it
-      has, is a clash (a mark of its own is task 4).
+      marks, that changes the marks of letters whose text stays (its ends
+      differ from the graphemes' alone), or that puts in letters whose
+      marks no letter beside or under it has, is a clash (a mark of its own
+      is task 4).
     * Apart: each splice widened to whole words (a run of letters, Han and
-      kana with no space between them one word) leaves at least one base
+      kana with no space between them one word; a number with `.` `,` `:`
+      `-` `/` between its digits and a word with `'` `-` between its
+      letters one word too) leaves at least one base
       letter between them. Two edits in one word, touching ranges and two
       inserts at one point are a clash: "cart" to "carts" and "dart" would
       give "darts".
@@ -24,11 +28,14 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       replaced, so every span outside it is theirs' map byte for byte, and
       theirs' defs, used or not, stay. Letters put in join the span they
       touch when the marks are equal, else a new span with mine's span key
-      or, when theirs has it, a fresh one.
+      or, when theirs has it, a fresh one unique in the block (a span's
+      key is read only under its block).
     * A guard on the result: each word is a word of base, mine or theirs,
       at most count(mine) + count(theirs) - count(base) times, and the text
       splits into the graphemes it was built from (no flag made at a join).
-      Otherwise a clash.
+      Otherwise a clash. The snap and the guard read words alike, so each
+      alone refuses a word made of two edits; the count bound is defence
+      in depth behind the snap.
 
   A block over `TextRebase.max_bytes/0` of text is a clash, as before.
   """
