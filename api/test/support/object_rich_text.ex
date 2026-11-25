@@ -184,7 +184,18 @@ defmodule BarkparkWeb.ObjectRichText do
   cannot read B's broadcast until the post is done, so A's socket reads the
   post as current, as two Chrome tabs did.
   """
-  def b_saves_inside(a, b, b_html, a_post) do
+  def b_saves_inside(a, b, b_html, a_post),
+    do:
+      inside(
+        a,
+        fn ->
+          send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => b_html})
+        end,
+        a_post
+      )
+
+  @doc "`b_save` (any save of another view) run inside A's post, as `b_saves_inside/4`."
+  def inside(a, b_save, a_post) do
     {a_pid, once} = {a.pid, :atomics.new(1, [])}
     id = "rt-write-race-#{System.unique_integer([:positive])}"
 
@@ -193,7 +204,7 @@ defmodule BarkparkWeb.ObjectRichText do
       [:barkpark, :repo, :query],
       fn _event, _measure, _meta, _ ->
         if self() == a_pid and :atomics.compare_exchange(once, 1, 0, 1) == :ok,
-          do: send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => b_html})
+          do: b_save.()
       end,
       nil
     )
