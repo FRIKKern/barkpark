@@ -5386,6 +5386,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {sessions, listed_owners} =
       [archived: socket.assigns[:show_archived] == true]
       |> StudioChat.list_sessions(:global)
+      |> then(&ChatHostGate.visible_sessions(socket.assigns, &1))
       |> clamp_list_to_tenancy(socket)
 
     # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
@@ -5613,14 +5614,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # OWN ws-B session would stop loading (`pds_chatlive_global_reads_test`'s
   # positive control is exactly that arm). Using the URL workspace on both leaves
   # the flat mount ungated, which is the defect this seam is here for.
-  defp load_permits?(socket, %{owner_workspace_id: owner}) do
-    case read_workspace_id(socket) do
-      # Scoped mount: `LiveScope` pinned an authorized URL workspace.
-      ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
-      # Flat mount: nothing binds the socket, so ask the token — the same axis
-      # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
-      nil -> principal_permits_owner?(socket, owner)
-    end
+  defp load_permits?(socket, %{owner_workspace_id: owner} = session) do
+    ChatHostGate.visible?(socket.assigns, session) and
+      case read_workspace_id(socket) do
+        # Scoped mount: `LiveScope` pinned an authorized URL workspace.
+        ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
+        # Flat mount: nothing binds the socket, so ask the token — the same axis
+        # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
+        nil -> principal_permits_owner?(socket, owner)
+      end
   end
 
   defp load_permits?(_socket, _other), do: false
