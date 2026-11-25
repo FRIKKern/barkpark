@@ -99,12 +99,15 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   end
 
   # What the tab believed stored: the store still holds it, or the post is
-  # merged onto the store from it, and a clash keeps the store.
+  # merged onto the store from it, and a clash keeps the store. "Still
+  # holds" counts each block's own fields (task-6174d8fa01658a68): a
+  # `level` or unknown field another editor set draws the same, and mine
+  # was written over it.
   defp rich_text(_base, mine, theirs, {:ok, was}) when is_list(mine) do
     theirs = if is_list(theirs), do: theirs, else: []
     was = if is_list(was), do: was, else: []
 
-    if PortableTextMerge.same_drawn?(was, theirs) do
+    if PortableTextMerge.same_shape?(was, theirs) do
       mine
     else
       case PortableTextMerge.merge(was, mine, theirs) do
