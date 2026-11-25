@@ -96,7 +96,14 @@
     return theirs ? theirs.seen : last;
   };
 
-  const flat = (html) => String(html).replace(/&nbsp;|\u00a0/g, " ");
+  // As the server reads marks (PortableText's tag table): the editor writes
+  // <b>, <i> and <strike> (execCommand), the server draws <strong>, <em> and
+  // <s>, and equal text with a bold word read as another value
+  // (task-5e0a0d5e0dfb8f33).
+  const tags = {b: "strong", i: "em", strike: "s", del: "s"};
+  const flat = (html) => String(html)
+    .replace(/&nbsp;|\u00a0/g, " ")
+    .replace(/<(\/?)(b|i|strike|del)\b/gi, (_m, close, tag) => `<${close}${tags[tag.toLowerCase()]}`);
   const same = (a, b) => flat(a) === flat(b);
 
   // Typed since this page last drew a value into it: words that may not be
