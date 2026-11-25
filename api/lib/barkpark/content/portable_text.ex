@@ -63,10 +63,12 @@ defmodule Barkpark.Content.PortableText do
   field keep its stored value byte for byte. An edited field keeps it per
   block: `from_html/2` returns each stored block whose HTML the edit did not
   change as it was stored, keys and all, and an edited text block keeps the
-  `_key` of the stored block at its position.
+  `_key` (and the undrawn fields) of the stored block it replaces, found by
+  `Barkpark.Content.PortableTextPairing`.
   """
 
   alias Barkpark.Content.LinkHref
+  alias Barkpark.Content.PortableTextPairing
 
   @decorators %{
     "strong" => "strong",
@@ -460,7 +462,11 @@ defmodule Barkpark.Content.PortableText do
 
   defp keep_stored(blocks, stored) do
     indexed =
-      Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1]), &1})
+      stored
+      |> Enum.with_index()
+      |> Enum.map(fn {b, i} ->
+        {{normalize(fragment_html(b)), drawn_list(b)}, to_html([b]), b, i}
+      end)
 
     kept =
       blocks
@@ -473,8 +479,12 @@ defmodule Barkpark.Content.PortableText do
             Enum.find_index(left, &(elem(&1, 1) == html))
 
         case i do
-          nil -> {{:rebuilt, block}, left}
-          i -> {{:kept, left |> Enum.at(i) |> elem(2)}, List.delete_at(left, i)}
+          nil ->
+            {{:rebuilt, block}, left}
+
+          i ->
+            {{:kept, elem(Enum.at(left, i), 2), elem(Enum.at(left, i), 3)},
+             List.delete_at(left, i)}
         end
       end)
       |> elem(0)
@@ -513,33 +523,53 @@ defmodule Barkpark.Content.PortableText do
     end)
   end
 
-  # An edited block takes the `_key` of the stored text block at its position
-  # when no kept block holds that key, so editing a word does not rekey its
-  # paragraph. Anything else keeps the position key `from_html/1` gave it.
+  # An edited block takes the `_key` of the stored text block it replaces
+  # (`PortableTextPairing`: by its place between kept blocks, or by its words
+  # beside an insert) when no kept block holds that key, so editing a word
+  # does not rekey its paragraph. Anything else keeps the position key
+  # `from_html/1` gave it.
   defp adopt_keys(kept, stored) do
-    taken = for {:kept, %{"_key" => k}} <- kept, into: MapSet.new(), do: k
+    taken = for {:kept, %{"_key" => k}, _i} <- kept, into: MapSet.new(), do: k
+    pairs = PortableTextPairing.pairs(kept, stored)
 
-    kept
-    |> Enum.with_index()
-    |> Enum.map_reduce(taken, fn
-      {{:kept, block}, _i}, taken ->
-        {block, taken}
+    {blocks, taken} =
+      kept
+      |> Enum.with_index()
+      |> Enum.map_reduce(taken, fn
+        {{:kept, block, _i}, _p}, taken ->
+          {{:fixed, block}, taken}
 
-      {{:rebuilt, %{"_type" => "block"} = block}, i}, taken ->
-        case Enum.at(stored, i) do
-          %{"_type" => "block", "_key" => k} = old when is_binary(k) ->
-            if MapSet.member?(taken, k),
-              do: {block, taken},
-              else: {adopt(block, old), MapSet.put(taken, k)}
+        {{:rebuilt, block}, p}, taken ->
+          with j when is_integer(j) <- pairs[p],
+               %{"_key" => k} = old <- Enum.at(stored, j),
+               false <- MapSet.member?(taken, k) do
+            {{:fixed, adopt(block, old)}, MapSet.put(taken, k)}
+          else
+            _ -> {{:unpaired, block}, taken}
+          end
+      end)
 
-          _ ->
-            {block, taken}
-        end
+    # A text block that took no stored key keeps its position key (`b0`…)
+    # only when no stored block and no other block of this save holds it: a
+    # value first saved here carries position keys, so an insert at the top
+    # would share `b0` with the edited block that kept it (#28714 review).
+    reserved = for %{"_key" => k} when is_binary(k) <- stored, into: taken, do: k
 
-      {{:rebuilt, block}, _i}, taken ->
-        {block, taken}
+    blocks
+    |> Enum.map_reduce(reserved, fn
+      {:unpaired, %{"_type" => "block", "_key" => k} = block}, used when is_binary(k) ->
+        k = if MapSet.member?(used, k), do: fresh_block_key(k, 1, used), else: k
+        {%{block | "_key" => k}, MapSet.put(used, k)}
+
+      {_kind, block}, used ->
+        {block, used}
     end)
     |> elem(0)
+  end
+
+  defp fresh_block_key(key, n, used) do
+    k = "#{key}n#{n}"
+    if MapSet.member?(used, k), do: fresh_block_key(key, n + 1, used), else: k
   end
 
   # The fields the editor draws, as TanStack's pt-value.ts `MANAGED`: an
