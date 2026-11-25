@@ -623,6 +623,65 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert Enum.sort(Enum.map(blk["markDefs"], & &1["_key"])) == ["d1", "d2"]
     end
 
+    # #28816 review: mine's second x link next to (or apart from) its first,
+    # keys shuffled across the sides. Mine's links stay two.
+    for {name, {bl, bd}, {ml, md}, {tl, td}} <- [
+          {"A: p inside mine's re-keyed x link",
+           {[a: "d1", b: "d1", " ": nil, c: "t7", " ": nil, e: nil, n: nil],
+            %{"d1" => :x, "t7" => :y}},
+           {[a: "t7", p: "m9", b: "t7", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
+            %{"t7" => :x, "m9" => :x, "d1" => :y}},
+           {[a: "d1", b: "d1", " ": nil, c: "m9", " ": nil, e: nil, N: nil],
+            %{"d1" => :x, "m9" => :y}}},
+          {"B: p apart, theirs re-keyed x",
+           {[a: "d1", b: "d1", " ": nil, c: "t7", " ": nil, e: nil, n: nil],
+            %{"d1" => :x, "t7" => :y}},
+           {[a: "d1", b: "d1", " ": nil, c: "d2", p: "m9", " ": nil, e: nil, n: nil],
+            %{"d1" => :x, "m9" => :x, "d2" => :y}},
+           {[a: "d2", b: "d2", " ": nil, c: "t7", " ": nil, e: nil, n: nil, z: "d2"],
+            %{"d2" => :x, "t7" => :y}}},
+          {"C: p after mine's own x link",
+           {[a: "d2", b: "d2", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
+            %{"d2" => :x, "d1" => :y}},
+           {[a: "d2", b: "d2", p: "m9", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
+            %{"d2" => :x, "m9" => :x, "d1" => :y}},
+           {[a: "d1", b: "d1", " ": nil, c: "m9", " ": nil, e: nil, N: nil],
+            %{"d1" => :x, "m9" => :y}}}
+        ] do
+      test "re-keyed S2 #{name}: mine's p link keeps a def of its own" do
+        lb = fn ls, defs, kp ->
+          spans =
+            ls
+            |> Enum.chunk_by(&elem(&1, 1))
+            |> Enum.with_index()
+            |> Enum.map(fn {[{_, k} | _] = run, i} ->
+              span("#{kp}#{i}", Enum.map_join(run, &Atom.to_string(elem(&1, 0))), List.wrap(k))
+            end)
+
+          used = ls |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1) |> MapSet.new()
+          md = for {k, c} <- Enum.sort(defs), MapSet.member?(used, k), do: link(k, "https://#{c}")
+          block("k", spans, md)
+        end
+
+        {b, m, t} =
+          {lb.(unquote(bl), unquote(Macro.escape(bd)), "b"),
+           lb.(unquote(ml), unquote(Macro.escape(md)), "m"),
+           lb.(unquote(tl), unquote(Macro.escape(td)), "t")}
+
+        assert {:ok, blk} = Inline.merge(b, m, t)
+        hrefs = Map.new(blk["markDefs"], &{&1["_key"], &1["href"]})
+
+        at = fn letter ->
+          Enum.find(blk["children"], &String.contains?(&1["text"], letter))["marks"]
+        end
+
+        [pk] = at.("p")
+        [ak] = at.("a")
+        assert hrefs[pk] == "https://x" and hrefs[ak] == "https://x"
+        assert pk != ak
+      end
+    end
+
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
       href = "https://a.example"
       base = block("k", [span("m1", "one two three")])
