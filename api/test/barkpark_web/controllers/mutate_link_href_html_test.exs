@@ -410,6 +410,9 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
       :erlang.trace_pattern(mfa, false, [:global])
     end
 
+    # Every trace message reaches the counter before `:done` does.
+    ref = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, :all, ^ref}
     send(counter, :done)
     assert_receive {:parses, n}
     n
