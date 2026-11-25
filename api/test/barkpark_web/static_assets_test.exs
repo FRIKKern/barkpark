@@ -59,7 +59,11 @@ defmodule BarkparkWeb.StaticAssetsTest do
 
       {hashed, other} = Enum.split_with(urls, &String.starts_with?(&1, "/assets/v/"))
 
-      assert Enum.map(hashed, &Path.basename/1) == @root_files
+      # The Studio layout links its own (bp-studio-leave.js,
+      # task-c4b59891f88686e0), hashed the same way.
+      names = Enum.map(hashed, &Path.basename/1)
+      assert "bp-studio-leave.js" in names
+      assert names -- ["bp-studio-leave.js"] == @root_files
 
       for url <- hashed do
         ["", "assets", "v", hash, name] = String.split(url, "/")
