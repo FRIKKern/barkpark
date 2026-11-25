@@ -37,9 +37,9 @@ defmodule Barkpark.Content.PortableTextPairingScaleTest do
     end
   end
 
-  # Runs `fun` in a process whose heap is capped at 100 MB: its result and
-  # the reductions it took. A run past the cap is killed and the test fails.
-  defp bounded(fun) do
+  # Runs `fun` in a process whose heap is capped at `mb`: its result and the
+  # reductions it took. A run past the cap is killed and the test fails.
+  defp bounded(fun, mb) do
     parent = self()
 
     {pid, ref} =
@@ -52,12 +52,13 @@ defmodule Barkpark.Content.PortableTextPairingScaleTest do
         end,
         [
           :monitor,
-          {:max_heap_size, %{size: div(100_000_000, 8), kill: true, error_logger: false}}
+          {:max_heap_size, %{size: div(mb * 1_000_000, 8), kill: true, error_logger: false}}
         ]
       )
 
-    assert_receive {:done, out, reductions}, 60_000
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 50_000
+    assert reason == :normal, "the save was killed past #{mb} MB"
+    assert_received {:done, out, reductions}
     {out, reductions}
   end
 
@@ -73,8 +74,11 @@ defmodule Barkpark.Content.PortableTextPairingScaleTest do
       posted = [block("z", "posted start")] ++ many.(20_000, "x") ++ [block("z2", "posted end")]
       html = PortableText.to_html(posted)
 
-      {_out, reductions} = bounded(fn -> length(PortableText.from_html(html, stored)) end)
-      # Measured on the fix: about 0.2G at most.
+      # 30,000 blocks parse to about 150 MB at peak, on main as well.
+      {_out, reductions} =
+        bounded(fn -> length(PortableText.from_html(html, stored)) end, 250)
+
+      # Measured: about 0.2G. On 8ba9040ffd, over 1.5G.
       assert reductions < 1_000_000_000, "took #{reductions} reductions"
     end
   end
