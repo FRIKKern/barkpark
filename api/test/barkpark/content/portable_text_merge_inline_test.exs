@@ -309,4 +309,84 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert r1 - r0 < 30_000_000, "#{r1 - r0} reductions"
     end
   end
+
+  describe "task-81d9efce3bbf6428: a mark change inside a splice" do
+    # base: TWO bold, then " three four five"; theirs edits "five".
+    defp marked(two, rest),
+      do: block("k", [span("a", "one "), span("b", two, ["strong"]), span("c", rest)])
+
+    defp theirs_five, do: marked("two", " three four FIVE")
+
+    test "mine edits two and four and bolds three between them: a clash" do
+      mine =
+        block("k", [
+          span("a", "one "),
+          span("b", "TWO three", ["strong"]),
+          span("c", " FOUR five")
+        ])
+
+      assert Inline.merge(marked("two", " three four five"), mine, theirs_five()) == :clash
+    end
+
+    test "mine edits two and four and unbolds a bold word between them: a clash" do
+      base =
+        block("k", [
+          span("a", "one two "),
+          span("b", "three", ["strong"]),
+          span("c", " four five")
+        ])
+
+      theirs =
+        block("k", [
+          span("a", "one two "),
+          span("b", "three", ["strong"]),
+          span("c", " four FIVE")
+        ])
+
+      mine = block("k", [span("a", "one TWO three FOUR five")])
+      assert Inline.merge(base, mine, theirs) == :clash
+    end
+
+    test "mine edits two and four, marks kept: it merges" do
+      mine = marked("TWO", " three FOUR five")
+      assert {:ok, blk} = Inline.merge(marked("two", " three four five"), mine, theirs_five())
+      assert text(blk) == "one TWO three FOUR FIVE"
+    end
+
+    # n letters "ab", every other pair bold; mine puts "xy" in their place,
+    # same marks; theirs edits the tail.
+    defp rewrite(n) do
+      pairs = fn t, k ->
+        for i <- 0..(div(n, 2) - 1),
+            do: span("#{k}#{i}", t, if(rem(i, 2) == 0, do: ["strong"], else: []))
+      end
+
+      base = block("k", pairs.("ab", "b") ++ [span("t", " gap end")])
+
+      {base, block("k", pairs.("xy", "m") ++ [span("t", " gap end")]),
+       block("k", pairs.("ab", "b") ++ [span("t", " gap END")])}
+    end
+
+    test "a rewrite of mixed marks at the cap costs under 15M reductions; past it, a clash" do
+      {base, mine, theirs} = rewrite(500)
+      {:reductions, r0} = Process.info(self(), :reductions)
+      assert {:ok, _} = Inline.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+      assert r1 - r0 < 15_000_000
+      {base, mine, theirs} = rewrite(502)
+      assert Inline.merge(base, mine, theirs) == :clash
+    end
+
+    test "a bold word typed new between two edits merges: no text of base changed marks" do
+      mine =
+        block("k", [
+          span("a", "one "),
+          span("b", "TWO NEW", ["strong"]),
+          span("c", " three FOUR five")
+        ])
+
+      assert {:ok, blk} = Inline.merge(marked("two", " three four five"), mine, theirs_five())
+      assert text(blk) == "one TWO NEW three FOUR FIVE"
+    end
+  end
 end
