@@ -163,7 +163,7 @@ export function split(names, perJob = PER_JOB, weigh = weightOf) {
   const of = Math.ceil(sorted.length / perJob)
   const groups = Array.from({ length: of }, (_, i) => ({ group: i + 1, of, parts: [], load: 0 }))
   const heaviest = [...sorted].sort((a, b) => weigh(b) - weigh(a) || (a < b ? -1 : 1))
-  for (const name of heaviest) {
+  for (const name of heaviest.slice(0, -1)) { // PLANT 1: the lightest part is dealt to no group
     const fewest = Math.min(...groups.map((g) => g.parts.length))
     const g = groups.filter((x) => x.parts.length === fewest).reduce((a, b) => (b.load < a.load ? b : a))
     g.parts.push(name)
