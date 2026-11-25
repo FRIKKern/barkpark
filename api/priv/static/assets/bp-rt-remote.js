@@ -27,7 +27,13 @@
 //
 // Each editor reports the number of the last value it shows, in a hidden
 // `_bp_rt_seen[]` input inside its wrapper (`name|number`): the newest
-// number this page was pushed, or, while a value waits, one less than it.
+// number this page was pushed, or, while values wait, one less than the
+// first of them. A newer value replaces the one waiting, but the editor
+// still shows what it showed before the first: with one less than the
+// newest, a post was read against a value it never showed, and B's change
+// before it was taken out with no word (task-2833650e2e72d380). The merge
+// of this page's own post (`own`) starts again from itself: the editor
+// shows that post, which the server merged with all that waited before.
 // The server reads a post against the value its number names: a post typed
 // before this page showed a value is merged with it, or held, never written
 // over it, and that holds for a commit of a composition begun earlier too.
@@ -43,7 +49,8 @@
 
   // The newest number any push carried.
   let last = 0;
-  // name -> {seq, html}: theirs, not shown yet.
+  // name -> {seq, html, first}: theirs, not shown yet; `first`, the number
+  // the editor's text is read from (see above).
   const waiting = new Map();
   // editor -> time of its last input.
   const typedAt = new WeakMap();
@@ -56,7 +63,7 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).seq - 1 : last);
+  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).first - 1 : last);
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
   // ignored by LiveView's patch, so the input stays.
@@ -241,7 +248,10 @@
       const w = wrapOf(name);
       if (typeof v.html === "string") {
         const theirs = waiting.get(name);
-        if (!theirs || theirs.seq < v.seq) waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload});
+        if (!theirs || theirs.seq < v.seq) {
+          const first = theirs && !v.own ? theirs.first : v.seq;
+          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, first});
+        }
         tryShow(name);
       }
       mark(w);
