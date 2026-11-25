@@ -85,19 +85,27 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
   is not delivered. A nil `deliver` (nothing left to answer to) cancels the
   session's pending asks (D11), so the store never holds an answer nothing
   received. An `{:error, _}` from `deliverer/2` touches nothing.
-  """
-  @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil | {:error, term()}) ::
-          outcome()
-  def settle(_session_id, _request_id, _status, {:error, _} = unavailable), do: unavailable
 
-  def settle(session_id, request_id, _status, nil) do
+  `extra` is merged into the row's metadata with the flip, and only with a
+  delivered flip: a question's answer passes `%{"answers" => answers}`, so the
+  stored row keeps what was chosen (task-70baa54b6bc7b54f).
+  """
+  @spec settle(String.t(), String.t(), String.t(), (-> any()) | nil | {:error, term()}, map()) ::
+          outcome()
+  def settle(session_id, request_id, status, deliver, extra \\ %{})
+
+  def settle(_session_id, _request_id, _status, {:error, _} = unavailable, _extra),
+    do: unavailable
+
+  def settle(session_id, request_id, _status, nil, _extra) do
     StudioChat.cancel_pending_approvals(session_id)
     check(session_id, request_id)
   end
 
-  def settle(session_id, request_id, status, deliver) when is_function(deliver, 0) do
+  def settle(session_id, request_id, status, deliver, extra)
+      when is_function(deliver, 0) and is_map(extra) do
     case claim(session_id, request_id) do
-      {:ok, claim} -> deliver(session_id, request_id, status, claim, deliver)
+      {:ok, claim} -> deliver(session_id, request_id, {status, extra}, claim, deliver)
       :unclaimed -> check(session_id, request_id)
     end
   end
@@ -210,7 +218,7 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
     end
   end
 
-  defp deliver(session_id, request_id, status, claim, deliver) do
+  defp deliver(session_id, request_id, {status, extra}, claim, deliver) do
     case deliver.() do
       {:error, reason} when reason != :unknown_approval ->
         release(claim)
@@ -218,7 +226,7 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
 
       _ok_or_gone_upstream ->
         # A cancel that landed during the delivery wins: the flip is pending-only.
-        _ = StudioChat.update_approval_status(session_id, request_id, status)
+        _ = StudioChat.update_approval_status(session_id, request_id, status, extra)
         :delivered
     end
   catch
