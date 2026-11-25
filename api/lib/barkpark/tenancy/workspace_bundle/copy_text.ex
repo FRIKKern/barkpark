@@ -46,6 +46,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.CopyText do
     end
   end
 
+  @doc "A value as a COPY text field: backslash, tab, newline and return escaped."
+  @spec escape(String.t()) :: String.t()
+  def escape(value) when is_binary(value) do
+    value
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\t", "\\t")
+    |> String.replace("\n", "\\n")
+    |> String.replace("\r", "\\r")
+  end
+
   defp unescape(raw) do
     if String.contains?(raw, "\\") do
       Regex.replace(~r/\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3}|.)/s, raw, fn _, esc ->

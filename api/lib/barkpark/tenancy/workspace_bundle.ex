@@ -586,10 +586,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end
 
     # BEFORE ANY WRITE (no transaction, COPY, DDL or PDS-D9 empty-shell DELETE
-    # yet): a bundle that disagrees with what the caller asked for, or holds a
-    # link address a write refuses (COPY skips the fences, task-9d0496cb3f369ed1).
+    # yet): a bundle that disagrees with what the caller asked for stops, and a
+    # link address a write refuses is stripped (COPY skips the fences, 9d0496cb).
     assert_root_slug_matches_expectation!(manifest, ctx.expected_root_slug)
-    __MODULE__.LinkHrefCheck.refuse!(manifest, dumps)
+    {dumps, refused_links} = __MODULE__.LinkHrefCheck.strip(manifest, dumps)
 
     # PDS-D45: a declared loss is only honest if someone HEARS it. The manifest
     # rides back inside `stats()`; the restore operator, usually watching a log
@@ -639,7 +639,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           )
         end
 
-        result
+        __MODULE__.LinkHrefCheck.report(result, refused_links)
     end
   end
 
