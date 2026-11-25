@@ -118,25 +118,8 @@ defmodule BarkparkWeb.ChatAttachmentController do
 
   # ── scope + fetch (the SAME oracle as every other id route) ────────────────
 
-  defp scope(conn), do: conn.assigns.chat_scope
-
-  defp store_scope(:global), do: :global
-  defp store_scope({:workspace, ws}), do: ws
-
-  # The sealed store confines the read (charter D17) — `nil` when the session is
-  # missing OR owned by another tenant. The controller only threads the scope;
-  # the store is the single enforcement point.
-  defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
-
-  # Plus the registered-host seat (task-f44bbb6363d28e37): a host session the
-  # caller may not see is the same `nil` as a missing id.
-  defp fetch_visible(conn, id) do
-    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
-         true <-
-           BarkparkWeb.HostExecutionGate.may_see_session?(conn.assigns[:api_token], session),
-         do: session,
-         else: (_ -> nil)
-  end
+  # Tenant seal + registered-host seat, nil ⇒ 404 (`ChatSessionDoor`).
+  defp fetch_visible(conn, id), do: BarkparkWeb.ChatSessionDoor.fetch(conn, id)
 
   # ── validation (D22 strictness) ────────────────────────────────────────────
 

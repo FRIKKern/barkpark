@@ -129,9 +129,13 @@ defmodule BarkparkWeb.ChatRegisteredHostReadsTest do
       {"POST interrupt", &post(&1, "/v1/chat/sessions/#{&2}/interrupt", "{}")},
       {"PATCH steer", &patch(&1, "/v1/chat/sessions/#{&2}", ~s({"mode":"acceptEdits"}))},
       {"PATCH title", &patch(&1, "/v1/chat/sessions/#{&2}", ~s({"title":"renamed"}))},
+      {"PATCH model", &patch(&1, "/v1/chat/sessions/#{&2}", ~s({"model_choice":"opus"}))},
+      {"PATCH effort", &patch(&1, "/v1/chat/sessions/#{&2}", ~s({"effort_choice":"high"}))},
       {"POST messages", &post(&1, "/v1/chat/sessions/#{&2}/messages", ~s({"content":"hi"}))},
       {"POST approval",
        &post(&1, "/v1/chat/sessions/#{&2}/approval", ~s({"request_id":"r-1","decision":"allow"}))},
+      {"POST approval deny",
+       &post(&1, "/v1/chat/sessions/#{&2}/approval", ~s({"request_id":"r-1","decision":"deny"}))},
       {"POST answer",
        &post(&1, "/v1/chat/sessions/#{&2}/answer", ~s({"request_id":"r-1","answers":{"q":"a"}}))},
       {"POST archive", &post(&1, "/v1/chat/sessions/#{&2}/archive", "{}")},
@@ -192,10 +196,14 @@ defmodule BarkparkWeb.ChatRegisteredHostReadsTest do
 
     after_row = StudioChat.get_session(host_sid, :global)
 
-    assert Map.take(after_row, [:title, :mode, :archived_at]) ==
-             Map.take(before, [:title, :mode, :archived_at])
+    assert Map.take(after_row, [:title, :mode, :model_choice, :effort_choice, :archived_at]) ==
+             Map.take(before, [:title, :mode, :model_choice, :effort_choice, :archived_at])
 
-    assert length(StudioChat.list_messages(host_sid, :global)) == 2
+    messages = StudioChat.list_messages(host_sid, :global)
+    assert length(messages) == 2
+
+    assert [%{metadata: %{"approval_status" => "pending"}}] =
+             Enum.filter(messages, &(&1.role == "approval"))
   end
 
   test "the list leaves the host session out for a member token, and keeps its managed one",

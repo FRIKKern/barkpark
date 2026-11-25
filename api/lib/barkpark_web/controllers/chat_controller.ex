@@ -98,6 +98,7 @@ defmodule BarkparkWeb.ChatController do
 
   alias Barkpark.Tenancy
   alias BarkparkWeb.ChatSendFailure
+  alias BarkparkWeb.ChatSessionDoor
   alias BarkparkWeb.ChatUserTurn
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.HostExecutionGate
@@ -230,10 +231,7 @@ defmodule BarkparkWeb.ChatController do
       # sessions are never starved out of the `@sidebar_cap` window by other
       # tenants' more-recent sessions (which an after-the-fact in-memory filter
       # would allow). `:global` stays unfiltered (admin sidebar unchanged).
-      sessions =
-        [archived: archived?]
-        |> StudioChat.list_sessions(store_scope(scope(conn)))
-        |> then(&HostExecutionGate.visible_sessions(conn.assigns[:api_token], &1))
+      sessions = ChatSessionDoor.list(conn, archived: archived?)
 
       json(conn, %{sessions: Enum.map(sessions, &sidebar_json(&1, conn.assigns[:api_token]))})
     else
@@ -567,16 +565,12 @@ defmodule BarkparkWeb.ChatController do
   clients remove optimistically on the 200 and reconcile on the next list poll.
   """
   def archive(conn, %{"id" => id}) do
-    if fetch_visible(conn, id),
-      do: respond_archived(conn, StudioChat.archive_session(id, store_scope(scope(conn)))),
-      else: not_found(conn)
+    respond_archived(conn, ChatSessionDoor.set_archived(conn, id, true))
   end
 
   @doc "Unarchive (charter D28) — clear `archived_at`. Same oracle + idempotency."
   def unarchive(conn, %{"id" => id}) do
-    if fetch_visible(conn, id),
-      do: respond_archived(conn, StudioChat.unarchive_session(id, store_scope(scope(conn)))),
-      else: not_found(conn)
+    respond_archived(conn, ChatSessionDoor.set_archived(conn, id, false))
   end
 
   defp respond_archived(conn, result) do
@@ -1192,11 +1186,8 @@ defmodule BarkparkWeb.ChatController do
   # tenant scoping (Connectors D18/D19a)
   #
   # `RequireChatAccess` puts `:global` or `{:workspace, ws}` on the conn; every
-  # id-bearing route fetches through `fetch_scoped/2` so a wrong-tenant read
-  # returns the SAME not-found oracle as a missing id. `owner_workspace_id` is
-  # read with `Map.get/2` (never `session.owner_workspace_id`) so this is total
-  # and forward-compatible: it is `nil` until the tenant-seam column lands, at
-  # which point a workspace caller resolves to its own owned rows automatically.
+  # id-bearing route fetches through `ChatSessionDoor.fetch/2`, so a wrong-tenant
+  # read (or a host chat the caller may not see) is the missing-id 404.
   # ─────────────────────────────────────────────────────────────────────────
 
   defp scope(conn), do: conn.assigns.chat_scope
@@ -1237,27 +1228,10 @@ defmodule BarkparkWeb.ChatController do
     end
   end
 
-  # Map the controller's `chat_scope` onto the store funnel's `scope` arg
-  # (`:global | workspace_id binary`, charter D17): `{:workspace, ws}` → `ws`.
-  defp store_scope(:global), do: :global
-  defp store_scope({:workspace, ws}), do: ws
-
-  # Fetch a session and confine it to the caller's scope — `nil` (⇒ 404) when the
-  # session does not exist OR is owned by another tenant. Reads through the
-  # sealed store scope (charter D17) so a foreign/`:global` session is invisible
-  # at the DB — the store is the single enforcement point, the controller only
-  # threads the scope.
-  defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
-
-  # The id routes' one fetch: the tenant seal, then the registered-host seat
-  # (task-f44bbb6363d28e37). A host session the caller may not see is the same
-  # `nil` as a missing id, so its existence does not leak.
-  defp fetch_visible(conn, id) do
-    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
-         true <- HostExecutionGate.may_see_session?(conn.assigns[:api_token], session),
-         do: session,
-         else: (_ -> nil)
-  end
+  # `chat_scope` → the store's scope arg, and the id routes' one fetch (tenant
+  # seal + registered-host seat; nil ⇒ 404): `ChatSessionDoor`.
+  defp store_scope(scope), do: ChatSessionDoor.store_scope(scope)
+  defp fetch_visible(conn, id), do: ChatSessionDoor.fetch(conn, id)
 
   # ─────────────────────────────────────────────────────────────────────────
   # writes: strict Recorder/ClaudeChat adapter
