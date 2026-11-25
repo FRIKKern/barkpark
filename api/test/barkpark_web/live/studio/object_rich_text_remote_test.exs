@@ -64,36 +64,59 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     end
   end
 
-  # task-fbe81bb824c6df0e: B saves twice while A types. A's page has
-  # painted neither B's paragraph nor the merge of A's first post, so while
-  # a value waits it reports the newest one's seq - 1 (bp-rt-remote.js
-  # `seenOf`), and A's next post is read against B's second save's `was`
-  # (the merged value), which lacks nothing of A's but has P1 that A's post
-  # does not. Feared: P1 taken out with no word. What happens: the line-up
-  # is not certain (two blocks for one), so the post is held with the
-  # banner, the store keeps both of B's paragraphs, and A's typing stays in
-  # A's editor. The banner itself is a false clash: task-2833650e2e72d380.
-  test "B saves twice while A types: B's paragraphs stay stored and A's typing is held, not lost",
-       c do
+  # task-fbe81bb824c6df0e, task-2833650e2e72d380: B saves twice while A
+  # types. A's page drew neither B's paragraph nor the merge of A's first
+  # post. It used to report the newest waiting value's number - 1, so A's
+  # next post was read against B's second save, which has P1 that A's post
+  # does not: held with a false banner (#28748 pinned that). It now reports
+  # one less than the merge of its own post (`own`), and the post merges.
+  test "B saves twice while A types: A's next post merges, B's paragraphs stay, no banner", c do
     a = open(c)
     b = open(c)
 
     b_saves_rt(b, c, "<p>one two</p><p>P1</p>", ["one two", "P1"])
-    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: s1}}}, 2_000)
+    page = got(page(), next_push(a), false)
 
-    post_rt(a, "<p>one twoA</p>", s1 - 1)
+    post_rt(a, "<p>one twoA</p>", seen(page))
     assert words(stored(c)["meta"]["rt"]) == ["one twoA", "P1"]
-    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: m}}}, 2_000)
+    page = got(page, next_push(a), false)
 
     b_saves_rt(b, c, "<p>one twoA</p><p>P1</p><p>P2</p>", ["one twoA", "P1", "P2"])
-    assert_push_event(a, @event, %{values: %{"doc[meta].rt" => %{seq: m2}}}, 2_000)
-    assert m2 > m
+    page = got(page, next_push(a), false)
 
-    # The page waits on m2 now, A's editor still showing only its own text.
-    html = post_rt(a, "<p>one twoAB</p>", m2 - 1)
+    html = post_rt(a, "<p>one twoAB</p>", seen(page))
 
-    assert words(stored(c)["meta"]["rt"]) == ["one twoA", "P1", "P2"]
-    assert words(form(a)["meta"]["rt"]) == ["one twoAB"]
+    assert words(stored(c)["meta"]["rt"]) == ["one twoAB", "P1", "P2"]
+    refute html =~ "Someone else rewrote"
+  end
+
+  # task-2833650e2e72d380: A's page shows p1; B adds a word to p1, then adds
+  # p2, both waiting while A types. The page reports one less than the
+  # first, B's word: it is never read as A's delete of it.
+  test "B's word, then B's paragraph, both waiting on A's page: B's word stays", c do
+    {p1, p2} = {"alpha beta gamma delta", "zeta eta theta iota"}
+    a = open(c)
+    b = open(c)
+
+    b_saves_rt(b, c, "<p>one two</p><p>#{p1}</p>", ["one two", p1])
+    page = got(page(), next_push(a), true)
+    b_saves_rt(b, c, "<p>one two</p><p>#{p1} epsilon</p>", ["one two", p1 <> " epsilon"])
+    page = got(page, next_push(a), false)
+
+    b_saves_rt(b, c, "<p>one two</p><p>#{p1} epsilon</p><p>#{p2}</p>", [
+      "one two",
+      p1 <> " epsilon",
+      p2
+    ])
+
+    page = got(page, next_push(a), false)
+
+    html = post_rt(a, "<p>one twoA</p><p>#{p1}</p>", seen(page))
+
+    # Read against what A shows, the line-up is not certain (B changed p1
+    # and added p2 beside it): held, B's value stored exactly. Read against
+    # B's second save, as before, the word was taken out with no banner.
+    assert words(stored(c)["meta"]["rt"]) == ["one two", p1 <> " epsilon", p2]
     assert html =~ "Someone else rewrote"
   end
 
