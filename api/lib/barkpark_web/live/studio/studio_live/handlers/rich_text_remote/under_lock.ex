@@ -56,6 +56,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   a post on it is A's: read against theirs, so it is written as typed.
   """
   def top(socket, posted) when is_map(posted) do
+    # `was` is the row the socket last took only because a top-level
+    # wrapper remounts on every form generation. task-8d20a831ddd287a2
+    # would stop those remounts: if it lands, `was` must become the value
+    # the page shows (drawn at mount or its own last post), as
+    # `values/3` reads an object's (#28896).
     content =
       case Lifecycle.base_doc(socket) do
         %{content: %{} = content} -> content
