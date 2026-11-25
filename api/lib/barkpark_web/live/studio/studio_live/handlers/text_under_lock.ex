@@ -12,7 +12,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
   So the save is told, per free-text field of the post, what this socket
   believed the store held (`values/4`: the newest stored version it has
   seen, `Lifecycle.base_doc/1`), for a page that numbers its values (v2 of
-  `_bp_seen`). `TextRebase.rebase/4` reads it under the lock: the store
+  `_bp_seen`). Where the page had not drawn that version, it is what the
+  page showed (task-eeecd067e3fb1b1f). `TextRebase.rebase/4` reads it under the lock: the store
   moved from it, and the post is merged onto the store, an overlap keeping
   the store. `held/3` reads the write's outcome (`:saved_over`, the value
   the write landed over): a store kept over a post that changed the field
@@ -26,9 +27,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
-  @doc "Each free-text field of the post (a key or a path) => the value this socket believed stored."
+  @doc """
+  Each free-text field of the post (a key or a path) => the value the tab
+  was shown as stored. `socket` holds the page's bases (`RemoteValues.
+  put_bases/4`, run first).
+  """
   def values(socket, keys, seen, path) do
     schema = socket.assigns[:editor_schema]
+    page = socket.assigns[:editor_field_bases] || %{}
 
     with true <- RemoteValues.crossing?(seen),
          %{} = doc <- Lifecycle.base_doc(socket) do
@@ -39,10 +45,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
           value = RemoteValues.value_at(text, key),
           is_binary(value),
           into: %{},
-          do: {key, value}
+          do: {key, shown(socket, key, value, Map.get(page, key))}
     else
       _ -> %{}
     end
+  end
+
+  # The socket heard a save the page did not draw: LiveView never sets the
+  # focused input, and bp-array-focus.js keeps typing it has not sent. The
+  # page then reports an older base than the value this socket believed
+  # stored, and the post was typed on that base, not on the save. So the
+  # save reads the post against the page's base: an overlap keeps the store
+  # and holds A's words with the banner (task-eeecd067e3fb1b1f). Before, the
+  # socket's value counted as seen, the overlap was `ours`, and the other
+  # side's letter went with no banner. A field the banner already names was
+  # told: typing on saves A's words over theirs.
+  defp shown(socket, key, stored, base) when is_binary(base) and base != stored,
+    do: if(told?(socket, key), do: stored, else: base)
+
+  defp shown(_socket, _key, stored, _base), do: stored
+
+  defp told?(socket, key) do
+    fields = socket.assigns[:editor_clash_fields] || []
+    socket.assigns[:doc_conflict] == true and (fields == [] or top(key) in fields)
   end
 
   @doc "The save's options: each value by its key, and the fields to report."

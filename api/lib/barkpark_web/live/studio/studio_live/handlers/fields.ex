@@ -524,14 +524,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         path = target_path(params, keys)
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
 
-        # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514).
-        text = TextUnderLock.values(socket, keys, params["_bp_seen"], path)
-
         based =
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"], path)
           |> RemoteValues.add_bases(built_bases)
-          |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
+
+        # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514),
+        # read against what the page showed (task-eeecd067e3fb1b1f).
+        text = TextUnderLock.values(based, keys, params["_bp_seen"], path)
+        based = assign(based, editor_rt_under_lock: rich, editor_text_under_lock: text)
 
         written =
           based

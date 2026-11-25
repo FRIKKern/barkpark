@@ -144,5 +144,54 @@ defmodule BarkparkWeb.Studio.StringFieldWriteRaceTest do
       assert get_in(stored(c), unquote(at)) == "ONE two THREE"
       refute html =~ "doc-conflict-banner"
     end
+
+    # task-eeecd067e3fb1b1f: B's socket heard A's save, B's page had not
+    # drawn it (a focused input is never set), and B's post names no number.
+    test "#{surface} #{field}: both rewrite one letter, B's page had not drawn A's save: A's kept, B held with the banner; typing on saves B's",
+         c do
+      {a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
+      field = unquote(field)
+
+      posts(a, unquote(target), %{field => "one twA three"})
+      _ = render(b)
+      html = posts(b, unquote(target), %{field => "one twBBB three"})
+
+      # On main: "one twBBB three", no banner, A's letter gone.
+      assert get_in(stored(c), unquote(at)) == "one twA three"
+      assert html =~ "doc-conflict-banner"
+      assert get_in(assigns(b).editor_form, unquote(at)) == "one twBBB three"
+
+      posts(b, unquote(target), %{field => "one twBBBB three"})
+
+      assert ObjectRichText.eventually(fn ->
+               get_in(stored(c), unquote(at)) == "one twBBBB three"
+             end)
+    end
+
+    test "#{surface} #{field}: B posts the field as its page showed it, A's save not drawn: A's kept, no banner",
+         c do
+      {a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
+      field = unquote(field)
+
+      posts(a, unquote(target), %{field => "one twA three"})
+      _ = render(b)
+      html = posts(b, unquote(target), %{field => "one two three"})
+
+      assert get_in(stored(c), unquote(at)) == "one twA three"
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} #{field}: each types in a word of their own, B's page had not drawn A's save: both kept, no banner",
+         c do
+      {a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
+      field = unquote(field)
+
+      posts(a, unquote(target), %{field => "ONE two three"})
+      _ = render(b)
+      html = posts(b, unquote(target), %{field => "one two THREE"})
+
+      assert get_in(stored(c), unquote(at)) == "ONE two THREE"
+      refute html =~ "doc-conflict-banner"
+    end
   end
 end
