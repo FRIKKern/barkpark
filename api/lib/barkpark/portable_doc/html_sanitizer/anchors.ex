@@ -103,12 +103,17 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Anchors do
   defp same_page?("?" <> _query, _self), do: true
   defp same_page?(_page, nil), do: false
 
+  # A browser drops a tab or newline anywhere in a URL and reads `/\` as
+  # `//`: what then starts `//` names another host.
   defp same_page?("/" <> _ = page, self) do
-    path = page |> String.split("?", parts: 2) |> hd()
-    path == self or String.ends_with?(path, self)
+    path = page |> String.replace(~r/[\t\n\r]/, "") |> String.split("?", parts: 2) |> hd()
+    not other_host?(path) and (path == self or String.ends_with?(path, self))
   end
 
   defp same_page?(_page, _self), do: false
+
+  defp other_host?(<<?/, c, _::binary>>) when c in [?/, ?\\], do: true
+  defp other_host?(_path), do: false
 
   defp moved?("", _anchors), do: false
 
