@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRejoinTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Phoenix.LiveViewTest, only: [assert_push_event: 4]
   import BarkparkWeb.ObjectRichText
 
   setup %{conn: conn}, do: setup_doc(conn)
