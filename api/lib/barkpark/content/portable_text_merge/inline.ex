@@ -139,6 +139,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # cost is not run: :error. Under it the engine never falls back to its
   # whole-block diff (2000 lines a side, 4M cells), which keeps nothing.
   @diff_cap 1_000
+  # A pure deletion or paste keeps no letter: no mark can change (#28771 review).
+  defp marks_kept?([], _put), do: true
+  defp marks_kept?(_mid, []), do: true
+
   defp marks_kept?(mid, put) do
     case MapSet.size(MapSet.new(mid ++ put, &elem(&1, 1))) do
       n when n <= 1 ->

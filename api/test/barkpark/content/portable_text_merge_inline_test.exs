@@ -377,6 +377,19 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert Inline.merge(base, mine, theirs) == :clash
     end
 
+    test "a pure deletion or paste past the cap, marks mixed, merges: it keeps no letter" do
+      {base, _mine, theirs} = rewrite(1002)
+      tail = block("k", [span("t", " gap end")])
+      assert {:ok, blk} = Inline.merge(base, tail, theirs)
+      assert text(blk) == " gap END"
+
+      # Mine pastes 1,002 letters of both marks before base's own.
+      {_base, xy, _theirs} = rewrite(1002)
+      paste = block("k", Enum.drop(xy["children"], -1) ++ base["children"])
+      assert {:ok, blk} = Inline.merge(base, paste, theirs)
+      assert text(blk) == String.duplicate("xy", 501) <> String.duplicate("ab", 501) <> " gap END"
+    end
+
     test "a bold word typed new between two edits merges: no text of base changed marks" do
       mine =
         block("k", [
