@@ -8,6 +8,10 @@
     {
       "name": "the touch target",
       "why": "Under a coarse pointer UI SDK lays an empty box 2.75rem each way over each thumb, so a tap near it reaches it. It draws nothing, so no light reads its size; at phone width the slider's control, where a press lands, is 2.75rem tall whatever the pointer."
+    },
+    {
+      "name": "invalid and required",
+      "why": "A slider always holds a value, so UI SDK never finds it missing in a form, and UI SDK's sheet gives a slider no invalid or required look. No slider here is required or stands in an invalid field, and this part draws neither."
     }
   ]
 }
