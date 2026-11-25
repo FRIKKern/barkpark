@@ -152,7 +152,7 @@ export const CASE_READINGS = {
       "at rest: a shot of the view taken when the page moved after the view was read, with no box placed against the view in the clip, is taken again, and red by name as the check's own red when the page moves before every shot": 0.7,
       "a job prints each part's seconds against its limit, and names the parts over two thirds of it or that none is": 1.6,
       "a job still builds the page of every folder: a folder it does not read that does not build refuses the job": 0.0,
-      "a job's page prints its parts' stages and the one that follows each of them on the page of every part, and no other stage": 1.8,
+      "a job's page prints its parts' stages and the one that follows each of them on the page of every part, and no other stage": 4.6,
     },
   },
   open: {
