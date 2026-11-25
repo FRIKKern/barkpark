@@ -179,7 +179,7 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert texts(M.merge(base, [b("ONE two three", "p0")], [b("one two THREE")])) ==
                ["ONE two THREE"]
 
-      assert {:clash, ["ONE two three"], _} =
+      assert {:clash, ["one two THREE"], _} =
                M.merge(base, [b("ONE two three", "p0")], [b("one two THREE")], inline: false)
     end
 
