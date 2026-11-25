@@ -67,13 +67,16 @@ defmodule Barkpark.Content.PortableTextPairing do
     stored = List.to_tuple(stored)
     kept = List.to_tuple(kept)
 
+    # Each block's words, counted once for the gaps and the pass after them.
+    words = counts(kept, stored, used)
+
     {acc, budget} =
       kept
       |> gaps(tuple_size(stored))
       |> Enum.reduce({%{}, {@max_cells, @max_work}}, fn {posted, held}, {acc, budget} ->
         rebuilt = rebuilt(kept, posted)
         left = left(stored, held, used)
-        {pairs, budget} = pair(rebuilt, left, budget)
+        {pairs, budget} = pair(rebuilt, left, budget, words)
         {Map.merge(acc, pairs), budget}
       end)
 
@@ -89,7 +92,7 @@ defmodule Barkpark.Content.PortableTextPairing do
           do: {p, elem(elem(kept, p), 1)}
 
     left = left(stored, 0..(tuple_size(stored) - 1)//1, paired)
-    {r, l} = {counted_all(rebuilt), counted_all(left)}
+    {r, l} = {counted_all(rebuilt, :r, words), counted_all(left, :l, words)}
     {rest, _budget} = within(r, l, indexes(r), indexes(l), budget, false)
     Map.merge(acc, ids(rest, r, l))
   end
@@ -119,8 +122,8 @@ defmodule Barkpark.Content.PortableTextPairing do
   defp text_block?(%{"_type" => "block", "_key" => k}) when is_binary(k), do: true
   defp text_block?(_block), do: false
 
-  defp pair([], _left, budget), do: {%{}, budget}
-  defp pair(_rebuilt, [], budget), do: {%{}, budget}
+  defp pair([], _left, budget, _words), do: {%{}, budget}
+  defp pair(_rebuilt, [], budget, _words), do: {%{}, budget}
 
   # A gap's blocks, in three steps (#28724 review):
   #
@@ -136,8 +139,8 @@ defmodule Barkpark.Content.PortableTextPairing do
   #
   # An inserted block beside a deleted one is left out by 1 and 2 and is no
   # stretch of one for one, so it takes no key (#28714 review S3).
-  defp pair(rebuilt, left, budget) do
-    {r, l} = {counted_all(rebuilt), counted_all(left)}
+  defp pair(rebuilt, left, budget, words) do
+    {r, l} = {counted_all(rebuilt, :r, words), counted_all(left, :l, words)}
     {n, m} = {tuple_size(r), tuple_size(l)}
 
     in_place =
@@ -183,8 +186,28 @@ defmodule Barkpark.Content.PortableTextPairing do
     end
   end
 
-  defp counted_all(blocks),
-    do: blocks |> Enum.map(fn {id, b} -> {id, counted(b)} end) |> List.to_tuple()
+  defp counted_all(blocks, side, words),
+    do:
+      blocks
+      |> Enum.map(fn {id, _b} -> {id, Map.fetch!(words, {side, id})} end)
+      |> List.to_tuple()
+
+  # `counted/1` of every rebuilt text block (`{:r, position}`) and every
+  # stored text block not kept (`{:l, index}`): all `rebuilt/2` and `left/3`
+  # can name.
+  defp counts(kept, stored, used) do
+    r =
+      for {p, b} <- rebuilt(kept, 0..(tuple_size(kept) - 1)//1),
+          into: %{},
+          do: {{:r, p}, counted(b)}
+
+    l =
+      for {j, b} <- left(stored, 0..(tuple_size(stored) - 1)//1, used),
+          into: r,
+          do: {{:l, j}, counted(b)}
+
+    l
+  end
 
   defp words_of(t, k), do: t |> elem(k) |> elem(1)
   defp indexes(t), do: Enum.to_list(0..(tuple_size(t) - 1)//1)

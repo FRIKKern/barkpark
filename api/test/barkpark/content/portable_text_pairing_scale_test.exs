@@ -78,8 +78,8 @@ defmodule Barkpark.Content.PortableTextPairingScaleTest do
       {_out, reductions} =
         bounded(fn -> length(PortableText.from_html(html, stored)) end, 250)
 
-      # Measured: about 0.2G. On 8ba9040ffd, over 1.5G.
-      assert reductions < 1_000_000_000, "took #{reductions} reductions"
+      # Measured: 12M-21M. On 8ba9040ffd, 1.5G.
+      assert reductions < 200_000_000, "took #{reductions} reductions"
     end
   end
 
