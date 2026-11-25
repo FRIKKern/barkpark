@@ -100,8 +100,70 @@ await check("an editor untouched since its last draw is drawn the new socket's v
   assert.equal(seen(X), `${X}|300`);
 });
 
+// #28779 review. Each case in a wrapper of its own.
+const add = (name, html, id) => document.body.insertAdjacentHTML("beforeend", wrap(name, html, id));
+
+await check("blocker 1: A's text ends in a space (Chrome's nbsp): the stored value is seen at once, no banner to come", () => {
+  const N = "doc[meta].t1";
+  add(N, "<p>one two A</p>", "h3");
+  type(N, "<p>one two A&nbsp;</p>");
+  const before = paints;
+  push({ [N]: { seq: 400, html: "<p>one two A </p>", born: true } });
+  assert.equal(seen(N), `${N}|400`);
+  assert.equal(paints, before);
+});
+
+await check("blocker 2: B set the load value back while A was offline: the stale editor is drawn, not marked seen", async () => {
+  const N = "doc[meta].t2";
+  add(N, "<p>one two A</p>", "h4");
+  push({ [N]: { seq: 500, html: "<p>one two</p>" } });
+  assert.equal(editorOf(N).value, "<p>one two</p>");
+  push({ [N]: { seq: 510, html: "<p>one two A</p>", born: true } });
+  await idle();
+  assert.equal(editorOf(N).value, "<p>one two A</p>");
+  assert.equal(seen(N), `${N}|510`);
+});
+
+await check("a change with no input event (a code mark, a link) counts as typing: the stored value waits", async () => {
+  const N = "doc[meta].t3";
+  add(N, "<p>x</p>", "h5");
+  push({ [N]: { seq: 600, html: "<p>x B</p>" } });
+  const ed = editorOf(N);
+  await new Promise((r) => setTimeout(r, 5));
+  ed.querySelector(".bp-rte-body").innerHTML = "<p><code>x</code> B</p>";
+  ed.dispatchEvent(new window.CustomEvent("bp-change", { bubbles: true, detail: { value: ed.value } }));
+  push({ [N]: { seq: 610, html: "<p>x B C</p>", born: true } });
+  await idle();
+  assert.equal(ed.value, "<p><code>x</code> B</p>");
+  assert.equal(seen(N), `${N}|600`);
+});
+
+await check("B's next save replaces a stored value waiting over offline typing: still never drawn over it", async () => {
+  const N = "doc[meta].t4";
+  add(N, "<p>y</p>", "h6");
+  push({ [N]: { seq: 700, html: "<p>y B</p>" } });
+  await new Promise((r) => setTimeout(r, 5));
+  type(N, "<p>y BA</p>");
+  push({ [N]: { seq: 710, html: "<p>y B C</p>", born: true } });
+  push({ [N]: { seq: 720, html: "<p>y B C D</p>" } });
+  await idle();
+  assert.equal(editorOf(N).value, "<p>y BA</p>");
+  assert.equal(seen(N), `${N}|700`);
+});
+
+await check("the desk makes a new editor on rejoin, drawn from the store: its stored value is seen at once, no paint", () => {
+  const N = "doc[meta].t5";
+  add(N, "<p>z B</p>", "h7");
+  const before = paints;
+  push({ [N]: { seq: 800, html: "<p>z B</p>", born: true } });
+  assert.equal(seen(N), `${N}|800`);
+  assert.equal(paints, before);
+});
+
 if (failures) {
   console.log(`\n${failures} check(s) failed`);
   process.exit(1);
 }
 console.log("\nall checks passed");
+// Values left waiting on purpose keep the idle timer going.
+process.exit(0);

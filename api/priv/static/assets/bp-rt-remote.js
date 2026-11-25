@@ -93,8 +93,12 @@
     return theirs ? theirs.seen : last;
   };
 
+  const flat = (html) => String(html).replace(/&nbsp;|\u00a0/g, " ");
+  const same = (a, b) => flat(a) === flat(b);
+
   // Typed since this page last drew a value into it: words that may not be
-  // posted yet (a socket that went takes them with it).
+  // posted yet (a socket that went takes them with it). Any change of the
+  // editor's counts, a mark or a link as well as a key (`bp-change`).
   const typedSince = (editor) => (typedAt.get(editor) || 0) > (shownAt.get(editor) || 0);
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
@@ -293,14 +297,21 @@
         const was = waiting.get(name);
         // One of another document starts again.
         const theirs = was && (!was.doc || !doc || was.doc === doc) ? was : undefined;
-        // What the editor shows already: seen, with nothing to draw.
-        const shows = editor && (editor.value === v.html ||
-          (v.born && !typedSince(editor) && editor.getAttribute("value") === v.html));
+        // What the editor shows already: seen, with nothing to draw. Read as
+        // it draws (nbsp, Chrome's trailing space, is a space as the server
+        // stores it); the load value only when this page never drew in it
+        // (#28779 review, blockers 1 and 2).
+        const shows = editor && (same(editor.value, v.html) ||
+          (v.born && !shownAt.has(editor) && !typedSince(editor) &&
+            same(editor.getAttribute("value") || "", v.html)));
         if (shows && (!theirs || theirs.seq < v.seq)) {
           waiting.delete(name);
         } else if (!theirs || theirs.seq < v.seq) {
           const seen = theirs && !v.own ? theirs.seen : v.born ? before : v.seq - 1;
-          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, seen, born: !!v.born, doc});
+          // A newer value over a waiting stored one keeps it from words typed
+          // offline: the page still reports the old number.
+          const born = !!v.born || (!!theirs && theirs.born && !v.own);
+          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, seen, born, doc});
         }
         tryShow(name);
       }
@@ -326,6 +337,8 @@
   // Before the bridge copies the text into the hidden input and the form
   // posts it, the wrapper says what this editor shows.
   document.addEventListener("bp-change", (e) => {
+    const editor = editorOf(e);
+    if (editor) typedAt.set(editor, Date.now());
     const w = e.target && e.target.closest ? e.target.closest(WRAP) : null;
     if (w) mark(w);
   }, true);
