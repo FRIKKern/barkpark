@@ -10,8 +10,9 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
   the run.
 
   Sometimes B's save lands inside A's post, after A's socket read it and
-  before A's write (`b_saves_inside/4`, task-00c56c6a88ed0b8f): the same
-  rule holds against the store B left, and the run ends there.
+  before A's write (`b_saves_inside/4`, task-00c56c6a88ed0b8f), half of
+  those in A's own block: the same rule holds against the store B left,
+  and the run ends there.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -123,7 +124,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
     [mine | rest] = state.editor
     editor = [mine <> " " <> a_tag | rest]
     old = rt(c)
-    new = with ^old <- edit(old, b_tag), do: edit(old, b_tag, 1)
+    new = race_edit(old, b_tag)
     shown = b_saves_inside(a, b, html(new), fn -> post_rt(a, html(editor), seen(state.page)) end)
     after_ = rt(c)
     {gone, added} = {MapSet.new(old -- new), MapSet.new(new -- old)}
@@ -143,6 +144,14 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
 
       {:halt, {state, %{t | quiet: t.quiet + 1}}}
     end
+  end
+
+  # Half the time B types where A types, at the end of A's block: the two
+  # cannot both stand, so the store is B's and A's post is held.
+  defp race_edit([first | rest] = old, tag) do
+    if :rand.uniform(2) == 1,
+      do: [first <> " " <> tag | rest],
+      else: with(^old <- edit(old, tag), do: edit(old, tag, 1))
   end
 
   # A's page draws a pushed value at once, or, A typing, it waits; a value
