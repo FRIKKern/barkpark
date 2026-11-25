@@ -26,7 +26,9 @@ defmodule Barkpark.Content.PortableTextPairing do
     * The pairing by words has one budget per save, not per gap (#28714
       review): `@max_cells` (rebuilt × stored, summed over the gaps) and
       `@max_work` (each gap's cells × its blocks' distinct words). A gap
-      past what is left is not paired by words, so its blocks are new.
+      past what is left is not paired by words, so its blocks are new. The
+      budget is spent in document order, so past it the first gaps pair
+      (#28714 r2 review: it was spent from the last gap up).
   """
 
   # Rebuilt × stored text blocks, summed over one save's gaps, at most.
@@ -66,7 +68,7 @@ defmodule Barkpark.Content.PortableTextPairing do
   end
 
   # Each gap as {stored index before it, stored index after it, its rebuilt
-  # text blocks}. A kept block is a fixed point only when it comes after the
+  # text blocks}, in document order. A kept block is a fixed point only when it comes after the
   # last one in stored order too; a block moved up is kept, not a bound.
   defp gaps(kept, n) do
     {gaps, rebuilt, lo} =
@@ -83,7 +85,7 @@ defmodule Barkpark.Content.PortableTextPairing do
           acc
       end)
 
-    [{lo, n, Enum.reverse(rebuilt)} | gaps]
+    Enum.reverse([{lo, n, Enum.reverse(rebuilt)} | gaps])
   end
 
   defp text_block?(%{"_type" => "block", "_key" => k}) when is_binary(k), do: true

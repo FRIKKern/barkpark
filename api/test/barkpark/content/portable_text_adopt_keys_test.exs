@@ -137,4 +137,47 @@ defmodule Barkpark.Content.PortableTextAdoptKeysTest do
     assert after_ - before < 80_000_000, "took #{after_ - before} reductions"
     assert map_size(pairs) > 0
   end
+
+  # task-78fa90c58c93e534 (#28714 r2 review).
+  describe "every key once in a save" do
+    defp box(k), do: %{"_type" => "image", "_key" => k, "asset" => %{"_ref" => "image-abc"}}
+
+    test "a copied object box gets a fresh key, and the first copy keeps its own",
+         %{p1: p1, p2: p2} do
+      out = save([p1, box("img1"), p2], [p1, box("img1"), box("img1"), p2])
+      keys = Enum.map(out, & &1["_key"])
+
+      assert keys == Enum.uniq(keys)
+      assert [^p1, first, copy, ^p2] = out
+      assert first == box("img1")
+      assert copy == %{box("img1") | "_key" => copy["_key"]}
+    end
+
+    test "the same with the copy above the box", %{p1: p1, p2: p2} do
+      out = save([p1, box("img1"), p2], [box("img1"), p1, box("img1"), p2])
+      keys = Enum.map(out, & &1["_key"])
+
+      assert keys == Enum.uniq(keys)
+      assert Enum.at(out, 0) == box("img1")
+    end
+
+    # The pairing budget fits one gap of 99 x 100 blocks, not two: the first
+    # gap pairs, as the document reads, and the second is new.
+    test "the pairing budget is spent in document order" do
+      four = fn k, i -> "w#{k}#{i} x#{k}#{i} y#{k}#{i} z#{k}#{i}" end
+      gap = fn k -> for i <- 0..99, do: block("#{k}#{i}", four.(k, i)) end
+
+      edit = fn k ->
+        for i <- 1..99, do: block("e", String.replace(four.(k, i), ~r/z\S+$/, "edited"))
+      end
+
+      fixed = block("K", "a block between the two gaps that stays")
+
+      out = save(gap.("a") ++ [fixed] ++ gap.("c"), edit.("a") ++ [fixed] ++ edit.("c"))
+      {first, [^fixed | second]} = Enum.split(out, 99)
+
+      assert Enum.map(first, & &1["_key"]) == for(i <- 1..99, do: "a#{i}")
+      assert Enum.all?(second, &(not String.starts_with?(&1["_key"], "c")))
+    end
+  end
 end

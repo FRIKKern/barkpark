@@ -526,13 +526,13 @@ defmodule Barkpark.Content.PortableText do
   # An edited block takes the `_key` of the stored text block it replaces
   # (`PortableTextPairing`: by its place between kept blocks, or by its words
   # beside an insert) when no kept block holds that key, so editing a word
-  # does not rekey its paragraph. Anything else keeps the position key
-  # `from_html/1` gave it.
+  # does not rekey its paragraph. Anything else keeps the key `from_html/1`
+  # gave it, unless another block of the save holds it.
   defp adopt_keys(kept, stored) do
     taken = for {:kept, %{"_key" => k}, _i} <- kept, into: MapSet.new(), do: k
     pairs = PortableTextPairing.pairs(kept, stored)
 
-    {blocks, taken} =
+    {blocks, _taken} =
       kept
       |> Enum.with_index()
       |> Enum.map_reduce(taken, fn
@@ -549,16 +549,36 @@ defmodule Barkpark.Content.PortableText do
           end
       end)
 
-    # A text block that took no stored key keeps its position key (`b0`…)
-    # only when no stored block and no other block of this save holds it: a
-    # value first saved here carries position keys, so an insert at the top
-    # would share `b0` with the edited block that kept it (#28714 review).
-    reserved = for %{"_key" => k} when is_binary(k) <- stored, into: taken, do: k
+    # A block kept twice (a value stored with one key on two blocks) holds
+    # that key once: the later one is unpaired.
+    {blocks, held} =
+      Enum.map_reduce(blocks, MapSet.new(), fn
+        {:fixed, %{"_key" => k} = block}, held when is_binary(k) ->
+          if MapSet.member?(held, k),
+            do: {{:unpaired, block}, held},
+            else: {{:fixed, block}, MapSet.put(held, k)}
 
+        other, held ->
+          {other, held}
+      end)
+
+    stored_keys = for %{"_key" => k} when is_binary(k) <- stored, into: MapSet.new(), do: k
+
+    # Every key once in a save. An unpaired block whose key a block kept or
+    # paired holds, or one earlier in this save, gets a fresh key: a copied
+    # object box comes back with its stored block's key (#28714 r2 review),
+    # and the box the post kept keeps it. A text block's position key (`b0`…)
+    # is fresh too when a stored block holds it: a value first saved here
+    # carries position keys, so an insert at the top would share `b0` with
+    # the edited block that kept it (#28714 review).
     blocks
-    |> Enum.map_reduce(reserved, fn
-      {:unpaired, %{"_type" => "block", "_key" => k} = block}, used when is_binary(k) ->
-        k = if MapSet.member?(used, k), do: fresh_block_key(k, 1, used), else: k
+    |> Enum.map_reduce(held, fn
+      {:unpaired, %{"_key" => k} = block}, used when is_binary(k) ->
+        clash? =
+          MapSet.member?(used, k) or
+            (block["_type"] == "block" and MapSet.member?(stored_keys, k))
+
+        k = if clash?, do: fresh_block_key(k, 1, used, stored_keys), else: k
         {%{block | "_key" => k}, MapSet.put(used, k)}
 
       {_kind, block}, used ->
@@ -567,9 +587,12 @@ defmodule Barkpark.Content.PortableText do
     |> elem(0)
   end
 
-  defp fresh_block_key(key, n, used) do
+  defp fresh_block_key(key, n, used, stored_keys) do
     k = "#{key}n#{n}"
-    if MapSet.member?(used, k), do: fresh_block_key(key, n + 1, used), else: k
+
+    if MapSet.member?(used, k) or MapSet.member?(stored_keys, k),
+      do: fresh_block_key(key, n + 1, used, stored_keys),
+      else: k
   end
 
   # The fields the editor draws, as TanStack's pt-value.ts `MANAGED`: an
