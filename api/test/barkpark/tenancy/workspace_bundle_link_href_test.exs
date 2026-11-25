@@ -119,6 +119,19 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
     assert e.message =~ "revisions lh1 /body/0/markDefs/0/href"
   end
 
+  test "an import into a new dataset is refused the same way", %{ws: ws, doc: doc} do
+    put_body!(Document, doc.id, link("javascript:x"))
+    {:ok, bundle} = WorkspaceBundle.export(ws.id, dataset: doc.dataset)
+    ws_b = create_workspace!("lhref-b-#{System.unique_integer([:positive])}")
+    proj_b = create_project!(ws_b, "default")
+    into = [into_dataset: [workspace_id: ws_b.id, project_id: proj_b.id, slug: "copy"]]
+
+    assert %InvalidBundleError{code: "pt_link_href_refused"} =
+             catch_error(WorkspaceBundle.import_bundle(bundle, into))
+
+    assert Repo.aggregate(from(d in Document, where: d.workspace_id == ^ws_b.id), :count) == 0
+  end
+
   test "a bundle with an https link imports", %{ws: ws, doc: doc} do
     {:ok, bundle} = WorkspaceBundle.export(ws.id)
 
