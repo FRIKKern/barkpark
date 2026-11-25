@@ -215,9 +215,33 @@
     return false;
   }
 
+  // task-f75673bec30873e6: the input an IME is composing in. A value drawn
+  // into it mid-composition made the composition commit again (かかき). It
+  // is left as it is, as typing not yet sent: its post, at compositionend,
+  // carries the number of the value it was typed from, and the server merges
+  // it (as rich text waits, task #28732).
+  var composing = null;
+
+  document.addEventListener(
+    "compositionstart",
+    function (e) {
+      composing = e.target;
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "compositionend",
+    function () {
+      composing = null;
+    },
+    true,
+  );
+
   function takeFocused(values) {
     var el = document.activeElement;
     if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
+    if (el === composing) return;
     var select = el.tagName === "SELECT" && !el.multiple;
     if (!(select || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
     if (!Object.prototype.hasOwnProperty.call(values, el.name)) return;

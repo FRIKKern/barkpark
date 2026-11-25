@@ -377,6 +377,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   # Reload the open doc from the DB after a concurrent edit by another user,
   # discarding the local buffer. Clears the conflict banner + dirty flag.
+  # Each string field the reload changed is pushed to the page with its
+  # numbers, as rich text is repainted (task-2e9aaa937cfc3da1): a patch
+  # leaves a focused input alone, so it kept A's held words, and A's next
+  # key wrote them over B's with no banner. The reload drops the numbers the
+  # socket sent, so the stored values are sent again under numbers of their
+  # own first (`RemoteValues.born/1`): a key from a page that has not drawn
+  # the push yet reads as a rejoin post (`TextRejoin`), never as sent.
   def reload_remote_doc(socket) do
     was = socket.assigns[:editor_form]
 
@@ -384,6 +391,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       socket
       |> Shared.rebuild_panes()
       |> RichTextRemote.repaint(was)
+      |> assign(editor_text_born: false)
+      |> RemoteValues.born()
+      |> then(&RemoteValues.push(&1, was || %{}, &1.assigns[:editor_form] || %{}))
       |> assign(
         editor_dirty: false,
         doc_conflict: false,
