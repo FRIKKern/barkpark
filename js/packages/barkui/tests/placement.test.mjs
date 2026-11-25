@@ -72,6 +72,13 @@ describe("a control's pieces, the third list", () => {
       }
     }
   })
+  it('holds a number input step button to the first button in its piece, the one UI SDK writes on', () => {
+    const step = SLOTS.filter((s) => /ui-number-input-(increment|decrement)/.test(s.at))
+    expect(step.length).toBe(1)
+    expect(step[0].first).toBe(true)
+    expect(step[0].slot).toMatch(/^the first button in /)
+    for (const s of SLOTS) expect(s.first === undefined || s.first === true, s.slot).toBe(true)
+  })
   it('is red when the two differ, either way', () => {
     const text = PARTS()
     const plants = [text.replace('`touch-action` as `none` (179)', '`touch-action` as `auto` (179)'), text.replace('`z-index` as `1` or `2` (67)', '`z-index` as `1` or `2` (66)'), text.replace('- On `ui-slider-track`', '- On `ui-slider-tracks`'), text.replace('`--hold-delay` as `400ms` (hold.js 9)', '`--hold-delay` as `500ms` (hold.js 9)'), text.replace('`--hold-delay` as `400ms` (hold.js 9)', '`--hold-delay` as `400ms` (9)')]

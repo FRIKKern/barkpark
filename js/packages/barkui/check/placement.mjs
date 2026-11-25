@@ -153,10 +153,13 @@ export const SLOTS = [
   },
   // The step buttons UI SDK binds a press and hold on (bindButton, components/number-input/number-input-api.js), with
   // the delay repeat.js gives it, 400 ms. hold.js also writes -webkit-touch-callout: none, which the browser the check
-  // runs drops, so it never reaches the log and is not here.
+  // runs drops, so it never reaches the log and is not here. UI SDK writes on one button in each piece, the first it
+  // finds (`target: (el) => el.querySelector("button")` in @ui-sdk/web's number-input.js): `first` holds the slot to
+  // the element that is the first of its kind in its parent, the piece, so a second button there carries nothing.
   {
-    slot: 'the button in ui-number-input-increment or ui-number-input-decrement',
+    slot: 'the first button in ui-number-input-increment or ui-number-input-decrement',
     at: 'ui-number-input ui-number-input-increment > button, ui-number-input ui-number-input-decrement > button',
+    first: true,
     writer: NUMBER,
     writes: [
       { property: 'user-select', values: ['none'], lines: [71] },
@@ -354,7 +357,7 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
             continue
           }
           // A slot of a control UI SDK lays out at run time carries what UI SDK writes on it, as it writes it.
-          const s = slots.find((x) => el.matches(x.at))
+          const s = slots.find((x) => el.matches(x.at) && (!x.first || el.parentElement?.querySelector(el.localName) === el))
           const own = s?.by.get(prop)
           if (own) {
             if (!slotFits(own, prop, value)) fail(say.SLOT_VALUE(who, prop, value, s.slot, own))
