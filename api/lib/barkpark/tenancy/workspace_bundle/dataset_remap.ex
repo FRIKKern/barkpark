@@ -146,7 +146,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
 
   alias Barkpark.Repo
   alias Barkpark.Tenancy.{Dataset, Project}
-  alias Barkpark.Tenancy.WorkspaceBundle.{Catalog, DatasetRemapError}
+  alias Barkpark.Tenancy.WorkspaceBundle.{Catalog, CopyText, DatasetRemapError}
   alias Ecto.Adapters.SQL
 
   @spine ~w(workspaces projects datasets)
@@ -483,64 +483,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
 
   # ── Reading COPY text ────────────────────────────────────────────────────────
 
-  # Rows of a member as lists of raw COPY fields. COPY text escapes tab and
-  # newline inside a value, so a bare tab separates fields and a bare newline
-  # ends a row, whatever the chunk boundaries were.
+  # Rows of a member as lists of raw COPY fields (`CopyText`, which
+  # `LinkHrefCheck` reads members with too).
   defp rows(nil), do: []
-
-  defp rows(%{source: source}) do
-    source
-    |> Stream.transform(
-      fn -> "" end,
-      fn chunk, buffer ->
-        parts = String.split(buffer <> IO.iodata_to_binary(chunk), "\n")
-        {complete, [rest]} = Enum.split(parts, -1)
-        {complete, rest}
-      end,
-      fn
-        "" -> {[], ""}
-        rest -> {[rest], ""}
-      end,
-      fn _ -> :ok end
-    )
-    |> Stream.reject(&(&1 == ""))
-    |> Stream.map(&String.split(&1, "\t"))
-  end
+  defp rows(%{source: source}), do: CopyText.rows(source)
 
   defp col!(%{table: table, cols: cols}, col) do
     Enum.find_index(cols, &(&1 == col)) ||
       refuse!("column_mismatch", table, "the bundle's #{table} member has no #{col} column")
   end
 
-  # The decoded value of field `i`: `nil` for SQL NULL, otherwise the text with
-  # COPY's backslash escapes undone.
-  defp value(fields, i) do
-    case Enum.at(fields, i) do
-      "\\N" -> nil
-      nil -> nil
-      raw -> unescape(raw)
-    end
-  end
-
-  defp unescape(raw) do
-    if String.contains?(raw, "\\") do
-      Regex.replace(~r/\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3}|.)/s, raw, fn _, esc ->
-        case esc do
-          "b" -> "\b"
-          "f" -> "\f"
-          "n" -> "\n"
-          "r" -> "\r"
-          "t" -> "\t"
-          "v" -> "\v"
-          "x" <> hex -> <<String.to_integer(hex, 16)>>
-          <<d, _::binary>> = oct when d in ?0..?7 -> <<String.to_integer(oct, 8)>>
-          other -> other
-        end
-      end)
-    else
-      raw
-    end
-  end
+  defp value(fields, i), do: CopyText.value(fields, i)
 
   # Only ever called with UUIDs, the dataset slug (the Dataset changeset limits
   # it to [a-z0-9_-]) or nil, none of which needs COPY escaping.
