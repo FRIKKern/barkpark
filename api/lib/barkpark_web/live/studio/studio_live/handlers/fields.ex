@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
+  alias BarkparkWeb.Studio.StudioLive.Handlers.SaveTells
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
@@ -299,10 +300,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # read under the lock, and the post as the page sent it. The write's
   # outcome is read before the reload drops it (`:saved_over`).
   defp do_save(params, not_codes, socket, text, {held, rich, posted}) do
+    before = socket.assigns[:editor_form] || %{}
     written = Shared.do_autosave(socket, params, :save)
     text_held = TextUnderLock.held(written, text, params)
     {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
-    rich_held? = Enum.any?(held, &match?({:held, _, _, _}, &1))
+    # A rich text still held from before (`:still`) is not saved either: no
+    # "Saved" beside its banner (#28832 review, N1).
+    rich_held? = Enum.any?(held, &(match?({:held, _, _, _}, &1) or match?({:still, _, _}, &1)))
 
     socket =
       written
@@ -310,6 +314,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       |> RefusedSave.not_codes(not_codes)
 
     {:noreply, saved} = do_saved(socket, text_held, rich_held?, params)
+
+    saved =
+      SaveTells.tell(
+        saved,
+        socket.assigns[:save_status] == "Saved",
+        {before, params},
+        {held, text_held}
+      )
+
     {saved, held}
   end
 
