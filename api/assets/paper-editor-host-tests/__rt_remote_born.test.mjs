@@ -113,6 +113,37 @@ await check("blocker 1: A's text ends in a space (Chrome's nbsp): the stored val
   assert.equal(paints, before);
 });
 
+// task-5e0a0d5e0dfb8f33 (#28779 r2 review): the editor writes <b> and <i>,
+// the server draws <strong> and <em>; the same marks are the same value.
+await check("the editor's <b>/<i>/<strike> against the stored <strong>/<em>/<s>, A typed since: seen at once, no paint", () => {
+  const N = "doc[meta].t9";
+  add(N, "<p>one</p>", "h9");
+  type(N, "<p>one <b>two</b> <i>three</i> <strike>four</strike></p>");
+  const before = paints;
+  push({ [N]: { seq: 450, html: "<p>one <strong>two</strong> <em>three</em> <s>four</s></p>", born: true } });
+  assert.equal(seen(N), `${N}|450`);
+  assert.equal(paints, before);
+});
+
+await check("other marks on the same text are another value: it waits over A's typing", () => {
+  const N = "doc[meta].t10";
+  add(N, "<p>one</p>", "h10");
+  type(N, "<p>one <b>two</b></p>");
+  const before = paints;
+  push({ [N]: { seq: 460, html: "<p>one <em>two</em></p>", born: true } });
+  assert.notEqual(seen(N), `${N}|460`);
+  assert.equal(paints, before);
+  assert.equal(editorOf(N).value, "<p>one <b>two</b></p>");
+});
+
+await check("<br> and <img> are not read as <b> and <i>", () => {
+  const N = "doc[meta].t11";
+  add(N, "<p>one</p>", "h11");
+  type(N, "<p>one<br>two</p>");
+  push({ [N]: { seq: 470, html: "<p>one<strong>r</strong>two</p>", born: true } });
+  assert.notEqual(seen(N), `${N}|470`);
+});
+
 await check("blocker 2: B set the load value back while A was offline: the stale editor is drawn, not marked seen", async () => {
   const N = "doc[meta].t2";
   add(N, "<p>one two A</p>", "h4");
@@ -170,7 +201,9 @@ await check("a hold's view replaces a stored value waiting over offline typing: 
   push({ [N]: { seq: 910, html: "<p>one two</p>", born: true } });
   push({ [N]: { seq: 920, html: "<p>one two <strong>bo</strong></p>", held: true } });
   await idle();
-  assert.equal(editorOf(N).value, "<p>one two <strong>bo</strong></p>");
+  // The view is what the editor shows (<b> is <strong>, task-5e0a0d5e0dfb8f33):
+  // seen, its number reported, with nothing to draw.
+  assert.equal(editorOf(N).value, "<p>one two <b>bo</b></p>");
   assert.equal(seen(N), `${N}|920`);
 });
 
