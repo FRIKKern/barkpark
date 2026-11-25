@@ -97,6 +97,13 @@
   }
 }
 
+/* The range input UI SDK hides in each thumb draws nothing, but the browser gives it a field's colours of its own, which
+   follow no skin; it takes the page's. */
+[data-slot="slider-thumb-input"] {
+  background: transparent;
+  color: var(--ui-foreground);
+}
+
 /* The pinned rows: each state's words beside a short track holding one thumb. */
 [data-slider-pin] {
   --bark-slider-pin-text: 0.875rem;
