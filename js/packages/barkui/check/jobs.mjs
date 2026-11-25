@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PER_JOB } from './capacity.mjs'
 import { copyAs } from './copy.mjs'
+import { weightOf } from './part-weights.mjs'
 import { readSelftestReports } from './selftest-report.mjs'
 
 // The closing check's name in .github/workflows/barkui.yml, written here once; a test holds the workflow to it.
@@ -151,21 +152,24 @@ export function pageOf(dir, names, base = process.env.RUNNER_TEMP || tmpdir()) {
   return into
 }
 
-/** The fewest groups of at most perJob parts, sizes within one of each other, in name order. */
-export function split(names, perJob = PER_JOB) {
+/** The fewest groups of at most perJob parts, sizes within one of each other, the heaviest parts spread apart. The
+    parts are dealt out heaviest first (by `weigh`, check/part-weights.mjs; equal weights by name), in rounds: each
+    part goes to the lightest group by summed weight among those holding the fewest parts so far (equal loads: the
+    lower group number). Each group lists its parts in name order. A pure function of the names and the weights. */
+export function split(names, perJob = PER_JOB, weigh = weightOf) {
   if (!names.length) throw new Error(NO_PARTS)
   if (!(Number.isInteger(perJob) && perJob >= 1)) throw new Error(`jobs: a job must hold at least one part, not ${perJob}`)
   const sorted = [...names].sort()
   const of = Math.ceil(sorted.length / perJob)
-  const base = Math.floor(sorted.length / of)
-  const extra = sorted.length % of
-  const groups = []
-  let at = 0
-  for (let k = 1; k <= of; k++) {
-    const size = base + (k <= extra ? 1 : 0)
-    groups.push({ group: k, of, parts: sorted.slice(at, (at += size)) })
+  const groups = Array.from({ length: of }, (_, i) => ({ group: i + 1, of, parts: [], load: 0 }))
+  const heaviest = [...sorted].sort((a, b) => weigh(b) - weigh(a) || (a < b ? -1 : 1))
+  for (const name of heaviest) {
+    const fewest = Math.min(...groups.map((g) => g.parts.length))
+    const g = groups.filter((x) => x.parts.length === fewest).reduce((a, b) => (b.load < a.load ? b : a))
+    g.parts.push(name)
+    g.load += weigh(name)
   }
-  return groups
+  return groups.map(({ group, parts }) => ({ group, of, parts: parts.sort() }))
 }
 
 /** What is wrong with a list of groups against the part names, in plain words; empty when every part is run by

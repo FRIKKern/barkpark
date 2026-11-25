@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
+import { PART_READINGS, weightOf } from '../check/part-weights.mjs'
 import { reportFile, selftestReport } from '../check/selftest-report.mjs'
 import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
 
@@ -74,6 +75,33 @@ describe('the job split covers every part folder exactly once', () => {
   })
 })
 
+describe('the split spreads the heaviest parts apart, by their hosted readings', () => {
+  const weights = { a: 10, b: 9, c: 8, d: 1, e: 1, f: 1, g: 1 }
+  const weigh = (n) => weightOf(n, weights)
+
+  it('deals the parts out heaviest first, each to the lightest of the groups holding the fewest, ties by name and group number', () => {
+    // a, b, c one to a group; d to c's (the lightest), e to b's, f to a's; g to c's, the lightest of the three.
+    expect(split(Object.keys(weights), 3, weigh).map((g) => g.parts)).toEqual([['a', 'f'], ['b', 'e'], ['c', 'd', 'g']])
+    // The same names in any order give the same groups.
+    expect(split(['g', 'e', 'c', 'a', 'f', 'd', 'b'], 3, weigh)).toEqual(split(Object.keys(weights), 3, weigh))
+  })
+
+  it('a part with no reading weighs as much as the heaviest reading, so it is dealt out among the first', () => {
+    expect(weightOf('new', weights)).toBe(10)
+    expect(weightOf('new', {})).toBe(0)
+    const groups = split([...Object.keys(weights), 'new'], 3, weigh)
+    expect(groups.find((g) => g.parts.includes('new')).parts.filter((p) => weights[p] >= 8)).toEqual([])
+  })
+
+  it('every reading names a part folder, and the heaviest real parts, one per group, are each in a group of their own', () => {
+    const real = folderNames(partsDir)
+    for (const n of Object.keys(PART_READINGS.seconds)) expect(real, n).toContain(n)
+    const groups = split(real)
+    const heaviest = [...real].sort((a, b) => weightOf(b) - weightOf(a) || (a < b ? -1 : 1)).slice(0, groups.length)
+    for (const g of groups) expect(g.parts.filter((p) => heaviest.includes(p)).length, `group ${g.group}`).toBe(1)
+  })
+})
+
 describe('more parts than the folder holds, made as copies under a test-only root', () => {
   // Every count of proof copies here comes from the one limit, MOST_PARTS in check/jobs.mjs, less the real parts,
   // so the tests hold for every number of real parts the limit allows (tests/counts.mjs walks them).
@@ -128,7 +156,8 @@ describe('more parts than the folder holds, made as copies under a test-only roo
   })
 })
 
-// The closing check's rows. Nine parts, four to a job: three groups, the last one (x6, x7, x8) planted red below.
+// The closing check's rows. Nine parts, four to a job, of equal weight: dealt out in turn into three groups, the last
+// one (x2, x5, x8) planted red below.
 const NAMES = Array.from({ length: 9 }, (_, i) => `x${i}`)
 const GROUPS = split(NAMES, 4)
 const MATRIX = JSON.stringify(GROUPS.map((g) => ({ group: g.group, of: g.of, parts: g.parts.join(',') })))
@@ -201,12 +230,12 @@ describe(`the closing check, "${AGGREGATE}"`, () => {
   it('a planted failing part in the last group turns it red, named, while the others pass', () => {
     const v = verdict(needsWith(MATRIX, { [JOBS.check]: { result: 'failure' } }), withLast((r) => ({ ...r, data: { ...r.data, ok: false } })))
     expect(v.ok).toBe(false)
-    expect(v.rows).toContain('RED group 3 of 3 (x6, x7, x8) is red')
+    expect(v.rows).toContain('RED group 3 of 3 (x2, x5, x8) is red')
     expect(v.rows.filter((r) => /group [12] /.test(r))).toEqual([])
   })
 
   it('a group with no report, a report from another commit or naming other parts, or two reports, is missing or red', () => {
-    expect(redWith(verdict(needsWith(MATRIX), [...groupReports().slice(0, -1), ...selftestOk('abc')]), /group 3 of 3 \(x6, x7, x8\) is missing: no report/)).toBe(true)
+    expect(redWith(verdict(needsWith(MATRIX), [...groupReports().slice(0, -1), ...selftestOk('abc')]), /group 3 of 3 \(x2, x5, x8\) is missing: no report/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), withLast((r) => ({ ...r, data: { ...r.data, sha: 'old' } }))), /group 3 of 3 .* is missing: its report is from commit old, not abc/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), withLast((r) => ({ ...r, data: { ...r.data, parts: ['x7'] } }))), /group 3 of 3 .* is missing: its report names \["x7"\]/)).toBe(true)
     expect(redWith(verdict(needsWith(MATRIX), [...goodReports(), goodReports()[2]]), /group 3 of 3 .* reported 2 times/)).toBe(true)
