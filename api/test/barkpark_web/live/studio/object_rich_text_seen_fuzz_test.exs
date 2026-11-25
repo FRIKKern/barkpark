@@ -13,6 +13,10 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
   before A's write (`b_saves_inside/4`, task-00c56c6a88ed0b8f), half of
   those in A's own block: the same rule holds against the store B left,
   and the run ends there.
+
+  B builds each post from the store, so it is a page with bp-rt-remote.js
+  that shows the store (`:store`). A page without it never shows A's posts,
+  so its post would not carry A's words (task-0437fdf2f2a6ccba).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -63,7 +67,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
   defp b_step(b, c, a, state, tag) do
     old = rt(c)
     new = with ^old <- edit(old, tag), do: edit(old, tag, 1)
-    b_saves_rt(b, c, html(new), new)
+    b_saves_rt(b, c, html(new), new, :store)
     {gone, added} = {MapSet.new(old -- new), MapSet.new(new -- old)}
     live = state.live |> MapSet.difference(gone) |> MapSet.union(added)
     dead = state.dead |> MapSet.difference(added) |> MapSet.union(gone)
@@ -125,7 +129,16 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
     editor = [mine <> " " <> a_tag | rest]
     old = rt(c)
     new = race_edit(old, b_tag)
-    shown = b_saves_inside(a, b, html(new), fn -> post_rt(a, html(editor), seen(state.page)) end)
+
+    shown =
+      b_saves_inside(
+        a,
+        b,
+        html(new),
+        fn -> post_rt(a, html(editor), seen(state.page)) end,
+        :store
+      )
+
     after_ = rt(c)
     {gone, added} = {MapSet.new(old -- new), MapSet.new(new -- old)}
     live = state.live |> MapSet.difference(gone) |> MapSet.union(added)
