@@ -6,9 +6,10 @@
    Each step button is the secondary button's: the --ui-input edge, --ui-muted-hover under the pointer; its minus or
    plus is an inline SVG in currentColor, so UI SDK's mask icon is not drawn and no mask is on the page. A step button
    at its bound, or in a disabled field, is disabled: --ui-muted ground and --ui-muted-foreground ink, keeping its edge
-   so the group stays whole. In a read-only field the buttons do nothing but keep their ink on --ui-muted, as the
-   read-only value does. A press on a step button steps the value and puts focus in the input; the button has no
-   pressed look of its own (see notCovered). At phone width the value is 1rem, the size UI SDK gives a coarse
+   so the group stays whole. In a read-only field the buttons keep their ink on --ui-muted, as the read-only value
+   does, and take no pointer: UI SDK leaves them without disabled and refuses their press, so a mouse press would
+   otherwise leave focus on a button that does nothing. A step button has no pressed look of its own (see
+   notCovered). At phone width the value is 1rem, the size UI SDK gives a coarse
    pointer, since this sheet's own size would win over UI SDK's there. The look keys only on markup the field and
    number input write: data-readonly, data-disabled and data-invalid, and on :hover. The focus ring is base.css's,
    drawn once for every part; UI SDK's own sheet also turns the input's edge to --ui-ring-border on :focus-visible. */
@@ -95,6 +96,7 @@
 
   &[data-readonly] {
     --bark-step-fg: var(--ui-foreground);
+    pointer-events: none;
   }
 
   &:hover:not([data-disabled]) {

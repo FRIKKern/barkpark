@@ -10,11 +10,11 @@
   "notCovered": [
     {
       "name": "a pressed step button",
-      "why": "A press on a step button steps the value at once and puts focus in the input, so a pressed look the check drives would change the value as it reads it; the button has none of its own and, held down, draws as it does under the pointer, which a pinned row shows."
+      "why": "A press on an enabled step button steps the value: a mouse press at once, with focus put in the input, and a touch press when it ends or while it is held. A pressed look the check drives would change the value as it reads it, so the button has none of its own: held down it draws as it does at rest, or under a mouse as it does under the pointer, and the live buttons and a pinned row show both. A disabled button takes no press, and in the read-only field the buttons take no pointer."
     },
     {
       "name": "a focused step button",
-      "why": "UI SDK keeps both step buttons out of the Tab order, and a press does not leave focus on them (a mouse press puts it in the input), so no step button draws the focus ring; the arrow keys give the same steps from the input."
+      "why": "UI SDK keeps both step buttons out of the Tab order. A mouse press on an enabled one puts focus in the input, a touch press leaves focus where it was, a disabled one takes no focus, and in the read-only field the buttons take no pointer, so no step button ever holds focus or draws the focus ring; the arrow keys give the same steps from the input."
     },
     {
       "name": "ui-number-input-scrub-area-cursor",
