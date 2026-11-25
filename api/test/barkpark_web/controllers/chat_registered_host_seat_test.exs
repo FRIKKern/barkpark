@@ -140,6 +140,11 @@ defmodule BarkparkWeb.ChatRegisteredHostSeatTest do
   defp refused?(conn),
     do: match?(%{"error" => %{"code" => "host_admin_required"}}, json_response(conn, 403))
 
+  # A seat that may not drive a host session may not see it either
+  # (task-f44bbb6363d28e37): its id doors answer the missing-id 404.
+  defp hidden?(conn),
+    do: match?(%{"error" => %{"code" => "not_found"}}, json_response(conn, 404))
+
   # Create and send as `raw`: the host gets the turn, and the row names its creator.
   defp assert_drives!(raw, token, host) do
     created = create(raw, host_body(host)) |> json_response(201)
@@ -172,11 +177,11 @@ defmodule BarkparkWeb.ChatRegisteredHostSeatTest do
     assert sessions_on(host) == 0
   end
 
-  test "a member token's turn on an admin's session is a 403 and leases nothing",
+  test "a member token's turn on an admin's session is a 404 and leases nothing",
        %{host: host, admin_raw: admin_raw, member_raw: member_raw} do
     sid = create(admin_raw, host_body(host)) |> json_response(201) |> Map.fetch!("id")
 
-    assert refused?(send_hi(member_raw, sid))
+    assert hidden?(send_hi(member_raw, sid))
     assert leases_for(sid) == 0
     assert commands_for(host, sid) == []
     assert StudioChat.list_messages(sid, :global) == []
@@ -190,7 +195,7 @@ defmodule BarkparkWeb.ChatRegisteredHostSeatTest do
       json_conn(member_raw)
       |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{mode: "acceptEdits"}))
 
-    assert refused?(conn)
+    assert hidden?(conn)
     assert StudioChat.get_session(sid, :global).mode == "plan"
   end
 
@@ -204,14 +209,14 @@ defmodule BarkparkWeb.ChatRegisteredHostSeatTest do
     assert_drives!(raw, token, host)
   end
 
-  test "a member-seat token whose owner_user_id is only a member is a 403",
+  test "a member-seat token whose owner_user_id is only a member is refused",
        %{ws: ws, host: host, member_user: member_user, admin_raw: admin_raw} do
     {raw, _token} = mint!(["read", "chat"], ws.id, owner_user_id: member_user.id)
 
     assert refused?(create(raw, host_body(host)))
 
     sid = create(admin_raw, host_body(host)) |> json_response(201) |> Map.fetch!("id")
-    assert refused?(send_hi(raw, sid))
+    assert hidden?(send_hi(raw, sid))
     assert leases_for(sid) == 0
   end
 

@@ -99,6 +99,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.Tenancy
   alias BarkparkWeb.ChatHostRefusal
   alias BarkparkWeb.ChatSendFailure
+  alias BarkparkWeb.ChatSessionDoor
   alias BarkparkWeb.ChatUserTurn
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.HostExecutionGate
@@ -231,7 +232,7 @@ defmodule BarkparkWeb.ChatController do
       # sessions are never starved out of the `@sidebar_cap` window by other
       # tenants' more-recent sessions (which an after-the-fact in-memory filter
       # would allow). `:global` stays unfiltered (admin sidebar unchanged).
-      sessions = StudioChat.list_sessions([archived: archived?], store_scope(scope(conn)))
+      sessions = ChatSessionDoor.list(conn, archived: archived?)
 
       json(conn, %{sessions: Enum.map(sessions, &sidebar_json(&1, conn.assigns[:api_token]))})
     else
@@ -282,7 +283,7 @@ defmodule BarkparkWeb.ChatController do
   """
   def show(conn, %{"id" => id} = params) do
     with {:ok, since} <- validate_since(params),
-         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = session <- fetch_visible(conn, id) do
       messages = MessagesSince.list(id, since, store_scope(scope(conn)))
       json(conn, full_session_json(session, messages, conn.assigns[:api_token]))
     else
@@ -308,7 +309,7 @@ defmodule BarkparkWeb.ChatController do
     # claude-only values), so the row has to exist first. Deliberate precedence
     # flip: unknown session + bad body is now 404, not 400 — the tenant
     # not-found oracle outranks body shape (pinned in the controller tests).
-    with %StudioChat.Session{provider: provider} = session <- fetch_scoped(id, scope(conn)),
+    with %StudioChat.Session{provider: provider} = session <- fetch_visible(conn, id),
          {:ok, ops} <- validate_patch(body, provider),
          {:ok, ops, runtime} <- patch_steer(conn, session, ops) do
       Enum.each(ops, &apply_patch_op(session, runtime, &1))
@@ -363,7 +364,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {content, attachment_ids}} <- validate_content(body),
-         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Session{} = session <- fetch_visible(conn, id),
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session),
          {:ok, turn} <- ChatUserTurn.resolve(session, content, attachment_ids) do
       # A registered host's lease is made under this key, so a send the server
@@ -396,7 +397,7 @@ defmodule BarkparkWeb.ChatController do
   spawn one just to interrupt it.
   """
   def interrupt(conn, %{"id" => id}) do
-    with %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
+    with %StudioChat.Session{} = stored <- fetch_visible(conn, id) do
       request_id =
         with recorder when is_pid(recorder) <- Recorder.whereis(id),
              {:ok, session} <- Recorder.session_pid(recorder),
@@ -429,7 +430,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, decision}} <- validate_approval(body),
-         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Session{} = stored <- fetch_visible(conn, id),
          # An ALLOW lets a host turn act; a deny always passes (task-6ca882967fd95dda).
          :ok <-
            if(decision == :allow,
@@ -515,7 +516,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, raw_answers}} <- validate_answer(body),
-         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         %StudioChat.Session{} = stored <- fetch_visible(conn, id),
          # An answer is an ALLOW: it lets a host turn act, so it passes the same
          # gate as /approval allow (task-b03e470c315a6664).
          :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
@@ -556,12 +557,12 @@ defmodule BarkparkWeb.ChatController do
   clients remove optimistically on the 200 and reconcile on the next list poll.
   """
   def archive(conn, %{"id" => id}) do
-    respond_archived(conn, StudioChat.archive_session(id, store_scope(scope(conn))))
+    respond_archived(conn, ChatSessionDoor.set_archived(conn, id, true))
   end
 
   @doc "Unarchive (charter D28) — clear `archived_at`. Same oracle + idempotency."
   def unarchive(conn, %{"id" => id}) do
-    respond_archived(conn, StudioChat.unarchive_session(id, store_scope(scope(conn))))
+    respond_archived(conn, ChatSessionDoor.set_archived(conn, id, false))
   end
 
   defp respond_archived(conn, result) do
@@ -604,7 +605,7 @@ defmodule BarkparkWeb.ChatController do
     # SCOPE THE SESSION BEFORE SUBSCRIBING (Connectors D18/D19a): a wrong-tenant
     # (or missing) id 404s here, so tenant B can never join tenant A's live
     # `Recorder.topic/1` stream by guessing a UUID.
-    case fetch_scoped(id, scope(conn)) do
+    case fetch_visible(conn, id) do
       nil ->
         not_found(conn)
 
@@ -1177,11 +1178,8 @@ defmodule BarkparkWeb.ChatController do
   # tenant scoping (Connectors D18/D19a)
   #
   # `RequireChatAccess` puts `:global` or `{:workspace, ws}` on the conn; every
-  # id-bearing route fetches through `fetch_scoped/2` so a wrong-tenant read
-  # returns the SAME not-found oracle as a missing id. `owner_workspace_id` is
-  # read with `Map.get/2` (never `session.owner_workspace_id`) so this is total
-  # and forward-compatible: it is `nil` until the tenant-seam column lands, at
-  # which point a workspace caller resolves to its own owned rows automatically.
+  # id-bearing route fetches through `ChatSessionDoor.fetch/2`, so a wrong-tenant
+  # read (or a host chat the caller may not see) is the missing-id 404.
   # ─────────────────────────────────────────────────────────────────────────
 
   defp scope(conn), do: conn.assigns.chat_scope
@@ -1222,17 +1220,10 @@ defmodule BarkparkWeb.ChatController do
     end
   end
 
-  # Map the controller's `chat_scope` onto the store funnel's `scope` arg
-  # (`:global | workspace_id binary`, charter D17): `{:workspace, ws}` → `ws`.
-  defp store_scope(:global), do: :global
-  defp store_scope({:workspace, ws}), do: ws
-
-  # Fetch a session and confine it to the caller's scope — `nil` (⇒ 404) when the
-  # session does not exist OR is owned by another tenant. Reads through the
-  # sealed store scope (charter D17) so a foreign/`:global` session is invisible
-  # at the DB — the store is the single enforcement point, the controller only
-  # threads the scope.
-  defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
+  # `chat_scope` → the store's scope arg, and the id routes' one fetch (tenant
+  # seal + registered-host seat; nil ⇒ 404): `ChatSessionDoor`.
+  defp store_scope(scope), do: ChatSessionDoor.store_scope(scope)
+  defp fetch_visible(conn, id), do: ChatSessionDoor.fetch(conn, id)
 
   # ─────────────────────────────────────────────────────────────────────────
   # writes: strict Recorder/ClaudeChat adapter

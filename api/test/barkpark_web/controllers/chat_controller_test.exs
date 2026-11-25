@@ -1002,8 +1002,15 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
 
     test "a registered-host session's repo root is UNKNOWN — the server never probes another machine's path",
-         %{admin: a1} do
-      %{host: host, sid: sid} = host_session!()
+         %{admin: _a1} do
+      %{ws: ws, host: host, sid: sid} = host_session!()
+      # The reader holds an admin seat in the session's workspace: only a
+      # seated reader sees a host session (task-f44bbb6363d28e37).
+      a1 = "ctx-host-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(a1, "ctx host admin", "production", ["read", "write", "admin"], ws.id)
+
       # A cwd that IS a work tree ON THIS SERVER. The point is that the answer
       # is `unknown` ANYWAY: for a host-executed session that path names a
       # directory on someone ELSE's machine, and probing our own filesystem for
