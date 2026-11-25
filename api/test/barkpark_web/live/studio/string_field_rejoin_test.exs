@@ -346,6 +346,26 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       assert get_in(stored(c), ["meta", "label"]) == "one twB three"
     end
 
+    test "#{surface}: B saves the label; A's page rejoins and presses Save with the label it showed: put back and drawn, no banner",
+         c do
+      b = open(c, unquote(surface))
+      posts(b, @label, %{"label" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.put(@label, 0)
+      html = saves(a2, %{}, seen)
+
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+      refute html =~ "doc-conflict-banner"
+      assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twB three"
+      assert drawn(a2, @label) == %{value: "one twB three", was: "one two three", draw: true}
+
+      # The page now shows B's label; a second Save keeps it.
+      saves(a2, %{"label" => "one twB three", "title" => "T0 Z"}, seen)
+      assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 Z" end)
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+    end
+
     test "#{surface}: a non-target field A typed while away, no stored version: still held", c do
       b = open(c, unquote(surface))
       posts(b, @label, %{"label" => "one twB three"})
