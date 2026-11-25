@@ -38,11 +38,11 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Cache do
   `@max_bytes` of output; past it, it is emptied and refills with what is
   still read.
 
-  ## Off in `:test`
+  ## On in `:test` too
 
-  `config/test.exs` turns it off, so a test that reads a log line from a
-  scrub sees it on every call. `enable_for_process/0` turns it on for one
-  test process.
+  The scrub reads nothing but its input and its rules, so the cache is on in
+  every environment and every test runs through it. `config :barkpark,
+  :html_sanitizer_cache, false` turns it off.
   """
 
   alias Barkpark.PortableDoc.HtmlSanitizer
@@ -117,14 +117,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Cache do
 
   @doc "Whether the cache is on (`config :barkpark, :html_sanitizer_cache`, default true)."
   @spec enabled?() :: boolean()
-  def enabled? do
-    Process.get({__MODULE__, :enabled}) == true or
-      Application.get_env(:barkpark, :html_sanitizer_cache, true) == true
-  end
-
-  @doc false
-  # For a test: the cache on in this process only, whatever the config.
-  def enable_for_process, do: Process.put({__MODULE__, :enabled}, true)
+  def enabled?, do: Application.get_env(:barkpark, :html_sanitizer_cache, true) == true
 
   @doc "Drop every entry. Safe when the table was never created."
   @spec invalidate() :: :ok

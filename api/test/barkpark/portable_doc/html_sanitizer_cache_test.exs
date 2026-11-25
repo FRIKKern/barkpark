@@ -11,7 +11,6 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerCacheTest do
   alias Barkpark.PortableDoc.HtmlSanitizer.Cache
 
   setup do
-    Cache.enable_for_process()
     Cache.invalidate()
     :ok
   end
@@ -92,6 +91,17 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerCacheTest do
 
     assert Cache.version(tables) == Cache.version(tables)
     refute Cache.version(%{tables | kept: ["div" | tables.kept]}) == Cache.version(tables)
+  end
+
+  test "off in the config, every read is scrubbed" do
+    try do
+      Application.put_env(:barkpark, :html_sanitizer_cache, false)
+      HtmlSanitizer.sanitize(@body, id: "p1")
+      {_out, n} = parses(fn -> HtmlSanitizer.sanitize(@body, id: "p1") end)
+      assert n > 0
+    after
+      Application.delete_env(:barkpark, :html_sanitizer_cache)
+    end
   end
 
   test "the editor's scrub and a call with its own pass cap are never cached" do
