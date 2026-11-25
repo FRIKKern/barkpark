@@ -111,7 +111,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     socket =
       socket
       |> reset_read_memo_per_callback()
-      |> attach_hook(:studio_leave_follow, :after_render, &LeaveAsk.follow/1)
+      |> attach_hook(:studio_leave_follow, :after_render, &leave_follow/1)
       |> Mount.init()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
@@ -185,6 +185,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp soonest_expiry(_), do: nil
+
+  # A local capture: the LiveView hook census resolves a hook to its clauses.
+  defp leave_follow(socket), do: LeaveAsk.follow(socket)
 
   defp asks(event, params, socket) do
     case LeaveAsk.ask(event, params, socket) do
