@@ -277,6 +277,12 @@ export function installHelpers(lists) {
     return { ratio }
   }
 
+  /** The control a person sees for an element that takes focus. UI SDK's slider takes focus on a range input it
+      hides inside each ui-slider-thumb (rangeInputStyle in components/slider/slider.js): that input, while no one
+      sees it, is read on its thumb, for boundary, nothing to show and the ring. Every other element is its own. */
+  const THUMB_INPUT = 'ui-slider ui-slider-thumb > ui-slider-thumb-input > input[type="range"]'
+  const shownAs = (el) => (el?.matches?.(THUMB_INPUT) && seen(el) !== true ? el.closest('ui-slider-thumb') : el)
+
   /** Text or icon that a person can actually see: a box, visible, opaque enough, not clipped away. */
   const seen = (el) => {
     const r = el.getBoundingClientRect()
@@ -537,7 +543,7 @@ export function installHelpers(lists) {
       ;(state.restyled ??= {})[place] = (state.restyled[place] ?? 0) + 1
     }
   }
-  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, afterAct, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, state }
+  window.__barkCheck = { TOP, settle, restyle, moving, atRest, toRest, still, afterAct, motionOffList, looks, AT_REST, UNSEEN, paintFree, selectorOf, shown, pseudos, hasText, rgba, contrast, against, effectiveBg, resolve, describe, frame, carries, painted, colourVars, trace, paint, disabledFill, ring, seen, shownAs, state }
 }
 
 /** Turns a function written in press.mjs into source the page can run. */

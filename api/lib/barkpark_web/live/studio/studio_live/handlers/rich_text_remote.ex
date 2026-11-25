@@ -50,8 +50,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   # #28256's size: a value past it goes to the page in an event of its own.
   @html_cap 20_000
 
-  # Changes kept per input name. A post reporting a number older than all of
-  # them is read against the oldest one's `was`.
+  # Changes kept per input name. Past it, the oldest two fold into one: the
+  # older one's `was`, the newer one's number and `now`
+  # (task-d6870fd34d7769b3). A post older than every change logged is read
+  # against the first `was`; one that saw a folded change but not the last
+  # folded in has no base left, and is held.
   @log_cap 8
 
   @doc """
@@ -103,8 +106,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   defp log(socket, name, entry) do
     log = socket.assigns[:editor_rt_log] || %{}
-    entries = Enum.take([entry | Map.get(log, name, [])], @log_cap)
-    assign(socket, editor_rt_log: Map.put(log, name, entries))
+    entries = [entry | Map.get(log, name, [])]
+
+    if length(entries) > @log_cap do
+      {kept, [{old, was, _}]} = Enum.split(entries, @log_cap)
+      {seq, _, now} = List.last(kept)
+      folded = socket.assigns[:editor_rt_folded] || %{}
+
+      assign(socket,
+        editor_rt_log: Map.put(log, name, List.replace_at(kept, -1, {seq, was, now})),
+        editor_rt_folded: Map.put_new(folded, name, old)
+      )
+    else
+      assign(socket, editor_rt_log: Map.put(log, name, entries))
+    end
   end
 
   # One event for the values up to `@html_cap` bytes; each larger one rides
@@ -141,18 +156,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     * a clash: theirs stays stored exactly (review rule 1), and the form
       holds A's view with theirs in the banner.
 
+  Past `@log_cap` changes the oldest fold together, so the first `was`
+  stays; a post that saw a folded change but not the last folded in has no
+  base that fits, and is held as a clash is.
+
   A rich text whose number is current is A's to save as typed.
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
     log = socket.assigns[:editor_rt_log] || %{}
     holds = socket.assigns[:editor_rt_held] || %{}
+    folded = socket.assigns[:editor_rt_folded] || %{}
 
     Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
            path when path != [] <- Path.parse_path(name),
            posted when is_binary(posted) <- FormPath.get(doc, path) do
-        later = Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end)
-        read(doc, acts, {name, path, posted}, n, Map.get(holds, name), later)
+        all = Map.get(log, name, [])
+        later = Enum.filter(all, fn {s, _, _} -> s > n end)
+        gap? = later != [] and length(later) == length(all) and n >= Map.get(folded, name, n + 1)
+        read(doc, acts, {name, path, posted}, {n, gap?}, Map.get(holds, name), later)
       else
         _ -> {doc, acts}
       end
@@ -162,7 +184,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   def split(_socket, doc, _seen), do: {doc, []}
 
   # Held, the view not shown yet: held again.
-  defp read(doc, acts, at, n, %{seq: seq} = h, _later) when n < seq,
+  defp read(doc, acts, at, {n, _gap?}, %{seq: seq} = h, _later) when n < seq,
     do: over(doc, acts, at, h.base, h.theirs, true)
 
   # Held, the view shown: unchanged from it, nothing is saved over theirs.
@@ -174,10 +196,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   defp read(doc, acts, {name, _path, _posted}, _n, nil, []), do: {doc, [{:current, name} | acts]}
 
-  defp read(doc, acts, at, _n, nil, later) do
+  # `gap?`: the post saw a change folded out of the log (`@log_cap`) but
+  # not the last one folded in, so no base fits it: held.
+  defp read(doc, acts, at, {_n, gap?}, nil, later) do
     {_seq, was, _now} = List.last(later)
     {_seq, _was, theirs} = hd(later)
-    over(doc, acts, at, was, theirs, false)
+    over(doc, acts, at, was, theirs, gap?)
   end
 
   defp over(doc, acts, {name, path, posted}, base, theirs, held?) do

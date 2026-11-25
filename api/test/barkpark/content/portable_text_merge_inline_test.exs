@@ -171,6 +171,147 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     end
   end
 
+  describe "#28761 review" do
+    test "a mark change riding inside a text splice is a clash: a bold put on" do
+      base = block("k", [span("a", "ONE", ["strong"]), span("b", " two three four")])
+
+      mine =
+        block("k", [
+          span("a", "ONE", ["strong"]),
+          span("c", " TWO three", ["strong"]),
+          span("b", " four")
+        ])
+
+      theirs = block("k", [span("a", "ONE", ["strong"]), span("b", " two three FOUR")])
+      assert Inline.merge(base, mine, theirs) == :clash
+    end
+
+    test "a mark change riding inside a text splice is a clash: a bold taken off" do
+      base =
+        block("k", [span("a", "one two "), span("b", "THREE", ["strong"]), span("c", " four")])
+
+      mine = block("k", [span("a", "one TWO THREE four")])
+
+      theirs =
+        block("k", [span("a", "one two "), span("b", "THREE", ["strong"]), span("c", " FOUR")])
+
+      assert Inline.merge(base, mine, theirs) == :clash
+    end
+
+    test "typing on at the end of a bold word still merges" do
+      base = block("k", [span("a", "ONE", ["strong"]), span("b", " two")])
+      mine = block("k", [span("a", "ONEx", ["strong"]), span("b", " two")])
+      theirs = block("k", [span("a", "ONE", ["strong"]), span("b", " TWO")])
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+      assert Enum.map(blk["children"], &{&1["text"], &1["marks"]}) == [
+               {"ONEx", ["strong"]},
+               {" TWO", []}
+             ]
+    end
+
+    for {name, base, mine, theirs} <- [
+          {"a decimal", "pi 3.14 now", "pi 4.14 now", "pi 3.15 now"},
+          {"a price", "costs 1,000 kr", "costs 2,000 kr", "costs 1,001 kr"},
+          {"a time", "at 12:30 then", "at 12:35 then", "at 13:30 then"},
+          {"a date", "on 2026-11-25 ok", "on 2026-11-26 ok", "on 2027-11-25 ok"},
+          {"a date with slashes", "on 11/25/2026 ok", "on 11/26/2026 ok", "on 12/25/2026 ok"},
+          {"a contraction", "we don't go", "we dan't go", "we don'tt go"},
+          {"a hyphenated word", "an e-mail here", "an a-mail here", "an e-mails here"}
+        ] do
+      test "#{name} is one word: two edits in it clash" do
+        assert Inline.merge(b(unquote(base)), b(unquote(mine)), b(unquote(theirs))) == :clash
+      end
+    end
+
+    test "a sentence's full stop after a number is not inside it" do
+      assert {:ok, blk} =
+               Inline.merge(
+                 b("cost 3. Then four"),
+                 b("cost 4. Then four"),
+                 b("cost 3. Then FOUR")
+               )
+
+      assert text(blk) == "cost 4. Then FOUR"
+    end
+
+    test "plain letters put inside theirs' bold span: the span's right piece takes a key of its own" do
+      base = block("k", [span("a", "one two three", ["strong"]), span("b", " four")])
+
+      mine =
+        block("p0", [
+          span("p0s0", "one ", ["strong"]),
+          span("p0s1", "new "),
+          span("p0s2", "two three", ["strong"]),
+          span("p0s3", " four")
+        ])
+
+      theirs = block("k", [span("a", "one two three", ["strong"]), span("b", " FOUR")])
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+      assert Enum.map(blk["children"], &{&1["_key"], &1["text"]}) ==
+               [{"a", "one "}, {"p0s1", "new "}, {"ki0", "two three"}, {"b", " FOUR"}]
+    end
+
+    test "an inline object in the block is a clash" do
+      obj = %{"_type" => "inlineImage", "_key" => "o1", "src" => "x.png"}
+      with_obj = fn text -> block("k", [span("a", text), obj, span("c", " end")]) end
+
+      assert Inline.merge(
+               with_obj.("one two three"),
+               with_obj.("ONE two three"),
+               with_obj.("one two THREE")
+             ) == :clash
+    end
+
+    test "a block of another _type, its fields the same, is a clash" do
+      callout = &%{b(&1) | "_type" => "callout"}
+
+      assert Inline.merge(
+               callout.("one two three"),
+               callout.("ONE two three"),
+               callout.("one two THREE")
+             ) == :clash
+    end
+
+    test "the same edit both sides, in spans cut another way: theirs, once" do
+      theirs = block("k", [span("t1", "one "), span("t2", "TWO three")])
+      assert Inline.merge(b("one two three"), b("one TWO three", "p0"), theirs) == {:ok, theirs}
+    end
+
+    test "the guard's count bound: a word more often than mine + theirs - base is refused" do
+      [base, mine, theirs] = [b("the cat"), b("the cat"), b("the cat")]
+      refute Inline.guard?(b("the the cat"), base, mine, theirs)
+      assert Inline.guard?(b("the cat"), base, mine, theirs)
+      assert Inline.guard?(b("the the cat"), base, b("the the cat"), theirs)
+    end
+
+    # 64 KB of text in 32,000 spans (#28761 review: 10.5 s and 75M before).
+    test "a block at the cap in many spans stays linear" do
+      spans = fn first, last ->
+        for i <- 1..32_000 do
+          t =
+            cond do
+              i == 1 -> first
+              i == 32_000 -> last
+              true -> "a "
+            end
+
+          span("s#{i}", t, if(rem(i, 2) == 0, do: ["em"], else: []))
+        end
+      end
+
+      {base, mine, theirs} =
+        {block("k", spans.("a ", "a ")), block("k", spans.("b ", "a ")),
+         block("k", spans.("a ", "c "))}
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      assert {:ok, _} = Inline.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+      assert r1 - r0 < 30_000_000, "#{r1 - r0} reductions"
+    end
+  end
+
   describe "through PortableTextMerge.merge/4" do
     # The first failing test of task-da701626f5be2143: a clash on main.
     test "disjoint words of one block merge: ONE two THREE" do
