@@ -97,6 +97,11 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
 
   defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
+  defp stored_title(c) do
+    {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, @dataset)
+    doc.title
+  end
+
   # The page as bp-array-focus.js keeps `_bp_seen` after the born push: a
   # field showing the stored value takes its number; one showing A's typing,
   # with no number of its own, reports 0.
@@ -309,7 +314,132 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       # Before r2: the label went back to "one two three", the banner naming notes.
       assert get_in(stored(c), ["meta", "label"]) == "one twB three"
       assert html =~ "doc-conflict-banner"
+      # The label A never edited is a stored version, stale: put back, not
+      # held (task-727f65fc259d0c7b). Notes, typed while away, are held.
+      assert assigns(a2).editor_clash_fields == ["notes"]
+    end
+
+    # task-727f65fc259d0c7b (#28830 r2 review, desk Chrome 3/3): B saves the
+    # label; A types in the title while away. The stale label in A's post
+    # was held under the banner, and A's next key in the title wrote it over
+    # B's, with the banner gone and B never told.
+    test "#{surface}: B saves the label, A typed the title while away: the stale label is put back, never held, and typing on keeps B's",
+         c do
+      b = open(c, unquote(surface))
+      posts(b, @label, %{"label" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.merge(%{"doc[title]" => 0, @label => 0})
+      changes(a2, "doc[title]", %{"title" => "T0 AAA", "label" => "one two three"}, seen)
+
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+      refute "meta" in (assigns(a2).editor_clash_fields || [])
+      refute MapSet.member?(assigns(a2).editor_unsaved_keys, "meta")
+      assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twB three"
+
+      # The page's input still showing the stale label is drawn B's.
+      assert drawn(a2, @label) == %{value: "one twB three", was: "one two three", draw: true}
+
+      # On main: this wrote "one two three" over B's label.
+      changes(a2, "doc[title]", %{"title" => "T0 AAAZ", "label" => "one two three"}, seen)
+      assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 AAAZ" end)
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+    end
+
+    test "#{surface}: B saves the label; A's page rejoins and presses Save with the label it showed: put back and drawn, the banner names it",
+         c do
+      b = open(c, unquote(surface))
+      posts(b, @label, %{"label" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.put(@label, 0)
+      html = saves(a2, %{}, seen)
+
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+      # #28850 r1 review: a Save that put a field back says so, not "Saved".
+      assert html =~ "doc-conflict-banner"
+      assert assigns(a2).editor_clash_fields == ["meta"]
+      refute (assigns(a2).flash || %{})["info"] == "Saved"
+      assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twB three"
+      assert drawn(a2, @label) == %{value: "one twB three", was: "one two three", draw: true}
+
+      # The page now shows B's label; a second Save keeps it.
+      saves(a2, %{"label" => "one twB three", "title" => "T0 Z"}, seen)
+      assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 Z" end)
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+    end
+
+    # #28850 r1 review: every draft save writes a revision, so a cap by count
+    # (50) let a stale label many saves old be held, and A's next key in the
+    # title wrote it over B's.
+    test "#{surface}: B saved the label 55 times; A's stale label from before them all is still put back",
+         c do
+      b = open(c, unquote(surface))
+      for i <- 1..55, do: posts(b, @label, %{"label" => "one twB three #{i}"})
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three 55"
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.merge(%{"doc[title]" => 0, @label => 0})
+      changes(a2, "doc[title]", %{"title" => "T0 AAA", "label" => "one two three"}, seen)
+      refute "meta" in (assigns(a2).editor_clash_fields || [])
+
+      changes(
+        a2,
+        "doc[title]",
+        %{
+          "title" => "T0 AAAZ",
+          "label" => get_in(assigns(a2).editor_form, ["meta", "label"])
+        },
+        seen
+      )
+
+      assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 AAAZ" end)
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three 55"
+    end
+
+    test "#{surface}: A typed the label back to its earlier version while away and presses Save: put back, the banner names it, no Saved",
+         c do
+      a = open(c, unquote(surface))
+      posts(a, @label, %{"label" => "one two three X"})
+
+      assert ObjectRichText.eventually(fn ->
+               get_in(stored(c), ["meta", "label"]) == "one two three X"
+             end)
+
+      b = open(c, unquote(surface))
+      posts(b, "doc[notes]", %{"notes" => "one twB three", "label" => "one two three X"})
+      assert ObjectRichText.eventually(fn -> stored(c)["notes"] == "one twB three" end)
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.put(@label, 0)
+      html = saves(a2, %{"label" => "one two three", "notes" => "one twB three"}, seen)
+
+      assert get_in(stored(c), ["meta", "label"]) == "one two three X"
+      assert html =~ "doc-conflict-banner"
+      assert assigns(a2).editor_clash_fields == ["meta"]
+      refute (assigns(a2).flash || %{})["info"] == "Saved"
+      assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one two three X"
+
+      # Told, A types the label back again: saved.
+      changes(a2, @label, %{"label" => "one two three", "notes" => "one twB three"}, seen)
+
+      assert ObjectRichText.eventually(fn ->
+               get_in(stored(c), ["meta", "label"]) == "one two three"
+             end)
+    end
+
+    test "#{surface}: a non-target field A typed while away, no stored version: still held", c do
+      b = open(c, unquote(surface))
+      posts(b, @label, %{"label" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.merge(%{"doc[title]" => 0, @label => 0})
+      html = changes(a2, "doc[title]", %{"title" => "T0 AAA", "label" => "one twA three"}, seen)
+
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+      assert html =~ "doc-conflict-banner"
       assert "meta" in assigns(a2).editor_clash_fields
+      assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twA three"
     end
 
     test "#{surface}: the hold draws A's words into the input, and typing on saves them", c do
