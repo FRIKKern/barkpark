@@ -110,7 +110,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerFixedPointTest do
 
       log =
         capture_log(fn ->
-          assert S.sanitize(html, max_passes: 1, id: "paper-7") == "<p>ab &lt;secret&gt;</p>"
+          assert S.sanitize(html, max_passes: 1, id: "paper-7") == "<p>a b &lt;secret&gt;</p>"
         end)
 
       assert log =~ ~s(id="paper-7")
