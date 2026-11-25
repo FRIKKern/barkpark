@@ -28,8 +28,9 @@ defmodule Barkpark.Content.PortableTextMerge do
     * Where the words can be lined up more than one way (two identical
       paragraphs, empty ones) and the other side touched a block whose
       place depends on the choice: the whole value is a clash.
-    * Past `@max_cells` (blocks of the base × blocks of a side) the merge is
-      not tried: a clash.
+    * Past `@max_cells` (blocks of the base × blocks of a side), or past
+      `@max_objects` inline objects in the three values, the merge is not
+      tried: a clash.
     * Otherwise each base block takes the one side that changed or deleted
       it, and blocks a side added go in where it put them.
 
@@ -44,6 +45,13 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Blocks lined up at most: base × side.
   @max_cells 20_000
+
+  # Inline objects in base, mine and theirs together, at most
+  # (task-1cb50a8ed57c0547, #28817 review N2): the byte caps count only
+  # text, and drawing and lining up objects costs about 3,500 reductions
+  # each per side, so 50,000 in one block cost 107-177M, over the 80M save
+  # bound. 15,000 keeps a merge near 20M.
+  @max_objects 15_000
 
   # Text merged inside blocks per merge, at most (base + mine + theirs bytes
   # of each such block): past it, a block both changed is a clash of it, as
@@ -66,18 +74,45 @@ defmodule Barkpark.Content.PortableTextMerge do
     base = list(base)
     {mine, theirs} = {list(mine), list(theirs)}
 
-    if length(base) * max(length(mine), length(theirs)) > @max_cells do
-      whole_clash(mine, theirs)
-    else
-      m = edits(base, mine)
-      t = edits(base, theirs)
+    cond do
+      length(base) * max(length(mine), length(theirs)) > @max_cells ->
+        whole_clash(mine, theirs)
 
-      cond do
-        not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
-        crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
-        true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
-      end
+      objects(base) + objects(mine) + objects(theirs) > @max_objects ->
+        {:clash, plain_banner(mine, theirs), mine}
+
+      true ->
+        line_up(base, mine, theirs, opts)
     end
+  end
+
+  defp line_up(base, mine, theirs, opts) do
+    m = edits(base, mine)
+    t = edits(base, theirs)
+
+    cond do
+      not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
+      crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
+      true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+    end
+  end
+
+  # Inline objects (children that are not spans) of a value.
+  defp objects(blocks) do
+    Enum.reduce(blocks, 0, fn b, n ->
+      Enum.reduce(children(b), n, fn
+        %{"_type" => "span"}, n -> n
+        %{}, n -> n + 1
+        _c, n -> n
+      end)
+    end)
+  end
+
+  # The banner past `@max_objects`: theirs' words in each block mine does not
+  # hold as it is, never drawn (drawing is what the cap bounds).
+  defp plain_banner(mine, theirs) do
+    have = MapSet.new(mine, &Map.delete(&1, "_key"))
+    for b <- theirs, not MapSet.member?(have, Map.delete(b, "_key")), do: text(b)
   end
 
   # Nothing of `side`'s needs a guess next to what `other` did.
