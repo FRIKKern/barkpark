@@ -13,8 +13,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     * One splice per side, as `TextRebase` reads a text: the common prefix
       and suffix of the base's letters and the side's, and the middle of the
       base replaced by the side's. Text only: a splice that only changes
-      marks, that changes the marks of letters whose text stays (its ends
-      differ from the graphemes' alone), or that puts in letters whose
+      marks, that changes the marks of letters whose text stays (it keeps
+      fewer letters than graphemes, `marks_kept?`), or that puts in letters whose
       marks no letter beside or under it has, is a clash (a mark of its own
       is task 4).
     * Apart: each splice widened to whole words (a run of graphemes with no
@@ -34,7 +34,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       splits into the graphemes it was built from (no flag made at a join).
       Otherwise a clash. The snap and the guard read words alike, so each
       alone refuses a word made of two edits; the count bound is defence
-      in depth behind the snap.
+      in depth behind the snap. One edit both sides made is theirs, a
+      side's own text, and is not guarded.
 
   A block over `TextRebase.max_bytes/0` of text is a clash, as before.
   """
@@ -56,7 +57,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
          {:ok, ts} <- splice(b, t),
          true <- ms == ts or apart?(b, ms, ts),
          {:ok, block} <- build(ms, ts, mine, theirs),
-         true <- guard?(block, base, mine, theirs) do
+         # One edit both made: theirs, a side's own text (task-3d00496b0292f20b).
+         true <- ms == ts or guard?(block, base, mine, theirs) do
       {:ok, block}
     else
       _ -> :clash
@@ -105,15 +107,13 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         do: {k, Map.delete(d, "_key")}
   end
 
-  # {from, to, letters}: the side's middle in place of base[from, to). The
-  # prefix and suffix are the same on letters as on graphemes alone, or a
-  # mark changed on text that did not (#28761 review): :error.
+  # {from, to, letters}: the side's middle in place of base[from, to), on
+  # letters. A mark changed on text that did not lies inside it, where
+  # `marks_kept?/2` reads it; ends taken on graphemes as well refused a bold
+  # word deleted before a word that starts alike (task-3d00496b0292f20b).
   defp splice(base, side) do
     {p, s} = ends(base, side)
-
-    if {p, s} != ends(Enum.map(base, &elem(&1, 0)), Enum.map(side, &elem(&1, 0))),
-      do: :error,
-      else: splice(base, side, p, s)
+    splice(base, side, p, s)
   end
 
   defp splice(base, side, p, s) do

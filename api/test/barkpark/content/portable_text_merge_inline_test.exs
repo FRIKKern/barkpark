@@ -434,6 +434,29 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     end
   end
 
+  describe "task-3d00496b0292f20b: needless clashes" do
+    test "one edit both sides made that lowers a word's count, spans cut apart: theirs" do
+      base = b("dog dog dog x")
+      mine = block("k", [span("a", "dog! "), span("b", "dog dog x")])
+      theirs = block("k", [span("c", "dog! dog"), span("d", " dog x")])
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert text(blk) == "dog! dog dog x"
+    end
+
+    test "a bold word deleted before a word that starts alike merges" do
+      base =
+        block("k", [span("a", "one "), span("b", "two", ["strong"]), span("c", " three four")])
+
+      mine = block("k", [span("a", "one three four")])
+
+      theirs =
+        block("k", [span("a", "one "), span("b", "two", ["strong"]), span("c", " three FOUR")])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert text(blk) == "one three FOUR"
+    end
+  end
+
   describe "through PortableTextMerge.merge/4" do
     # The first failing test of task-da701626f5be2143: a clash on main.
     test "disjoint words of one block merge: ONE two THREE" do
