@@ -107,7 +107,7 @@ defmodule Barkpark.Content.LinkHrefFence do
 
           content
           |> refusable.()
-          |> drop_held(held(prev_doc, refusable))
+          |> drop_held(prev_doc, refusable)
           |> drop_twin_held(type, dataset, doc_id, opts, refusable)
         end)
         |> refusal()
@@ -302,7 +302,12 @@ defmodule Barkpark.Content.LinkHrefFence do
   # text, so `<noscript><p title="</noscript><a href=…>">` holds a live link
   # there and none here. When the string has a `noscript`, it is parsed a
   # second time as the browser would (`noscript` read as raw text, as `xmp`
-  # always is), and the links of both readings count (#28695 review r1).
+  # always is), and the links of both readings count (#28695 review r1). The
+  # input's own `xmp` is renamed first, so its `</xmp` cannot end the
+  # noscript early; a browser ends noscript only at `</noscript` (r2). A
+  # `select` is renamed in that reading too: lexbor drops an `<a>` inside
+  # one, Chrome's select parser keeps it (r2). The second reading only ever
+  # finds more links; the first keeps the plain parse.
   defp html_findings(html, path) do
     if link_tag?(html) do
       for view <- views(html),
@@ -320,12 +325,28 @@ defmodule Barkpark.Content.LinkHrefFence do
   end
 
   @noscript ~r/<(\/?)noscript(?=[\t\n\f\r \/>])/i
+  @xmp ~r/<(\/?)xmp(?=[\t\n\f\r \/>])/i
+  @select ~r/<(\/?)select(?=[\t\n\f\r \/>])/i
 
   defp views(html) do
-    if Regex.match?(@noscript, html),
-      do: [html, Regex.replace(@noscript, html, "<\\1xmp")],
-      else: [html]
+    noscript? = Regex.match?(@noscript, html)
+    select? = Regex.match?(@select, html)
+
+    if noscript? or select? do
+      browser =
+        html
+        |> rename(select?, @select, "<\\1bp-select")
+        |> rename(noscript?, @xmp, "<\\1bp-xmp")
+        |> rename(noscript?, @noscript, "<\\1xmp")
+
+      [html, browser]
+    else
+      [html]
+    end
   end
+
+  defp rename(html, false, _tag, _as), do: html
+  defp rename(html, true, tag, as), do: Regex.replace(tag, html, as)
 
   defp own_defs(map, path) do
     case Map.get(map, "markDefs") do
@@ -353,7 +374,13 @@ defmodule Barkpark.Content.LinkHrefFence do
 
   defp held(_doc, _refusable), do: MapSet.new()
 
-  defp drop_held(found, held), do: Enum.reject(found, fn {_path, href} -> href in held end)
+  # The stored row is read only when an address is new (#28695 review r2).
+  defp drop_held([], _doc, _refusable), do: []
+
+  defp drop_held(found, doc, refusable) do
+    held = held(doc, refusable)
+    Enum.reject(found, fn {_path, href} -> href in held end)
+  end
 
   # Read only when an address is still new: the draft's first write carries
   # what the published row holds, and a publish what the draft held.
@@ -367,7 +394,7 @@ defmodule Barkpark.Content.LinkHrefFence do
       end
 
     case Content.get_document(twin, type, dataset, opts) do
-      {:ok, doc} -> drop_held(found, held(doc, refusable))
+      {:ok, doc} -> drop_held(found, doc, refusable)
       _ -> found
     end
   end
