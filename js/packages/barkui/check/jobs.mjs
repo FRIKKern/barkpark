@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PER_JOB } from './capacity.mjs'
 import { copyAs } from './copy.mjs'
-import { weightOf } from './part-weights.mjs'
+import { unreadOf, weightOf } from './part-weights.mjs'
 import { readSelftestReports } from './selftest-report.mjs'
 
 // The closing check's name in .github/workflows/barkui.yml, written here once; a test holds the workflow to it.
@@ -285,7 +285,11 @@ export function readReports(dir) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [mode, at] = process.argv.slice(2)
   try {
-    if (mode === '--matrix') console.log(JSON.stringify(planMatrix()))
+    if (mode === '--matrix') {
+      console.log(JSON.stringify(planMatrix()))
+      // On the log only (stderr), never in the list: the part folders the split weighed without a reading.
+      for (const n of unreadOf(folderNames())) console.error(`jobs: parts/${n} has no reading in check/part-weights.mjs, so it weighs the median, ${weightOf(n)} s; write its time: line from a hosted run there`)
+    }
     else if (mode === '--judge') {
       const verdict = judge({ needs: JSON.parse(process.env.NEEDS || '{}'), reports: readReports(at ?? ''), names: partNames(), sha: process.env.GITHUB_SHA ?? '' })
       for (const r of verdict.rows) console.log(r)

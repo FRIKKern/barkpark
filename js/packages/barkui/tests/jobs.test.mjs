@@ -1,10 +1,11 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
-import { PART_READINGS, weightOf } from '../check/part-weights.mjs'
+import { PART_READINGS, staleOf, unreadOf, weightOf } from '../check/part-weights.mjs'
 import { reportFile, selftestReport } from '../check/selftest-report.mjs'
 import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split, startOrder } from '../check/jobs.mjs'
 
@@ -91,19 +92,31 @@ describe('the split spreads the heaviest parts apart, by their hosted readings',
     expect(startOrder(['b', 'a'], () => 1)).toEqual(['a', 'b'])
   })
 
-  it('a part with no reading weighs as much as the heaviest reading, so it is dealt out among the first', () => {
-    expect(weightOf('new', weights)).toBe(10)
+  it('a part with no reading weighs the median reading, so it never ties the heaviest', () => {
+    expect(weightOf('new', weights)).toBe(1)
+    expect(weightOf('new', { a: 10, b: 9 })).toBe(9.5)
     expect(weightOf('new', {})).toBe(0)
-    const groups = split([...Object.keys(weights), 'new'], 3, weigh)
-    expect(groups.find((g) => g.parts.includes('new')).parts.filter((p) => weights[p] >= 8)).toEqual([])
+    expect(unreadOf(['a', 'new', 'g'], weights)).toEqual(['new'])
   })
 
-  it('every reading names a part folder, and the heaviest real parts, one per group, are each in a group of their own', () => {
-    const real = folderNames(partsDir)
-    for (const n of Object.keys(PART_READINGS.seconds)) expect(real, n).toContain(n)
-    const groups = split(real)
-    const heaviest = [...real].sort((a, b) => weightOf(b) - weightOf(a) || (a < b ? -1 : 1)).slice(0, groups.length)
-    for (const g of groups) expect(g.parts.filter((p) => heaviest.includes(p)).length, `group ${g.group}`).toBe(1)
+  it('with any parts that have no reading beside the parts that have one, toast and tooltip among them, the two heaviest readings share no group', () => {
+    const read = Object.keys(PART_READINGS.seconds)
+    const [first, second] = [...read].sort((a, b) => weightOf(b) - weightOf(a))
+    const room = MOST_PARTS - read.length
+    const extras = [['toast', 'tooltip'], ['toast'], ['aaa', 'zzz'], ...Array.from({ length: room + 1 }, (_, k) => Array.from({ length: k }, (_, i) => `${i % 2 ? 'a' : 'zz'}${i}-new`))]
+    for (const more of extras) {
+      const groups = split([...read, ...more])
+      if (groups.length < 2) continue
+      expect(groups.filter((g) => g.parts.includes(first) || g.parts.includes(second)).length, more.join(',')).toBe(2)
+    }
+  })
+
+  it('every reading names a part folder of the real parts folder, as git lists it, and a reading that names none is refused', () => {
+    // The real folder as git tracks it, so a copy of this package with other parts (tests/counts.mjs) reads it too.
+    const tracked = [...new Set(execFileSync('git', ['-C', partsDir, 'ls-files', '.'], { encoding: 'utf8' }).split('\n').filter(Boolean).map((f) => f.split('/')[0]))]
+    expect(tracked).toContain('radio')
+    expect(staleOf(tracked)).toEqual([])
+    expect(staleOf(['a'], { a: 1, gone: 2 })).toEqual(['gone'])
   })
 })
 
