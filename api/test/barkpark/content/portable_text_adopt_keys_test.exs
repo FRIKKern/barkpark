@@ -153,12 +153,17 @@ defmodule Barkpark.Content.PortableTextAdoptKeysTest do
       assert copy == %{box("img1") | "_key" => copy["_key"]}
     end
 
-    test "the same with the copy above the box", %{p1: p1, p2: p2} do
+    # The box where the stored one sat keeps its key, as the line-up in
+    # stored order reads it: the copy above it is the new one (#28721
+    # review). It took the key as the first in the document.
+    test "a copy pasted above the box is the new one", %{p1: p1, p2: p2} do
       out = save([p1, box("img1"), p2], [box("img1"), p1, box("img1"), p2])
       keys = Enum.map(out, & &1["_key"])
 
       assert keys == Enum.uniq(keys)
-      assert Enum.at(out, 0) == box("img1")
+      assert [copy, ^p1, box, ^p2] = out
+      assert box == box("img1")
+      assert copy == %{box("img1") | "_key" => copy["_key"]}
     end
 
     # The pairing budget fits one gap of 99 x 100 blocks, not two: the first
@@ -178,6 +183,84 @@ defmodule Barkpark.Content.PortableTextAdoptKeysTest do
 
       assert Enum.map(first, & &1["_key"]) == for(i <- 1..99, do: "a#{i}")
       assert Enum.all?(second, &(not String.starts_with?(&1["_key"], "c")))
+    end
+  end
+
+  # task-dd2886673f171e40 (#28714 review S3, S4).
+  describe "a key goes only to a block with its words" do
+    test "a delete, an edit and an insert in one gap: the insert takes no key", %{p1: p1, p2: p2} do
+      x = block("kx", "alpha beta gamma delta", %{"anchor" => "gone"})
+      y = block("ky", "epsilon zeta eta theta", %{"anchor" => "why"})
+      edited = block("e", "epsilon zeta eta iota")
+      out = save([p1, x, y, p2], [p1, edited, new("brand new words in here"), p2])
+
+      assert keyed(out, words(edited))["_key"] == "ky"
+      assert keyed(out, words(edited))["anchor"] == "why"
+      assert keyed(out, "brand new words in here")["_key"] not in ["kx", "ky"]
+      refute Map.has_key?(keyed(out, "brand new words in here"), "anchor")
+    end
+
+    test "two blocks rewritten in place with none of their words keep no keys", %{p1: p1, p2: p2} do
+      x = block("kx", "alpha beta gamma delta")
+      y = block("ky", "epsilon zeta eta theta")
+      out = save([p1, x, y, p2], [p1, new("one two three four"), new("five six seven eight"), p2])
+
+      assert Enum.all?(Enum.slice(out, 1, 2), &(&1["_key"] not in ["kx", "ky"]))
+    end
+
+    test "one block rewritten in place still keeps its key", %{p1: p1, p2: p2} do
+      x = block("kx", "alpha beta gamma delta", %{"anchor" => "x"})
+      out = save([p1, x, p2], [p1, new("one two three four"), p2])
+
+      assert %{"_key" => "kx", "anchor" => "x"} = Enum.at(out, 1)
+    end
+
+    test "a kept block moved up: the edited block after it keeps its key" do
+      a = block("ka", "first paragraph stays the same")
+      b = block("kb", "the middle paragraph with some words", %{"anchor" => "mid"})
+      c = block("kc", "last paragraph stays the same too")
+      edited = block("e", "the middle paragraph with other words")
+      out = save([a, b, c], [c, edited, a])
+
+      assert Enum.map(out, & &1["_key"]) == ["kc", "kb", "ka"]
+      assert Enum.at(out, 1)["anchor"] == "mid"
+    end
+  end
+
+  # #28724 review S1: a block alone in place between blocks paired by their
+  # words keeps its key and fields, whatever its own words.
+  describe "a block alone in place beside an edited one" do
+    test "a heading renamed beside an edited paragraph keeps its key and anchor", %{p1: p1} do
+      h = block("h1", "Introduction", %{"style" => "h2", "anchor" => "intro"})
+      renamed = block("x", "Overview", %{"style" => "h2"})
+      edited = block("e", "The quick brown fox leaps over the lazy dog")
+      out = save([h, p1], [renamed, edited])
+
+      assert [%{"_key" => "h1", "anchor" => "intro"}, %{"_key" => "k1"}] = out
+    end
+
+    test "list items: one edited by words, one rewritten, both keep their keys" do
+      item = &block(&1, &2, %{"listItem" => "bullet", "level" => 1})
+
+      out =
+        save([item.("l1", "Milk"), item.("l2", "Eggs")], [
+          item.("x", "Oat milk"),
+          item.("x", "Butter")
+        ])
+
+      assert Enum.map(out, & &1["_key"]) == ["l1", "l2"]
+    end
+
+    test "typing into an empty paragraph beside an edited one keeps its key", %{p1: p1} do
+      empty = %{
+        block("ke", "")
+        | "children" => [%{"_type" => "span", "_key" => "kes", "text" => "", "marks" => []}]
+      }
+
+      edited = block("e", "The quick brown fox leaps over the lazy dog")
+      out = save([p1, empty], [edited, new("now some words")])
+
+      assert Enum.map(out, & &1["_key"]) == ["k1", "ke"]
     end
   end
 end

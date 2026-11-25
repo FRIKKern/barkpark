@@ -113,4 +113,47 @@ caseOf(
   "twoQ words",
 );
 
+// task-cfd4254783206ad7 (#28716 review): the change was read as starting at
+// the first letter that differs, so beside the same letters the caret went
+// inside their word: "say h|ello" with "hi " added made "say h|i hello", and
+// "two " removed from "one t|wo three" made "one tQhree".
+caseOf("an insert beside the same letters: the caret stays outside it", "<p>say hello</p>", [0, 5], "<p>say hi hello</p>", "say hi hQello");
+caseOf("a delete beside the same letters: the caret goes where it was", "<p>one two three</p>", [0, 5], "<p>one three</p>", "one Qthree");
+caseOf("an insert after the caret beside the same letters", "<p>say hello</p>", [0, 3], "<p>say hi hello</p>", "sayQ hi hello");
+
+// A selection stays selected, in its direction, where main collapsed it to
+// its start.
+const putPoint = (i, at) => {
+  const walk = document.createTreeWalker(body.children[i], window.NodeFilter.SHOW_TEXT);
+  let t;
+  while ((t = walk.nextNode())) {
+    if (at <= t.length) break;
+    at -= t.length;
+  }
+  return [t, at];
+};
+const selected = (label, mine, from, to, next, text, backward) => {
+  body.innerHTML = mine;
+  const [a, f] = [putPoint(...from), putPoint(...to)];
+  window.getSelection().setBaseAndExtent(a[0], a[1], f[0], f[1]);
+  theirs(next);
+  const sel = window.getSelection();
+  assert.equal(sel.toString(), text, label);
+  const r = document.createRange();
+  r.setStart(sel.anchorNode, sel.anchorOffset);
+  assert.equal(r.comparePoint(sel.focusNode, sel.focusOffset), backward ? -1 : 1, label + ": its direction");
+};
+
+selected("a selected word after text theirs added before it", "<p>one two three</p>", [0, 8], [0, 13], "<p>X one two three</p>", "three", false);
+selected("the same, selected backwards", "<p>one two three</p>", [0, 13], [0, 8], "<p>X one two three</p>", "three", true);
+selected(
+  "a selection across two blocks",
+  "<p>one two</p><p>three four</p>",
+  [0, 4],
+  [1, 5],
+  "<p>X one two</p><p>three four</p>",
+  "twothree",
+  false,
+);
+
 console.log("rt-remote caret: all cases pass");
