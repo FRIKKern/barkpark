@@ -13,7 +13,8 @@
 // switch of an address link (data-new-tab) (task-025d7af119d6f0b8). These are the styles, lists and decorators Sanity's
 // Portable Text editor offers for a body; the server turns the HTML into
 // Portable Text (Barkpark.Content.PortableText). Emits a bubbling
-// CustomEvent("bp-change", {detail: {value}}) on every input. The
+// CustomEvent("bp-change", {detail: {value}}) on every input outside an IME
+// composition, and once when a composition commits. The
 // LiveView hook BarkparkFieldBridge (see root.html.heex) catches the
 // bubbled event on the wrapper and mirrors detail.value into the
 // sibling hidden input identified by data-bridge-target — Phoenix
@@ -56,6 +57,7 @@ class BpRichTextEditor extends HTMLElement {
     super();
     this._editor = null;
     this._onInput = null;
+    this._onCompositionEnd = null;
     this._onPaste = null;
   }
 
@@ -93,7 +95,17 @@ class BpRichTextEditor extends HTMLElement {
     this.appendChild(this._editor);
     this._paint(initial);
 
-    this._onInput = () => this._emit();
+    // An IME composition posts nothing until it commits
+    // (task-9c12e45747b151ee): half a word saved mid-composition made another
+    // editor's save of earlier text in the block a clash. Chrome's last input
+    // of a composition is still composing, so the commit posts on
+    // compositionend; Firefox sends one more input after it, which posts the
+    // same value again.
+    this._onInput = (e) => {
+      if (e && e.isComposing) return;
+      this._emit();
+    };
+    this._onCompositionEnd = () => this._emit();
 
     // A custom Portable Text block (a mediaModule, a quote) is a box the text
     // cannot edit. Clicking it, or Enter or Space on it, asks the host to open
@@ -175,6 +187,7 @@ class BpRichTextEditor extends HTMLElement {
   _listen() {
     if (this._onSelection) document.addEventListener("selectionchange", this._onSelection);
     this._editor.addEventListener("input", this._onInput);
+    this._editor.addEventListener("compositionend", this._onCompositionEnd);
     this._editor.addEventListener("click", this._onBlockClick);
     this._editor.addEventListener("keydown", this._onBlockKey);
     this._editor.addEventListener("paste", this._onPaste);
@@ -189,6 +202,7 @@ class BpRichTextEditor extends HTMLElement {
     if (this._editor) {
       if (this._onFocusOut) this._editor.removeEventListener("focusout", this._onFocusOut);
       if (this._onInput) this._editor.removeEventListener("input", this._onInput);
+      if (this._onCompositionEnd) this._editor.removeEventListener("compositionend", this._onCompositionEnd);
       if (this._onPaste) this._editor.removeEventListener("paste", this._onPaste);
       if (this._onBlockClick) this._editor.removeEventListener("click", this._onBlockClick);
       if (this._onBlockKey) this._editor.removeEventListener("keydown", this._onBlockKey);
