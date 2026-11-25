@@ -17,11 +17,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       differ from the graphemes' alone), or that puts in letters whose
       marks no letter beside or under it has, is a clash (a mark of its own
       is task 4).
-    * Apart: each splice widened to whole words (a run of letters, Han and
-      kana with no space between them one word; a number with `.` `,` `:`
-      `-` `/` between its digits and a word with `'` `-` between its
-      letters one word too) leaves at least one base
-      letter between them. Two edits in one word, touching ranges and two
+    * Apart: each splice widened to whole words (a run of graphemes with no
+      space and no CJK punctuation between them: "example.com", "a/b",
+      "x-1", "3.14", "don't" and a space-less Han and kana run are each one
+      word, "two。かな" two) leaves at least one base letter between them. Two edits in one word, touching ranges and two
       inserts at one point are a clash: "cart" to "carts" and "dart" would
       give "darts".
     * Built from theirs, as the store holds it: only mine's splice is
@@ -41,6 +40,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   """
 
   alias Barkpark.Content.TextRebase
+  alias Barkpark.PortableDoc.TextDiff, as: LineDiff
 
   @fixed ~w(_key _type children markDefs)
 
@@ -125,9 +125,39 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
     cond do
       Enum.map(mid, &elem(&1, 0)) == Enum.map(put, &elem(&1, 0)) -> :error
+      not marks_kept?(mid, put) -> :error
       Enum.all?(put, &MapSet.member?(allowed, elem(&1, 1))) -> {:ok, {p, length(base) - s, put}}
       true -> :error
     end
+  end
+
+  # Inside the splice, the text kept is as long on letters as on graphemes
+  # alone: no base letter whose text stayed took other marks
+  # (task-81d9efce3bbf6428). The kept letters are a longest common run, by
+  # the one diff engine (`PortableDoc.TextDiff`, a letter a line); one tag
+  # in the splice needs none. Past @diff_cap letters with marks mixed, the
+  # cost is not run: :error. Under it the engine never falls back to its
+  # whole-block diff (2000 lines a side, 4M cells), which keeps nothing.
+  @diff_cap 1_000
+  # A pure deletion or paste keeps no letter: no mark can change (#28771 review).
+  defp marks_kept?([], _put), do: true
+  defp marks_kept?(_mid, []), do: true
+
+  defp marks_kept?(mid, put) do
+    case MapSet.size(MapSet.new(mid ++ put, &elem(&1, 1))) do
+      n when n <= 1 ->
+        true
+
+      _ ->
+        length(mid) + length(put) <= @diff_cap and
+          kept(mid, put) == kept(Enum.map(mid, &elem(&1, 0)), Enum.map(put, &elem(&1, 0)))
+    end
+  end
+
+  defp kept(a, b) do
+    ids = (a ++ b) |> Enum.uniq() |> Enum.with_index() |> Map.new()
+    lines = fn xs -> Enum.map_join(xs, "\n", &Integer.to_string(Map.fetch!(ids, &1))) end
+    LineDiff.diff_lines(lines.(a), lines.(b)) |> Enum.count(&(&1.op == "="))
   end
 
   defp ends(base, side) do
@@ -159,27 +189,13 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     if j >= 0 and j < tuple_size(gs) and word?(gs, j), do: edge(gs, j, step), else: i
   end
 
-  # A word letter: a letter or digit (or marks only), or a joiner inside a
-  # word, as `words/1` reads one: `.` `,` `:` `-` `/` between digits
-  # (3.14, 1,000, 12:30, 2026-11-25), `'` `’` `-` between letters (don't,
-  # e-mail). "3.14" to "4.14" and "3.15" would give "4.15" (#28761 review).
-  defp word?(gs, i) do
-    g = elem(gs, i)
+  # A word letter: any grapheme but a space and CJK punctuation (。、「」),
+  # as `words/1` reads one. A joiner list left gaps: "example.com" to
+  # "exampel.com" and "example.org" gave "exampel.org" (task-5d102d5baa016e0a).
+  defp word?(gs, i), do: letter?(elem(gs, i))
 
-    cond do
-      Regex.match?(~r/\A(?:[\p{L}\p{N}]|\p{M}+\z)/u, g) -> true
-      i == 0 or i == tuple_size(gs) - 1 -> false
-      true -> joins?(g, elem(gs, i - 1), elem(gs, i + 1))
-    end
-  end
-
-  defp joins?(g, a, b),
-    do:
-      (g in ~w(. , : - /) and digit?(a) and digit?(b)) or
-        (g in ["'", "’", "-"] and letter?(a) and letter?(b))
-
-  defp digit?(g), do: Regex.match?(~r/\A\p{N}/u, g)
-  defp letter?(g), do: Regex.match?(~r/\A\p{L}/u, g)
+  @apart ~r/\A(?:[\s\p{Z}]|(?=\p{P})[\x{3000}-\x{303F}\x{FF00}-\x{FFEF}])/u
+  defp letter?(g), do: not Regex.match?(@apart, g)
 
   # Theirs with mine's splice put in (moved by theirs' when theirs' is first).
   defp build(same, same, _mine, theirs), do: {:ok, theirs}
@@ -342,11 +358,14 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   defp all(block), do: Enum.map_join(block["children"], &text/1)
 
-  # Maximal runs of word letters: a letter or digit, then letters, digits
-  # and marks (an accent, a vowel sign) that go on with it, and the joiners
-  # `word?/2` reads inside a word.
-  @word ~r/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*(?:(?:(?<=\p{N})[.,:\-\/](?=\p{N})|(?<=[\p{L}\p{M}])['’\-](?=\p{L}))[\p{L}\p{N}][\p{L}\p{N}\p{M}]*)*/u
-  defp words(text), do: @word |> Regex.scan(text) |> List.flatten()
+  # Maximal runs of word letters, on graphemes as `word?/2` reads them.
+  defp words(text) do
+    text
+    |> String.graphemes()
+    |> Enum.chunk_by(&letter?/1)
+    |> Enum.filter(&letter?(hd(&1)))
+    |> Enum.map(&Enum.join/1)
+  end
 
   defp text(%{"text" => t}) when is_binary(t), do: t
   defp text(_child), do: ""
