@@ -175,7 +175,7 @@
     "pages/light-en.html": "de7e55515804efe8ce8ac20da92ed367f18e37848ba029bcb02a1a4dc3859f3b",
     "pages/light-nb-NO.html": "ea0ec0f17e7a042425b6b28422f789c6dfa516ca7c4fc97b633f0a39521f5d45"
   },
-  "gettext_sha256": "4c37477d56e8c9cf888e402128a3f288e280abbbfb4e55038a8b401f9f2edd90",
+  "gettext_sha256": "8d51ffd61f33f6c93c27b5169e4f9d0b06fdb62c69db7a8837317c5cd29f028d",
   "inputs": [
     "lib/mix/tasks/barkpark.portable_doc.gen_golden_email.ex",
     "lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",

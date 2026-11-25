@@ -10822,6 +10822,16 @@ msgstr ""
 msgid "Updated by another user — your unsaved edits are kept."
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/editor.ex:1418
+#, elixir-autogen, elixir-format
+msgid "%{count} more"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/leave_ask.ex:54
+#, elixir-autogen, elixir-format
+msgid "Press again to leave."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3661
 #, elixir-autogen, elixir-format
 msgid "first %{cols} of %{used} columns"
