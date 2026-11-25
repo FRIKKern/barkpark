@@ -146,6 +146,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
              ) == :clash
     end
 
+    test "a block over TextRebase.max_bytes/0 of text" do
+      text = String.duplicate("word ", div(Barkpark.Content.TextRebase.max_bytes(), 5) + 1)
+      assert Inline.merge(b(text), b("FIRST " <> text), b(text <> "LAST")) == :clash
+    end
+
     test "a block field either side changed" do
       assert Inline.merge(
                b("one two three"),
