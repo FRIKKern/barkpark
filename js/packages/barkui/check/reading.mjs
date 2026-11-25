@@ -39,6 +39,8 @@ export async function readView(page, part, waits = []) {
     const y = Math.floor(Math.min(...all.map((b) => b.y)))
     return { x, y, w: Math.ceil(Math.max(...all.map((b) => b.x + b.w))) - x, h: Math.ceil(Math.max(...all.map((b) => b.y + b.h))) - y }
   }, [sel, open.boxes])
+  const R0 = performance.now()
+  try {
   if (open.boxes.length) {
     try {
       await world(() => window.__barkCheck.hideLayers(true))
@@ -55,6 +57,12 @@ export async function readView(page, part, waits = []) {
     return { ...(await readNow(page, part, waits, { sel, world, scale, frame, shoot, clip })), unnamed: open.unnamed, can }
   } finally {
     if (open.boxes.length) await world(() => window.__barkCheck.under(null))
+  }
+  } finally {
+    if (!readView.seen) readView.seen = new Set()
+    const k = `${part.name} ${clip.w}x${clip.h}@${scale}`
+    readView.n = (readView.n ?? 0) + 1
+    if (!readView.seen.has(k) || readView.n % 25 === 0) { readView.seen.add(k); process.stderr.write(`T> ${part.name}       reading ${clip.w}x${clip.h} at ${scale}x took ${((performance.now() - R0) / 1000).toFixed(2)} s\n`) }
   }
 }
 

@@ -157,6 +157,8 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
   const drives = new Map()
   for (const p of todo) for (const s of p.states) drives.set(`${p.el} ${MODES[s]}`, { el: p.el, at: p.at, mode: MODES[s], kind: p.kind })
   const held = new Map()
+  process.stderr.write(`T> ${part.name}     drives ${drives.size}: ${[...drives.values()].map((d) => `${d.at} ${d.mode}`).join(' | ')}\n`)
+  let D0 = performance.now()
   for (const { el, at, mode, kind } of drives.values()) {
     const said = `real ${mode.replace(' ', ' and ')} on ${at}`
     if (mode === 'checked' && kind !== 'checkbox' && kind !== 'radio') {
@@ -237,6 +239,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
       if (left) fails.push(`${said}: ${left}; a judged ${mode.replace(' ', ' and ')} must leave the stage as it found it, and the check puts back only what is checked`)
     }
   }
+  process.stderr.write(`T> ${part.name}     drive loop ${((performance.now() - D0) / 1000).toFixed(1)}\n`); D0 = performance.now()
   // Each state once, with every control it was proven on pinned. Text-only is a fact about a control at rest
   // (docs/PARTS.md), read in every view with its pin let go; here the controls are not at rest, so that one reading is
   // left to the views.
@@ -256,6 +259,7 @@ export async function realStates(page, part, { skin, settle, title, entries, pai
       await page.barkCheck(setPins, [part.name, list, null])
     }
   }
+  process.stderr.write(`T> ${part.name}     held readings ${((performance.now() - D0) / 1000).toFixed(1)}\n`)
   await rest()
   return fails
 }

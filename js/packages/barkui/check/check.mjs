@@ -152,7 +152,9 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     const began = performance.now()
     try {
       await limit((async () => {
+        let T0 = performance.now(); const T = (w) => { process.stderr.write(`T> ${part.name} ${w} ${((performance.now() - T0) / 1000).toFixed(1)}\n`); T0 = performance.now() }
         if (only.includes('pressed')) ({ light: lights.pressed, steps } = await pressed(ctx, part, skins))
+        T('pressed')
         if (only.includes('skins') || only.includes('schemes')) {
           const looks = await skinsAndSchemes(ctx, part, skins, viewPages)
           viewsLine = looks.views
@@ -161,8 +163,11 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
           paintFree = looks.paintFree
           textOnly = looks.textOnly
         }
+        T('skinsAndSchemes')
         if (only.includes('phone')) lights.phone = await phone(ctx, part, skins, viewPages)
+        T('phone')
         if (only.includes('noscript')) lights.noscript = await noscript(ctx, part)
+        T('noscript')
       })(), PART_MS, `part ${part.name}`)
     } catch (e) {
       ctx.errors.push(String(e.message).split('\n')[0])
