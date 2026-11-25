@@ -113,10 +113,11 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
 
     html = post_rt(a, "<p>one twoA</p><p>#{p1}</p>", seen(page))
 
-    assert words(stored(c)["meta"]["rt"]) |> Enum.member?(p1 <> " epsilon")
-
-    assert html =~ "Someone else rewrote" or
-             words(stored(c)["meta"]["rt"]) == ["one twoA", p1 <> " epsilon", p2]
+    # Read against what A shows, the line-up is not certain (B changed p1
+    # and added p2 beside it): held, B's value stored exactly. Read against
+    # B's second save, as before, the word was taken out with no banner.
+    assert words(stored(c)["meta"]["rt"]) == ["one two", p1 <> " epsilon", p2]
+    assert html =~ "Someone else rewrote"
   end
 
   test "B saves the sibling meta.rt2: only rt2 is sent", c do
