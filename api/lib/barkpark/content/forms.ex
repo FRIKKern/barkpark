@@ -1135,7 +1135,7 @@ defmodule Barkpark.Content.Forms do
   # `whole` is the posted fields written exactly as posted, nulls and empty
   # subfields included: an undo or redo's whole value (`field_bases` marks
   # them `:whole`), which the store held before and must hold again.
-  defp classic_save_content(base_doc, current_doc, whole, params, schema, dataset, scope) do
+  defp classic_save_content(base_doc, current_doc, whole, params, schema, dataset, {scope, seen}) do
     snapshot = Map.get(base_doc, :content) || %{}
     base_content = Map.get(current_doc, :content) || %{}
 
@@ -1144,7 +1144,7 @@ defmodule Barkpark.Content.Forms do
     params =
       params
       |> edits(snapshot, schema)
-      |> ObjectRebase.onto(snapshot, base_content, schema)
+      |> ObjectRebase.onto(snapshot, base_content, schema, seen)
       |> Map.merge(whole)
 
     case Map.get(base_content, "blocks") do
@@ -1468,7 +1468,8 @@ defmodule Barkpark.Content.Forms do
     {bases, write_opts} = Keyword.pop(write_opts, :field_bases, %{})
     {expect, write_opts} = Keyword.pop(write_opts, :field_expect, %{})
     {over, write_opts} = Keyword.pop(write_opts, :saved_over, [])
-    params_now = TextRebase.rebase(params, bases, text_values(current))
+    {seen, write_opts} = Keyword.pop(write_opts, :text_seen, %{})
+    params_now = TextRebase.rebase(params, bases, text_values(current), seen)
     write_opts = Keyword.put(write_opts, :whole_fields, for({key, :whole} <- bases, do: key))
 
     case expected(expect, current) ||
@@ -1587,6 +1588,7 @@ defmodule Barkpark.Content.Forms do
 
   defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
     {whole, opts} = Keyword.pop(opts, :whole_fields, [])
+    {seen, opts} = Keyword.pop(opts, :rich_text_seen, %{})
 
     with content when is_map(content) <-
            classic_save_content(
@@ -1596,7 +1598,7 @@ defmodule Barkpark.Content.Forms do
              params,
              CanonicalShapes.for_type(schema, type),
              dataset,
-             Keyword.take(opts, [:workspace_id, :project_id])
+             {Keyword.take(opts, [:workspace_id, :project_id]), seen}
            ) do
       new_title = row_field(params, "title", base_doc, current)
 

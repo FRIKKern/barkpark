@@ -82,27 +82,27 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerFixedPointTest do
   describe "B5: an unwrap never leaves a tree the parser would not build" do
     for {name, html} <- [
           {"li under aside",
-           ~s(<ul><li>a<div><aside><li>b</li></aside></div></li></ul><p id="esc">x</p>)},
+           ~s(<ul><li>a<div><aside><li>b</li></aside></div></li></ul><p id="bp-anchor-esc">x</p>)},
           {"dd under marquee",
-           ~s(<dl><dt>a<div><marquee><dd>b</dd></marquee></div></dt></dl><p id="esc">x</p>)},
+           ~s(<dl><dt>a<div><marquee><dd>b</dd></marquee></div></dt></dl><p id="bp-anchor-esc">x</p>)},
           {"dt under main",
-           ~s(<dl><dt>a<div><main><dt>b</dt></main></div></dt></dl><p id="esc">x</p>)},
+           ~s(<dl><dt>a<div><main><dt>b</dt></main></div></dt></dl><p id="bp-anchor-esc">x</p>)},
           {"li under center",
-           ~s(<ul><li>a<div><center><li>b</li></center></div></li></ul><p id="esc">x</p>)},
+           ~s(<ul><li>a<div><center><li>b</li></center></div></li></ul><p id="bp-anchor-esc">x</p>)},
           {"li under marquee",
-           ~s(<ul><li>a<div><marquee><li>b</li></marquee></div>c</li></ul><p id="esc">x</p>)},
-          {"li with no list", ~s(<li><div><aside><li>b</aside></div><p id="esc">x</p>)}
+           ~s(<ul><li>a<div><marquee><li>b</li></marquee></div>c</li></ul><p id="bp-anchor-esc">x</p>)},
+          {"li with no list", ~s(<li><div><aside><li>b</aside></div><p id="bp-anchor-esc">x</p>)}
         ] do
       test "#{name}: stable, and no </div> closes outside the box" do
         out = S.sanitize(unquote(html))
         assert stable?(out), out
         assert contained?(out), out
-        assert count(reader(out), "#pb #esc") == 1
+        assert count(reader(out), "#pb #bp-anchor-esc") == 1
       end
     end
 
     test "control: one pass of the old kind does escape the box" do
-      refute contained?(~s(<ul><li>a<div><li>b</li></div></li></ul><p id="esc">x</p>))
+      refute contained?(~s(<ul><li>a<div><li>b</li></div></li></ul><p id="bp-anchor-esc">x</p>))
     end
 
     test "a body that does not settle is served as its text, and the log names the id only" do
@@ -110,7 +110,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerFixedPointTest do
 
       log =
         capture_log(fn ->
-          assert S.sanitize(html, max_passes: 1, id: "paper-7") == "<p>ab &lt;secret&gt;</p>"
+          assert S.sanitize(html, max_passes: 1, id: "paper-7") == "<p>a b &lt;secret&gt;</p>"
         end)
 
       assert log =~ ~s(id="paper-7")

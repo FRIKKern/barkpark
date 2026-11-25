@@ -1,0 +1,104 @@
+<div data-demo-row>
+  <span data-demo-label>Hidden, shown</span>
+  <ui-field id="password-input-new-field" data-slot="field">
+    <ui-field-label id="password-input-new-field-label" data-slot="field-label" for="password-input-new">Password</ui-field-label>
+    <div data-password-row>
+      <ui-password-input data-slot="password-input">
+        <input id="password-input-new" data-slot="password-input-control" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" aria-labelledby="password-input-new-field-label" aria-describedby="password-input-new-field-description">
+        <ui-password-input-toggle><button aria-label="Show password" data-slot="password-input-toggle" type="button" aria-pressed="false" aria-controls="password-input-new"></button></ui-password-input-toggle>
+      </ui-password-input>
+    </div>
+    <ui-field-description id="password-input-new-field-description" data-slot="field-description">Use at least 8 characters.</ui-field-description>
+  </ui-field>
+  <ui-field id="password-input-wifi-field" data-slot="field">
+    <ui-field-label id="password-input-wifi-field-label" data-slot="field-label" for="password-input-wifi">Wi-Fi password</ui-field-label>
+    <div data-password-row>
+      <ui-password-input default-visible default-value="sample-wifi-0000" data-slot="password-input" data-visible="" data-filled="">
+        <input id="password-input-wifi" value="sample-wifi-0000" data-slot="password-input-control" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-visible="" data-filled="" aria-labelledby="password-input-wifi-field-label" aria-describedby="password-input-wifi-field-description">
+        <ui-password-input-toggle><button aria-label="Show password" data-slot="password-input-toggle" type="button" aria-pressed="true" aria-controls="password-input-wifi" data-visible="" data-filled=""></button></ui-password-input-toggle>
+      </ui-password-input>
+    </div>
+    <ui-field-description id="password-input-wifi-field-description" data-slot="field-description">Guests read it from here, so it starts shown.</ui-field-description>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Read-only, disabled</span>
+  <ui-field id="password-input-key-field" data-slot="field">
+    <ui-field-label id="password-input-key-field-label" data-slot="field-label" for="password-input-key">Recovery key</ui-field-label>
+    <div data-password-row>
+      <ui-password-input read-only default-value="sample-key-0000" data-slot="password-input" data-filled="" data-readonly="">
+        <input id="password-input-key" value="sample-key-0000" data-slot="password-input-control" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" readonly="" data-filled="" data-readonly="" aria-labelledby="password-input-key-field-label">
+        <ui-password-input-toggle><button aria-label="Show recovery key" data-slot="password-input-toggle" type="button" aria-pressed="false" aria-controls="password-input-key" data-filled="" data-readonly=""></button></ui-password-input-toggle>
+      </ui-password-input>
+    </div>
+  </ui-field>
+  <ui-field id="password-input-admin-field" data-slot="field" disabled data-disabled="">
+    <ui-field-label id="password-input-admin-field-label" data-slot="field-label" for="password-input-admin" data-disabled="">Admin password</ui-field-label>
+    <div data-password-row>
+      <ui-password-input default-value="not-a-real-one" data-slot="password-input" data-filled="" data-disabled="">
+        <input id="password-input-admin" value="not-a-real-one" data-slot="password-input-control" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" disabled="" data-filled="" data-disabled="" aria-labelledby="password-input-admin-field-label">
+        <ui-password-input-toggle><button aria-label="Show password" data-slot="password-input-toggle" type="button" aria-pressed="false" aria-controls="password-input-admin" disabled="" data-filled="" data-disabled=""></button></ui-password-input-toggle>
+      </ui-password-input>
+    </div>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Invalid</span>
+  <ui-field id="password-input-confirm-field" data-slot="field" invalid data-invalid="">
+    <ui-field-label id="password-input-confirm-field-label" data-slot="field-label" for="password-input-confirm" data-invalid="">Confirm password</ui-field-label>
+    <div data-password-row>
+      <ui-password-input default-value="sample-pass" data-slot="password-input" data-filled="">
+        <input id="password-input-confirm" value="sample-pass" data-slot="password-input-control" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-filled="" aria-invalid="true" data-invalid="" aria-labelledby="password-input-confirm-field-label" aria-describedby="password-input-confirm-field-error">
+        <ui-password-input-toggle><button aria-label="Show password" data-slot="password-input-toggle" type="button" aria-pressed="false" aria-controls="password-input-confirm" data-filled=""></button></ui-password-input-toggle>
+      </ui-password-input>
+    </div>
+    <ui-field-error id="password-input-confirm-field-error" data-slot="field-error" data-invalid="">The two passwords do not match.</ui-field-error>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Hidden: hover, focus, hover and focus; empty: focus</span>
+  <input id="password-input-pin-hidden-hover" data-slot="password-input-control" type="password" value="Hover" data-filled="" data-pin="hover">
+  <input id="password-input-pin-hidden-focus" data-slot="password-input-control" type="password" value="Focus" data-filled="" data-pin="focus-visible">
+  <input id="password-input-pin-hidden-hover-focus" data-slot="password-input-control" type="password" value="Hover and focus" data-filled="" data-pin="hover focus-visible">
+  <input id="password-input-pin-empty-focus" data-slot="password-input-control" type="password" data-pin="focus-visible">
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Shown: hover, focus, hover and focus</span>
+  <input id="password-input-pin-shown-hover" data-slot="password-input-control" type="text" value="Hover" data-filled="" data-visible="" data-pin="hover">
+  <input id="password-input-pin-shown-focus" data-slot="password-input-control" type="text" value="Focus" data-filled="" data-visible="" data-pin="focus-visible">
+  <input id="password-input-pin-shown-hover-focus" data-slot="password-input-control" type="text" value="Hover and focus" data-filled="" data-visible="" data-pin="hover focus-visible">
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Invalid, hidden and shown: hover, focus</span>
+  <input id="password-input-pin-invalid-hidden-hover" data-slot="password-input-control" type="password" value="Hover" data-filled="" data-invalid="" aria-invalid="true" data-pin="hover">
+  <input id="password-input-pin-invalid-hidden-focus" data-slot="password-input-control" type="password" value="Focus" data-filled="" data-invalid="" aria-invalid="true" data-pin="focus-visible">
+  <input id="password-input-pin-invalid-shown-hover" data-slot="password-input-control" type="text" value="Hover" data-filled="" data-visible="" data-invalid="" aria-invalid="true" data-pin="hover">
+  <input id="password-input-pin-invalid-shown-focus" data-slot="password-input-control" type="text" value="Focus" data-filled="" data-visible="" data-invalid="" aria-invalid="true" data-pin="focus-visible">
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only, hidden and shown: hover, focus; disabled, hidden and shown: hover</span>
+  <input id="password-input-pin-readonly-hidden-hover" data-slot="password-input-control" type="password" value="Hover" data-filled="" data-readonly="" readonly data-pin="hover">
+  <input id="password-input-pin-readonly-hidden-focus" data-slot="password-input-control" type="password" value="Focus" data-filled="" data-readonly="" readonly data-pin="focus-visible">
+  <input id="password-input-pin-readonly-shown-hover" data-slot="password-input-control" type="text" value="Hover" data-filled="" data-visible="" data-readonly="" readonly data-pin="hover">
+  <input id="password-input-pin-readonly-shown-focus" data-slot="password-input-control" type="text" value="Focus" data-filled="" data-visible="" data-readonly="" readonly data-pin="focus-visible">
+  <input id="password-input-pin-disabled-hidden-hover" data-slot="password-input-control" type="password" value="Disabled" data-filled="" data-disabled="" disabled data-pin="hover">
+  <input id="password-input-pin-disabled-shown-hover" data-slot="password-input-control" type="text" value="Disabled" data-filled="" data-visible="" data-disabled="" disabled data-pin="hover">
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Show button, hidden: hover, pressed, focus, hover with focus, pressed with focus</span>
+  <button id="password-input-pin-toggle-hidden-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="hover"></button>
+  <button id="password-input-pin-toggle-hidden-pressed" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="hover active"></button>
+  <button id="password-input-pin-toggle-hidden-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="focus-visible"></button>
+  <button id="password-input-pin-toggle-hidden-hover-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="hover focus-visible"></button>
+  <button id="password-input-pin-toggle-hidden-pressed-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-pin="active focus-visible"></button>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Show button, shown: hover, pressed, focus, hover with focus, pressed with focus; disabled, hidden and shown: hover</span>
+  <button id="password-input-pin-toggle-shown-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="hover"></button>
+  <button id="password-input-pin-toggle-shown-pressed" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="hover active"></button>
+  <button id="password-input-pin-toggle-shown-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="focus-visible"></button>
+  <button id="password-input-pin-toggle-shown-hover-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="hover focus-visible"></button>
+  <button id="password-input-pin-toggle-shown-pressed-focus" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-pin="active focus-visible"></button>
+  <button id="password-input-pin-toggle-disabled-hidden-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="false" data-filled="" data-disabled="" disabled data-pin="hover"></button>
+  <button id="password-input-pin-toggle-disabled-shown-hover" type="button" aria-label="Show password" data-slot="password-input-toggle" aria-pressed="true" data-filled="" data-visible="" data-disabled="" disabled data-pin="hover"></button>
+</div>

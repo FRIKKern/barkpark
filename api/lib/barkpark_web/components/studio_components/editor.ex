@@ -974,12 +974,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
               aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop(@editor_schema, @nav_group, @parent_assigns)}
             >
+            <%!-- `data-studio-held`: what Studio asks before a link leaves or
+                  the tab closes while a field is held (bp-studio-leave.js,
+                  task-c4b59891f88686e0). The desk asks from its pane
+                  (`Desk.LeaveGuard`). Not drawn while nothing is held. --%>
             <form
               phx-submit="save"
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
               data-desk-undo-keys={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.DocUndo.names(@editor_schema)}
+              data-studio-held={not desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.LeaveGuard.message(@parent_assigns)}
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}
             >
               <%!-- Per field, the number of the last remote value this page

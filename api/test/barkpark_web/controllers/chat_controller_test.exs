@@ -441,22 +441,33 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert body["provider_session_id"] == body["id"]
     end
 
+    # A registered-host create needs an owner or admin seat in the workspace
+    # (task-7efaf895e8bc88e4): the no-workspace admin token holds none, a
+    # Default-bound admin token holds one.
     test "persists and projects explicit provider and registered-host identity", %{admin: a1} do
       host_id = Ecto.UUID.generate()
 
+      create =
+        Jason.encode!(%{
+          provider: "codex",
+          execution_target: "registered_host",
+          execution_host_id: host_id,
+          mode: "read-only",
+          model: "gpt-5.6",
+          effort: "high"
+        })
+
+      assert json_conn(a1) |> post("/v1/chat/sessions", create) |> json_response(403)
+
+      seated = "chat-seated-admin-#{System.unique_integer([:positive])}"
+      ws_id = default_workspace_id!()
+
+      {:ok, _} =
+        Auth.create_token(seated, "chat-seated", @dataset, ["read", "write", "admin"], ws_id)
+
       body =
-        json_conn(a1)
-        |> post(
-          "/v1/chat/sessions",
-          Jason.encode!(%{
-            provider: "codex",
-            execution_target: "registered_host",
-            execution_host_id: host_id,
-            mode: "read-only",
-            model: "gpt-5.6",
-            effort: "high"
-          })
-        )
+        json_conn(seated)
+        |> post("/v1/chat/sessions", create)
         |> json_response(201)
 
       assert body["provider"] == "codex"
@@ -991,8 +1002,15 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
 
     test "a registered-host session's repo root is UNKNOWN — the server never probes another machine's path",
-         %{admin: a1} do
-      %{host: host, sid: sid} = host_session!()
+         %{admin: _a1} do
+      %{ws: ws, host: host, sid: sid} = host_session!()
+      # The reader holds an admin seat in the session's workspace: only a
+      # seated reader sees a host session (task-f44bbb6363d28e37).
+      a1 = "ctx-host-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(a1, "ctx host admin", "production", ["read", "write", "admin"], ws.id)
+
       # A cwd that IS a work tree ON THIS SERVER. The point is that the answer
       # is `unknown` ANYWAY: for a host-executed session that path names a
       # directory on someone ELSE's machine, and probing our own filesystem for

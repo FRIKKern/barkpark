@@ -1247,8 +1247,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # nil, or the tab with the refusal line when ChatHostGate refuses `act`.
   defp host_refused(socket, act) do
-    if ChatHostGate.authorize(socket.assigns, act) != :ok,
-      do: append_message(socket, :system, spawn_error_text(:host_execution_not_permitted))
+    case ChatHostGate.authorize(socket.assigns, act) do
+      :ok -> nil
+      {:error, reason} -> append_message(socket, :system, spawn_error_text(reason))
+    end
   end
 
   # Pick the reasoning-effort tier (charter D48) — shared by the footer selector.
@@ -4822,9 +4824,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
             )
             |> assign(session: nil, status: :offline)
 
-          {:error, :host_execution_not_permitted} ->
+          {:error, reason} when reason in [:host_execution_not_permitted, :host_admin_required] ->
             socket
-            |> append_message(:system, spawn_error_text(:host_execution_not_permitted))
+            |> append_message(:system, spawn_error_text(reason))
             |> assign(session: nil, status: :offline)
 
           {:error, reason} ->
@@ -5384,6 +5386,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {sessions, listed_owners} =
       [archived: socket.assigns[:show_archived] == true]
       |> StudioChat.list_sessions(:global)
+      |> then(&ChatHostGate.visible_sessions(socket.assigns, &1))
       |> clamp_list_to_tenancy(socket)
 
     # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
@@ -5611,14 +5614,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # OWN ws-B session would stop loading (`pds_chatlive_global_reads_test`'s
   # positive control is exactly that arm). Using the URL workspace on both leaves
   # the flat mount ungated, which is the defect this seam is here for.
-  defp load_permits?(socket, %{owner_workspace_id: owner}) do
-    case read_workspace_id(socket) do
-      # Scoped mount: `LiveScope` pinned an authorized URL workspace.
-      ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
-      # Flat mount: nothing binds the socket, so ask the token — the same axis
-      # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
-      nil -> principal_permits_owner?(socket, owner)
-    end
+  defp load_permits?(socket, %{owner_workspace_id: owner} = session) do
+    ChatHostGate.visible?(socket.assigns, session) and
+      case read_workspace_id(socket) do
+        # Scoped mount: `LiveScope` pinned an authorized URL workspace.
+        ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
+        # Flat mount: nothing binds the socket, so ask the token — the same axis
+        # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
+        nil -> principal_permits_owner?(socket, owner)
+      end
   end
 
   defp load_permits?(_socket, _other), do: false
@@ -8453,6 +8457,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp spawn_error_text(:host_execution_not_permitted),
     do: Barkpark.StudioChat.HostExecution.message()
+
+  defp spawn_error_text(:host_admin_required),
+    do: BarkparkWeb.HostExecutionGate.host_admin_message()
 
   defp spawn_error_text(:binary_not_found),
     do:

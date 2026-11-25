@@ -17,10 +17,14 @@ defmodule BarkparkWeb.HostExecutionGate do
   one). An `admin` token of any other workspace is not one.
   """
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Accounts.User
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Repo
   alias Barkpark.StudioChat.HostExecution
+  alias Barkpark.StudioChat.Session
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.Plugs.RequirePlatformOperator
@@ -34,12 +38,28 @@ defmodule BarkparkWeb.HostExecutionGate do
   end
 
   @doc """
-  `:ok`, or `{:error, :host_execution_not_permitted}` when `principal` would
-  start or drive a managed turn on the host for `session` (a map with
-  `:provider`, `:execution_target`, `:owner_workspace_id`) that it may not.
-  `registered_host` sessions and turns that do not run on the host always pass.
+  `:ok`, or an error when `principal` may not start or drive a turn for
+  `session` (a map with `:provider`, `:execution_target`,
+  `:owner_workspace_id`):
+
+    * `{:error, :host_execution_not_permitted}` — a managed turn that would run
+      on the INSTANCE host, for a principal that is not an instance principal.
+      Managed turns that do not run on the host always pass.
+    * `{:error, :host_admin_required}` — a `registered_host` session, for a
+      principal that may not run a turn on that workspace's own computers
+      (task-7efaf895e8bc88e4; before it, any member with chat access could).
+      It passes for an owner or admin seat in the session's workspace
+      (`Tenancy.Auth.workspace_admin?/2`), and for an api token whose
+      `owner_user_id` holds the OWNER seat there (a personal or app token the
+      owner minted). A Connector (chat) token is minted with no
+      `owner_user_id`, so it gets nothing from that second arm and needs an
+      owner or admin seat of its own. A session with no owning workspace
+      passes for no one. On an EXISTING session the caller meets
+      `may_see_session?/2` first, so a refused seat gets the missing-id 404
+      there; this 403 is what a create answers.
   """
-  @spec authorize_turn(term(), map()) :: :ok | {:error, :host_execution_not_permitted}
+  @spec authorize_turn(term(), map()) ::
+          :ok | {:error, :host_execution_not_permitted | :host_admin_required}
   def authorize_turn(principal, %{execution_target: target} = session)
       when target in [nil, "managed"] do
     ws = Map.get(session, :owner_workspace_id)
@@ -51,7 +71,78 @@ defmodule BarkparkWeb.HostExecutionGate do
     end
   end
 
+  def authorize_turn(principal, %{execution_target: "registered_host"} = session) do
+    if host_seat?(principal, Map.get(session, :owner_workspace_id)),
+      do: :ok,
+      else: {:error, :host_admin_required}
+  end
+
   def authorize_turn(_principal, _session), do: :ok
+
+  @doc "The sentence a `:host_admin_required` refusal carries."
+  @spec host_admin_message() :: String.t()
+  def host_admin_message do
+    "This chat runs on a computer registered to this workspace. Only a workspace owner " <>
+      "or admin can start or send to a chat on it."
+  end
+
+  @doc "Every error reason `authorize_turn/2` returns; each one is a 403."
+  @spec refusals() :: [atom()]
+  def refusals, do: [:host_execution_not_permitted, :host_admin_required]
+
+  @doc "The wire `{code, message}` of an `authorize_turn/2` refusal."
+  @spec refusal(atom()) :: {String.t(), String.t()}
+  def refusal(:host_admin_required), do: {"host_admin_required", host_admin_message()}
+
+  def refusal(:host_execution_not_permitted),
+    do: {HostExecution.reason(), HostExecution.message()}
+
+  @doc """
+  True when `principal` may SEE `session` at all: read it, stream it, list it,
+  interrupt or archive it (task-f44bbb6363d28e37). A `registered_host` session
+  is the same seat as a turn on it (`authorize_turn/2`); every other session
+  is `true` here and keeps its existing gates. A door that answers `false`
+  answers not-found, so a session's existence does not leak.
+  """
+  @spec may_see_session?(term(), map()) :: boolean()
+  def may_see_session?(principal, %{execution_target: "registered_host"} = session),
+    do: host_seat?(principal, Map.get(session, :owner_workspace_id))
+
+  def may_see_session?(_principal, _session), do: true
+
+  @doc """
+  `rows` without the `registered_host` sessions `principal` may not see
+  (`may_see_session?/2`). For list rows that do not carry
+  `owner_workspace_id` (the sidebar `select` leaves it out): the owners of the
+  host rows are read in ONE query, and only when there are host rows.
+  """
+  @spec visible_sessions(term(), [map()]) :: [map()]
+  def visible_sessions(principal, rows) do
+    case for(%{execution_target: "registered_host", id: id} <- rows, do: id) do
+      [] ->
+        rows
+
+      host_ids ->
+        owners =
+          from(s in Session, where: s.id in ^host_ids, select: {s.id, s.owner_workspace_id})
+          |> Repo.all()
+          |> Map.new()
+
+        Enum.filter(rows, fn row ->
+          may_see_session?(principal, Map.put(row, :owner_workspace_id, Map.get(owners, row.id)))
+        end)
+    end
+  end
+
+  defp host_seat?(principal, ws) when is_binary(ws),
+    do: TenancyAuth.workspace_admin?(principal, ws) or owner_users_token?(principal, ws)
+
+  defp host_seat?(_principal, _ws), do: false
+
+  defp owner_users_token?(%ApiToken{owner_user_id: uid}, ws) when is_binary(uid),
+    do: TenancyAuth.workspace_owner?(uid, ws, :user)
+
+  defp owner_users_token?(_principal, _ws), do: false
 
   # The admin bit is the instance tier only on a token of the Default workspace
   # or of no workspace (the legacy operator; no DB read for that one). An admin

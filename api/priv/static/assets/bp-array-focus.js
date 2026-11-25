@@ -201,14 +201,47 @@
     return now.length - s;
   }
 
+  // The stretch of `now` that differs from `was`: [start, end).
+  function changed(was, now) {
+    var p = 0;
+    while (p < was.length && p < now.length && was[p] === now[p]) p++;
+    var s = 0;
+    while (s < was.length - p && s < now.length - p && was[was.length - 1 - s] === now[now.length - 1 - s]) s++;
+    return [p, now.length - s];
+  }
+
   function hasOption(select, value) {
     for (var i = 0; i < select.options.length; i++) if (select.options[i].value === value) return true;
     return false;
   }
 
+  // task-f75673bec30873e6: the input an IME is composing in. A value drawn
+  // into it mid-composition made the composition commit again (かかき). It
+  // is left as it is, as typing not yet sent: its post, at compositionend,
+  // carries the number of the value it was typed from, and the server merges
+  // it (as rich text waits, task #28732).
+  var composing = null;
+
+  document.addEventListener(
+    "compositionstart",
+    function (e) {
+      composing = e.target;
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "compositionend",
+    function () {
+      composing = null;
+    },
+    true,
+  );
+
   function takeFocused(values) {
     var el = document.activeElement;
     if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
+    if (el === composing) return;
     var select = el.tagName === "SELECT" && !el.multiple;
     if (!(select || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
     if (!Object.prototype.hasOwnProperty.call(values, el.name)) return;
@@ -222,6 +255,11 @@
     }
     var start = shift(el.selectionStart, change.was, change.value);
     var end = shift(el.selectionEnd, change.was, change.value);
+    // task-e070cb99b86100be: a selection that would span letters the other
+    // editor put in is not carried onto them: B's next key replaced them and
+    // the post read as B's own edit. The caret goes after the other's change.
+    var added = changed(change.was, change.value);
+    if (start !== end && added[1] > added[0] && start < added[1] && end > added[0]) start = end = added[1];
     el.value = change.value;
     el.setSelectionRange(start, end);
   }
@@ -306,7 +344,34 @@
     if (detail.seqs) recordSeen(values, detail.seqs);
   }
 
+  // task-4fc7383b936f606a: a connected mount sends each free-text field its
+  // stored value with a number (`RemoteValues.born/1`). A page that rejoins
+  // a new socket keeps this input, the old socket's numbers. A field showing
+  // the value takes the number. One that does not (typed while away) keeps
+  // its number, or reports 0, a number no socket sends: the server holds its
+  // post rather than write it over a save it never showed. Nothing is drawn.
+  function onBorn(e) {
+    var detail = (e && e.detail) || {};
+    var values = detail.values || {};
+    var seqs = detail.seqs || {};
+    var form = document.getElementById("editor-form");
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    seen.v = SEEN_VERSION;
+    Object.keys(seqs).forEach(function (name) {
+      var value = values[name];
+      var field = form.elements.namedItem(name);
+      if (typeof value !== "string" || typeof seqs[name] !== "number") return;
+      // A field not drawn now is drawn later from the server's form.
+      if (!field || (typeof field.value === "string" && lf(field.value) === lf(value))) seen[name] = seqs[name];
+      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = 0;
+    });
+    input.value = JSON.stringify(seen);
+  }
+
   window.addEventListener("phx:bp:form-remote-values", onRemoteValues);
+  window.addEventListener("phx:bp:form-born", onBorn);
   window.BarkparkFormRemoteValues = onRemoteValues;
 })();
 

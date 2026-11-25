@@ -394,6 +394,10 @@ defmodule Barkpark.Content.Errors do
                          # way out is the cloud profile or a registered host
                          # (task-6ca882967fd95dda, StudioChat.HostExecution).
                          "host_execution_not_permitted",
+                         # 403: a create or a turn on a registered-host session
+                         # by a principal without an owner/admin seat in its
+                         # workspace (task-7efaf895e8bc88e4, HostExecutionGate).
+                         "host_admin_required",
                          # Per-account prefs (task-7d2a48dbf7e4bf34) —
                          # user_pref_controller.ex. `no_user_identity` (403): a
                          # shared/admin-minted token with no owner has no
@@ -1433,6 +1437,15 @@ defmodule Barkpark.Content.Errors do
          details: details,
          hint: hint
        }
+
+  # A NUL in a task or session write: the changeset refusal's shape.
+  defp build({:error, %Barkpark.Content.NulByteError{field: field, message: message}}),
+    do: %{
+      code: "validation_failed",
+      message: "document failed validation",
+      status: 422,
+      details: %{field => [message]}
+    }
 
   defp build({:error, %Ecto.Changeset{} = cs}) do
     case Barkpark.Content.DocumentSize.refusal(cs) do

@@ -229,22 +229,30 @@ defmodule BarkparkWeb.Studio.TwoEditorsInFlightTest do
       assert stored(c)["title"] == "Fixture post 14 aaa"
     end
 
-    test "a page that rejoins: the other's field survives; its own field is its last post", c do
+    # task-4fc7383b936f606a: the title A typed on the old socket's value was
+    # written over B's "bbb", with no banner. It is held now: B's title
+    # stays, A's typing waits in the form with the banner.
+    test "a page that rejoins: the other's field survives; its own field's post is held over B's",
+         c do
       a = open(c, c.desk)
       b = open(c, c.desk)
 
       send_post(a, "title", %{"title" => "Fixture post 14 A"})
-      told(b)
+      # B shows A's title, and its page reports that number.
+      {_values, seqs} = told(b)
+      b_seen = %{"doc[title]" => List.last(seqs["doc[title]"])}
 
       # A drops off; B saves both fields; A's page rejoins on a new socket
       # and posts the title it typed meanwhile, with the old socket's number.
       GenServer.stop(a.pid, :normal)
-      send_post(b, "excerpt", %{"excerpt" => "Short. B"})
-      send_post(b, "title", %{"title" => "bbb Fixture post 14 A"})
+      send_post(b, "excerpt", %{"excerpt" => "Short. B"}, b_seen)
+      send_post(b, "title", %{"title" => "bbb Fixture post 14 A"}, b_seen)
       a2 = open(c, c.desk)
       send_post(a2, "title", %{"title" => "Fixture post 14 A aaa"}, %{"doc[title]" => 1})
 
-      assert stored(c) == %{"title" => "Fixture post 14 A aaa", "excerpt" => "Short. B"}
+      assert stored(c) == %{"title" => "bbb Fixture post 14 A", "excerpt" => "Short. B"}
+      assert :sys.get_state(a2.pid).socket.assigns.editor_form["title"] == "Fixture post 14 A aaa"
+      assert has_element?(a2, ~s([data-test-id="doc-conflict-banner"]))
     end
 
     # The desk's Paste field writes a value the server built: no `_bp_seen`.

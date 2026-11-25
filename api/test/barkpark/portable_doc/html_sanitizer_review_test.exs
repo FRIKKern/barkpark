@@ -416,20 +416,20 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerReviewTest do
     for tag <- ~w(article main div section body html) do
       @tag_name tag
       test "</#{tag}> in the body closes nothing outside it" do
-        html = "<p>a</p></#{@tag_name}><p id=\"esc\">b</p>"
+        html = "<p>a</p></#{@tag_name}><p id=\"bp-anchor-esc\">b</p>"
         out = S.sanitize(html)
 
         refute out =~ "</#{@tag_name}>"
         doc = reader(out)
         assert count(doc, "#paper-body > p") == 2
-        assert count(doc, "#paper-body #esc") == 1
+        assert count(doc, "#paper-body #bp-anchor-esc") == 1
         assert count(doc, "main > #after") == 1
       end
     end
 
     test "control: the raw input does close the box" do
-      doc = reader(~s|<p>a</p></article><p id="esc">b</p>|)
-      assert count(doc, "#paper-body #esc") == 0
+      doc = reader(~s|<p>a</p></article><p id="bp-anchor-esc">b</p>|)
+      assert count(doc, "#paper-body #bp-anchor-esc") == 0
     end
 
     test "the output is always the serialised tree, and a second pass the same bytes" do

@@ -78,9 +78,13 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
 
   # ── fixtures ───────────────────────────────────────────────────────────────
 
+  # Every token here is seated OWNER of its own workspace: a member seat may
+  # not create or drive a registered-host chat (task-7efaf895e8bc88e4), and
+  # this file pins what happens past that gate, when the host belongs to
+  # another workspace.
   defp mint!(perms, ws_id) do
     raw = "host-tenancy-" <> Ecto.UUID.generate()
-    {:ok, _} = Auth.create_token(raw, "host tenancy", @dataset, perms, ws_id)
+    {:ok, _} = Auth.create_token(raw, "host tenancy", @dataset, perms, ws_id) |> owner_seat!()
     raw
   end
 
@@ -291,10 +295,19 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
       assert_own_session_leased(a_raw, host_a)
     end
 
-    test "it reads and lists every workspace's sessions (charter D21), which is how it sees B's row",
+    # Charter D21 still lists every workspace's MANAGED sessions; a host session
+    # is listed only where the token holds a seat (task-f44bbb6363d28e37). The
+    # operator's admin seat is in Default, not in B.
+    test "it lists B's managed row but not B's host row, and reads the host row as missing",
          %{default_ws: default_ws, host_a: host_a, b_raw: b_raw} do
       op_raw = mint!(["read", "write", "admin"], default_ws.id)
-      sid = create(b_raw, host_a) |> json_response(201) |> Map.fetch!("id")
+      host_sid = create(b_raw, host_a) |> json_response(201) |> Map.fetch!("id")
+
+      managed_sid =
+        json_conn(b_raw)
+        |> post("/v1/chat/sessions", Jason.encode!(%{provider: "claude"}))
+        |> json_response(201)
+        |> Map.fetch!("id")
 
       ids =
         json_conn(op_raw)
@@ -303,7 +316,9 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
         |> Map.fetch!("sessions")
         |> Enum.map(& &1["id"])
 
-      assert sid in ids
+      assert managed_sid in ids
+      refute host_sid in ids
+      assert json_conn(op_raw) |> get("/v1/chat/sessions/#{host_sid}") |> json_response(404)
     end
   end
 
@@ -364,15 +379,15 @@ defmodule BarkparkWeb.ChatRegisteredHostTenancyTest do
   describe "Studio's create path (ChatHostGate.create_session/3)" do
     test "a B admin in B's scoped chat pushing A's host id gets a B row and A's host receives nothing",
          %{conn: conn, ws_b: ws_b, host_a: host_a, a_raw: a_raw} do
-      # The scoped mount's admin, as `ChatLiveScopedAdminTest` mints it: the
-      # admin permission and an admin seat in B.
+      # The scoped mount's admin, as `ChatLiveScopedAdminTest` mints it, seated
+      # owner of B: the admin permission and B's owner seat.
       {:ok, _project} = Barkpark.Tenancy.create_project(ws_b, %{slug: "default", name: "Default"})
       raw = "host-tenancy-studio-" <> Ecto.UUID.generate()
 
       {:ok, token} =
         Auth.create_token(raw, "studio b admin", @dataset, ["read", "write", "admin"])
 
-      {:ok, _} = TenancyAuth.create_membership(ws_b.id, token.id, "admin")
+      {:ok, _} = TenancyAuth.create_membership(ws_b.id, token.id, "owner")
 
       conn = init_test_session(conn, %{"api_token" => raw})
       {:ok, view, _html} = live(conn, "/w/#{ws_b.slug}/p/default/studio/chat")

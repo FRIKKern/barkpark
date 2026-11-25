@@ -60,6 +60,12 @@ defmodule Barkpark.StudioChat.Session do
     # `:global` superuser path stamps NULL. See `Barkpark.StudioChat` store seal.
     field :owner_workspace_id, Ecto.UUID
 
+    # WHO created the session (task-7efaf895e8bc88e4): `"api_token:<id>"` or
+    # `"user:<id>"`, the principal-ref `Sharing.PreviewLinks.actor_ref/1` spells.
+    # Create-only, stamped by the create doors; NULL on every row made before
+    # the column existed (no backfill: nothing recorded who made those).
+    field :created_by, :string
+
     # Provider identity and execution location are independent, durable axes.
     # They are create-only: no update changeset casts them. `provider_session_id`
     # is the opaque native resume/thread id and is set once by the runtime seam.
@@ -195,8 +201,8 @@ defmodule Barkpark.StudioChat.Session do
   def persistable_modes, do: @persistable_modes
 
   @create_fields ~w(
-    id owner_workspace_id provider execution_target execution_host_id provider_session_id
-    bot_folder title title_source cwd mode model status last_active_at summary
+    id owner_workspace_id created_by provider execution_target execution_host_id
+    provider_session_id bot_folder title title_source cwd mode model status last_active_at summary
   )a
 
   @doc """

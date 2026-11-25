@@ -110,10 +110,12 @@ defmodule Barkpark.Content.Forms.ObjectRebaseTest do
                ["one two A", "B para"]
     end
 
+    # Both edit the word "two": an overlap, a clash before and after the
+    # merge inside one block (task-266ffbe9cd115f3c).
     test "the same block: the post is written, as before" do
       base = [blk("k1", "one two")]
-      mine = [blk("k1", "B one two")]
-      theirs = [blk("k1", "one two A")]
+      mine = [blk("k1", "one TWO")]
+      theirs = [blk("k1", "one twoA")]
 
       assert rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"] == mine
     end
@@ -126,6 +128,18 @@ defmodule Barkpark.Content.Forms.ObjectRebaseTest do
       theirs = [blk("p", "P"), blk("q", "Q"), blk("x2", "X"), blk("r", "R")]
 
       assert rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"] == mine
+    end
+
+    # task-13351734f4f8d2f6: different words of one block, merged inside
+    # the block (task-266ffbe9cd115f3c); before it, the post was written and
+    # theirs' word lost.
+    test "the same block, different words: both kept" do
+      base = [blk("k1", "one two three")]
+      mine = [blk("k1", "one two THREE")]
+      theirs = [blk("k1", "ONE two three")]
+
+      assert words(rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"]) ==
+               ["ONE two THREE"]
     end
 
     test "theirs unchanged from the base: the post is written as it is" do

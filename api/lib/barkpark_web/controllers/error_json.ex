@@ -93,6 +93,15 @@ defmodule BarkparkWeb.ErrorJSON do
        }),
        do: {:error, e}
 
+  # SAME pass-through for a NUL in a write that skips the document changeset
+  # (`Barkpark.Content.NulByteError`, 422): the body is the changeset's
+  # `validation_failed` naming the field, not `internal_error`.
+  defp reason_for_template(_template, %{
+         kind: :error,
+         reason: %Barkpark.Content.NulByteError{} = e
+       }),
+       do: {:error, e}
+
   # A strict `Accept` header on a JSON route (task-701191424b8d15e8).
   # `plug(:accepts, ["json"])` raises Phoenix.NotAcceptableError, whose status
   # is already 406. Without this clause the body read `internal_error`, with

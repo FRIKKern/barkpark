@@ -161,7 +161,11 @@ matches; a rule or a pair nobody judges fails the part by name.
   (button, input, select, textarea, summary, a link, anything with a control role or a tabindex) must
   mark where it is at 3:1 or more against the ground next to it: the best of its fill and its drawn
   edge (border, outline, inset ring), at the opacity it is drawn at. Nothing is read from part.json's
-  paint entries. A stage with controls and no boundary reading fails.
+  paint entries. A stage with controls and no boundary reading fails. One pair is read on another element,
+  by name: UI SDK's slider takes focus on a range input it hides inside each `ui-slider-thumb`, so that input,
+  while no one sees it, is read on its thumb for its boundary, for whether it shows anything, and for the focus
+  ring, which base.css draws on the thumb in place of UI SDK's own outline there. Every other control is read
+  on itself.
 - Text-only is a fact the check verifies. A control named in part.json's `textOnly` is left out of the
   boundary only if, at rest (its showroom pin let go), it draws no fill and no edge that differs from
   its ground, and it has a drawn text label. One that draws an edge or a fill is held to 3:1 like any
@@ -316,9 +320,45 @@ puts the old value back in the same task, so a reading taken now and then does n
 
 - `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
 
-Any other property, a box's property on an element that is not a box, an anchor name no box hangs from, and any
-other transition value fail by name ("… was given opacity in a style attribute, which is not placement: the look
-belongs in part.css"). What is read is each declaration the browser applies, by its name: a shorthand by its
+Apart from both, a third list has its own reason: UI SDK lays out the pieces of a control and sets how they take a
+press at run time, and that is where a piece sits and how it behaves, not how it looks. A piece is the element it
+is, inside its control (a `ui-slider` or a `ui-number-input`), and carries only what UI SDK writes on it, each
+property by its lines in the file that writes it (`components/slider/slider.js`,
+`components/number-input/number-input.js`, or the file named before the lines, in
+`foundation/direct-manipulation/`), and only as one of the values UI SDK writes there, read as the browser gives it
+back. In a value, `{p}` is a place on the track, a number from 0 to 100: UI SDK writes every place as a percentage
+it clamps to that range (`percentOf`, in `components/slider/slider-values.js`). Every entry names its values; none
+takes any value. Which way the slider runs is not read: a piece may carry what UI SDK writes on it running across or
+running down. A number input's step button is the first `button` in its piece, the one UI SDK writes on
+(`el.querySelector("button")`, in `@ui-sdk/web`); a second button there carries nothing. It holds a press for the
+400 ms `repeat.js` gives it; `hold.js` also writes `-webkit-touch-callout: none` there, which the browser the check
+runs drops, so it is not on the list.
+
+- On `ui-slider-control`: `touch-action` as `none` (179). UI SDK slider, on its pieces.
+- On `ui-slider-track`: `position` as `relative` (187). UI SDK slider, on its pieces.
+- On `ui-slider-indicator`: `position` as `absolute` (79), `inset-inline-start` as `{p}%` (80), `width` as `{p}%`
+  (81), `height` as `{p}%` (81), `top` as `0` (82), `bottom` as `0` or `{p}%` (80, 82), `left` as `0` (82), `right`
+  as `0` (82), `--slider-indicator-start` as `{p}%` (83), `--slider-indicator-size` as `{p}%` (84). UI SDK slider,
+  on its pieces.
+- On `ui-slider-thumb`: `position` as `absolute` (59), `bottom` as `{p}%` (60), `left` as `50%` (60), `translate`
+  as `-50% 50%` or `0 -50%` (60, 65), `inset-inline` as `calc({p}% - 50%) calc(50% - {p}%)` (61), `margin-inline`
+  as `auto` (62), `justify-self` as `center` (63), `top` as `50%` (64), `z-index` as `1` or `2` (67),
+  `--slider-thumb-position` as `{p}%` (68). UI SDK slider, on its pieces.
+- On the range input in `ui-slider-thumb-input`: `position` as `absolute` (88), `inset` as `0` (89), `width` as
+  `100%` (90), `height` as `100%` (91), `margin` as `0` (92), `padding` as `0` (93), `border` as `0` (94),
+  `opacity` as `0` (95), `overflow` as `hidden` (96), `clip-path` as `inset(50%)` (97), `white-space` as `nowrap`
+  (98), `pointer-events` as `none` (99). UI SDK slider, on its pieces.
+- On the first button in `ui-number-input-increment` or `ui-number-input-decrement`: `user-select` as `none` (71),
+  `-webkit-user-select` as `none` (71), `touch-action` as `manipulation` (71), `--hold-delay` as `400ms` (hold.js 9).
+  UI SDK number input, on its step buttons and scrub area.
+- On `ui-number-input-scrub-area`: `touch-action` as `none` (237), `user-select` as `none` (237),
+  `-webkit-user-select` as `none` (237). UI SDK number input, on its step buttons and scrub area.
+
+Any other property, a box's property on an element that is not a box, a piece's property on any other element
+or on another piece, an anchor name no box hangs from, any other transition value, and a value UI SDK does not
+write on a piece, a place past 100% among them, fail by name ("… was given opacity in a style attribute, which is
+not placement: the look belongs in part.css"; "… was given top: 10px in a style attribute, and UI SDK writes top on
+ui-slider-thumb only as "50%""). What is read is each declaration the browser applies, by its name: a shorthand by its
 longhands (`inset` is `top`, `right`, `bottom` and `left`), and `all` by its own name. From the page's first
 frame, a log in the check's own world takes each change to a `style`
 attribute in the document and in each open shadow root, however it is written (the attribute, `el.style`,

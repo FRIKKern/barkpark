@@ -287,6 +287,38 @@ defmodule Barkpark.TenancyFixtures do
     held
   end
 
+  @doc """
+  Seat a workspace-bound api token as an OWNER of its workspace and hand back
+  what it was given, so it pipes onto `Auth.create_token/5`:
+
+      {:ok, _} = Auth.create_token(raw, "label", "production", ["chat"], ws.id) |> owner_seat!()
+
+  A minted token is seated `member` (or `admin` for an `admin` permission
+  list); a member seat may not run a chat on a registered host
+  (`BarkparkWeb.HostExecutionGate.authorize_turn/2`, task-7efaf895e8bc88e4)
+  and only an owner may enroll one.
+  Raises unless exactly one seat moved.
+  """
+  def owner_seat!({:ok, %Barkpark.Auth.ApiToken{} = token} = minted) do
+    owner_seat!(token)
+    minted
+  end
+
+  def owner_seat!(%Barkpark.Auth.ApiToken{id: id, workspace_id: ws_id} = token)
+      when is_binary(ws_id) do
+    {1, _} =
+      Barkpark.Repo.update_all(
+        from(m in Tenancy.Membership,
+          where:
+            m.principal_id == ^id and m.workspace_id == ^ws_id and
+              m.principal_type == "api_token"
+        ),
+        set: [role: "owner"]
+      )
+
+    token
+  end
+
   # Build [workspace_id: ..., project_id: ...] from fixtures, dropping a nil
   # project so the opts shape matches the production scope_opts contract.
   defp scope_opts(workspace, nil), do: [workspace_id: workspace.id]
