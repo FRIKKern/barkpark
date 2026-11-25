@@ -25,47 +25,57 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRejoinTest do
     {b, got(page, next_push(a), false)}
   end
 
-  test "B's change waits, the page rejoins, A posts on the old number: held, B's change stored",
-       c do
-    {_b, page} = waiting_b(c)
-    a2 = rejoin(c)
+  # The desk makes a new editor on rejoin; Studio keeps it (#28779 review).
+  # The server reads both alike.
+  for surface <- [:desk, :studio] do
+    test "#{surface}: B's change waits, the page rejoins, A posts on the old number: held, B's change stored",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      {_b, page} = waiting_b(c)
+      a2 = rejoin(c)
 
-    html = post_rt(a2, "<p>one twoA</p><p>p1</p>", seen(page))
+      html = post_rt(a2, "<p>one twoA</p><p>p1</p>", seen(page))
 
-    # Read as current, A's text was saved over B's "b" with no banner.
-    assert html =~ "Someone else rewrote"
-    assert words(stored(c)["meta"]["rt"]) == ["one two", "p1 b"]
-  end
+      # Read as current, A's text was saved over B's "b" with no banner.
+      assert html =~ "Someone else rewrote"
+      assert words(stored(c)["meta"]["rt"]) == ["one two", "p1 b"]
+    end
 
-  test "the page rejoins and posts the stored value back on the old number: nothing changes, no banner",
-       c do
-    {_b, page} = waiting_b(c)
-    a2 = rejoin(c)
+    test "#{surface}: the page rejoins and posts the stored value back on the old number: nothing changes, no banner",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      {_b, page} = waiting_b(c)
+      a2 = rejoin(c)
 
-    html = post_rt(a2, "<p>one two</p><p>p1 b</p>", seen(page))
+      html = post_rt(a2, "<p>one two</p><p>p1 b</p>", seen(page))
 
-    refute html =~ "Someone else rewrote"
-    assert words(stored(c)["meta"]["rt"]) == ["one two", "p1 b"]
-  end
+      refute html =~ "Someone else rewrote"
+      assert words(stored(c)["meta"]["rt"]) == ["one two", "p1 b"]
+    end
 
-  test "a page that never had a value reports 0: its post is read as typed on this mount", c do
-    a = open(c)
-    html = post_rt(a, "<p>one twoA</p>", 0)
+    test "#{surface}: a page that never had a value reports 0: its post is read as typed on this mount",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      a = open(c)
+      html = post_rt(a, "<p>one twoA</p>", 0)
 
-    assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one twoA"] end)
-    refute html =~ "Someone else rewrote"
-  end
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one twoA"] end)
+      refute html =~ "Someone else rewrote"
+    end
 
-  test "the page rejoins, draws the stored value at idle, and types on it: saved as typed", c do
-    {_b, page} = waiting_b(c)
-    a2 = rejoin(c)
-    v = %{seq: born_seq(a2)}
-    page = got(page, Map.put(v, :born, true), true)
+    test "#{surface}: the page rejoins, draws the stored value at idle, and types on it: saved as typed",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      {_b, page} = waiting_b(c)
+      a2 = rejoin(c)
+      v = %{seq: born_seq(a2)}
+      page = got(page, Map.put(v, :born, true), true)
 
-    html = post_rt(a2, "<p>one two</p><p>p1 bA</p>", seen(page))
+      html = post_rt(a2, "<p>one two</p><p>p1 bA</p>", seen(page))
 
-    assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two", "p1 bA"] end)
-    refute html =~ "Someone else rewrote"
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two", "p1 bA"] end)
+      refute html =~ "Someone else rewrote"
+    end
   end
 
   defp born_seq(view) do
