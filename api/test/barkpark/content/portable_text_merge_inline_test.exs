@@ -646,7 +646,14 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
            {[a: "d2", b: "d2", p: "m9", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
             %{"d2" => :x, "m9" => :x, "d1" => :y}},
            {[a: "d1", b: "d1", " ": nil, c: "m9", " ": nil, e: nil, N: nil],
-            %{"d1" => :x, "m9" => :y}}}
+            %{"d1" => :x, "m9" => :y}}},
+          # Main gave p the a link's key here: mine's two links became one.
+          {"D: p takes base's y key, theirs re-keyed x and dropped c",
+           {[a: "t7", b: "t7", " ": nil, c: "m9", " ": nil, e: nil, n: nil],
+            %{"t7" => :x, "m9" => :y}},
+           {[a: "t7", b: "t7", " ": nil, c: "d1", " ": nil, e: nil, p: "m9", n: nil],
+            %{"t7" => :x, "m9" => :x, "d1" => :y}},
+           {[a: "d2", b: "d2", " ": nil, " ": nil, e: nil, n: nil], %{"d2" => :x}}}
         ] do
       test "re-keyed S2 #{name}: mine's p link keeps a def of its own" do
         lb = fn ls, defs, kp ->
