@@ -12,11 +12,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       is a clash.
     * One splice per side, as `TextRebase` reads a text: the common prefix
       and suffix of the base's letters and the side's, and the middle of the
-      base replaced by the side's. Text only: a splice that only changes
-      marks, that changes the marks of letters whose text stays (it keeps
-      fewer letters than graphemes, `marks_kept?`), or that puts in letters whose
-      marks no letter beside or under it has, is a clash (a mark of its own
-      is task 4).
+      base replaced by the side's. A letter is its grapheme and its marks,
+      so a mark put on or taken off, or a link's def changed, is part of
+      the splice (task-07d2ca9aa7667208): a bold on "one" merges with an
+      edit of "three"; a bold across the other side's edit clashes.
     * Apart: each splice widened to whole words (a run of graphemes with no
       space and no CJK punctuation between them: "example.com", "a/b",
       "x-1", "3.14", "don't" and a space-less Han and kana run are each one
@@ -24,11 +23,15 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       inserts at one point are a clash: "cart" to "carts" and "dart" would
       give "darts".
     * Built from theirs, as the store holds it: only mine's splice is
-      replaced, so every span outside it is theirs' map byte for byte, and
-      theirs' defs, used or not, stay. Letters put in join the span they
-      touch when the marks are equal, else a new span with mine's span key
-      or, when theirs has it, a fresh one unique in the block (a span's
-      key is read only under its block).
+      replaced, so every span outside it is theirs' map byte for byte.
+      Letters put in join the span they touch when the marks are equal,
+      else a new span with mine's span key or, when theirs has it, a fresh
+      one unique in the block (a span's key is read only under its block).
+    * Defs: theirs' stay, used or not. A link of mine's letters is theirs'
+      def with that content, else mine's def added under mine's key (a
+      fresh one when theirs holds it); two of mine's links with one content
+      stay two. A def of theirs goes only when its last use was in the text
+      mine's splice replaced.
     * A guard on the result: each word is a word of base, mine or theirs,
       at most count(mine) + count(theirs) - count(base) times, and the text
       splits into the graphemes it was built from (no flag made at a join).
@@ -41,7 +44,6 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   """
 
   alias Barkpark.Content.TextRebase
-  alias Barkpark.PortableDoc.TextDiff, as: LineDiff
 
   @fixed ~w(_key _type children markDefs)
 
@@ -116,48 +118,15 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     splice(base, side, p, s)
   end
 
+  # A letter is its grapheme and its marks, so a mark put on, taken off or
+  # a link's def changed is part of the side's splice (task-07d2ca9aa7667208).
+  # A splice of no letters (spans cut another way, nothing drawn changed):
+  # :error, as before.
   defp splice(base, side, p, s) do
     {mid, put} =
       {Enum.slice(base, p, length(base) - s - p), Enum.slice(side, p, length(side) - s - p)}
 
-    near = Enum.slice(base, max(p - 1, 0), length(mid) + if(p > 0, do: 2, else: 1))
-    allowed = MapSet.new(near, &elem(&1, 1)) |> MapSet.put({[], %{}})
-
-    cond do
-      Enum.map(mid, &elem(&1, 0)) == Enum.map(put, &elem(&1, 0)) -> :error
-      not marks_kept?(mid, put) -> :error
-      Enum.all?(put, &MapSet.member?(allowed, elem(&1, 1))) -> {:ok, {p, length(base) - s, put}}
-      true -> :error
-    end
-  end
-
-  # Inside the splice, the text kept is as long on letters as on graphemes
-  # alone: no base letter whose text stayed took other marks
-  # (task-81d9efce3bbf6428). The kept letters are a longest common run, by
-  # the one diff engine (`PortableDoc.TextDiff`, a letter a line); one tag
-  # in the splice needs none. Past @diff_cap letters with marks mixed, the
-  # cost is not run: :error. Under it the engine never falls back to its
-  # whole-block diff (2000 lines a side, 4M cells), which keeps nothing.
-  @diff_cap 1_000
-  # A pure deletion or paste keeps no letter: no mark can change (#28771 review).
-  defp marks_kept?([], _put), do: true
-  defp marks_kept?(_mid, []), do: true
-
-  defp marks_kept?(mid, put) do
-    case MapSet.size(MapSet.new(mid ++ put, &elem(&1, 1))) do
-      n when n <= 1 ->
-        true
-
-      _ ->
-        length(mid) + length(put) <= @diff_cap and
-          kept(mid, put) == kept(Enum.map(mid, &elem(&1, 0)), Enum.map(put, &elem(&1, 0)))
-    end
-  end
-
-  defp kept(a, b) do
-    ids = (a ++ b) |> Enum.uniq() |> Enum.with_index() |> Map.new()
-    lines = fn xs -> Enum.map_join(xs, "\n", &Integer.to_string(Map.fetch!(ids, &1))) end
-    LineDiff.diff_lines(lines.(a), lines.(b)) |> Enum.count(&(&1.op == "="))
+    if mid == put, do: :error, else: {:ok, {p, length(base) - s, put}}
   end
 
   defp ends(base, side) do
@@ -207,56 +176,133 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp build({mp, me, put}, {tp, te, tput}, mine, theirs) do
     shift = if tp < mp, do: length(tput) - (te - tp), else: 0
     {a, b} = {mp + shift, me + shift}
-    defs = Map.new(defs(theirs), fn {k, d} -> {d, k} end)
 
-    keys =
+    spans =
       mine["children"]
-      |> Enum.flat_map(&List.duplicate(&1["_key"], glen(&1)))
+      |> Enum.flat_map(&List.duplicate(&1, glen(&1)))
       |> Enum.slice(mp, length(put))
 
-    with {:ok, new} <- new_spans(Enum.zip(put, keys), defs, theirs) do
-      {:ok, Map.put(theirs, "children", cut(theirs, a, b, new))}
-    end
+    {new, added} = new_spans(Enum.zip(put, spans), defs(mine), theirs)
+    children = cut(theirs, a, b, new)
+
+    block = Map.put(theirs, "children", children)
+
+    if added == [] and not is_map_key(theirs, "markDefs"),
+      do: {:ok, block},
+      else: {:ok, Map.put(block, "markDefs", mark_defs(theirs, added, children))}
   end
 
-  # Mine's letters as spans in theirs' marks ({tag, span}); a def theirs
-  # lacks is a clash.
-  defp new_spans(letters, defs, theirs) do
-    used = MapSet.new(theirs["children"], & &1["_key"])
+  # Mine's letters as spans in theirs' marks ({look, span}). A link is read
+  # by its def: theirs' def with that content, else mine's added under
+  # mine's key (a fresh one when theirs holds it). Two of mine's links with
+  # one content stay two (`marks/4`).
+  #
+  # The state carries the fresh-key counters (`ns`, `nd`) and the keys
+  # taken so far (`took`), so each run costs the same however many came
+  # before (#28802 review: mine and theirs share base's span keys, and a
+  # walk from 0 per run grew with the square of the runs).
+  defp new_spans(letters, mdefs, theirs) do
+    used = MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
 
-    letters
-    |> Enum.chunk_by(fn {{_g, tag}, _key} -> tag end)
-    |> Enum.reduce_while({[], used}, fn [{{_, {named, extra} = tag}, key} | _] = run,
-                                        {acc, used} ->
-      marks =
-        Enum.map(named, fn
-          {:dec, m} -> m
-          {:def, d} -> defs[d]
-        end)
+    tdefs =
+      defs(theirs) |> Enum.sort() |> Enum.reduce(%{}, fn {k, d}, m -> Map.put_new(m, d, k) end)
 
-      key =
-        if is_binary(key) and not MapSet.member?(used, key),
-          do: key,
-          else: fresh(theirs["_key"], used, 0)
+    st = %{used: used, taken: %{}, took: MapSet.new(), added: [], ns: 0, nd: 0}
 
-      text = Enum.map_join(run, fn {{g, _}, _} -> g end)
+    {spans, %{added: added}} =
+      letters
+      |> Enum.chunk_by(fn {{_g, tag}, ms} -> {tag, link_keys(ms, mdefs)} end)
+      |> Enum.map_reduce(st, fn [{{_, {_named, extra}}, ms} | _] = run, st ->
+        {marks, st} = marks(ms, mdefs, tdefs, theirs["_key"], st)
 
-      span =
-        Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+        {key, st} =
+          if is_binary(ms["_key"]) and not MapSet.member?(st.used, ms["_key"]) do
+            {ms["_key"], st}
+          else
+            {key, n} = fresh(theirs["_key"], st.used, st.ns)
+            {key, %{st | ns: n}}
+          end
 
-      if Enum.all?(marks, &is_binary/1),
-        do: {:cont, {[{tag, span} | acc], MapSet.put(used, key)}},
-        else: {:halt, :error}
+        text = Enum.map_join(run, fn {{g, _}, _} -> g end)
+
+        span =
+          Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+
+        {{look(span), span}, %{st | used: MapSet.put(st.used, key)}}
+      end)
+
+    {spans, Enum.reverse(added)}
+  end
+
+  defp link_keys(span, mdefs), do: Enum.filter(List.wrap(span["marks"]), &is_map_key(mdefs, &1))
+
+  # Each of mine's marks as theirs' mark key. `taken`: mine's link key => the
+  # key it took (`took`, the keys taken), so one link of mine stays one, and
+  # a second link of mine with the same content takes a def of its own. A
+  # def key mine holds for another link of its own is not taken by content
+  # either: mine's link outside the splice keeps that key, and the two would
+  # become one.
+  defp marks(span, mdefs, tdefs, bkey, st) do
+    span["marks"]
+    |> List.wrap()
+    |> Enum.map_reduce(st, fn mk, st ->
+      k = is_map_key(mdefs, mk) && tdefs[mdefs[mk]]
+
+      cond do
+        not is_map_key(mdefs, mk) ->
+          {mk, st}
+
+        is_map_key(st.taken, mk) ->
+          {st.taken[mk], st}
+
+        k && not MapSet.member?(st.took, k) && (k == mk or not is_map_key(mdefs, k)) ->
+          {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
+
+        true ->
+          {k, st} =
+            if MapSet.member?(st.used, mk) do
+              {k, n} = fresh(bkey <> "d", st.used, st.nd)
+              {k, %{st | nd: n}}
+            else
+              {mk, st}
+            end
+
+          {k,
+           %{
+             st
+             | used: MapSet.put(st.used, k),
+               taken: Map.put(st.taken, mk, k),
+               took: MapSet.put(st.took, k),
+               added: [Map.put(mdefs[mk], "_key", k) | st.added]
+           }}
+      end
     end)
-    |> case do
-      {spans, _used} -> {:ok, Enum.reverse(spans)}
-      :error -> :error
-    end
   end
 
+  # Theirs' defs stay, used or not, with mine's added; a def is dropped
+  # only when its last use was in theirs' text mine's splice replaced.
+  defp mark_defs(theirs, added, children) do
+    before = used_marks(theirs["children"])
+    now = used_marks(children)
+
+    for(
+      %{"_key" => k} = d <- List.wrap(theirs["markDefs"]),
+      not (MapSet.member?(before, k) and not MapSet.member?(now, k)),
+      do: d
+    ) ++ added
+  end
+
+  defp used_marks(children),
+    do: MapSet.new(Enum.flat_map(children, &List.wrap(&1["marks"])))
+
+  # What a span draws besides its text: its marks, as keys, and its fields.
+  defp look(span),
+    do: {Enum.sort(List.wrap(span["marks"])), Map.drop(span, ~w(_key _type text marks))}
+
+  # The first free `<k>i<n>` from `n` on, and the counter to start from next.
   defp fresh(k, used, n) do
     key = "#{k}i#{n}"
-    if MapSet.member?(used, key), do: fresh(k, used, n + 1), else: key
+    if MapSet.member?(used, key), do: fresh(k, used, n + 1), else: {key, n + 1}
   end
 
   # Theirs' spans with letters [a, b) replaced by `new`: a span left or right
@@ -265,8 +311,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # own marks stays that span. A new run with the marks of the span beside
   # it joins that span.
   defp cut(theirs, a, b, new) do
-    defs = defs(theirs)
-    tag = &tag(&1, defs)
+    tag = &look/1
 
     {spans, _} =
       Enum.map_reduce(theirs["children"], 0, fn s, o ->
@@ -293,7 +338,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
           # The right piece of a span split in two takes a key of its own.
           l =
             if f == l and lt != "",
-              do: Map.put(l, "_key", fresh(theirs["_key"], used(theirs, news), 0)),
+              do: Map.put(l, "_key", elem(fresh(theirs["_key"], used(theirs, news), 0), 0)),
               else: l
 
           join(left ++ piece(f, lt), new, piece(l, rt) ++ right, tag)
