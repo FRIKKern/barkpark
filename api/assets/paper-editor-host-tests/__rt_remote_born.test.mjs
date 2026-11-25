@@ -160,6 +160,20 @@ await check("the desk makes a new editor on rejoin, drawn from the store: its st
   assert.equal(paints, before);
 });
 
+await check("a hold's view replaces a stored value waiting over offline typing: drawn at idle, its number reported (#28779 r2 review)", async () => {
+  const N = "doc[meta].t6";
+  add(N, "<p>one</p>", "h8");
+  push({ [N]: { seq: 900, html: "<p>one two</p>" } });
+  await new Promise((r) => setTimeout(r, 5));
+  // The editor writes <b> for bold; the server draws <strong>.
+  type(N, "<p>one two <b>bo</b></p>");
+  push({ [N]: { seq: 910, html: "<p>one two</p>", born: true } });
+  push({ [N]: { seq: 920, html: "<p>one two <strong>bo</strong></p>", held: true } });
+  await idle();
+  assert.equal(editorOf(N).value, "<p>one two <strong>bo</strong></p>");
+  assert.equal(seen(N), `${N}|920`);
+});
+
 if (failures) {
   console.log(`\n${failures} check(s) failed`);
   process.exit(1);

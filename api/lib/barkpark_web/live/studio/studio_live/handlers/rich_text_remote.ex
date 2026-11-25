@@ -323,7 +323,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     socket
     |> log(name, {seq, base, theirs})
     |> assign(editor_rt_held: Map.put(holds, name, hold))
-    |> send_values(%{name => %{seq: seq, html: html(view)}})
+    |> send_values(%{name => %{seq: seq, html: html(view), held: true}})
   end
 
   @doc """

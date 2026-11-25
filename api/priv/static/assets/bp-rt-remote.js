@@ -11,6 +11,9 @@
 //                                                 it with this page's post, or,
 //                                                 on a clash, this page's
 //                                                 block over theirs elsewhere
+//   {values: {"doc[meta].rt": {seq, html, held: true}}}
+//                                                 a hold's view: this page's
+//                                                 words over theirs
 //   {values: {"doc[meta].rt": {seq, html, reload: true}}}
 //                                                 the stored text after this
 //                                                 page's own Reload or restore:
@@ -308,9 +311,10 @@
           waiting.delete(name);
         } else if (!theirs || theirs.seq < v.seq) {
           const seen = theirs && !v.own ? theirs.seen : v.born ? before : v.seq - 1;
-          // A newer value over a waiting stored one keeps it from words typed
-          // offline: the page still reports the old number.
-          const born = !!v.born || (!!theirs && theirs.born && !v.own);
+          // Another save over a waiting stored one keeps it from words typed
+          // offline: the page still reports the old number. The hold's own
+          // view (`held`) is drawn as a hold's is (#28779 r2 review).
+          const born = !!v.born || (!!theirs && theirs.born && !v.own && !v.held);
           waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, seen, born, doc});
         }
         tryShow(name);
