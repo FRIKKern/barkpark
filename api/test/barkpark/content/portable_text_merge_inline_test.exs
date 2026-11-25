@@ -389,4 +389,33 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert text(blk) == "one TWO NEW three FOUR FIVE"
     end
   end
+
+  describe "task-5d102d5baa016e0a: a word is a run with no space" do
+    for {name, base, mine, theirs} <- [
+          {"a domain", "see example.com now", "see exampel.com now", "see example.org now"},
+          {"a slash pair", "use a/b here", "use A/b here", "use a/B here"},
+          {"a letter and a digit", "is x-1 ok", "is y-1 ok", "is x-2 ok"},
+          {"an ellipsis between digits", "from 1...2 on", "from 0...2 on", "from 1...3 on"},
+          {"a quoted word", ~s(say "hi" now), ~s(say "hu" now), ~s(say "hi!" now)}
+        ] do
+      test "#{name} is one word: two edits in it clash" do
+        assert Inline.merge(b(unquote(base)), b(unquote(mine)), b(unquote(theirs))) == :clash
+      end
+    end
+
+    test "edits in two words that touch punctuation merge: one, TWO" do
+      assert {:ok, blk} = Inline.merge(b("one, two."), b("ONE, two."), b("one, TWO."))
+      assert text(blk) == "ONE, TWO."
+    end
+
+    test "CJK punctuation parts Han runs: 京都。県庁" do
+      assert {:ok, blk} = Inline.merge(b("東京。都庁"), b("京都。都庁"), b("東京。県庁"))
+      assert text(blk) == "京都。県庁"
+    end
+
+    test "an ideographic space parts words: one\u3000TWO" do
+      assert {:ok, blk} = Inline.merge(b("one\u3000two"), b("ONE\u3000two"), b("one\u3000TWO"))
+      assert text(blk) == "ONE\u3000TWO"
+    end
+  end
 end
