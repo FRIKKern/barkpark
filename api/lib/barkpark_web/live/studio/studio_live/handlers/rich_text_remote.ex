@@ -461,6 +461,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   @doc "Each rich text path inside an object or a row whose drawn value changed."
   def changes(schema, old_form, new_form), do: paths(schema, old_form, new_form, :changed)
 
+  @doc "Each rich text path inside an object or a row of `form`."
+  def every(schema, form) when is_map(form),
+    do: for({path, _, _} <- paths(schema, form, form, :all), do: path)
+
+  def every(_schema, _form), do: []
+
   # Every rich text path inside an object or a row (`:all`), or each one whose
   # drawn value differs between the two forms (`:changed`).
   defp paths(%{fields: fields}, old_form, new_form, mode) when is_list(fields) do
