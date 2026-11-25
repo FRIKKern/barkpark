@@ -177,12 +177,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
     # A log of another document is none of this one's (a forget lost).
-    {log, holds, folded} =
+    {log, holds, folded, born} =
       if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
         do:
           {socket.assigns[:editor_rt_log] || %{}, socket.assigns[:editor_rt_held] || %{},
-           socket.assigns[:editor_rt_folded] || %{}},
-        else: {%{}, %{}, %{}}
+           socket.assigns[:editor_rt_folded] || %{}, socket.assigns[:editor_rt_born] || %{}},
+        else: {%{}, %{}, %{}, %{}}
 
     Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
@@ -191,7 +191,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         all = Map.get(log, name, [])
         later = Enum.filter(all, fn {s, _, _} -> s > n end)
         gap? = later != [] and length(later) == length(all) and n >= Map.get(folded, name, n + 1)
-        read(doc, acts, {name, path, posted}, {n, gap?}, Map.get(holds, name), later)
+
+        case {Map.get(born, name), Map.get(holds, name)} do
+          # A number of a socket gone (`born/1`; 0 is a page that never had a value).
+          {{seq, value}, nil} when n > 0 and n < seq ->
+            unknown(doc, acts, {name, path, posted}, newest(later, value))
+
+          {_born, held} ->
+            read(doc, acts, {name, path, posted}, {n, gap?}, held, later)
+        end
       else
         _ -> {doc, acts}
       end
@@ -218,7 +226,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   defp read(doc, acts, at, {_n, gap?}, nil, later) do
     {_seq, was, _now} = List.last(later)
     {_seq, _was, theirs} = hd(later)
+
     over(doc, acts, at, was, theirs, gap?)
+  end
+
+  defp newest([], value), do: value
+  defp newest([{_seq, _was, now} | _], _value), do: now
+
+  # Typed on a socket gone (`born/1`): the base is not known. The stored
+  # value posted back saves nothing; anything else is held over it.
+  defp unknown(doc, acts, {_name, path, posted} = at, theirs) do
+    if drawn(PortableText.from_html(posted, list(theirs))) == drawn(theirs),
+      do: {FormPath.put(doc, path, html(theirs)), acts},
+      else: over(doc, acts, at, theirs, theirs, true)
   end
 
   defp over(doc, acts, {name, path, posted}, base, theirs, held?) do
@@ -303,7 +323,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     socket
     |> log(name, {seq, base, theirs})
     |> assign(editor_rt_held: Map.put(holds, name, hold))
-    |> send_values(%{name => %{seq: seq, html: html(view)}})
+    |> send_values(%{name => %{seq: seq, html: html(view), held: true}})
+  end
+
+  @doc """
+  Once per socket, when it first shows a document and is connected: every
+  rich text inside an object or a row is sent its stored value (`born`),
+  logged with no base. A page that rejoins a new socket keeps its editors
+  and its numbers, which are the old socket's (task-eeda66fac5af065f). A
+  post on such a number is older than this, so it is held unless it is the
+  stored value; the page draws the value once A is idle and has nothing
+  unposted. A page that never had a value reports 0 and is read as typed
+  on this mount (task-05a0cfa97d2580ff).
+  """
+  def born(socket) do
+    if is_map(socket.assigns[:editor_rt_born]) or not Phoenix.LiveView.connected?(socket) or
+         is_nil(PostIdentity.of(socket)) do
+      socket
+    else
+      form = socket.assigns[:editor_form] || %{}
+
+      {socket, values, born} =
+        socket.assigns[:editor_schema]
+        |> paths(form, form, :all)
+        |> Enum.reduce({socket, %{}, %{}}, fn {path, _, now}, {s, values, born} ->
+          {s, seq} = next_seq(s)
+          name = input_name(path)
+
+          {s, Map.put(values, name, %{seq: seq, html: html(now), born: true}),
+           Map.put(born, name, {seq, now})}
+        end)
+
+      socket
+      |> assign(editor_rt_born: born)
+      |> send_values(values)
+    end
   end
 
   @doc """
@@ -327,7 +381,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_log: %{},
         editor_rt_folded: %{},
         editor_rt_held: %{},
-        editor_rt_clash: %{}
+        editor_rt_clash: %{},
+        editor_rt_born: %{}
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end
