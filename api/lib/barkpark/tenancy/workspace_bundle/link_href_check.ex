@@ -40,8 +40,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
   `markDefs` nor a `\\u` escape, so cannot spell the key. A value read and
   not decoded refuses the bundle (`pt_content_undecodable`): Postgres must
   never get a value the check could not read. A member whose rows the
-  check cannot split as `COPY FROM` does (a raw carriage return, a `\\.`
-  line) refuses the bundle too (`copy_rows_unreadable`). Numbers are decoded as
+  check cannot split as `COPY FROM` does (a raw carriage return, an
+  unescaped `\\.`) refuses the bundle too (`copy_rows_unreadable`). Numbers are decoded as
   decimals and written back as they were, so a stripped value keeps every
   other value.
 
@@ -226,7 +226,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
 
   # The member split into rows as `COPY FROM` splits it, or refused
   # (task-ff1f9481f31ad3bc, #28728 r2 review). `COPY FROM` also ends a row
-  # at a bare carriage return, and stops at a line of `\.`; the check
+  # at a bare carriage return, and stops at a `\.` (alone on a line, or on
+  # Postgres 14-17 at the end of one too); the check
   # splits on newlines only, so a member with either is read as other rows
   # than Postgres loads: a link in a row ended by a CR went through
   # unread. `COPY TO` writes neither (it escapes a CR as `\r`, and a
@@ -242,14 +243,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
         Enum.any?(fields, &String.contains?(&1, "\r")) ->
           unsplittable!(table, n, "a raw carriage return, which ends a row for Postgres")
 
-        fields == ["\\."] ->
-          unsplittable!(table, n, "a \\. line, which ends the data for Postgres")
+        Enum.any?(fields, &end_marker?/1) ->
+          unsplittable!(table, n, "an unescaped \\., which ends the data for Postgres")
 
         true ->
           :ok
       end
     end)
   end
+
+  # An unescaped `\.` anywhere in a field. Postgres 14-17 stop at one that
+  # ends a longer line too, and return success for the rows before it: a
+  # partial import (task-b5b5e07116c3465e, #28736 review). `COPY TO` never
+  # writes one, since a backslash in a value goes out as `\\`.
+  defp end_marker?(field) do
+    :binary.match(field, "\\.") != :nomatch and marker_at?(field)
+  end
+
+  defp marker_at?(<<?\\, ?., _::binary>>), do: true
+  defp marker_at?(<<?\\, _escaped, rest::binary>>), do: marker_at?(rest)
+  defp marker_at?(<<_, rest::binary>>), do: marker_at?(rest)
+  defp marker_at?(<<>>), do: false
 
   defp unsplittable!(table, n, what) do
     raise InvalidBundleError,

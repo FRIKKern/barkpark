@@ -250,7 +250,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
 
   for {name, join} <- [
         {"a member whose rows end with a bare CR", :cr},
-        {"a member with a \\. line before the link's row", :eod}
+        {"a member with a \\. line before the link's row", :eod},
+        # task-b5b5e07116c3465e (#28736 review): Postgres 14-17 stop at a
+        # `\\.` that ends a longer line too, and return ok for the rows
+        # before it.
+        {"a member whose row before the link's ends with \\.", :tail}
       ] do
     test "#{name} is refused, and no javascript: link is stored", %{ws: ws, proj: proj, doc: doc} do
       {:ok, two} =
@@ -270,6 +274,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
           case unquote(join) do
             :cr -> Enum.join(ok ++ bad, "\r") <> "\r"
             :eod -> Enum.join(ok ++ ["\\."] ++ bad, "\n") <> "\n"
+            :tail -> Enum.join(List.update_at(ok, -1, &(&1 <> "\\.")) ++ bad, "\n") <> "\n"
           end
         end)
 
@@ -284,6 +289,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
 
       assert %{"href" => "https://ok.example"} = def_of(Document, two.id)
     end
+  end
+
+  test "a backslash written before a dot in a value (COPY's \\\\.) imports as it is", %{ws: ws} do
+    Repo.update_all(from(d in Document, where: d.workspace_id == ^ws.id), set: [title: ~S(C:\.)])
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+    Repo.update_all(from(d in Document, where: d.workspace_id == ^ws.id), set: [title: "x"])
+
+    assert {:ok, _} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+
+    assert [~S(C:\.)] =
+             Repo.all(from(d in Document, where: d.workspace_id == ^ws.id, select: d.title))
   end
 
   test "a value the check cannot decode refuses the bundle, by name", %{ws: ws, doc: doc} do
