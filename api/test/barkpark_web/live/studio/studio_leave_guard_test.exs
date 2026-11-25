@@ -162,6 +162,8 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     # On r1: the editor moved to the second document, A's words dropped.
     html = a |> element(row) |> render_click()
     assert html =~ "Not saved: Notes. What you typed there will be lost."
+    # task-66200f2c6a01ab57: the flash says the press was stopped, and how to go.
+    assert html =~ "What you typed there will be lost. Press again to leave."
     assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
     assert assigns(a).editor_form["notes"] == "one twA three"
     assert has_element?(a, "form#editor-form[data-studio-held]")
