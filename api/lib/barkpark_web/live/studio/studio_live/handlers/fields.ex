@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
@@ -496,6 +497,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         keys = target_key(params, socket.assigns[:editor_schema])
         path = target_path(params, keys)
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
+        # A page that rejoined a new socket, typed on a value it never took
+        # (`TextRejoin`, task-4fc7383b936f606a).
+        {doc, typed} = TextRejoin.split(socket, keys, params["_bp_seen"], path, doc)
 
         # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514).
         text = TextUnderLock.values(socket, keys, params["_bp_seen"], path)
@@ -528,6 +532,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> RefusedSave.not_codes(not_codes)
           |> settle_dirty(keys)
           |> TextUnderLock.hold(text_held, doc)
+          |> TextRejoin.hold(typed)
 
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
         {:noreply, RichTextRemote.hold(saved, held)}
