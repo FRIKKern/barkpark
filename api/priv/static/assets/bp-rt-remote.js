@@ -241,6 +241,8 @@
   };
 
   const onRemote = (e) => {
+    // Another document is shown: what waits is the old one's (task-29686209fb9fc5dc).
+    if (e.detail && e.detail.forget) waiting.clear();
     const values = (e.detail && e.detail.values) || {};
     for (const [name, v] of Object.entries(values)) {
       if (!v || typeof v.seq !== "number") continue;

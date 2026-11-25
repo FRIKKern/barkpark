@@ -289,6 +289,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     |> send_values(%{name => %{seq: seq, html: html(view)}})
   end
 
+  @doc """
+  Another document is shown than `was` (`PostIdentity.of/1` before the
+  navigation): the log is of the one left, keyed by input names the new one
+  may share, so it goes, and the page drops what waits for those names
+  (task-29686209fb9fc5dc). A post on the new document is A's, as typed.
+  """
+  def forget(socket, was) do
+    if was == BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket) do
+      socket
+    else
+      socket
+      |> assign(editor_rt_log: %{}, editor_rt_folded: %{})
+      |> push_event(@event, %{forget: true, values: %{}})
+    end
+  end
+
   @doc "Ends every hold: the form was read again from the store."
   def drop_holds(socket), do: assign(socket, editor_rt_held: %{}, editor_rt_clash: %{})
 
