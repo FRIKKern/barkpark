@@ -266,13 +266,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => doc} ->
+      %{"doc" => posted} ->
         # As an autosave: a rich text in an object written over another
-        # editor's change is not written over it (#28349 r2 review, V1).
-        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
+        # editor's change is not written over it (#28349 r2 review, V1),
+        # and is read again under the lock (`RichTextRemote.UnderLock`,
+        # task-8f15f5c9c15ce748).
+        {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
+        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
         {socket, text} = text_bases(socket, doc, params["_bp_seen"])
-        {:noreply, saved} = do_save(doc, not_codes, socket, text)
+        socket = assign(socket, editor_rt_under_lock: rich)
+        {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted})
         {:noreply, RichTextRemote.hold(saved, held)}
 
       _ ->
@@ -291,17 +295,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {assign(based, editor_text_under_lock: text), text}
   end
 
-  defp do_save(params, not_codes, socket, text) do
+  # `{held, rich, posted}`: the rich text acts `split/3` gave, the values
+  # read under the lock, and the post as the page sent it. The write's
+  # outcome is read before the reload drops it (`:saved_over`).
+  defp do_save(params, not_codes, socket, text, {held, rich, posted}) do
     written = Shared.do_autosave(socket, params, :save)
     text_held = TextUnderLock.held(written, text, params)
+    {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
+    rich_held? = Enum.any?(held, &match?({:held, _, _, _}, &1))
 
     socket =
       written
-      |> assign(editor_field_bases: %{}, editor_text_under_lock: nil)
+      |> assign(editor_field_bases: %{}, editor_text_under_lock: nil, editor_rt_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
+    {:noreply, saved} = do_saved(socket, text_held, rich_held?, params)
+    {saved, held}
+  end
+
+  defp do_saved(socket, text_held, rich_held?, params) do
     case socket.assigns[:save_status] do
-      "Saved" when text_held != [] ->
+      "Saved" when text_held != [] or rich_held? ->
         # The store kept another editor's words over a field of the Save:
         # the rest is saved; that field holds A's words, unsaved, with the
         # banner, as an autosave holds it.
