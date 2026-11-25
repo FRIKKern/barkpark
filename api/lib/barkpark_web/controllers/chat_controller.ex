@@ -97,6 +97,7 @@ defmodule BarkparkWeb.ChatController do
   }
 
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ChatHostRefusal
   alias BarkparkWeb.ChatSendFailure
   alias BarkparkWeb.ChatUserTurn
   alias BarkparkWeb.ErrorResponse
@@ -187,7 +188,7 @@ defmodule BarkparkWeb.ChatController do
           )
       end
     else
-      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
+      {:error, reason} when reason in @host_refusals -> ChatHostRefusal.emit(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -314,7 +315,7 @@ defmodule BarkparkWeb.ChatController do
       json(conn, full_session_json(StudioChat.get_session(id), [], conn.assigns[:api_token]))
     else
       nil -> not_found(conn)
-      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
+      {:error, reason} when reason in @host_refusals -> ChatHostRefusal.emit(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -382,18 +383,9 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
-      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
+      {:error, reason} when reason in @host_refusals -> ChatHostRefusal.emit(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
-  end
-
-  # task-6ca882967fd95dda: a managed turn on the INSTANCE HOST is the instance
-  # owner's alone (`HostExecution`); a registered host's turn is a workspace
-  # owner's or admin's (task-7efaf895e8bc88e4). A permanent 403 that names the
-  # reason, never a retryable 503.
-  defp host_refused(conn, reason) do
-    {code, message} = HostExecutionGate.refusal(reason)
-    ErrorResponse.emit_custom(conn, 403, code, message)
   end
 
   # ── POST /v1/chat/sessions/:id/interrupt ───────────────────────────────────
@@ -480,7 +472,7 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
-      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
+      {:error, reason} when reason in @host_refusals -> ChatHostRefusal.emit(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -546,7 +538,7 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
-      {:error, reason} when reason in @host_refusals -> host_refused(conn, reason)
+      {:error, reason} when reason in @host_refusals -> ChatHostRefusal.emit(conn, reason)
       {:error, message} -> bad_request(conn, message)
     end
   end
