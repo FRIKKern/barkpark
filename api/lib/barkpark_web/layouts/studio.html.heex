@@ -229,4 +229,9 @@
       <% end %>
     </:vitals>
   </BarkparkWeb.StudioComponents.Nav.studio_footer>
+  <%!-- Studio asks before a link leaves, or the tab closes, while a field
+        is held (task-c4b59891f88686e0): a document-level listener over the
+        editor form's `data-studio-held`. Here, not in root.html.heex: it is
+        Studio's alone. Runs once per page load; a live patch keeps it. --%>
+  <script src={BarkparkWeb.StaticAssets.path("bp-studio-leave.js")} defer></script>
 </.studio_shell>
