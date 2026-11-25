@@ -728,6 +728,96 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       end
     end
 
+    # task-336c3a9b3baa9d0e (#28802 r2 review N1): mine swapped base's def
+    # keys and put an x-linked "a" in; mine draws one x link "aa".
+    test "mine re-keyed its defs and grows its x link: one link, not two" do
+      {x, y} = {"https://x.example", "https://y.example"}
+
+      base =
+        block("k", [span("s0", "a", ["d1"]), span("s1", "a", ["d2"]), span("t", " end")], [
+          link("d1", x),
+          link("d2", y)
+        ])
+
+      mine =
+        block("k", [span("s0", "aa", ["d2"]), span("s1", "a", ["d1"]), span("t", " end")], [
+          link("d2", x),
+          link("d1", y)
+        ])
+
+      theirs = put_in(base, ["children", Access.at(2), "text"], " END")
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert runs(blk) == [{"aa", [x]}, {"a", [y]}, {" END", []}]
+      assert Enum.sort(Enum.map(blk["markDefs"], & &1["_key"])) == ["d1", "d2"]
+    end
+
+    # #28816 review: mine's second x link next to (or apart from) its first,
+    # keys shuffled across the sides. Mine's links stay two.
+    for {name, {bl, bd}, {ml, md}, {tl, td}} <- [
+          {"A: p inside mine's re-keyed x link",
+           {[a: "d1", b: "d1", " ": nil, c: "t7", " ": nil, e: nil, n: nil],
+            %{"d1" => :x, "t7" => :y}},
+           {[a: "t7", p: "m9", b: "t7", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
+            %{"t7" => :x, "m9" => :x, "d1" => :y}},
+           {[a: "d1", b: "d1", " ": nil, c: "m9", " ": nil, e: nil, N: nil],
+            %{"d1" => :x, "m9" => :y}}},
+          {"B: p apart, theirs re-keyed x",
+           {[a: "d1", b: "d1", " ": nil, c: "t7", " ": nil, e: nil, n: nil],
+            %{"d1" => :x, "t7" => :y}},
+           {[a: "d1", b: "d1", " ": nil, c: "d2", p: "m9", " ": nil, e: nil, n: nil],
+            %{"d1" => :x, "m9" => :x, "d2" => :y}},
+           {[a: "d2", b: "d2", " ": nil, c: "t7", " ": nil, e: nil, n: nil, z: "d2"],
+            %{"d2" => :x, "t7" => :y}}},
+          {"C: p after mine's own x link",
+           {[a: "d2", b: "d2", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
+            %{"d2" => :x, "d1" => :y}},
+           {[a: "d2", b: "d2", p: "m9", " ": nil, c: "d1", " ": nil, e: nil, n: nil],
+            %{"d2" => :x, "m9" => :x, "d1" => :y}},
+           {[a: "d1", b: "d1", " ": nil, c: "m9", " ": nil, e: nil, N: nil],
+            %{"d1" => :x, "m9" => :y}}},
+          # Main gave p the a link's key here: mine's two links became one.
+          {"D: p takes base's y key, theirs re-keyed x and dropped c",
+           {[a: "t7", b: "t7", " ": nil, c: "m9", " ": nil, e: nil, n: nil],
+            %{"t7" => :x, "m9" => :y}},
+           {[a: "t7", b: "t7", " ": nil, c: "d1", " ": nil, e: nil, p: "m9", n: nil],
+            %{"t7" => :x, "m9" => :x, "d1" => :y}},
+           {[a: "d2", b: "d2", " ": nil, " ": nil, e: nil, n: nil], %{"d2" => :x}}}
+        ] do
+      test "re-keyed S2 #{name}: mine's p link keeps a def of its own" do
+        lb = fn ls, defs, kp ->
+          spans =
+            ls
+            |> Enum.chunk_by(&elem(&1, 1))
+            |> Enum.with_index()
+            |> Enum.map(fn {[{_, k} | _] = run, i} ->
+              span("#{kp}#{i}", Enum.map_join(run, &Atom.to_string(elem(&1, 0))), List.wrap(k))
+            end)
+
+          used = ls |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1) |> MapSet.new()
+          md = for {k, c} <- Enum.sort(defs), MapSet.member?(used, k), do: link(k, "https://#{c}")
+          block("k", spans, md)
+        end
+
+        {b, m, t} =
+          {lb.(unquote(bl), unquote(Macro.escape(bd)), "b"),
+           lb.(unquote(ml), unquote(Macro.escape(md)), "m"),
+           lb.(unquote(tl), unquote(Macro.escape(td)), "t")}
+
+        assert {:ok, blk} = Inline.merge(b, m, t)
+        hrefs = Map.new(blk["markDefs"], &{&1["_key"], &1["href"]})
+
+        at = fn letter ->
+          Enum.find(blk["children"], &String.contains?(&1["text"], letter))["marks"]
+        end
+
+        [pk] = at.("p")
+        [ak] = at.("a")
+        assert hrefs[pk] == "https://x" and hrefs[ak] == "https://x"
+        assert pk != ak
+      end
+    end
+
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
       href = "https://a.example"
       base = block("k", [span("m1", "one two three")])
