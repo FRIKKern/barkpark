@@ -274,7 +274,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # and is read again under the lock (`RichTextRemote.UnderLock`,
         # task-8f15f5c9c15ce748).
         {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
-        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
+
+        rich =
+          Map.merge(
+            RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"]),
+            RichTextRemote.UnderLock.top(socket, posted)
+          )
+
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
         # A Save from a page that rejoined a new socket is read as its
         # autosave is (`TextRejoin`, #28830 r1 review, B2).
@@ -562,7 +568,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
         # Read again under the document's lock: the store may have moved
         # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
-        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
+        rich =
+          Map.merge(
+            RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"]),
+            RichTextRemote.UnderLock.top(socket, posted)
+          )
+
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
