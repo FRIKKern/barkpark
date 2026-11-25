@@ -1247,8 +1247,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # nil, or the tab with the refusal line when ChatHostGate refuses `act`.
   defp host_refused(socket, act) do
-    if ChatHostGate.authorize(socket.assigns, act) != :ok,
-      do: append_message(socket, :system, spawn_error_text(:host_execution_not_permitted))
+    case ChatHostGate.authorize(socket.assigns, act) do
+      :ok -> nil
+      {:error, reason} -> append_message(socket, :system, spawn_error_text(reason))
+    end
   end
 
   # Pick the reasoning-effort tier (charter D48) — shared by the footer selector.
@@ -4822,9 +4824,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
             )
             |> assign(session: nil, status: :offline)
 
-          {:error, :host_execution_not_permitted} ->
+          {:error, reason} when reason in [:host_execution_not_permitted, :host_admin_required] ->
             socket
-            |> append_message(:system, spawn_error_text(:host_execution_not_permitted))
+            |> append_message(:system, spawn_error_text(reason))
             |> assign(session: nil, status: :offline)
 
           {:error, reason} ->
@@ -8453,6 +8455,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp spawn_error_text(:host_execution_not_permitted),
     do: Barkpark.StudioChat.HostExecution.message()
+
+  defp spawn_error_text(:host_admin_required),
+    do: BarkparkWeb.HostExecutionGate.host_admin_message()
 
   defp spawn_error_text(:binary_not_found),
     do:

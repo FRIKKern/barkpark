@@ -1113,6 +1113,16 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   @doc """
+  True when a RAW principal id of the STATED kind holds the owner seat. The
+  unambiguous form of `workspace_owner?/2`, as `workspace_admin?/3` is of
+  `workspace_admin?/2`.
+  """
+  @spec workspace_owner?(binary(), binary(), principal_kind()) :: boolean()
+  def workspace_owner?(principal_id, workspace_id, principal_kind) do
+    membership_role(principal_id, workspace_id, principal_kind) in @owner_roles
+  end
+
+  @doc """
   Where `role` sits on `workspace_id`'s seat ladder (task-018e79d8734a1b08):
 
     * `5` — `owner`

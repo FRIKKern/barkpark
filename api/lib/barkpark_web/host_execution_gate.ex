@@ -34,12 +34,26 @@ defmodule BarkparkWeb.HostExecutionGate do
   end
 
   @doc """
-  `:ok`, or `{:error, :host_execution_not_permitted}` when `principal` would
-  start or drive a managed turn on the host for `session` (a map with
-  `:provider`, `:execution_target`, `:owner_workspace_id`) that it may not.
-  `registered_host` sessions and turns that do not run on the host always pass.
+  `:ok`, or an error when `principal` may not start or drive a turn for
+  `session` (a map with `:provider`, `:execution_target`,
+  `:owner_workspace_id`):
+
+    * `{:error, :host_execution_not_permitted}` — a managed turn that would run
+      on the INSTANCE host, for a principal that is not an instance principal.
+      Managed turns that do not run on the host always pass.
+    * `{:error, :host_admin_required}` — a `registered_host` session, for a
+      principal that may not run a turn on that workspace's own computers
+      (task-7efaf895e8bc88e4; before it, any member with chat access could).
+      It passes for an owner or admin seat in the session's workspace
+      (`Tenancy.Auth.workspace_admin?/2`), and for an api token whose
+      `owner_user_id` holds the OWNER seat there (a personal or app token the
+      owner minted). A Connector (chat) token is minted with no
+      `owner_user_id`, so it gets nothing from that second arm and needs an
+      owner or admin seat of its own. A session with no owning workspace
+      passes for no one.
   """
-  @spec authorize_turn(term(), map()) :: :ok | {:error, :host_execution_not_permitted}
+  @spec authorize_turn(term(), map()) ::
+          :ok | {:error, :host_execution_not_permitted | :host_admin_required}
   def authorize_turn(principal, %{execution_target: target} = session)
       when target in [nil, "managed"] do
     ws = Map.get(session, :owner_workspace_id)
@@ -51,7 +65,41 @@ defmodule BarkparkWeb.HostExecutionGate do
     end
   end
 
+  def authorize_turn(principal, %{execution_target: "registered_host"} = session) do
+    if host_seat?(principal, Map.get(session, :owner_workspace_id)),
+      do: :ok,
+      else: {:error, :host_admin_required}
+  end
+
   def authorize_turn(_principal, _session), do: :ok
+
+  @doc "The sentence a `:host_admin_required` refusal carries."
+  @spec host_admin_message() :: String.t()
+  def host_admin_message do
+    "This chat runs on a computer registered to this workspace. Only a workspace owner " <>
+      "or admin can start or send to a chat on it."
+  end
+
+  @doc "Every error reason `authorize_turn/2` returns; each one is a 403."
+  @spec refusals() :: [atom()]
+  def refusals, do: [:host_execution_not_permitted, :host_admin_required]
+
+  @doc "The wire `{code, message}` of an `authorize_turn/2` refusal."
+  @spec refusal(atom()) :: {String.t(), String.t()}
+  def refusal(:host_admin_required), do: {"host_admin_required", host_admin_message()}
+
+  def refusal(:host_execution_not_permitted),
+    do: {HostExecution.reason(), HostExecution.message()}
+
+  defp host_seat?(principal, ws) when is_binary(ws),
+    do: TenancyAuth.workspace_admin?(principal, ws) or owner_users_token?(principal, ws)
+
+  defp host_seat?(_principal, _ws), do: false
+
+  defp owner_users_token?(%ApiToken{owner_user_id: uid}, ws) when is_binary(uid),
+    do: TenancyAuth.workspace_owner?(uid, ws, :user)
+
+  defp owner_users_token?(_principal, _ws), do: false
 
   # The admin bit is the instance tier only on a token of the Default workspace
   # or of no workspace (the legacy operator; no DB read for that one). An admin
