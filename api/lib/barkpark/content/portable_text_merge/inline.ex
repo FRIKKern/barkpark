@@ -363,13 +363,23 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     tdefs = defs(theirs)
     tl = theirs["children"] |> Enum.flat_map(&List.duplicate(&1, glen(&1))) |> List.to_tuple()
 
-    at = fn j ->
+    # theirs' index of base's letter `j` (nil inside theirs' splice), with
+    # theirs' put length read once (#28868 review: per letter, it grew with
+    # the square of theirs' splice).
+    at =
       case ts do
-        {tp, te, tput} when j >= te -> j - te + tp + length(tput)
-        {tp, _te, _tput} when j >= tp -> nil
-        _ -> j
+        {tp, te, tput} ->
+          tn = length(tput)
+
+          fn
+            j when j >= te -> j - te + tp + tn
+            j when j >= tp -> nil
+            j -> j
+          end
+
+        _ ->
+          & &1
       end
-    end
 
     before = letters |> Enum.take(mp) |> Enum.with_index()
 

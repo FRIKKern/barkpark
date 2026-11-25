@@ -888,6 +888,33 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert Enum.find(blk["children"], &String.contains?(&1["text"], "Q"))["text"] == "gQhi"
     end
 
+    # #28868 review: `outside_links/4` read theirs' put length for every
+    # letter of mine outside its splice, so its cost grew with the square
+    # of theirs' splice.
+    test "theirs puts 30k letters at the start, mine edits a linked word at the end: under the bound" do
+      y = "https://y"
+      body = String.duplicate("word ", 6_000)
+      base = block("k", [span("b0", body), span("b1", "end", ["d1"])], [link("d1", y)])
+      mine = block("k", [span("b0", body), span("b1", "enXd", ["d1"])], [link("d1", y)])
+
+      theirs =
+        block(
+          "k",
+          [span("t0", String.duplicate("more ", 6_000) <> body), span("b1", "end", ["d1"])],
+          [
+            link("d1", y)
+          ]
+        )
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      result = Inline.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 30_000_000, "#{r1 - r0} reductions"
+      assert {:ok, blk} = result
+      assert List.last(blk["children"])["text"] == "enXd"
+    end
+
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
       href = "https://a.example"
       base = block("k", [span("m1", "one two three")])
