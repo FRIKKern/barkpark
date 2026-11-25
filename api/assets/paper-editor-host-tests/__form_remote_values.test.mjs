@@ -191,6 +191,39 @@ check("a push without numbers (not free text) reports nothing", () => {
   assert.deepEqual(seen(), {});
 });
 
+// task-4fc7383b936f606a: a connected mount sends each free-text field its
+// stored value (`bp:form-born`). A page that rejoined keeps its _bp_seen.
+const born = (values, seqs) =>
+  window.dispatchEvent(new window.CustomEvent("phx:bp:form-born", { detail: { values, seqs } }));
+
+check("born: a field showing the stored value takes its number, and nothing is drawn", () => {
+  const { title } = mount("Fixture post B3", "First");
+  born({ "doc[title]": "Fixture post B3" }, { "doc[title]": 9 });
+  assert.equal(title.value, "Fixture post B3");
+  assert.deepEqual(seen(), { "doc[title]": 9, v: 2 });
+});
+
+check("born: a field showing typing done while away, with no number, reports 0 and keeps the typing", () => {
+  const { title } = mount("Fixture post A7", "First");
+  title.focus();
+  born({ "doc[title]": "Fixture post B3" }, { "doc[title]": 9 });
+  assert.equal(title.value, "Fixture post A7", "the typing stays");
+  assert.deepEqual(seen(), { "doc[title]": 0, v: 2 });
+});
+
+check("born: a field with the old socket's number keeps it when it does not show the value", () => {
+  const { title } = mount("Fixture post A7", "First");
+  document.querySelector('#editor-form [name="_bp_seen"]').value = JSON.stringify({ "doc[title]": 4, v: 2 });
+  born({ "doc[title]": "Fixture post B3" }, { "doc[title]": 9 });
+  assert.deepEqual(seen(), { "doc[title]": 4, v: 2 });
+});
+
+check("born: a field not drawn takes the number; a textarea compares its line breaks as \\n", () => {
+  mount("T", "one\ntwo");
+  born({ "doc[kicker]": "K", "doc[excerpt]": "one\r\ntwo" }, { "doc[kicker]": 5, "doc[excerpt]": 6 });
+  assert.deepEqual(seen(), { "doc[kicker]": 5, "doc[excerpt]": 6, v: 2 });
+});
+
 window.close();
 if (failures) {
   console.log(`\n${failures} check(s) failed`);
