@@ -378,7 +378,16 @@ defmodule BarkparkWeb.Integration.ChatSavedModeHostGateTest do
 
       assert create_session(seat, %{}).status == 201
       assert create_session(seat, %{mode: "plan"}).status == 201
-      assert create_session(seat, host).status == 201
+      # A registered host takes an owner or admin seat (task-7efaf895e8bc88e4):
+      # the member seat is refused there, an owner seat creates.
+      assert create_session(seat, host).status == 403
+      owner = "savedmode-owner-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(owner, "owner", "production", ["chat"], ws.id)
+        |> Barkpark.TenancyFixtures.owner_seat!()
+
+      assert create_session(owner, host).status == 201
 
       {:ok, _} = Tenancy.set_workspace_chat_settings(ws.id, %{"execution_profile" => "cloud"})
       assert create_session(seat, %{mode: "acceptEdits", model: "opus"}).status == 201

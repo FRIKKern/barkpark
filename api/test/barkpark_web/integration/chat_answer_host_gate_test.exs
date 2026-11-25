@@ -208,7 +208,10 @@ defmodule BarkparkWeb.Integration.ChatAnswerHostGateTest do
     assert status_of(sid) == "allowed"
   end
 
-  test "CONTROL: a registered-host session is not gated (204 for the same principal)",
+  # The instance-host rule never applies to a registered host; the seat rule
+  # does (task-7efaf895e8bc88e4): the member seat is refused, then answers once
+  # it is seated owner.
+  test "CONTROL: a registered-host session takes the seat rule, not the host gate",
        %{default_ws: ws, seat: seat} do
     {:ok, %{enrollment_token: t}} = ChatHosts.issue_enrollment(ws.id, %{name: "answergate"})
     {:ok, %{credential: credential}} = ChatHosts.enroll(t)
@@ -240,6 +243,12 @@ defmodule BarkparkWeb.Integration.ChatAnswerHostGateTest do
       Map.put(adapters, :claude, EchoCodex)
     )
 
+    refused = answer(seat, sid, "q-3")
+    assert %{"error" => %{"code" => "host_admin_required"}} = json_response(refused, 403)
+    assert status_of(sid) == "pending"
+
+    {:ok, token} = Barkpark.Auth.verify_token(seat)
+    Barkpark.TenancyFixtures.owner_seat!(token)
     assert answer(seat, sid, "q-3").status == 204
     assert_receive {:answered, "q-3", {:allow, _}}, 1_000
     assert status_of(sid) == "allowed"

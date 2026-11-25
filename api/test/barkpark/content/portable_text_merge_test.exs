@@ -100,6 +100,77 @@ defmodule Barkpark.Content.PortableTextMergeTest do
     assert words(view) == ["Hel", ""]
   end
 
+  # task-77c9532e1e04907b: B changed p1 with p2 next to it, a gap of two
+  # blocks for two; A changed p1. The view showed mine whole, so B's p2 was
+  # dropped from it, and typing on it took B's change out.
+  test "B changes the block A edits and the one after it: the view keeps B's change there" do
+    base = [b("k1", "one two"), b("k2", "three four"), b("k3", "x")]
+    theirs = [b("t1", "one twB"), b("t2", "THREE four"), b("k3", "x")]
+
+    assert {:clash, ["one twB"], view} =
+             M.merge(base, post(base, ["one twoA", "three four", "x"]), theirs)
+
+    assert words(view) == ["one twoA", "THREE four", "x"]
+    assert keys_unique?(view)
+  end
+
+  # task-f3594c6613f4663e: seed 52 of the #28801 review's generator. Mine
+  # whole, and six of theirs' blocks it does not have: the banner held 5,
+  # and "iota xi tau t2" was in neither it nor the view.
+  test "a view of mine whole lists every block of theirs it does not have, past five" do
+    keys = ~w(k0 k1 k2 k3 k4 k5)
+
+    base =
+      Enum.zip_with(
+        keys,
+        ~w(lam_alpha_omi psi_phi_eta ups_omg_zeta nu_eps_sig delta_rho_chi iota_xi_tau),
+        fn k, t -> b(k, String.replace(t, "_", " ")) end
+      )
+
+    mine =
+      post(base, [
+        "lam alpha omi",
+        "psi",
+        "phi eta",
+        "ups omg zeta",
+        "nu eps sig",
+        "delta rho chi m2",
+        "iota xi tau"
+      ])
+
+    theirs =
+      post(base, [
+        "lam",
+        "alpha omi",
+        "psi phi eta",
+        "ups omg zeta",
+        "nu eps sig t1",
+        "DELTA RHO CHI",
+        "iota xi tau t2"
+      ])
+
+    assert {:clash, texts, ^mine} = M.merge(base, mine, theirs)
+
+    assert texts == [
+             "lam",
+             "alpha omi",
+             "psi phi eta",
+             "nu eps sig t1",
+             "DELTA RHO CHI",
+             "iota xi tau t2"
+           ]
+  end
+
+  # B's two blocks zipped onto base blocks they did not come from would
+  # show a word more often than either side has it: mine whole.
+  test "B rewrote two blocks in another order: the view is mine whole" do
+    base = [b("k1", "one two"), b("k2", "three four")]
+    theirs = [b("t1", "three fourX"), b("t2", "one twoY")]
+    mine = post(base, ["one twoA", "three four"])
+
+    assert {:clash, _texts, ^mine} = M.merge(base, mine, theirs)
+  end
+
   test "B deletes the block A is editing: a clash; A's block is kept in the view" do
     base = [b("a", "alpha"), b("z", "omega")]
 

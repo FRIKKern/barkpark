@@ -132,7 +132,24 @@ defmodule BarkparkWeb.ObjectRichText do
     {:ok, view, _html} = live(c.conn, path)
     render_async(view, 5_000)
     assert eventually(fn -> has_element?(view, "#editor-form") end)
+    born(view)
     view
+  end
+
+  @doc """
+  The stored values a connected mount sends (`RichTextRemote.born/1`,
+  task-eeda66fac5af065f). A page that never had a value draws them as it
+  already shows them; the mirror's `page/0` reports 0, read the same way.
+  """
+  def born(view) do
+    assert_push_event(
+      view,
+      "bp:rt-remote",
+      %{values: %{"doc[meta].rt" => %{born: true} = v}},
+      2_000
+    )
+
+    v
   end
 
   def eventually(fun), do: Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
@@ -161,6 +178,45 @@ defmodule BarkparkWeb.ObjectRichText do
     |> render_change(Map.merge(%{"_target" => [target], "doc" => %{"title" => "T0"}}, fields))
   end
 
+  @doc """
+  B's save of `b_html` inside A's post `a_post` (task-00c56c6a88ed0b8f): on
+  A's first query after the post starts, before A's write. A's process
+  cannot read B's broadcast until the post is done, so A's socket reads the
+  post as current, as two Chrome tabs did.
+  """
+  def b_saves_inside(a, b, b_html, a_post),
+    do:
+      inside(
+        a,
+        fn ->
+          send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => b_html})
+        end,
+        a_post
+      )
+
+  @doc "`b_save` (any save of another view) run inside A's post, as `b_saves_inside/4`."
+  def inside(a, b_save, a_post) do
+    {a_pid, once} = {a.pid, :atomics.new(1, [])}
+    id = "rt-write-race-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      id,
+      [:barkpark, :repo, :query],
+      fn _event, _measure, _meta, _ ->
+        if self() == a_pid and :atomics.compare_exchange(once, 1, 0, 1) == :ok,
+          do: b_save.()
+      end,
+      nil
+    )
+
+    try do
+      a_post.()
+    after
+      :telemetry.detach(id)
+      assert :atomics.get(once, 1) == 1, "B's save never ran inside A's post"
+    end
+  end
+
   def b_saves_rt(b, c, html, words) do
     send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => html})
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == words end)
@@ -174,7 +230,14 @@ defmodule BarkparkWeb.ObjectRichText do
   def page, do: %{last: 0, first: nil}
 
   def got(page, %{seq: seq} = v, draw?) do
-    first = if page.first && !v[:own], do: page.first, else: seq
+    # A new socket's stored value waits with what the page had before it.
+    first =
+      cond do
+        page.first && !v[:own] -> page.first
+        v[:born] -> page.last + 1
+        true -> seq
+      end
+
     %{last: max(page.last, seq), first: if(draw?, do: nil, else: first)}
   end
 

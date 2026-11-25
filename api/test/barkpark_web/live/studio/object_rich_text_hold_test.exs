@@ -263,4 +263,45 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHoldTest do
       end
     end
   end
+
+  # task-13351734f4f8d2f6 (plan /papers/pt-merge-inside-one-block, task 3):
+  # with the merge inside one block, B's edit of word 1 and A's of word 3
+  # of the same block are both stored, and A typing on before its editor
+  # shows the merge (K8: the page reports the merge's number - 1) saves only
+  # its new letters.
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    test "#{surface}: B edits word 1, A word 3 of the same block, A types on before the merge is shown: both stored once, no banner",
+         c do
+      c = %{c | surface: @surface}
+      a = open(c)
+      b = open(c)
+
+      b_saves_rt(b, c, "<p>one two three</p>", ["one two three"])
+      page = got(page(), next_push(a), true)
+
+      b_saves_rt(b, c, "<p>ONE two three</p>", ["ONE two three"])
+      page = got(page, next_push(a), false)
+
+      html = post_rt(a, "<p>one two THREE</p>", seen(page))
+      assert words(stored(c)["meta"]["rt"]) == ["ONE two THREE"]
+      refute html =~ "Someone else rewrote"
+
+      merge = next_push(a)
+      assert merge[:own] and merge.html =~ "ONE two THREE"
+      page = got(page, merge, false)
+      assert seen(page) == merge.seq - 1
+
+      html = post_rt(a, "<p>one two THREEx</p>", seen(page))
+      assert words(stored(c)["meta"]["rt"]) == ["ONE two THREEx"]
+      refute html =~ "Someone else rewrote"
+      page = got(page, next_push(a), false)
+
+      # Shown: A types on the merged text, every word once.
+      html = post_rt(a, "<p>ONE two THREExy</p>", seen(drew(page)))
+      assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["ONE two THREExy"] end)
+      refute html =~ "Someone else rewrote"
+    end
+  end
 end

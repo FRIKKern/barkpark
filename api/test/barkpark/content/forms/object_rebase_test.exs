@@ -130,6 +130,18 @@ defmodule Barkpark.Content.Forms.ObjectRebaseTest do
       assert rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"] == mine
     end
 
+    # task-13351734f4f8d2f6: different words of one block, merged inside
+    # the block (task-266ffbe9cd115f3c); before it, the post was written and
+    # theirs' word lost.
+    test "the same block, different words: both kept" do
+      base = [blk("k1", "one two three")]
+      mine = [blk("k1", "one two THREE")]
+      theirs = [blk("k1", "ONE two three")]
+
+      assert words(rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"]) ==
+               ["ONE two THREE"]
+    end
+
     test "theirs unchanged from the base: the post is written as it is" do
       base = [blk("k1", "one two")]
       mine = [blk("k1", "one two X")]

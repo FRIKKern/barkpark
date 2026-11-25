@@ -8,6 +8,11 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
   stored, and brings back none B took out. B edits only past A's block; A
   types only in it, so a block B lost is never A's own edit. A banner ends
   the run.
+
+  Sometimes B's save lands inside A's post, after A's socket read it and
+  before A's write (`b_saves_inside/4`, task-00c56c6a88ed0b8f), half of
+  those in A's own block: the same rule holds against the store B left,
+  and the run ends there.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -27,12 +32,17 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
     test "seeds #{List.first(seeds)}..#{List.last(seeds)}: B's last change is stored or shown with the banner",
          %{conn: conn} do
       tally =
-        Enum.reduce(unquote(seeds), %{posts: 0, quiet: 0, merged: 0, banners: 0}, fn seed, t ->
-          :rand.seed(:exsss, {seed, 7, 11})
-          run(setup_doc(conn), seed, t)
-        end)
+        Enum.reduce(
+          unquote(seeds),
+          %{posts: 0, quiet: 0, merged: 0, banners: 0, races: 0},
+          fn seed, t ->
+            :rand.seed(:exsss, {seed, 7, 11})
+            run(setup_doc(conn), seed, t)
+          end
+        )
 
       assert tally.merged >= 3, inspect(tally)
+      assert tally.races >= 1, inspect(tally)
     end
   end
 
@@ -41,9 +51,11 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
     state = %{page: page(), editor: ["one two"], live: MapSet.new(), dead: MapSet.new()}
 
     Enum.reduce_while(1..@steps, {state, tally}, fn i, {state, t} ->
-      if :rand.uniform(3) > 1,
-        do: {:cont, {b_step(b, c, a, state, "s#{seed}n#{i}"), t}},
-        else: a_step(a, c, state, "a#{seed}n#{i}", t, seed)
+      cond do
+        :rand.uniform(3) > 1 -> {:cont, {b_step(b, c, a, state, "s#{seed}n#{i}"), t}}
+        race?(seed, i) -> race_step({a, b}, c, state, {"a#{seed}n#{i}", "s#{seed}n#{i}"}, t, seed)
+        true -> a_step(a, c, state, "a#{seed}n#{i}", t, seed)
+      end
     end)
     |> elem(1)
   end
@@ -99,6 +111,47 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
       # A merge is sent back (`own`); a post saved as typed is not.
       {:cont, {if(merged?, do: arrive(state, next_push(a)), else: state), t}}
     end
+  end
+
+  # An even seed's A post late in the run races B's save; the runs before
+  # it draw as they did.
+  defp race?(seed, i), do: rem(seed, 2) == 0 and i > div(@steps, 2)
+
+  # B saves inside A's post. A's post is read against the store B left: no
+  # block B wrote is lost and none B took out comes back, or, held, the
+  # store is B's exactly. The run ends: A's page is not modelled past it.
+  defp race_step({a, b}, c, state, {a_tag, b_tag}, t, seed) do
+    [mine | rest] = state.editor
+    editor = [mine <> " " <> a_tag | rest]
+    old = rt(c)
+    new = race_edit(old, b_tag)
+    shown = b_saves_inside(a, b, html(new), fn -> post_rt(a, html(editor), seen(state.page)) end)
+    after_ = rt(c)
+    {gone, added} = {MapSet.new(old -- new), MapSet.new(new -- old)}
+    live = state.live |> MapSet.difference(gone) |> MapSet.union(added)
+    dead = state.dead |> MapSet.difference(added) |> MapSet.union(gone)
+    t = %{t | posts: t.posts + 1, races: t.races + 1}
+
+    if shown =~ @banner do
+      assert after_ == new, "seed #{seed}: a hold wrote over theirs (race)"
+      {:halt, {state, %{t | banners: t.banners + 1}}}
+    else
+      lost = for x <- new, MapSet.member?(live, x), x not in after_, do: x
+      back = for x <- after_, MapSet.member?(dead, x), x not in new, do: x
+
+      assert {lost, back} == {[], []},
+             "seed #{seed} (race): #{inspect({old, new, editor, after_})}"
+
+      {:halt, {state, %{t | quiet: t.quiet + 1}}}
+    end
+  end
+
+  # Half the time B types where A types, at the end of A's block: the two
+  # cannot both stand, so the store is B's and A's post is held.
+  defp race_edit([first | rest] = old, tag) do
+    if :rand.uniform(2) == 1,
+      do: [first <> " " <> tag | rest],
+      else: with(^old <- edit(old, tag), do: edit(old, tag, 1))
   end
 
   # A's page draws a pushed value at once, or, A typing, it waits; a value
