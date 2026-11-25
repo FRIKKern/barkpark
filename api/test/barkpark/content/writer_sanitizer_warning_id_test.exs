@@ -14,10 +14,15 @@ defmodule Barkpark.Content.WriterSanitizerWarningIdTest do
 
   alias Barkpark.Content
   alias Barkpark.PortableDoc.HtmlSanitizer
+  alias Barkpark.PortableDoc.HtmlSanitizer.Cache
 
   @unsettled ~s(<p>body</p><ul><li>z<div><aside><li>y</li></aside></div></li></ul>)
 
   setup do
+    # A scrub's output is cached per node, so its fail-closed warning fires
+    # once per body, id and policy version (`HtmlSanitizer.Cache`). Each test
+    # here reads the warning, so each starts with nothing cached.
+    Cache.invalidate()
     prev = Application.get_env(:barkpark, HtmlSanitizer)
     Application.put_env(:barkpark, HtmlSanitizer, max_passes: 1)
 

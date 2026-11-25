@@ -84,12 +84,14 @@ defmodule Barkpark.Application do
     # The same ownership rule for three caches that used to be created lazily
     # by their first caller and died with it (task-45913114e6d4ffbe): the DEK
     # cache, the tenancy default-scope cache and the codelist alias cache,
-    # plus the schema catalog cache (task-cca3c6d48e57097e) and the OIDC
+    # plus the schema catalog cache (task-cca3c6d48e57097e), the sanitizer's
+    # output cache (task-13c9d34562701725) and the OIDC
     # discovery and JWKS cache.
     Barkpark.Crypto.DataKeys.init_cache()
     Barkpark.Tenancy.DefaultScopeCache.init_cache()
     Barkpark.Content.Codelists.init_cache()
     Barkpark.Content.SchemaCatalogCache.init_cache()
+    Barkpark.PortableDoc.HtmlSanitizer.Cache.init_cache()
     Barkpark.Sso.Oidc.init_cache()
 
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
