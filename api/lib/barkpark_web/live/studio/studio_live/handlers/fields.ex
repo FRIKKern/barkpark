@@ -484,10 +484,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => doc} ->
+      %{"doc" => posted} ->
         # A rich text in an object written over another editor's change is
         # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
-        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
+        {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
         # Read again under the document's lock: the store may have moved
         # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
         rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
@@ -529,7 +529,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> settle_dirty(keys)
           |> TextUnderLock.hold(text_held, doc)
 
-        {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, doc)
+        {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
         {:noreply, RichTextRemote.hold(saved, held)}
 
       _ ->
