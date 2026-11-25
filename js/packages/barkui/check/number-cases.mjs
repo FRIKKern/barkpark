@@ -85,4 +85,57 @@ export const NUMBER_CASES = [
       "the step button's touch-action on the scrub area fails by name, with its value": has(SLOT_VALUE(SCRUB_AT, 'touch-action', 'manipulation', SCRUB, write(SCRUB, 'touch-action'))),
     }),
   },
+  {
+    name: 'review plants: number input and slider writes off their own pieces each fail by name',
+    only: ['pressed'],
+    plant: all(
+      (d) =>
+        row(
+          d,
+          `<ui-number-input id="button-rv" default-value="2" min="0" max="9">
+  <ui-number-input-scrub-area id="button-rv-scrub"><span>Count</span></ui-number-input-scrub-area>
+  <ui-number-input-group>
+    <button id="button-rv-inner" type="button">Inner</button>
+    <ui-number-input-decrement><button id="button-rv-less" type="button">Less</button></ui-number-input-decrement>
+    <ui-number-input-control><input id="button-rv-control" type="text" aria-label="Count"></ui-number-input-control>
+    <ui-number-input-increment><button id="button-rv-more" type="button">More</button><button id="button-rv-more2" type="button">Again</button></ui-number-input-increment>
+  </ui-number-input-group>
+</ui-number-input>
+<button id="button-rv-plain" type="button">Plain</button>
+<ui-slider id="button-rvs" default-value="40"><ui-slider-control id="button-rvs-control"><ui-slider-track><ui-slider-indicator></ui-slider-indicator><ui-slider-thumb id="button-rvs-thumb0" aria-label="Level"></ui-slider-thumb></ui-slider-track></ui-slider-control></ui-slider>`,
+        ),
+      withNumber,
+      (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), imports: [...JSON.parse(s).imports, '@ui-sdk/web/slider'] }, null, 2)),
+      (d) =>
+        inDemo(
+          d,
+          [
+            S,
+            "Promise.all([customElements.whenDefined('ui-number-input-increment'), customElements.whenDefined('ui-slider-thumb')]).then(() => requestAnimationFrame(() => {",
+            "  const q = (id) => root.querySelector('#' + id)",
+            "  q('button-rv-plain')[S]['set' + 'Property']('--hold-delay', '400ms')",
+            "  q('button-rv-inner')[S]['set' + 'Property']('--hold-delay', '400ms')",
+            "  q('button-rv-inner')[S].userSelect = 'none'",
+            "  q('button-rv-scrub')[S].touchAction = 'manipulation'",
+            "  q('button-rv-less')[S]['set' + 'Property']('--hold-delay', '500ms')",
+            "  q('button-rv-less')[S]['set' + 'Property']('--slider-thumb-position', '50%')",
+            "  q('button-rv-more2')[S].userSelect = 'none'",
+            "  q('button-rvs-thumb0')[S].userSelect = 'none'",
+            "  q('button-rvs-thumb0')[S]['set' + 'Property']('--hold-delay', '400ms')",
+            '}))',
+          ].join('\n'),
+        ),
+    ),
+    expect: each({
+      'P1a hold delay on a plain button outside the number input': (p) => /button#button-rv-plain[^;]*--hold-delay in a style attribute, which is not placement/.test(said(p)),
+      'P1b hold delay on a button inside the number input outside the step pieces': (p) => /button#button-rv-inner[^;]*--hold-delay in a style attribute, which is not placement/.test(said(p)),
+      'P1c user-select on a button inside the number input outside the step pieces': (p) => /button#button-rv-inner[^;]*user-select in a style attribute, which is not placement/.test(said(p)),
+      'P2 touch-action manipulation on the scrub area': (p) => /button-rv-scrub[^;]*touch-action: manipulation in a style attribute, and UI SDK writes/.test(said(p)),
+      'P3 hold delay 500ms on the decrement button': (p) => /button#button-rv-less[^;]*--hold-delay: 500ms in a style attribute, and UI SDK writes/.test(said(p)),
+      'P4a slider property on a number input step button': (p) => /button#button-rv-less[^;]*--slider-thumb-position in a style attribute, which is not placement/.test(said(p)),
+      'P4b number input user-select on a slider thumb': (p) => /button-rvs-thumb0[^;]*user-select in a style attribute, which is not placement/.test(said(p)),
+      'P4c number input hold delay on a slider thumb': (p) => /button-rvs-thumb0[^;]*--hold-delay in a style attribute, which is not placement/.test(said(p)),
+      'P5 user-select on a second button in the increment piece, which UI SDK does not bind': (p) => /button#button-rv-more2[^;]*user-select in a style attribute/.test(said(p)),
+    }),
+  },
 ]
