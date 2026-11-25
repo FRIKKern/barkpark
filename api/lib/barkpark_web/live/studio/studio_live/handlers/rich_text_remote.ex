@@ -372,7 +372,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         end)
 
       socket
-      |> assign(editor_rt_born: born)
+      |> assign(editor_rt_born: born, editor_rt_born_doc: PostIdentity.of(socket))
       |> send_values(values)
     end
   end
@@ -399,7 +399,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_folded: %{},
         editor_rt_held: %{},
         editor_rt_clash: %{},
-        editor_rt_born: %{}
+        editor_rt_born: %{},
+        editor_rt_page: nil
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end

@@ -281,7 +281,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         units = RemoteValues.text_units(socket.assigns[:editor_schema], doc)
         {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc)
         {socket, text} = text_bases(socket, doc, params["_bp_seen"])
-        socket = assign(socket, editor_rt_under_lock: rich)
+
+        socket =
+          socket
+          |> assign(editor_rt_under_lock: rich)
+          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
+
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
         {:noreply, RichTextRemote.hold(saved, held)}
 
@@ -581,7 +586,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514),
         # read against what the page showed (task-eeecd067e3fb1b1f).
         text = TextUnderLock.values(based, keys, params["_bp_seen"], path)
-        based = assign(based, editor_rt_under_lock: rich, editor_text_under_lock: text)
+
+        based =
+          based
+          |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
+          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
 
         written =
           based
