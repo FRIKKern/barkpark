@@ -94,4 +94,47 @@ defmodule Barkpark.Content.PortableTextAdoptKeysTest do
     refute Enum.any?(out, &(&1["_key"] == "k1"))
     refute Enum.any?(out, &(&1["anchor"] == "intro"))
   end
+
+  # A value first saved by this desk carries position keys (b0, b1 …), which
+  # is also the key an unpaired block is given (#28714 review).
+  test "with position keys, an insert at the top takes a key no block holds" do
+    p1 = block("b0", "The quick brown fox jumps over the lazy dog", %{"anchor" => "intro"})
+    p2 = block("b1", "A second paragraph that stays as it was")
+    edited = block("b0", "The quick brown fox leaps over the lazy dog")
+    out = save([p1, p2], [new("A brand new opening line"), edited, p2])
+
+    keys = Enum.map(out, & &1["_key"])
+    assert keys == Enum.uniq(keys), "duplicate keys #{inspect(keys)}"
+    assert keyed(out, words(edited))["_key"] == "b0"
+    assert keyed(out, words(edited))["anchor"] == "intro"
+    assert keyed(out, "A brand new opening line")["_key"] not in ["b0", "b1"]
+  end
+
+  # The pairing by words has one budget per save (#28714 review): a paste
+  # of many gaps of long blocks cannot make it run for seconds. Bounded by
+  # work done (reductions), not by time, as text_undo_test is (#28710).
+  test "the pairing by words is bounded per save, not per gap" do
+    vocab = for i <- 1..400, do: "w#{i}"
+
+    para = fn seed ->
+      Enum.map_join(0..199, " ", &Enum.at(vocab, rem(seed * 7 + &1 * 13, 400)))
+    end
+
+    {kept, stored} =
+      Enum.reduce(0..9, {[], []}, fn g, {kept, stored} ->
+        anchor = block("a#{g}", "anchor #{g}")
+        gap = for i <- 0..99, do: block("g#{g}x#{i}", para.(g * 100 + i))
+        posted = for i <- 0..98, do: {:rebuilt, block("r", para.(g * 100 + i) <> " more")}
+        at = length(stored)
+        {kept ++ [{:kept, anchor, at} | posted], stored ++ [anchor | gap]}
+      end)
+
+    {:reductions, before} = Process.info(self(), :reductions)
+    pairs = Barkpark.Content.PortableTextPairing.pairs(kept, stored)
+    {:reductions, after_} = Process.info(self(), :reductions)
+
+    # Measured: about 28M with the budget, about 406M at 175fde76c3 (the cap per gap).
+    assert after_ - before < 80_000_000, "took #{after_ - before} reductions"
+    assert map_size(pairs) > 0
+  end
 end

@@ -23,12 +23,17 @@ defmodule Barkpark.Content.PortableTextPairing do
       at least half of them are the same (a Dice score of 0.5 over the words
       of the two blocks). A block with no such match is new, and a stored
       block with none was deleted.
-    * Past `@max_cells` (rebuilt × stored in one gap) nothing in that gap is
-      paired.
+    * The pairing by words has one budget per save, not per gap (#28714
+      review): `@max_cells` (rebuilt × stored, summed over the gaps) and
+      `@max_work` (each gap's cells × its blocks' distinct words). A gap
+      past what is left is not paired by words, so its blocks are new.
   """
 
-  # Rebuilt × stored text blocks in one gap, at most, for a pairing by words.
+  # Rebuilt × stored text blocks, summed over one save's gaps, at most.
   @max_cells 10_000
+
+  # Cells × distinct words per block, summed over one save's gaps, at most.
+  @max_work 2_000_000
 
   # The share of words two blocks must have in common to be one block.
   @min_score 0.5
@@ -47,15 +52,17 @@ defmodule Barkpark.Content.PortableTextPairing do
 
     kept
     |> gaps(tuple_size(stored))
-    |> Enum.reduce(%{}, fn {lo, hi, rebuilt}, acc ->
+    |> Enum.reduce({%{}, {@max_cells, @max_work}}, fn {lo, hi, rebuilt}, {acc, budget} ->
       left =
         for j <- (lo + 1)..(hi - 1)//1,
             not MapSet.member?(used, j),
             text_block?(elem(stored, j)),
             do: {j, elem(stored, j)}
 
-      Map.merge(acc, pair(rebuilt, left))
+      {pairs, budget} = pair(rebuilt, left, budget)
+      {Map.merge(acc, pairs), budget}
     end)
+    |> elem(0)
   end
 
   # Each gap as {stored index before it, stored index after it, its rebuilt
@@ -82,21 +89,41 @@ defmodule Barkpark.Content.PortableTextPairing do
   defp text_block?(%{"_type" => "block", "_key" => k}) when is_binary(k), do: true
   defp text_block?(_block), do: false
 
-  defp pair([], _left), do: %{}
-  defp pair(_rebuilt, []), do: %{}
+  defp pair([], _left, budget), do: {%{}, budget}
+  defp pair(_rebuilt, [], budget), do: {%{}, budget}
 
-  defp pair(rebuilt, left) when length(rebuilt) == length(left),
-    do: Map.new(Enum.zip(rebuilt, left), fn {{p, _}, {j, _}} -> {p, j} end)
+  defp pair(rebuilt, left, budget) when length(rebuilt) == length(left),
+    do: {Map.new(Enum.zip(rebuilt, left), fn {{p, _}, {j, _}} -> {p, j} end), budget}
 
-  defp pair(rebuilt, left) when length(rebuilt) * length(left) > @max_cells, do: %{}
+  defp pair(rebuilt, left, {cells_left, work_left} = budget) do
+    cells = length(rebuilt) * length(left)
 
-  defp pair(rebuilt, left), do: by_words(rebuilt, left)
+    if cells > cells_left do
+      {%{}, budget}
+    else
+      # Each block's words counted once, not once per cell.
+      r = Enum.map(rebuilt, fn {p, b} -> {p, counted(b)} end)
+      l = Enum.map(left, fn {j, b} -> {j, counted(b)} end)
+      work = cells * min(widest(r), widest(l))
+
+      if work > work_left,
+        do: {%{}, budget},
+        else:
+          {by_words(List.to_tuple(r), List.to_tuple(l)), {cells_left - cells, work_left - work}}
+    end
+  end
+
+  # A block's words as {word => count, number of words}.
+  defp counted(block) do
+    words = words(block)
+    {Enum.frequencies(words), length(words)}
+  end
+
+  defp widest(blocks), do: blocks |> Enum.map(fn {_, {f, _}} -> map_size(f) end) |> Enum.max()
 
   # The order-keeping pairing with the highest total score, counting only
   # pairs at or over `@min_score` (a longest common subsequence, weighted).
-  defp by_words(rebuilt, left) do
-    r = rebuilt |> Enum.map(fn {p, b} -> {p, words(b)} end) |> List.to_tuple()
-    l = left |> Enum.map(fn {j, b} -> {j, words(b)} end) |> List.to_tuple()
+  defp by_words(r, l) do
     {n, m} = {tuple_size(r), tuple_size(l)}
 
     table =
@@ -131,14 +158,19 @@ defmodule Barkpark.Content.PortableTextPairing do
     end
   end
 
-  # Dice over the two blocks' words, counted with repeats.
-  defp score([], _b), do: 0.0
-  defp score(_a, []), do: 0.0
+  # Dice over the two blocks' words, counted with repeats. Two blocks whose
+  # lengths alone keep it under `@min_score` are not compared word by word.
+  defp score({_fa, 0}, _b), do: 0.0
+  defp score(_a, {_fb, 0}), do: 0.0
 
-  defp score(a, b) do
-    {fa, fb} = {Enum.frequencies(a), Enum.frequencies(b)}
-    shared = Enum.sum(for {w, x} <- fa, y = fb[w], do: min(x, y))
-    2 * shared / (length(a) + length(b))
+  defp score({fa, la}, {fb, lb}) do
+    if 2 * min(la, lb) / (la + lb) < @min_score do
+      0.0
+    else
+      {small, big} = if map_size(fa) <= map_size(fb), do: {fa, fb}, else: {fb, fa}
+      shared = Enum.sum(for {w, x} <- small, y = big[w], do: min(x, y))
+      2 * shared / (la + lb)
+    end
   end
 
   defp words(%{"children" => children}) when is_list(children) do
