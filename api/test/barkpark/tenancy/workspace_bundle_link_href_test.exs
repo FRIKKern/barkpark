@@ -233,6 +233,59 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
     assert now =~ "19.990000000000000001" and now =~ "1.10"
   end
 
+  # task-ff1f9481f31ad3bc (#28728 r2 review): `COPY FROM` ends a row at a
+  # bare CR too, and stops at a `\\.` line; the check split on newlines only.
+  # The javascript: link sits in the member's last row.
+  defp last_link_row(bytes) do
+    rows = bytes |> String.split("\n", trim: true)
+    {bad, ok} = Enum.split_with(rows, &String.contains?(&1, "javascript:"))
+    {ok, bad}
+  end
+
+  defp refused(bundle) do
+    WorkspaceBundle.import_bundle(bundle, mode: :merge)
+  rescue
+    e in InvalidBundleError -> {:raised, e}
+  end
+
+  for {name, join} <- [
+        {"a member whose rows end with a bare CR", :cr},
+        {"a member with a \\. line before the link's row", :eod}
+      ] do
+    test "#{name} is refused, and no javascript: link is stored", %{ws: ws, proj: proj, doc: doc} do
+      {:ok, two} =
+        create_document_in!(ws, proj, "post", %{
+          "doc_id" => "lh2",
+          "body" => link("https://ok.example")
+        })
+
+      put_body!(Document, two.id, link("javascript:cr"))
+      {:ok, bundle} = WorkspaceBundle.export(ws.id)
+      put_body!(Document, two.id, link("https://ok.example"))
+
+      bundle =
+        edited(bundle, "documents", fn bytes ->
+          {ok, bad} = last_link_row(bytes)
+
+          case unquote(join) do
+            :cr -> Enum.join(ok ++ bad, "\r") <> "\r"
+            :eod -> Enum.join(ok ++ ["\\."] ++ bad, "\n") <> "\n"
+          end
+        end)
+
+      result = refused(bundle)
+
+      assert match?({:raised, %{code: "copy_rows_unreadable"}}, result) or
+               match?({:error, %{code: "copy_rows_unreadable"}}, result),
+             "imported: #{inspect(result, limit: 5)}"
+
+      for d <- [doc, two],
+          do: assert(LinkHrefFence.refused(Repo.get!(Document, d.id).content, "") == [])
+
+      assert %{"href" => "https://ok.example"} = def_of(Document, two.id)
+    end
+  end
+
   test "a value the check cannot decode refuses the bundle, by name", %{ws: ws, doc: doc} do
     {:ok, bundle} = WorkspaceBundle.export(ws.id)
     {manifest, dumps} = Archive.unpack(bundle)

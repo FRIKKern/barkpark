@@ -39,7 +39,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
   values skipped unread are those that after the COPY escapes hold neither
   `markDefs` nor a `\\u` escape, so cannot spell the key. A value read and
   not decoded refuses the bundle (`pt_content_undecodable`): Postgres must
-  never get a value the check could not read. Numbers are decoded as
+  never get a value the check could not read. A member whose rows the
+  check cannot split as `COPY FROM` does (a raw carriage return, a `\\.`
+  line) refuses the bundle too (`copy_rows_unreadable`). Numbers are decoded as
   decimals and written back as they were, so a stripped value keeps every
   other value.
 
@@ -81,6 +83,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
     dumps = Map.new(dumps)
     members = manifest["tables"] || []
     json = json_columns(for %{"name" => t} <- members, do: t)
+    for %{"name" => t} <- members, dumps[t] != nil, do: splittable!(t, dumps[t])
 
     for %{"name" => table, "columns" => cols} <- members,
         at = for({c, i} <- Enum.with_index(cols), c in Map.get(json, table, []), do: {c, i}),
@@ -219,6 +222,41 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
             "bundle member #{table} row #{id || "with no id"}: #{column} is not JSON " <>
               "the import can read, so its link addresses cannot be checked"
     end
+  end
+
+  # The member split into rows as `COPY FROM` splits it, or refused
+  # (task-ff1f9481f31ad3bc, #28728 r2 review). `COPY FROM` also ends a row
+  # at a bare carriage return, and stops at a line of `\.`; the check
+  # splits on newlines only, so a member with either is read as other rows
+  # than Postgres loads: a link in a row ended by a CR went through
+  # unread. `COPY TO` writes neither (it escapes a CR as `\r`, and a
+  # backslash as `\\`), so a member holding one was not written by an
+  # export, and the bundle is refused.
+  defp splittable!(table, dump) do
+    dump
+    |> source()
+    |> CopyText.rows()
+    |> Stream.with_index(1)
+    |> Enum.each(fn {fields, n} ->
+      cond do
+        Enum.any?(fields, &String.contains?(&1, "\r")) ->
+          unsplittable!(table, n, "a raw carriage return, which ends a row for Postgres")
+
+        fields == ["\\."] ->
+          unsplittable!(table, n, "a \\. line, which ends the data for Postgres")
+
+        true ->
+          :ok
+      end
+    end)
+  end
+
+  defp unsplittable!(table, n, what) do
+    raise InvalidBundleError,
+      code: "copy_rows_unreadable",
+      message:
+        "bundle member #{table} row #{n} holds #{what}; an export never writes one, " <>
+          "so its rows cannot be read as Postgres would load them"
   end
 
   # Each stripped address in the member, as findings.
