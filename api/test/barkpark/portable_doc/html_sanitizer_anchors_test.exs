@@ -162,6 +162,21 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerAnchorsTest do
       assert linked("#%E0%A4%A") == ["#%E0%A4%A"]
     end
 
+    test "a protocol-relative or backslash host is another host" do
+      opts = [id: "doc-1"]
+
+      # A browser reads `/\host` as `//host` and drops a tab or newline inside a URL.
+      for href <- [
+            "//e.example/papers/doc-1#intro",
+            "/\\e.example/papers/doc-1#intro",
+            " //e.example/papers/doc-1?y#intro",
+            "/\t/e.example/papers/doc-1#intro",
+            "/\n\\e.example/papers/doc-1#intro"
+          ] do
+        assert linked(href, opts) == [href], "#{inspect(href)} was treated as this Paper"
+      end
+    end
+
     test "each is a fixed point" do
       for href <- ["?x#intro", " #intro", "#a%20b", "/papers/doc-1#intro"] do
         out = S.sanitize(@body <> ~s(<a href="#{href}">x</a>), id: "doc-1")
