@@ -166,6 +166,28 @@ defmodule BarkparkWeb.ObjectRichText do
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == words end)
   end
 
+  @doc """
+  A's page as bp-rt-remote.js keeps one editor's numbers: `seen/1` is what
+  its `_bp_rt_seen` reports. `got/3` takes a push, drawn at once or left
+  waiting (A typing); `drew/1`, the waiting value drawn once A is idle.
+  """
+  def page, do: %{last: 0, first: nil}
+
+  def got(page, %{seq: seq} = v, draw?) do
+    first = if page.first && !v[:own], do: page.first, else: seq
+    %{last: max(page.last, seq), first: if(draw?, do: nil, else: first)}
+  end
+
+  def drew(page), do: %{page | first: nil}
+  def seen(%{first: nil, last: last}), do: last
+  def seen(%{first: first}), do: first - 1
+
+  @doc "The next value pushed to `view` for `doc[meta].rt`."
+  def next_push(view) do
+    assert_push_event(view, @event, %{values: %{"doc[meta].rt" => v}}, 2_000)
+    v
+  end
+
   def post_rt(view, html, seen) do
     send_post(view, "doc[meta].rt", %{
       "doc[meta].label" => "l0",

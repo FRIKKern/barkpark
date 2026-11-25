@@ -21,7 +21,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     * `repaint/2`, from Reload and a restore: every one is sent its stored
       value, shown at once, and every hold ends.
     * The page reports, per editor, the number of the last value it shows
-      (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post against it:
+      (`_bp_rt_seen[]`, `name|number`; while values wait, one less than
+      the first of them, or than the merge of its own post, sent `own`:
+      task-2833650e2e72d380). `split/3` reads a post against it:
       typed over a value A never saw, it is merged when the line-up is
       certain (`PortableTextMerge`), else held. A hold keeps theirs stored
       exactly, puts A's view in the form with the conflict banner, and
@@ -215,9 +217,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
           editor_rt_held: Map.delete(s.assigns[:editor_rt_held] || %{}, name)
         )
 
+      # `own`: the page reads its text from this one, not from what waited
+      # before it (task-2833650e2e72d380).
       {:merged, _name, path, mine}, s ->
         stored = FormPath.get(s.assigns[:editor_form] || %{}, path)
-        tell(s, [{path, mine, stored}], %{})
+        tell(s, [{path, mine, stored}], %{own: true})
 
       {:still, name, path}, s ->
         case (s.assigns[:editor_rt_held] || %{})[name] do
