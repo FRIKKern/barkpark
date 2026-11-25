@@ -836,6 +836,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 an IME composition (#28349 r3 review, K6). --%>
           <div id="doc-conflict-slot" style="display: contents;">
             <.doc_conflict_banner
+              id={"doc-conflict-" <> Barkpark.Content.published_id(@editor_doc.doc_id)}
               conflict={@doc_conflict}
               disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
               theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
@@ -1393,6 +1394,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   """
   attr :conflict, :boolean, default: false
 
+  attr :id, :string,
+    default: "doc-conflict",
+    doc: "per document, so two panes draw no id twice; the fold is `<id>-more`"
+
   attr :disabled, :boolean,
     default: false,
     doc:
@@ -1414,7 +1419,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           </span>
         </div>
         <blockquote :for={text <- Enum.take(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
-        <details :if={length(@theirs) > 5} class="bp-doc-conflict-more" data-test-id="doc-conflict-more">
+        <%!-- A patch would close the fold under the reader: `open` is the page's (#28891 review). --%>
+        <details
+          :if={length(@theirs) > 5}
+          id={@id <> "-more"}
+          class="bp-doc-conflict-more"
+          data-test-id="doc-conflict-more"
+          phx-mounted={JS.ignore_attributes(["open"])}
+        >
           <summary><%= gettext("%{count} more", count: length(@theirs) - 5) %></summary>
           <blockquote :for={text <- Enum.drop(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
         </details>

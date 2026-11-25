@@ -11,7 +11,11 @@ defmodule BarkparkWeb.StudioComponents.DocConflictBannerMoreTest do
   alias BarkparkWeb.StudioComponents.Editor
 
   defp banner(theirs) do
-    render_component(&Editor.doc_conflict_banner/1, conflict: true, theirs: theirs)
+    render_component(&Editor.doc_conflict_banner/1,
+      id: "doc-conflict-d1",
+      conflict: true,
+      theirs: theirs
+    )
     |> LazyHTML.from_fragment()
   end
 
@@ -45,5 +49,20 @@ defmodule BarkparkWeb.StudioComponents.DocConflictBannerMoreTest do
       assert [more] = texts(doc, ~s([data-test-id="doc-conflict-more"] > summary))
       assert String.trim(more) == "3 til"
     end)
+  end
+
+  # #28891 review: the fold closed on every LiveView patch while open. Its
+  # `open` is the page's: a stable id and `JS.ignore_attributes(["open"])`.
+  test "the fold keeps the page's open state across a patch" do
+    [fold] =
+      banner(for i <- 1..7, do: "block #{i}")
+      |> LazyHTML.query(~s([data-test-id="doc-conflict-more"]))
+      |> Enum.to_list()
+
+    # Per document, so two panes draw no id twice.
+    assert LazyHTML.attribute(fold, "id") == ["doc-conflict-d1-more"]
+    assert [mounted] = LazyHTML.attribute(fold, "phx-mounted")
+    assert mounted =~ "ignore_attrs"
+    assert mounted =~ ~s("open")
   end
 end
