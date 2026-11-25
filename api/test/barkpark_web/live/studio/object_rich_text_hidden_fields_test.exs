@@ -53,7 +53,6 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHiddenFieldsTest do
       end)
 
   defp rtb(c), do: stored(c)["meta"]["rt"]
-  defp f(c), do: Enum.map(rtb(c), &Map.take(&1, ["_key", "level", "foo", "style", "listItem"]))
 
   defp save(view, html, seen) do
     view
@@ -127,8 +126,8 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHiddenFieldsTest do
       s = seq(a)
       setlevel(c, "k2", 3)
       Process.sleep(200)
-      pushed = drain(a)
-      h = post_rt(a, "<p>ONE two</p><p>three four</p>", s)
+      _ = drain(a)
+      _ = post_rt(a, "<p>ONE two</p><p>three four</p>", s)
       assert Enum.at(rtb(c), 1)["level"] == 3
       assert words(rtb(c)) == ["ONE two", "three four"]
     end
@@ -157,7 +156,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextHiddenFieldsTest do
       _ = drain(a)
       render_hook(a, "reload-remote-doc", %{})
       s2 = seq(a)
-      h = post_rt(a, "<p>ONE two</p><p>three four</p>", s2)
+      _ = post_rt(a, "<p>ONE two</p><p>three four</p>", s2)
       assert Enum.at(rtb(c), 1)["level"] == 3
     end
 
