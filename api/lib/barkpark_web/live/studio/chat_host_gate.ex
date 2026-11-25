@@ -94,15 +94,14 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   end
 
   @doc """
-  The tab's read door (task-f44bbb6363d28e37): `session` when the tab's
-  principal may see it (`HostExecutionGate.may_see_session?/2`), else nil —
-  the same "no longer available" a missing row reads as.
+  The tab's read door (task-f44bbb6363d28e37): true when the tab's principal
+  may see `session` (`HostExecutionGate.may_see_session?/2`). ChatLive's
+  `load_permits?/2` asks it, so a host chat the tab may not see is the same
+  "no longer available" a missing row reads as, and it may not write one either.
   """
-  @spec visible(map(), map() | nil) :: map() | nil
-  def visible(assigns, %{} = session),
-    do: if(HostExecutionGate.may_see_session?(principal(assigns), session), do: session)
-
-  def visible(_assigns, nil), do: nil
+  @spec visible?(map(), map()) :: boolean()
+  def visible?(assigns, session),
+    do: HostExecutionGate.may_see_session?(principal(assigns), session)
 
   @doc "The sidebar rows the tab's principal may see (`HostExecutionGate.visible_sessions/2`)."
   @spec visible_sessions(map(), [map()]) :: [map()]

@@ -5386,10 +5386,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {sessions, listed_owners} =
       [archived: socket.assigns[:show_archived] == true]
       |> StudioChat.list_sessions(:global)
+      |> then(&ChatHostGate.visible_sessions(socket.assigns, &1))
       |> clamp_list_to_tenancy(socket)
-      |> then(fn {rows, owners} ->
-        {ChatHostGate.visible_sessions(socket.assigns, rows), owners}
-      end)
 
     # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
     # folds to the compact D3 summary HERE, and the snapshot itself never
@@ -5480,12 +5478,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # guard, so a row this socket may not SEE is a row it may not WRITE.
   defp tenancy_permits?(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session ->
-        load_permits?(socket, session) and ChatHostGate.visible(socket.assigns, session) != nil
-
+      %{} = session -> load_permits?(socket, session)
       # Missing row: not a cross-tenant reach.
-      _ ->
-        true
+      _ -> true
     end
   end
 
@@ -5604,11 +5599,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `test/barkpark_web/live/studio/chat_flat_route_foreign_session_load_test.exs`.
   defp get_session_in_tenancy(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{} = session ->
-        if load_permits?(socket, session), do: ChatHostGate.visible(socket.assigns, session)
-
-      _ ->
-        nil
+      %{} = session -> if load_permits?(socket, session), do: session
+      _ -> nil
     end
   end
 
@@ -5622,14 +5614,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # OWN ws-B session would stop loading (`pds_chatlive_global_reads_test`'s
   # positive control is exactly that arm). Using the URL workspace on both leaves
   # the flat mount ungated, which is the defect this seam is here for.
-  defp load_permits?(socket, %{owner_workspace_id: owner}) do
-    case read_workspace_id(socket) do
-      # Scoped mount: `LiveScope` pinned an authorized URL workspace.
-      ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
-      # Flat mount: nothing binds the socket, so ask the token — the same axis
-      # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
-      nil -> principal_permits_owner?(socket, owner)
-    end
+  defp load_permits?(socket, %{owner_workspace_id: owner} = session) do
+    ChatHostGate.visible?(socket.assigns, session) and
+      case read_workspace_id(socket) do
+        # Scoped mount: `LiveScope` pinned an authorized URL workspace.
+        ws_id when is_binary(ws_id) -> owner_in_tenancy?(socket, owner)
+        # Flat mount: nothing binds the socket, so ask the token — the same axis
+        # `tenancy_permits?/2` has guarded the id-addressed writes on since #14593.
+        nil -> principal_permits_owner?(socket, owner)
+      end
   end
 
   defp load_permits?(_socket, _other), do: false
