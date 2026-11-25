@@ -232,13 +232,13 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
     {a, b} = {mp + shift, me + shift}
 
-    spans =
-      mine["children"]
-      |> Enum.flat_map(&List.duplicate(&1, glen(&1)))
-      |> Enum.slice(mp, length(put))
+    all = Enum.flat_map(mine["children"], &List.duplicate(&1, glen(&1)))
+    spans = Enum.slice(all, mp, length(put))
+    mdefs = defs(mine)
+    outside = outside_links({all, mp, me, length(put)}, mdefs, theirs, ts)
 
     {new, added} =
-      new_spans(Enum.zip(put, spans), defs(mine), theirs, {elsewhere, gone(theirs, a, b)})
+      new_spans(Enum.zip(put, spans), mdefs, theirs, {elsewhere, gone(theirs, a, b), outside})
 
     children = cut(theirs, a, b, new)
 
@@ -262,7 +262,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # An inline object is a child of its own. It keeps mine's key when
   # neither theirs' block nor the rest of the field (`elsewhere`) uses it,
   # else takes a fresh key unique in both (task-8619a5423030aca8).
-  defp new_spans(letters, mdefs, theirs, {elsewhere, gone}) do
+  defp new_spans(letters, mdefs, theirs, {elsewhere, gone, outside}) do
     used =
       MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
       |> MapSet.difference(gone)
@@ -279,7 +279,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       ns: 0,
       nd: 0,
       no: 0,
-      same: Enum.frequencies(Map.values(mdefs))
+      same: Enum.frequencies(Map.values(mdefs)),
+      outside: outside
     }
 
     {spans, %{added: added}} =
@@ -352,15 +353,75 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   defp link_keys(span, mdefs), do: Enum.filter(List.wrap(span["marks"]), &is_map_key(mdefs, &1))
 
+  # Each of mine's links that goes on outside mine's splice, as theirs'
+  # key on those same letters (mine's letters, one span per letter; mine's
+  # splice puts `n` letters for base's [mp, me), theirs' `ts`). It is that
+  # link in the result, so mine's letters of it inside the splice take
+  # that key. A link theirs holds under no def of that content there, or
+  # under more than one, is left out.
+  defp outside_links({letters, mp, me, n}, mdefs, theirs, ts) do
+    tdefs = defs(theirs)
+    tl = theirs["children"] |> Enum.flat_map(&List.duplicate(&1, glen(&1))) |> List.to_tuple()
+
+    # theirs' index of base's letter `j` (nil inside theirs' splice), with
+    # theirs' put length read once (#28868 review: per letter, it grew with
+    # the square of theirs' splice).
+    at =
+      case ts do
+        {tp, te, tput} ->
+          tn = length(tput)
+
+          fn
+            j when j >= te -> j - te + tp + tn
+            j when j >= tp -> nil
+            j -> j
+          end
+
+        _ ->
+          & &1
+      end
+
+    before = letters |> Enum.take(mp) |> Enum.with_index()
+
+    after_ =
+      letters |> Enum.drop(mp + n) |> Enum.with_index(me)
+
+    (before ++ after_)
+    |> Enum.flat_map(fn {span, j} ->
+      t = at.(j)
+      tspan = t && t < tuple_size(tl) && elem(tl, t)
+
+      for mk <- link_keys(span, mdefs) do
+        tks =
+          if tspan, do: Enum.filter(link_keys(tspan, tdefs), &(tdefs[&1] == mdefs[mk])), else: []
+
+        {mk, tks}
+      end
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.flat_map(fn {mk, lists} ->
+      case lists |> List.flatten() |> Enum.uniq() do
+        [tk] -> [{mk, tk}]
+        _ -> []
+      end
+    end)
+    |> Map.new()
+  end
+
   # Each of mine's marks as theirs' mark key. `taken`: mine's link key => the
   # key it took (`took`, the keys taken), so one link of mine stays one, and
   # a second link of mine with the same content takes a def of its own.
   # Theirs' def is not taken by content under another key when mine has
   # another link of that content (`same`): mine's other link sits in the
   # result under theirs' key, whatever mine names it, and the two would
-  # become one (#28816 review). Mine's one link of that content takes it,
-  # whatever key mine holds it under: else one link of mine came out as
-  # two after mine re-keyed its defs (task-336c3a9b3baa9d0e).
+  # become one (#28816 review). A link of mine that goes on outside the
+  # splice takes theirs' key on those letters (`outside`), not theirs' key
+  # by content nor by name: mine's new link that held theirs' key for that
+  # content, or theirs' re-keyed name for mine's other link, was joined to
+  # mine's other link (task-985e4a7e234e48a0, #28868 review). Mine's one
+  # link of that content takes theirs' def, whatever key mine holds it
+  # under: else one link of mine came out as two after mine re-keyed its
+  # defs (task-336c3a9b3baa9d0e).
   defp marks(span, mdefs, tdefs, bkey, st) do
     span["marks"]
     |> List.wrap()
@@ -374,7 +435,12 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         is_map_key(st.taken, mk) ->
           {st.taken[mk], st}
 
-        k && not MapSet.member?(st.took, k) && (k == mk or st.same[mdefs[mk]] == 1) ->
+        is_map_key(st.outside, mk) and not MapSet.member?(st.took, st.outside[mk]) ->
+          k = st.outside[mk]
+          {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
+
+        k && not MapSet.member?(st.took, k) && st.same[mdefs[mk]] == 1 &&
+            not is_map_key(st.outside, mk) ->
           {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
 
         true ->

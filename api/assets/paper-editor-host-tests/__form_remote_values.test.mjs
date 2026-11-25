@@ -224,6 +224,36 @@ check("born: a field not drawn takes the number; a textarea compares its line br
   assert.deepEqual(seen(), { "doc[kicker]": 5, "doc[excerpt]": 6, v: 2 });
 });
 
+// task-727f65fc259d0c7b: a stale field put back to the store is drawn the
+// stored value though it is not focused; anything else is left to the patch.
+check("draw: an input not focused, still showing was, takes the value", () => {
+  const { title, excerpt } = mount("one two three", "E");
+  excerpt.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three", draw: true } });
+  assert.equal(title.value, "one twB three");
+});
+
+check("draw: an input showing something else keeps it", () => {
+  const { title, excerpt } = mount("one twA three", "E");
+  excerpt.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three", draw: true } });
+  assert.equal(title.value, "one twA three");
+});
+
+check("draw: a textarea compares its line breaks as \\n", () => {
+  const { title, excerpt } = mount("T", "one\ntwo");
+  title.focus();
+  push({ "doc[excerpt]": { value: "one\nB", was: "one\r\ntwo", draw: true } });
+  assert.equal(excerpt.value, "one\nB");
+});
+
+check("no draw flag: an input not focused is left to the patch", () => {
+  const { title, excerpt } = mount("one two three", "E");
+  excerpt.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three" } });
+  assert.equal(title.value, "one two three");
+});
+
 // task-f75673bec30873e6 (#28833 review, N2): a value drawn into a field
 // while it composes (IME) made the composition commit again (かかき).
 check("IME: a composing input is not drawn; after compositionend it is", () => {
