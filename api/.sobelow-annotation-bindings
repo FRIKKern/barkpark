@@ -183,6 +183,8 @@ lib/barkpark/tenancy/workspace_bundle/janitor.ex	os_process_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	own
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	owner_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	remove
+lib/barkpark/tenancy/workspace_bundle/link_href_check.ex	source
+lib/barkpark/tenancy/workspace_bundle/link_href_check.ex	write!
 lib/barkpark/tenancy/workspace_bundle/local_only.ex	release!
 lib/barkpark_web/controllers/cycle_fleet_controller.ex	release_paper_render
 lib/barkpark_web/controllers/ecosystem_panel_frame_controller.ex	serve
