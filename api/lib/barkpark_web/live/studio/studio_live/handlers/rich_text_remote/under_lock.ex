@@ -25,7 +25,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
 
-  @doc "Input name => {path, the value this socket believed stored}."
+  @doc """
+  Input name => {path, the value this socket believed stored, the value the
+  page typed on when `split/3` reads the post past a logged change (else
+  nil)}.
+  """
   def values(socket, seen) when is_list(seen) do
     content =
       case Lifecycle.base_doc(socket) do
@@ -34,11 +38,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       end
 
     for entry <- seen,
-        {name, _n} <- [RichTextRemote.parse_seen(entry)],
+        {name, n} <- [RichTextRemote.parse_seen(entry)],
         path = Path.parse_path(name),
         path != [],
         into: %{},
-        do: {name, {path, FormPath.get(content, path)}}
+        do: {name, {path, FormPath.get(content, path), RichTextRemote.page_base(socket, name, n)}}
   end
 
   def values(_socket, _seen), do: %{}
@@ -48,8 +52,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def write_opts(values) do
     [
-      rich_text_seen: Map.new(Map.values(values)),
-      saved_over: values |> Map.values() |> Enum.map(fn {[key | _], _} -> key end) |> Enum.uniq()
+      rich_text_seen: Map.new(Map.values(values), fn {path, was, _page} -> {path, was} end),
+      saved_over:
+        values |> Map.values() |> Enum.map(fn {[key | _], _, _} -> key end) |> Enum.uniq()
     ]
   end
 
@@ -63,7 +68,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     over = (is_map(written) && Map.get(written, :saved_over)) || %{}
     now = (is_map(written) && Map.get(written, :content)) || %{}
 
-    Enum.reduce(values, {saved, acts}, fn {name, {path, was}}, {s, acts} ->
+    Enum.reduce(values, {saved, acts}, fn {name, {path, was, page}}, {s, acts} ->
       before = FormPath.get(over, path)
       posted = FormPath.get(doc, path)
 
@@ -83,7 +88,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
             acts,
             {name, path},
             {list(was), list(before), list(FormPath.get(now, path))},
-            posted
+            {posted, page}
           )
       end
     end)
@@ -97,8 +102,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   # rule). The store kept over it: held, A's words in the view. Else the
   # store took them merged: shown to the page as its own, logged over the
   # page's own text, `split/3`'s `mine` where it merged (#28792 review B1).
-  defp moved(s, acts, {name, path}, {was, before, after_write}, posted) do
+  # A hold where `split/3` merged is read against what the page typed on,
+  # not `was`: the page has not drawn the change merged in, and a post on
+  # its text would read as taking it out (task-77c9532e1e04907b).
+  defp moved(s, acts, {name, path}, {was, before, after_write}, {posted, page}) do
     written = PortableText.from_html(posted, was)
+    mine = Enum.find_value(acts, &match_merged(&1, name))
 
     cond do
       PortableTextMerge.same_drawn?(written, was) ->
@@ -106,18 +115,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
       PortableTextMerge.same_drawn?(after_write, before) and
           not PortableTextMerge.same_drawn?(written, before) ->
+        {base, text} = if mine && page, do: {list(page), mine}, else: {was, written}
+
         {view, texts} =
-          case PortableTextMerge.merge(was, written, before) do
+          case PortableTextMerge.merge(base, text, before) do
             {:clash, texts, view} -> {view, texts}
-            {:ok, _merged} -> {written, nil}
+            {:ok, _merged} -> {text, nil}
           end
 
-        {s, [{:held, name, path, {was, before, view, texts}} | drop(acts, name)]}
+        {s, [{:held, name, path, {base, before, view, texts}} | drop(acts, name)]}
 
       true ->
-        mine = Enum.find_value(acts, written, &match_merged(&1, name))
         form = FormPath.put(s.assigns[:editor_form] || %{}, path, after_write)
-        acts = [{:merged, name, path, mine} | drop(acts, name)]
+        acts = [{:merged, name, path, mine || written} | drop(acts, name)]
         {Phoenix.Component.assign(s, editor_form: form), acts}
     end
   end
