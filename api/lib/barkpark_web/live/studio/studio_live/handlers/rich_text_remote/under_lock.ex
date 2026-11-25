@@ -63,7 +63,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   (`saved` is the socket after the write, `doc` the post `split/3` gave),
   and the socket's form at the stored value of a merge.
   """
-  def acts(saved, acts, values, doc) when map_size(values) > 0 do
+  #
+  # `doc` is the post as written (after `split/3`), `posted` as the page
+  # sent it. A rich text `split/3` held (again, or still on the view) was
+  # held against the store this socket knew; when the store moved under the
+  # lock, the hold is read again against it (`rehold/5`,
+  # task-4dbb75a6eb9ceeea), or the view kept the old store and typing on it
+  # erased the save that landed.
+  def acts(saved, acts, values, {doc, posted_doc}) when map_size(values) > 0 do
     written = saved.assigns[:editor_doc]
     over = (is_map(written) && Map.get(written, :saved_over)) || %{}
     now = (is_map(written) && Map.get(written, :content)) || %{}
@@ -80,7 +87,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
           {s, acts}
 
         holds?(acts, name) ->
-          {s, acts}
+          rehold(s, acts, {name, path}, list(before), FormPath.get(posted_doc, path))
 
         true ->
           moved(
@@ -94,7 +101,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     end)
   end
 
-  def acts(saved, acts, _values, _doc), do: {saved, acts}
+  def acts(saved, acts, _values, _docs), do: {saved, acts}
+
+  # Held by `split/3` over the store this socket knew, `before` landed under
+  # the lock: A's text (the post; the view for a post still on it) merged
+  # again from the hold's base onto `before`, held as `split/3` holds.
+  defp rehold(s, acts, {name, path}, before, posted) do
+    case held_base(s, acts, name) do
+      {base, mine} when is_binary(posted) or is_list(mine) ->
+        mine = mine || PortableText.from_html(posted, list(base))
+
+        hold =
+          case PortableTextMerge.merge(list(base), mine, before) do
+            {:clash, texts, view} -> {base, before, view, texts}
+            {:ok, merged} -> {base, before, merged, nil}
+          end
+
+        {s, [{:held, name, path, hold} | drop(acts, name)]}
+
+      _ ->
+        {s, acts}
+    end
+  end
+
+  # The hold's base, and A's text when it is the view (`:still`), else nil.
+  defp held_base(s, acts, name) do
+    case Enum.find(acts, &(elem(&1, 1) == name)) do
+      {:held, ^name, _path, {base, _theirs, _view, _texts}} ->
+        {base, nil}
+
+      {:still, ^name, _path} ->
+        case (s.assigns[:editor_rt_held] || %{})[name] do
+          %{base: base, view: view} -> {base, list(view)}
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
 
   # `written` is what the write was given (after `split/3`, which may have
   # merged a change A's page was told of into it). It left this rich text
