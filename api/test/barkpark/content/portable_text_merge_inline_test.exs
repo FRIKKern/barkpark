@@ -782,7 +782,17 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
             %{"t7" => :x, "m9" => :y}},
            {[a: "t7", b: "t7", " ": nil, c: "d1", " ": nil, e: nil, p: "m9", n: nil],
             %{"t7" => :x, "m9" => :x, "d1" => :y}},
-           {[a: "d2", b: "d2", " ": nil, " ": nil, e: nil, n: nil], %{"d2" => :x}}}
+           {[a: "d2", b: "d2", " ": nil, " ": nil, e: nil, n: nil], %{"d2" => :x}}},
+          # task-985e4a7e234e48a0: mine's new p link happens to hold theirs'
+          # x key (d2, base's y key in mine's re-keyed defs). Main read it as
+          # the one link under that key: p joined theirs' a link.
+          {"E: p holds theirs' x key, mine re-keyed both",
+           {[a: "m9", b: "m9", " ": nil, c: "d2", " ": nil, e: nil, n: nil],
+            %{"m9" => :x, "d2" => :y}},
+           {[a: "t7", b: "t7", " ": nil, c: "d1", p: "d2", " ": nil, e: nil, n: nil],
+            %{"t7" => :x, "d2" => :x, "d1" => :y}},
+           {[a: "d2", b: "d2", " ": nil, c: "t7", " ": nil, e: nil, N: nil],
+            %{"d2" => :x, "t7" => :y}}}
         ] do
       test "re-keyed S2 #{name}: mine's p link keeps a def of its own" do
         lb = fn ls, defs, kp ->
