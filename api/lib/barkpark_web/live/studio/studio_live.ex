@@ -185,6 +185,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp soonest_expiry(_), do: nil
 
+  defp asks(event, params, socket) do
+    case LeaveAsk.ask(event, params, socket) do
+      {:stay, socket} -> {:noreply, socket}
+      {:go, socket} -> leave(event, params, socket)
+    end
+  end
+
   defp leave("select", params, socket), do: Scope.select(params, socket)
   defp leave("expand-pane", params, socket), do: Scope.expand_pane(params, socket)
   defp leave("new-document", params, socket), do: Fields.new_document(params, socket)
@@ -471,12 +478,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   # A press that leaves a held field asks first (`LeaveAsk`).
-  def handle_event(event, params, socket) when event in ~w(select expand-pane new-document) do
-    case LeaveAsk.ask(event, params, socket) do
-      {:stay, socket} -> {:noreply, socket}
-      {:go, socket} -> leave(event, params, socket)
-    end
-  end
+  def handle_event("select", params, socket), do: asks("select", params, socket)
+  def handle_event("expand-pane", params, socket), do: asks("expand-pane", params, socket)
+  def handle_event("new-document", params, socket), do: asks("new-document", params, socket)
 
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)
