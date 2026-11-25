@@ -38,7 +38,7 @@ defmodule Barkpark.Test.PtMergeGen do
 
     # Sometimes theirs makes mine's edits too, and maybe one more.
     theirs =
-      if pick(1..6) == 1,
+      if pick(1..7) == 1,
         do: edit(mine, "t", pick(0..max(length(mine) - 1, 0)), kind, 0..1),
         else: edit(base, "t", hot, kind)
 
@@ -56,7 +56,7 @@ defmodule Barkpark.Test.PtMergeGen do
   defp base(kind),
     do: for(i <- 0..(pick(1..4) - 1), do: block("k#{i}", words(pick(1..5), kind), kind))
 
-  defp edit(blocks, side, hot, kind, count \\ [0, 1, 1, 2, 2, 3]) do
+  defp edit(blocks, side, hot, kind, count \\ [0, 1, 1, 1, 2, 2, 2, 3]) do
     Enum.reduce(1..Enum.random(count)//1, {blocks, 0}, fn _, {bs, n} ->
       {one_edit(bs, side, n, hot, kind), n + 1}
     end)
@@ -67,7 +67,7 @@ defmodule Barkpark.Test.PtMergeGen do
 
   defp one_edit(blocks, side, n, hot, kind) do
     last = length(blocks) - 1
-    i = if pick(1..8) > 1, do: min(hot, last), else: pick(0..last)
+    i = if pick(1..6) > 1, do: min(hot, last), else: pick(0..last)
 
     case pick(1..22) do
       1 -> List.insert_at(blocks, i + 1, block("#{side}#{n}", words(pick(1..3), kind), kind))
