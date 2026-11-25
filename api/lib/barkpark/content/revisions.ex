@@ -134,6 +134,39 @@ defmodule Barkpark.Content.Revisions do
   end
 
   @doc """
+  Whether any revision of the document, in the same scope as
+  `list_revisions/4`, holds `value` at `key` (a field name, or a path into a
+  `composite`; `"title"` is the title column). One `EXISTS` over the
+  document's revisions (index `doc_id, type, dataset`), never capped by a
+  count: a rejoin's stale field may be many saves old
+  (task-727f65fc259d0c7b, #28850 r1 review).
+  """
+  def revision_holds?(doc_id, type, dataset, key, value, opts \\ []) when is_binary(value) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    owner_may_read?(doc_id, type, dataset, opts) and
+      Revision
+      |> where([r], r.doc_id == ^Content.published_id(doc_id) and r.type == ^type)
+      |> scope_to_dataset(dataset, opts)
+      # global-read: same clauses as list_revisions/4 (owner check, dataset, grants); answers only a yes/no for one document the caller has open
+      |> scope_to_workspace_or_global(workspace_id, project_id)
+      |> maybe_scope_to_grants(opts)
+      |> holds(List.wrap(key), value)
+      |> Repo.exists?()
+  end
+
+  defp holds(query, ["title"], value), do: where(query, [r], r.title == ^value)
+
+  defp holds(query, path, value),
+    do:
+      where(
+        query,
+        [r],
+        fragment("(? #>> ?) = ?", r.content, type(^path, {:array, :string}), ^value)
+      )
+
+  @doc """
   Get a single revision by ID, scoped to a dataset and (optionally)
   workspace/project.
 
