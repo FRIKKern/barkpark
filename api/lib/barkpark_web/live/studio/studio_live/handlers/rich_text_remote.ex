@@ -156,6 +156,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     * a clash: theirs stays stored exactly (review rule 1), and the form
       holds A's view with theirs in the banner.
 
+  Past `@log_cap` changes the oldest fold together, so the first `was`
+  stays; a post that saw a folded change but not the last folded in has no
+  base that fits, and is held as a clash is.
+
   A rich text whose number is current is A's to save as typed.
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
