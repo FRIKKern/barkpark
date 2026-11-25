@@ -68,7 +68,7 @@ defmodule Barkpark.Content.PortableText do
   """
 
   alias Barkpark.Content.LinkHref
-  alias Barkpark.Content.PortableTextPairing
+  alias Barkpark.Content.{PortableTextAlign, PortableTextPairing}
 
   @decorators %{
     "strong" => "strong",
@@ -458,40 +458,82 @@ defmodule Barkpark.Content.PortableText do
   # block whose text the parser normalises (an empty paragraph, a leading line
   # break) when the author did not touch it. An empty block nothing matches
   # is dropped, as `from_html/1` drops it.
+  #
+  # The blocks kept in stored order are found as one line-up
+  # (`PortableTextAlign`, the merge's), so a copy pasted above a block is the
+  # new one and the block where the stored one sat keeps it (#28721 review):
+  # `{:kept, block, i}`, the fixed points the pairing reads gaps between. A
+  # block that matches a stored block out of that order was moved:
+  # `{:moved, block, i}`, kept too, but not a fixed point (#28714 review S4).
   defp keep_stored(blocks, []), do: for({block, _src} <- blocks, not empty?(block), do: block)
 
   defp keep_stored(blocks, stored) do
-    indexed =
-      stored
-      |> Enum.with_index()
-      |> Enum.map(fn {b, i} ->
-        {{normalize(fragment_html(b)), drawn_list(b)}, to_html([b]), b, i}
+    seen = Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1])})
+
+    posted =
+      Enum.map(blocks, fn {block, src} ->
+        {src && {normalize(src), drawn_list(block)}, to_html([block])}
       end)
 
-    kept =
-      blocks
-      |> Enum.map_reduce(indexed, fn {block, src}, left ->
-        src = src && {normalize(src), drawn_list(block)}
-        html = to_html([block])
+    fixed = posted |> line_up(seen) |> Map.new()
+    seen = seen |> Enum.zip(stored) |> Enum.with_index()
 
-        i =
-          (src && Enum.find_index(left, &(elem(&1, 0) == src))) ||
-            Enum.find_index(left, &(elem(&1, 1) == html))
+    blocks
+    |> Enum.zip(posted)
+    |> Enum.with_index()
+    |> Enum.map_reduce(MapSet.new(Map.values(fixed)), fn {{{block, _src}, {src, html}}, p},
+                                                         used ->
+      case fixed[p] do
+        nil ->
+          left = Enum.reject(seen, fn {_s, i} -> MapSet.member?(used, i) end)
 
-        case i do
-          nil ->
-            {{:rebuilt, block}, left}
+          found =
+            (src && Enum.find(left, fn {{{frag, _}, _}, _} -> frag == src end)) ||
+              Enum.find(left, fn {{{_, h}, _}, _} -> h == html end)
 
-          i ->
-            {{:kept, elem(Enum.at(left, i), 2), elem(Enum.at(left, i), 3)},
-             List.delete_at(left, i)}
-        end
-      end)
-      |> elem(0)
-      |> Enum.reject(&match?({:rebuilt, %{"_type" => "block", "children" => []}}, &1))
+          case found do
+            nil -> {{:rebuilt, block}, used}
+            {{_, old}, i} -> {{:moved, old, i}, MapSet.put(used, i)}
+          end
 
-    adopt_keys(kept, stored)
+        i ->
+          {{:kept, Enum.at(stored, i), i}, used}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reject(&match?({:rebuilt, %{"_type" => "block", "children" => []}}, &1))
+    |> adopt_keys(stored)
   end
+
+  # A posted block is a stored one when it was read from that block's editor
+  # HTML or renders to its HTML.
+  defp same_block?({src, html}, {frag, stored_html}),
+    do: (src != nil and src == frag) or html == stored_html
+
+  # `PortableTextAlign.pairs/3` over what lies between the blocks both lists
+  # start and end with, which a typical save leaves almost all of. The start
+  # is the line-up's own first choice; past the end of the shorter list the
+  # line-up runs out.
+  defp line_up(posted, seen) do
+    start = common(posted, seen)
+    {posted, seen} = {Enum.drop(posted, start), Enum.drop(seen, start)}
+    finish = common(Enum.reverse(posted), Enum.reverse(seen))
+    {pn, sn} = {length(posted) - finish, length(seen) - finish}
+
+    head = for k <- 0..(start - 1)//1, do: {k, k}
+    tail = for k <- 0..(finish - 1)//1, do: {start + pn + k, start + sn + k}
+
+    middle =
+      posted
+      |> Enum.take(pn)
+      |> PortableTextAlign.pairs(Enum.take(seen, sn), &same_block?/2)
+      |> Enum.map(fn {p, i} -> {start + p, start + i} end)
+
+    head ++ middle ++ tail
+  end
+
+  defp common([a | as], [b | bs]), do: if(same_block?(a, b), do: 1 + common(as, bs), else: 0)
+  defp common(_, _), do: 0
 
   defp empty?(%{"_type" => "block", "children" => []}), do: true
   defp empty?(_), do: false
@@ -529,14 +571,18 @@ defmodule Barkpark.Content.PortableText do
   # does not rekey its paragraph. Anything else keeps the key `from_html/1`
   # gave it, unless another block of the save holds it.
   defp adopt_keys(kept, stored) do
-    taken = for {:kept, %{"_key" => k}, _i} <- kept, into: MapSet.new(), do: k
+    taken =
+      for {kind, %{"_key" => k}, _i} when kind in [:kept, :moved] <- kept,
+          into: MapSet.new(),
+          do: k
+
     pairs = PortableTextPairing.pairs(kept, stored)
 
     {blocks, _taken} =
       kept
       |> Enum.with_index()
       |> Enum.map_reduce(taken, fn
-        {{:kept, block, _i}, _p}, taken ->
+        {{kind, block, _i}, _p}, taken when kind in [:kept, :moved] ->
           {{:fixed, block}, taken}
 
         {{:rebuilt, block}, p}, taken ->
