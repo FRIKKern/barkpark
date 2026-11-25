@@ -111,22 +111,28 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
   end
 
   @doc """
-  Studio's answer (`ChatLive.resolve_permission`), through `settle/4`, so a card
+  Studio's answer (`ChatLive.resolve_permission`), through `settle/5`, so a card
   a tab still shows as pending never delivers to an ask the store has canceled
   or answered (task-52de5429fbdcb68c). Studio ignores the delivery's result, as
-  it always has. `{:ok, status}` when delivered and stored as `status`;
-  otherwise `{:settled, stored}` with the stored terminal status, so a cancel
-  that commits during the send shows as canceled (task-a759f535f818d2cb); and
-  `:noop` while another answer is in flight.
+  it always has. `decision` is what `deliver` hands the runtime: `{:deny, _}`
+  stores "denied", anything else "allowed". A question row answered with
+  `{:allow, %{"answers" => answers}}` also keeps `answers` on the row, as the
+  HTTP answer does (task-48d523fa9c04c354). `{:ok, status}` when delivered and
+  stored as `status`; otherwise `{:settled, stored}` with the stored terminal
+  status, so a cancel that commits during the send shows as canceled
+  (task-a759f535f818d2cb); and `:noop` while another answer is in flight.
   An ask with no stored row (no store session, or a lost Recorder write) is
   delivered as before, so its card never goes dead.
   """
-  @spec resolve(String.t() | nil, String.t(), String.t(), (-> any())) ::
+  @spec resolve(String.t() | nil, String.t(), term(), (-> any())) ::
           {:ok, String.t()} | {:settled, String.t()} | :noop
-  def resolve(session_id, request_id, status, deliver) do
+  def resolve(session_id, request_id, decision, deliver) do
+    status = if match?({:deny, _}, decision), do: "denied", else: "allowed"
+
     with true <- is_binary(session_id),
-         %Message{} <- StudioChat.get_needs_you_message(session_id, request_id) do
-      sent = settle(session_id, request_id, status, fn -> {:ok, deliver.()} end)
+         %Message{} = ask <- StudioChat.get_needs_you_message(session_id, request_id) do
+      send = fn -> {:ok, deliver.()} end
+      sent = settle(session_id, request_id, status, send, answers_extra(ask, decision))
 
       case {sent, stored(session_id, request_id)} do
         {:delivered, {:settled, ^status}} -> {:ok, status}
@@ -138,6 +144,12 @@ defmodule Barkpark.StudioChat.ApprovalAnswer do
         {:ok, status}
     end
   end
+
+  defp answers_extra(%Message{role: "question"}, {:allow, %{"answers" => answers}})
+       when is_map(answers),
+       do: %{"answers" => answers}
+
+  defp answers_extra(_ask, _decision), do: %{}
 
   @doc """
   The host refused a delivered answer (task-746c02d760f26ce7): the ask was
