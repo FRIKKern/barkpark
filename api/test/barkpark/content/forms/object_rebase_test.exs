@@ -110,10 +110,12 @@ defmodule Barkpark.Content.Forms.ObjectRebaseTest do
                ["one two A", "B para"]
     end
 
+    # Both edit the word "two": an overlap, a clash before and after the
+    # merge inside one block (task-266ffbe9cd115f3c).
     test "the same block: the post is written, as before" do
       base = [blk("k1", "one two")]
-      mine = [blk("k1", "B one two")]
-      theirs = [blk("k1", "one two A")]
+      mine = [blk("k1", "one TWO")]
+      theirs = [blk("k1", "one twoA")]
 
       assert rebase(%{"rt" => mine}, %{"rt" => base}, %{"rt" => theirs})["rt"] == mine
     end

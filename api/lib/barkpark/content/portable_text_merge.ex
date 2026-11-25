@@ -47,8 +47,11 @@ defmodule Barkpark.Content.PortableTextMerge do
   each clashed block and theirs elsewhere; mine whole when the line-up is
   not certain), and `texts` are theirs words the view does not show, for
   the banner. A clash is never stored.
+
+  `opts`: `inline: false` (tests only) leaves out the merge inside one
+  block (task-266ffbe9cd115f3c); until that lands it changes nothing.
   """
-  def merge(base, mine, theirs) do
+  def merge(base, mine, theirs, _opts \\ []) do
     base = list(base)
     {mine, theirs} = {list(mine), list(theirs)}
 
