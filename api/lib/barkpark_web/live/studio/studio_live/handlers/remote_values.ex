@@ -188,14 +188,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
         socket.assigns[:editor_rt_under_lock] || %{}
       )
 
+    text =
+      BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock.write_opts(
+        socket.assigns[:editor_text_under_lock] || %{}
+      )
+
     [
       field_bases: socket.assigns[:editor_field_bases] || %{},
       field_expect: socket.assigns[:editor_field_expect] || %{},
       saved_over:
-        Enum.uniq((socket.assigns[:editor_saved_over] || []) ++ (rich[:saved_over] || [])),
-      rich_text_seen: rich[:rich_text_seen] || %{}
+        Enum.uniq(
+          (socket.assigns[:editor_saved_over] || []) ++
+            (rich[:saved_over] || []) ++ (text[:saved_over] || [])
+        ),
+      rich_text_seen: rich[:rich_text_seen] || %{},
+      text_seen: text[:text_seen] || %{}
     ]
   end
+
+  @doc "Whether the raw `_bp_seen` is from a page that numbers every value it shows."
+  def crossing?(seen) when is_binary(seen), do: Map.get(decode_seen(seen), "v") == @seen_version
+  def crossing?(_seen), do: false
 
   @doc false
   # The entry a post reporting number `n` was written from: the latest of the
@@ -227,8 +240,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
          doc != before.assigns[:editor_doc] do
       schema = socket.assigns[:editor_schema]
 
+      # A field held over a store that moved under the post
+      # (`TextUnderLock`) keeps A's words and is told nothing.
+      held = socket.assigns[:editor_text_held] || []
+
       sent =
         for key <- units(keys, text_path(schema, keys, path)),
+            key not in held,
             free_text_at?(schema, key),
             value = value_at(posted, key),
             is_binary(value),
