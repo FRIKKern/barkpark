@@ -26,6 +26,10 @@ defmodule BarkparkWeb.Studio.ObjectRichTextWriteRaceTest do
 
       assert words(stored(c)["meta"]["rt"]) == ["one twB"]
       assert html =~ "Someone else rewrote"
+
+      # A's page is sent the view: A's words, held.
+      assert_push_event(a, "bp:rt-remote", %{values: %{"doc[meta].rt" => %{html: view}}}, 2_000)
+      assert view =~ "one twoA"
     end
 
     test "#{surface}: each types in a word of their own, B's save lands under A's post: both kept",
@@ -38,6 +42,16 @@ defmodule BarkparkWeb.Studio.ObjectRichTextWriteRaceTest do
 
       assert words(stored(c)["meta"]["rt"]) == ["ONE TWO"]
       refute html =~ "Someone else rewrote"
+
+      # A's page is sent the merge as its own.
+      assert_push_event(
+        a,
+        "bp:rt-remote",
+        %{values: %{"doc[meta].rt" => %{own: true, html: merged}}},
+        2_000
+      )
+
+      assert merged =~ "ONE TWO"
     end
   end
 end
