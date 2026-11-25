@@ -320,7 +320,34 @@
     if (detail.seqs) recordSeen(values, detail.seqs);
   }
 
+  // task-4fc7383b936f606a: a connected mount sends each free-text field its
+  // stored value with a number (`RemoteValues.born/1`). A page that rejoins
+  // a new socket keeps this input, the old socket's numbers. A field showing
+  // the value takes the number. One that does not (typed while away) keeps
+  // its number, or reports 0, a number no socket sends: the server holds its
+  // post rather than write it over a save it never showed. Nothing is drawn.
+  function onBorn(e) {
+    var detail = (e && e.detail) || {};
+    var values = detail.values || {};
+    var seqs = detail.seqs || {};
+    var form = document.getElementById("editor-form");
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    seen.v = SEEN_VERSION;
+    Object.keys(seqs).forEach(function (name) {
+      var value = values[name];
+      var field = form.elements.namedItem(name);
+      if (typeof value !== "string" || typeof seqs[name] !== "number") return;
+      // A field not drawn now is drawn later from the server's form.
+      if (!field || (typeof field.value === "string" && lf(field.value) === lf(value))) seen[name] = seqs[name];
+      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = 0;
+    });
+    input.value = JSON.stringify(seen);
+  }
+
   window.addEventListener("phx:bp:form-remote-values", onRemoteValues);
+  window.addEventListener("phx:bp:form-born", onBorn);
   window.BarkparkFormRemoteValues = onRemoteValues;
 })();
 
