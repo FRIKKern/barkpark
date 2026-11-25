@@ -486,7 +486,7 @@ defmodule Barkpark.Content.PortableText do
       case fixed[p] do
         nil ->
           case take(index, used, src, html) do
-            nil -> {{:rebuilt, block}, {used, index}}
+            {nil, index} -> {{:rebuilt, block}, {used, index}}
             {i, index} -> {{:moved, elem(stored_at, i), i}, {MapSet.put(used, i), index}}
           end
 
@@ -542,8 +542,11 @@ defmodule Barkpark.Content.PortableText do
     |> Enum.reduce({[], lookup(seen), MapSet.new(), -1}, fn {{src, html}, p},
                                                             {acc, index, used, last} ->
       case take(index, used, src, html) do
-        {i, index} when i > last -> {[{p, i} | acc], index, MapSet.put(used, i), i}
-        _ -> {acc, index, used, last}
+        {i, index} when is_integer(i) and i > last ->
+          {[{p, i} | acc], index, MapSet.put(used, i), i}
+
+        {_i, index} ->
+          {acc, index, used, last}
       end
     end)
     |> elem(0)
@@ -562,15 +565,20 @@ defmodule Barkpark.Content.PortableText do
   end
 
   # The first unused stored block read from `src`, else the first whose HTML
-  # is `html`: `{index, lookup without it}`, or nil.
-  defp take(index, used, src, html),
-    do:
-      (src && first_unused(index, {:src, src}, used)) || first_unused(index, {:html, html}, used)
+  # is `html`, and the lookup with the used blocks before it dropped: `{index
+  # or nil, lookup}`. The caller marks a block it takes used, and the next
+  # walk drops it. The lookup is kept found or not: a block taken through one
+  # list stays in the other, and identical blocks walked past every taken one
+  # on each lookup (#28724 r2 review S1).
+  defp take(index, used, src, html) do
+    {i, index} = if src, do: first_unused(index, {:src, src}, used), else: {nil, index}
+    if i, do: {i, index}, else: first_unused(index, {:html, html}, used)
+  end
 
   defp first_unused(index, key, used) do
     case Enum.drop_while(Map.get(index, key, []), &MapSet.member?(used, &1)) do
-      [] -> nil
-      [i | rest] -> {i, Map.put(index, key, rest)}
+      [] -> {nil, Map.delete(index, key)}
+      [i | _] = unused -> {i, Map.put(index, key, unused)}
     end
   end
 

@@ -37,6 +37,48 @@ defmodule Barkpark.Content.PortableTextPairingScaleTest do
     end
   end
 
+  # Runs `fun` in a process whose heap is capped at 100 MB: its result and
+  # the reductions it took. A run past the cap is killed and the test fails.
+  defp bounded(fun) do
+    parent = self()
+
+    {pid, ref} =
+      :erlang.spawn_opt(
+        fn ->
+          {:reductions, r0} = Process.info(self(), :reductions)
+          out = fun.()
+          {:reductions, r1} = Process.info(self(), :reductions)
+          send(parent, {:done, out, r1 - r0})
+        end,
+        [
+          :monitor,
+          {:max_heap_size, %{size: div(100_000_000, 8), kill: true, error_logger: false}}
+        ]
+      )
+
+    assert_receive {:done, out, reductions}, 60_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    {out, reductions}
+  end
+
+  # #28724 r2 review S1: identical blocks between two ends that differ are
+  # past the line-up's cap, and the in-order walk looked each one up past
+  # every block it had taken: stored Y, A x 10k, Y' against posted Z,
+  # A x 20k, Z' took 5.9 s (main 0.36 s), 20k empty paragraphs 5.7 s.
+  for {name, text} <- [{"identical", "the same words"}, {"empty", ""}] do
+    test "#{name} blocks past the line-up's cap cost a linear walk" do
+      text = unquote(text)
+      many = fn n, k -> for i <- 1..n, do: block("#{k}#{i}", text) end
+      stored = [block("y", "stored start")] ++ many.(10_000, "a") ++ [block("y2", "stored end")]
+      posted = [block("z", "posted start")] ++ many.(20_000, "x") ++ [block("z2", "posted end")]
+      html = PortableText.to_html(posted)
+
+      {_out, reductions} = bounded(fn -> length(PortableText.from_html(html, stored)) end)
+      # Measured on the fix: about 0.2G at most.
+      assert reductions < 1_000_000_000, "took #{reductions} reductions"
+    end
+  end
+
   # 10,000 stored blocks and a post of 10,000 others: the line-up's table
   # held 10,000 x 10,000 cells, about 1 GB (B2). In a process whose heap is
   # capped at 100 MB, a save past the cap is killed and the test fails.
