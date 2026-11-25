@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   modes have no order across providers (a model switch has no direction).
   """
 
+  alias Barkpark.Sharing.PreviewLinks
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Runtime
   alias BarkparkWeb.HostExecutionGate
@@ -36,7 +37,8 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   The session is the stored row when there is one (its provider, target and
   owner are what the runtime was started from), else the tab's own assigns.
   """
-  @spec authorize(map(), term()) :: :ok | {:error, :host_execution_not_permitted}
+  @spec authorize(map(), term()) ::
+          :ok | {:error, :host_execution_not_permitted | :host_admin_required}
   def authorize(_assigns, {:deny, _message}), do: :ok
 
   def authorize(assigns, act) do
@@ -69,7 +71,8 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
           execution_target: assigns.execution_target,
           execution_host_id: assigns.execution_host_id,
           cwd: Runtime.cwd(assigns.provider),
-          mode: assigns.mode
+          mode: assigns.mode,
+          created_by: PreviewLinks.actor_ref(principal(assigns))
         },
         scope
       )
@@ -80,7 +83,8 @@ defmodule BarkparkWeb.Studio.ChatHostGate do
   The spawn-time check: `store_session` is the row the spawn is for (or nil
   for a row the tab could not load), the provider and target are the tab's.
   """
-  @spec authorize_spawn(map(), map() | nil) :: :ok | {:error, :host_execution_not_permitted}
+  @spec authorize_spawn(map(), map() | nil) ::
+          :ok | {:error, :host_execution_not_permitted | :host_admin_required}
   def authorize_spawn(assigns, store_session) do
     HostExecutionGate.authorize_turn(principal(assigns), %{
       provider: assigns[:provider],
