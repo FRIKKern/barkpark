@@ -218,7 +218,7 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Each base index mine kept, to mine's own block there.
   defp kept(base, mine) do
-    pairs = PortableTextAlign.pairs(Enum.map(base, &drawn/1), Enum.map(mine, &drawn/1))
+    pairs = PortableTextAlign.pairs(Enum.map(base, &shape/1), Enum.map(mine, &shape/1))
     mine_at = List.to_tuple(mine)
     Map.new(pairs, fn {i, j} -> {i, elem(mine_at, j)} end)
   end
@@ -301,7 +301,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp bytes(_block, _m, _t), do: 0
 
   defp same_edit?(:deleted, :deleted), do: true
-  defp same_edit?({:changed, a}, {:changed, b}), do: drawn(a) == drawn(b)
+  defp same_edit?({:changed, a}, {:changed, b}), do: shape(a) == shape(b)
   defp same_edit?(_, _), do: false
 
   # Mine for a clashed block. Inserts at one place come from one side only
@@ -325,7 +325,7 @@ defmodule Barkpark.Content.PortableTextMerge do
         block ++ Map.get(t_ins, i, []) ++ Map.get(m_ins, i, [])
       end)
 
-    unique_keys(head ++ body)
+    (head ++ body) |> unique_keys() |> unique_objects()
   end
 
   # What a side did, against the base:
@@ -336,7 +336,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   #   * `gaps`: each gap as `{base indexes left out, blocks put in}`;
   #   * `unsure`: base indexes whose line-up can go more than one way.
   defp edits(base, side) do
-    {a, b} = {Enum.map(base, &drawn/1), Enum.map(side, &drawn/1)}
+    {a, b} = {Enum.map(base, &shape/1), Enum.map(side, &shape/1)}
     {pairs, unsure} = lcs(a, b)
     side_at = List.to_tuple(side)
 
@@ -458,6 +458,50 @@ defmodule Barkpark.Content.PortableTextMerge do
     out
   end
 
+  # An inline object key is unique in the whole field (task-1f8cff9d0bb3af3e,
+  # #28817 review T1): theirs' new object keeps its key, and mine may have
+  # put the same key in another block. The one later in the field gets a key
+  # no block or child of the field uses. `next` carries each key's counter,
+  # so d objects sharing a key cost d tries, not d² (#28861 review: a paste
+  # of one object 16k times took 24 s).
+  defp unique_objects(blocks) do
+    used =
+      MapSet.new(
+        Enum.flat_map(blocks, &[&1["_key"] | Enum.map(children(&1), fn c -> child_key(c) end)])
+      )
+
+    {out, _} =
+      Enum.map_reduce(blocks, {MapSet.new(), used, %{}}, fn
+        %{"children" => cs} = b, acc when is_list(cs) ->
+          {cs, acc} = Enum.map_reduce(cs, acc, &object_key/2)
+          {Map.put(b, "children", cs), acc}
+
+        b, acc ->
+          {b, acc}
+      end)
+
+    out
+  end
+
+  defp object_key(%{"_type" => type, "_key" => k} = c, {objects, used, next})
+       when is_binary(k) and type != "span" do
+    if MapSet.member?(objects, k) do
+      {k2, n} = fresh_n(k, used, Map.get(next, k, 1))
+
+      {Map.put(c, "_key", k2),
+       {MapSet.put(objects, k2), MapSet.put(used, k2), Map.put(next, k, n + 1)}}
+    else
+      {c, {MapSet.put(objects, k), used, next}}
+    end
+  end
+
+  defp object_key(c, acc), do: {c, acc}
+
+  defp fresh_n(k, seen, n) do
+    k2 = "#{k}m#{n}"
+    if MapSet.member?(seen, k2), do: fresh_n(k, seen, n + 1), else: {k2, n}
+  end
+
   defp fresh(k, seen, n) do
     k2 = "#{k}m#{n}"
     if MapSet.member?(seen, k2), do: fresh(k, seen, n + 1), else: k2
@@ -469,6 +513,17 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   defp text(%{"_type" => type}) when is_binary(type), do: "[#{type}]"
   defp text(_block), do: ""
+
+  # A block as the line-up reads it: as drawn, and a text block's own fields
+  # beside the drawing (task-68298dcf20a1ec8a, #28817 review T2). A field
+  # change that draws the same (`level` without `listItem`, an unknown
+  # field, a `style` removed) read as no change, and the merge dropped it.
+  # `same_drawn?/2` stays by the drawing: it compares a page's posted HTML,
+  # which carries no such field.
+  defp shape(%{"_type" => "block"} = block),
+    do: {drawn(block), Map.drop(block, ["_key", "children", "markDefs"])}
+
+  defp shape(block), do: drawn(block)
 
   # A text block as the editor draws it, keys set aside; a custom block (a
   # mediaModule) by its fields, since its drawn summary can hide a change.

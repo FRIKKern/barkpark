@@ -215,9 +215,33 @@
     return false;
   }
 
+  // task-f75673bec30873e6: the input an IME is composing in. A value drawn
+  // into it mid-composition made the composition commit again (かかき). It
+  // is left as it is, as typing not yet sent: its post, at compositionend,
+  // carries the number of the value it was typed from, and the server merges
+  // it (as rich text waits, task #28732).
+  var composing = null;
+
+  document.addEventListener(
+    "compositionstart",
+    function (e) {
+      composing = e.target;
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "compositionend",
+    function () {
+      composing = null;
+    },
+    true,
+  );
+
   function takeFocused(values) {
     var el = document.activeElement;
     if (!el || !el.name || !el.form || el.form.id !== "editor-form") return;
+    if (el === composing) return;
     var select = el.tagName === "SELECT" && !el.multiple;
     if (!(select || el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT.test(el.type)))) return;
     if (!Object.prototype.hasOwnProperty.call(values, el.name)) return;
@@ -313,10 +337,28 @@
     input.value = JSON.stringify(seen);
   }
 
+  // task-727f65fc259d0c7b: a value marked `draw` is set in an input that
+  // is not focused too, while it still shows exactly `was`. The server put a
+  // stale field back to the store without changing its form, so no patch
+  // redraws it, and the input kept showing the old text.
+  function drawShown(values) {
+    var form = document.getElementById("editor-form");
+    if (!form) return;
+    Object.keys(values).forEach(function (name) {
+      var change = values[name];
+      var el = form.elements.namedItem(name);
+      if (!change || !change.draw || typeof change.value !== "string") return;
+      if (!el || el === document.activeElement || typeof el.value !== "string") return;
+      if (el.tagName === "INPUT" ? !TEXT.test(el.type) : el.tagName !== "TEXTAREA") return;
+      if (lf(el.value) === lf(change.was)) el.value = change.value;
+    });
+  }
+
   function onRemoteValues(e) {
     var detail = (e && e.detail) || {};
     var values = detail.values || {};
     takeFocused(values);
+    drawShown(values);
     if (detail.seqs) recordSeen(values, detail.seqs);
   }
 
