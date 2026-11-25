@@ -32,15 +32,13 @@ No app moves before the step written in [0004](docs/decisions/0004-ready-before-
 The daily news run fills this block from merged work that touches BarkUI. Nothing here is written by hand.
 
 <!-- news:start -->
+**Monday 23 November.** The BarkUI check now reads a part's look only on a page at rest: every read, every change the checker makes and every act are settled first, inside 2 s, and a read on a moving page is red by name. The page's scroll is put back after each capture, and a shot taken while the page moved with a box fixed to the view in it is taken again. [The full day](../../../docs/news/2026-11-23.md)
+- **Check:** a look is read only on a page at rest; the scroll is put back after each capture; a moved shot with a fixed box is taken again ([#28389](https://github.com/FRIKKern/barkpark/pull/28389), [#28515](https://github.com/FRIKKern/barkpark/pull/28515), [#28527](https://github.com/FRIKKern/barkpark/pull/28527))
+
 **Sunday 22 November.** The BarkUI check now reads a part's popovers and modal dialogs open, against what the page draws behind them, and refuses by name any box that can open there without being named. A part lists what it does not cover in one place, printed under it in the showroom. Every selftest case runs under one 60 s limit. [The full day](../../../docs/news/2026-11-22.md)
 - **Check:** popovers and dialogs read open; a style attribute may hold placement only; the part's context holds the check's own two pages and no other ([#28122](https://github.com/FRIKKern/barkpark/pull/28122), [#28239](https://github.com/FRIKKern/barkpark/pull/28239), [#28336](https://github.com/FRIKKern/barkpark/pull/28336))
 - **Parts:** what a part does not cover is one list in part.json, matched as whole words ([#28249](https://github.com/FRIKKern/barkpark/pull/28249), [#28268](https://github.com/FRIKKern/barkpark/pull/28268))
 - **Selftest:** one limit of 60 s per case, each hosted reading under 48 s; the two slow cases split into runs ([#28277](https://github.com/FRIKKern/barkpark/pull/28277))
-
-**Saturday 21 November.** The showroom gained the text field and the tabs, each proved like the button in every skin, scheme and surface, at phone width and with no script. The check now judges a checked box and a field's typed value, reads every branch of a selector list, and refuses by name a rule the browser drops. CI walks the fast tests at every part count from 1 to 40, and the selftest runs as two jobs. [The full day](../../../docs/news/2026-11-21.md)
-- **Showroom:** the text field and the tabs, with keyboard rows pressed by real keys ([#28052](https://github.com/FRIKKern/barkpark/pull/28052), [#28123](https://github.com/FRIKKern/barkpark/pull/28123))
-- **Check:** :checked and typed values judged; the caret and a selection never change a reading; every selector branch read; a dropped rule refused by name ([#27920](https://github.com/FRIKKern/barkpark/pull/27920), [#28001](https://github.com/FRIKKern/barkpark/pull/28001), [#28044](https://github.com/FRIKKern/barkpark/pull/28044), [#28057](https://github.com/FRIKKern/barkpark/pull/28057), [#27998](https://github.com/FRIKKern/barkpark/pull/27998), [#28000](https://github.com/FRIKKern/barkpark/pull/28000))
-- **CI:** the fast tests at every part count; one pinned walk step; the selftest as two jobs, each under its own ceiling ([#28093](https://github.com/FRIKKern/barkpark/pull/28093), [#28125](https://github.com/FRIKKern/barkpark/pull/28125), [#28156](https://github.com/FRIKKern/barkpark/pull/28156))
 <!-- news:end -->
 
 ## Where things stand
