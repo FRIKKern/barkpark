@@ -29,9 +29,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     assert text(blk) == "ONE two THREE" and blk["_key"] == "k"
   end
 
-  test "the old disjoint fixture pair merges: B one two A" do
+  test "the old disjoint fixture pair merges either way round, in one span: B one two A" do
     assert {:ok, blk} = Inline.merge(b("one two"), b("one two A"), b("B one two"))
-    assert text(blk) == "B one two A"
+    assert [%{"_key" => "ks", "text" => "B one two A"}] = blk["children"]
+    assert {:ok, blk} = Inline.merge(b("one two"), b("B one two"), b("one two A"))
+    assert [%{"_key" => "ks", "text" => "B one two A"}] = blk["children"]
   end
 
   test "a kana commit after theirs took an earlier word out" do
