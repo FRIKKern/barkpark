@@ -72,6 +72,34 @@ await check("a value for the new document after forget is drawn as any", async (
   assert.equal(seen(), `${NAME}|15`);
 });
 
+// #28766 review: each value names its document, as the form does. With the
+// forget lost, a value of doc 1 is still never drawn into doc 2's editor,
+// and the page does not report a number of it.
+const D1 = '["production","t","d1"]';
+const D2 = '["production","t","d2"]';
+const inForm = (doc, html) => {
+  document.body.innerHTML =
+    `<form id="editor-form" phx-value-_bp_doc='${doc}'><div data-pt-subfield="${NAME}">` +
+    `<bp-rich-text-editor data-bridge-target="h"><div class="bp-rte-body">${html}</div></bp-rich-text-editor>` +
+    '<input type="hidden" id="h"></div></form>';
+};
+
+await check("doc 1's value waits while A types, then doc 2 shows with no forget: idle draws nothing", async () => {
+  inForm(D1, "<p>one</p>");
+  typed();
+  send({ doc: D1, values: { [NAME]: { seq: 20, html: "<p>one B</p>" } } });
+  assert.equal(seen(), `${NAME}|19`);
+  inForm(D2, "<p>doc two</p>");
+  await new Promise((r) => setTimeout(r, 1800));
+  assert.equal(editor().value, "<p>doc two</p>");
+});
+
+await check("doc 2's first value after it is drawn, its own number reported", () => {
+  send({ doc: D2, values: { [NAME]: { seq: 30, html: "<p>doc two B</p>" } } });
+  assert.equal(editor().value, "<p>doc two B</p>");
+  assert.equal(seen(), `${NAME}|30`);
+});
+
 if (failures) {
   console.log(`\n${failures} check(s) failed`);
   process.exit(1);

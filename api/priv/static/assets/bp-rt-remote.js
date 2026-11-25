@@ -63,7 +63,31 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).first - 1 : last);
+  // The document the wrapper's form shows (`phx-value-_bp_doc`, as each
+  // event's `doc`).
+  const docOf = (w) => {
+    const form = w && w.closest("form");
+    return form ? form.getAttribute("phx-value-_bp_doc") : null;
+  };
+
+  // What waits for `name`, if it is of the document its form shows: a value
+  // of another is dropped, never drawn there, even with its forget lost
+  // (#28766 review).
+  const waitingFor = (name) => {
+    const theirs = waiting.get(name);
+    if (!theirs) return undefined;
+    const doc = docOf(wrapOf(name));
+    if (theirs.doc && doc && theirs.doc !== doc) {
+      waiting.delete(name);
+      return undefined;
+    }
+    return theirs;
+  };
+
+  const seenOf = (name) => {
+    const theirs = waitingFor(name);
+    return theirs ? theirs.first - 1 : last;
+  };
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
   // ignored by LiveView's patch, so the input stays.
@@ -215,7 +239,7 @@
   };
 
   const tryShow = (name) => {
-    const theirs = waiting.get(name);
+    const theirs = waitingFor(name);
     if (!theirs) return;
     const w = wrapOf(name);
     const editor = editorIn(w);
@@ -244,15 +268,18 @@
     // Another document is shown: what waits is the old one's (task-29686209fb9fc5dc).
     if (e.detail && e.detail.forget) waiting.clear();
     const values = (e.detail && e.detail.values) || {};
+    const doc = (e.detail && e.detail.doc) || null;
     for (const [name, v] of Object.entries(values)) {
       if (!v || typeof v.seq !== "number") continue;
       last = Math.max(last, v.seq);
       const w = wrapOf(name);
       if (typeof v.html === "string") {
-        const theirs = waiting.get(name);
+        const was = waiting.get(name);
+        // One of another document starts again.
+        const theirs = was && (!was.doc || !doc || was.doc === doc) ? was : undefined;
         if (!theirs || theirs.seq < v.seq) {
           const first = theirs && !v.own ? theirs.first : v.seq;
-          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, first});
+          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, first, doc});
         }
         tryShow(name);
       }
