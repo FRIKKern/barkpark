@@ -445,6 +445,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
 
   def text_path(_schema, _keys, _path), do: nil
 
+  @doc """
+  Each free-text value of a posted form, by its key or, inside a
+  `composite` object, its path: what an explicit Save posts at once
+  (task-998551f010da1d5e).
+  """
+  def text_units(schema, form, at \\ []) when is_map(form) do
+    Enum.flat_map(form, fn
+      {key, value} when is_binary(key) and is_binary(value) ->
+        if free_text_at?(schema, key), do: [unit(at, key)], else: []
+
+      {key, %{} = inner} when is_binary(key) and not is_struct(inner) ->
+        case field(schema, key) do
+          %{"type" => "composite", "fields" => subs} when is_list(subs) ->
+            text_units(%{fields: subs}, inner, at ++ [key])
+
+          _ ->
+            []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
   @doc "The post's field keys, and the text subfield path it changed (or nil)."
   def units(keys, nil), do: keys
   def units(keys, path), do: keys ++ [path]

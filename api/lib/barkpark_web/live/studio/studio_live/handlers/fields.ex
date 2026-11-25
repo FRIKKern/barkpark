@@ -267,26 +267,67 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => doc} ->
+      %{"doc" => posted} ->
         # As an autosave: a rich text in an object written over another
-        # editor's change is not written over it (#28349 r2 review, V1).
-        {doc, held} = RichTextRemote.split(socket, doc, params["_bp_rt_seen"])
+        # editor's change is not written over it (#28349 r2 review, V1),
+        # and is read again under the lock (`RichTextRemote.UnderLock`,
+        # task-8f15f5c9c15ce748).
+        {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
+        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
-        {:noreply, socket} = do_save(doc, not_codes, socket)
-        {:noreply, RichTextRemote.hold(socket, held)}
+        {socket, text} = text_bases(socket, doc, params["_bp_seen"])
+        socket = assign(socket, editor_rt_under_lock: rich)
+        {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted})
+        {:noreply, RichTextRemote.hold(saved, held)}
 
       _ ->
         {:noreply, socket}
     end
   end
 
-  defp do_save(params, not_codes, socket) do
+  # As an autosave: each free-text field of the Save is merged onto the
+  # store from the base the page reports, and read again under the lock
+  # (`TextUnderLock`) (task-998551f010da1d5e). The Save skipped both, so a
+  # save landing under it was written over as sent, with no banner.
+  defp text_bases(socket, doc, seen) do
+    keys = RemoteValues.text_units(socket.assigns[:editor_schema], doc)
+    based = RemoteValues.put_bases(socket, keys, seen)
+    text = TextUnderLock.values(based, keys, seen, nil)
+    {assign(based, editor_text_under_lock: text), text}
+  end
+
+  # `{held, rich, posted}`: the rich text acts `split/3` gave, the values
+  # read under the lock, and the post as the page sent it. The write's
+  # outcome is read before the reload drops it (`:saved_over`).
+  defp do_save(params, not_codes, socket, text, {held, rich, posted}) do
+    written = Shared.do_autosave(socket, params, :save)
+    text_held = TextUnderLock.held(written, text, params)
+    {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
+    rich_held? = Enum.any?(held, &match?({:held, _, _, _}, &1))
+
     socket =
-      socket
-      |> Shared.do_autosave(params, :save)
+      written
+      |> assign(editor_field_bases: %{}, editor_text_under_lock: nil, editor_rt_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
+    {:noreply, saved} = do_saved(socket, text_held, rich_held?, params)
+    {saved, held}
+  end
+
+  defp do_saved(socket, text_held, rich_held?, params) do
     case socket.assigns[:save_status] do
+      "Saved" when text_held != [] or rich_held? ->
+        # The store kept another editor's words over a field of the Save:
+        # the rest is saved; that field holds A's words, unsaved, with the
+        # banner, as an autosave holds it.
+        {:noreply,
+         socket
+         |> Shared.rebuild_panes()
+         |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+         |> Shared.assign_page_title()
+         |> clear_touched()
+         |> TextUnderLock.hold(text_held, params)}
+
       "Saved" ->
         # An explicit save reloads the editor from the just-persisted row —
         # the local buffer is now clean, so drop the dirty flag and any
@@ -501,14 +542,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # (`TextRejoin`, task-4fc7383b936f606a).
         {doc, typed} = TextRejoin.split(socket, keys, params["_bp_seen"], path, doc)
 
-        # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514).
-        text = TextUnderLock.values(socket, keys, params["_bp_seen"], path)
-
         based =
           socket
           |> RemoteValues.put_bases(keys, params["_bp_seen"], path)
           |> RemoteValues.add_bases(built_bases)
-          |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
+
+        # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514),
+        # read against what the page showed (task-eeecd067e3fb1b1f).
+        text = TextUnderLock.values(based, keys, params["_bp_seen"], path)
+        based = assign(based, editor_rt_under_lock: rich, editor_text_under_lock: text)
 
         written =
           based
