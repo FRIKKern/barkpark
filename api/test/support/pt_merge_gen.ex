@@ -35,22 +35,29 @@ defmodule Barkpark.Test.PtMergeGen do
     base = base(kind)
     hot = pick(0..(length(base) - 1))
     mine = edit(base, "m", hot, kind)
-    theirs = edit(base, "t", hot, kind)
+
+    # Sometimes theirs makes mine's edits too, and maybe one more.
+    theirs =
+      if pick(1..6) == 1,
+        do: edit(mine, "t", pick(0..max(length(mine) - 1, 0)), kind, 0..1),
+        else: edit(base, "t", hot, kind)
+
     mine = if pick(1..2) == 1, do: by_position(mine, Enum.random(["k", "p"])), else: mine
     {base, mine, theirs}
   end
 
   defp base(:same) do
     w = words(pick(1..3), :plain)
-    blocks = [w, w, [], words(pick(1..3), :plain)] |> Enum.take(pick(2..4)) |> Enum.shuffle()
+    x = words(pick(1..3), :plain)
+    blocks = Enum.random([[w, x, w], [w, w, x], [w, x, w, []], [x, w, [], w], [w, [], w]])
     for {ws, i} <- Enum.with_index(blocks), do: block("k#{i}", ws, :plain)
   end
 
   defp base(kind),
     do: for(i <- 0..(pick(1..4) - 1), do: block("k#{i}", words(pick(1..5), kind), kind))
 
-  defp edit(blocks, side, hot, kind) do
-    Enum.reduce(1..Enum.random([0, 1, 1, 2, 2, 3])//1, {blocks, 0}, fn _, {bs, n} ->
+  defp edit(blocks, side, hot, kind, count \\ [0, 1, 1, 2, 2, 3]) do
+    Enum.reduce(1..Enum.random(count)//1, {blocks, 0}, fn _, {bs, n} ->
       {one_edit(bs, side, n, hot, kind), n + 1}
     end)
     |> elem(0)
