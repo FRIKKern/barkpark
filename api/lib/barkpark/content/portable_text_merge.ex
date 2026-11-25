@@ -79,7 +79,7 @@ defmodule Barkpark.Content.PortableTextMerge do
         whole_clash(mine, theirs)
 
       objects(base) + objects(mine) + objects(theirs) > @max_objects ->
-        {:clash, plain_banner(mine, theirs), mine}
+        over_cap(base, mine, theirs)
 
       true ->
         line_up(base, mine, theirs, opts)
@@ -107,6 +107,23 @@ defmodule Barkpark.Content.PortableTextMerge do
       end)
     end)
   end
+
+  # Past `@max_objects` the merge is not tried, but a value one side left as
+  # it was, or both sides edited alike, is no clash (task-64eed140345d8927,
+  # #28882 review: the same edit on both sides was held with an empty
+  # banner). Blocks compare as maps with their keys set aside, as the
+  # banner does; nothing is drawn.
+  defp over_cap(base, mine, theirs) do
+    {b, m, t} = {keyless(base), keyless(mine), keyless(theirs)}
+
+    cond do
+      m == t or m == b -> {:ok, theirs}
+      t == b -> {:ok, mine}
+      true -> {:clash, plain_banner(mine, theirs), mine}
+    end
+  end
+
+  defp keyless(blocks), do: Enum.map(blocks, &Map.delete(&1, "_key"))
 
   # The banner past `@max_objects`: theirs' words in each block mine does not
   # hold as it is, never drawn (drawing is what the cap bounds).
