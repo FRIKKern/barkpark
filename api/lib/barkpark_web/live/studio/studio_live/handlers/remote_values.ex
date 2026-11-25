@@ -178,13 +178,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   (`:field_bases`), the value a field must still hold for the write to
   land (`:field_expect`, set by `Desk.DocUndo` from the value it read), and
   the fields whose value the write lands over the saved document reports
-  (`:saved_over`, set by `Desk.DocUndo` for the step it keeps).
+  (`:saved_over`, set by `Desk.DocUndo` for the step it keeps), and each
+  rich text's value the socket believed stored (`:rich_text_seen`,
+  `RichTextRemote.UnderLock`).
   """
   def write_opts(socket) do
+    rich =
+      BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock.write_opts(
+        socket.assigns[:editor_rt_under_lock] || %{}
+      )
+
     [
       field_bases: socket.assigns[:editor_field_bases] || %{},
       field_expect: socket.assigns[:editor_field_expect] || %{},
-      saved_over: socket.assigns[:editor_saved_over] || []
+      saved_over:
+        Enum.uniq((socket.assigns[:editor_saved_over] || []) ++ (rich[:saved_over] || [])),
+      rich_text_seen: rich[:rich_text_seen] || %{}
     ]
   end
 
