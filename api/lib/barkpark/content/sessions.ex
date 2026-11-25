@@ -34,7 +34,7 @@ defmodule Barkpark.Content.Sessions do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, Writer}
+  alias Barkpark.Content.{Document, NulByte, Writer}
   alias Barkpark.Repo
 
   # Global whitelist (session-handoff charter) — the only event kinds a
@@ -80,6 +80,8 @@ defmodule Barkpark.Content.Sessions do
 
           events = (doc.content["events"] || []) ++ [event]
           new_content = Map.put(doc.content, "events", events)
+
+          :ok = NulByte.refuse!(:content, new_content)
 
           {rows, _} =
             from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
@@ -169,6 +171,8 @@ defmodule Barkpark.Content.Sessions do
             end
 
           new_content = Map.put(doc.content, "conversations", conversations)
+
+          :ok = NulByte.refuse!(:content, new_content)
 
           {rows, _} =
             from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
