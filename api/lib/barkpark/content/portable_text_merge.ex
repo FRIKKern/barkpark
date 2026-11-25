@@ -290,7 +290,7 @@ defmodule Barkpark.Content.PortableTextMerge do
         block ++ Map.get(t_ins, i, []) ++ Map.get(m_ins, i, [])
       end)
 
-    unique_keys(head ++ body)
+    (head ++ body) |> unique_keys() |> unique_objects()
   end
 
   # What a side did, against the base:
@@ -421,6 +421,50 @@ defmodule Barkpark.Content.PortableTextMerge do
       end)
 
     out
+  end
+
+  # An inline object key is unique in the whole field (task-1f8cff9d0bb3af3e,
+  # #28817 review T1): theirs' new object keeps its key, and mine may have
+  # put the same key in another block. The one later in the field gets a key
+  # no block or child of the field uses. `next` carries each key's counter,
+  # so d objects sharing a key cost d tries, not d² (#28861 review: a paste
+  # of one object 16k times took 24 s).
+  defp unique_objects(blocks) do
+    used =
+      MapSet.new(
+        Enum.flat_map(blocks, &[&1["_key"] | Enum.map(children(&1), fn c -> child_key(c) end)])
+      )
+
+    {out, _} =
+      Enum.map_reduce(blocks, {MapSet.new(), used, %{}}, fn
+        %{"children" => cs} = b, acc when is_list(cs) ->
+          {cs, acc} = Enum.map_reduce(cs, acc, &object_key/2)
+          {Map.put(b, "children", cs), acc}
+
+        b, acc ->
+          {b, acc}
+      end)
+
+    out
+  end
+
+  defp object_key(%{"_type" => type, "_key" => k} = c, {objects, used, next})
+       when is_binary(k) and type != "span" do
+    if MapSet.member?(objects, k) do
+      {k2, n} = fresh_n(k, used, Map.get(next, k, 1))
+
+      {Map.put(c, "_key", k2),
+       {MapSet.put(objects, k2), MapSet.put(used, k2), Map.put(next, k, n + 1)}}
+    else
+      {c, {MapSet.put(objects, k), used, next}}
+    end
+  end
+
+  defp object_key(c, acc), do: {c, acc}
+
+  defp fresh_n(k, seen, n) do
+    k2 = "#{k}m#{n}"
+    if MapSet.member?(seen, k2), do: fresh_n(k, seen, n + 1), else: {k2, n}
   end
 
   defp fresh(k, seen, n) do
