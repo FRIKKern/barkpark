@@ -1,55 +1,153 @@
 defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   @moduledoc """
-  Studio asks on the server before a press leaves a document with a held
-  field (task-c4b59891f88686e0, #28836 r1 review).
+  Studio asks on the server before it leaves a document with a held field
+  (task-c4b59891f88686e0, task-5b4914f1b5f21594), with the desk's dialog
+  (`Desk.LeaveGuard.dialog/1`), naming the field (`LeaveGuard.message/1`).
 
-  Studio's list rows, its crumbs and New document are `phx-click` buttons,
-  not links, so bp-studio-leave.js never saw them: a row click patched to
-  the other document and A's held words were gone. While a field is held
-  (`Desk.LeaveGuard.doc/1`), the first such press stays where it is and
-  says so in a flash naming the field (`LeaveGuard.message/1`), the desk's
-  question. The same press again goes on. A press on the open document's
-  own row asks too: it opens the document again from the store, and the
-  held words go. The desk's own dialog for this is task-5b4914f1b5f21594.
+    * a press: a list row, a crumb, New document (`phx-click` buttons, which
+      bp-studio-leave.js never sees). It stays where it is and asks; Leave
+      makes the press. A press on the open document's own row asks too: it
+      opens the document again from the store, and the held words go;
+    * any patch to another place, Back above all. LiveView turns Back into
+      `handle_params/3`, the URL already moved: the document stays and the
+      dialog asks; Leave goes on with that patch, Stay patches the URL back.
+
+  Studio reads the document again from the store on every patch, even one
+  to the same document (`Lifecycle.finish_handle_params/6`), so Stay's patch
+  back would drop the words it kept. Stay marks that one return: the next
+  patch, if it is to the same place, does nothing. The mark goes with that
+  next patch, whatever it is, so it never holds back any other.
+
+  Nothing held, nothing asked. A patch that keeps the place (a query only)
+  goes on as before.
   """
 
-  import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [put_flash: 3]
-  use Gettext, backend: BarkparkWeb.Gettext
+  use Phoenix.Component
+  import Phoenix.LiveView, only: [push_patch: 2]
 
   alias BarkparkWeb.Studio.Desk.LeaveGuard
 
+  @doc "No question open."
+  def init(socket),
+    do:
+      assign(socket,
+        studio_leave: nil,
+        studio_leave_pass: false,
+        studio_leave_return: nil,
+        studio_leave_uri: nil
+      )
+
   @doc """
-  After each render: a hold that has ended forgets the press it asked
-  about, so a later hold asks again (#28836 r2 review: asked on a row, the
-  hold ended by typing on, a new clash held the field, and the same row
-  then left with no question).
+  After each render: a question still open over a hold that has ended (a
+  save landed) is closed as Stay closes it (`:studio_leave_cleared`), so it
+  never stands empty.
   """
   def follow(socket) do
-    if socket.assigns[:studio_leave_asked] && is_nil(LeaveGuard.doc(socket.assigns)),
-      do: assign(socket, :studio_leave_asked, nil),
-      else: socket
+    if socket.assigns[:studio_leave] && not held?(socket),
+      do: send(self(), :studio_leave_cleared)
+
+    socket
+  end
+
+  @doc "Whether the hold that asked has ended (for `:studio_leave_cleared`)."
+  def cleared?(socket), do: socket.assigns[:studio_leave] != nil and not held?(socket)
+
+  @doc "A press: `{:go, socket}`, or `{:stay, socket}` with the question open."
+  def ask(event, params, socket) do
+    if held?(socket),
+      do: {:stay, open(socket, {:event, event, params})},
+      else: {:go, socket}
   end
 
   @doc """
-  `{:go, socket}`, or `{:stay, socket}` with the question asked. A press
-  that goes clears the asked one, and so does the hold's end (`follow/1`).
+  Before a patch is read (`place` is `{dataset, path, desk}`, as the patch
+  names it): `{:route, socket}` reads it, `{:stop, socket}` keeps the
+  document, with the question open, or as Stay's own return.
   """
-  def ask(event, params, socket) do
-    press = {event, params}
+  def params(socket, params, uri, place) do
+    return = socket.assigns[:studio_leave_return]
+    socket = assign(socket, :studio_leave_return, nil)
 
-    if is_nil(LeaveGuard.doc(socket.assigns)) or socket.assigns[:studio_leave_asked] == press do
-      {:go, assign(socket, :studio_leave_asked, nil)}
-    else
-      {:stay,
-       socket
-       |> assign(:studio_leave_asked, press)
-       |> put_flash(:error, message(socket.assigns))}
+    cond do
+      return != nil and return == place ->
+        {:stop, socket}
+
+      socket.assigns[:studio_leave_pass] != true and held?(socket) and place != here(socket) ->
+        {:stop, open(socket, {:patch, params, uri})}
+
+      true ->
+        {:route,
+         assign(socket, studio_leave: nil, studio_leave_pass: false, studio_leave_uri: back(uri))}
     end
   end
 
-  # The desk's question, and that the press was stopped and a second one
-  # leaves (#28836 r2 review: the flash named the field and nothing more).
-  defp message(assigns),
-    do: LeaveGuard.message(assigns) <> " " <> gettext("Press again to leave.")
+  @doc "Stay: the question closes; a patch it asked about is patched back."
+  def stay(socket) do
+    socket =
+      case socket.assigns[:studio_leave] do
+        %{to: {:patch, _, _}, back: back} when is_binary(back) ->
+          socket
+          |> assign(:studio_leave_return, here(socket))
+          |> push_patch(to: back)
+
+        _ ->
+          socket
+      end
+
+    assign(socket, :studio_leave, nil)
+  end
+
+  @doc "Leave: what was asked, `{:patch, params, uri}`, `{:event, event, params}` or nil, past the guard once."
+  def go(socket) do
+    to = socket.assigns[:studio_leave] && socket.assigns.studio_leave.to
+    {to, assign(socket, studio_leave: nil, studio_leave_pass: true)}
+  end
+
+  @doc "After Leave's press: the pass is for the patch it sent; with none, it ends here."
+  def passed(%{redirected: {:live, :patch, _}} = socket), do: socket
+  def passed(socket), do: assign(socket, :studio_leave_pass, false)
+
+  attr :leave, :map, required: true
+  attr :message, :string, default: nil
+
+  @doc """
+  The desk's question, in Studio's look: the frame's own stylesheet is the
+  desk's (`.dk`, its tokens), so Studio draws it with its modal's
+  (`.modal-backdrop`, `.modal-card` in root.html.heex).
+  """
+  def dialog(assigns) do
+    ~H"""
+    <div class="studio-leave">
+      <style>
+        .studio-leave .dk-dialog-backdrop { z-index: 51; background: hsl(var(--bp-scrim-hsl) / 0.45); }
+        .studio-leave .dk-dialog { position: fixed; z-index: 52; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--fg); box-shadow: 0 16px 48px hsl(var(--bp-shadow-hsl) / 0.25); }
+        .studio-leave .dk-dialog-head { display: flex; align-items: center; gap: 8px; padding: 16px 16px 0 20px; }
+        .studio-leave .dk-dialog-head h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--text-base); font-weight: 600; }
+        .studio-leave .dk-dialog-body { padding: 12px 20px 4px; overflow: auto; }
+        .studio-leave .dk-dialog-body p { margin: 0 0 12px; overflow-wrap: anywhere; }
+        .studio-leave .dk-dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
+        .studio-leave .dk-dialog-btn.danger { background: var(--destructive); border-color: var(--destructive); color: var(--bg-card); }
+        .studio-leave .dk-dialog-btn:focus-visible, .studio-leave .dk-dialog-close:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+      </style>
+      <LeaveGuard.dialog id="studio-leave-dialog" leave={@leave} message={@message} />
+    </div>
+    """
+  end
+
+  defp open(socket, to) do
+    back = socket.assigns[:studio_leave_uri]
+    assign(socket, :studio_leave, %{to: to, back: back})
+  end
+
+  defp held?(socket), do: not is_nil(LeaveGuard.doc(socket.assigns))
+
+  defp here(socket),
+    do: {socket.assigns[:dataset], socket.assigns[:nav_path] || [], socket.assigns[:nav_desk]}
+
+  defp back(uri) when is_binary(uri) do
+    %URI{path: path, query: query} = URI.parse(uri)
+    if query, do: path <> "?" <> query, else: path
+  end
+
+  defp back(_uri), do: nil
 end

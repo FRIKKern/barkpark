@@ -163,7 +163,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # pair's twins: they list the principal's own membership places and go to
   # one after the same reachability gate, and they write nothing.
   @safe_events ~w(
-    select select-group select-desk select-pane expand-pane
+    select select-group select-desk select-pane expand-pane desk-leave-stay desk-leave-go
     switch-workspace switch-project switch-dataset toggle-create
     scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
     desk-scope-load desk-scope-go
@@ -684,6 +684,9 @@ defmodule BarkparkWeb.Studio.Caps do
       |> attach_hook(:studio_caps_gate, :handle_event, &gate/3)
     end
   end
+
+  @doc "The gate for `event`, for a press made later than it was asked (Studio's leave dialog)."
+  def gate_event(event, params, socket), do: gate(event, params, socket)
 
   defp gate(event, params, socket) do
     case classify(event) do
