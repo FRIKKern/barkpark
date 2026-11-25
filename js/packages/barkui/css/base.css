@@ -47,9 +47,13 @@
    own box-shadow can cover it: a 2px gap in the ground (--ui-background), a 2px
    edge in --ui-ring-border, then the pale --ui-ring halo outside. The gap keeps
    the edge off a filled control; the edge reads against the ground. The
-   transparent outline sits on the edge and shows in forced-colours mode. */
+   transparent outline sits on the edge and shows in forced-colours mode.
+   UI SDK's slider takes focus on a range input it hides inside each thumb:
+   the ring is drawn on the thumb a person sees, and the transparent outline
+   takes the place of UI SDK's own 4px ring there, so one ring shows. */
 @layer bark-focus {
-  [data-slot]:focus-visible {
+  [data-slot]:focus-visible,
+  [data-slot="slider-thumb"]:has(> ui-slider-thumb-input > input[type="range"]:focus-visible) {
     outline: 2px solid transparent;
     outline-offset: 2px;
     box-shadow:
