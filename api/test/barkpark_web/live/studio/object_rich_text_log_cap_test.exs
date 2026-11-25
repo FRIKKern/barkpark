@@ -22,13 +22,6 @@ defmodule BarkparkWeb.Studio.ObjectRichTextLogCapTest do
     do:
       Enum.with_index(@blocks, 1) |> Enum.map(fn {b, i} -> if i <= k, do: b <> " x", else: b end)
 
-  defp start(c) do
-    a = open(c)
-    b = open(c)
-    b_saves_rt(b, c, rt(["one two" | @blocks]), ["one two" | @blocks])
-    {a, b, got(page(), next_push(a), true)}
-  end
-
   test "10 of B's saves waiting on A's page: A's post keeps all of them, no banner", c do
     a = open(c)
     b = open(c)
@@ -50,10 +43,12 @@ defmodule BarkparkWeb.Studio.ObjectRichTextLogCapTest do
   end
 
   test "A saw B's first save, then B took it back and 8 more wait: held, B's value stored", c do
-    {a, b, page} = start(c)
+    b = open(c)
+    b_saves_rt(b, c, rt(["one two" | @blocks]), ["one two" | @blocks])
+    a = open(c)
 
     b_saves_rt(b, c, rt(["one two" | with_x(1)]), ["one two" | with_x(1)])
-    page = got(page, next_push(a), true)
+    page = got(page(), next_push(a), true)
 
     # B takes w1's x back, then adds an x to w2..w9, one save each.
     page =
@@ -65,9 +60,9 @@ defmodule BarkparkWeb.Studio.ObjectRichTextLogCapTest do
 
     html = post_rt(a, rt(["one twoA" | with_x(1)]), seen(page))
 
-    # The change A drew and B's take-back of it are both out of the log, so
-    # no base fits A's post: held. Against the oldest base kept, w1's x
-    # would read as A's and come back; against the next, the same.
+    # The change A drew and B's take-back of it are both folded, so no base
+    # fits A's post: held. Read against the oldest base kept (before the x)
+    # or the next (after the take-back), w1's x read as A's and came back.
     assert html =~ "Someone else rewrote"
     assert words(stored(c)["meta"]["rt"]) == ["one two" | with_x_from(@blocks, 2, 9)]
   end
