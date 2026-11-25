@@ -434,6 +434,29 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     end
   end
 
+  describe "task-3d00496b0292f20b: needless clashes" do
+    test "one edit both sides made that lowers a word's count, spans cut apart: theirs" do
+      base = b("dog dog dog x")
+      mine = block("k", [span("a", "dog! "), span("b", "dog dog x")])
+      theirs = block("k", [span("c", "dog! dog"), span("d", " dog x")])
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert text(blk) == "dog! dog dog x"
+    end
+
+    test "a bold word deleted before a word that starts alike merges" do
+      base =
+        block("k", [span("a", "one "), span("b", "two", ["strong"]), span("c", " three four")])
+
+      mine = block("k", [span("a", "one three four")])
+
+      theirs =
+        block("k", [span("a", "one "), span("b", "two", ["strong"]), span("c", " three FOUR")])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert text(blk) == "one three FOUR"
+    end
+  end
+
   describe "through PortableTextMerge.merge/4" do
     # The first failing test of task-da701626f5be2143: a clash on main.
     test "disjoint words of one block merge: ONE two THREE" do
@@ -471,6 +494,28 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert r1 - r0 < 80_000_000, "#{r1 - r0} reductions"
       assert text(hd(view)) == "FIRST b1 " <> text <> "LAST"
       assert text(Enum.at(view, 138)) == "FIRST b70 " <> text
+    end
+
+    # A block that does not fit what is left of the budget is a clash and
+    # costs nothing: a smaller block after it still merges (#28781 review,
+    # the charge-on-miss mutant). Ten capped blocks use about 1.97M of the
+    # 2M; the eleventh does not fit; the small one does.
+    test "a block too big for what is left of the budget clashes, and a small block after it still merges" do
+      text = String.duplicate("word ", div(Barkpark.Content.TextRebase.max_bytes(), 5) - 4)
+
+      value = fn f, small ->
+        Enum.flat_map(1..11, &[b(f.("b#{&1} " <> text), "k#{&1}"), b("anchor #{&1}", "a#{&1}")]) ++
+          [b(small, "s")]
+      end
+
+      base = value.(& &1, "one two three")
+      mine = value.(&("FIRST " <> &1), "ONE two three")
+      theirs = value.(&(&1 <> "LAST"), "one two THREE")
+
+      assert {:clash, [_eleventh], view} = M.merge(base, mine, theirs)
+      assert text(Enum.at(view, 18)) == "FIRST b10 " <> text <> "LAST"
+      assert text(Enum.at(view, 20)) == "FIRST b11 " <> text
+      assert text(List.last(view)) == "ONE two THREE"
     end
   end
 end
