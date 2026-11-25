@@ -389,6 +389,52 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       end
     end
 
+    # #28802 review B1 (the reviewer's save-path probe): mine and theirs
+    # share base's span keys, so every run of mine takes a fresh key. A walk
+    # from 0 per run cost 1,589M reductions (28 s) at 16,000 spans.
+    test "the save path: mine flips the marks of 16,000 spans whose keys theirs shares, under 40M" do
+      n = 16_000
+      words = fn ms -> for i <- 0..(n - 1), do: span("s#{i}", "ab ", ms.(i)) end
+      strong = fn r -> fn i -> if rem(i, 2) == r, do: ["strong"], else: [] end end
+      base = [block("k", words.(strong.(0)) ++ [span("t", "gap end")])]
+      mine = [block("k", words.(strong.(1)) ++ [span("t", "gap end")])]
+      theirs = [block("k", words.(strong.(0)) ++ [span("t", "gap END")])]
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      result = M.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 40_000_000, "#{r1 - r0} reductions"
+      assert {:ok, [blk]} = result
+      assert text(blk) == String.duplicate("ab ", n) <> "gap END"
+      keys = Enum.map(blk["children"], & &1["_key"])
+      assert length(keys) == length(Enum.uniq(keys))
+    end
+
+    # S1: a key taken by content is looked up in a set, not in a list.
+    test "30,000 links of mine, each its own key, one href theirs holds: under 20M" do
+      n = 30_000
+      x = link("d1", "https://x.example")
+      base = block("k", [span("s", String.duplicate("a", n)), span("t", " end")], [x])
+
+      mine =
+        block(
+          "k",
+          for(i <- 0..(n - 1), do: span("m#{i}", "a", ["l#{i}"])) ++ [span("t", " end")],
+          [x | for(i <- 0..(n - 1), do: link("l#{i}", "https://x.example"))]
+        )
+
+      theirs = block("k", [span("s", String.duplicate("a", n)), span("t", " END")], [x])
+
+      {:reductions, r0} = Process.info(self(), :reductions)
+      result = Inline.merge(base, mine, theirs)
+      {:reductions, r1} = Process.info(self(), :reductions)
+
+      assert r1 - r0 < 20_000_000, "#{r1 - r0} reductions"
+      assert {:ok, blk} = result
+      assert text(blk) == String.duplicate("a", n) <> " END"
+    end
+
     test "a pure deletion or paste past the cap, marks mixed, merges: it keeps no letter" do
       {base, _mine, theirs} = rewrite(1002)
       tail = block("k", [span("t", " gap end")])
@@ -528,6 +574,29 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert [%{"marks" => [k1]}, %{"marks" => [k2]}, %{"text" => " THREE"}] = blk["children"]
       assert k1 != k2 and Enum.map(blk["markDefs"], & &1["_key"]) == [k1, k2]
       assert Enum.map(blk["markDefs"], & &1["href"]) == [href, href]
+    end
+
+    # #28802 review S2: mine's new link beside mine's own link of one content.
+    test "mine links one beside its own equal-content link on two: two links, either side splicing" do
+      x = link("d1", "https://x.example")
+      spans = &[span("s0", "one ", &1), span("s1", "two", ["d1"]), span("s2", &2)]
+      base = block("k", spans.([], " three"), [x])
+      mine = block("k", spans.(["m1"], " three"), [x, link("m1", "https://x.example")])
+      theirs = block("k", spans.([], " THREE"), [x])
+
+      for {one, other} <- [{mine, theirs}, {theirs, mine}] do
+        assert {:ok, blk} = Inline.merge(base, one, other)
+
+        assert runs(blk) == [
+                 {"one ", ["https://x.example"]},
+                 {"two", ["https://x.example"]},
+                 {" THREE", []}
+               ]
+
+        assert [%{"marks" => [k1]}, %{"marks" => [k2]}, _] = blk["children"]
+        assert k1 != k2
+        assert blk["markDefs"] |> Enum.map(& &1["_key"]) |> Enum.sort() == Enum.sort([k1, k2])
+      end
     end
 
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do

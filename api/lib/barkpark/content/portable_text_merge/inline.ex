@@ -196,29 +196,39 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # by its def: theirs' def with that content, else mine's added under
   # mine's key (a fresh one when theirs holds it). Two of mine's links with
   # one content stay two (`marks/4`).
+  #
+  # The state carries the fresh-key counters (`ns`, `nd`) and the keys
+  # taken so far (`took`), so each run costs the same however many came
+  # before (#28802 review: mine and theirs share base's span keys, and a
+  # walk from 0 per run grew with the square of the runs).
   defp new_spans(letters, mdefs, theirs) do
     used = MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
 
     tdefs =
       defs(theirs) |> Enum.sort() |> Enum.reduce(%{}, fn {k, d}, m -> Map.put_new(m, d, k) end)
 
-    {spans, {_used, _taken, added}} =
+    st = %{used: used, taken: %{}, took: MapSet.new(), added: [], ns: 0, nd: 0}
+
+    {spans, %{added: added}} =
       letters
       |> Enum.chunk_by(fn {{_g, tag}, ms} -> {tag, link_keys(ms, mdefs)} end)
-      |> Enum.map_reduce({used, %{}, []}, fn [{{_, {_named, extra}}, ms} | _] = run, st ->
-        {marks, {used, taken, added}} = marks(ms, mdefs, tdefs, {theirs["_key"], st})
+      |> Enum.map_reduce(st, fn [{{_, {_named, extra}}, ms} | _] = run, st ->
+        {marks, st} = marks(ms, mdefs, tdefs, theirs["_key"], st)
 
-        key =
-          if is_binary(ms["_key"]) and not MapSet.member?(used, ms["_key"]),
-            do: ms["_key"],
-            else: fresh(theirs["_key"], used, 0)
+        {key, st} =
+          if is_binary(ms["_key"]) and not MapSet.member?(st.used, ms["_key"]) do
+            {ms["_key"], st}
+          else
+            {key, n} = fresh(theirs["_key"], st.used, st.ns)
+            {key, %{st | ns: n}}
+          end
 
         text = Enum.map_join(run, fn {{g, _}, _} -> g end)
 
         span =
           Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
 
-        {{look(span), span}, {MapSet.put(used, key), taken, added}}
+        {{look(span), span}, %{st | used: MapSet.put(st.used, key)}}
       end)
 
     {spans, Enum.reverse(added)}
@@ -227,26 +237,44 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp link_keys(span, mdefs), do: Enum.filter(List.wrap(span["marks"]), &is_map_key(mdefs, &1))
 
   # Each of mine's marks as theirs' mark key. `taken`: mine's link key => the
-  # key it took, so one link of mine stays one, and a second link of mine
-  # with the same content takes a def of its own.
-  defp marks(span, mdefs, tdefs, {bkey, {used, taken, added}}) do
+  # key it took (`took`, the keys taken), so one link of mine stays one, and
+  # a second link of mine with the same content takes a def of its own. A
+  # def key mine holds for another link of its own is not taken by content
+  # either: mine's link outside the splice keeps that key, and the two would
+  # become one.
+  defp marks(span, mdefs, tdefs, bkey, st) do
     span["marks"]
     |> List.wrap()
-    |> Enum.map_reduce({used, taken, added}, fn mk, {used, taken, added} = st ->
+    |> Enum.map_reduce(st, fn mk, st ->
+      k = is_map_key(mdefs, mk) && tdefs[mdefs[mk]]
+
       cond do
         not is_map_key(mdefs, mk) ->
           {mk, st}
 
-        is_map_key(taken, mk) ->
-          {taken[mk], st}
+        is_map_key(st.taken, mk) ->
+          {st.taken[mk], st}
 
-        (k = tdefs[mdefs[mk]]) && k not in Map.values(taken) ->
-          {k, {used, Map.put(taken, mk, k), added}}
+        k && not MapSet.member?(st.took, k) && (k == mk or not is_map_key(mdefs, k)) ->
+          {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
 
         true ->
-          k = if MapSet.member?(used, mk), do: fresh(bkey <> "d", used, 0), else: mk
-          def = Map.put(mdefs[mk], "_key", k)
-          {k, {MapSet.put(used, k), Map.put(taken, mk, k), [def | added]}}
+          {k, st} =
+            if MapSet.member?(st.used, mk) do
+              {k, n} = fresh(bkey <> "d", st.used, st.nd)
+              {k, %{st | nd: n}}
+            else
+              {mk, st}
+            end
+
+          {k,
+           %{
+             st
+             | used: MapSet.put(st.used, k),
+               taken: Map.put(st.taken, mk, k),
+               took: MapSet.put(st.took, k),
+               added: [Map.put(mdefs[mk], "_key", k) | st.added]
+           }}
       end
     end)
   end
@@ -271,9 +299,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp look(span),
     do: {Enum.sort(List.wrap(span["marks"])), Map.drop(span, ~w(_key _type text marks))}
 
+  # The first free `<k>i<n>` from `n` on, and the counter to start from next.
   defp fresh(k, used, n) do
     key = "#{k}i#{n}"
-    if MapSet.member?(used, key), do: fresh(k, used, n + 1), else: key
+    if MapSet.member?(used, key), do: fresh(k, used, n + 1), else: {key, n + 1}
   end
 
   # Theirs' spans with letters [a, b) replaced by `new`: a span left or right
@@ -309,7 +338,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
           # The right piece of a span split in two takes a key of its own.
           l =
             if f == l and lt != "",
-              do: Map.put(l, "_key", fresh(theirs["_key"], used(theirs, news), 0)),
+              do: Map.put(l, "_key", elem(fresh(theirs["_key"], used(theirs, news), 0), 0)),
               else: l
 
           join(left ++ piece(f, lt), new, piece(l, rt) ++ right, tag)
