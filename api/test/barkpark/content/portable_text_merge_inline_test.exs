@@ -23,6 +23,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
   defp b(text, key \\ "k"), do: block(key, [span(key <> "s", text)])
   defp text(%{"children" => cs}), do: Enum.map_join(cs, & &1["text"])
   defp texts({:ok, blocks}), do: Enum.map(blocks, &text/1)
+  # Each span as {text, marks}, a link by its def's href.
+  defp runs(%{"children" => cs} = blk) do
+    hrefs = Map.new(List.wrap(blk["markDefs"]), &{&1["_key"], &1["href"]})
+    Enum.map(cs, &{&1["text"], Enum.map(&1["marks"], fn m -> hrefs[m] || m end)})
+  end
 
   test "disjoint words of one block merge: ONE two THREE" do
     assert {:ok, blk} =
@@ -136,17 +141,13 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     test "ranges that touch with no letter between: one .. two",
       do: assert(Inline.merge(b("one .. two"), b("one !. two"), b("one .? two")) == :clash)
 
-    test "a mark only, or a mark of its own put in" do
+    # task-07d2ca9aa7667208: a mark is part of the splice; across the
+    # other side's edit it clashes.
+    test "mine bolds one two three while theirs rewrites two" do
       assert Inline.merge(
                b("one two three"),
-               block("k", [span("a", "one", ["strong"]), span("b", " two three")]),
-               b("one two THREE")
-             ) == :clash
-
-      assert Inline.merge(
-               b("one two three"),
-               block("k", [span("a", "one two "), span("b", "new", ["em"]), span("c", " three")]),
-               b("ONE two three")
+               block("k", [span("a", "one two three", ["strong"])]),
+               b("one TWO three")
              ) == :clash
     end
 
@@ -172,7 +173,9 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
   end
 
   describe "#28761 review" do
-    test "a mark change riding inside a text splice is a clash: a bold put on" do
+    # task-07d2ca9aa7667208: a mark change inside a text splice is mine's
+    # (both were a clash before marks merged).
+    test "a mark change riding inside a text splice merges apart from theirs': a bold put on" do
       base = block("k", [span("a", "ONE", ["strong"]), span("b", " two three four")])
 
       mine =
@@ -183,10 +186,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
         ])
 
       theirs = block("k", [span("a", "ONE", ["strong"]), span("b", " two three FOUR")])
-      assert Inline.merge(base, mine, theirs) == :clash
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert runs(blk) == [{"ONE TWO three", ["strong"]}, {" FOUR", []}]
     end
 
-    test "a mark change riding inside a text splice is a clash: a bold taken off" do
+    test "a mark change riding inside a text splice merges apart from theirs': a bold taken off" do
       base =
         block("k", [span("a", "one two "), span("b", "THREE", ["strong"]), span("c", " four")])
 
@@ -195,7 +199,8 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       theirs =
         block("k", [span("a", "one two "), span("b", "THREE", ["strong"]), span("c", " FOUR")])
 
-      assert Inline.merge(base, mine, theirs) == :clash
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert runs(blk) == [{"one TWO THREE", []}, {" FOUR", []}]
     end
 
     test "typing on at the end of a bold word still merges" do
@@ -319,7 +324,7 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
     defp theirs_five, do: marked("two", " three four FIVE")
 
-    test "mine edits two and four and bolds three between them: a clash" do
+    test "mine edits two and four and bolds three between them: merged, three bold" do
       mine =
         block("k", [
           span("a", "one "),
@@ -327,10 +332,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
           span("c", " FOUR five")
         ])
 
-      assert Inline.merge(marked("two", " three four five"), mine, theirs_five()) == :clash
+      assert {:ok, blk} = Inline.merge(marked("two", " three four five"), mine, theirs_five())
+      assert runs(blk) == [{"one ", []}, {"TWO three", ["strong"]}, {" FOUR FIVE", []}]
     end
 
-    test "mine edits two and four and unbolds a bold word between them: a clash" do
+    test "mine edits two and four and unbolds a bold word between them: merged, unbolded" do
       base =
         block("k", [
           span("a", "one two "),
@@ -346,7 +352,8 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
         ])
 
       mine = block("k", [span("a", "one TWO three FOUR five")])
-      assert Inline.merge(base, mine, theirs) == :clash
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert runs(blk) == [{"one TWO three FOUR", []}, {" FIVE", []}]
     end
 
     test "mine edits two and four, marks kept: it merges" do
@@ -369,14 +376,17 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
        block("k", pairs.("ab", "b") ++ [span("t", " gap END")])}
     end
 
-    test "a rewrite of mixed marks at the cap costs under 15M reductions; past it, a clash" do
-      {base, mine, theirs} = rewrite(500)
-      {:reductions, r0} = Process.info(self(), :reductions)
-      assert {:ok, _} = Inline.merge(base, mine, theirs)
-      {:reductions, r1} = Process.info(self(), :reductions)
-      assert r1 - r0 < 15_000_000
-      {base, mine, theirs} = rewrite(502)
-      assert Inline.merge(base, mine, theirs) == :clash
+    # The letter diff that read marks kept is gone with task-07d2ca9aa7667208:
+    # marks ride the splice, past the old cap too.
+    test "a rewrite of mixed marks costs under 15M reductions, at the old cap and past it" do
+      for n <- [500, 2_000] do
+        {base, mine, theirs} = rewrite(n)
+        {:reductions, r0} = Process.info(self(), :reductions)
+        assert {:ok, blk} = Inline.merge(base, mine, theirs)
+        {:reductions, r1} = Process.info(self(), :reductions)
+        assert r1 - r0 < 15_000_000
+        assert text(blk) == String.duplicate("xy", div(n, 2)) <> " gap END"
+      end
     end
 
     test "a pure deletion or paste past the cap, marks mixed, merges: it keeps no letter" do
@@ -454,6 +464,135 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
       assert {:ok, blk} = Inline.merge(base, mine, theirs)
       assert text(blk) == "one three FOUR"
+    end
+  end
+
+  describe "task-07d2ca9aa7667208: marks and links" do
+    defp link(k, href), do: %{"_key" => k, "_type" => "link", "href" => href}
+
+    test "mine bolds one, theirs edits three: merged, bold on one only" do
+      mine = block("k", [span("a", "one", ["strong"]), span("b", " two three")])
+      assert {:ok, blk} = Inline.merge(b("one two three"), mine, b("one two THREE"))
+      assert runs(blk) == [{"one", ["strong"]}, {" two THREE", []}]
+      assert List.last(blk["children"])["_key"] == "ks"
+    end
+
+    test "theirs bolds three, mine edits one: theirs' bold stays" do
+      theirs = block("k", [span("ks", "one two "), span("t", "three", ["strong"])])
+      assert {:ok, blk} = Inline.merge(b("one two three"), b("ONE two three"), theirs)
+      assert runs(blk) == [{"ONE two ", []}, {"three", ["strong"]}]
+    end
+
+    test "mine links one, theirs edits three: theirs' defs unchanged, plus mine's" do
+      ours = link("t1", "https://b.example")
+
+      base =
+        block("k", [span("ks", "one "), span("l", "two", ["t1"]), span("r", " three")], [ours])
+
+      theirs =
+        block("k", [span("ks", "one "), span("l", "two", ["t1"]), span("r", " THREE")], [ours])
+
+      mine =
+        block(
+          "k",
+          [
+            span("m", "one", ["m1"]),
+            span("ks", " "),
+            span("l", "two", ["t1"]),
+            span("r", " three")
+          ],
+          [link("m1", "https://a.example"), ours]
+        )
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert blk["markDefs"] == [ours, link("m1", "https://a.example")]
+
+      assert runs(blk) == [
+               {"one", ["https://a.example"]},
+               {" ", []},
+               {"two", ["https://b.example"]},
+               {" THREE", []}
+             ]
+    end
+
+    test "two adjacent links with equal content stay two links" do
+      href = "https://a.example"
+
+      mine =
+        block("k", [span("a", "one", ["m1"]), span("b", "two", ["m2"]), span("c", " three")], [
+          link("m1", href),
+          link("m2", href)
+        ])
+
+      assert {:ok, blk} = Inline.merge(b("onetwo three"), mine, b("onetwo THREE"))
+      assert [%{"marks" => [k1]}, %{"marks" => [k2]}, %{"text" => " THREE"}] = blk["children"]
+      assert k1 != k2 and Enum.map(blk["markDefs"], & &1["_key"]) == [k1, k2]
+      assert Enum.map(blk["markDefs"], & &1["href"]) == [href, href]
+    end
+
+    test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
+      href = "https://a.example"
+      base = block("k", [span("m1", "one two three")])
+
+      theirs =
+        block("k", [span("m1", "one two "), span("t", "THREE", ["d1"])], [link("d1", href)])
+
+      mine = block("k", [span("a", "one", ["m1"]), span("b", " two three")], [link("m1", href)])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert [%{"marks" => ["d1"]} | _] = blk["children"]
+      assert blk["markDefs"] == [link("d1", href)]
+
+      other =
+        block("k", [span("a", "one", ["m1"]), span("b", " two three")], [
+          link("m1", "https://o.example")
+        ])
+
+      assert {:ok, blk} = Inline.merge(base, other, theirs)
+      [new] = blk["markDefs"] -- [link("d1", href)]
+      assert new["href"] == "https://o.example" and new["_key"] not in ["m1", "d1"]
+      assert hd(blk["children"])["marks"] == [new["_key"]]
+    end
+
+    test "mine takes out the only link to a def: the def goes; a def no span used stays" do
+      unused = link("d9", "https://unused.example")
+
+      base =
+        block("k", [span("a", "one", ["d1"]), span("b", " two three")], [
+          link("d1", "https://x.example"),
+          unused
+        ])
+
+      theirs =
+        block("k", [span("a", "one", ["d1"]), span("b", " two THREE")], [
+          link("d1", "https://x.example"),
+          unused
+        ])
+
+      assert {:ok, blk} = Inline.merge(base, block("k", [span("b", "ONE two three")]), theirs)
+      assert runs(blk) == [{"ONE two THREE", []}]
+      assert blk["markDefs"] == [unused]
+    end
+
+    test "mine changes a link's href on one, theirs edits three: the new def, the old one gone" do
+      base =
+        block("k", [span("a", "one", ["d1"]), span("b", " two three")], [
+          link("d1", "https://x.example")
+        ])
+
+      theirs =
+        block("k", [span("a", "one", ["d1"]), span("b", " two THREE")], [
+          link("d1", "https://x.example")
+        ])
+
+      mine =
+        block("k", [span("a", "one", ["d1"]), span("b", " two three")], [
+          link("d1", "https://y.example")
+        ])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert runs(blk) == [{"one", ["https://y.example"]}, {" two THREE", []}]
+      assert [%{"href" => "https://y.example"}] = blk["markDefs"]
     end
   end
 

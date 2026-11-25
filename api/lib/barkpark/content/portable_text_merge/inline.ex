@@ -41,7 +41,6 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   """
 
   alias Barkpark.Content.TextRebase
-  alias Barkpark.PortableDoc.TextDiff, as: LineDiff
 
   @fixed ~w(_key _type children markDefs)
 
@@ -116,48 +115,15 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     splice(base, side, p, s)
   end
 
+  # A letter is its grapheme and its marks, so a mark put on, taken off or
+  # a link's def changed is part of the side's splice (task-07d2ca9aa7667208).
+  # A splice of no letters (spans cut another way, nothing drawn changed):
+  # :error, as before.
   defp splice(base, side, p, s) do
     {mid, put} =
       {Enum.slice(base, p, length(base) - s - p), Enum.slice(side, p, length(side) - s - p)}
 
-    near = Enum.slice(base, max(p - 1, 0), length(mid) + if(p > 0, do: 2, else: 1))
-    allowed = MapSet.new(near, &elem(&1, 1)) |> MapSet.put({[], %{}})
-
-    cond do
-      Enum.map(mid, &elem(&1, 0)) == Enum.map(put, &elem(&1, 0)) -> :error
-      not marks_kept?(mid, put) -> :error
-      Enum.all?(put, &MapSet.member?(allowed, elem(&1, 1))) -> {:ok, {p, length(base) - s, put}}
-      true -> :error
-    end
-  end
-
-  # Inside the splice, the text kept is as long on letters as on graphemes
-  # alone: no base letter whose text stayed took other marks
-  # (task-81d9efce3bbf6428). The kept letters are a longest common run, by
-  # the one diff engine (`PortableDoc.TextDiff`, a letter a line); one tag
-  # in the splice needs none. Past @diff_cap letters with marks mixed, the
-  # cost is not run: :error. Under it the engine never falls back to its
-  # whole-block diff (2000 lines a side, 4M cells), which keeps nothing.
-  @diff_cap 1_000
-  # A pure deletion or paste keeps no letter: no mark can change (#28771 review).
-  defp marks_kept?([], _put), do: true
-  defp marks_kept?(_mid, []), do: true
-
-  defp marks_kept?(mid, put) do
-    case MapSet.size(MapSet.new(mid ++ put, &elem(&1, 1))) do
-      n when n <= 1 ->
-        true
-
-      _ ->
-        length(mid) + length(put) <= @diff_cap and
-          kept(mid, put) == kept(Enum.map(mid, &elem(&1, 0)), Enum.map(put, &elem(&1, 0)))
-    end
-  end
-
-  defp kept(a, b) do
-    ids = (a ++ b) |> Enum.uniq() |> Enum.with_index() |> Map.new()
-    lines = fn xs -> Enum.map_join(xs, "\n", &Integer.to_string(Map.fetch!(ids, &1))) end
-    LineDiff.diff_lines(lines.(a), lines.(b)) |> Enum.count(&(&1.op == "="))
+    if mid == put, do: :error, else: {:ok, {p, length(base) - s, put}}
   end
 
   defp ends(base, side) do
@@ -207,52 +173,100 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp build({mp, me, put}, {tp, te, tput}, mine, theirs) do
     shift = if tp < mp, do: length(tput) - (te - tp), else: 0
     {a, b} = {mp + shift, me + shift}
-    defs = Map.new(defs(theirs), fn {k, d} -> {d, k} end)
 
-    keys =
+    spans =
       mine["children"]
-      |> Enum.flat_map(&List.duplicate(&1["_key"], glen(&1)))
+      |> Enum.flat_map(&List.duplicate(&1, glen(&1)))
       |> Enum.slice(mp, length(put))
 
-    with {:ok, new} <- new_spans(Enum.zip(put, keys), defs, theirs) do
-      {:ok, Map.put(theirs, "children", cut(theirs, a, b, new))}
-    end
+    {new, added} = new_spans(Enum.zip(put, spans), defs(mine), theirs)
+    children = cut(theirs, a, b, new)
+
+    block = Map.put(theirs, "children", children)
+
+    if added == [] and not is_map_key(theirs, "markDefs"),
+      do: {:ok, block},
+      else: {:ok, Map.put(block, "markDefs", mark_defs(theirs, added, children))}
   end
 
-  # Mine's letters as spans in theirs' marks ({tag, span}); a def theirs
-  # lacks is a clash.
-  defp new_spans(letters, defs, theirs) do
-    used = MapSet.new(theirs["children"], & &1["_key"])
+  # Mine's letters as spans in theirs' marks ({look, span}). A link is read
+  # by its def: theirs' def with that content, else mine's added under
+  # mine's key (a fresh one when theirs holds it). Two of mine's links with
+  # one content stay two (`marks/4`).
+  defp new_spans(letters, mdefs, theirs) do
+    used = MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
 
-    letters
-    |> Enum.chunk_by(fn {{_g, tag}, _key} -> tag end)
-    |> Enum.reduce_while({[], used}, fn [{{_, {named, extra} = tag}, key} | _] = run,
-                                        {acc, used} ->
-      marks =
-        Enum.map(named, fn
-          {:dec, m} -> m
-          {:def, d} -> defs[d]
-        end)
+    tdefs =
+      defs(theirs) |> Enum.sort() |> Enum.reduce(%{}, fn {k, d}, m -> Map.put_new(m, d, k) end)
 
-      key =
-        if is_binary(key) and not MapSet.member?(used, key),
-          do: key,
-          else: fresh(theirs["_key"], used, 0)
+    {spans, {_used, _taken, added}} =
+      letters
+      |> Enum.chunk_by(fn {{_g, tag}, ms} -> {tag, link_keys(ms, mdefs)} end)
+      |> Enum.map_reduce({used, %{}, []}, fn [{{_, {_named, extra}}, ms} | _] = run, st ->
+        {marks, {used, taken, added}} = marks(ms, mdefs, tdefs, {theirs["_key"], st})
 
-      text = Enum.map_join(run, fn {{g, _}, _} -> g end)
+        key =
+          if is_binary(ms["_key"]) and not MapSet.member?(used, ms["_key"]),
+            do: ms["_key"],
+            else: fresh(theirs["_key"], used, 0)
 
-      span =
-        Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+        text = Enum.map_join(run, fn {{g, _}, _} -> g end)
 
-      if Enum.all?(marks, &is_binary/1),
-        do: {:cont, {[{tag, span} | acc], MapSet.put(used, key)}},
-        else: {:halt, :error}
+        span =
+          Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+
+        {{look(span), span}, {MapSet.put(used, key), taken, added}}
+      end)
+
+    {spans, Enum.reverse(added)}
+  end
+
+  defp link_keys(span, mdefs), do: Enum.filter(List.wrap(span["marks"]), &is_map_key(mdefs, &1))
+
+  # Each of mine's marks as theirs' mark key. `taken`: mine's link key => the
+  # key it took, so one link of mine stays one, and a second link of mine
+  # with the same content takes a def of its own.
+  defp marks(span, mdefs, tdefs, {bkey, {used, taken, added}}) do
+    span["marks"]
+    |> List.wrap()
+    |> Enum.map_reduce({used, taken, added}, fn mk, {used, taken, added} = st ->
+      cond do
+        not is_map_key(mdefs, mk) ->
+          {mk, st}
+
+        is_map_key(taken, mk) ->
+          {taken[mk], st}
+
+        (k = tdefs[mdefs[mk]]) && k not in Map.values(taken) ->
+          {k, {used, Map.put(taken, mk, k), added}}
+
+        true ->
+          k = if MapSet.member?(used, mk), do: fresh(bkey <> "d", used, 0), else: mk
+          def = Map.put(mdefs[mk], "_key", k)
+          {k, {MapSet.put(used, k), Map.put(taken, mk, k), [def | added]}}
+      end
     end)
-    |> case do
-      {spans, _used} -> {:ok, Enum.reverse(spans)}
-      :error -> :error
-    end
   end
+
+  # Theirs' defs stay, used or not, with mine's added; a def is dropped
+  # only when its last use was in theirs' text mine's splice replaced.
+  defp mark_defs(theirs, added, children) do
+    before = used_marks(theirs["children"])
+    now = used_marks(children)
+
+    for(
+      %{"_key" => k} = d <- List.wrap(theirs["markDefs"]),
+      not (MapSet.member?(before, k) and not MapSet.member?(now, k)),
+      do: d
+    ) ++ added
+  end
+
+  defp used_marks(children),
+    do: MapSet.new(Enum.flat_map(children, &List.wrap(&1["marks"])))
+
+  # What a span draws besides its text: its marks, as keys, and its fields.
+  defp look(span),
+    do: {Enum.sort(List.wrap(span["marks"])), Map.drop(span, ~w(_key _type text marks))}
 
   defp fresh(k, used, n) do
     key = "#{k}i#{n}"
@@ -265,8 +279,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # own marks stays that span. A new run with the marks of the span beside
   # it joins that span.
   defp cut(theirs, a, b, new) do
-    defs = defs(theirs)
-    tag = &tag(&1, defs)
+    tag = &look/1
 
     {spans, _} =
       Enum.map_reduce(theirs["children"], 0, fn s, o ->
