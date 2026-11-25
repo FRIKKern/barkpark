@@ -14,10 +14,10 @@ const has = (s) => (p) => said(p).includes(JSON.stringify(s).slice(1, -1))
 const STYLE_FAIL = /in a style attribute|carries a style attribute/
 
 /** A UI SDK number input with its scrub area and both step buttons. */
-const numberInput = (id, more = '') => `<ui-number-input id="${id}" default-value="2" min="0" max="9">
+const numberInput = (id, more = '', lead = '', less = '') => `<ui-number-input id="${id}" default-value="2" min="0" max="9">
   <ui-number-input-scrub-area id="${id}-scrub"><span>Count</span></ui-number-input-scrub-area>
   <ui-number-input-group>
-    <ui-number-input-decrement><button id="${id}-less" type="button">Less</button></ui-number-input-decrement>
+    <ui-number-input-decrement>${lead}<button id="${id}-less" type="button">Less</button>${less}</ui-number-input-decrement>
     <ui-number-input-control><input id="${id}-control" type="text" aria-label="Count"></ui-number-input-control>
     <ui-number-input-increment><button id="${id}-more" type="button">More</button>${more}</ui-number-input-increment>
   </ui-number-input-group>
@@ -36,6 +36,15 @@ steps.push({
     return (v === '3' && !bare) || \`value \${v}, \${bare} piece(s) with nothing written\`
   },
 })
+steps.push({
+  name: 'R2 plant: a decrement piece whose first child is a span, not a button: UI SDK writes on its first button',
+  click: '#button-nl-less',
+  expect: (root) => {
+    const v = root.querySelector('#button-nl-control').value
+    const bare = [...root.querySelectorAll('#button-nl-scrub, #button-nl-less, #button-nl-more')].filter((e) => !e.hasAttribute('sty' + 'le')).length
+    return (v === '1' && !bare) || \`value \${v}, \${bare} piece(s) with nothing written\`
+  },
+})
 `
 
 // Written as the page loads, a frame after the number input is made: a step button's property on a span and on the
@@ -48,6 +57,8 @@ const WRITES = [
   "  root.querySelector('#button-not-number').setAttribute(S, 'user-select: none')",
   "  root.querySelector('#button-nix-control')[S].touchAction = 'manipulation'",
   "  root.querySelector('#button-nix-more2')[S].userSelect = 'none'",
+  "  root.querySelector('#button-nix-less2')[S]['set' + 'Property']('--hold-delay', '400ms')",
+  "  root.querySelector('#button-nix-less3')[S].touchAction = 'manipulation'",
   "  const scrub = root.querySelector('#button-nix-scrub')",
   "  scrub[S]['set' + 'Property']('--hold-delay', '400ms')",
   "  scrub[S].touchAction = 'manipulation'",
@@ -68,7 +79,7 @@ export const NUMBER_CASES = [
     name: 'placement: a UI SDK number input, stepped by a click on its increment button, writes only what UI SDK writes on its step buttons and scrub area, and that passes',
     only: ['pressed'],
     green: true,
-    plant: all((d) => row(d, numberInput('button-ni')), withNumber, (d) => appendFileSync(join(d, 'press.mjs'), STEP)),
+    plant: all((d) => row(d, `${numberInput('button-ni')}\n${numberInput('button-nl', '', '<span id="button-nl-lead">Down</span>')}`), withNumber, (d) => appendFileSync(join(d, 'press.mjs'), STEP)),
     expect: each({
       'every press step passed, the value stepped and every step button and the scrub area written among them': (p) => lights(p).pressed?.pass === true && (p?.parts?.button?.steps ?? []).length > 0,
       'no fail names a style attribute: not a step button and not the scrub area': (p) => !STYLE_FAIL.test(said(p)),
@@ -77,11 +88,13 @@ export const NUMBER_CASES = [
   {
     name: "placement: a number input's properties stand only on its step buttons and scrub area, as UI SDK writes them: one on a span or on the input, a hold delay on the scrub area, and a value UI SDK does not write fail by name",
     only: ['pressed'],
-    plant: all((d) => row(d, `${numberInput('button-nix', '<button id="button-nix-more2" type="button">Also</button>')}\n<span id="button-not-number">Not a number input</span>`), withNumber, (d) => inDemo(d, WRITES)),
+    plant: all((d) => row(d, `${numberInput('button-nix', '<button id="button-nix-more2" type="button">Also</button>', '', '<button id="button-nix-less2" type="button">Again</button><button id="button-nix-less3" type="button">Third</button>')}\n<span id="button-not-number">Not a number input</span>`), withNumber, (d) => inDemo(d, WRITES)),
     expect: each({
       "a step button's user-select on a span fails by name": has(NOT_PLACEMENT('span#button-not-number "Not a number input"', 'user-select')),
       "a step button's touch-action on the input fails by name": has(NOT_PLACEMENT('input#button-nix-control ""', 'touch-action')),
       "a step button's user-select on a second button in the increment piece, which UI SDK does not write on, fails by name": has(NOT_PLACEMENT('button#button-nix-more2 "Also"', 'user-select')),
+      "R2 plant: a hold delay of 400ms on a second button in the decrement piece fails by name": has(NOT_PLACEMENT('button#button-nix-less2 "Again"', '--hold-delay')),
+      "R2 plant: a touch-action of manipulation on a third button in the decrement piece fails by name": has(NOT_PLACEMENT('button#button-nix-less3 "Third"', 'touch-action')),
       'a hold delay on the scrub area, which UI SDK writes only on a step button, fails by name': has(NOT_PLACEMENT(SCRUB_AT, '--hold-delay')),
       'a hold delay of 500ms on a step button fails by name, with its value': has(SLOT_VALUE(MORE, '--hold-delay', '500ms', BUTTON, write(BUTTON, '--hold-delay'))),
       'a touch-action of none on a step button fails by name, with its value': has(SLOT_VALUE(MORE, 'touch-action', 'none', BUTTON, write(BUTTON, 'touch-action'))),
