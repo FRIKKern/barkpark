@@ -15,7 +15,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
   alias Barkpark.Content.{Document, LinkHrefFence, Revision}
   alias Barkpark.Repo
   alias Barkpark.Tenancy.WorkspaceBundle
-  alias Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck
+  alias Barkpark.Tenancy.WorkspaceBundle.{Archive, InvalidBundleError, LinkHrefCheck}
 
   defp body(def) do
     [
@@ -85,6 +85,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
     assert stats.refused_links == [
              %{
                table: "documents",
+               column: "content",
                doc_id: doc.doc_id,
                path: "/body/0/markDefs/0/href",
                href: "javascript:alert(1)"
@@ -158,6 +159,155 @@ defmodule Barkpark.Tenancy.WorkspaceBundleLinkHrefTest do
     after
       File.rm(path)
     end
+  end
+
+  # The bundle with its `documents` member's bytes passed through `edit`, as
+  # a hand-edited bundle would be (#28728 review).
+  defp edited(bundle, member, edit) do
+    {:ok, entries} = :erl_tar.extract({:binary, bundle}, [:memory])
+    name = ~c"tables/#{member}.copy"
+    path = Path.join(System.tmp_dir!(), "lhref-#{System.unique_integer([:positive])}.tar")
+    {:ok, tar} = :erl_tar.open(path, [:write])
+
+    for {n, bytes} <- entries do
+      :ok = :erl_tar.add(tar, if(n == name, do: edit.(bytes), else: bytes), n, [])
+    end
+
+    :ok = :erl_tar.close(tar)
+    bytes = File.read!(path)
+    File.rm!(path)
+    bytes
+  end
+
+  defp put_raw!(table, id, json) do
+    Repo.query!("UPDATE #{table} SET content = $2::text::jsonb WHERE id = $1", [
+      Ecto.UUID.dump!(id),
+      json
+    ])
+  end
+
+  # A key spelled with a JSON or a COPY escape is the same key once Postgres
+  # has read the row; the check read the raw bytes (#28728 review, 1).
+  for {name, spelling} <- [
+        {"a JSON escape", ~S(\\u006darkDefs)},
+        {"a COPY hex escape", ~S(\x6darkDefs)},
+        {"a COPY octal escape", ~S(\155arkDefs)}
+      ] do
+    test "a markDefs key spelled with #{name} is stripped", %{ws: ws, doc: doc} do
+      put_body!(Document, doc.id, link("javascript:alert(1)"))
+      {:ok, bundle} = WorkspaceBundle.export(ws.id)
+      bundle = edited(bundle, "documents", &String.replace(&1, "markDefs", unquote(spelling)))
+      put_body!(Document, doc.id, link("https://ok.example"))
+
+      {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+
+      stored = Repo.get!(Document, doc.id).content
+      assert LinkHrefFence.refused(stored, "") == []
+      assert %{"refused_href" => "javascript:alert(1)"} = def_of(stored)
+      assert [%{path: "/body/0/markDefs/0/href"}] = stats.refused_links
+    end
+  end
+
+  # Jason refused `1e400`, which jsonb stores, and the row went through
+  # unchecked (#28728 review, 2). Every number is kept as written (5).
+  test "a row with numbers Jason's floats cannot hold is stripped, every number kept",
+       %{ws: ws, doc: doc} do
+    body = Jason.encode!(link("javascript:x"))
+
+    put_raw!(
+      "documents",
+      doc.id,
+      ~s({"n":1e400,"p":19.990000000000000001,"q":1.10,"body":#{body}})
+    )
+
+    numbers = "SELECT (content - 'body')::text FROM documents WHERE id = $1"
+    %{rows: [[before]]} = Repo.query!(numbers, [Ecto.UUID.dump!(doc.id)])
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+
+    {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+
+    assert [%{table: "documents"}] = stats.refused_links
+    assert %{"refused_href" => "javascript:x"} = def_of(Document, doc.id)
+    %{rows: [[now]]} = Repo.query!(numbers, [Ecto.UUID.dump!(doc.id)])
+    assert now == before
+    assert now =~ "19.990000000000000001" and now =~ "1.10"
+  end
+
+  test "a value the check cannot decode refuses the bundle, by name", %{ws: ws, doc: doc} do
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+    {manifest, dumps} = Archive.unpack(bundle)
+
+    dumps =
+      Map.update!(dumps, "documents", &String.replace(&1, ~s("markDefs":), ~s("markDefs"::)))
+
+    error = assert_raise InvalidBundleError, fn -> LinkHrefCheck.strip(manifest, dumps) end
+    assert error.code == "pt_content_undecodable"
+    assert error.message =~ doc.doc_id
+  end
+
+  # The listen replay, the sync outbox and the webhook rebuild serve
+  # `mutation_events.document` (#28728 review, 4).
+  test "a mutation event's document snapshot is stripped too", %{ws: ws, doc: doc} do
+    event = fn href ->
+      %{
+        dataset: doc.dataset,
+        type: doc.type,
+        doc_id: doc.doc_id,
+        mutation: "delete",
+        rev: "r1",
+        document: %{"_id" => doc.doc_id, "body" => link(href)},
+        inserted_at: NaiveDateTime.utc_now(:second),
+        workspace_id: Ecto.UUID.dump!(ws.id),
+        source: "api"
+      }
+    end
+
+    {1, [%{id: id}]} =
+      Repo.insert_all("mutation_events", [event.("javascript:x")], returning: [:id])
+
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+    Repo.query!("DELETE FROM mutation_events WHERE id = $1", [id])
+
+    {:ok, stats} = WorkspaceBundle.import_bundle(bundle, mode: :merge)
+
+    %{rows: [[stored]]} = Repo.query!("SELECT document FROM mutation_events WHERE id = $1", [id])
+    assert LinkHrefFence.refused(stored, "") == []
+    assert %{"refused_href" => "javascript:x"} = def_of(stored)
+
+    assert %{column: "document"} =
+             Enum.find(stats.refused_links, &(&1.table == "mutation_events"))
+  end
+
+  # The columns read are the target's json and jsonb columns, from its own
+  # schema, so a member added later is read with no list to update. Held
+  # against the bundle's own member list and an independent read of the
+  # catalog (pg_attribute, not information_schema).
+  test "every json and jsonb column of every bundle member is read", %{ws: ws} do
+    {:ok, bundle} = WorkspaceBundle.export(ws.id)
+    {manifest, _dumps} = Archive.unpack(bundle)
+    members = for %{"name" => t, "columns" => cols} <- manifest["tables"], do: {t, cols}
+
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT c.relname, a.attname FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+        WHERE c.relname = ANY($1) AND a.attnum > 0 AND NOT a.attisdropped
+          AND format_type(a.atttypid, a.atttypmod) IN ('json', 'jsonb')
+        """,
+        [Enum.map(members, &elem(&1, 0))]
+      )
+
+    read = LinkHrefCheck.json_columns(Enum.map(members, &elem(&1, 0)))
+    exported = Map.new(members)
+
+    for [table, column] <- rows, column in exported[table] do
+      assert column in Map.get(read, table, []), "#{table}.#{column} is not read"
+    end
+
+    assert "content" in read["documents"] and "content" in read["revisions"]
+    assert "document" in read["mutation_events"]
   end
 
   test "a bundle with an https link imports as it was, with no findings", %{ws: ws, doc: doc} do

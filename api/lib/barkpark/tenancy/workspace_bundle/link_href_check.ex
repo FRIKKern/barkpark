@@ -24,25 +24,37 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
 
   ## What is read
 
-  The `documents` and `revisions` members, before anything is written, for
-  the restore and the remap into a dataset alike. A revision is stripped
-  too: restoring one puts its content back without the fence, which
-  assumes a stored revision passed it. In each row, every `markDefs` list in
-  the content, as the fence reads it (`LinkHrefFence.refused/2`): a `link`'s
-  `href`, a `linkAnnotation`'s `url`, `href` and `damFileUrl`.
+  Every `json` and `jsonb` column of every member, before anything is
+  written, for the restore and the remap into a dataset alike. The columns
+  are read off the target's own schema (`json_columns/1`), not a list, so a
+  member added later is read too (#28728 review: `mutation_events.document`
+  is served by the listen replay, the sync outbox and the webhook rebuild).
+  A revision is stripped too: restoring one puts its content back without
+  the fence, which assumes a stored revision passed it.
+
+  In each value, every `markDefs` list, as the fence reads it
+  (`LinkHrefFence.refused/2`): a `link`'s `href`, a `linkAnnotation`'s
+  `url`, `href` and `damFileUrl`. A value is read after both its COPY
+  escapes and its JSON escapes are undone, as Postgres reads it: the only
+  values skipped unread are those that after the COPY escapes hold neither
+  `markDefs` nor a `\\u` escape, so cannot spell the key. A value read and
+  not decoded refuses the bundle (`pt_content_undecodable`): Postgres must
+  never get a value the check could not read. Numbers are decoded as
+  decimals and written back as they were, so a stripped value keeps every
+  other value.
 
   Not read: an `<a href>` inside a rich text value stored as an HTML string.
   The fence reads those only where the schema types the field `richText`,
   and the check has no schema before the import; rewriting every string
-  that looks like markup would change plain text.
+  that looks like markup would change plain text (task-f696490d16ac11da).
   """
 
   require Logger
 
-  alias Barkpark.Content.{LinkHref, LinkHrefFence}
-  alias Barkpark.Tenancy.WorkspaceBundle.CopyText
+  alias Barkpark.Content.LinkHref
+  alias Barkpark.Repo
+  alias Barkpark.Tenancy.WorkspaceBundle.{CopyText, InvalidBundleError}
 
-  @tables ~w(documents revisions)
   @chunk_bytes 64 * 1024
 
   # As `LinkHrefFence`'s `@link_keys`; the tests hold the two together
@@ -52,6 +64,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
   @typedoc "One stripped address."
   @type finding :: %{
           table: String.t(),
+          column: String.t(),
           doc_id: String.t() | nil,
           path: String.t(),
           href: String.t()
@@ -60,34 +73,48 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
   @doc """
   The bundle's members with each refused link address stripped, and the
   findings. `dumps` maps a member's name to its bytes or `{:file, path}`; a
-  member with nothing to strip is returned as it was.
+  member with nothing to strip is returned as it was. Raises
+  `InvalidBundleError` on a value it cannot decode.
   """
   @spec strip(map(), Enumerable.t()) :: {map(), [finding()]}
   def strip(manifest, dumps) do
     dumps = Map.new(dumps)
+    members = manifest["tables"] || []
+    json = json_columns(for %{"name" => t} <- members, do: t)
 
-    for %{"name" => table, "columns" => cols} <- manifest["tables"] || [],
-        table in @tables,
-        content = Enum.find_index(cols, &(&1 == "content")),
+    for %{"name" => table, "columns" => cols} <- members,
+        at = for({c, i} <- Enum.with_index(cols), c in Map.get(json, table, []), do: {c, i}),
+        at != [],
         dump = dumps[table],
         dump != nil,
         reduce: {dumps, []} do
       {dumps, found} ->
-        doc_id = Enum.find_index(cols, &(&1 == "doc_id"))
+        id = Enum.find_index(cols, &(&1 == "doc_id")) || Enum.find_index(cols, &(&1 == "id"))
 
-        case rows_found(dump, content, doc_id) do
-          [] ->
-            {dumps, found}
-
-          here ->
-            here =
-              Enum.map(here, fn {id, path, href} ->
-                %{table: table, doc_id: id, path: path, href: href}
-              end)
-
-            {Map.put(dumps, table, rewrite(dump, content)), found ++ here}
+        case rows_found(dump, table, at, id) do
+          [] -> {dumps, found}
+          here -> {Map.put(dumps, table, rewrite(dump, at)), found ++ here}
         end
     end
+  end
+
+  @doc """
+  `%{table => [column]}`: the `json` and `jsonb` columns of `tables` in the
+  target's schema, the columns the import must read.
+  """
+  @spec json_columns([String.t()]) :: %{String.t() => [String.t()]}
+  def json_columns(tables) do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT table_name, column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ANY($1)
+          AND data_type IN ('json', 'jsonb')
+        """,
+        [tables]
+      )
+
+    Enum.group_by(rows, &hd/1, &List.last/1)
   end
 
   @doc """
@@ -99,7 +126,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
     for f <- found do
       Logger.warning(
         "workspace bundle import: stripped a #{f.table} link address a write refuses " <>
-          "(#{f.doc_id || "no doc_id"} #{f.path}): #{inspect(String.slice(f.href, 0, 40))}"
+          "(#{f.doc_id || "no id"} #{f.column}#{f.path}): #{inspect(String.slice(f.href, 0, 40))}"
       )
     end
 
@@ -172,44 +199,64 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
 
   defp escape(key), do: to_string(key)
 
-  # Only a row whose content names `markDefs` can hold a link.
-  defp candidate?(fields, content),
-    do: :binary.match(Enum.at(fields, content) || "", "markDefs") != :nomatch
+  # A value that after its COPY escapes holds neither `markDefs` nor a JSON
+  # `\u` escape cannot hold the key `markDefs` once decoded; every other
+  # value is decoded (#28728 review: `\x6darkDefs`, `\u006darkDefs`).
+  defp candidate?(nil), do: false
 
-  defp decoded(fields, content) do
-    case Jason.decode(CopyText.value(fields, content) || "null") do
-      {:ok, value} -> value
-      {:error, _} -> nil
+  defp candidate?(value),
+    do: String.contains?(value, "markDefs") or String.contains?(value, "\\u")
+
+  defp decoded!(value, table, column, id) do
+    case Jason.decode(value, floats: :decimals) do
+      {:ok, decoded} ->
+        decoded
+
+      {:error, _} ->
+        raise InvalidBundleError,
+          code: "pt_content_undecodable",
+          message:
+            "bundle member #{table} row #{id || "with no id"}: #{column} is not JSON " <>
+              "the import can read, so its link addresses cannot be checked"
     end
   end
 
-  defp rows_found(dump, content, doc_id) do
+  # Each stripped address in the member, as findings.
+  defp rows_found(dump, table, at, id_at) do
     dump
     |> source()
     |> CopyText.rows()
-    |> Stream.filter(&candidate?(&1, content))
     |> Enum.flat_map(fn fields ->
-      id = doc_id && CopyText.value(fields, doc_id)
-      {_value, found} = strip_content(decoded(fields, content), "")
-      for {path, href} <- found, do: {id, path, href}
+      id = id_at && CopyText.value(fields, id_at)
+
+      for {column, i} <- at,
+          value = CopyText.value(fields, i),
+          candidate?(value),
+          {_v, found} = strip_content(decoded!(value, table, column, id), ""),
+          {path, href} <- found,
+          do: %{table: table, column: column, doc_id: id, path: path, href: href}
     end)
   end
 
-  # The member again, each row with something to strip written with its
-  # content stripped and every other row as it was.
-  defp rewrite(dump, content) do
+  # The member again: each value with something to strip written stripped,
+  # every other field and row as it was, byte for byte.
+  defp rewrite(dump, at) do
     lines =
       dump
       |> source()
       |> CopyText.rows()
       |> Stream.map(fn fields ->
         fields =
-          with true <- candidate?(fields, content),
-               {value, [_ | _]} <- strip_content(decoded(fields, content), "") do
-            List.replace_at(fields, content, CopyText.escape(Jason.encode!(value)))
-          else
-            _ -> fields
-          end
+          Enum.reduce(at, fields, fn {_column, i}, fields ->
+            with value when is_binary(value) <- CopyText.value(fields, i),
+                 true <- candidate?(value),
+                 {:ok, decoded} <- Jason.decode(value, floats: :decimals),
+                 {stripped, [_ | _]} <- strip_content(decoded, "") do
+              List.replace_at(fields, i, CopyText.escape(encode!(stripped)))
+            else
+              _ -> fields
+            end
+          end)
 
         [Enum.join(fields, "\t"), "\n"]
       end)
@@ -220,9 +267,19 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
     end
   end
 
+  # A decimal is written as its digits (`1.10`, `1E+400`), not as Jason's
+  # quoted string.
+  defp encode!(value), do: value |> exact() |> Jason.encode!()
+
+  defp exact(%Decimal{} = d), do: Jason.Fragment.new(Decimal.to_string(d, :scientific))
+  defp exact(%{} = map), do: Map.new(map, fn {k, v} -> {k, exact(v)} end)
+  defp exact(list) when is_list(list), do: Enum.map(list, &exact/1)
+  defp exact(value), do: value
+
   # Next to the extracted member, which it replaces: the member is deleted
   # the moment the stripped copy is written, as the import deletes each
-  # member once its COPY is done.
+  # member once its COPY is done. `path` is the import's own extracted
+  # member (`Archive.unpack_to_dir/2`), never request input.
   # sobelow_skip ["Traversal.FileModule"]
   defp write!(path, lines) do
     stripped = path <> ".links"
@@ -231,6 +288,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.LinkHrefCheck do
     stripped
   end
 
+  # As `WorkspaceBundle`'s `copy_source/1`: the import's own extracted member.
+  # sobelow_skip ["Traversal.FileModule"]
   defp source({:file, path}), do: File.stream!(path, @chunk_bytes)
   defp source(dump) when is_binary(dump), do: [dump]
 end
