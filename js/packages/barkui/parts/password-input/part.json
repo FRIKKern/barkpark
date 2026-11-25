@@ -1,0 +1,25 @@
+{
+  "name": "password-input",
+  "family": "form",
+  "element": "ui-password-input",
+  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/password-input"],
+  "summary": "A password, hidden as it is typed, with a button beside it that shows and hides it: label, hint and error, with read-only, disabled and invalid, each hidden and shown.",
+  "notCovered": [
+    {
+      "name": "the dots of a hidden password",
+      "why": "A hidden password draws each character as a dot, and the check reads a field's value as words only while the field shows text, so the dots' contrast is never measured. They are drawn in the field's text colour, the same colour a shown password's words take, which every light reads."
+    },
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box 2.75rem each way around the show button, which is 2.25rem square, so a tap near it reaches it. The box draws nothing, so no light reads its size, and the part leaves it as UI SDK sets it."
+    },
+    {
+      "name": "Caps Lock",
+      "why": "UI SDK marks the field with data-capslock while Caps Lock is on and the field has focus; this part gives that mark no look and the showroom shows no warning, so nothing a person sees changes with it, and the keyboard rows never press Caps Lock."
+    },
+    {
+      "name": "the form",
+      "why": "UI SDK hides a shown password when its form submits or resets and when the page is hidden; no field here sits in a form, and the page is never hidden while the check reads it, so only the show button shows and hides what is typed."
+    }
+  ]
+}

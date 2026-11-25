@@ -64,6 +64,62 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     end
   end
 
+  # task-fbe81bb824c6df0e, task-2833650e2e72d380: B saves twice while A
+  # types. A's page drew neither B's paragraph nor the merge of A's first
+  # post. It used to report the newest waiting value's number - 1, so A's
+  # next post was read against B's second save, which has P1 that A's post
+  # does not: held with a false banner (#28748 pinned that). It now reports
+  # one less than the merge of its own post (`own`), and the post merges.
+  test "B saves twice while A types: A's next post merges, B's paragraphs stay, no banner", c do
+    a = open(c)
+    b = open(c)
+
+    b_saves_rt(b, c, "<p>one two</p><p>P1</p>", ["one two", "P1"])
+    page = got(page(), next_push(a), false)
+
+    post_rt(a, "<p>one twoA</p>", seen(page))
+    assert words(stored(c)["meta"]["rt"]) == ["one twoA", "P1"]
+    page = got(page, next_push(a), false)
+
+    b_saves_rt(b, c, "<p>one twoA</p><p>P1</p><p>P2</p>", ["one twoA", "P1", "P2"])
+    page = got(page, next_push(a), false)
+
+    html = post_rt(a, "<p>one twoAB</p>", seen(page))
+
+    assert words(stored(c)["meta"]["rt"]) == ["one twoAB", "P1", "P2"]
+    refute html =~ "Someone else rewrote"
+  end
+
+  # task-2833650e2e72d380: A's page shows p1; B adds a word to p1, then adds
+  # p2, both waiting while A types. The page reports one less than the
+  # first, B's word: it is never read as A's delete of it.
+  test "B's word, then B's paragraph, both waiting on A's page: B's word stays", c do
+    {p1, p2} = {"alpha beta gamma delta", "zeta eta theta iota"}
+    a = open(c)
+    b = open(c)
+
+    b_saves_rt(b, c, "<p>one two</p><p>#{p1}</p>", ["one two", p1])
+    page = got(page(), next_push(a), true)
+    b_saves_rt(b, c, "<p>one two</p><p>#{p1} epsilon</p>", ["one two", p1 <> " epsilon"])
+    page = got(page, next_push(a), false)
+
+    b_saves_rt(b, c, "<p>one two</p><p>#{p1} epsilon</p><p>#{p2}</p>", [
+      "one two",
+      p1 <> " epsilon",
+      p2
+    ])
+
+    page = got(page, next_push(a), false)
+
+    html = post_rt(a, "<p>one twoA</p><p>#{p1}</p>", seen(page))
+
+    # Read against what A shows, the line-up is not certain (B changed p1
+    # and added p2 beside it): held, B's value stored exactly. Read against
+    # B's second save, as before, the word was taken out with no banner.
+    assert words(stored(c)["meta"]["rt"]) == ["one two", p1 <> " epsilon", p2]
+    assert html =~ "Someone else rewrote"
+  end
+
   test "B saves the sibling meta.rt2: only rt2 is sent", c do
     a = open(c)
     b = open(c)

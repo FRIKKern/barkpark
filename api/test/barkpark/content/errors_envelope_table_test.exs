@@ -294,6 +294,12 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"invalid_dataset", {:error, {:invalid_dataset, %{"dataset" => ["is invalid"]}}},
        "validation_failed", 422, [:details]},
       {"changeset", {:error, changeset()}, "validation_failed", 422, [:details]},
+      # A NUL in a task or session write (task-b456c48d916f7cbc): the
+      # changeset's shape.
+      {"nul_byte",
+       {:error,
+        %Barkpark.Content.NulByteError{field: :content, message: "holds a NUL byte at /x"}},
+       "validation_failed", 422, [:details]},
       {"invalid_task_content", {:error, {:invalid_task_content, %{"kind" => ["is required"]}}},
        "validation_failed", 422, [:details]},
       # A non-admin write changed a schema `readOnly` field (owner ruling #35).

@@ -77,14 +77,29 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
      type: type}
   end
 
+  # The body goes straight into storage: a row an import or an older client
+  # wrote before the write path refused a script address in an HTML string
+  # (task-5272840f43511e20). A write now refuses a new one.
   defp doc!(c, body) do
     id = "legacyrt-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
       Content.create_document(
         c.type,
-        %{"doc_id" => id, "title" => "T", "content" => %{"body" => body, "notes" => "n0"}},
+        %{
+          "doc_id" => id,
+          "title" => "T",
+          "content" => %{"body" => "<p>seed</p>", "notes" => "n0"}
+        },
         @dataset
+      )
+
+    import Ecto.Query
+
+    {1, _} =
+      Barkpark.Repo.update_all(
+        from(d in Barkpark.Content.Document, where: d.doc_id == ^("drafts." <> id)),
+        set: [content: %{"body" => body, "notes" => "n0"}]
       )
 
     id
@@ -183,6 +198,25 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
       assert again |> LazyHTML.query("a") |> attr("data-refused-href") == ["javascript:alert(1)"]
       assert unsafe_hrefs(again) == []
       assert LazyHTML.text(again) == "see, typed, x"
+    end
+
+    # task-5272840f43511e20: a post the editor did not make (devtools, a
+    # scripted form) bringing a script address in is refused on save, as the
+    # API's is: the row keeps what it had.
+    test "a save that brings a javascript: href into the field does not store it", c do
+      id = doc!(c, "<p>clean</p>")
+      view = open(c, id)
+
+      BarkparkWeb.EditorPost.change(view, %{
+        "doc" => %{"body" => ~s|<p>see <a href="javascript:alert(3)">x</a></p>|},
+        "_target" => ["doc", "body"]
+      })
+
+      {doc, _, _} = Content.fetch_doc_with_draft(c.type, id, @dataset)
+      refute doc.content["body"] =~ "javascript:"
+      assert doc.content["body"] == "<p>clean</p>"
+      # The writer is told why, at the field.
+      assert render(view) =~ "link address not allowed"
     end
 
     test "a https anchor stays a link", c do
@@ -299,9 +333,9 @@ defmodule BarkparkWeb.Studio.LegacyRichHtmlHrefTest do
       end
     end
 
-    test "the reader keeps id and name (task-52d612bdb8ff6cb3 owns that)" do
+    test "the reader moves a stored id into the body's namespace and drops an img's name" do
       assert Barkpark.PortableDoc.HtmlSanitizer.sanitize(~s|<p id="a"><img name="n" src="x"></p>|) ==
-               ~s|<p id="a"><img name="n" src="x"></p>|
+               ~s|<p id="bp-anchor-a"><img src="x"></p>|
     end
 
     # S2: the editor's strikethrough writes <strike>; a redraw kept only the

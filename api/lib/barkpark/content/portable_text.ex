@@ -63,10 +63,12 @@ defmodule Barkpark.Content.PortableText do
   field keep its stored value byte for byte. An edited field keeps it per
   block: `from_html/2` returns each stored block whose HTML the edit did not
   change as it was stored, keys and all, and an edited text block keeps the
-  `_key` of the stored block at its position.
+  `_key` (and the undrawn fields) of the stored block it replaces, found by
+  `Barkpark.Content.PortableTextPairing`.
   """
 
   alias Barkpark.Content.LinkHref
+  alias Barkpark.Content.{PortableTextAlign, PortableTextPairing}
 
   @decorators %{
     "strong" => "strong",
@@ -456,31 +458,128 @@ defmodule Barkpark.Content.PortableText do
   # block whose text the parser normalises (an empty paragraph, a leading line
   # break) when the author did not touch it. An empty block nothing matches
   # is dropped, as `from_html/1` drops it.
+  #
+  # The blocks kept in stored order are found as one line-up
+  # (`PortableTextAlign`, the merge's), so a copy pasted above a block is the
+  # new one and the block where the stored one sat keeps it (#28721 review):
+  # `{:kept, block, i}`, the fixed points the pairing reads gaps between. A
+  # block that matches a stored block out of that order was moved:
+  # `{:moved, block, i}`, kept too, but not a fixed point (#28714 review S4).
   defp keep_stored(blocks, []), do: for({block, _src} <- blocks, not empty?(block), do: block)
 
   defp keep_stored(blocks, stored) do
-    indexed =
-      Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1]), &1})
+    seen = Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1])})
 
-    kept =
-      blocks
-      |> Enum.map_reduce(indexed, fn {block, src}, left ->
-        src = src && {normalize(src), drawn_list(block)}
-        html = to_html([block])
-
-        i =
-          (src && Enum.find_index(left, &(elem(&1, 0) == src))) ||
-            Enum.find_index(left, &(elem(&1, 1) == html))
-
-        case i do
-          nil -> {{:rebuilt, block}, left}
-          i -> {{:kept, left |> Enum.at(i) |> elem(2)}, List.delete_at(left, i)}
-        end
+    posted =
+      Enum.map(blocks, fn {block, src} ->
+        {src && {normalize(src), drawn_list(block)}, to_html([block])}
       end)
-      |> elem(0)
-      |> Enum.reject(&match?({:rebuilt, %{"_type" => "block", "children" => []}}, &1))
 
-    adopt_keys(kept, stored)
+    fixed = posted |> line_up(seen) |> Map.new()
+    stored_at = List.to_tuple(stored)
+    start = {MapSet.new(Map.values(fixed)), lookup(seen)}
+
+    blocks
+    |> Enum.zip(posted)
+    |> Enum.with_index()
+    |> Enum.map_reduce(start, fn {{{block, _src}, {src, html}}, p}, {used, index} ->
+      case fixed[p] do
+        nil ->
+          case take(index, used, src, html) do
+            {nil, index} -> {{:rebuilt, block}, {used, index}}
+            {i, index} -> {{:moved, elem(stored_at, i), i}, {MapSet.put(used, i), index}}
+          end
+
+        i ->
+          {{:kept, elem(stored_at, i), i}, {used, index}}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reject(&match?({:rebuilt, %{"_type" => "block", "children" => []}}, &1))
+    |> adopt_keys(stored)
+  end
+
+  # A posted block is a stored one when it was read from that block's editor
+  # HTML or renders to its HTML.
+  defp same_block?({src, html}, {frag, stored_html}),
+    do: (src != nil and src == frag) or html == stored_html
+
+  # The line-up's table at most, rebuilt × stored blocks between the blocks
+  # both lists start and end with (#28724 review B2: 10,000 against 10,000
+  # took 1 GB).
+  @max_line_up 250_000
+
+  # `PortableTextAlign.pairs/3` over what lies between the blocks both lists
+  # start and end with, which a typical save leaves almost all of. The start
+  # is the line-up's own first choice; past the end of the shorter list the
+  # line-up runs out. Past `@max_line_up`, each block takes the first unused
+  # stored block it matches, as before the line-up, and is a fixed point
+  # when that comes after the last one.
+  defp line_up(posted, seen) do
+    start = common(posted, seen)
+    {posted, seen} = {Enum.drop(posted, start), Enum.drop(seen, start)}
+    finish = common(Enum.reverse(posted), Enum.reverse(seen))
+    {pn, sn} = {length(posted) - finish, length(seen) - finish}
+    {posted, seen} = {Enum.take(posted, pn), Enum.take(seen, sn)}
+
+    head = for k <- 0..(start - 1)//1, do: {k, k}
+    tail = for k <- 0..(finish - 1)//1, do: {start + pn + k, start + sn + k}
+
+    middle =
+      if pn * sn > @max_line_up,
+        do: in_order(posted, seen),
+        else: PortableTextAlign.pairs(posted, seen, &same_block?/2)
+
+    head ++ Enum.map(middle, fn {p, i} -> {start + p, start + i} end) ++ tail
+  end
+
+  defp common([a | as], [b | bs]), do: if(same_block?(a, b), do: 1 + common(as, bs), else: 0)
+  defp common(_, _), do: 0
+
+  defp in_order(posted, seen) do
+    posted
+    |> Enum.with_index()
+    |> Enum.reduce({[], lookup(seen), MapSet.new(), -1}, fn {{src, html}, p},
+                                                            {acc, index, used, last} ->
+      case take(index, used, src, html) do
+        {i, index} when is_integer(i) and i > last ->
+          {[{p, i} | acc], index, MapSet.put(used, i), i}
+
+        {_i, index} ->
+          {acc, index, used, last}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  # The stored blocks by what a posted block is matched on (`same_block?/2`),
+  # each list in stored order.
+  defp lookup(seen) do
+    seen
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.reduce(%{}, fn {{frag, html}, i}, acc ->
+      acc |> Map.update({:src, frag}, [i], &[i | &1]) |> Map.update({:html, html}, [i], &[i | &1])
+    end)
+  end
+
+  # The first unused stored block read from `src`, else the first whose HTML
+  # is `html`, and the lookup with the used blocks before it dropped: `{index
+  # or nil, lookup}`. The caller marks a block it takes used, and the next
+  # walk drops it. The lookup is kept found or not: a block taken through one
+  # list stays in the other, and identical blocks walked past every taken one
+  # on each lookup (#28724 r2 review S1).
+  defp take(index, used, src, html) do
+    {i, index} = if src, do: first_unused(index, {:src, src}, used), else: {nil, index}
+    if i, do: {i, index}, else: first_unused(index, {:html, html}, used)
+  end
+
+  defp first_unused(index, key, used) do
+    case Enum.drop_while(Map.get(index, key, []), &MapSet.member?(used, &1)) do
+      [] -> {nil, Map.delete(index, key)}
+      [i | _] = unused -> {i, Map.put(index, key, unused)}
+    end
   end
 
   defp empty?(%{"_type" => "block", "children" => []}), do: true
@@ -513,33 +612,80 @@ defmodule Barkpark.Content.PortableText do
     end)
   end
 
-  # An edited block takes the `_key` of the stored text block at its position
-  # when no kept block holds that key, so editing a word does not rekey its
-  # paragraph. Anything else keeps the position key `from_html/1` gave it.
+  # An edited block takes the `_key` of the stored text block it replaces
+  # (`PortableTextPairing`: by its place between kept blocks, or by its words
+  # beside an insert) when no kept block holds that key, so editing a word
+  # does not rekey its paragraph. Anything else keeps the key `from_html/1`
+  # gave it, unless another block of the save holds it.
   defp adopt_keys(kept, stored) do
-    taken = for {:kept, %{"_key" => k}} <- kept, into: MapSet.new(), do: k
+    taken =
+      for {kind, %{"_key" => k}, _i} when kind in [:kept, :moved] <- kept,
+          into: MapSet.new(),
+          do: k
 
-    kept
-    |> Enum.with_index()
-    |> Enum.map_reduce(taken, fn
-      {{:kept, block}, _i}, taken ->
-        {block, taken}
+    pairs = PortableTextPairing.pairs(kept, stored)
 
-      {{:rebuilt, %{"_type" => "block"} = block}, i}, taken ->
-        case Enum.at(stored, i) do
-          %{"_type" => "block", "_key" => k} = old when is_binary(k) ->
-            if MapSet.member?(taken, k),
-              do: {block, taken},
-              else: {adopt(block, old), MapSet.put(taken, k)}
+    {blocks, _taken} =
+      kept
+      |> Enum.with_index()
+      |> Enum.map_reduce(taken, fn
+        {{kind, block, _i}, _p}, taken when kind in [:kept, :moved] ->
+          {{:fixed, block}, taken}
 
-          _ ->
-            {block, taken}
-        end
+        {{:rebuilt, block}, p}, taken ->
+          with j when is_integer(j) <- pairs[p],
+               %{"_key" => k} = old <- Enum.at(stored, j),
+               false <- MapSet.member?(taken, k) do
+            {{:fixed, adopt(block, old)}, MapSet.put(taken, k)}
+          else
+            _ -> {{:unpaired, block}, taken}
+          end
+      end)
 
-      {{:rebuilt, block}, _i}, taken ->
-        {block, taken}
+    # A block kept twice (a value stored with one key on two blocks) holds
+    # that key once: the later one is unpaired.
+    {blocks, held} =
+      Enum.map_reduce(blocks, MapSet.new(), fn
+        {:fixed, %{"_key" => k} = block}, held when is_binary(k) ->
+          if MapSet.member?(held, k),
+            do: {{:unpaired, block}, held},
+            else: {{:fixed, block}, MapSet.put(held, k)}
+
+        other, held ->
+          {other, held}
+      end)
+
+    stored_keys = for %{"_key" => k} when is_binary(k) <- stored, into: MapSet.new(), do: k
+
+    # Every key once in a save. An unpaired block whose key a block kept or
+    # paired holds, or one earlier in this save, gets a fresh key: a copied
+    # object box comes back with its stored block's key (#28714 r2 review),
+    # and the box the post kept keeps it. A text block's position key (`b0`…)
+    # is fresh too when a stored block holds it: a value first saved here
+    # carries position keys, so an insert at the top would share `b0` with
+    # the edited block that kept it (#28714 review).
+    blocks
+    |> Enum.map_reduce(held, fn
+      {:unpaired, %{"_key" => k} = block}, used when is_binary(k) ->
+        clash? =
+          MapSet.member?(used, k) or
+            (block["_type"] == "block" and MapSet.member?(stored_keys, k))
+
+        k = if clash?, do: fresh_block_key(k, 1, used, stored_keys), else: k
+        {%{block | "_key" => k}, MapSet.put(used, k)}
+
+      {_kind, block}, used ->
+        {block, used}
     end)
     |> elem(0)
+  end
+
+  defp fresh_block_key(key, n, used, stored_keys) do
+    k = "#{key}n#{n}"
+
+    if MapSet.member?(used, k) or MapSet.member?(stored_keys, k),
+      do: fresh_block_key(key, n + 1, used, stored_keys),
+      else: k
   end
 
   # The fields the editor draws, as TanStack's pt-value.ts `MANAGED`: an

@@ -19,9 +19,12 @@ defmodule Barkpark.Content.PortableTextMerge do
     * Both sides added blocks at one place, or one side added blocks inside
       a gap of the other's that spans several base blocks: a clash.
     * A base block both sides changed, each in a gap of one block for one,
-      is a clash of that block. Both changed it to the same words: one
-      change. Any other block both touched (one deleted it, or one changed
-      it in a wider gap): the whole value is a clash.
+      is merged inside the block when each changed its text or marks in one
+      place, and the places are words apart (`PortableTextMerge.Inline`,
+      task-da701626f5be2143); else it is a clash of that block. Both
+      changed it to the same words: one change. Any other block both
+      touched (one deleted it, or one changed it in a wider gap): the whole
+      value is a clash.
     * Where the words can be lined up more than one way (two identical
       paragraphs, empty ones) and the other side touched a block whose
       place depends on the choice: the whole value is a clash.
@@ -36,19 +39,30 @@ defmodule Barkpark.Content.PortableTextMerge do
   editor, so a paragraph added in another block is never a clash there.
   """
 
-  alias Barkpark.Content.PortableText
+  alias Barkpark.Content.{PortableText, PortableTextAlign}
+  alias Barkpark.Content.PortableTextMerge.Inline
 
   # Blocks lined up at most: base × side.
   @max_cells 20_000
 
+  # Text merged inside blocks per merge, at most (base + mine + theirs bytes
+  # of each such block): past it, a block both changed is a clash of it, as
+  # before (about 21 reductions a byte, so a save stays near 40M).
+  @inline_bytes 2_000_000
+
   @doc """
   `{:ok, merged}` when the line-up is certain and no block clashed. Else
   `{:clash, texts, view}`: `view` is what the editor keeps showing (mine for
-  each clashed block and theirs elsewhere; mine whole when the line-up is
-  not certain), and `texts` are theirs words the view does not show, for
+  each clashed block and theirs elsewhere; mine wherever mine touched and
+  theirs elsewhere when a block both touched is not one clear clash; mine
+  whole when the line-up is not certain), and `texts` are theirs words the view does not show, for
   the banner. A clash is never stored.
+
+  `opts`: `inline: false` (tests only) leaves out the merge inside one
+  block (`Inline`, task-266ffbe9cd115f3c): a block both changed is then a
+  clash of that block, as before it.
   """
-  def merge(base, mine, theirs) do
+  def merge(base, mine, theirs, opts \\ []) do
     base = list(base)
     {mine, theirs} = {list(mine), list(theirs)}
 
@@ -58,9 +72,11 @@ defmodule Barkpark.Content.PortableTextMerge do
       m = edits(base, mine)
       t = edits(base, theirs)
 
-      if certain?(m, t) and certain?(t, m) and not crossed?(m, t),
-        do: three_way(base, m, t),
-        else: whole_clash(mine, theirs)
+      cond do
+        not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
+        crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
+        true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+      end
     end
   end
 
@@ -95,12 +111,19 @@ defmodule Barkpark.Content.PortableTextMerge do
     end)
   end
 
-  defp three_way(base, m, t) do
-    at =
+  # `keys`: how many times the field uses each key, for an inline object of
+  # a block merged inside it (`Inline`, task-8619a5423030aca8); false
+  # leaves the merge inside one block out.
+  defp three_way(base, m, t, keys) do
+    budget = if keys, do: @inline_bytes, else: -1
+
+    {at, _left} =
       base
       |> Enum.with_index()
-      |> Enum.map(fn {block, i} ->
-        pick(block, Map.get(m.at, i, :same), Map.get(t.at, i, :same))
+      |> Enum.map_reduce(budget, fn {block, i}, left ->
+        {me, te} = {Map.get(m.at, i, :same), Map.get(t.at, i, :same)}
+        cost = bytes(block, me, te)
+        {pick(block, me, te, cost <= left && keys), if(cost <= left, do: left - cost, else: left)}
       end)
 
     case for({:clash, _, {:changed, b}} <- at, do: text(b)) do
@@ -111,10 +134,69 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Mine shown as it is; the banner shows theirs blocks that mine does not
   # have.
-  defp whole_clash(mine, theirs) do
-    have = MapSet.new(mine, &drawn/1)
-    texts = for b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)
-    {:clash, Enum.take(texts, 5), mine}
+  defp whole_clash(mine, theirs), do: {:clash, banner(mine, theirs), mine}
+
+  # Every one: typing on the view saves it over theirs, so a block of theirs
+  # in neither the view nor the banner was lost with no word. A cap of 5
+  # did that in 38 of 6,000 generated clashes (task-f3594c6613f4663e).
+  defp banner(view, theirs) do
+    have = MapSet.new(view, &drawn/1)
+    for b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)
+  end
+
+  # Lined up, but a block both touched is not one clear clash of one block
+  # (B changed it with the block next to it): mine wherever mine touched,
+  # theirs elsewhere, so the view keeps every change of theirs outside what
+  # mine touched and typing on it never takes one out
+  # (task-77c9532e1e04907b; before it, mine whole). Blocks neither touched
+  # are mine's own. One side deleted a block both touched: mine whole. A view that would hold a word more often than either
+  # side does (a gap of theirs zipped onto blocks it moved): mine whole.
+  defp crossed_view(base, mine, theirs, m, t) do
+    if deleted?(m, t),
+      do: whole_clash(mine, theirs),
+      else: crossed_view(base, mine, theirs, m, t, kept(base, mine))
+  end
+
+  # A block both touched that one side deleted: theirs' blocks next to it
+  # may be it, moved (case 10).
+  defp deleted?(m, t),
+    do: Enum.any?(m.at, fn {i, me} -> Map.has_key?(t.at, i) and :deleted in [me, t.at[i]] end)
+
+  defp crossed_view(base, mine, theirs, m, t, kept) do
+    at =
+      base
+      |> Enum.with_index()
+      |> Enum.map(fn {block, i} ->
+        case {Map.get(m.at, i, :same), Map.get(t.at, i, :same)} do
+          {:same, :same} -> {:keep, Map.get(kept, i, block)}
+          {:same, te} -> {:take, te}
+          {me, _te} -> {:take, me}
+        end
+      end)
+
+    view = build(at, m.ins, t.ins)
+
+    if bounded?(view, mine, theirs),
+      do: {:clash, banner(view, theirs), view},
+      else: whole_clash(mine, theirs)
+  end
+
+  # Each base index mine kept, to mine's own block there.
+  defp kept(base, mine) do
+    pairs = PortableTextAlign.pairs(Enum.map(base, &drawn/1), Enum.map(mine, &drawn/1))
+    mine_at = List.to_tuple(mine)
+    Map.new(pairs, fn {i, j} -> {i, elem(mine_at, j)} end)
+  end
+
+  defp bounded?(view, mine, theirs) do
+    {v, mw, tw} = {words(view), words(mine), words(theirs)}
+    Enum.all?(v, fn {w, n} -> n <= max(Map.get(mw, w, 0), Map.get(tw, w, 0)) end)
+  end
+
+  defp words(blocks) do
+    blocks
+    |> Enum.flat_map(&String.split(text(&1)))
+    |> Enum.frequencies()
   end
 
   # A block whose place in one side's line-up is not certain, that the
@@ -124,18 +206,64 @@ defmodule Barkpark.Content.PortableTextMerge do
     Enum.any?(touched, &MapSet.member?(unsure, &1))
   end
 
+  @doc """
+  Whether two values draw the same, keys set aside, as this merge compares
+  blocks: the store still holds what a tab believed it held
+  (`Forms.ObjectRebase`, task-00c56c6a88ed0b8f).
+  """
+  def same_drawn?(a, b), do: Enum.map(list(a), &drawn/1) == Enum.map(list(b), &drawn/1)
+
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []
 
   # One base block: what each side did with it. Both changed it otherwise
-  # only in one-block gaps (`crossed?/2`).
-  defp pick(block, :same, :same), do: {:keep, block}
-  defp pick(_block, m, :same), do: {:take, m}
-  defp pick(_block, :same, t), do: {:take, t}
+  # only in one-block gaps (`crossed?/2`): merged inside the block
+  # (`{:inline, block}`) or a clash of it.
+  defp pick(block, :same, :same, _inline?), do: {:keep, block}
+  defp pick(_block, m, :same, _inline?), do: {:take, m}
+  defp pick(_block, :same, t, _inline?), do: {:take, t}
 
-  defp pick(_block, m, t) do
-    if same_edit?(m, t), do: {:take, t}, else: {:clash, m, t}
+  defp pick(block, m, t, inline?) do
+    cond do
+      same_edit?(m, t) -> {:take, t}
+      inline? -> inline(block, m, t, inline?)
+      true -> {:clash, m, t}
+    end
   end
+
+  defp inline(block, {:changed, mb} = m, {:changed, tb} = t, keys) do
+    own = Enum.frequencies(Enum.map(children(mb) ++ children(tb), &child_key/1))
+    elsewhere = &(Map.get(keys, &1, 0) > Map.get(own, &1, 0))
+
+    case Inline.merge(block, mb, tb, elsewhere: elsewhere) do
+      {:ok, merged} -> {:inline, merged}
+      :clash -> {:clash, m, t}
+    end
+  end
+
+  defp inline(_block, m, t, _keys), do: {:clash, m, t}
+
+  # Each key the field uses, counted over both sides' blocks and children.
+  defp keys(mine, theirs) do
+    (mine ++ theirs)
+    |> Enum.flat_map(fn
+      %{"children" => cs} = b when is_list(cs) -> [b["_key"] | Enum.map(cs, &child_key/1)]
+      b -> [child_key(b)]
+    end)
+    |> Enum.frequencies()
+  end
+
+  defp children(%{"children" => cs}) when is_list(cs), do: cs
+  defp children(_block), do: []
+
+  defp child_key(%{"_key" => k}), do: k
+  defp child_key(_child), do: nil
+
+  # The text `Inline` reads for a block both changed; 0 for any other.
+  defp bytes(block, {:changed, a}, {:changed, b}),
+    do: Enum.sum(Enum.map([block, a, b], &byte_size(text(&1))))
+
+  defp bytes(_block, _m, _t), do: 0
 
   defp same_edit?(:deleted, :deleted), do: true
   defp same_edit?({:changed, a}, {:changed, b}), do: drawn(a) == drawn(b)
@@ -154,6 +282,7 @@ defmodule Barkpark.Content.PortableTextMerge do
           case edit do
             {:keep, b} -> [b]
             {:take, {:changed, b}} -> [b]
+            {:inline, b} -> [b]
             {:take, :deleted} -> []
             {:clash, {:changed, b}, _t} -> [b]
           end
@@ -174,15 +303,12 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp edits(base, side) do
     {a, b} = {Enum.map(base, &drawn/1), Enum.map(side, &drawn/1)}
     {pairs, unsure} = lcs(a, b)
-    anchors = [{-1, -1}] ++ pairs ++ [{length(base), length(side)}]
+    side_at = List.to_tuple(side)
 
     gaps =
-      anchors
-      |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.map(fn [{b0, s0}, {b1, s1}] ->
-        # Start and count: a range ending at -1 would read as the last index.
-        {b0, Enum.to_list((b0 + 1)..(b1 - 1)//1), Enum.slice(side, s0 + 1, s1 - s0 - 1)}
-      end)
+      pairs
+      |> PortableTextAlign.gaps(length(base), length(side))
+      |> Enum.map(fn {b0, gone, new} -> {b0, gone, Enum.map(new, &elem(side_at, &1))} end)
       |> Enum.reject(fn {_b0, gone, new} -> gone == [] and new == [] end)
 
     Enum.reduce(gaps, %{at: %{}, one: MapSet.new(), ins: %{}, gaps: [], unsure: unsure}, fn
@@ -203,13 +329,13 @@ defmodule Barkpark.Content.PortableTextMerge do
     end)
   end
 
-  # Index pairs of a longest common subsequence of `a` and `b`, in order,
-  # and the indexes of `a` whose pairing differs between such subsequences.
+  # Index pairs of a longest common subsequence of `a` and `b`, in order
+  # (`PortableTextAlign`, the line-up the key pairing uses too), and the
+  # indexes of `a` whose pairing differs between such subsequences.
   defp lcs(a, b) do
+    pairs = PortableTextAlign.pairs(a, b)
     {a, b} = {List.to_tuple(a), List.to_tuple(b)}
-    {n, m} = {tuple_size(a), tuple_size(b)}
     {l, c} = tables(a, b)
-    pairs = walk({a, b, l, n, m}, 0, 0, [])
 
     unsure =
       if c[{0, 0}] == 1 do
@@ -275,16 +401,6 @@ defmodule Barkpark.Content.PortableTextMerge do
           do: i
 
     MapSet.union(moved, MapSet.new(none))
-  end
-
-  defp walk({_a, _b, _l, n, m}, i, j, acc) when i >= n or j >= m, do: Enum.reverse(acc)
-
-  defp walk({a, b, l, _n, _m} = g, i, j, acc) do
-    cond do
-      elem(a, i) == elem(b, j) -> walk(g, i + 1, j + 1, [{i, j} | acc])
-      l[{i + 1, j}] >= l[{i, j + 1}] -> walk(g, i + 1, j, acc)
-      true -> walk(g, i, j + 1, acc)
-    end
   end
 
   # A merge can put two blocks with one `_key` side by side (each side kept

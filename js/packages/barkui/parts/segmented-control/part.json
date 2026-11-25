@@ -1,0 +1,22 @@
+{
+  "name": "segmented-control",
+  "family": "form",
+  "element": "ui-segmented-control",
+  "imports": ["@ui-sdk/web/segmented-control", "@ui-sdk/web/field"],
+  "summary": "Picks one of a few options from a row of items, named by its field, the checked one drawn as the indicator: the arrow keys move the choice and pass a disabled item, with read-only and disabled.",
+  "textOnly": ["[data-slot=\"segmented-control-item\"]:not([data-checked])"],
+  "notCovered": [
+    {
+      "name": "ui-segmented-control-indicator",
+      "why": "UI SDK writes the checked item's position and size onto it as a style attribute, which the check refuses on a stage, so the stage holds none and part.css does not style it; the checked item draws the indicator's look itself, so the choice moves at once and does not slide."
+    },
+    {
+      "name": "invalid",
+      "why": "UI SDK's sheet gives a segmented control no invalid look, and no segmented control here sits in an invalid field, so the stage holds no invalid state."
+    },
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box over each item, 2.75rem tall, so a tap near it reaches it. It draws nothing, so no light reads its size, and the part leaves it as UI SDK sets it."
+    }
+  ]
+}

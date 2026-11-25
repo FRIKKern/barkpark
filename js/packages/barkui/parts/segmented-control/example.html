@@ -1,0 +1,48 @@
+<div data-demo-row>
+  <span data-demo-label>Choose one, one disabled</span>
+  <ui-field id="segmented-control-range-field" data-slot="field">
+    <ui-field-label id="segmented-control-range-label" data-slot="field-label" for="segmented-control-range">Range</ui-field-label>
+    <ui-segmented-control id="segmented-control-range" default-value="day" data-slot="segmented-control" aria-labelledby="segmented-control-range-label" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal">
+      <ui-segmented-control-item id="segmented-control-day" value="day" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked>Day</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-week" value="week" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Week</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-month" value="month" disabled data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" aria-disabled="true" data-unchecked data-disabled>Month</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-year" value="year" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Year</ui-segmented-control-item>
+    </ui-segmented-control>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Disabled, read-only</span>
+  <ui-field id="segmented-control-theme-field" data-slot="field">
+    <ui-field-label id="segmented-control-theme-label" data-slot="field-label" for="segmented-control-theme">Theme</ui-field-label>
+    <ui-segmented-control id="segmented-control-theme" default-value="light" disabled data-slot="segmented-control" aria-labelledby="segmented-control-theme-label" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-disabled="true" data-disabled>
+      <ui-segmented-control-item id="segmented-control-light" value="light" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" aria-disabled="true" tabindex="-1" data-checked data-disabled>Light</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-dark" value="dark" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" aria-disabled="true" tabindex="-1" data-unchecked data-disabled>Dark</ui-segmented-control-item>
+    </ui-segmented-control>
+  </ui-field>
+  <ui-field id="segmented-control-plan-field" data-slot="field">
+    <ui-field-label id="segmented-control-plan-label" data-slot="field-label" for="segmented-control-plan">Your plan</ui-field-label>
+    <ui-field-description id="segmented-control-plan-description" data-slot="field-description">Ask an admin to change plans.</ui-field-description>
+    <ui-segmented-control id="segmented-control-plan" default-value="pro" read-only data-slot="segmented-control" aria-labelledby="segmented-control-plan-label" aria-describedby="segmented-control-plan-description" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
+      <ui-segmented-control-item id="segmented-control-free" value="free" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly>Free</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-pro" value="pro" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly>Pro</ui-segmented-control-item>
+    </ui-segmented-control>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Checked with focus, unchecked under the pointer</span>
+  <span data-slot="segmented-control" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal">
+    <span id="segmented-control-pin-focus" data-slot="segmented-control-item" role="radio" aria-checked="true" data-checked data-pin="focus-visible">Focus</span>
+    <span id="segmented-control-pin-hover" data-slot="segmented-control-item" role="radio" aria-checked="false" data-unchecked data-pin="hover">Hover</span>
+  </span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only with focus: checked, unchecked</span>
+  <span data-slot="segmented-control" role="radiogroup" aria-orientation="horizontal" aria-readonly="true" data-orientation="horizontal" data-readonly>
+    <span id="segmented-control-pin-ro-checked" data-slot="segmented-control-item" role="radio" aria-checked="true" data-checked data-readonly data-pin="focus-visible">Checked</span>
+    <span id="segmented-control-pin-ro-rest" data-slot="segmented-control-item" role="radio" aria-checked="false" data-unchecked data-readonly>Rest</span>
+  </span>
+  <span data-slot="segmented-control" role="radiogroup" aria-orientation="horizontal" aria-readonly="true" data-orientation="horizontal" data-readonly>
+    <span id="segmented-control-pin-ro-on" data-slot="segmented-control-item" role="radio" aria-checked="true" data-checked data-readonly>Rest</span>
+    <span id="segmented-control-pin-ro-unchecked" data-slot="segmented-control-item" role="radio" aria-checked="false" data-unchecked data-readonly data-pin="focus-visible">Unchecked</span>
+  </span>
+</div>

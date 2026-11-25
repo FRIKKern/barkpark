@@ -21,7 +21,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     * `repaint/2`, from Reload and a restore: every one is sent its stored
       value, shown at once, and every hold ends.
     * The page reports, per editor, the number of the last value it shows
-      (`_bp_rt_seen[]`, `name|number`). `split/3` reads a post against it:
+      (`_bp_rt_seen[]`, `name|number`; while values wait, one less than
+      the first of them, or than the merge of its own post, sent `own`:
+      task-2833650e2e72d380). `split/3` reads a post against it:
       typed over a value A never saw, it is merged when the line-up is
       certain (`PortableTextMerge`), else held. A hold keeps theirs stored
       exactly, puts A's view in the form with the conflict banner, and
@@ -45,11 +47,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   @event "bp:rt-remote"
 
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
+
   # #28256's size: a value past it goes to the page in an event of its own.
   @html_cap 20_000
 
-  # Changes kept per input name. A post reporting a number older than all of
-  # them is read against the oldest one's `was`.
+  # Changes kept per input name. Past it, the oldest two fold into one: the
+  # older one's `was`, the newer one's number and `now`
+  # (task-d6870fd34d7769b3). A post older than every change logged is read
+  # against the first `was`; one that saw a folded change but not the last
+  # folded in has no base left, and is held.
   @log_cap 8
 
   @doc """
@@ -100,21 +107,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   defp log(socket, name, entry) do
+    socket = assign(socket, editor_rt_doc: PostIdentity.of(socket))
     log = socket.assigns[:editor_rt_log] || %{}
-    entries = Enum.take([entry | Map.get(log, name, [])], @log_cap)
-    assign(socket, editor_rt_log: Map.put(log, name, entries))
+    entries = [entry | Map.get(log, name, [])]
+
+    if length(entries) > @log_cap do
+      {kept, [{old, was, _}]} = Enum.split(entries, @log_cap)
+      {seq, _, now} = List.last(kept)
+      folded = socket.assigns[:editor_rt_folded] || %{}
+
+      assign(socket,
+        editor_rt_log: Map.put(log, name, List.replace_at(kept, -1, {seq, was, now})),
+        editor_rt_folded: Map.put_new(folded, name, old)
+      )
+    else
+      assign(socket, editor_rt_log: Map.put(log, name, entries))
+    end
   end
 
   # One event for the values up to `@html_cap` bytes; each larger one rides
   # an event of its own, so one long text never holds up the others' event
   # and the page takes it the same way.
+  # Each event names the document its values are of (`PostIdentity.of/1`,
+  # the editor form's `phx-value-_bp_doc`): the page drops a value whose
+  # document its form no longer shows. The log and the page's values are
+  # then this document's (`editor_rt_doc`, `forget/1`).
   defp send_values(socket, values) do
     {big, small} = Enum.split_with(values, fn {_name, v} -> byte_size(v.html) > @html_cap end)
+    doc = PostIdentity.of(socket)
+    socket = assign(socket, editor_rt_doc: doc)
 
     socket =
-      if small == [], do: socket, else: push_event(socket, @event, %{values: Map.new(small)})
+      if small == [],
+        do: socket,
+        else: push_event(socket, @event, %{doc: doc, values: Map.new(small)})
 
-    Enum.reduce(big, socket, fn {name, v}, s -> push_event(s, @event, %{values: %{name => v}}) end)
+    Enum.reduce(big, socket, fn {name, v}, s ->
+      push_event(s, @event, %{doc: doc, values: %{name => v}})
+    end)
   end
 
   @doc """
@@ -139,18 +169,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     * a clash: theirs stays stored exactly (review rule 1), and the form
       holds A's view with theirs in the banner.
 
+  Past `@log_cap` changes the oldest fold together, so the first `was`
+  stays; a post that saw a folded change but not the last folded in has no
+  base that fits, and is held as a clash is.
+
   A rich text whose number is current is A's to save as typed.
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
-    log = socket.assigns[:editor_rt_log] || %{}
-    holds = socket.assigns[:editor_rt_held] || %{}
+    # A log of another document is none of this one's (a forget lost).
+    {log, holds, folded, born} =
+      if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
+        do:
+          {socket.assigns[:editor_rt_log] || %{}, socket.assigns[:editor_rt_held] || %{},
+           socket.assigns[:editor_rt_folded] || %{}, socket.assigns[:editor_rt_born] || %{}},
+        else: {%{}, %{}, %{}, %{}}
 
     Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
            path when path != [] <- Path.parse_path(name),
            posted when is_binary(posted) <- FormPath.get(doc, path) do
-        later = Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end)
-        read(doc, acts, {name, path, posted}, n, Map.get(holds, name), later)
+        all = Map.get(log, name, [])
+        later = Enum.filter(all, fn {s, _, _} -> s > n end)
+        gap? = later != [] and length(later) == length(all) and n >= Map.get(folded, name, n + 1)
+
+        case {Map.get(born, name), Map.get(holds, name)} do
+          # A number of a socket gone (`born/1`; 0 is a page that never had a value).
+          {{seq, value}, nil} when n > 0 and n < seq ->
+            unknown(doc, acts, {name, path, posted}, newest(later, value))
+
+          {_born, held} ->
+            read(doc, acts, {name, path, posted}, {n, gap?}, held, later)
+        end
       else
         _ -> {doc, acts}
       end
@@ -159,8 +208,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   def split(_socket, doc, _seen), do: {doc, []}
 
+  @doc """
+  The value a post on number `n` was typed on, as `split/3` reads it: the
+  `was` of the oldest change logged past `n`. Nil when none is (the page
+  typed on the newest value this socket knows).
+  """
+  def page_base(socket, name, n) do
+    log =
+      if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
+        do: socket.assigns[:editor_rt_log] || %{},
+        else: %{}
+
+    case Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end) do
+      [] -> nil
+      later -> later |> List.last() |> elem(1)
+    end
+  end
+
   # Held, the view not shown yet: held again.
-  defp read(doc, acts, at, n, %{seq: seq} = h, _later) when n < seq,
+  defp read(doc, acts, at, {n, _gap?}, %{seq: seq} = h, _later) when n < seq,
     do: over(doc, acts, at, h.base, h.theirs, true)
 
   # Held, the view shown: unchanged from it, nothing is saved over theirs.
@@ -172,10 +238,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   defp read(doc, acts, {name, _path, _posted}, _n, nil, []), do: {doc, [{:current, name} | acts]}
 
-  defp read(doc, acts, at, _n, nil, later) do
+  # `gap?`: the post saw a change folded out of the log (`@log_cap`) but
+  # not the last one folded in, so no base fits it: held.
+  defp read(doc, acts, at, {_n, gap?}, nil, later) do
     {_seq, was, _now} = List.last(later)
     {_seq, _was, theirs} = hd(later)
-    over(doc, acts, at, was, theirs, false)
+
+    over(doc, acts, at, was, theirs, gap?)
+  end
+
+  defp newest([], value), do: value
+  defp newest([{_seq, _was, now} | _], _value), do: now
+
+  # Typed on a socket gone (`born/1`): the base is not known. The stored
+  # value posted back saves nothing; anything else is held over it.
+  defp unknown(doc, acts, {_name, path, posted} = at, theirs) do
+    if drawn(PortableText.from_html(posted, list(theirs))) == drawn(theirs),
+      do: {FormPath.put(doc, path, html(theirs)), acts},
+      else: over(doc, acts, at, theirs, theirs, true)
   end
 
   defp over(doc, acts, {name, path, posted}, base, theirs, held?) do
@@ -215,9 +295,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
           editor_rt_held: Map.delete(s.assigns[:editor_rt_held] || %{}, name)
         )
 
+      # `own`: the page reads its text from this one, not from what waited
+      # before it (task-2833650e2e72d380).
       {:merged, _name, path, mine}, s ->
         stored = FormPath.get(s.assigns[:editor_form] || %{}, path)
-        tell(s, [{path, mine, stored}], %{})
+        tell(s, [{path, mine, stored}], %{own: true})
 
       {:still, name, path}, s ->
         case (s.assigns[:editor_rt_held] || %{})[name] do
@@ -258,7 +340,69 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     socket
     |> log(name, {seq, base, theirs})
     |> assign(editor_rt_held: Map.put(holds, name, hold))
-    |> send_values(%{name => %{seq: seq, html: html(view)}})
+    |> send_values(%{name => %{seq: seq, html: html(view), held: true}})
+  end
+
+  @doc """
+  Once per socket, when it first shows a document and is connected: every
+  rich text inside an object or a row is sent its stored value (`born`),
+  logged with no base. A page that rejoins a new socket keeps its editors
+  and its numbers, which are the old socket's (task-eeda66fac5af065f). A
+  post on such a number is older than this, so it is held unless it is the
+  stored value; the page draws the value once A is idle and has nothing
+  unposted. A page that never had a value reports 0 and is read as typed
+  on this mount (task-05a0cfa97d2580ff).
+  """
+  def born(socket) do
+    if is_map(socket.assigns[:editor_rt_born]) or not Phoenix.LiveView.connected?(socket) or
+         is_nil(PostIdentity.of(socket)) do
+      socket
+    else
+      form = socket.assigns[:editor_form] || %{}
+
+      {socket, values, born} =
+        socket.assigns[:editor_schema]
+        |> paths(form, form, :all)
+        |> Enum.reduce({socket, %{}, %{}}, fn {path, _, now}, {s, values, born} ->
+          {s, seq} = next_seq(s)
+          name = input_name(path)
+
+          {s, Map.put(values, name, %{seq: seq, html: html(now), born: true}),
+           Map.put(born, name, {seq, now})}
+        end)
+
+      socket
+      |> assign(editor_rt_born: born)
+      |> send_values(values)
+    end
+  end
+
+  @doc """
+  The document the log and the page's values are of (`editor_rt_doc`) is
+  not the one open, none included (a project or workspace switch,
+  `Shared.reset_nav_for_switch/1`): the log, its folds and holds go, keyed by
+  input names the next document may share, and the page drops what waits
+  for those names (task-29686209fb9fc5dc). A post on the next document is
+  A's, as typed.
+  """
+  def forget(socket) do
+    was = socket.assigns[:editor_rt_doc]
+    now = PostIdentity.of(socket)
+
+    if is_nil(was) or was == now do
+      socket
+    else
+      socket
+      |> assign(
+        editor_rt_doc: nil,
+        editor_rt_log: %{},
+        editor_rt_folded: %{},
+        editor_rt_held: %{},
+        editor_rt_clash: %{},
+        editor_rt_born: %{}
+      )
+      |> push_event(@event, %{forget: true, doc: now, values: %{}})
+    end
   end
 
   @doc "Ends every hold: the form was read again from the store."
@@ -450,7 +594,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   # `name|number`, split at the last `|`.
-  defp parse_seen(entry) when is_binary(entry) do
+  @doc false
+  def parse_seen(entry) when is_binary(entry) do
     parts = String.split(entry, "|")
     name = parts |> Enum.drop(-1) |> Enum.join("|")
 
@@ -460,7 +605,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     end
   end
 
-  defp parse_seen(_entry), do: nil
+  def parse_seen(_entry), do: nil
 
   @doc "The input name the composite draws for `path` (`CompositeField`, `ArrayField`)."
   def input_name([key | rest]) do

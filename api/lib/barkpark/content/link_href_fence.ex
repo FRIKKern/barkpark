@@ -46,6 +46,21 @@ defmodule Barkpark.Content.LinkHrefFence do
   is read whole, and so is a type with no schema (#28393 review of r2).
   Content keyed by atoms (an Elixir caller) is read as JSON is.
 
+  ## A rich text value stored as an HTML string
+
+  A `richText` field can hold an HTML string, not Portable Text (an import, an
+  older client, the desk editor's legacy arm). Each `<a href>` and
+  `<area href>` in it is read the same way, from a LazyHTML parse, never a
+  pattern over the bytes: a top-level field, or one nested in an object or
+  array row. Only a string the schema types `richText` is read. A `string` or
+  `text` field is not markup, and an untyped string (a paper's `body_html`
+  cache, which the writer sanitizes) is not rich text. The finding's path is
+  the field's, since the address sits inside one string
+  (task-5272840f43511e20). Any string's addresses count as held, so a row an
+  import wrote stays editable.
+  An address the desk editor refused is stored as `data-refused-href` (#28402),
+  which is not a link, so an edit of that field is not refused.
+
   The refusal is the mutate door's `validation_failed` (422), with one
   finding per address under the code `pt_link_href_refused`. Nothing is
   written.
@@ -75,17 +90,26 @@ defmodule Barkpark.Content.LinkHrefFence do
       restore?(opts) ->
         :ok
 
-      # Nothing refused anywhere: no schema read.
-      refused(content, "") == [] ->
+      # Nothing refused in markDefs and no `<a` in any string: no schema read.
+      refused(content, "") == [] and not link_tag?(content) ->
         :ok
 
       true ->
         scope = scope(attrs, opts)
 
         dataset
-        |> with_resolver(scope, &rich_text_refused(content, fields(type, dataset, scope), &1))
-        |> drop_held(held(prev_doc))
-        |> drop_twin_held(type, dataset, doc_id, opts)
+        |> with_resolver(scope, fn resolve ->
+          fields = fields(type, dataset, scope)
+          # Held is read by the walk the refusal uses: an address counts as
+          # held only where it would be refused, never from a text, json or
+          # undeclared value the fence lets through (#28695 review r1).
+          refusable = &rich_text_refused(&1, fields, resolve)
+
+          content
+          |> refusable.()
+          |> drop_held(prev_doc, refusable)
+          |> drop_twin_held(type, dataset, doc_id, opts, refusable)
+        end)
         |> refusal()
     end
   end
@@ -141,6 +165,18 @@ defmodule Barkpark.Content.LinkHrefFence do
   end
 
   defp walk(%{"type" => "json"}, _value, _path, _resolve), do: []
+
+  defp walk(%{"type" => "richText"}, value, path, _resolve) when is_binary(value),
+    do: html_findings(value, path)
+
+  # A rich localizedText holds one HTML string per language, from the same editor.
+  defp walk(%{"type" => "localizedText", "format" => "rich"}, %{} = value, path, _resolve) do
+    Enum.flat_map(value, fn {lang, v} ->
+      sub = "#{path}/#{escape(lang)}"
+      if is_binary(v), do: html_findings(v, sub), else: refused(v, sub)
+    end)
+  end
+
   defp walk(_field, value, _path, _resolve) when not is_map(value) and not is_list(value), do: []
 
   defp walk(%{"fields" => [_ | _] = fields}, %{} = value, path, resolve),
@@ -250,6 +286,68 @@ defmodule Barkpark.Content.LinkHrefFence do
 
   def refused(_value, _path), do: []
 
+  # A string that could hold a link: `<a` or `<A` (`<area`, `<A HREF`…; no
+  # space may follow `<`). A byte match, not a case fold of the whole string.
+  defp link_tag?(html) when is_binary(html), do: :binary.match(html, ["<a", "<A"]) != :nomatch
+
+  defp link_tag?(%{} = map) when not is_struct(map),
+    do: map |> Map.values() |> Enum.any?(&link_tag?/1)
+
+  defp link_tag?(list) when is_list(list), do: Enum.any?(list, &link_tag?/1)
+  defp link_tag?(_value), do: false
+
+  # Every `<a href>` / `<area href>` in an HTML string, as a browser builds
+  # it. LazyHTML parses with scripting off, where `noscript` holds markup; a
+  # browser drawing the string with scripting on reads `noscript` as raw
+  # text, so `<noscript><p title="</noscript><a href=…>">` holds a live link
+  # there and none here. When the string has a `noscript`, it is parsed a
+  # second time as the browser would (`noscript` read as raw text, as `xmp`
+  # always is), and the links of both readings count (#28695 review r1). The
+  # input's own `xmp` is renamed first, so its `</xmp` cannot end the
+  # noscript early; a browser ends noscript only at `</noscript` (r2). A
+  # `select` is renamed in that reading too: lexbor drops an `<a>` inside
+  # one, Chrome's select parser keeps it (r2). The second reading only ever
+  # finds more links; the first keeps the plain parse.
+  defp html_findings(html, path) do
+    if link_tag?(html) do
+      for view <- views(html),
+          href <-
+            view
+            |> LazyHTML.from_fragment()
+            |> LazyHTML.query("a[href], area[href]")
+            |> LazyHTML.attribute("href"),
+          href != "" and LinkHref.write_refused?(href),
+          uniq: true,
+          do: {path, href}
+    else
+      []
+    end
+  end
+
+  @noscript ~r/<(\/?)noscript(?=[\t\n\f\r \/>])/i
+  @xmp ~r/<(\/?)xmp(?=[\t\n\f\r \/>])/i
+  @select ~r/<(\/?)select(?=[\t\n\f\r \/>])/i
+
+  defp views(html) do
+    noscript? = Regex.match?(@noscript, html)
+    select? = Regex.match?(@select, html)
+
+    if noscript? or select? do
+      browser =
+        html
+        |> rename(select?, @select, "<\\1bp-select")
+        |> rename(noscript?, @xmp, "<\\1bp-xmp")
+        |> rename(noscript?, @noscript, "<\\1xmp")
+
+      [html, browser]
+    else
+      [html]
+    end
+  end
+
+  defp rename(html, false, _tag, _as), do: html
+  defp rename(html, true, tag, as), do: Regex.replace(tag, html, as)
+
   defp own_defs(map, path) do
     case Map.get(map, "markDefs") do
       list when is_list(list) -> def_findings(list, path <> "/markDefs")
@@ -271,18 +369,24 @@ defmodule Barkpark.Content.LinkHrefFence do
 
   defp content(_attrs), do: nil
 
-  defp held(%{content: content}),
-    do: MapSet.new(refused(stringify(content), ""), &elem(&1, 1))
+  defp held(%{content: content}, refusable),
+    do: MapSet.new(refusable.(stringify(content)), &elem(&1, 1))
 
-  defp held(_doc), do: MapSet.new()
+  defp held(_doc, _refusable), do: MapSet.new()
 
-  defp drop_held(found, held), do: Enum.reject(found, fn {_path, href} -> href in held end)
+  # The stored row is read only when an address is new (#28695 review r2).
+  defp drop_held([], _doc, _refusable), do: []
+
+  defp drop_held(found, doc, refusable) do
+    held = held(doc, refusable)
+    Enum.reject(found, fn {_path, href} -> href in held end)
+  end
 
   # Read only when an address is still new: the draft's first write carries
   # what the published row holds, and a publish what the draft held.
-  defp drop_twin_held([], _type, _dataset, _doc_id, _opts), do: []
+  defp drop_twin_held([], _type, _dataset, _doc_id, _opts, _refusable), do: []
 
-  defp drop_twin_held(found, type, dataset, doc_id, opts) when is_binary(doc_id) do
+  defp drop_twin_held(found, type, dataset, doc_id, opts, refusable) when is_binary(doc_id) do
     twin =
       case doc_id do
         "drafts." <> published -> published
@@ -290,12 +394,12 @@ defmodule Barkpark.Content.LinkHrefFence do
       end
 
     case Content.get_document(twin, type, dataset, opts) do
-      {:ok, doc} -> drop_held(found, held(doc))
+      {:ok, doc} -> drop_held(found, doc, refusable)
       _ -> found
     end
   end
 
-  defp drop_twin_held(found, _type, _dataset, _doc_id, _opts), do: found
+  defp drop_twin_held(found, _type, _dataset, _doc_id, _opts, _refusable), do: found
 
   defp refusal([]), do: :ok
 
