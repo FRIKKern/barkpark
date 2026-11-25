@@ -156,11 +156,11 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert Inline.merge(b(text), b("FIRST " <> text), b(text <> "LAST")) == :clash
     end
 
-    test "a block field either side changed" do
+    test "a block field both sides changed differently (task-8619a5423030aca8)" do
       assert Inline.merge(
                b("one two three"),
                Map.put(b("ONE two three"), "style", "h2"),
-               b("one two THREE")
+               Map.put(b("one two THREE"), "style", "h3")
              ) == :clash
     end
 
@@ -169,6 +169,131 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       mine = block("k", [span("a", "x 🇳"), span("b", "🇴 two three", ["strong"])])
       theirs = block("k", [span("a", "x "), span("b", "🇴 two THREE", ["strong"])])
       assert Inline.merge(base, mine, theirs) == :clash
+    end
+  end
+
+  describe "task-8619a5423030aca8: block fields, inline objects and keys" do
+    defp obj(k, src), do: %{"_type" => "inlineImage", "_key" => k, "src" => src}
+
+    test "theirs sets style h2 and mine edits a word: merged h2 with mine's word" do
+      assert {:ok, blk} =
+               Inline.merge(
+                 b("one two three"),
+                 b("ONE two three", "p0"),
+                 Map.put(b("one two three"), "style", "h2")
+               )
+
+      assert text(blk) == "ONE two three" and blk["style"] == "h2"
+    end
+
+    test "mine sets style h2 and drops listItem, theirs edits a word: mine's fields, theirs' word" do
+      base = Map.merge(b("one two three"), %{"listItem" => "bullet", "level" => 1})
+      mine = base |> Map.put("style", "h2") |> Map.delete("listItem")
+      theirs = %{base | "children" => [span("ks", "one two THREE")], "level" => 2}
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert text(blk) == "one two THREE"
+      assert {blk["style"], blk["level"], Map.has_key?(blk, "listItem")} == {"h2", 2, false}
+    end
+
+    test "fields only, on both sides: each field merged; the same field changed alike is fine" do
+      base = b("one two three")
+      mine = Map.merge(base, %{"style" => "h2", "level" => 1})
+      theirs = Map.merge(base, %{"style" => "h2", "listItem" => "number"})
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+      assert Map.take(blk, ~w(style level listItem)) == %{
+               "style" => "h2",
+               "level" => 1,
+               "listItem" => "number"
+             }
+
+      assert blk["children"] == base["children"]
+    end
+
+    test "a field changed differently by each side, text apart: :clash" do
+      base = b("one two three")
+
+      assert Inline.merge(
+               base,
+               Map.put(b("ONE two three"), "level", 1),
+               Map.put(b("one two THREE"), "level", 2)
+             ) == :clash
+    end
+
+    test "an object mine puts in keeps mine's key; theirs' edit of another word stays" do
+      base = block("k", [span("a", "one two three")])
+      mine = block("k", [span("a", "one "), obj("m1", "x.png"), span("b", " two three")])
+
+      assert {:ok, blk} = Inline.merge(base, mine, block("k", [span("a", "one two THREE")]))
+      assert Enum.filter(blk["children"], &(&1["_type"] == "inlineImage")) == [obj("m1", "x.png")]
+      assert Enum.map_join(blk["children"], &(&1["text"] || "#")) == "one # two THREE"
+    end
+
+    test "an object of mine whose key theirs' block uses takes a fresh key unique in the block" do
+      base = block("k", [span("a", "one two three")])
+      mine = block("k", [span("a", "one "), obj("t", "x.png"), span("b", " two three")])
+      theirs = block("k", [span("a", "one two "), span("t", "THREE", ["em"])])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      keys = Enum.map(blk["children"], & &1["_key"])
+      [o] = Enum.filter(blk["children"], &(&1["_type"] == "inlineImage"))
+      assert o["_key"] != "t" and keys == Enum.uniq(keys)
+      assert Map.delete(o, "_key") == Map.delete(obj("t", "x.png"), "_key")
+    end
+
+    test "an object of mine whose key another block in the field uses takes a fresh key" do
+      base = [b("one two three", "p1"), b("x", "o1")]
+
+      mine = [
+        block("p1", [span("p1s", "one "), obj("o1", "x.png"), span("b", " two three")]),
+        b("x", "o1")
+      ]
+
+      theirs = [b("one two THREE", "p1"), b("x", "o1")]
+
+      assert {:ok, [blk, _]} = M.merge(base, mine, theirs)
+      [o] = Enum.filter(blk["children"], &(&1["_type"] == "inlineImage"))
+      assert o["_key"] not in ["o1", "p1", "p1s"]
+      assert Enum.map_join(blk["children"], &(&1["text"] || "#")) == "one # two THREE"
+    end
+
+    test "mine changes an object, theirs edits another word: mine's object under its own key" do
+      base = block("k", [span("a", "one "), obj("o1", "x.png"), span("b", " two three")])
+      mine = block("k", [span("a", "one "), obj("o1", "y.png"), span("b", " two three")])
+      theirs = block("k", [span("a", "one "), obj("o1", "x.png"), span("b", " two THREE")])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert blk["children"] == [span("a", "one "), obj("o1", "y.png"), span("b", " two THREE")]
+    end
+
+    test "an object both sides changed: :clash" do
+      with_obj = &block("k", [span("a", "one "), obj("o1", &1), span("b", " two three")])
+      assert Inline.merge(with_obj.("x.png"), with_obj.("y.png"), with_obj.("z.png")) == :clash
+    end
+
+    test "an object parts words: one word each side of it merges" do
+      with_obj = &block("k", [span("a", &1), obj("o1", "x.png"), span("b", &2)])
+
+      assert {:ok, blk} =
+               Inline.merge(
+                 with_obj.("one", "two"),
+                 with_obj.("ONE", "two"),
+                 with_obj.("one", "TWO")
+               )
+
+      assert blk["children"] == [span("a", "ONE"), obj("o1", "x.png"), span("b", "TWO")]
+    end
+
+    test "mine deletes an object, theirs edits another word" do
+      base = block("k", [span("a", "one "), obj("o1", "x.png"), span("b", " two three")])
+      mine = block("k", [span("a", "one  two three")])
+      theirs = block("k", [span("a", "one "), obj("o1", "x.png"), span("b", " two THREE")])
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert Enum.map_join(blk["children"], &(&1["text"] || "#")) == "one  two THREE"
+      refute Enum.any?(blk["children"], &(&1["_type"] == "inlineImage"))
     end
   end
 
@@ -258,15 +383,19 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
                [{"a", "one "}, {"p0s1", "new "}, {"ki0", "two three"}, {"b", " FOUR"}]
     end
 
-    test "an inline object in the block is a clash" do
+    # task-8619a5423030aca8: an inline object is one letter.
+    test "an inline object neither side touched: merged, theirs' object as it is" do
       obj = %{"_type" => "inlineImage", "_key" => "o1", "src" => "x.png"}
       with_obj = fn text -> block("k", [span("a", text), obj, span("c", " end")]) end
 
-      assert Inline.merge(
-               with_obj.("one two three"),
-               with_obj.("ONE two three"),
-               with_obj.("one two THREE")
-             ) == :clash
+      assert {:ok, blk} =
+               Inline.merge(
+                 with_obj.("one two three"),
+                 with_obj.("ONE two three"),
+                 with_obj.("one two THREE")
+               )
+
+      assert blk["children"] == [span("a", "ONE two THREE"), obj, span("c", " end")]
     end
 
     test "a block of another _type, its fields the same, is a clash" do
