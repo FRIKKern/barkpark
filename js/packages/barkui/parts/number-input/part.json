@@ -2,7 +2,10 @@
   "name": "number-input",
   "family": "form",
   "element": "ui-number-input",
-  "imports": ["@ui-sdk/web/field", "@ui-sdk/web/number-input"],
+  "imports": [
+    "@ui-sdk/web/field",
+    "@ui-sdk/web/number-input"
+  ],
   "summary": "A number between a lowest and a highest value, inside its field: ArrowUp and ArrowDown step it and stop at either end, a step button on each side disables at its bound, and its label scrubs it, with read-only, disabled and invalid.",
   "notCovered": [
     {
@@ -11,15 +14,19 @@
     },
     {
       "name": "a focused step button",
-      "why": "UI SDK keeps both step buttons out of the Tab order, and a press puts focus in the input, so a step button never takes the focus ring; the arrow keys give the same steps from the input."
+      "why": "UI SDK keeps both step buttons out of the Tab order, and a press does not leave focus on them (a mouse press puts it in the input), so no step button draws the focus ring; the arrow keys give the same steps from the input."
     },
     {
       "name": "ui-number-input-scrub-area-cursor",
-      "why": "UI SDK moves the scrub cursor to the body and places it there in its style attribute while a drag holds the pointer, which the check refuses on a stage, so the stage holds none and a drag on the label shows the browser's own cursor."
+      "why": "UI SDK moves the scrub cursor to the body and places it there in its style attribute while a drag holds the pointer, which the check refuses on a stage, so the stage holds none. Where the browser grants pointer lock during a drag on the label, the pointer is hidden and nothing stands in for it until the drag ends."
     },
     {
       "name": "a drag on the label",
       "why": "The check does not drag; a drag changes the value as the arrow keys do, and the part gives data-scrubbing no look of its own, so the stage draws as it does at rest while the value moves."
+    },
+    {
+      "name": "the selected value",
+      "why": "A click on the label that does not drag puts focus in the input and selects its value; the browser draws the selection in its own colours, which no skin variable sets and the check does not read, and the part sets none."
     },
     {
       "name": "the touch target",
