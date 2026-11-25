@@ -94,7 +94,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
         before = RemoteValues.value_at(over, key),
         mine = RemoteValues.value_at(posted, key),
         is_binary(before) and is_binary(mine),
-        before != was and mine != before and RemoteValues.value_at(now, key) == before,
+        # A post that left the field as the tab was shown it changed nothing
+        # to hold (task-eeecd067e3fb1b1f).
+        before != was and mine != before and mine != was and
+          RemoteValues.value_at(now, key) == before,
         do: key
   end
 

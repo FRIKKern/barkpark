@@ -168,6 +168,19 @@ defmodule BarkparkWeb.Studio.StringFieldWriteRaceTest do
              end)
     end
 
+    test "#{surface} #{field}: B posts the field as its page showed it, A's save not drawn: A's kept, no banner",
+         c do
+      {a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
+      field = unquote(field)
+
+      posts(a, unquote(target), %{field => "one twA three"})
+      _ = render(b)
+      html = posts(b, unquote(target), %{field => "one two three"})
+
+      assert get_in(stored(c), unquote(at)) == "one twA three"
+      refute html =~ "doc-conflict-banner"
+    end
+
     test "#{surface} #{field}: each types in a word of their own, B's page had not drawn A's save: both kept, no banner",
          c do
       {a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
