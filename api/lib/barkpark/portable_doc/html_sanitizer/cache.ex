@@ -16,10 +16,10 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Cache do
   An entry is keyed by the SHA-256 of the body and the Paper's own path
   (`Anchors.self_path/1` of `opts[:id]`, which decides a same-page link).
   It is served only under the policy version it was stored under:
-  `version/0`, a hash of the sanitizer's rule tables (`Elements.kept/0`,
+  `version/0`, a deterministic hash of the sanitizer's rule tables (`Elements.kept/0`,
   `inert/0` and `dropped/0`, `StyleGrammar.table/0`), the compiled code of
-  the sanitizer and its parts (which holds the attribute, style and class
-  sets), the `lazy_html` parser's version, and the configured pass cap. A
+  the sanitizer and its parts, `StyleGrammar.Shape` among them (which holds
+  the attribute, style and class sets), the `lazy_html` parser's version, and the configured pass cap. A
   rule change, a code change or a parser upgrade changes the version, and
   every entry stored before it is a miss.
 
@@ -30,6 +30,10 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Cache do
   tell another anything. A deploy changes the version on each node as it
   starts. A column on the Paper would need a migration and a write on the
   read path, for a value every node can compute.
+
+  A body that does not settle is cached as its text-only output too, so a
+  hostile body read over and over costs one scrub: its fail-closed warning
+  fires once per node per body, id and version, not once per read.
 
   ## What is never cached
 
@@ -51,7 +55,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Cache do
   @table :barkpark_html_sanitizer_cache
   @max_bytes 64 * 1024 * 1024
   @static_key {__MODULE__, :static_version}
-  @modules [HtmlSanitizer, Elements, StyleGrammar, Serializer, Anchors]
+  @modules [HtmlSanitizer, Elements, StyleGrammar, StyleGrammar.Shape, Serializer, Anchors]
 
   @doc """
   The output for `html` and `opts`: the cached one under the current
@@ -102,7 +106,8 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer.Cache do
 
   @doc "The version of a set of rule tables: a hash of the term."
   @spec version(term()) :: binary()
-  def version(tables), do: :crypto.hash(:sha256, :erlang.term_to_binary(tables))
+  def version(tables),
+    do: :crypto.hash(:sha256, :erlang.term_to_binary(tables, [:deterministic]))
 
   defp static_tables(code) do
     version(%{
