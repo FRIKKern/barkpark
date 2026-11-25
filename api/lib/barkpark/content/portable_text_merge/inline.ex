@@ -162,11 +162,14 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     cond do
       Regex.match?(~r/\A(?:[\p{L}\p{N}]|\p{M}+\z)/u, g) -> true
       i == 0 or i == tuple_size(gs) - 1 -> false
-      g in ~w(. , : - /) -> digit?(elem(gs, i - 1)) and digit?(elem(gs, i + 1))
-      g in ["'", "’", "-"] -> letter?(elem(gs, i - 1)) and letter?(elem(gs, i + 1))
-      true -> false
+      true -> joins?(g, elem(gs, i - 1), elem(gs, i + 1))
     end
   end
+
+  defp joins?(g, a, b),
+    do:
+      (g in ~w(. , : - /) and digit?(a) and digit?(b)) or
+        (g in ["'", "’", "-"] and letter?(a) and letter?(b))
 
   defp digit?(g), do: Regex.match?(~r/\A\p{N}/u, g)
   defp letter?(g), do: Regex.match?(~r/\A\p{L}/u, g)
