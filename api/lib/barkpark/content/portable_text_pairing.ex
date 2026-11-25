@@ -281,6 +281,10 @@ defmodule Barkpark.Content.PortableTextPairing do
       %{"text" => text} when is_binary(text) -> text
       _child -> ""
     end)
+    # A no-break space separates words too: the editor paints a space the
+    # browser would not draw as one (task-a196f4063197dc02, #28735 r2 review
+    # S7), and `String.split/1` keeps it inside a word.
+    |> String.replace("\u00A0", " ")
     |> String.downcase()
     |> String.split()
   end

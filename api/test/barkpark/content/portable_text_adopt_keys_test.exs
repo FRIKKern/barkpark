@@ -263,4 +263,31 @@ defmodule Barkpark.Content.PortableTextAdoptKeysTest do
       assert Enum.map(out, & &1["_key"]) == ["k1", "ke"]
     end
   end
+
+  # task-a196f4063197dc02 (#28735 r2 review S7): the rich text editor paints
+  # a space the browser would not draw ("Title " at a block's end, two
+  # spaces) as Chrome writes a typed one, nbsp. An untouched block then
+  # posts as "Title&nbsp;", and the pairing's words did not split on the
+  # nbsp, so two such blocks beside an edited one lost their keys.
+  test "blocks posted with nbsp where the store has a space keep their keys and their stored text" do
+    for {stored, post} <- [
+          {[block("k1", "Title "), block("k2", "Intro "), block("k3", "Body text here")],
+           "<p>Title&nbsp;</p><p>Intro&nbsp;</p><p>Body text here!</p>"},
+          {[block("k1", "one  three"), block("k2", "text "), block("k3", "Hello world")],
+           "<p>one&nbsp; Qthree</p><p>text&nbsp;</p><p>Hello world</p>"}
+        ] do
+      out = PortableText.from_html(post, stored)
+      assert Enum.map(out, & &1["_key"]) == ["k1", "k2", "k3"], post
+      [_, two, _] = stored
+      assert words(Enum.at(out, 1)) == words(two), post
+    end
+
+    out =
+      PortableText.from_html(
+        "<p>Title&nbsp;</p><p>Intro&nbsp;</p><p>Body text here!</p>",
+        [block("k1", "Title "), block("k2", "Intro "), block("k3", "Body text here")]
+      )
+
+    assert Enum.map(out, &words/1) == ["Title ", "Intro ", "Body text here!"]
+  end
 end

@@ -285,6 +285,7 @@ jobs:
           node ../paper-editor-host-tests/__rte_move_focus.test.mjs
           node ../paper-editor-host-tests/__rte_pt_blocks.test.mjs
           node ../paper-editor-host-tests/__rte_vocabulary.test.mjs
+          node ../paper-editor-host-tests/__rte_spaces.test.mjs
           node ../paper-editor-host-tests/path-filter-workflow.test.mjs
           node ../paper-editor-host-tests/local-fixtures.test.mjs
           node ../paper-editor-host-tests/__asset_explorer_collection_create.test.mjs
