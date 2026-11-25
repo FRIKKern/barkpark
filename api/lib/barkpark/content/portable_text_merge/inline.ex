@@ -235,7 +235,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     all = Enum.flat_map(mine["children"], &List.duplicate(&1, glen(&1)))
     spans = Enum.slice(all, mp, length(put))
     mdefs = defs(mine)
-    outside = outside_links(all, mp, length(put), mdefs)
+    outside = outside_links({all, mp, me, length(put)}, mdefs, theirs, ts)
 
     {new, added} =
       new_spans(Enum.zip(put, spans), mdefs, theirs, {elsewhere, gone(theirs, a, b), outside})
@@ -353,13 +353,49 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   defp link_keys(span, mdefs), do: Enum.filter(List.wrap(span["marks"]), &is_map_key(mdefs, &1))
 
-  # Mine's link keys on letters outside its splice ([mp, mp + n) of mine's
-  # letters, one span per letter).
-  defp outside_links(letters, mp, n, mdefs) do
-    (Enum.take(letters, mp) ++ Enum.drop(letters, mp + n))
-    |> Enum.uniq()
-    |> Enum.flat_map(&link_keys(&1, mdefs))
-    |> MapSet.new()
+  # Each of mine's links that goes on outside mine's splice, as theirs'
+  # key on those same letters (mine's letters, one span per letter; mine's
+  # splice puts `n` letters for base's [mp, me), theirs' `ts`). It is that
+  # link in the result, so mine's letters of it inside the splice take
+  # that key. A link theirs holds under no def of that content there, or
+  # under more than one, is left out.
+  defp outside_links({letters, mp, me, n}, mdefs, theirs, ts) do
+    tdefs = defs(theirs)
+    tl = theirs["children"] |> Enum.flat_map(&List.duplicate(&1, glen(&1))) |> List.to_tuple()
+
+    at = fn j ->
+      case ts do
+        {tp, te, tput} when j >= te -> j - te + tp + length(tput)
+        {tp, _te, _tput} when j >= tp -> nil
+        _ -> j
+      end
+    end
+
+    before = letters |> Enum.take(mp) |> Enum.with_index()
+
+    after_ =
+      letters |> Enum.drop(mp + n) |> Enum.with_index(me)
+
+    (before ++ after_)
+    |> Enum.flat_map(fn {span, j} ->
+      t = at.(j)
+      tspan = t && t < tuple_size(tl) && elem(tl, t)
+
+      for mk <- link_keys(span, mdefs) do
+        tks =
+          if tspan, do: Enum.filter(link_keys(tspan, tdefs), &(tdefs[&1] == mdefs[mk])), else: []
+
+        {mk, tks}
+      end
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.flat_map(fn {mk, lists} ->
+      case lists |> List.flatten() |> Enum.uniq() do
+        [tk] -> [{mk, tk}]
+        _ -> []
+      end
+    end)
+    |> Map.new()
   end
 
   # Each of mine's marks as theirs' mark key. `taken`: mine's link key => the
@@ -368,12 +404,14 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # Theirs' def is not taken by content under another key when mine has
   # another link of that content (`same`): mine's other link sits in the
   # result under theirs' key, whatever mine names it, and the two would
-  # become one (#28816 review). Under the same key it is taken only when
-  # mine's link of that key goes on outside the splice, so it is the one
-  # link (task-985e4a7e234e48a0): a new link of mine that happened to take
-  # theirs' key for that content was joined to mine's other link. Mine's one link of that content takes it,
-  # whatever key mine holds it under: else one link of mine came out as
-  # two after mine re-keyed its defs (task-336c3a9b3baa9d0e).
+  # become one (#28816 review). A link of mine that goes on outside the
+  # splice takes theirs' key on those letters (`outside`), not theirs' key
+  # by content nor by name: mine's new link that held theirs' key for that
+  # content, or theirs' re-keyed name for mine's other link, was joined to
+  # mine's other link (task-985e4a7e234e48a0, #28868 review). Mine's one
+  # link of that content takes theirs' def, whatever key mine holds it
+  # under: else one link of mine came out as two after mine re-keyed its
+  # defs (task-336c3a9b3baa9d0e).
   defp marks(span, mdefs, tdefs, bkey, st) do
     span["marks"]
     |> List.wrap()
@@ -387,8 +425,12 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         is_map_key(st.taken, mk) ->
           {st.taken[mk], st}
 
-        k && not MapSet.member?(st.took, k) &&
-            (st.same[mdefs[mk]] == 1 or (k == mk and MapSet.member?(st.outside, mk))) ->
+        is_map_key(st.outside, mk) and not MapSet.member?(st.took, st.outside[mk]) ->
+          k = st.outside[mk]
+          {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
+
+        k && not MapSet.member?(st.took, k) && st.same[mdefs[mk]] == 1 &&
+            not is_map_key(st.outside, mk) ->
           {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
 
         true ->

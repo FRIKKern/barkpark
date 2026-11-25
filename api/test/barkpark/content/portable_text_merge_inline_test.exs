@@ -828,6 +828,66 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       end
     end
 
+    # #28868 review: mine's key is theirs' key for that content, and mine's
+    # link of it goes on outside the splice, but theirs re-keyed: theirs'
+    # d2 is mine's OTHER link ("def"), and mine's "ghi" is theirs' m9.
+    test "mine types inside its own link theirs re-keyed: the letter takes theirs' key on that link" do
+      y = "https://y"
+
+      base =
+        block(
+          "k",
+          [
+            span("b0", "abc "),
+            span("b1", "def", ["d1"]),
+            span("b2", " "),
+            span("b3", "ghi", ["d2"]),
+            span("b4", " j")
+          ],
+          [link("d1", y), link("d2", y)]
+        )
+
+      mine =
+        block(
+          "k",
+          [
+            span("m0", "abc "),
+            span("m1", "def", ["d1"]),
+            span("m2", " "),
+            span("m3", "gQhi", ["d2"]),
+            span("m4", " j")
+          ],
+          [link("d1", y), link("d2", y)]
+        )
+
+      theirs =
+        block(
+          "k",
+          [
+            span("t0", "abc "),
+            span("t1", "d", ["d2"]),
+            span("t2", "W", ["d1"]),
+            span("t3", "U", ["t7"]),
+            span("t4", "V", ["d1"]),
+            span("t5", " "),
+            span("t6", "ghi", ["m9"]),
+            span("t7s", " j")
+          ],
+          [link("d2", y), link("d1", "https://x"), link("t7", y), link("m9", y)]
+        )
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+      at = fn letter ->
+        Enum.find(blk["children"], &String.contains?(&1["text"], letter))["marks"]
+      end
+
+      # Q sits in mine's ghi link, theirs' m9: not with d's link, one run.
+      assert at.("Q") == at.("g")
+      refute at.("Q") == at.("d")
+      assert Enum.find(blk["children"], &String.contains?(&1["text"], "Q"))["text"] == "gQhi"
+    end
+
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
       href = "https://a.example"
       base = block("k", [span("m1", "one two three")])
