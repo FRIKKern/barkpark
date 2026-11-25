@@ -58,7 +58,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextDocSwitchTest do
     b_saves_rt(b, c, "<p>one two</p><p>B para</p>", ["one two", "B para"])
     page = got(page(), next_push(a), false)
 
-    render_patch(a, "#{c.root}/_desk/#{c.type};#{c.id}")
+    render_patch(a, "#{c.root}/_desk/#{c.type};#{c.id}?view=1")
     html = post_rt(a, "<p>one twoA</p>", seen(page))
 
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one twoA", "B para"] end)
