@@ -346,4 +346,82 @@ defmodule BarkparkWeb.MutateLinkHrefHtmlTest do
                200
     end
   end
+
+  describe "#28695 review r2, should fix" do
+    # View 2 reads noscript as xmp; the input's own `</xmp` must not close it,
+    # since a browser ends noscript only at `</noscript`.
+    test "an xmp end tag inside a noscript does not hide its link", %{conn: conn} do
+      for html <- [
+            ~s|<noscript></xmp><p title="</noscript><a href=javascript:alert(1)>x</a>"></p>|,
+            ~s|<NOSCRIPT></XMP ><p title="</NOSCRIPT><a href=javascript:alert(1)>x</a>"></p>|
+          ] do
+        refused!(create(conn, id(), %{"body" => html}), ["/body"])
+      end
+    end
+
+    # lexbor drops an `<a>` inside a select; Chrome's select parser keeps it.
+    test "a link inside a select is refused", %{conn: conn} do
+      for html <- [
+            ~s|<select><a href="javascript:alert(1)">x</a></select>|,
+            ~s|<SELECT><option>o</option><A HREF=javascript:alert(1)>x</A></SELECT>|,
+            ~s|<select><noscript><p title="</noscript><a href=javascript:alert(1)>x</a>"></p></noscript></select>|
+          ] do
+        refused!(create(conn, id(), %{"body" => html}), ["/body"])
+      end
+    end
+
+    test "a select, an xmp and a noscript beside a safe link are written", %{conn: conn} do
+      html =
+        ~s|<select><option>a</option></select><xmp><b></xmp>| <>
+          ~s|<noscript>n</noscript><a href="https://x.example">y</a>|
+
+      assert create(conn, id(), %{"body" => html}).status == 200
+    end
+
+    # Held addresses are read only when the new value has a refusable link:
+    # a save with safe links parses the new value, never the stored row.
+    test "a save with no refusable link does not parse the stored row", %{conn: conn} do
+      id = id()
+      assert create(conn, id, %{"body" => ~s|<a href="https://old.example">o</a>|}).status == 200
+
+      parses =
+        count_parses(fn ->
+          assert set_fields(conn, id, %{"body" => ~s|<a href="https://new.example">n</a>|}).status ==
+                   200
+        end)
+
+      assert parses == 1, "parsed #{parses} times"
+    end
+  end
+
+  # LazyHTML.from_fragment/1 calls made by this process (and what it
+  # spawns) while `fun` runs, counted by a separate tracer process.
+  defp count_parses(fun) do
+    mfa = {LazyHTML, :from_fragment, 1}
+    me = self()
+    counter = spawn_link(fn -> count_calls(me, 0) end)
+    :erlang.trace_pattern(mfa, true, [:global])
+    :erlang.trace(self(), true, [:call, :set_on_spawn, {:tracer, counter}])
+
+    try do
+      fun.()
+    after
+      :erlang.trace(self(), false, [:call, :set_on_spawn])
+      :erlang.trace_pattern(mfa, false, [:global])
+    end
+
+    # Every trace message reaches the counter before `:done` does.
+    ref = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, :all, ^ref}
+    send(counter, :done)
+    assert_receive {:parses, n}
+    n
+  end
+
+  defp count_calls(parent, n) do
+    receive do
+      {:trace, _pid, :call, {LazyHTML, :from_fragment, _args}} -> count_calls(parent, n + 1)
+      :done -> send(parent, {:parses, n})
+    end
+  end
 end
