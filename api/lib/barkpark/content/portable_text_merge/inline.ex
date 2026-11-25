@@ -12,11 +12,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       is a clash.
     * One splice per side, as `TextRebase` reads a text: the common prefix
       and suffix of the base's letters and the side's, and the middle of the
-      base replaced by the side's. Text only: a splice that only changes
-      marks, that changes the marks of letters whose text stays (it keeps
-      fewer letters than graphemes, `marks_kept?`), or that puts in letters whose
-      marks no letter beside or under it has, is a clash (a mark of its own
-      is task 4).
+      base replaced by the side's. A letter is its grapheme and its marks,
+      so a mark put on or taken off, or a link's def changed, is part of
+      the splice (task-07d2ca9aa7667208): a bold on "one" merges with an
+      edit of "three"; a bold across the other side's edit clashes.
     * Apart: each splice widened to whole words (a run of graphemes with no
       space and no CJK punctuation between them: "example.com", "a/b",
       "x-1", "3.14", "don't" and a space-less Han and kana run are each one
@@ -24,11 +23,15 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       inserts at one point are a clash: "cart" to "carts" and "dart" would
       give "darts".
     * Built from theirs, as the store holds it: only mine's splice is
-      replaced, so every span outside it is theirs' map byte for byte, and
-      theirs' defs, used or not, stay. Letters put in join the span they
-      touch when the marks are equal, else a new span with mine's span key
-      or, when theirs has it, a fresh one unique in the block (a span's
-      key is read only under its block).
+      replaced, so every span outside it is theirs' map byte for byte.
+      Letters put in join the span they touch when the marks are equal,
+      else a new span with mine's span key or, when theirs has it, a fresh
+      one unique in the block (a span's key is read only under its block).
+    * Defs: theirs' stay, used or not. A link of mine's letters is theirs'
+      def with that content, else mine's def added under mine's key (a
+      fresh one when theirs holds it); two of mine's links with one content
+      stay two. A def of theirs goes only when its last use was in the text
+      mine's splice replaced.
     * A guard on the result: each word is a word of base, mine or theirs,
       at most count(mine) + count(theirs) - count(base) times, and the text
       splits into the graphemes it was built from (no flag made at a join).

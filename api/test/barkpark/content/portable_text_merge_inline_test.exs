@@ -1,6 +1,6 @@
 defmodule Barkpark.Content.PortableTextMergeInlineTest do
   @moduledoc """
-  The merge inside one block, text only (`PortableTextMerge.Inline`,
+  The merge inside one block, text and marks (`PortableTextMerge.Inline`,
   task-da701626f5be2143, plan /papers/pt-merge-inside-one-block rev 4).
   """
   use ExUnit.Case, async: true
