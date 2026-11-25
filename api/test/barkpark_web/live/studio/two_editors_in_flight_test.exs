@@ -238,13 +238,15 @@ defmodule BarkparkWeb.Studio.TwoEditorsInFlightTest do
       b = open(c, c.desk)
 
       send_post(a, "title", %{"title" => "Fixture post 14 A"})
-      told(b)
+      # B shows A's title, and its page reports that number.
+      {_values, seqs} = told(b)
+      b_seen = %{"doc[title]" => List.last(seqs["doc[title]"])}
 
       # A drops off; B saves both fields; A's page rejoins on a new socket
       # and posts the title it typed meanwhile, with the old socket's number.
       GenServer.stop(a.pid, :normal)
-      send_post(b, "excerpt", %{"excerpt" => "Short. B"})
-      send_post(b, "title", %{"title" => "bbb Fixture post 14 A"})
+      send_post(b, "excerpt", %{"excerpt" => "Short. B"}, b_seen)
+      send_post(b, "title", %{"title" => "bbb Fixture post 14 A"}, b_seen)
       a2 = open(c, c.desk)
       send_post(a2, "title", %{"title" => "Fixture post 14 A aaa"}, %{"doc[title]" => 1})
 

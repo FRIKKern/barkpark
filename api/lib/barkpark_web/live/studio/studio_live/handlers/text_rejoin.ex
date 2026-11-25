@@ -24,9 +24,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
 
   @doc """
   `{doc, typed}`: the post with each held field put back to the stored
-  value, and the held fields with A's words (`[{key, words}]`).
+  value, and the held fields with A's words and the stored value
+  (`[{key, words, stored}]`). `units` are every free-text field the post
+  carries, not only its target (#28830 r1 review, B1): a post from before
+  the rejoin carries the whole form as the page showed it, and an explicit
+  Save is one too (B2).
   """
-  def split(socket, keys, seen, path, doc) when is_binary(seen) and is_map(doc) do
+  def split(socket, units, seen, doc) when is_binary(seen) and is_map(doc) do
     schema = socket.assigns[:editor_schema]
 
     typed =
@@ -35,7 +39,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
           text =
             Map.put(if(is_map(base.content), do: base.content, else: %{}), "title", base.title)
 
-          for key <- RemoteValues.units(keys, RemoteValues.text_path(schema, keys, path)),
+          for key <- Enum.uniq(units),
               RemoteValues.free_text_at?(schema, key),
               not told?(socket, key),
               RemoteValues.born_untaken?(socket, key, seen),
@@ -49,21 +53,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
       end
 
     {Enum.reduce(typed, doc, fn {key, _mine, stored}, d -> RemoteValues.put_at(d, key, stored) end),
-     Enum.map(typed, fn {key, mine, _stored} -> {key, mine} end)}
+     typed}
   end
 
-  def split(_socket, _keys, _seen, _path, doc), do: {doc, []}
+  def split(_socket, _units, _seen, doc), do: {doc, []}
 
-  @doc "A's words for each held field in the form, unsaved, with the banner."
+  @doc """
+  The units of an autosave: its target (and the text subfield it changed)
+  and every free-text field the post carries.
+  """
+  def units(schema, keys, path, doc),
+    do:
+      RemoteValues.units(keys, RemoteValues.text_path(schema, keys, path)) ++
+        RemoteValues.text_units(schema, doc)
+
+  @doc """
+  A's words for each held field in the form, unsaved, with the banner, and
+  drawn into the page's input. The desk redraws its form on a rejoin, so
+  the input already showed the stored value: the banner said A's words were
+  kept, and A's next key saved the stored text over them (#28830 r1 review,
+  B3). The input takes A's words while it still shows the stored value
+  (bp-array-focus.js `takeFocused`); one still showing A's words keeps them.
+  """
   def hold(socket, []), do: socket
 
-  def hold(socket, typed),
-    do:
-      TextUnderLock.hold(
-        socket,
-        Enum.map(typed, &elem(&1, 0)),
-        Enum.reduce(typed, %{}, &RemoteValues.put_at/2)
-      )
+  def hold(socket, typed) do
+    values =
+      Map.new(typed, fn {key, mine, stored} ->
+        {RemoteValues.input_name(key), %{value: mine, was: stored}}
+      end)
+
+    socket
+    |> TextUnderLock.hold(
+      Enum.map(typed, &elem(&1, 0)),
+      Enum.reduce(typed, %{}, fn {key, mine, _stored}, form ->
+        RemoteValues.put_at(form, key, mine)
+      end)
+    )
+    |> Phoenix.LiveView.push_event("bp:form-remote-values", %{values: values})
+  end
 
   # A field the banner already names was told: typing on saves A's words.
   defp told?(socket, key) do

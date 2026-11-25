@@ -219,4 +219,113 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
              end)
     end
   end
+
+  # The #28830 r1 review: every free-text field of a post from before the
+  # rejoin is read, not only its target (B1, probes P2/P2b), and so is an
+  # explicit Save (B2, P1/P1b). The hold draws A's words into the input
+  # (B3): the desk had redrawn it with the stored value.
+  defp all_born(view) do
+    assert_push_event(view, "bp:form-born", %{seqs: seqs}, 2_000)
+    seqs
+  end
+
+  defp form_of(fields, seen) do
+    %{
+      "doc" => %{
+        "title" => fields["title"] || "T0",
+        "notes" => fields["notes"] || "one two three"
+      },
+      @label => fields["label"] || "one two three",
+      "_bp_seen" => Jason.encode!(Map.put(seen, "v", 2))
+    }
+  end
+
+  defp changes(view, target, fields, seen),
+    do:
+      view
+      |> element("#editor-form")
+      |> render_change(Map.put(form_of(fields, seen), "_target", [target]))
+
+  defp saves(view, fields, seen),
+    do: view |> element("#editor-form") |> render_submit(form_of(fields, seen))
+
+  defp drawn(view, name) do
+    assert_push_event(view, "bp:form-remote-values", %{values: %{^name => drawn}}, 2_000)
+    drawn
+  end
+
+  for surface <- [:desk, :studio] do
+    for {label, number} <- [{"no number of its own", 0}, {"the old socket's number", 3}] do
+      test "#{surface}: B saves notes while A's page is away; A's page rejoins and presses Save with #{label}: B's kept, A held",
+           c do
+        b = open(c, unquote(surface))
+        posts(b, "doc[notes]", %{"notes" => "one twB three"})
+
+        a2 = open(c, unquote(surface))
+        seen = a2 |> all_born() |> Map.put("doc[notes]", unquote(number))
+        html = saves(a2, %{"notes" => "one twA three"}, seen)
+
+        # Before r2: "one twA three", no banner, B's words gone.
+        assert stored(c)["notes"] == "one twB three"
+        assert html =~ "doc-conflict-banner"
+        refute html =~ "Saved"
+        assert assigns(a2).editor_form["notes"] == "one twA three"
+
+        assert open(c, unquote(surface)) |> assigns() |> get_in([:editor_form, "notes"]) ==
+                 "one twB three"
+
+        changes(a2, "doc[notes]", %{"notes" => "one twAA three"}, seen)
+        assert ObjectRichText.eventually(fn -> stored(c)["notes"] == "one twAA three" end)
+      end
+    end
+
+    test "#{surface}: B saves notes; A typed notes and label while away and its post targets the label: B's notes kept, notes held",
+         c do
+      b = open(c, unquote(surface))
+      posts(b, "doc[notes]", %{"notes" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.merge(%{"doc[notes]" => 0, @label => 0})
+      html = changes(a2, @label, %{"notes" => "one twA three", "label" => "one twA three"}, seen)
+
+      # Before r2: notes "one twA three", the banner naming only meta.
+      assert stored(c)["notes"] == "one twB three"
+      assert html =~ "doc-conflict-banner"
+      assert "notes" in assigns(a2).editor_clash_fields
+      assert assigns(a2).editor_form["notes"] == "one twA three"
+    end
+
+    test "#{surface}: B saves the label; A's post targets notes and carries the label as A's page showed it: B's label kept",
+         c do
+      b = open(c, unquote(surface))
+      posts(b, @label, %{"label" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.merge(%{"doc[notes]" => 0, @label => 0})
+
+      html =
+        changes(a2, "doc[notes]", %{"notes" => "one twA three", "label" => "one two three"}, seen)
+
+      # Before r2: the label went back to "one two three", the banner naming notes.
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+      assert html =~ "doc-conflict-banner"
+      assert "meta" in assigns(a2).editor_clash_fields
+    end
+
+    test "#{surface}: the hold draws A's words into the input, and typing on saves them", c do
+      b = open(c, unquote(surface))
+      posts(b, "doc[notes]", %{"notes" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.put("doc[notes]", 0)
+      changes(a2, "doc[notes]", %{"notes" => "one twA three"}, seen)
+
+      # The input takes A's words while it shows the stored value (the
+      # desk's rejoin redraw), so the next key types on A's words.
+      assert drawn(a2, "doc[notes]") == %{value: "one twA three", was: "one twB three"}
+
+      changes(a2, "doc[notes]", %{"notes" => "one twA threeZ"}, seen)
+      assert ObjectRichText.eventually(fn -> stored(c)["notes"] == "one twA threeZ" end)
+    end
+  end
 end
