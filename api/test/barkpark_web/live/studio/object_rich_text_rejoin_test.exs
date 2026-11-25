@@ -39,6 +39,10 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRejoinTest do
       # Read as current, A's text was saved over B's "b" with no banner.
       assert html =~ "Someone else rewrote"
       assert words(stored(c)["meta"]["rt"]) == ["one two", "p1 b"]
+
+      # The hold's view is marked, so the page draws it as a hold's, not
+      # under the stored value's guard (#28779 r2 review).
+      assert_push_event(a2, "bp:rt-remote", %{values: %{"doc[meta].rt" => %{held: true}}}, 2_000)
     end
 
     test "#{surface}: the page rejoins and posts the stored value back on the old number: nothing changes, no banner",
