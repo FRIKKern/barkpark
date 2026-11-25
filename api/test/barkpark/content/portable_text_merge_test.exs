@@ -45,14 +45,16 @@ defmodule Barkpark.Content.PortableTextMergeTest do
     assert words(merged) == ["alpha B", "middle", "omega A"]
   end
 
+  # Both edit the word "two": an overlap, a clash before and after the merge
+  # inside one block (task-266ffbe9cd115f3c).
   test "both changed one block: a clash; the view has mine there and theirs elsewhere, the banner theirs" do
     base = [b("k1", "one two"), b("k2", "tail")]
-    theirs = [b("k1", "B one two"), b("k2", "tail"), b("k3", "B para")]
+    theirs = [b("k1", "one TWO"), b("k2", "tail"), b("k3", "B para")]
 
-    assert {:clash, ["B one two"], view} =
-             M.merge(base, post(base, ["one two A", "tail"]), theirs)
+    assert {:clash, ["one TWO"], view} =
+             M.merge(base, post(base, ["one twoA", "tail"]), theirs)
 
-    assert words(view) == ["one two A", "tail", "B para"]
+    assert words(view) == ["one twoA", "tail", "B para"]
     assert keys_unique?(view)
   end
 
