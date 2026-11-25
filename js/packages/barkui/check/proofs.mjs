@@ -269,6 +269,7 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
       await settle(page)
     }
     const at = `${skin} ${scheme}`
+    const V0 = performance.now()
     await view(page, skin, scheme)
     await settle(page)
     const freeNow = await page.barkCheck((n) => window.__barkCheck.paintFree(document.querySelector(`[data-part="${n}"]`)), part.name)
@@ -320,6 +321,7 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
         for (const f of out) bad[scheme].push(`${at} on ${surface}: ${f}`)
       })
     }
+    const V1 = performance.now()
     await surfaceTo('base')
     // Focus: Tab through the part with real keys and measure the ring on each stop.
     await page.barkCheck((id) => {
@@ -347,7 +349,9 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
       })
       if (r2.done) break
     }
+    process.stderr.write(`T> ${part.name}     view ${at}: surfaces ${((V1 - V0) / 1000).toFixed(1)} tab ${((performance.now() - V1) / 1000).toFixed(1)}\n`)
   }
+  let S0 = performance.now(); const ST = (w) => { process.stderr.write(`T> ${part.name}   ${w} ${((performance.now() - S0) / 1000).toFixed(1)}\n`); S0 = performance.now() }
   const { once, count } = await readOnPages({
     views,
     pages,
@@ -360,6 +364,7 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
     read: (page, v, keep, names) => readAView(page, names, v, keep),
     end: (page) => stillStyled(ctx, page, 'skins'),
   })
+  ST('views')
   // The light's views come first in light, then in dark: what the census told is kept where it is first read.
   for (const scheme of ['light', 'dark']) bad[scheme] = once(bad[scheme])
   // A run that reads the views of the drive's skins alone names the rest in both lights: it is never green, and a
@@ -369,8 +374,10 @@ export async function skinsAndSchemes(ctx, part, skins, pages = VIEW_PAGES) {
   if (count.fail) for (const scheme of ['light', 'dark']) bad[scheme].push(count.fail)
   // Motion allowed: the same drawn readings, so a rule that applies only with motion on cannot hide from them.
   if (ctx.motion !== false) bad.light.push(...(await motionFails(ctx, part, skins[0])))
+  ST('motion')
   // Real states against their pins (states.mjs).
   if (ctx.states !== false) bad.light.push(...(await stateFails(ctx, part, driveSkins(skins)[0])))
+  ST('states')
   const still = frozen(traces)
   const measures = { focusEdge: focus.max ? { min: +fmt(focus.min), max: +fmt(focus.max) } : null }
   for (const [surface, b] of Object.entries(bounds)) if (b.max) measures[surface === 'base' ? 'boundary' : `boundary:${surface}`] = { min: +fmt(b.min), max: +fmt(b.max), at: b.at }
