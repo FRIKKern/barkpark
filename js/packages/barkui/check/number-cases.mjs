@@ -56,7 +56,8 @@ const WRITES = [
 ].join('\n')
 const BUTTON = 'the button in ui-number-input-increment or ui-number-input-decrement'
 const SCRUB = 'ui-number-input-scrub-area'
-const write = (name, property) => SLOTS.find((s) => s.slot === name).writes.find((w) => w.property === property)
+// A write the list does not hold stands in with no value, so on a list without it each row is read and is not caught.
+const write = (name, property) => SLOTS.find((s) => s.slot === name)?.writes.find((w) => w.property === property) ?? { property, values: [] }
 const MORE = 'button#button-nix-more "More"'
 const SCRUB_AT = 'ui-number-input-scrub-area#button-nix-scrub "Count"'
 
