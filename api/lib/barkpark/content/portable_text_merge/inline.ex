@@ -207,7 +207,15 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     tdefs =
       defs(theirs) |> Enum.sort() |> Enum.reduce(%{}, fn {k, d}, m -> Map.put_new(m, d, k) end)
 
-    st = %{used: used, taken: %{}, took: MapSet.new(), added: [], ns: 0, nd: 0}
+    st = %{
+      used: used,
+      taken: %{},
+      took: MapSet.new(),
+      added: [],
+      ns: 0,
+      nd: 0,
+      same: Enum.frequencies(Map.values(mdefs))
+    }
 
     {spans, %{added: added}} =
       letters
@@ -238,10 +246,13 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   # Each of mine's marks as theirs' mark key. `taken`: mine's link key => the
   # key it took (`took`, the keys taken), so one link of mine stays one, and
-  # a second link of mine with the same content takes a def of its own. A
-  # def key mine holds for another link of its own is not taken by content
-  # either: mine's link outside the splice keeps that key, and the two would
-  # become one.
+  # a second link of mine with the same content takes a def of its own.
+  # Theirs' def is not taken by content under another key when mine has
+  # another link of that content (`same`): mine's other link sits in the
+  # result under theirs' key, whatever mine names it, and the two would
+  # become one (#28816 review). Mine's one link of that content takes it,
+  # whatever key mine holds it under: else one link of mine came out as
+  # two after mine re-keyed its defs (task-336c3a9b3baa9d0e).
   defp marks(span, mdefs, tdefs, bkey, st) do
     span["marks"]
     |> List.wrap()
@@ -255,7 +266,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         is_map_key(st.taken, mk) ->
           {st.taken[mk], st}
 
-        k && not MapSet.member?(st.took, k) && (k == mk or not is_map_key(mdefs, k)) ->
+        k && not MapSet.member?(st.took, k) && (k == mk or st.same[mdefs[mk]] == 1) ->
           {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
 
         true ->
