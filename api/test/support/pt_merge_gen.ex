@@ -28,10 +28,19 @@ defmodule Barkpark.Test.PtMergeGen do
   @cjk ["かな", "漢字", "たべる", "東京", "ひと"]
   @other ["👨‍👩‍👧", "🇳🇴", "é", "。"]
 
-  @doc "The triple for `seed`, the same on every run."
-  def triple(seed) do
+  @doc """
+  The triple for `seed`, the same on every run. `:text` (task-da701626f5be2143)
+  gives longer blocks and only edits to their words, the merge inside one
+  block's text-only scope; the pinned triples are `:all`'s.
+  """
+  def triple(seed, mode \\ :all) do
     :rand.seed(:exsss, {seed, seed * 7 + 1, seed * 13 + 2})
-    kind = Enum.random([:plain, :plain, :plain, :plain, :plain, :same, :cjk, :plain])
+
+    kind =
+      if mode == :text,
+        do: :text,
+        else: Enum.random([:plain, :plain, :plain, :plain, :plain, :same, :cjk, :plain])
+
     base = base(kind)
     hot = pick(0..(length(base) - 1))
     mine = edit(base, "m", hot, kind)
@@ -53,10 +62,15 @@ defmodule Barkpark.Test.PtMergeGen do
     for {ws, i} <- Enum.with_index(blocks), do: block("k#{i}", ws, :plain)
   end
 
+  defp base(:text),
+    do: for(i <- 0..(pick(1..3) - 1), do: block("k#{i}", words(pick(6..12), :text), :text))
+
   defp base(kind),
     do: for(i <- 0..(pick(1..4) - 1), do: block("k#{i}", words(pick(1..5), kind), kind))
 
   defp edit(blocks, side, hot, kind, count \\ [0, 1, 1, 1, 2, 2, 2, 3]) do
+    count = if kind == :text and count != 0..1, do: [1, 1, 2], else: count
+
     Enum.reduce(1..Enum.random(count)//1, {blocks, 0}, fn _, {bs, n} ->
       {one_edit(bs, side, n, hot, kind), n + 1}
     end)
@@ -70,10 +84,20 @@ defmodule Barkpark.Test.PtMergeGen do
     i = if pick(1..6) > 1, do: min(hot, last), else: pick(0..last)
 
     case pick(1..22) do
-      1 -> List.insert_at(blocks, i + 1, block("#{side}#{n}", words(pick(1..3), kind), kind))
-      2 when last > 0 -> List.delete_at(blocks, i)
-      3 -> List.insert_at(blocks, i + 1, Map.put(Enum.at(blocks, i), "_key", "#{side}#{n}"))
-      k -> List.update_at(blocks, i, &change(&1, rem(k, 7) + 3, side, n, kind))
+      _ when kind == :text ->
+        List.update_at(blocks, i, &change(&1, Enum.random([3, 4, 5, 8, 9]), side, n, kind))
+
+      1 ->
+        List.insert_at(blocks, i + 1, block("#{side}#{n}", words(pick(1..3), kind), kind))
+
+      2 when last > 0 ->
+        List.delete_at(blocks, i)
+
+      3 ->
+        List.insert_at(blocks, i + 1, Map.put(Enum.at(blocks, i), "_key", "#{side}#{n}"))
+
+      k ->
+        List.update_at(blocks, i, &change(&1, rem(k, 7) + 3, side, n, kind))
     end
   end
 
@@ -214,6 +238,7 @@ defmodule Barkpark.Test.PtMergeGen do
   defp tail(text), do: if(String.ends_with?(text, " "), do: " ", else: "")
 
   defp words(n, kind), do: for(_ <- 1..n//1, do: word(kind))
+  defp word(:text), do: Enum.random(@latin ++ @latin ++ @cjk)
   defp word(:cjk), do: Enum.random(@cjk ++ @cjk ++ @other)
   defp word(_kind), do: Enum.random(@latin ++ @latin ++ @cjk ++ @other)
   defp pick(range), do: Enum.random(range)
