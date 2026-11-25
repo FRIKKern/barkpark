@@ -1,0 +1,17 @@
+{
+  "name": "slider",
+  "family": "form",
+  "element": "ui-slider",
+  "imports": ["@ui-sdk/web/slider", "@ui-sdk/web/field"],
+  "summary": "Picks a number on a scale with one thumb on a track, named by its field: the arrow keys move it one step, Page Up and Page Down a large step, Home and End to its ends, with read-only and disabled.",
+  "notCovered": [
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box 2.75rem each way over each thumb, so a tap near it reaches it. It draws nothing, so no light reads its size; at phone width the slider's control, where a press lands, is 2.75rem tall whatever the pointer."
+    },
+    {
+      "name": "invalid and required",
+      "why": "A slider always holds a value, so UI SDK never finds it missing in a form, and UI SDK's sheet gives a slider no invalid or required look. No slider here is required or stands in an invalid field, and this part draws neither."
+    }
+  ]
+}
