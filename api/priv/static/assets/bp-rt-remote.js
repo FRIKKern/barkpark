@@ -31,7 +31,10 @@
 // first of them. A newer value replaces the one waiting, but the editor
 // still shows what it showed before the first: with one less than the
 // newest, a post was read against a value it never showed, and B's change
-// before it was taken out with no word (task-2833650e2e72d380). The merge
+// before it was taken out with no word (task-2833650e2e72d380). A new
+// socket's stored value (`born`, task-eeda66fac5af065f) waits with the
+// number this page had before it, is seen at once when the editor already
+// shows it, and is never drawn over words typed since the last draw. The merge
 // of this page's own post (`own`) starts again from itself: the editor
 // shows that post, which the server merged with all that waited before.
 // The server reads a post against the value its number names: a post typed
@@ -49,11 +52,12 @@
 
   // The newest number any push carried.
   let last = 0;
-  // name -> {seq, html, first}: theirs, not shown yet; `first`, the number
-  // the editor's text is read from (see above).
+  // name -> {seq, html, seen, born}: theirs, not shown yet; `seen`, the
+  // number the editor's text is read from (see above).
   const waiting = new Map();
-  // editor -> time of its last input.
+  // editor -> time of its last input, and of its last draw from here.
   const typedAt = new WeakMap();
+  const shownAt = new WeakMap();
   const composing = new WeakSet();
   let timer = null;
 
@@ -63,7 +67,11 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).first - 1 : last);
+  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).seen : last);
+
+  // Typed since this page last drew a value into it: words that may not be
+  // posted yet (a socket that went takes them with it).
+  const typedSince = (editor) => (typedAt.get(editor) || 0) > (shownAt.get(editor) || 0);
 
   // The wrapper's `_bp_rt_seen[]`, made on first need. The wrapper is
   // ignored by LiveView's patch, so the input stays.
@@ -208,6 +216,7 @@
     const body = editor.querySelector(".bp-rte-body");
     const caret = caretIn(body);
     editor.value = html;
+    shownAt.set(editor, Date.now());
     if (caret && body) caretBack(body, caret);
     const id = editor.dataset.bridgeTarget;
     const input = id ? document.getElementById(id) : null;
@@ -225,6 +234,10 @@
       return;
     }
     if (!theirs.reload && busy(editor)) return;
+    // A new socket's stored value (`born`) is never drawn over words typed
+    // since the last draw: A's next post is held against it instead
+    // (task-eeda66fac5af065f).
+    if (theirs.born && typedSince(editor)) return;
     show(w, editor, theirs.html);
     waiting.delete(name);
     mark(w);
@@ -244,15 +257,23 @@
     // Another document is shown: what waits is the old one's (task-29686209fb9fc5dc).
     if (e.detail && e.detail.forget) waiting.clear();
     const values = (e.detail && e.detail.values) || {};
+    // A new socket's stored value is read from what this page had before it.
+    const before = last;
     for (const [name, v] of Object.entries(values)) {
       if (!v || typeof v.seq !== "number") continue;
       last = Math.max(last, v.seq);
       const w = wrapOf(name);
+      const editor = editorIn(w);
       if (typeof v.html === "string") {
         const theirs = waiting.get(name);
-        if (!theirs || theirs.seq < v.seq) {
-          const first = theirs && !v.own ? theirs.first : v.seq;
-          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, first});
+        // What the editor shows already: seen, with nothing to draw.
+        const shows = editor && (editor.value === v.html ||
+          (v.born && !typedSince(editor) && editor.getAttribute("value") === v.html));
+        if (shows && (!theirs || theirs.seq < v.seq)) {
+          waiting.delete(name);
+        } else if (!theirs || theirs.seq < v.seq) {
+          const seen = theirs && !v.own ? theirs.seen : v.born ? before : v.seq - 1;
+          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, seen, born: !!v.born});
         }
         tryShow(name);
       }
