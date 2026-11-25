@@ -67,6 +67,7 @@ defmodule Barkpark.Content.PortableText do
   """
 
   alias Barkpark.Content.LinkHref
+  alias Barkpark.Content.PortableTextPairing
 
   @decorators %{
     "strong" => "strong",
@@ -460,7 +461,11 @@ defmodule Barkpark.Content.PortableText do
 
   defp keep_stored(blocks, stored) do
     indexed =
-      Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1]), &1})
+      stored
+      |> Enum.with_index()
+      |> Enum.map(fn {b, i} ->
+        {{normalize(fragment_html(b)), drawn_list(b)}, to_html([b]), b, i}
+      end)
 
     kept =
       blocks
@@ -473,8 +478,12 @@ defmodule Barkpark.Content.PortableText do
             Enum.find_index(left, &(elem(&1, 1) == html))
 
         case i do
-          nil -> {{:rebuilt, block}, left}
-          i -> {{:kept, left |> Enum.at(i) |> elem(2)}, List.delete_at(left, i)}
+          nil ->
+            {{:rebuilt, block}, left}
+
+          i ->
+            {{:kept, elem(Enum.at(left, i), 2), elem(Enum.at(left, i), 3)},
+             List.delete_at(left, i)}
         end
       end)
       |> elem(0)
@@ -513,31 +522,29 @@ defmodule Barkpark.Content.PortableText do
     end)
   end
 
-  # An edited block takes the `_key` of the stored text block at its position
-  # when no kept block holds that key, so editing a word does not rekey its
-  # paragraph. Anything else keeps the position key `from_html/1` gave it.
+  # An edited block takes the `_key` of the stored text block it replaces
+  # (`PortableTextPairing`: by its place between kept blocks, or by its words
+  # beside an insert) when no kept block holds that key, so editing a word
+  # does not rekey its paragraph. Anything else keeps the position key
+  # `from_html/1` gave it.
   defp adopt_keys(kept, stored) do
-    taken = for {:kept, %{"_key" => k}} <- kept, into: MapSet.new(), do: k
+    taken = for {:kept, %{"_key" => k}, _i} <- kept, into: MapSet.new(), do: k
+    pairs = PortableTextPairing.pairs(kept, stored)
 
     kept
     |> Enum.with_index()
     |> Enum.map_reduce(taken, fn
-      {{:kept, block}, _i}, taken ->
+      {{:kept, block, _i}, _p}, taken ->
         {block, taken}
 
-      {{:rebuilt, %{"_type" => "block"} = block}, i}, taken ->
-        case Enum.at(stored, i) do
-          %{"_type" => "block", "_key" => k} = old when is_binary(k) ->
-            if MapSet.member?(taken, k),
-              do: {block, taken},
-              else: {adopt(block, old), MapSet.put(taken, k)}
-
-          _ ->
-            {block, taken}
+      {{:rebuilt, block}, p}, taken ->
+        with j when is_integer(j) <- pairs[p],
+             %{"_key" => k} = old <- Enum.at(stored, j),
+             false <- MapSet.member?(taken, k) do
+          {adopt(block, old), MapSet.put(taken, k)}
+        else
+          _ -> {block, taken}
         end
-
-      {{:rebuilt, block}, _i}, taken ->
-        {block, taken}
     end)
     |> elem(0)
   end
