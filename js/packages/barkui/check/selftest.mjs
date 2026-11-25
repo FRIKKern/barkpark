@@ -27,6 +27,7 @@ import { readPartCss, sameAsShipped } from './cssom.mjs'
 import { buildShowroom } from '../build/showroom.mjs'
 import { LAYER_CASES } from './layer-cases.mjs'
 import { PLACEMENT_CASES } from './placement-cases.mjs'
+import { NUMBER_CASES } from './number-cases.mjs'
 import { SLIDER_CASES } from './slider-cases.mjs'
 import { REST_CASES } from './rest-cases.mjs'
 import { POINTER_CASES } from './pointer-cases.mjs'
@@ -616,6 +617,7 @@ steps.push({
   ...LAYER_CASES,
   ...PLACEMENT_CASES,
   ...SLIDER_CASES,
+  ...NUMBER_CASES,
   ...REST_CASES,
   ...POINTER_CASES,
   ...PAGE_CASES,
