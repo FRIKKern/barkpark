@@ -36,7 +36,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   editor, so a paragraph added in another block is never a clash there.
   """
 
-  alias Barkpark.Content.PortableText
+  alias Barkpark.Content.{PortableText, PortableTextAlign}
 
   # Blocks lined up at most: base × side.
   @max_cells 20_000
@@ -174,15 +174,12 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp edits(base, side) do
     {a, b} = {Enum.map(base, &drawn/1), Enum.map(side, &drawn/1)}
     {pairs, unsure} = lcs(a, b)
-    anchors = [{-1, -1}] ++ pairs ++ [{length(base), length(side)}]
+    side_at = List.to_tuple(side)
 
     gaps =
-      anchors
-      |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.map(fn [{b0, s0}, {b1, s1}] ->
-        # Start and count: a range ending at -1 would read as the last index.
-        {b0, Enum.to_list((b0 + 1)..(b1 - 1)//1), Enum.slice(side, s0 + 1, s1 - s0 - 1)}
-      end)
+      pairs
+      |> PortableTextAlign.gaps(length(base), length(side))
+      |> Enum.map(fn {b0, gone, new} -> {b0, gone, Enum.map(new, &elem(side_at, &1))} end)
       |> Enum.reject(fn {_b0, gone, new} -> gone == [] and new == [] end)
 
     Enum.reduce(gaps, %{at: %{}, one: MapSet.new(), ins: %{}, gaps: [], unsure: unsure}, fn
@@ -203,13 +200,13 @@ defmodule Barkpark.Content.PortableTextMerge do
     end)
   end
 
-  # Index pairs of a longest common subsequence of `a` and `b`, in order,
-  # and the indexes of `a` whose pairing differs between such subsequences.
+  # Index pairs of a longest common subsequence of `a` and `b`, in order
+  # (`PortableTextAlign`, the line-up the key pairing uses too), and the
+  # indexes of `a` whose pairing differs between such subsequences.
   defp lcs(a, b) do
+    pairs = PortableTextAlign.pairs(a, b)
     {a, b} = {List.to_tuple(a), List.to_tuple(b)}
-    {n, m} = {tuple_size(a), tuple_size(b)}
     {l, c} = tables(a, b)
-    pairs = walk({a, b, l, n, m}, 0, 0, [])
 
     unsure =
       if c[{0, 0}] == 1 do
@@ -275,16 +272,6 @@ defmodule Barkpark.Content.PortableTextMerge do
           do: i
 
     MapSet.union(moved, MapSet.new(none))
-  end
-
-  defp walk({_a, _b, _l, n, m}, i, j, acc) when i >= n or j >= m, do: Enum.reverse(acc)
-
-  defp walk({a, b, l, _n, _m} = g, i, j, acc) do
-    cond do
-      elem(a, i) == elem(b, j) -> walk(g, i + 1, j + 1, [{i, j} | acc])
-      l[{i + 1, j}] >= l[{i, j + 1}] -> walk(g, i + 1, j, acc)
-      true -> walk(g, i, j + 1, acc)
-    end
   end
 
   # A merge can put two blocks with one `_key` side by side (each side kept
