@@ -159,7 +159,6 @@ export const SLOTS = [
   {
     slot: 'the first button in ui-number-input-increment or ui-number-input-decrement',
     at: 'ui-number-input ui-number-input-increment > button, ui-number-input ui-number-input-decrement > button',
-    first: true,
     writer: NUMBER,
     writes: [
       { property: 'user-select', values: ['none'], lines: [71] },
