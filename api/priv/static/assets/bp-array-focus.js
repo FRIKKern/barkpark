@@ -313,10 +313,28 @@
     input.value = JSON.stringify(seen);
   }
 
+  // task-727f65fc259d0c7b: a value marked `draw` is set in an input that
+  // is not focused too, while it still shows exactly `was`. The server put a
+  // stale field back to the store without changing its form, so no patch
+  // redraws it, and the input kept showing the old text.
+  function drawShown(values) {
+    var form = document.getElementById("editor-form");
+    if (!form) return;
+    Object.keys(values).forEach(function (name) {
+      var change = values[name];
+      var el = form.elements.namedItem(name);
+      if (!change || !change.draw || typeof change.value !== "string") return;
+      if (!el || el === document.activeElement || typeof el.value !== "string") return;
+      if (el.tagName === "INPUT" ? !TEXT.test(el.type) : el.tagName !== "TEXTAREA") return;
+      if (el.value === change.was) el.value = change.value;
+    });
+  }
+
   function onRemoteValues(e) {
     var detail = (e && e.detail) || {};
     var values = detail.values || {};
     takeFocused(values);
+    drawShown(values);
     if (detail.seqs) recordSeen(values, detail.seqs);
   }
 

@@ -315,7 +315,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       |> assign(editor_field_bases: %{}, editor_text_under_lock: nil, editor_rt_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
-    {:noreply, saved} = do_saved(socket, text_held, rich_held? or typed != [], params)
+    {:noreply, saved} = do_saved(socket, text_held, rich_held? or TextRejoin.held?(typed), params)
     {TextRejoin.hold(saved, typed), held}
   end
 
@@ -545,8 +545,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {doc, not_codes, built_bases} = page_codes(doc, socket, origin)
         # A page that rejoined a new socket, typed on a value it never took
         # (`TextRejoin`, task-4fc7383b936f606a).
-        units = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
-        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc)
+        {targets, units} = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
+        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc, targets)
 
         based =
           socket

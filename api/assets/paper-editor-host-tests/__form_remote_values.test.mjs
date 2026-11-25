@@ -224,6 +224,29 @@ check("born: a field not drawn takes the number; a textarea compares its line br
   assert.deepEqual(seen(), { "doc[kicker]": 5, "doc[excerpt]": 6, v: 2 });
 });
 
+// task-727f65fc259d0c7b: a stale field put back to the store is drawn the
+// stored value though it is not focused; anything else is left to the patch.
+check("draw: an input not focused, still showing was, takes the value", () => {
+  const { title, excerpt } = mount("one two three", "E");
+  excerpt.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three", draw: true } });
+  assert.equal(title.value, "one twB three");
+});
+
+check("draw: an input showing something else keeps it", () => {
+  const { title, excerpt } = mount("one twA three", "E");
+  excerpt.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three", draw: true } });
+  assert.equal(title.value, "one twA three");
+});
+
+check("no draw flag: an input not focused is left to the patch", () => {
+  const { title, excerpt } = mount("one two three", "E");
+  excerpt.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three" } });
+  assert.equal(title.value, "one two three");
+});
+
 window.close();
 if (failures) {
   console.log(`\n${failures} check(s) failed`);
