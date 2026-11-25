@@ -8,8 +8,15 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
     * Letters: one grapheme each, tagged with its span's marks (a decorator
       by name, an annotation by its def without `_key`) and its other span
-      fields. A child that is not a span, or a block field any side changed,
-      is a clash.
+      fields. An inline object is one letter, its value without `_key`
+      (task-8619a5423030aca8): an object a side changed is in its splice,
+      and it parts words as a space does. A child with no `_type` is a
+      clash.
+    * Block fields (all but `_key`, `_type`, `children`, `markDefs`), three
+      ways, one at a time: a field one side changed takes that side's
+      value; both changed it differently, a clash. A side that changed only
+      fields has no splice: theirs sets h2 while mine edits a word gives h2
+      with mine's word.
     * One splice per side, as `TextRebase` reads a text: the common prefix
       and suffix of the base's letters and the side's, and the middle of the
       base replaced by the side's. A letter is its grapheme and its marks,
@@ -27,6 +34,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       Letters put in join the span they touch when the marks are equal,
       else a new span with mine's span key or, when theirs has it, a fresh
       one unique in the block (a span's key is read only under its block).
+    * An inline object in mine's splice keeps mine's key when theirs'
+      block (but an object of theirs the splice replaces whole) and the rest
+      of the field (`:elsewhere`) do not use it, else a fresh key unique in
+      both.
     * Defs: theirs' stay, used or not. A link of mine's letters is theirs'
       def with that content, else mine's def added under mine's key (a
       fresh one when theirs holds it); two of mine's links with one content
@@ -47,21 +58,26 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   @fixed ~w(_key _type children markDefs)
 
-  @doc "The block with both sides' text, or `:clash`."
-  @spec merge(map(), map(), map()) :: {:ok, map()} | :clash
-  def merge(base, mine, theirs) do
+  @doc """
+  The block with both sides' text, or `:clash`. `opts`: `:elsewhere`, whether
+  the rest of the field uses a key (its blocks, and the children of blocks
+  but these), which an inline object of mine's splice does not take.
+  """
+  @spec merge(map(), map(), map(), keyword()) :: {:ok, map()} | :clash
+  def merge(base, mine, theirs, opts \\ []) do
     with true <- Enum.all?([base, mine, theirs], &text_block?/1),
-         true <- fields_same?(base, mine, theirs),
+         {:ok, fields} <- fields3(base, mine, theirs),
          {:ok, b} <- letters(base),
          {:ok, m} <- letters(mine),
          {:ok, t} <- letters(theirs),
-         {:ok, ms} <- splice(b, m),
-         {:ok, ts} <- splice(b, t),
+         {:ok, ms} <- splice(b, m, fields_changed?(base, mine)),
+         {:ok, ts} <- splice(b, t, fields_changed?(base, theirs)),
          true <- ms == ts or apart?(b, ms, ts),
-         {:ok, block} <- build(ms, ts, mine, theirs),
+         elsewhere = Keyword.get(opts, :elsewhere, fn _key -> false end),
+         {:ok, block} <- build(ms, ts, mine, theirs, elsewhere),
          # One edit both made: theirs, a side's own text (task-3d00496b0292f20b).
          true <- ms == ts or guard?(block, base, mine, theirs) do
-      {:ok, block}
+      {:ok, Enum.reduce(fields, block, &field/2)}
     else
       _ -> :clash
     end
@@ -72,12 +88,33 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   defp text_block?(_block), do: false
 
-  defp fields_same?(base, mine, theirs) do
+  # Block fields, three ways, one at a time (task-8619a5423030aca8): a
+  # field one side changed takes that side's value; both changed it
+  # differently, :clash. The result is built from theirs, so only mine's
+  # changes are put on it: `[{key, {:put, value} | :delete}]`.
+  defp fields3(base, mine, theirs) do
     keys = Enum.uniq(Map.keys(base) ++ Map.keys(mine) ++ Map.keys(theirs)) -- @fixed
-    Enum.all?(keys, &(base[&1] == mine[&1] and mine[&1] == theirs[&1]))
+
+    Enum.reduce_while(keys, {:ok, []}, fn k, {:ok, acc} ->
+      {b, m, t} = {Map.fetch(base, k), Map.fetch(mine, k), Map.fetch(theirs, k)}
+
+      cond do
+        m == b or m == t -> {:cont, {:ok, acc}}
+        t == b -> {:cont, {:ok, [{k, m} | acc]}}
+        true -> {:halt, :clash}
+      end
+    end)
   end
 
-  # [{grapheme, marks}], or :error for a child that is not a span.
+  defp field({k, {:ok, v}}, block), do: Map.put(block, k, v)
+  defp field({k, :error}, block), do: Map.delete(block, k)
+
+  defp fields_changed?(base, side),
+    do: Map.drop(base, @fixed) != Map.drop(side, @fixed)
+
+  # [{grapheme, marks}], an inline object as one letter `{{:obj, value},
+  # :obj}` (its value without `_key`), or :error for a child that is
+  # neither.
   defp letters(block) do
     defs = defs(block)
 
@@ -86,6 +123,9 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       %{"_type" => "span", "text" => text} = span, {:ok, acc} when is_binary(text) ->
         tag = tag(span, defs)
         {:cont, {:ok, [Enum.map(String.graphemes(text), &{&1, tag}) | acc]}}
+
+      %{"_type" => type} = obj, {:ok, acc} when is_binary(type) and type != "span" ->
+        {:cont, {:ok, [[{{:obj, Map.delete(obj, "_key")}, :obj}] | acc]}}
 
       _child, _acc ->
         {:halt, :error}
@@ -113,7 +153,11 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # letters. A mark changed on text that did not lies inside it, where
   # `marks_kept?/2` reads it; ends taken on graphemes as well refused a bold
   # word deleted before a word that starts alike (task-3d00496b0292f20b).
-  defp splice(base, side) do
+  # A side whose letters are base's, that changed only block fields:
+  # `:none` (task-8619a5423030aca8).
+  defp splice(base, base, true), do: {:ok, :none}
+
+  defp splice(base, side, _fields?) do
     {p, s} = ends(base, side)
     splice(base, side, p, s)
   end
@@ -140,6 +184,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp prefix(_a, _b, n), do: n
 
   # The two splices, widened to whole words, leave a base letter between.
+  defp apart?(_base, ms, ts) when :none in [ms, ts], do: true
+
   defp apart?(base, ms, ts) do
     gs = base |> Enum.map(&elem(&1, 0)) |> List.to_tuple()
     {{a, b}, {c, d}} = {widen(gs, ms), widen(gs, ts)}
@@ -163,6 +209,9 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # "exampel.com" and "example.org" gave "exampel.org" (task-5d102d5baa016e0a).
   defp word?(gs, i), do: letter?(elem(gs, i))
 
+  # An inline object parts words, as a space does.
+  defp letter?({:obj, _value}), do: false
+
   @apart ~r/\A(?:[\s\p{Z}]|(?=\p{P})[\x{3000}-\x{303F}\x{FF00}-\x{FFEF}])/u
   # One byte: read from a table made of `@apart` itself, so the two agree;
   # a regex per grapheme cost a capped block's guard 3x (task-da701626).
@@ -171,10 +220,16 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp letter?(g), do: not Regex.match?(@apart, g)
 
   # Theirs with mine's splice put in (moved by theirs' when theirs' is first).
-  defp build(same, same, _mine, theirs), do: {:ok, theirs}
+  defp build(same, same, _mine, theirs, _elsewhere), do: {:ok, theirs}
+  defp build(:none, _ts, _mine, theirs, _elsewhere), do: {:ok, theirs}
 
-  defp build({mp, me, put}, {tp, te, tput}, mine, theirs) do
-    shift = if tp < mp, do: length(tput) - (te - tp), else: 0
+  defp build({mp, me, put}, ts, mine, theirs, elsewhere) do
+    shift =
+      case ts do
+        {tp, te, tput} when tp < mp -> length(tput) - (te - tp)
+        _ -> 0
+      end
+
     {a, b} = {mp + shift, me + shift}
 
     spans =
@@ -182,7 +237,9 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       |> Enum.flat_map(&List.duplicate(&1, glen(&1)))
       |> Enum.slice(mp, length(put))
 
-    {new, added} = new_spans(Enum.zip(put, spans), defs(mine), theirs)
+    {new, added} =
+      new_spans(Enum.zip(put, spans), defs(mine), theirs, {elsewhere, gone(theirs, a, b)})
+
     children = cut(theirs, a, b, new)
 
     block = Map.put(theirs, "children", children)
@@ -201,45 +258,96 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # taken so far (`took`), so each run costs the same however many came
   # before (#28802 review: mine and theirs share base's span keys, and a
   # walk from 0 per run grew with the square of the runs).
-  defp new_spans(letters, mdefs, theirs) do
-    used = MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
+  #
+  # An inline object is a child of its own. It keeps mine's key when
+  # neither theirs' block nor the rest of the field (`elsewhere`) uses it,
+  # else takes a fresh key unique in both (task-8619a5423030aca8).
+  defp new_spans(letters, mdefs, theirs, {elsewhere, gone}) do
+    used =
+      MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
+      |> MapSet.difference(gone)
 
     tdefs =
       defs(theirs) |> Enum.sort() |> Enum.reduce(%{}, fn {k, d}, m -> Map.put_new(m, d, k) end)
 
     st = %{
       used: used,
+      elsewhere: elsewhere,
       taken: %{},
       took: MapSet.new(),
       added: [],
       ns: 0,
       nd: 0,
+      no: 0,
       same: Enum.frequencies(Map.values(mdefs))
     }
 
     {spans, %{added: added}} =
       letters
-      |> Enum.chunk_by(fn {{_g, tag}, ms} -> {tag, link_keys(ms, mdefs)} end)
-      |> Enum.map_reduce(st, fn [{{_, {_named, extra}}, ms} | _] = run, st ->
-        {marks, st} = marks(ms, mdefs, tdefs, theirs["_key"], st)
+      |> Enum.with_index()
+      |> Enum.chunk_by(fn
+        {{{{:obj, _}, :obj}, _ms}, i} -> {:obj, i}
+        {{{_g, tag}, ms}, _i} -> {tag, link_keys(ms, mdefs)}
+      end)
+      |> Enum.map(fn run -> Enum.map(run, &elem(&1, 0)) end)
+      |> Enum.map_reduce(st, fn
+        [{{{:obj, value}, :obj}, ms}], st ->
+          object(value, ms, theirs["_key"], st)
 
-        {key, st} =
-          if is_binary(ms["_key"]) and not MapSet.member?(st.used, ms["_key"]) do
-            {ms["_key"], st}
-          else
-            {key, n} = fresh(theirs["_key"], st.used, st.ns)
-            {key, %{st | ns: n}}
-          end
+        [{{_, {_named, extra}}, ms} | _] = run, st ->
+          {marks, st} = marks(ms, mdefs, tdefs, theirs["_key"], st)
 
-        text = Enum.map_join(run, fn {{g, _}, _} -> g end)
+          {key, st} =
+            if is_binary(ms["_key"]) and not MapSet.member?(st.used, ms["_key"]) do
+              {ms["_key"], st}
+            else
+              {key, n} = fresh(theirs["_key"], st.used, st.ns)
+              {key, %{st | ns: n}}
+            end
 
-        span =
-          Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+          text = Enum.map_join(run, fn {{g, _}, _} -> g end)
 
-        {{look(span), span}, %{st | used: MapSet.put(st.used, key)}}
+          span =
+            Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+
+          {{look(span), span}, %{st | used: MapSet.put(st.used, key)}}
       end)
 
     {spans, Enum.reverse(added)}
+  end
+
+  # The keys of theirs' inline objects mine's splice replaces whole
+  # ([a, b) in theirs' letters): free for mine's object there, so an object
+  # mine changed keeps its key.
+  defp gone(theirs, a, b) do
+    {keys, _} =
+      Enum.reduce(theirs["children"], {MapSet.new(), 0}, fn c, {acc, o} ->
+        n = glen(c)
+        acc = if not span?(c) and o >= a and o + n <= b, do: MapSet.put(acc, c["_key"]), else: acc
+        {acc, o + n}
+      end)
+
+    keys
+  end
+
+  defp object(value, ms, bkey, st) do
+    taken? = &(MapSet.member?(st.used, &1) or st.elsewhere.(&1))
+
+    {key, st} =
+      if is_binary(ms["_key"]) and not taken?.(ms["_key"]) do
+        {ms["_key"], st}
+      else
+        {key, n} = fresh_by(bkey <> "o", taken?, st.no)
+        {key, %{st | no: n}}
+      end
+
+    obj = Map.put(value, "_key", key)
+    {{look(obj), obj}, %{st | used: MapSet.put(st.used, key)}}
+  end
+
+  defp fresh_by(k, taken?, n) do
+    key = "#{k}i#{n}"
+    if taken?.(key), do: fresh_by(k, taken?, n + 1), else: {key, n + 1}
   end
 
   defp link_keys(span, mdefs), do: Enum.filter(List.wrap(span["marks"]), &is_map_key(mdefs, &1))
@@ -307,8 +415,11 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     do: MapSet.new(Enum.flat_map(children, &List.wrap(&1["marks"])))
 
   # What a span draws besides its text: its marks, as keys, and its fields.
-  defp look(span),
+  defp look(%{"_type" => "span"} = span),
     do: {Enum.sort(List.wrap(span["marks"])), Map.drop(span, ~w(_key _type text marks))}
+
+  # An inline object never joins a span or another object.
+  defp look(_child), do: {:obj, make_ref()}
 
   # The first free `<k>i<n>` from `n` on, and the counter to start from next.
   defp fresh(k, used, n) do
@@ -343,7 +454,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         {lt, rt} = {take(f, a - fo), drop(l, b - lo)}
         news = Enum.map(new, &elem(&1, 1))
 
-        if f == l and Enum.all?(new, fn {t, _} -> t == tag.(f) end) do
+        if f == l and span?(f) and Enum.all?(new, fn {t, _} -> t == tag.(f) end) do
           left ++ piece(f, lt <> Enum.map_join(news, & &1["text"]) <> rt) ++ right
         else
           # The right piece of a span split in two takes a key of its own.
@@ -386,6 +497,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   end
 
   defp used(theirs, news), do: MapSet.new(theirs["children"] ++ news, & &1["_key"])
+  defp span?(child), do: match?(%{"_type" => "span"}, child)
   defp put(s, text), do: Map.put(s, "text", text)
   defp piece(_s, ""), do: []
   defp piece(s, text), do: [put(s, text)]
@@ -400,7 +512,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # the count is mine + theirs - base exactly (#28761 review, check 5).
   # Tested directly for that reason.
   def guard?(block, base, mine, theirs) do
-    texts = Enum.map(block["children"], &text/1)
+    texts = Enum.map(block["children"], &gtext/1)
     joined = Enum.join(texts)
 
     [w, wb, wm, wt] =
@@ -416,7 +528,12 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       end)
   end
 
-  defp all(block), do: Enum.map_join(block["children"], &text/1)
+  defp all(block), do: Enum.map_join(block["children"], &gtext/1)
+
+  # The guard reads an inline object as a space: it parts words, as the
+  # snap reads it.
+  defp gtext(%{"_type" => "span"} = span), do: text(span)
+  defp gtext(_object), do: " "
 
   # Maximal runs of word letters, on graphemes as `word?/2` reads them. An
   # ASCII text splits on the same bytes natively: each of its graphemes is
@@ -438,5 +555,6 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
 
   defp text(%{"text" => t}) when is_binary(t), do: t
   defp text(_child), do: ""
-  defp glen(child), do: child |> text() |> String.graphemes() |> length()
+  defp glen(%{"_type" => "span"} = child), do: child |> text() |> String.graphemes() |> length()
+  defp glen(_object), do: 1
 end

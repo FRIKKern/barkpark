@@ -75,7 +75,7 @@ defmodule Barkpark.Content.PortableTextMerge do
       cond do
         not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
         crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
-        true -> three_way(base, m, t, Keyword.get(opts, :inline, true))
+        true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
       end
     end
   end
@@ -111,8 +111,11 @@ defmodule Barkpark.Content.PortableTextMerge do
     end)
   end
 
-  defp three_way(base, m, t, inline?) do
-    budget = if inline?, do: @inline_bytes, else: -1
+  # `keys`: how many times the field uses each key, for an inline object of
+  # a block merged inside it (`Inline`, task-8619a5423030aca8); false
+  # leaves the merge inside one block out.
+  defp three_way(base, m, t, keys) do
+    budget = if keys, do: @inline_bytes, else: -1
 
     {at, _left} =
       base
@@ -120,7 +123,7 @@ defmodule Barkpark.Content.PortableTextMerge do
       |> Enum.map_reduce(budget, fn {block, i}, left ->
         {me, te} = {Map.get(m.at, i, :same), Map.get(t.at, i, :same)}
         cost = bytes(block, me, te)
-        {pick(block, me, te, cost <= left), if(cost <= left, do: left - cost, else: left)}
+        {pick(block, me, te, cost <= left && keys), if(cost <= left, do: left - cost, else: left)}
       end)
 
     case for({:clash, _, {:changed, b}} <- at, do: text(b)) do
@@ -223,19 +226,38 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp pick(block, m, t, inline?) do
     cond do
       same_edit?(m, t) -> {:take, t}
-      inline? -> inline(block, m, t)
+      inline? -> inline(block, m, t, inline?)
       true -> {:clash, m, t}
     end
   end
 
-  defp inline(block, {:changed, mb} = m, {:changed, tb} = t) do
-    case Inline.merge(block, mb, tb) do
+  defp inline(block, {:changed, mb} = m, {:changed, tb} = t, keys) do
+    own = Enum.frequencies(Enum.map(children(mb) ++ children(tb), &child_key/1))
+    elsewhere = &(Map.get(keys, &1, 0) > Map.get(own, &1, 0))
+
+    case Inline.merge(block, mb, tb, elsewhere: elsewhere) do
       {:ok, merged} -> {:inline, merged}
       :clash -> {:clash, m, t}
     end
   end
 
-  defp inline(_block, m, t), do: {:clash, m, t}
+  defp inline(_block, m, t, _keys), do: {:clash, m, t}
+
+  # Each key the field uses, counted over both sides' blocks and children.
+  defp keys(mine, theirs) do
+    (mine ++ theirs)
+    |> Enum.flat_map(fn
+      %{"children" => cs} = b when is_list(cs) -> [b["_key"] | Enum.map(cs, &child_key/1)]
+      b -> [child_key(b)]
+    end)
+    |> Enum.frequencies()
+  end
+
+  defp children(%{"children" => cs}) when is_list(cs), do: cs
+  defp children(_block), do: []
+
+  defp child_key(%{"_key" => k}), do: k
+  defp child_key(_child), do: nil
 
   # The text `Inline` reads for a block both changed; 0 for any other.
   defp bytes(block, {:changed, a}, {:changed, b}),
