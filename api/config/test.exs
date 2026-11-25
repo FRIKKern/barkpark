@@ -398,6 +398,11 @@ config :barkpark, tenancy_default_scope_cache_ttl_ms: 0
 # outlive the sandbox that built it. `schema_catalog_cache_test.exs` turns it on.
 config :barkpark, schema_catalog_cache: false
 
+# The sanitizer's output cache (task-13c9d34562701725) is off, so a test that
+# reads a scrub's log line sees it on every call. `html_sanitizer_cache_test.exs`
+# turns it on for its own process.
+config :barkpark, html_sanitizer_cache: false
+
 # OFF in test for the same reason: a connected mount must not take panes a
 # dead render built inside another test's sandbox. `connect_handoff_test.exs`
 # turns it on.
