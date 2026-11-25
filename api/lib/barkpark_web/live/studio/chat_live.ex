@@ -6829,7 +6829,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     with true <- pending?,
          :ok <- if(session, do: :ok, else: {:error, {:runtime_unavailable, :no_recorder}}),
          :ok <- ChatHostGate.authorize(socket.assigns, decision),
-         {:ok, _} <- ApprovalAnswer.resolve(store_id, request_id, to_string(status), deliver) do
+         {:ok, _} <- ApprovalAnswer.resolve(store_id, request_id, decision, deliver) do
       messages = flip_card(socket.assigns.messages, request_id, status)
       broadcast_resolution(socket, request_id, status)
 
