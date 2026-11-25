@@ -279,6 +279,7 @@ jobs:
           node ../paper-editor-host-tests/__paper_editor_move.test.mjs
           node ../paper-editor-host-tests/__paper_find_bar.test.mjs
           node ../paper-editor-host-tests/__paper_anchor.test.mjs
+          node ../paper-editor-host-tests/__rt_remote_caret.test.mjs
           node ../paper-editor-host-tests/__paper_export.test.mjs
           node ../paper-editor-host-tests/__rte_move_focus.test.mjs
           node ../paper-editor-host-tests/__rte_pt_blocks.test.mjs

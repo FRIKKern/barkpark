@@ -100,10 +100,26 @@
     };
   };
 
+  // Where the caret goes in a block whose text theirs changed, as TanStack's
+  // editor carries its selection through another editor's text patch: after
+  // the same characters it was after. A change before it moves it by the
+  // change's length, one after it leaves it; inside the changed part it goes
+  // after what replaced it (#28349 r3 review, K2).
+  const mapOffset = (old, now, at) => {
+    const max = Math.min(old.length, now.length);
+    let p = 0;
+    while (p < max && old[p] === now[p]) p++;
+    let s = 0;
+    while (s < max - p && old[old.length - 1 - s] === now[now.length - 1 - s]) s++;
+    if (at <= p) return at;
+    if (at >= old.length - s) return now.length - (old.length - at);
+    return now.length - s;
+  };
+
   // The block of the same key, else of the same text nearest where it was
   // (a paragraph theirs added above moves it down): the caret goes back to
-  // its offset. Its text changed: the caret goes to the end of the block now
-  // at its place.
+  // its offset. Its text changed: the caret goes to the same place in the
+  // block now at its place (`mapOffset`).
   const caretBack = (body, c) => {
     const blocks = [...body.children];
     if (!blocks.length) return;
@@ -114,7 +130,7 @@
     let at = c.at;
     if (!block || block.textContent !== c.text) {
       block = blocks[Math.min(Math.max(c.i, 0), blocks.length - 1)];
-      at = block.textContent.length;
+      at = mapOffset(c.text, block.textContent, c.at);
     }
     const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
     let node = block, off = 0, t;
