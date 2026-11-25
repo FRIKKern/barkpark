@@ -19,9 +19,12 @@ defmodule Barkpark.Content.PortableTextMerge do
     * Both sides added blocks at one place, or one side added blocks inside
       a gap of the other's that spans several base blocks: a clash.
     * A base block both sides changed, each in a gap of one block for one,
-      is a clash of that block. Both changed it to the same words: one
-      change. Any other block both touched (one deleted it, or one changed
-      it in a wider gap): the whole value is a clash.
+      is merged inside the block when each changed only its text, in one
+      place, and the places are words apart (`PortableTextMerge.Inline`,
+      task-da701626f5be2143); else it is a clash of that block. Both
+      changed it to the same words: one change. Any other block both
+      touched (one deleted it, or one changed it in a wider gap): the whole
+      value is a clash.
     * Where the words can be lined up more than one way (two identical
       paragraphs, empty ones) and the other side touched a block whose
       place depends on the choice: the whole value is a clash.
@@ -37,9 +40,15 @@ defmodule Barkpark.Content.PortableTextMerge do
   """
 
   alias Barkpark.Content.{PortableText, PortableTextAlign}
+  alias Barkpark.Content.PortableTextMerge.Inline
 
   # Blocks lined up at most: base × side.
   @max_cells 20_000
+
+  # Text merged inside blocks per merge, at most (base + mine + theirs bytes
+  # of each such block): past it, a block both changed is a clash of it, as
+  # before (about 21 reductions a byte, so a save stays near 40M).
+  @inline_bytes 2_000_000
 
   @doc """
   `{:ok, merged}` when the line-up is certain and no block clashed. Else
@@ -49,9 +58,10 @@ defmodule Barkpark.Content.PortableTextMerge do
   the banner. A clash is never stored.
 
   `opts`: `inline: false` (tests only) leaves out the merge inside one
-  block (task-266ffbe9cd115f3c); until that lands it changes nothing.
+  block (`Inline`, task-266ffbe9cd115f3c): a block both changed is then a
+  clash of that block, as before it.
   """
-  def merge(base, mine, theirs, _opts \\ []) do
+  def merge(base, mine, theirs, opts \\ []) do
     base = list(base)
     {mine, theirs} = {list(mine), list(theirs)}
 
@@ -62,7 +72,7 @@ defmodule Barkpark.Content.PortableTextMerge do
       t = edits(base, theirs)
 
       if certain?(m, t) and certain?(t, m) and not crossed?(m, t),
-        do: three_way(base, m, t),
+        do: three_way(base, m, t, Keyword.get(opts, :inline, true)),
         else: whole_clash(mine, theirs)
     end
   end
@@ -98,12 +108,16 @@ defmodule Barkpark.Content.PortableTextMerge do
     end)
   end
 
-  defp three_way(base, m, t) do
-    at =
+  defp three_way(base, m, t, inline?) do
+    budget = if inline?, do: @inline_bytes, else: -1
+
+    {at, _left} =
       base
       |> Enum.with_index()
-      |> Enum.map(fn {block, i} ->
-        pick(block, Map.get(m.at, i, :same), Map.get(t.at, i, :same))
+      |> Enum.map_reduce(budget, fn {block, i}, left ->
+        {me, te} = {Map.get(m.at, i, :same), Map.get(t.at, i, :same)}
+        cost = bytes(block, me, te)
+        {pick(block, me, te, cost <= left), if(cost <= left, do: left - cost, else: left)}
       end)
 
     case for({:clash, _, {:changed, b}} <- at, do: text(b)) do
@@ -131,14 +145,34 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp list(_v), do: []
 
   # One base block: what each side did with it. Both changed it otherwise
-  # only in one-block gaps (`crossed?/2`).
-  defp pick(block, :same, :same), do: {:keep, block}
-  defp pick(_block, m, :same), do: {:take, m}
-  defp pick(_block, :same, t), do: {:take, t}
+  # only in one-block gaps (`crossed?/2`): merged inside the block
+  # (`{:inline, block}`) or a clash of it.
+  defp pick(block, :same, :same, _inline?), do: {:keep, block}
+  defp pick(_block, m, :same, _inline?), do: {:take, m}
+  defp pick(_block, :same, t, _inline?), do: {:take, t}
 
-  defp pick(_block, m, t) do
-    if same_edit?(m, t), do: {:take, t}, else: {:clash, m, t}
+  defp pick(block, m, t, inline?) do
+    cond do
+      same_edit?(m, t) -> {:take, t}
+      inline? -> inline(block, m, t)
+      true -> {:clash, m, t}
+    end
   end
+
+  defp inline(block, {:changed, mb} = m, {:changed, tb} = t) do
+    case Inline.merge(block, mb, tb) do
+      {:ok, merged} -> {:inline, merged}
+      :clash -> {:clash, m, t}
+    end
+  end
+
+  defp inline(_block, m, t), do: {:clash, m, t}
+
+  # The text `Inline` reads for a block both changed; 0 for any other.
+  defp bytes(block, {:changed, a}, {:changed, b}),
+    do: Enum.sum(Enum.map([block, a, b], &byte_size(text(&1))))
+
+  defp bytes(_block, _m, _t), do: 0
 
   defp same_edit?(:deleted, :deleted), do: true
   defp same_edit?({:changed, a}, {:changed, b}), do: drawn(a) == drawn(b)
@@ -157,6 +191,7 @@ defmodule Barkpark.Content.PortableTextMerge do
           case edit do
             {:keep, b} -> [b]
             {:take, {:changed, b}} -> [b]
+            {:inline, b} -> [b]
             {:take, :deleted} -> []
             {:clash, {:changed, b}, _t} -> [b]
           end

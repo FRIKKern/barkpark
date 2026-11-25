@@ -1,0 +1,297 @@
+defmodule Barkpark.Content.PortableTextMerge.Inline do
+  @moduledoc """
+  The merge inside one block (task-266ffbe9cd115f3c, task-da701626f5be2143,
+  plan /papers/pt-merge-inside-one-block rev 4, part 2): a text block both
+  sides changed, each in a gap of one block for one, merges when each side
+  changed its text in one place and the places are apart. Called only from
+  `PortableTextMerge`'s `pick/4`.
+
+    * Letters: one grapheme each, tagged with its span's marks (a decorator
+      by name, an annotation by its def without `_key`) and its other span
+      fields. A child that is not a span, or a block field any side changed,
+      is a clash.
+    * One splice per side, as `TextRebase` reads a text: the common prefix
+      and suffix of the base's letters and the side's, and the middle of the
+      base replaced by the side's. Text only: a splice that only changes
+      marks, or puts in letters whose marks no letter beside or under it
+      has, is a clash (a mark of its own is task 4).
+    * Apart: each splice widened to whole words (a run of letters, Han and
+      kana with no space between them one word) leaves at least one base
+      letter between them. Two edits in one word, touching ranges and two
+      inserts at one point are a clash: "cart" to "carts" and "dart" would
+      give "darts".
+    * Built from theirs, as the store holds it: only mine's splice is
+      replaced, so every span outside it is theirs' map byte for byte, and
+      theirs' defs, used or not, stay. Letters put in join the span they
+      touch when the marks are equal, else a new span with mine's span key
+      or, when theirs has it, a fresh one.
+    * A guard on the result: each word is a word of base, mine or theirs,
+      at most count(mine) + count(theirs) - count(base) times, and the text
+      splits into the graphemes it was built from (no flag made at a join).
+      Otherwise a clash.
+
+  A block over `TextRebase.max_bytes/0` of text is a clash, as before.
+  """
+
+  alias Barkpark.Content.TextRebase
+
+  @fixed ~w(_key _type children markDefs)
+
+  @doc "The block with both sides' text, or `:clash`."
+  @spec merge(map(), map(), map()) :: {:ok, map()} | :clash
+  def merge(base, mine, theirs) do
+    with true <- Enum.all?([base, mine, theirs], &text_block?/1),
+         true <- fields_same?(base, mine, theirs),
+         {:ok, b} <- letters(base),
+         {:ok, m} <- letters(mine),
+         {:ok, t} <- letters(theirs),
+         {:ok, ms} <- splice(b, m),
+         {:ok, ts} <- splice(b, t),
+         true <- ms == ts or apart?(b, ms, ts),
+         {:ok, block} <- build(ms, ts, mine, theirs),
+         true <- guard?(block, base, mine, theirs) do
+      {:ok, block}
+    else
+      _ -> :clash
+    end
+  end
+
+  defp text_block?(%{"_type" => "block", "children" => children}) when is_list(children),
+    do: byte_size(Enum.map_join(children, &text/1)) <= TextRebase.max_bytes()
+
+  defp text_block?(_block), do: false
+
+  defp fields_same?(base, mine, theirs) do
+    keys = Enum.uniq(Map.keys(base) ++ Map.keys(mine) ++ Map.keys(theirs)) -- @fixed
+    Enum.all?(keys, &(base[&1] == mine[&1] and mine[&1] == theirs[&1]))
+  end
+
+  # [{grapheme, marks}], or :error for a child that is not a span.
+  defp letters(block) do
+    defs = defs(block)
+
+    Enum.reduce_while(block["children"], {:ok, []}, fn
+      %{"_type" => "span", "text" => text} = span, {:ok, acc} when is_binary(text) ->
+        tag = tag(span, defs)
+        {:cont, {:ok, acc ++ Enum.map(String.graphemes(text), &{&1, tag})}}
+
+      _child, _acc ->
+        {:halt, :error}
+    end)
+  end
+
+  # A span's marks as they read (a def by its content), with its other fields.
+  defp tag(span, defs) do
+    marks = if is_list(span["marks"]), do: span["marks"], else: []
+    named = Enum.map(marks, &if(is_map_key(defs, &1), do: {:def, defs[&1]}, else: {:dec, &1}))
+    {Enum.sort(named), Map.drop(span, ~w(_key _type text marks))}
+  end
+
+  defp defs(block) do
+    for %{"_key" => k} = d <- List.wrap(block["markDefs"]),
+        into: %{},
+        do: {k, Map.delete(d, "_key")}
+  end
+
+  # {from, to, letters}: the side's middle in place of base[from, to).
+  defp splice(base, side) do
+    p = prefix(base, side, 0)
+
+    s =
+      min(prefix(Enum.reverse(base), Enum.reverse(side), 0), min(length(base), length(side)) - p)
+
+    {mid, put} =
+      {Enum.slice(base, p, length(base) - s - p), Enum.slice(side, p, length(side) - s - p)}
+
+    near = Enum.slice(base, max(p - 1, 0), length(mid) + if(p > 0, do: 2, else: 1))
+    allowed = MapSet.new(near, &elem(&1, 1)) |> MapSet.put({[], %{}})
+
+    cond do
+      Enum.map(mid, &elem(&1, 0)) == Enum.map(put, &elem(&1, 0)) -> :error
+      Enum.all?(put, &MapSet.member?(allowed, elem(&1, 1))) -> {:ok, {p, length(base) - s, put}}
+      true -> :error
+    end
+  end
+
+  defp prefix([x | a], [x | b], n), do: prefix(a, b, n + 1)
+  defp prefix(_a, _b, n), do: n
+
+  # The two splices, widened to whole words, leave a base letter between.
+  defp apart?(base, ms, ts) do
+    gs = base |> Enum.map(&elem(&1, 0)) |> List.to_tuple()
+    {{a, b}, {c, d}} = {widen(gs, ms), widen(gs, ts)}
+    b < c or d < a
+  end
+
+  defp widen(gs, {p, e, _put}) do
+    n = tuple_size(gs)
+    from = if p > 0 and word?(elem(gs, p - 1)), do: edge(gs, p - 1, -1), else: p
+    to = if e < n and word?(elem(gs, e)), do: edge(gs, e, 1) + 1, else: e
+    {from, to}
+  end
+
+  defp edge(gs, i, step) do
+    j = i + step
+    if j >= 0 and j < tuple_size(gs) and word?(elem(gs, j)), do: edge(gs, j, step), else: i
+  end
+
+  defp word?(g), do: Regex.match?(~r/\A(?:[\p{L}\p{N}]|\p{M}+\z)/u, g)
+
+  # Theirs with mine's splice put in (moved by theirs' when theirs' is first).
+  defp build(same, same, _mine, theirs), do: {:ok, theirs}
+
+  defp build({mp, me, put}, {tp, te, tput}, mine, theirs) do
+    shift = if tp < mp, do: length(tput) - (te - tp), else: 0
+    {a, b} = {mp + shift, me + shift}
+    defs = Map.new(defs(theirs), fn {k, d} -> {d, k} end)
+
+    keys =
+      mine["children"]
+      |> Enum.flat_map(&List.duplicate(&1["_key"], glen(&1)))
+      |> Enum.slice(mp, length(put))
+
+    with {:ok, new} <- new_spans(Enum.zip(put, keys), defs, theirs) do
+      {:ok, Map.put(theirs, "children", cut(theirs, a, b, new))}
+    end
+  end
+
+  # Mine's letters as spans in theirs' marks ({tag, span}); a def theirs
+  # lacks is a clash.
+  defp new_spans(letters, defs, theirs) do
+    used = MapSet.new(theirs["children"], & &1["_key"])
+
+    letters
+    |> Enum.chunk_by(fn {{_g, tag}, _key} -> tag end)
+    |> Enum.reduce_while({[], used}, fn [{{_, {named, extra} = tag}, key} | _] = run,
+                                        {acc, used} ->
+      marks =
+        Enum.map(named, fn
+          {:dec, m} -> m
+          {:def, d} -> defs[d]
+        end)
+
+      key =
+        if is_binary(key) and not MapSet.member?(used, key),
+          do: key,
+          else: fresh(theirs["_key"], used, 0)
+
+      text = Enum.map_join(run, fn {{g, _}, _} -> g end)
+
+      span =
+        Map.merge(extra, %{"_type" => "span", "_key" => key, "text" => text, "marks" => marks})
+
+      if Enum.all?(marks, &is_binary/1),
+        do: {:cont, {acc ++ [{tag, span}], MapSet.put(used, key)}},
+        else: {:halt, :error}
+    end)
+    |> case do
+      {spans, _used} -> {:ok, spans}
+      :error -> :error
+    end
+  end
+
+  defp fresh(k, used, n) do
+    key = "#{k}i#{n}"
+    if MapSet.member?(used, key), do: fresh(k, used, n + 1), else: key
+  end
+
+  # Theirs' spans with letters [a, b) replaced by `new`: a span left or right
+  # of the cut is kept as it is; the first and last it reaches keep their
+  # maps with their text cut. One new run with the marks of the span it
+  # touches joins it.
+  defp cut(theirs, a, b, new) do
+    defs = defs(theirs)
+
+    {spans, _} =
+      Enum.map_reduce(theirs["children"], 0, fn s, o ->
+        n = glen(s)
+        {{s, o, n}, o + n}
+      end)
+
+    {left, rest} = Enum.split_with(spans, fn {_s, o, n} -> o + n <= a end)
+    {mid, right} = Enum.split_with(rest, fn {_s, o, _n} -> o < b end)
+    {left, right} = {Enum.map(left, &elem(&1, 0)), Enum.map(right, &elem(&1, 0))}
+    tag = &tag(&1, defs)
+
+    case {mid, new} do
+      {[], [{t, s}]} ->
+        cond do
+          left != [] and tag.(List.last(left)) == t ->
+            Enum.drop(left, -1) ++ [glue(List.last(left), "", s["text"])] ++ right
+
+          right != [] and tag.(hd(right)) == t ->
+            left ++ [glue(hd(right), s["text"], "")] ++ tl(right)
+
+          true ->
+            left ++ [s] ++ right
+        end
+
+      {[], _} ->
+        left ++ Enum.map(new, &elem(&1, 1)) ++ right
+
+      _ ->
+        {{f, fo, _}, {l, lo, _}} = {hd(mid), List.last(mid)}
+        left ++ pieces(f, l, {take(f, a - fo), drop(l, b - lo)}, new, tag, theirs) ++ right
+    end
+  end
+
+  defp pieces(f, l, {lt, rt}, new, tag, theirs) do
+    same = f == l
+    news = Enum.map(new, &elem(&1, 1))
+    # The right piece of a span split in two takes a key of its own.
+    two = fn r ->
+      if same and lt != "",
+        do: Map.put(r, "_key", fresh(theirs["_key"], used(theirs, news), 0)),
+        else: r
+    end
+
+    {t, txt} = with [{t, s}] <- new, do: {t, s["text"]}, else: (_ -> {nil, nil})
+
+    cond do
+      txt && lt != "" && tag.(f) == t ->
+        if same, do: [put(f, lt <> txt <> rt)], else: [put(f, lt <> txt)] ++ piece(l, rt)
+
+      txt && rt != "" && tag.(l) == t ->
+        piece(f, lt) ++ [put(two.(l), txt <> rt)]
+
+      true ->
+        piece(f, lt) ++ news ++ piece(two.(l), rt)
+    end
+  end
+
+  defp used(theirs, news), do: MapSet.new(theirs["children"] ++ news, & &1["_key"])
+  defp put(s, text), do: Map.put(s, "text", text)
+  defp piece(_s, ""), do: []
+  defp piece(s, text), do: [put(s, text)]
+
+  defp glue(span, before, after_), do: Map.put(span, "text", before <> span["text"] <> after_)
+  defp take(s, n), do: s |> text() |> String.graphemes() |> Enum.take(max(n, 0)) |> Enum.join()
+  defp drop(s, n), do: s |> text() |> String.graphemes() |> Enum.drop(max(n, 0)) |> Enum.join()
+
+  defp guard?(block, base, mine, theirs) do
+    texts = Enum.map(block["children"], &text/1)
+    joined = Enum.join(texts)
+
+    [w, wb, wm, wt] =
+      Enum.map(
+        [joined, all(base), all(mine), all(theirs)],
+        &(&1 |> words() |> Enum.frequencies())
+      )
+
+    String.graphemes(joined) == Enum.flat_map(texts, &String.graphemes/1) and
+      Enum.all?(w, fn {x, k} ->
+        (is_map_key(wb, x) or is_map_key(wm, x) or is_map_key(wt, x)) and
+          k <= Map.get(wm, x, 0) + Map.get(wt, x, 0) - Map.get(wb, x, 0)
+      end)
+  end
+
+  defp all(block), do: Enum.map_join(block["children"], &text/1)
+
+  # Maximal runs of word letters: a letter or digit, then letters, digits
+  # and marks (an accent, a vowel sign) that go on with it.
+  defp words(text), do: ~r/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/u |> Regex.scan(text) |> List.flatten()
+
+  defp text(%{"text" => t}) when is_binary(t), do: t
+  defp text(_child), do: ""
+  defp glen(child), do: child |> text() |> String.graphemes() |> length()
+end
