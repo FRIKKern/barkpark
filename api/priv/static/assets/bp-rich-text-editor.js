@@ -85,6 +85,11 @@ class BpRichTextEditor extends HTMLElement {
     this._editor = document.createElement("div");
     this._editor.contentEditable = "true";
     this._editor.className = "bp-rte-body";
+    // Every space is drawn, as TanStack's editor draws them
+    // (task-a196f4063197dc02). Collapsed, two spaces another editor's
+    // delete left ("one  three") showed as one, and the browser dropped
+    // one when the next letter was typed between them ("one Qthree").
+    this._editor.style.whiteSpace = "pre-wrap";
     // A bare contenteditable div has no role and no name; the field's label
     // rides on the host as data-label (task-e471f8bd50a1aefd).
     this._editor.setAttribute("role", "textbox");
