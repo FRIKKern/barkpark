@@ -5,9 +5,18 @@
 //
 // Run: node ../paper-editor-host-tests/__studio_leave.test.mjs
 import assert from "node:assert/strict";
-import { JSDOM } from "./jsdom.mjs";
+import { JSDOM, VirtualConsole } from "./jsdom.mjs";
 
-const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/w/a/p/b/d/production/studio/post/p1" });
+// A link that is not held back navigates, which jsdom does not do: quiet.
+const virtualConsole = new VirtualConsole();
+virtualConsole.on("jsdomError", (err) => {
+  if (!/navigation/.test(err.message)) throw err;
+});
+
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "http://localhost/w/a/p/b/d/production/studio/post/p1",
+  virtualConsole,
+});
 const { window } = dom;
 for (const name of ["document", "Element", "Event", "MouseEvent", "HTMLElement", "Node"]) globalThis[name] = window[name];
 globalThis.window = window;
@@ -81,6 +90,20 @@ try {
     assert.equal(e.defaultPrevented, false);
     assert.equal(navigated, 1);
   }
+
+  {
+    // A full-page link answered Leave: its own unload does not ask again
+    // (#28836 r1 review: confirm, then the browser's "Leave site?").
+    page(QUESTION);
+    answer = true;
+    click("away");
+    const e = new window.Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(e);
+    assert.equal(e.defaultPrevented, false, "Leave answered: the unload does not ask twice");
+  }
+
+  // Past the Leave answer's moment, the tab's close asks again.
+  await new Promise((resolve) => setTimeout(resolve, 2100));
 
   {
     // The tab's close or reload asks while held, and not otherwise.

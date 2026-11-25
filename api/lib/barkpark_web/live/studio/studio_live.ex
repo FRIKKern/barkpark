@@ -34,6 +34,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.{DocActions, Mount, Path, PostIdentity, Shared}
 
+  alias BarkparkWeb.Studio.StudioLive.LeaveAsk
+
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     AccessPanel,
     Airdrop,
@@ -182,6 +184,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   defp soonest_expiry(_), do: nil
+
+  defp leave("select", params, socket), do: Scope.select(params, socket)
+  defp leave("expand-pane", params, socket), do: Scope.expand_pane(params, socket)
+  defp leave("new-document", params, socket), do: Fields.new_document(params, socket)
 
   defp refresh_caps(socket), do: Phoenix.Component.assign(socket, :caps, Caps.derive(socket))
 
@@ -464,7 +470,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── handle_event/3 routing heads ────────────────────────────────────────────
 
   @impl true
-  def handle_event("select", params, socket), do: Scope.select(params, socket)
+  # A press that leaves a held field asks first (`LeaveAsk`).
+  def handle_event(event, params, socket) when event in ~w(select expand-pane new-document) do
+    case LeaveAsk.ask(event, params, socket) do
+      {:stay, socket} -> {:noreply, socket}
+      {:go, socket} -> leave(event, params, socket)
+    end
+  end
+
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)
   def handle_event("view-more", _params, socket), do: Views.more(socket)
@@ -475,7 +488,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("toggle-create", params, socket), do: Scope.toggle_create(params, socket)
   def handle_event("create-workspace", params, socket), do: Scope.create_workspace(params, socket)
   def handle_event("create-project", params, socket), do: Scope.create_project(params, socket)
-  def handle_event("expand-pane", params, socket), do: Scope.expand_pane(params, socket)
 
   def handle_event("desk-search", params, socket), do: DeskSearch.search(params, socket)
   def handle_event("desk-search-clear", _params, socket), do: DeskSearch.clear(socket)
@@ -511,8 +523,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
      |> assign(:desk_list_sorts, sorts)
      |> Shared.rebuild_panes()}
   end
-
-  def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
 
   def handle_event("save", params, socket),
     do: params |> Fields.save(socket) |> Scope.settle_group()

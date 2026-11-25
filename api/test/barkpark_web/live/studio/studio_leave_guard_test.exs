@@ -96,6 +96,8 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     doc.content
   end
 
+  defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
+
   # A held: B's save lands under A's post rewriting the same letter.
   defp hold(c, surface, target, field) do
     {a, b} = {open(c, surface), open(c, surface)}
@@ -139,6 +141,55 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
       assert has_element?(a, "[data-pane-editing][data-desk-held]")
       refute has_element?(a, "form#editor-form[data-studio-held]")
     end
+  end
+
+  # #28836 r1 review: Studio's list rows and New document are phx-click
+  # buttons, not links. A row click left the held field with no question
+  # and A's words were gone. The server asks (`StudioLive.LeaveAsk`).
+  test "studio: a row of another document asks first and stays, A's words kept; the same press again leaves",
+       c do
+    {:ok, _} =
+      Content.create_document(
+        c.type,
+        %{"doc_id" => c.id <> "-2", "title" => "Second", "content" => %{}},
+        @dataset
+      )
+
+    a = hold(c, :studio, "doc[notes]", "notes")
+    row = ~s(button[phx-click="select"][phx-value-id="#{c.id}-2"])
+    assert ObjectRichText.eventually(fn -> has_element?(a, row) end)
+
+    # On r1: the editor moved to the second document, A's words dropped.
+    html = a |> element(row) |> render_click()
+    assert html =~ "Not saved: Notes. What you typed there will be lost."
+    assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
+    assert assigns(a).editor_form["notes"] == "one twA three"
+    assert has_element?(a, "form#editor-form[data-studio-held]")
+
+    a |> element(row) |> render_click()
+    assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id <> "-2"
+  end
+
+  test "studio: New document asks first while a field is held", c do
+    a = hold(c, :studio, "doc[notes]", "notes")
+
+    html = render_click(a, "new-document", %{"type" => c.type})
+
+    assert html =~ "Not saved: Notes."
+    assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
+    assert assigns(a).editor_form["notes"] == "one twA three"
+  end
+
+  # Opening the document again reads it from the store: the held words go.
+  test "studio: the open document's own row asks too", c do
+    a = hold(c, :studio, "doc[notes]", "notes")
+    row = ~s(button[phx-click="select"][phx-value-id="#{c.id}"])
+    assert ObjectRichText.eventually(fn -> has_element?(a, row) end)
+
+    html = a |> element(row) |> render_click()
+
+    assert html =~ "Not saved: Notes."
+    assert assigns(a).editor_form["notes"] == "one twA three"
   end
 
   test "studio: nothing held, nothing asked", c do
