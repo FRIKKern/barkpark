@@ -77,7 +77,7 @@ defmodule BarkparkWeb.ChatAttachmentController do
 
     # Tenant oracle FIRST (charter D17): a session another tenant owns must 404
     # before this route reveals anything — including whether a body was valid.
-    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+    with %StudioChat.Session{} = session <- fetch_visible(conn, id),
          {:ok, bytes} <- validate_upload(body),
          {:ok, pointer} <- store(session.id, bytes) do
       conn
@@ -99,7 +99,7 @@ defmodule BarkparkWeb.ChatAttachmentController do
   attachment on it) exists in another tenant.
   """
   def show(conn, %{"id" => id, "attachment_id" => attachment_id}) do
-    with %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+    with %StudioChat.Session{} = session <- fetch_visible(conn, id),
          {:ok, attachment} <- Attachments.fetch(session.id, attachment_id) do
       json(conn, %{
         attachment: %{
@@ -118,15 +118,8 @@ defmodule BarkparkWeb.ChatAttachmentController do
 
   # ── scope + fetch (the SAME oracle as every other id route) ────────────────
 
-  defp scope(conn), do: conn.assigns.chat_scope
-
-  defp store_scope(:global), do: :global
-  defp store_scope({:workspace, ws}), do: ws
-
-  # The sealed store confines the read (charter D17) — `nil` when the session is
-  # missing OR owned by another tenant. The controller only threads the scope;
-  # the store is the single enforcement point.
-  defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
+  # Tenant seal + registered-host seat, nil ⇒ 404 (`ChatSessionDoor`).
+  defp fetch_visible(conn, id), do: BarkparkWeb.ChatSessionDoor.fetch(conn, id)
 
   # ── validation (D22 strictness) ────────────────────────────────────────────
 
