@@ -8,6 +8,11 @@ defmodule Barkpark.Content.PortableTextMergeFuzzTest do
 
       PT_MERGE_FUZZ_REGEN=1 mix test test/barkpark/content/portable_text_merge_fuzz_test.exs
 
+  The triples are drawn with `:rand` (`exsss`) and `Enum.random/1`. An
+  Elixir or OTP release that changes how either draws moves every pin with
+  no change to the merge: a plain regen, with no code change, is then the
+  fix, and its PR says so.
+
   The merge inside one block adds its invariants here (the plan's 2-4, and
   the share of seeds that reach it).
   """
@@ -55,34 +60,55 @@ defmodule Barkpark.Content.PortableTextMergeFuzzTest do
   end
 
   # The seeds are only worth pinning if they reach each branch: a merge, a
-  # clash, and a block both sides changed in place (what the merge inside
-  # one block takes).
+  # clash, and `pick/3` with a block both sides changed differently in a
+  # certain line-up, the branch the merge inside one block takes. That one
+  # is counted on the code itself (a call trace on `pick/3`'s returns), not
+  # by keys: a block both changed in a line-up the merge does not trust
+  # never gets there (#28747 review: 694 by key, 325 real).
   test "the seeds reach a merge, a clash, and a block both sides changed" do
-    counts =
-      Enum.reduce(@seeds, %{ok: 0, clash: 0, both: 0}, fn s, acc ->
-        {b, m, t} = PtMergeGen.triple(s)
+    Code.ensure_loaded!(M)
+    spec = [{[:_, {:changed, :_}, {:changed, :_}], [], [{:return_trace}]}]
+    assert :erlang.trace_pattern({M, :pick, 3}, spec, [:local]) == 1
 
-        acc =
-          Map.update!(
-            acc,
-            if(match?({:ok, _}, M.merge(b, m, t)), do: :ok, else: :clash),
-            &(&1 + 1)
-          )
+    # A process does not trace itself: the seeds run in `worker`, one at a
+    # time, and each seed's trace is read once `trace_delivered` says all of
+    # it is here.
+    me = self()
 
-        if both_changed?(b, m, t), do: Map.update!(acc, :both, &(&1 + 1)), else: acc
+    worker =
+      spawn_link(fn ->
+        for s <- @seeds do
+          receive do: (:next -> :ok)
+          {b, m, t} = PtMergeGen.triple(s)
+          send(me, {:merged, match?({:ok, _}, M.merge(b, m, t))})
+        end
       end)
 
-    assert counts.ok >= 40 and counts.clash >= 40 and counts.both >= 40, inspect(counts)
+    :erlang.trace(worker, true, [:call])
+
+    counts =
+      Enum.reduce(@seeds, %{ok: 0, clash: 0, both: 0}, fn _s, acc ->
+        send(worker, :next)
+        ok? = receive do: ({:merged, ok?} -> ok?)
+        ref = :erlang.trace_delivered(worker)
+        receive do: ({:trace_delivered, ^worker, ^ref} -> :ok)
+        acc = Map.update!(acc, if(ok?, do: :ok, else: :clash), &(&1 + 1))
+        if both_clashed?(), do: Map.update!(acc, :both, &(&1 + 1)), else: acc
+      end)
+
+    :erlang.trace_pattern({M, :pick, 3}, false, [:local])
+    assert counts.ok >= 400 and counts.clash >= 400 and counts.both >= 600, inspect(counts)
   end
 
-  defp both_changed?(base, mine, theirs) do
-    by_key = fn l -> Map.new(l, &{&1["_key"], &1}) end
-    {m, t} = {by_key.(mine), by_key.(theirs)}
-
-    Enum.any?(base, fn b ->
-      {x, y} = {m[b["_key"]], t[b["_key"]]}
-      x != nil and y != nil and x != b and y != b
-    end)
+  # Whether a traced `pick/3` returned a clash; empties the trace messages.
+  defp both_clashed?(hit \\ false) do
+    receive do
+      {:trace, _, :return_from, {M, :pick, 3}, {:clash, _, _}} -> both_clashed?(true)
+      {:trace, _, _, _} -> both_clashed?(hit)
+      {:trace, _, _, _, _} -> both_clashed?(hit)
+    after
+      0 -> hit
+    end
   end
 
   test "inline: false gives the same result while the merge inside one block is not built" do
