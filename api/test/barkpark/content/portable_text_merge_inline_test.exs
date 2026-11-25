@@ -79,6 +79,31 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     assert blk["markDefs"] == [def, unused] and blk["_key"] == "k"
   end
 
+  test "a word mine took out of theirs' span leaves one span, keyed as theirs" do
+    assert {:ok, blk} =
+             Inline.merge(b("one two three four"), b("one three four"), b("one two three FOUR"))
+
+    assert [%{"_key" => "ks", "text" => "one three FOUR"}] = blk["children"]
+  end
+
+  test "mine's runs between two spans: a key theirs holds is not reused" do
+    base = block("k", [span("a", "one "), span("b", "two three", ["strong"])])
+    theirs = block("k", [span("a", "one "), span("b", "two THREE", ["strong"])])
+
+    mine =
+      block("k", [
+        span("x0", "one "),
+        span("a", "X", ["strong"]),
+        span("b", "Y"),
+        span("x1", "two three", ["strong"])
+      ])
+
+    assert {:ok, blk} = Inline.merge(base, mine, theirs)
+
+    assert Enum.map(blk["children"], &{&1["_key"], &1["text"]}) ==
+             [{"a", "one "}, {"ki0", "X"}, {"ki1", "Y"}, {"b", "two THREE"}]
+  end
+
   test "a custom block both changed, or text one side made an image, clashes without raising" do
     img = fn k, a -> %{"_type" => "image", "_key" => k, "alt" => a} end
     assert Inline.merge(img.("i", "a"), img.("i", "b"), img.("i", "c")) == :clash
@@ -100,9 +125,12 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
     test "たべる: たべた and のべる", do: assert(Inline.merge(b("たべる"), b("たべた"), b("のべる")) == :clash)
 
-    test "touching ranges",
+    test "an edit beside a word reaches into it",
       do:
         assert(Inline.merge(b("one two three"), b("ONE two three"), b("onetwo three")) == :clash)
+
+    test "ranges that touch with no letter between: one .. two",
+      do: assert(Inline.merge(b("one .. two"), b("one !. two"), b("one .? two")) == :clash)
 
     test "a mark only, or a mark of its own put in" do
       assert Inline.merge(
