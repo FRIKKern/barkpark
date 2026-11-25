@@ -17,10 +17,14 @@ defmodule BarkparkWeb.HostExecutionGate do
   one). An `admin` token of any other workspace is not one.
   """
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Accounts.User
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Repo
   alias Barkpark.StudioChat.HostExecution
+  alias Barkpark.StudioChat.Session
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.Plugs.RequirePlatformOperator
@@ -50,7 +54,9 @@ defmodule BarkparkWeb.HostExecutionGate do
       owner minted). A Connector (chat) token is minted with no
       `owner_user_id`, so it gets nothing from that second arm and needs an
       owner or admin seat of its own. A session with no owning workspace
-      passes for no one.
+      passes for no one. On an EXISTING session the caller meets
+      `may_see_session?/2` first, so a refused seat gets the missing-id 404
+      there; this 403 is what a create answers.
   """
   @spec authorize_turn(term(), map()) ::
           :ok | {:error, :host_execution_not_permitted | :host_admin_required}
@@ -90,6 +96,43 @@ defmodule BarkparkWeb.HostExecutionGate do
 
   def refusal(:host_execution_not_permitted),
     do: {HostExecution.reason(), HostExecution.message()}
+
+  @doc """
+  True when `principal` may SEE `session` at all: read it, stream it, list it,
+  interrupt or archive it (task-f44bbb6363d28e37). A `registered_host` session
+  is the same seat as a turn on it (`authorize_turn/2`); every other session
+  is `true` here and keeps its existing gates. A door that answers `false`
+  answers not-found, so a session's existence does not leak.
+  """
+  @spec may_see_session?(term(), map()) :: boolean()
+  def may_see_session?(principal, %{execution_target: "registered_host"} = session),
+    do: host_seat?(principal, Map.get(session, :owner_workspace_id))
+
+  def may_see_session?(_principal, _session), do: true
+
+  @doc """
+  `rows` without the `registered_host` sessions `principal` may not see
+  (`may_see_session?/2`). For list rows that do not carry
+  `owner_workspace_id` (the sidebar `select` leaves it out): the owners of the
+  host rows are read in ONE query, and only when there are host rows.
+  """
+  @spec visible_sessions(term(), [map()]) :: [map()]
+  def visible_sessions(principal, rows) do
+    case for(%{execution_target: "registered_host", id: id} <- rows, do: id) do
+      [] ->
+        rows
+
+      host_ids ->
+        owners =
+          from(s in Session, where: s.id in ^host_ids, select: {s.id, s.owner_workspace_id})
+          |> Repo.all()
+          |> Map.new()
+
+        Enum.filter(rows, fn row ->
+          may_see_session?(principal, Map.put(row, :owner_workspace_id, Map.get(owners, row.id)))
+        end)
+    end
+  end
 
   defp host_seat?(principal, ws) when is_binary(ws),
     do: TenancyAuth.workspace_admin?(principal, ws) or owner_users_token?(principal, ws)
