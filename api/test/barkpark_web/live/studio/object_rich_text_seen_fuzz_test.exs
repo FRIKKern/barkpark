@@ -23,7 +23,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextSeenFuzzTest do
 
   # 24 seeds in 4 tests, so no one test holds its sandbox for long. Each
   # chunk reaches a merge over B's saves; the four together, a hold.
-  for {seeds, k} <- Enum.with_index(Enum.chunk_every(1..24, 6)) do
+  for seeds <- Enum.chunk_every(1..24, 6) do
     test "seeds #{List.first(seeds)}..#{List.last(seeds)}: B's last change is stored or shown with the banner",
          %{conn: conn} do
       tally =

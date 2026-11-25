@@ -67,7 +67,31 @@
   };
   const editorIn = (w) => (w ? w.querySelector("bp-rich-text-editor") : null);
 
-  const seenOf = (name) => (waiting.has(name) ? waiting.get(name).seen : last);
+  // The document the wrapper's form shows (`phx-value-_bp_doc`, as each
+  // event's `doc`).
+  const docOf = (w) => {
+    const form = w && w.closest("form");
+    return form ? form.getAttribute("phx-value-_bp_doc") : null;
+  };
+
+  // What waits for `name`, if it is of the document its form shows: a value
+  // of another is dropped, never drawn there, even with its forget lost
+  // (#28766 review).
+  const waitingFor = (name) => {
+    const theirs = waiting.get(name);
+    if (!theirs) return undefined;
+    const doc = docOf(wrapOf(name));
+    if (theirs.doc && doc && theirs.doc !== doc) {
+      waiting.delete(name);
+      return undefined;
+    }
+    return theirs;
+  };
+
+  const seenOf = (name) => {
+    const theirs = waitingFor(name);
+    return theirs ? theirs.seen : last;
+  };
 
   // Typed since this page last drew a value into it: words that may not be
   // posted yet (a socket that went takes them with it).
@@ -224,7 +248,7 @@
   };
 
   const tryShow = (name) => {
-    const theirs = waiting.get(name);
+    const theirs = waitingFor(name);
     if (!theirs) return;
     const w = wrapOf(name);
     const editor = editorIn(w);
@@ -259,13 +283,16 @@
     const values = (e.detail && e.detail.values) || {};
     // A new socket's stored value is read from what this page had before it.
     const before = last;
+    const doc = (e.detail && e.detail.doc) || null;
     for (const [name, v] of Object.entries(values)) {
       if (!v || typeof v.seq !== "number") continue;
       last = Math.max(last, v.seq);
       const w = wrapOf(name);
       const editor = editorIn(w);
       if (typeof v.html === "string") {
-        const theirs = waiting.get(name);
+        const was = waiting.get(name);
+        // One of another document starts again.
+        const theirs = was && (!was.doc || !doc || was.doc === doc) ? was : undefined;
         // What the editor shows already: seen, with nothing to draw.
         const shows = editor && (editor.value === v.html ||
           (v.born && !typedSince(editor) && editor.getAttribute("value") === v.html));
@@ -273,7 +300,7 @@
           waiting.delete(name);
         } else if (!theirs || theirs.seq < v.seq) {
           const seen = theirs && !v.own ? theirs.seen : v.born ? before : v.seq - 1;
-          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, seen, born: !!v.born});
+          waiting.set(name, {seq: v.seq, html: v.html, reload: !!v.reload, seen, born: !!v.born, doc});
         }
         tryShow(name);
       }

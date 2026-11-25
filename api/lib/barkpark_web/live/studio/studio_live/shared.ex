@@ -1472,6 +1472,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       graph_doc: nil,
       graph_data: %{nodes: [], edges: []}
     )
+    |> BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.forget()
   end
 
   @doc false

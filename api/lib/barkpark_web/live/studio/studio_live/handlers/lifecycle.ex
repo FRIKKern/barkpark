@@ -59,7 +59,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_rt_held: %{},
         editor_rt_clash: %{}
       )
-      |> RichTextRemote.forget(shown)
+      |> RichTextRemote.forget()
       |> RichTextRemote.born()
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so

@@ -47,6 +47,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   @event "bp:rt-remote"
 
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
+
   # #28256's size: a value past it goes to the page in an event of its own.
   @html_cap 20_000
 
@@ -105,6 +107,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   defp log(socket, name, entry) do
+    socket = assign(socket, editor_rt_doc: PostIdentity.of(socket))
     log = socket.assigns[:editor_rt_log] || %{}
     entries = [entry | Map.get(log, name, [])]
 
@@ -125,13 +128,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   # One event for the values up to `@html_cap` bytes; each larger one rides
   # an event of its own, so one long text never holds up the others' event
   # and the page takes it the same way.
+  # Each event names the document its values are of (`PostIdentity.of/1`,
+  # the editor form's `phx-value-_bp_doc`): the page drops a value whose
+  # document its form no longer shows. The log and the page's values are
+  # then this document's (`editor_rt_doc`, `forget/1`).
   defp send_values(socket, values) do
     {big, small} = Enum.split_with(values, fn {_name, v} -> byte_size(v.html) > @html_cap end)
+    doc = PostIdentity.of(socket)
+    socket = assign(socket, editor_rt_doc: doc)
 
     socket =
-      if small == [], do: socket, else: push_event(socket, @event, %{values: Map.new(small)})
+      if small == [],
+        do: socket,
+        else: push_event(socket, @event, %{doc: doc, values: Map.new(small)})
 
-    Enum.reduce(big, socket, fn {name, v}, s -> push_event(s, @event, %{values: %{name => v}}) end)
+    Enum.reduce(big, socket, fn {name, v}, s ->
+      push_event(s, @event, %{doc: doc, values: %{name => v}})
+    end)
   end
 
   @doc """
@@ -163,10 +176,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   A rich text whose number is current is A's to save as typed.
   """
   def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
-    log = socket.assigns[:editor_rt_log] || %{}
-    holds = socket.assigns[:editor_rt_held] || %{}
-    folded = socket.assigns[:editor_rt_folded] || %{}
-    born = socket.assigns[:editor_rt_born] || %{}
+    # A log of another document is none of this one's (a forget lost).
+    {log, holds, folded, born} =
+      if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
+        do:
+          {socket.assigns[:editor_rt_log] || %{}, socket.assigns[:editor_rt_held] || %{},
+           socket.assigns[:editor_rt_folded] || %{}, socket.assigns[:editor_rt_born] || %{}},
+        else: {%{}, %{}, %{}, %{}}
 
     Enum.reduce(seen, {doc, []}, fn entry, {doc, acts} ->
       with {name, n} <- parse_seen(entry),
@@ -322,7 +338,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   """
   def born(socket) do
     if is_map(socket.assigns[:editor_rt_born]) or not Phoenix.LiveView.connected?(socket) or
-         is_nil(BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket)) do
+         is_nil(PostIdentity.of(socket)) do
       socket
     else
       form = socket.assigns[:editor_form] || %{}
@@ -345,18 +361,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   @doc """
-  The document `was` (`PostIdentity.of/1` before the navigation) is left:
-  the log is of it, keyed by input names the next one may share, so it
-  goes, and the page drops what waits for those names
-  (task-29686209fb9fc5dc). A post on the next document is A's, as typed.
+  The document the log and the page's values are of (`editor_rt_doc`) is
+  not the one open, none included (a project or workspace switch,
+  `Shared.reset_nav_for_switch/1`): the log, its folds and holds go, keyed by
+  input names the next document may share, and the page drops what waits
+  for those names (task-29686209fb9fc5dc). A post on the next document is
+  A's, as typed.
   """
-  def forget(socket, was) do
-    if not is_binary(was) or was == BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket) do
+  def forget(socket) do
+    was = socket.assigns[:editor_rt_doc]
+    now = PostIdentity.of(socket)
+
+    if is_nil(was) or was == now do
       socket
     else
       socket
-      |> assign(editor_rt_log: %{}, editor_rt_folded: %{}, editor_rt_born: %{})
-      |> push_event(@event, %{forget: true, values: %{}})
+      |> assign(
+        editor_rt_doc: nil,
+        editor_rt_log: %{},
+        editor_rt_folded: %{},
+        editor_rt_held: %{},
+        editor_rt_clash: %{},
+        editor_rt_born: %{}
+      )
+      |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end
   end
 
