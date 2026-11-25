@@ -19,7 +19,9 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   next patch, whatever it is, so it never holds back any other.
 
   Nothing held, nothing asked. A patch that keeps the place (a query only)
-  goes on as before.
+  goes on as before. On the desk, which drives Studio's handlers for its
+  editor (`Desk.EditorHost`), nothing here acts: the desk asks for itself
+  (`Desk.LeaveGuard`).
   """
 
   use Phoenix.Component
@@ -43,7 +45,7 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   never stands empty.
   """
   def follow(socket) do
-    if socket.assigns[:studio_leave] && not held?(socket),
+    if (not desk?(socket) and socket.assigns[:studio_leave]) && not held?(socket),
       do: send(self(), :studio_leave_cleared)
 
     socket
@@ -54,7 +56,7 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
 
   @doc "A press: `{:go, socket}`, or `{:stay, socket}` with the question open."
   def ask(event, params, socket) do
-    if held?(socket),
+    if not desk?(socket) and held?(socket),
       do: {:stay, open(socket, {:event, event, params})},
       else: {:go, socket}
   end
@@ -65,6 +67,10 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   document, with the question open, or as Stay's own return.
   """
   def params(socket, params, uri, place) do
+    if desk?(socket), do: {:route, socket}, else: studio_params(socket, params, uri, place)
+  end
+
+  defp studio_params(socket, params, uri, place) do
     return = socket.assigns[:studio_leave_return]
     socket = assign(socket, :studio_leave_return, nil)
 
@@ -138,6 +144,8 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
     back = socket.assigns[:studio_leave_uri]
     assign(socket, :studio_leave, %{to: to, back: back})
   end
+
+  defp desk?(socket), do: is_binary(socket.assigns[:desk_base])
 
   defp held?(socket), do: not is_nil(LeaveGuard.doc(socket.assigns))
 
