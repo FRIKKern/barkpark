@@ -208,6 +208,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   def split(_socket, doc, _seen), do: {doc, []}
 
+  @doc """
+  The value a post on number `n` was typed on, as `split/3` reads it: the
+  `was` of the oldest change logged past `n`. Nil when none is (the page
+  typed on the newest value this socket knows).
+  """
+  def page_base(socket, name, n) do
+    log =
+      if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
+        do: socket.assigns[:editor_rt_log] || %{},
+        else: %{}
+
+    case Enum.filter(Map.get(log, name, []), fn {s, _, _} -> s > n end) do
+      [] -> nil
+      later -> later |> List.last() |> elem(1)
+    end
+  end
+
   # Held, the view not shown yet: held again.
   defp read(doc, acts, at, {n, _gap?}, %{seq: seq} = h, _later) when n < seq,
     do: over(doc, acts, at, h.base, h.theirs, true)
