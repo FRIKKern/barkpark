@@ -40,31 +40,20 @@
   </ui-field>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Unchecked: rest, hover, pressed, focus</span>
-  <span id="radio-off-rest" data-slot="radio" role="radio" aria-checked="false" data-unchecked>Rest</span>
+  <span data-demo-label>Unchecked: hover, pressed, focus; checked: hover, pressed, focus</span>
   <span id="radio-off-hover" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-pin="hover">Hover</span>
   <span id="radio-off-pressed" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-pin="hover active">Pressed</span>
   <span id="radio-off-focus" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-pin="focus-visible">Focus</span>
-</div>
-<div data-demo-row inert>
-  <span data-demo-label>Checked: rest, hover, pressed, focus</span>
-  <span id="radio-on-rest" data-slot="radio" role="radio" aria-checked="true" data-checked>Rest</span>
   <span id="radio-on-hover" data-slot="radio" role="radio" aria-checked="true" data-checked data-pin="hover">Hover</span>
   <span id="radio-on-pressed" data-slot="radio" role="radio" aria-checked="true" data-checked data-pin="hover active">Pressed</span>
   <span id="radio-on-focus" data-slot="radio" role="radio" aria-checked="true" data-checked data-pin="focus-visible">Focus</span>
 </div>
 <div data-demo-row inert>
-  <span data-demo-label>Invalid, unchecked: rest, hover, pressed, focus</span>
+  <span data-demo-label>Invalid, unchecked: hover, pressed, focus; checked: rest, hover, pressed, focus</span>
   <span data-slot="radio-group" role="radiogroup" aria-invalid="true" data-invalid>
-    <span id="radio-bad-off-rest" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required>Rest</span>
     <span id="radio-bad-off-hover" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required data-pin="hover">Hover</span>
     <span id="radio-bad-off-pressed" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required data-pin="hover active">Pressed</span>
     <span id="radio-bad-off-focus" data-slot="radio" role="radio" aria-checked="false" data-unchecked data-required data-pin="focus-visible">Focus</span>
-  </span>
-</div>
-<div data-demo-row inert>
-  <span data-demo-label>Invalid, checked: rest, hover, pressed, focus</span>
-  <span data-slot="radio-group" role="radiogroup" aria-invalid="true" data-invalid>
     <span id="radio-bad-on-rest" data-slot="radio" role="radio" aria-checked="true" data-checked data-required>Rest</span>
     <span id="radio-bad-on-hover" data-slot="radio" role="radio" aria-checked="true" data-checked data-required data-pin="hover">Hover</span>
     <span id="radio-bad-on-pressed" data-slot="radio" role="radio" aria-checked="true" data-checked data-required data-pin="hover active">Pressed</span>
