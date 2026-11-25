@@ -599,6 +599,30 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       end
     end
 
+    # task-336c3a9b3baa9d0e (#28802 r2 review N1): mine swapped base's def
+    # keys and put an x-linked "a" in; mine draws one x link "aa".
+    test "mine re-keyed its defs and grows its x link: one link, not two" do
+      {x, y} = {"https://x.example", "https://y.example"}
+
+      base =
+        block("k", [span("s0", "a", ["d1"]), span("s1", "a", ["d2"]), span("t", " end")], [
+          link("d1", x),
+          link("d2", y)
+        ])
+
+      mine =
+        block("k", [span("s0", "aa", ["d2"]), span("s1", "a", ["d1"]), span("t", " end")], [
+          link("d2", x),
+          link("d1", y)
+        ])
+
+      theirs = put_in(base, ["children", Access.at(2), "text"], " END")
+
+      assert {:ok, blk} = Inline.merge(base, mine, theirs)
+      assert runs(blk) == [{"aa", [x]}, {"a", [y]}, {" END", []}]
+      assert Enum.sort(Enum.map(blk["markDefs"], & &1["_key"])) == ["d1", "d2"]
+    end
+
     test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
       href = "https://a.example"
       base = block("k", [span("m1", "one two three")])
