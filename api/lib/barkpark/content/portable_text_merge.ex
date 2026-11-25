@@ -53,8 +53,9 @@ defmodule Barkpark.Content.PortableTextMerge do
   @doc """
   `{:ok, merged}` when the line-up is certain and no block clashed. Else
   `{:clash, texts, view}`: `view` is what the editor keeps showing (mine for
-  each clashed block and theirs elsewhere; mine whole when the line-up is
-  not certain), and `texts` are theirs words the view does not show, for
+  each clashed block and theirs elsewhere; mine wherever mine touched and
+  theirs elsewhere when a block both touched is not one clear clash; mine
+  whole when the line-up is not certain), and `texts` are theirs words the view does not show, for
   the banner. A clash is never stored.
 
   `opts`: `inline: false` (tests only) leaves out the merge inside one
@@ -71,9 +72,11 @@ defmodule Barkpark.Content.PortableTextMerge do
       m = edits(base, mine)
       t = edits(base, theirs)
 
-      if certain?(m, t) and certain?(t, m) and not crossed?(m, t),
-        do: three_way(base, m, t, Keyword.get(opts, :inline, true)),
-        else: whole_clash(mine, theirs)
+      cond do
+        not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
+        crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
+        true -> three_way(base, m, t, Keyword.get(opts, :inline, true))
+      end
     end
   end
 
@@ -128,10 +131,66 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Mine shown as it is; the banner shows theirs blocks that mine does not
   # have.
-  defp whole_clash(mine, theirs) do
-    have = MapSet.new(mine, &drawn/1)
-    texts = for b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)
-    {:clash, Enum.take(texts, 5), mine}
+  defp whole_clash(mine, theirs), do: {:clash, banner(mine, theirs), mine}
+
+  defp banner(view, theirs) do
+    have = MapSet.new(view, &drawn/1)
+    Enum.take(for(b <- theirs, not MapSet.member?(have, drawn(b)), do: text(b)), 5)
+  end
+
+  # Lined up, but a block both touched is not one clear clash of one block
+  # (B changed it with the block next to it): mine wherever mine touched,
+  # theirs elsewhere, so the view keeps every change of theirs outside what
+  # mine touched and typing on it never takes one out
+  # (task-77c9532e1e04907b; before it, mine whole). Blocks neither touched
+  # are mine's own. One side deleted a block both touched: mine whole. A view that would hold a word more often than either
+  # side does (a gap of theirs zipped onto blocks it moved): mine whole.
+  defp crossed_view(base, mine, theirs, m, t) do
+    if deleted?(m, t),
+      do: whole_clash(mine, theirs),
+      else: crossed_view(base, mine, theirs, m, t, kept(base, mine))
+  end
+
+  # A block both touched that one side deleted: theirs' blocks next to it
+  # may be it, moved (case 10).
+  defp deleted?(m, t),
+    do: Enum.any?(m.at, fn {i, me} -> Map.has_key?(t.at, i) and :deleted in [me, t.at[i]] end)
+
+  defp crossed_view(base, mine, theirs, m, t, kept) do
+    at =
+      base
+      |> Enum.with_index()
+      |> Enum.map(fn {block, i} ->
+        case {Map.get(m.at, i, :same), Map.get(t.at, i, :same)} do
+          {:same, :same} -> {:keep, Map.get(kept, i, block)}
+          {:same, te} -> {:take, te}
+          {me, _te} -> {:take, me}
+        end
+      end)
+
+    view = build(at, m.ins, t.ins)
+
+    if bounded?(view, mine, theirs),
+      do: {:clash, banner(view, theirs), view},
+      else: whole_clash(mine, theirs)
+  end
+
+  # Each base index mine kept, to mine's own block there.
+  defp kept(base, mine) do
+    pairs = PortableTextAlign.pairs(Enum.map(base, &drawn/1), Enum.map(mine, &drawn/1))
+    mine_at = List.to_tuple(mine)
+    Map.new(pairs, fn {i, j} -> {i, elem(mine_at, j)} end)
+  end
+
+  defp bounded?(view, mine, theirs) do
+    {v, mw, tw} = {words(view), words(mine), words(theirs)}
+    Enum.all?(v, fn {w, n} -> n <= max(Map.get(mw, w, 0), Map.get(tw, w, 0)) end)
+  end
+
+  defp words(blocks) do
+    blocks
+    |> Enum.flat_map(&String.split(text(&1)))
+    |> Enum.frequencies()
   end
 
   # A block whose place in one side's line-up is not certain, that the

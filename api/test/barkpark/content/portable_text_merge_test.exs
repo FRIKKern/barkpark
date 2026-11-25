@@ -100,6 +100,30 @@ defmodule Barkpark.Content.PortableTextMergeTest do
     assert words(view) == ["Hel", ""]
   end
 
+  # task-77c9532e1e04907b: B changed p1 with p2 next to it, a gap of two
+  # blocks for two; A changed p1. The view showed mine whole, so B's p2 was
+  # dropped from it, and typing on it took B's change out.
+  test "B changes the block A edits and the one after it: the view keeps B's change there" do
+    base = [b("k1", "one two"), b("k2", "three four"), b("k3", "x")]
+    theirs = [b("t1", "one twB"), b("t2", "THREE four"), b("k3", "x")]
+
+    assert {:clash, ["one twB"], view} =
+             M.merge(base, post(base, ["one twoA", "three four", "x"]), theirs)
+
+    assert words(view) == ["one twoA", "THREE four", "x"]
+    assert keys_unique?(view)
+  end
+
+  # B's two blocks zipped onto base blocks they did not come from would
+  # show a word more often than either side has it: mine whole.
+  test "B rewrote two blocks in another order: the view is mine whole" do
+    base = [b("k1", "one two"), b("k2", "three four")]
+    theirs = [b("t1", "three fourX"), b("t2", "one twoY")]
+    mine = post(base, ["one twoA", "three four"])
+
+    assert {:clash, _texts, ^mine} = M.merge(base, mine, theirs)
+  end
+
   test "B deletes the block A is editing: a clash; A's block is kept in the view" do
     base = [b("a", "alpha"), b("z", "omega")]
 
