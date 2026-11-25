@@ -67,7 +67,7 @@ defmodule Barkpark.Test.PtMergeGen do
 
   defp one_edit(blocks, side, n, hot, kind) do
     last = length(blocks) - 1
-    i = if pick(1..5) > 1, do: min(hot, last), else: pick(0..last)
+    i = if pick(1..8) > 1, do: min(hot, last), else: pick(0..last)
 
     case pick(1..22) do
       1 -> List.insert_at(blocks, i + 1, block("#{side}#{n}", words(pick(1..3), kind), kind))
