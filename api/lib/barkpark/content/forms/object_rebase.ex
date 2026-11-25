@@ -25,8 +25,8 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   onto the store from it, and a clash keeps the store (the tab holds its
   words with the banner). Two tabs typing in one word wrote the later post
   over the earlier with no word. A Studio post with no `_bp_rt_seen` (a page
-  without bp-rt-remote.js) is given `seen` from the row its form was drawn
-  from (`UnderLock.values/3`, task-0437fdf2f2a6ccba). A rich text with no
+  without bp-rt-remote.js) is given `seen` from the form the socket last drew
+  (`UnderLock.values/3`, task-0437fdf2f2a6ccba). A rich text with no
   `seen` here (another caller) is merged from `base`, and a clash is
   written as posted, as before.
   """

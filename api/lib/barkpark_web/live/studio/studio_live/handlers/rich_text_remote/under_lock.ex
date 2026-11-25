@@ -50,19 +50,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   @doc """
   `values/2`, and for a post with no `_bp_rt_seen` (a page without
   bp-rt-remote.js) each rich text inside an object or a row the post
-  carries, read against the row the form was drawn from (`editor_doc`):
-  that page draws no other editor's save, so it typed on what it was drawn.
-  A clash then keeps the store and holds A with the banner, as a post with
-  a number does; it was written as posted, over B (task-0437fdf2f2a6ccba).
+  carries, read against the form the socket last drew (`editor_form`):
+  that page shows no value but the one drawn, so it typed on it. A clash
+  then keeps the store and holds A with the banner, as a post with a number
+  does; it was written as posted, over B (task-0437fdf2f2a6ccba).
   """
   def values(socket, seen, _posted) when is_list(seen), do: values(socket, seen)
 
   def values(socket, nil, posted) when is_map(posted) do
-    drawn =
-      case socket.assigns[:editor_doc] do
-        %{content: %{} = content} -> content
-        _ -> %{}
-      end
+    drawn = socket.assigns[:editor_form] || %{}
 
     for path <- RichTextRemote.every(socket.assigns[:editor_schema], drawn),
         is_binary(FormPath.get(posted, path)),
