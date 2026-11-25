@@ -172,6 +172,10 @@ export function split(names, perJob = PER_JOB, weigh = weightOf) {
   return groups.map(({ group, parts }) => ({ group, of, parts: parts.sort() }))
 }
 
+/** The order a job starts its parts in (check/check.mjs): lightest first by `weigh` (check/part-weights.mjs; equal
+    weights by name), so its heaviest part starts last, as the others end, and runs the end of its time beside fewer. */
+export const startOrder = (names, weigh = weightOf) => [...names].sort((a, b) => weigh(a) - weigh(b) || (a < b ? -1 : 1))
+
 /** What is wrong with a list of groups against the part names, in plain words; empty when every part is run by
     exactly one group, no group runs anything else or nothing, and none holds more than perJob. */
 export function cover(groups, names, perJob = PER_JOB) {

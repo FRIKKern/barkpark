@@ -6,7 +6,7 @@ import { discoverParts } from '../build/parts.mjs'
 import { ceilingFor, PER_JOB, STEP_MINUTES } from '../check/capacity.mjs'
 import { PART_READINGS, weightOf } from '../check/part-weights.mjs'
 import { reportFile, selftestReport } from '../check/selftest-report.mjs'
-import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split } from '../check/jobs.mjs'
+import { AGGREGATE, cover, folderNames, JOBS, judge, legGroup, materialize, NO_PARTS, partNames, partsDir, planMatrix, MOST_GROUPS, MOST_PARTS, SELFTEST_JOBS, split, startOrder } from '../check/jobs.mjs'
 
 const scratch = mkdtempSync(join(tmpdir(), 'barkui-jobs-test-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -84,6 +84,11 @@ describe('the split spreads the heaviest parts apart, by their hosted readings',
     expect(split(Object.keys(weights), 3, weigh).map((g) => g.parts)).toEqual([['a', 'f'], ['b', 'e'], ['c', 'd', 'g']])
     // The same names in any order give the same groups.
     expect(split(['g', 'e', 'c', 'a', 'f', 'd', 'b'], 3, weigh)).toEqual(split(Object.keys(weights), 3, weigh))
+  })
+
+  it('a job starts its parts lightest first, equal weights by name, so its heaviest part starts last', () => {
+    expect(startOrder(['a', 'e', 'c', 'd'], weigh)).toEqual(['d', 'e', 'c', 'a'])
+    expect(startOrder(['b', 'a'], () => 1)).toEqual(['a', 'b'])
   })
 
   it('a part with no reading weighs as much as the heaviest reading, so it is dealt out among the first', () => {

@@ -15,7 +15,7 @@ import { noscript, phone, pressed, skinsAndSchemes, styleBaseline, surfacesOf } 
 import { waitLine } from '../build/sheet-waits.mjs'
 import { VIEW_PAGES } from './view-pages.mjs'
 import { launch, refusals } from './acts.mjs'
-import { pageOf } from './jobs.mjs'
+import { pageOf, startOrder } from './jobs.mjs'
 import { writePartPage } from './part-page.mjs'
 import { nearLine, timeLine } from './part-time.mjs'
 
@@ -139,8 +139,9 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
     return { ok: false, proof: null }
   }
   const proof = { ranAt: new Date().toISOString(), browser: `Chromium ${browser.version()}`, uiSdk: uiSdkVersion, foundation: foundationHash(), parts: {}, errors: [] }
-  // Parts run AT_ONCE at a time, each in its own pages of the one browser; each part's lines print together
-  // when it ends, and proof.json keeps the parts in folder order.
+  // Parts run AT_ONCE at a time, each in its own pages of the one browser, lightest first (check/jobs.mjs startOrder),
+  // so a job's heaviest part starts last, as the others end; each part's lines print together when it ends, and
+  // proof.json keeps the parts in folder order.
   const checkPart = async (part) => {
     const lines = []
     const ctx = { browser, url: pathToFileURL(pages[part.name]).href, part: part.name, errors: [], log, colourNames: variableNames(), styles: styles[part.name], surfaces, motion, states, entries: judged.find((j) => j.name === part.name).entries, judged: new Set(), pairs: [] }
@@ -194,10 +195,11 @@ async function readParts({ dir = partsDir, out = outDir, proofFile = proofPath, 
   }
   const done = new Array(mine.length)
   try {
+    const queue = startOrder(mine.map((p) => p.name)).map((n) => mine.findIndex((p) => p.name === n))
     let next = 0
     const worker = async () => {
-      while (next < mine.length) {
-        const i = next++
+      while (next < queue.length) {
+        const i = queue[next++]
         done[i] = await checkPart(mine[i])
       }
     }
