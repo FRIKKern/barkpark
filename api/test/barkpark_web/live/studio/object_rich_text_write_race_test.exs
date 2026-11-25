@@ -53,5 +53,16 @@ defmodule BarkparkWeb.Studio.ObjectRichTextWriteRaceTest do
 
       assert merged =~ "ONE TWO"
     end
+
+    test "#{surface}: A's post leaves the rich text as it was, B's save lands under it: B's stored, no banner",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      {a, b} = {open(c), open(c)}
+
+      html = b_saves_inside(a, b, "<p>one twB</p>", fn -> post_rt(a, "<p>one two</p>", 0) end)
+
+      assert words(stored(c)["meta"]["rt"]) == ["one twB"]
+      refute html =~ "Someone else rewrote"
+    end
   end
 end

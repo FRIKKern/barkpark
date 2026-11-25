@@ -91,26 +91,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def acts(saved, acts, _values, _doc), do: {saved, acts}
 
-  # The store kept over the post: held, A's words in the view. Else the
-  # store took them merged: shown to the page as its own.
+  # `written` is what the write was given (after `split/3`, which may have
+  # merged a change A's page was told of into it). It left this rich text
+  # as A believed it stored: nothing of A's to keep, no act (`over/6`'s
+  # rule). The store kept over it: held, A's words in the view. Else the
+  # store took them merged: shown to the page as its own, logged over the
+  # page's own text, `split/3`'s `mine` where it merged (#28792 review B1).
   defp moved(s, acts, {name, path}, {was, before, after_write}, posted) do
-    mine = PortableText.from_html(posted, was)
-    acts = Enum.reject(acts, &(elem(&1, 1) == name))
+    written = PortableText.from_html(posted, was)
 
-    if PortableTextMerge.same_drawn?(after_write, before) and
-         not PortableTextMerge.same_drawn?(mine, before) do
-      {view, texts} =
-        case PortableTextMerge.merge(was, mine, before) do
-          {:clash, texts, view} -> {view, texts}
-          {:ok, _merged} -> {mine, nil}
-        end
+    cond do
+      PortableTextMerge.same_drawn?(written, was) ->
+        {s, acts}
 
-      {s, [{:held, name, path, {was, before, view, texts}} | acts]}
-    else
-      form = FormPath.put(s.assigns[:editor_form] || %{}, path, after_write)
-      {Phoenix.Component.assign(s, editor_form: form), [{:merged, name, path, mine} | acts]}
+      PortableTextMerge.same_drawn?(after_write, before) and
+          not PortableTextMerge.same_drawn?(written, before) ->
+        {view, texts} =
+          case PortableTextMerge.merge(was, written, before) do
+            {:clash, texts, view} -> {view, texts}
+            {:ok, _merged} -> {written, nil}
+          end
+
+        {s, [{:held, name, path, {was, before, view, texts}} | drop(acts, name)]}
+
+      true ->
+        mine = Enum.find_value(acts, written, &match_merged(&1, name))
+        form = FormPath.put(s.assigns[:editor_form] || %{}, path, after_write)
+        acts = [{:merged, name, path, mine} | drop(acts, name)]
+        {Phoenix.Component.assign(s, editor_form: form), acts}
     end
   end
+
+  defp match_merged({:merged, name, _path, mine}, name), do: mine
+  defp match_merged(_act, _name), do: nil
+
+  defp drop(acts, name), do: Enum.reject(acts, &(elem(&1, 1) == name))
 
   defp holds?(acts, name),
     do:
