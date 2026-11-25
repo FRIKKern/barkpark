@@ -585,15 +585,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         message: "not a #{Archive.format()} bundle: format=#{inspect(manifest["format"])}"
     end
 
-    # BEFORE ANY WRITE — before the transaction is even opened, so no COPY, no
-    # DDL and above all no PDS-D9 empty-shell DELETE can have happened when the
-    # bundle disagrees with what the caller asked for.
+    # BEFORE ANY WRITE (no transaction, COPY, DDL or PDS-D9 empty-shell DELETE
+    # yet): a bundle that disagrees with what the caller asked for, or holds a
+    # link address a write refuses (COPY skips the fences, task-9d0496cb3f369ed1).
     assert_root_slug_matches_expectation!(manifest, ctx.expected_root_slug)
+    __MODULE__.LinkHrefCheck.refuse!(manifest, dumps)
 
     # PDS-D45: a declared loss is only honest if someone HEARS it. The manifest
-    # rides back to the caller inside `stats()` (machine-readable), and the
-    # restore operator — who is usually watching a log, not parsing a tar — gets
-    # it here, before the first row lands.
+    # rides back inside `stats()`; the restore operator, usually watching a log
+    # rather than parsing a tar, gets it here, before the first row lands.
     warn_declared_loss(manifest)
 
     # Test-only fault seam (mirrors :export_copy_fault): when configured, the
