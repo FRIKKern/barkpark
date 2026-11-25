@@ -9,6 +9,30 @@ defmodule Barkpark.Content.TextUndoTest do
   alias Barkpark.Content.TextRebase
   alias Barkpark.Content.TextUndo
 
+  # "An answer at once" is measured as work, not time (task-16c776c04c581992).
+  # A wall-clock bound failed on loaded CI runners (700 took 553 and 627 ms)
+  # with no change to this code. Reductions, the BEAM's count of the work a
+  # process does, do not move with load: these cases measured within 2% of
+  # each other idle and beside CPU burners, while their time grew up to 15x.
+  # The work stays in this process (no task, no NIF).
+  defp work(fun) do
+    {:reductions, before} = Process.info(self(), :reductions)
+    result = fun.()
+    {:reductions, after_} = Process.info(self(), :reductions)
+    {after_ - before, result}
+  end
+
+  # Measured at 804ba5e258, on OTP 28 here and on CI's OTP 27 (.tool-versions)
+  # within 3% of each other: the 50 KB / 30 KB / 15 KB cases take
+  # 2.4M / 1.5M / 0.8M reductions.
+  @clash_at_once 5_000_000
+
+  # The caps cases take 0.7M-15M (table250, the most). With the
+  # `@max_changed_units` guard removed (the cap these cases pin), the 999-unit
+  # rewrites take 23M-26M, about 300 ms here, which the old 500 ms bound let
+  # through; this budget does not.
+  @caps_at_once 20_000_000
+
   describe "revert/3" do
     test "takes A's suffix out and keeps B's prefix" do
       assert TextUndo.revert(
@@ -113,14 +137,14 @@ defmodule Barkpark.Content.TextUndoTest do
             {short, short_ours, "B " <> short}
           ] do
         assert TextRebase.merge3_both(base, ours, theirs) != nil
-        {micros, result} = :timer.tc(fn -> TextRebase.merge3_clash(base, ours, theirs) end)
+        {work, result} = work(fn -> TextRebase.merge3_clash(base, ours, theirs) end)
         assert result == nil
-        assert micros < 500_000, "took #{div(micros, 1000)} ms"
+        assert work < @clash_at_once, "took #{work} reductions"
       end
     end
 
     # Short repeated structure makes many diff parts: the clash check stays
-    # under half a second on it, at the caps and past them.
+    # within its work budget on it, at the caps and past them.
     test "merge3_clash: repeated text, a table, a rewrite at the caps: an answer at once" do
       cat = String.duplicate("the cat sat. ", 1_531) |> String.slice(0, 19_900)
 
@@ -144,8 +168,8 @@ defmodule Barkpark.Content.TextUndoTest do
             {table, 700}
           ] do
         ours = splice.(text, 9_000, n)
-        {micros, _result} = :timer.tc(fn -> TextRebase.merge3_clash(text, ours, "B " <> text) end)
-        assert micros < 500_000, "#{n} took #{div(micros, 1000)} ms"
+        {work, _result} = work(fn -> TextRebase.merge3_clash(text, ours, "B " <> text) end)
+        assert work < @caps_at_once, "#{n} took #{work} reductions"
       end
     end
 
