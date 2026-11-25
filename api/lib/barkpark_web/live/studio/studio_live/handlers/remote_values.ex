@@ -61,6 +61,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   alias Barkpark.Content
 
   @event "bp:form-remote-values"
+  @born_event "bp:form-born"
 
   # The `v` bp-array-focus.js writes into `_bp_seen` (its SEEN_VERSION).
   @seen_version 2
@@ -229,17 +230,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
           {s, seq} = next_seq(s)
           name = input_name(key)
           s = put_entries(s, key, Map.get(history(s), key, []) ++ [{seq, value, :born}])
-          # 0 for the value the page showed: a page that did not take this
-          # one, and had no number, reports 0, a number this socket never
-          # sent. One that had a number keeps it (bp-array-focus.js).
-          {s, Map.put(values, name, %{value: value, was: value}), Map.put(seqs, name, [0, seq])}
+          {s, Map.put(values, name, value), Map.put(seqs, name, seq)}
         end)
 
+      # Its own event: a field showing the value takes the number; one that
+      # does not, and has none, reports 0, which this socket never sends
+      # (bp-array-focus.js).
       socket = assign(socket, :editor_text_born, true)
 
       if values == %{},
         do: socket,
-        else: push_event(socket, @event, %{values: values, seqs: seqs})
+        else: push_event(socket, @born_event, %{values: values, seqs: seqs})
     end
   end
 
@@ -249,7 +250,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   does not report: the page had not taken it, so its post was typed on
   what the page showed before the rejoin, which this socket never saw. The
   page then reports a number this socket did not send (the old socket's,
-  or the push's 0). A post with no number took no push and reads as before.
+  or 0). A post with no number took no push: it shows the born value.
   """
   def born_untaken?(socket, key, seen) when is_binary(seen) do
     seen = decode_seen(seen)
@@ -290,10 +291,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   @doc false
   # The entry a post reporting number `n` was written from: the latest of the
   # values the page showed up to `n` and the page's own landed post. With no
-  # number, the page took no push yet: its own post or the first push's `was`.
+  # number, the page took no push yet: its own post, the first push's `was`,
+  # or the value this socket was born with (`born/1`), which the page shows.
   def base_entry(entries, nil) do
     entries
-    |> Enum.filter(fn {_seq, _value, kind} -> kind in [:own, :origin] end)
+    |> Enum.filter(fn {_seq, _value, kind} -> kind in [:own, :origin, :born] end)
     |> latest()
   end
 

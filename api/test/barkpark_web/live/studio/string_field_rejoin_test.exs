@@ -98,11 +98,11 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
   defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
   # The page as bp-array-focus.js keeps `_bp_seen` after the born push: a
-  # field showing the stored value takes its number (`seqs`' second); one
-  # showing A's typing takes the push's 0 (its first).
+  # field showing the stored value takes its number; one showing A's typing,
+  # with no number of its own, reports 0.
   defp born(view, name, shows_stored?) do
-    assert_push_event(view, "bp:form-remote-values", %{seqs: %{^name => [was, seq]}}, 2_000)
-    if shows_stored?, do: seq, else: was
+    assert_push_event(view, "bp:form-born", %{seqs: %{^name => seq}}, 2_000)
+    if shows_stored?, do: seq, else: 0
   end
 
   defp posts_seen(view, target, fields, n) do
