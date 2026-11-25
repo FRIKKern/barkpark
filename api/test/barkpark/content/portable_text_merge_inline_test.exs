@@ -377,6 +377,19 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert Inline.merge(base, mine, theirs) == :clash
     end
 
+    test "a pure deletion or paste past the cap, marks mixed, merges: it keeps no letter" do
+      {base, _mine, theirs} = rewrite(1002)
+      tail = block("k", [span("t", " gap end")])
+      assert {:ok, blk} = Inline.merge(base, tail, theirs)
+      assert text(blk) == " gap END"
+
+      # Mine pastes 1,002 letters of both marks before base's own.
+      {_base, xy, _theirs} = rewrite(1002)
+      paste = block("k", Enum.drop(xy["children"], -1) ++ base["children"])
+      assert {:ok, blk} = Inline.merge(base, paste, theirs)
+      assert text(blk) == String.duplicate("xy", 501) <> String.duplicate("ab", 501) <> " gap END"
+    end
+
     test "a bold word typed new between two edits merges: no text of base changed marks" do
       mine =
         block("k", [
@@ -387,6 +400,35 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
       assert {:ok, blk} = Inline.merge(marked("two", " three four five"), mine, theirs_five())
       assert text(blk) == "one TWO NEW three FOUR FIVE"
+    end
+  end
+
+  describe "task-5d102d5baa016e0a: a word is a run with no space" do
+    for {name, base, mine, theirs} <- [
+          {"a domain", "see example.com now", "see exampel.com now", "see example.org now"},
+          {"a slash pair", "use a/b here", "use A/b here", "use a/B here"},
+          {"a letter and a digit", "is x-1 ok", "is y-1 ok", "is x-2 ok"},
+          {"an ellipsis between digits", "from 1...2 on", "from 0...2 on", "from 1...3 on"},
+          {"a quoted word", ~s(say "hi" now), ~s(say "hu" now), ~s(say "hi!" now)}
+        ] do
+      test "#{name} is one word: two edits in it clash" do
+        assert Inline.merge(b(unquote(base)), b(unquote(mine)), b(unquote(theirs))) == :clash
+      end
+    end
+
+    test "edits in two words that touch punctuation merge: one, TWO" do
+      assert {:ok, blk} = Inline.merge(b("one, two."), b("ONE, two."), b("one, TWO."))
+      assert text(blk) == "ONE, TWO."
+    end
+
+    test "CJK punctuation parts Han runs: 京都。県庁" do
+      assert {:ok, blk} = Inline.merge(b("東京。都庁"), b("京都。都庁"), b("東京。県庁"))
+      assert text(blk) == "京都。県庁"
+    end
+
+    test "an ideographic space parts words: one\u3000TWO" do
+      assert {:ok, blk} = Inline.merge(b("one\u3000two"), b("ONE\u3000two"), b("one\u3000TWO"))
+      assert text(blk) == "ONE\u3000TWO"
     end
   end
 end
