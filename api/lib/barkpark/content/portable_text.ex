@@ -476,28 +476,22 @@ defmodule Barkpark.Content.PortableText do
       end)
 
     fixed = posted |> line_up(seen) |> Map.new()
-    seen = seen |> Enum.zip(stored) |> Enum.with_index()
+    stored_at = List.to_tuple(stored)
+    start = {MapSet.new(Map.values(fixed)), lookup(seen)}
 
     blocks
     |> Enum.zip(posted)
     |> Enum.with_index()
-    |> Enum.map_reduce(MapSet.new(Map.values(fixed)), fn {{{block, _src}, {src, html}}, p},
-                                                         used ->
+    |> Enum.map_reduce(start, fn {{{block, _src}, {src, html}}, p}, {used, index} ->
       case fixed[p] do
         nil ->
-          left = Enum.reject(seen, fn {_s, i} -> MapSet.member?(used, i) end)
-
-          found =
-            (src && Enum.find(left, fn {{{frag, _}, _}, _} -> frag == src end)) ||
-              Enum.find(left, fn {{{_, h}, _}, _} -> h == html end)
-
-          case found do
-            nil -> {{:rebuilt, block}, used}
-            {{_, old}, i} -> {{:moved, old, i}, MapSet.put(used, i)}
+          case take(index, used, src, html) do
+            nil -> {{:rebuilt, block}, {used, index}}
+            {i, index} -> {{:moved, elem(stored_at, i), i}, {MapSet.put(used, i), index}}
           end
 
         i ->
-          {{:kept, Enum.at(stored, i), i}, used}
+          {{:kept, elem(stored_at, i), i}, {used, index}}
       end
     end)
     |> elem(0)
@@ -510,30 +504,75 @@ defmodule Barkpark.Content.PortableText do
   defp same_block?({src, html}, {frag, stored_html}),
     do: (src != nil and src == frag) or html == stored_html
 
+  # The line-up's table at most, rebuilt × stored blocks between the blocks
+  # both lists start and end with (#28724 review B2: 10,000 against 10,000
+  # took 1 GB).
+  @max_line_up 250_000
+
   # `PortableTextAlign.pairs/3` over what lies between the blocks both lists
   # start and end with, which a typical save leaves almost all of. The start
   # is the line-up's own first choice; past the end of the shorter list the
-  # line-up runs out.
+  # line-up runs out. Past `@max_line_up`, each block takes the first unused
+  # stored block it matches, as before the line-up, and is a fixed point
+  # when that comes after the last one.
   defp line_up(posted, seen) do
     start = common(posted, seen)
     {posted, seen} = {Enum.drop(posted, start), Enum.drop(seen, start)}
     finish = common(Enum.reverse(posted), Enum.reverse(seen))
     {pn, sn} = {length(posted) - finish, length(seen) - finish}
+    {posted, seen} = {Enum.take(posted, pn), Enum.take(seen, sn)}
 
     head = for k <- 0..(start - 1)//1, do: {k, k}
     tail = for k <- 0..(finish - 1)//1, do: {start + pn + k, start + sn + k}
 
     middle =
-      posted
-      |> Enum.take(pn)
-      |> PortableTextAlign.pairs(Enum.take(seen, sn), &same_block?/2)
-      |> Enum.map(fn {p, i} -> {start + p, start + i} end)
+      if pn * sn > @max_line_up,
+        do: in_order(posted, seen),
+        else: PortableTextAlign.pairs(posted, seen, &same_block?/2)
 
-    head ++ middle ++ tail
+    head ++ Enum.map(middle, fn {p, i} -> {start + p, start + i} end) ++ tail
   end
 
   defp common([a | as], [b | bs]), do: if(same_block?(a, b), do: 1 + common(as, bs), else: 0)
   defp common(_, _), do: 0
+
+  defp in_order(posted, seen) do
+    posted
+    |> Enum.with_index()
+    |> Enum.reduce({[], lookup(seen), MapSet.new(), -1}, fn {{src, html}, p},
+                                                            {acc, index, used, last} ->
+      case take(index, used, src, html) do
+        {i, index} when i > last -> {[{p, i} | acc], index, MapSet.put(used, i), i}
+        _ -> {acc, index, used, last}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  # The stored blocks by what a posted block is matched on (`same_block?/2`),
+  # each list in stored order.
+  defp lookup(seen) do
+    seen
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.reduce(%{}, fn {{frag, html}, i}, acc ->
+      acc |> Map.update({:src, frag}, [i], &[i | &1]) |> Map.update({:html, html}, [i], &[i | &1])
+    end)
+  end
+
+  # The first unused stored block read from `src`, else the first whose HTML
+  # is `html`: `{index, lookup without it}`, or nil.
+  defp take(index, used, src, html),
+    do:
+      (src && first_unused(index, {:src, src}, used)) || first_unused(index, {:html, html}, used)
+
+  defp first_unused(index, key, used) do
+    case Enum.drop_while(Map.get(index, key, []), &MapSet.member?(used, &1)) do
+      [] -> nil
+      [i | rest] -> {i, Map.put(index, key, rest)}
+    end
+  end
 
   defp empty?(%{"_type" => "block", "children" => []}), do: true
   defp empty?(_), do: false

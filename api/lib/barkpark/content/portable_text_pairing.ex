@@ -18,21 +18,26 @@ defmodule Barkpark.Content.PortableTextPairing do
   stored text blocks nothing kept and the rebuilt blocks the post put
   there. A block kept out of that order (`:moved`) is no bound.
 
-    * One for one: paired, the block edited in place. The post carries no
-      keys, so a delete and an insert in one place read as a rewrite.
-    * Any other gap, even count or not: each rebuilt block is paired with a
-      stored block only by its words, in order, where at least half of them
-      are the same (a Dice score of 0.5 over the words of the two blocks). A
+    * The same count on both sides: first each pair in place whose words
+      agree (a Dice score of 0.5 over the words of the two blocks), so a
+      find and replace across the value keeps every key (#28724 review B1).
+    * Between those, each rebuilt block is paired with a stored block only
+      by its words, in order, where at least half of them are the same. A
       block with no such match is new, and a stored block with none was
       deleted. In order, a block inserted beside a deleted one took its key
       (#28714 review S3).
+    * Between all of those, a stretch of one block for one is paired in
+      place whatever its words: a heading renamed, an empty paragraph typed
+      into, beside an edited block (#28724 review S1). The post carries no
+      keys, so a delete and an insert in one place read as a rewrite.
     * Then the rebuilt and stored text blocks no gap paired, across the
       value, by their words: a move puts an edited block and its stored
       block in different gaps (#28714 review S4).
     * The pairing by words has one budget per save, not per gap (#28714
       review): `@max_cells` (rebuilt × stored, summed over the gaps and the
-      pass across the value) and `@max_work` (cells × distinct words). A gap
-      past what is left is not paired by words, so its blocks are new. The
+      pass across the value) and `@max_work` (cells × distinct words). A
+      stretch past what is left is not paired by words: of the same count,
+      it is paired in place, as before; otherwise its blocks are new. The
       budget is spent in document order, so past it the first gaps pair
       (#28714 r2 review: it was spent from the last gap up).
   """
@@ -84,8 +89,9 @@ defmodule Barkpark.Content.PortableTextPairing do
           do: {p, elem(elem(kept, p), 1)}
 
     left = left(stored, 0..(tuple_size(stored) - 1)//1, paired)
-    {rest, _budget} = by_words_within(rebuilt, left, budget)
-    Map.merge(acc, rest)
+    {r, l} = {counted_all(rebuilt), counted_all(left)}
+    {rest, _budget} = within(r, l, indexes(r), indexes(l), budget, false)
+    Map.merge(acc, ids(rest, r, l))
   end
 
   # Each gap as {positions in `kept`, stored indexes}, from the line-up of
@@ -116,34 +122,75 @@ defmodule Barkpark.Content.PortableTextPairing do
   defp pair([], _left, budget), do: {%{}, budget}
   defp pair(_rebuilt, [], budget), do: {%{}, budget}
 
-  # One block for one: a rewrite in place, whatever its words. The post
-  # carries no keys, so it is the same post as a delete and an insert there.
-  defp pair([{p, _}], [{j, _}], budget), do: {%{p => j}, budget}
+  # A gap's blocks, in three steps (#28724 review):
+  #
+  #   1. The same count on both sides: each pair in place whose words agree.
+  #      A find and replace edits every block in place, and pairs here
+  #      whatever the budget (B1).
+  #   2. Between those, by words (`by_words/2`), within the budget. Past it,
+  #      a stretch of the same count is paired in place, as before.
+  #   3. Between all of those, a stretch of one block for one, whatever its
+  #      words: a heading renamed or an empty paragraph typed into, beside an
+  #      edited block (S1). The post carries no keys, so a delete and an
+  #      insert in one place read as that rewrite.
+  #
+  # An inserted block beside a deleted one is left out by 1 and 2 and is no
+  # stretch of one for one, so it takes no key (#28714 review S3).
+  defp pair(rebuilt, left, budget) do
+    {r, l} = {counted_all(rebuilt), counted_all(left)}
+    {n, m} = {tuple_size(r), tuple_size(l)}
 
-  # Any other gap, even count or not, by words: in order, an inserted block
-  # took the key of the block deleted beside it (#28714 review S3).
-  defp pair(rebuilt, left, budget), do: by_words_within(rebuilt, left, budget)
+    in_place =
+      if n == m,
+        do: for(k <- 0..(n - 1), score(words_of(r, k), words_of(l, k)) >= @min_score, do: {k, k}),
+        else: []
 
-  defp by_words_within([], _left, budget), do: {%{}, budget}
-  defp by_words_within(_rebuilt, [], budget), do: {%{}, budget}
+    {found, budget} =
+      in_place
+      |> PortableTextAlign.gaps(n, m)
+      |> Enum.reduce({in_place, budget}, fn {_lo, ri, li}, {acc, budget} ->
+        {pairs, budget} = within(r, l, ri, li, budget, true)
+        {pairs ++ acc, budget}
+      end)
 
-  defp by_words_within(rebuilt, left, {cells_left, work_left} = budget) do
-    cells = length(rebuilt) * length(left)
+    found = Enum.sort(found)
+    ones = for {_lo, [i], [j]} <- PortableTextAlign.gaps(found, n, m), do: {i, j}
+    {ids(found ++ ones, r, l), budget}
+  end
 
-    if cells > cells_left do
-      {%{}, budget}
-    else
-      # Each block's words counted once, not once per cell.
-      r = Enum.map(rebuilt, fn {p, b} -> {p, counted(b)} end)
-      l = Enum.map(left, fn {j, b} -> {j, counted(b)} end)
-      work = cells * min(widest(r), widest(l))
+  # `by_words/2` over the blocks at indexes `ri` of `r` and `li` of `l`, as
+  # index pairs, within the budget. Past it nothing, or, when `in_place?`
+  # and the counts are the same, each in place.
+  defp within(_r, _l, [], _li, budget, _in_place?), do: {[], budget}
+  defp within(_r, _l, _ri, [], budget, _in_place?), do: {[], budget}
 
-      if work > work_left,
-        do: {%{}, budget},
-        else:
-          {by_words(List.to_tuple(r), List.to_tuple(l)), {cells_left - cells, work_left - work}}
+  defp within(r, l, ri, li, {cells_left, work_left} = budget, in_place?) do
+    rs = for i <- ri, do: {i, words_of(r, i)}
+    ls = for j <- li, do: {j, words_of(l, j)}
+    cells = length(rs) * length(ls)
+
+    cond do
+      cells <= cells_left and cells * min(widest(rs), widest(ls)) <= work_left ->
+        work = cells * min(widest(rs), widest(ls))
+        pairs = by_words(List.to_tuple(rs), List.to_tuple(ls))
+        {Map.to_list(pairs), {cells_left - cells, work_left - work}}
+
+      in_place? and length(ri) == length(li) ->
+        {Enum.zip(ri, li), budget}
+
+      true ->
+        {[], budget}
     end
   end
+
+  defp counted_all(blocks),
+    do: blocks |> Enum.map(fn {id, b} -> {id, counted(b)} end) |> List.to_tuple()
+
+  defp words_of(t, k), do: t |> elem(k) |> elem(1)
+  defp indexes(t), do: Enum.to_list(0..(tuple_size(t) - 1)//1)
+
+  defp ids(pairs, r, l),
+    do: Map.new(pairs, fn {i, j} -> {elem(elem(r, i), 0), elem(elem(l, j), 0)} end)
 
   # A block's words as {word => count, number of words}.
   defp counted(block) do

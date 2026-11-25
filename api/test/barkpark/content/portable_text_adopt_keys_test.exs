@@ -226,4 +226,41 @@ defmodule Barkpark.Content.PortableTextAdoptKeysTest do
       assert Enum.at(out, 1)["anchor"] == "mid"
     end
   end
+
+  # #28724 review S1: a block alone in place between blocks paired by their
+  # words keeps its key and fields, whatever its own words.
+  describe "a block alone in place beside an edited one" do
+    test "a heading renamed beside an edited paragraph keeps its key and anchor", %{p1: p1} do
+      h = block("h1", "Introduction", %{"style" => "h2", "anchor" => "intro"})
+      renamed = block("x", "Overview", %{"style" => "h2"})
+      edited = block("e", "The quick brown fox leaps over the lazy dog")
+      out = save([h, p1], [renamed, edited])
+
+      assert [%{"_key" => "h1", "anchor" => "intro"}, %{"_key" => "k1"}] = out
+    end
+
+    test "list items: one edited by words, one rewritten, both keep their keys" do
+      item = &block(&1, &2, %{"listItem" => "bullet", "level" => 1})
+
+      out =
+        save([item.("l1", "Milk"), item.("l2", "Eggs")], [
+          item.("x", "Oat milk"),
+          item.("x", "Butter")
+        ])
+
+      assert Enum.map(out, & &1["_key"]) == ["l1", "l2"]
+    end
+
+    test "typing into an empty paragraph beside an edited one keeps its key", %{p1: p1} do
+      empty = %{
+        block("ke", "")
+        | "children" => [%{"_type" => "span", "_key" => "kes", "text" => "", "marks" => []}]
+      }
+
+      edited = block("e", "The quick brown fox leaps over the lazy dog")
+      out = save([p1, empty], [edited, new("now some words")])
+
+      assert Enum.map(out, & &1["_key"]) == ["k1", "ke"]
+    end
+  end
 end
