@@ -157,6 +157,33 @@ defmodule BarkparkWeb.Studio.StringFieldExplicitSaveRaceTest do
     end
   end
 
+  # #28826 review: a Save posts every field, so a field A never changed
+  # was held over B's save of it, and A's next Save wrote the stale text.
+  for surface <- [:desk, :studio] do
+    test "#{surface}: A Saves a label change while B's notes save lands inside: no banner, B's notes kept through A's next Save",
+         c do
+      {a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
+
+      html =
+        ObjectRichText.inside(
+          a,
+          fn -> posts(b, "doc[notes]", %{"notes" => "one two THREE"}) end,
+          fn -> saves(a, %{"label" => "ONE two three"}) end
+        )
+
+      assert stored(c)["notes"] == "one two THREE"
+      assert get_in(stored(c), ["meta", "label"]) == "ONE two three"
+      refute html =~ "doc-conflict-banner"
+      assert assigns(a).editor_form["notes"] == "one two THREE"
+
+      html = saves(a, %{"label" => "ONE two threeX", "notes" => assigns(a).editor_form["notes"]})
+
+      refute html =~ "doc-conflict-banner"
+      assert stored(c)["notes"] == "one two THREE"
+      assert get_in(stored(c), ["meta", "label"]) == "ONE two threeX"
+    end
+  end
+
   test "an explicit Save with no other editor: saved as sent, no banner", c do
     a = open(c, :studio)
     html = saves(a, %{"notes" => "one two three four", "label" => "one"})
