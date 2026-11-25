@@ -320,13 +320,17 @@ puts the old value back in the same task, so a reading taken now and then does n
 
 - `transition`, all five longhands `none`: only on a box. UI SDK select and menu, on the box.
 
-Apart from both, a third list has its own reason: UI SDK lays out the pieces of a slider on its track at run time,
-and where a piece sits is not how it looks. A piece is the element it is, inside a `ui-slider`, and carries only
-what UI SDK writes on it, each property by its lines in `components/slider/slider.js`, and only as one of the
-values UI SDK writes there, read as the browser gives it back. In a value, `{p}` is a place on the track, a number
-from 0 to 100: UI SDK writes every place as a percentage it clamps to that range (`percentOf`, in
-`components/slider/slider-values.js`). Every entry names its values; none takes any value. Which way the slider runs
-is not read: a piece may carry what UI SDK writes on it running across or running down.
+Apart from both, a third list has its own reason: UI SDK lays out the pieces of a control and sets how they take a
+press at run time, and that is where a piece sits and how it behaves, not how it looks. A piece is the element it
+is, inside its control (a `ui-slider` or a `ui-number-input`), and carries only what UI SDK writes on it, each
+property by its lines in the file that writes it (`components/slider/slider.js`,
+`components/number-input/number-input.js`, or the file named before the lines, in
+`foundation/direct-manipulation/`), and only as one of the values UI SDK writes there, read as the browser gives it
+back. In a value, `{p}` is a place on the track, a number from 0 to 100: UI SDK writes every place as a percentage
+it clamps to that range (`percentOf`, in `components/slider/slider-values.js`). Every entry names its values; none
+takes any value. Which way the slider runs is not read: a piece may carry what UI SDK writes on it running across or
+running down. A number input's step button holds a press for the 400 ms `repeat.js` gives it; `hold.js` also writes
+`-webkit-touch-callout: none` there, which the browser the check runs drops, so it is not on the list.
 
 - On `ui-slider-control`: `touch-action` as `none` (179). UI SDK slider, on its pieces.
 - On `ui-slider-track`: `position` as `relative` (187). UI SDK slider, on its pieces.
@@ -342,6 +346,11 @@ is not read: a piece may carry what UI SDK writes on it running across or runnin
   `100%` (90), `height` as `100%` (91), `margin` as `0` (92), `padding` as `0` (93), `border` as `0` (94),
   `opacity` as `0` (95), `overflow` as `hidden` (96), `clip-path` as `inset(50%)` (97), `white-space` as `nowrap`
   (98), `pointer-events` as `none` (99). UI SDK slider, on its pieces.
+- On the button in `ui-number-input-increment` or `ui-number-input-decrement`: `user-select` as `none` (71),
+  `-webkit-user-select` as `none` (71), `touch-action` as `manipulation` (71), `--hold-delay` as `400ms` (hold.js 9).
+  UI SDK number input, on its step buttons and scrub area.
+- On `ui-number-input-scrub-area`: `touch-action` as `none` (237), `user-select` as `none` (237),
+  `-webkit-user-select` as `none` (237). UI SDK number input, on its step buttons and scrub area.
 
 Any other property, a box's property on an element that is not a box, a piece's property on any other element
 or on another piece, an anchor name no box hangs from, any other transition value, and a value UI SDK does not

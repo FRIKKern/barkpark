@@ -9,9 +9,10 @@
 // position-anchor names; anything else, anywhere in a stage, fails by name. docs/PARTS.md "Placement" prints the
 // same list, and a unit row is red when the two differ.
 //
-// SLOTS is the third list, with its own reason: the pieces of a control UI SDK lays out at run time (a slider's
-// control, track, indicator, thumbs and the range input it hides in each thumb), each with only the properties UI SDK
-// writes on it, by line, and the values it writes there. A later control's pieces go in as more entries.
+// SLOTS is the third list, with its own reason: the pieces of a control UI SDK lays out, or sets how they take a
+// press, at run time (a slider's control, track, indicator, thumbs and the range input it hides in each thumb; a number
+// input's step buttons and scrub area), each with only the properties UI SDK writes on it, by line, and the values it
+// writes there. A later control's pieces go in as more entries.
 //
 // SCROLL_LOCK is the second list, with its own reason and its values, for an element that holds a stage: the root
 // element or body only, and only while a dialog box is open. OUT_OF_DOCUMENT names a stage that does not stand in
@@ -83,15 +84,17 @@ export const SCROLL_LOCK = [
   { property: '--scrollbar-width', on: 'root', length: 'px', writer: LOCK },
 ]
 
-/** The third list, with its own reason, for the pieces of a UI SDK control that lays them out at run time: each slot
-    by the element it is (`at`, a selector), and each property UI SDK writes there, by its lines in the writer's file.
+/** The third list, with its own reason, for the pieces of a UI SDK control that lays them out, or sets how they take a
+    press, at run time: each slot by the element it is (`at`, a selector), and each property UI SDK writes there, by its
+    lines in the writer's file, or in `file` where another file writes it.
     `values` are the values UI SDK writes there (any one of them, as the browser gives it back), where `{p}` is a place
     on the track, a number from 0 to 100: UI SDK writes every place as a percentage it clamps to that range (percentOf
     in components/slider/slider-values.js). Every entry has its values. A slot carries only its own properties; any other property there, any of them on another
     element, and a value UI SDK does not write fail by name, as any style attribute does. A later control's slots go in as more entries. */
-export const SLOT_REASON = 'UI SDK lays out the pieces of a slider on its track at run time; where a piece sits is not how it looks'
+export const SLOT_REASON = 'UI SDK lays out the pieces of a control and sets how they take a press at run time; that is where a piece sits and how it behaves, not how it looks'
 const SLIDER = 'UI SDK slider, on its pieces (components/slider/slider.js)'
 const PLACE = { values: ['{p}%'] }
+const NUMBER = 'UI SDK number input, on its step buttons and scrub area (components/number-input/number-input.js)'
 export const SLOTS = [
   { slot: 'ui-slider-control', at: 'ui-slider ui-slider-control', writer: SLIDER, writes: [{ property: 'touch-action', values: ['none'], lines: [179] }] },
   { slot: 'ui-slider-track', at: 'ui-slider ui-slider-track', writer: SLIDER, writes: [{ property: 'position', values: ['relative'], lines: [187] }] },
@@ -146,6 +149,30 @@ export const SLOTS = [
       { property: 'clip-path', values: ['inset(50%)'], lines: [97] },
       { property: 'white-space', values: ['nowrap'], lines: [98] },
       { property: 'pointer-events', values: ['none'], lines: [99] },
+    ],
+  },
+  // The step buttons UI SDK binds a press and hold on (bindButton, components/number-input/number-input-api.js), with
+  // the delay repeat.js gives it, 400 ms. hold.js also writes -webkit-touch-callout: none, which the browser the check
+  // runs drops, so it never reaches the log and is not here.
+  {
+    slot: 'the button in ui-number-input-increment or ui-number-input-decrement',
+    at: 'ui-number-input ui-number-input-increment > button, ui-number-input ui-number-input-decrement > button',
+    writer: NUMBER,
+    writes: [
+      { property: 'user-select', values: ['none'], lines: [71] },
+      { property: '-webkit-user-select', values: ['none'], lines: [71] },
+      { property: 'touch-action', values: ['manipulation'], lines: [71] },
+      { property: '--hold-delay', values: ['400ms'], lines: [9], file: 'foundation/direct-manipulation/hold.js' },
+    ],
+  },
+  {
+    slot: 'ui-number-input-scrub-area',
+    at: 'ui-number-input ui-number-input-scrub-area',
+    writer: NUMBER,
+    writes: [
+      { property: 'touch-action', values: ['none'], lines: [237] },
+      { property: 'user-select', values: ['none'], lines: [237] },
+      { property: '-webkit-user-select', values: ['none'], lines: [237] },
     ],
   },
 ]
@@ -203,7 +230,8 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
   // Each slot's writes by the longhands the browser applies.
   const slots = lists.slots.map((s) => {
     const by = new Map()
-    for (const w of s.writes) for (const { prop } of parse(`${w.property}: inherit`).decls) by.set(prop, w)
+    // Where two writes come to one longhand (-webkit-user-select is user-select's other name), the first names it.
+    for (const w of s.writes) for (const { prop } of parse(`${w.property}: inherit`).decls) if (!by.has(prop)) by.set(prop, w)
     return { ...s, by }
   })
   // A value of a write as the browser gives it back for the longhand `prop`, on a pad of its own (parse's stays put).
