@@ -487,7 +487,9 @@ defmodule BarkparkWeb.ChatController do
   Answer an AskUserQuestion row with the option(s) the human actually picked →
   204. Body `{request_id, answers}`, where `answers` maps a QUESTION STRING the
   server persisted to a chosen option LABEL the server persisted (or, for a
-  `multiSelect` question, a list of them).
+  `multiSelect` question, a list of them). A delivered answer is stored on the
+  row as `metadata.answers` (the validated map), so a reader sees what was
+  chosen after a reload (task-70baa54b6bc7b54f).
 
   This is the D28 backlog closed (`ct-bl-question-updatedinput`), and it closes
   it WITHOUT relaxing D22. The caller still never supplies `updatedInput`: it
@@ -534,7 +536,7 @@ defmodule BarkparkWeb.ChatController do
           &Runtime.answer_approval(stored.provider, &1, request_id, answer)
         )
 
-      case ApprovalAnswer.settle(id, request_id, "allowed", deliver) do
+      case ApprovalAnswer.settle(id, request_id, "allowed", deliver, %{"answers" => answers}) do
         :delivered -> send_resp(conn, :no_content, "")
         {:error, _} -> ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", @unsent)
         _not_pending -> not_found(conn)
