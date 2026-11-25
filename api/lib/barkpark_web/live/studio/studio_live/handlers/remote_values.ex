@@ -61,6 +61,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   alias Barkpark.Content
 
   @event "bp:form-remote-values"
+  @born_event "bp:form-born"
 
   # The `v` bp-array-focus.js writes into `_bp_seen` (its SEEN_VERSION).
   @seen_version 2
@@ -206,6 +207,83 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
     ]
   end
 
+  @doc """
+  Once per socket, when it first shows a document and is connected
+  (task-4fc7383b936f606a): every free-text field is sent its stored value
+  under a number of its own (`:born`), as `RichTextRemote.born/1` sends
+  rich text. A page that rejoins a new socket keeps its `_bp_seen`, the old
+  socket's numbers, which this socket never sent. A field showing the
+  stored value takes the number; one typed on while the page was away
+  keeps its old number, or none (`born_untaken?/3`).
+  """
+  def born(socket) do
+    if socket.assigns[:editor_text_born] || not Phoenix.LiveView.connected?(socket) ||
+         is_nil(doc_key(socket)) do
+      socket
+    else
+      form = socket.assigns[:editor_form] || %{}
+
+      {socket, values, seqs} =
+        socket.assigns[:editor_schema]
+        |> born_units(form)
+        |> Enum.reduce({socket, %{}, %{}}, fn {key, value}, {s, values, seqs} ->
+          {s, seq} = next_seq(s)
+          name = input_name(key)
+          s = put_entries(s, key, Map.get(history(s), key, []) ++ [{seq, value, :born}])
+          {s, Map.put(values, name, value), Map.put(seqs, name, seq)}
+        end)
+
+      # Its own event: a field showing the value takes the number; one that
+      # does not, and has none, reports 0, which this socket never sends
+      # (bp-array-focus.js).
+      socket = assign(socket, :editor_text_born, true)
+
+      if values == %{},
+        do: socket,
+        else: push_event(socket, @born_event, %{values: values, seqs: seqs})
+    end
+  end
+
+  @doc """
+  Whether `key` holds a value this socket sent at birth (`born/1`) that the
+  post (`seen`, the raw `_bp_seen`, from a page that numbers its values)
+  does not report: the page had not taken it, so its post was typed on
+  what the page showed before the rejoin, which this socket never saw. The
+  page then reports a number this socket did not send (the old socket's,
+  or 0). A post with no number took no push: it shows the born value.
+  """
+  def born_untaken?(socket, key, seen) when is_binary(seen) do
+    seen = decode_seen(seen)
+    name = input_name(key)
+    n = Map.get(seen, name) || Map.get(drawn_numbers(seen), name)
+    entries = Map.get(history(socket), key, [])
+
+    Map.get(seen, "v") == @seen_version and is_integer(n) and
+      Enum.any?(entries, &match?({_, _, :born}, &1)) and is_nil(base_entry(entries, n))
+  end
+
+  def born_untaken?(_socket, _key, _seen), do: false
+
+  # Each free-text value of the form, by key or path into a `composite`.
+  defp born_units(schema, form, at \\ []) do
+    Enum.flat_map(form, fn
+      {key, value} when is_binary(key) and is_binary(value) ->
+        if free_text_at?(schema, key), do: [{unit(at, key), value}], else: []
+
+      {key, %{} = inner} when is_binary(key) and not is_struct(inner) ->
+        case field(schema, key) do
+          %{"type" => "composite", "fields" => subs} when is_list(subs) ->
+            born_units(%{fields: subs}, inner, at ++ [key])
+
+          _ ->
+            []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
   @doc "Whether the raw `_bp_seen` is from a page that numbers every value it shows."
   def crossing?(seen) when is_binary(seen), do: Map.get(decode_seen(seen), "v") == @seen_version
   def crossing?(_seen), do: false
@@ -213,10 +291,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   @doc false
   # The entry a post reporting number `n` was written from: the latest of the
   # values the page showed up to `n` and the page's own landed post. With no
-  # number, the page took no push yet: its own post or the first push's `was`.
+  # number, the page took no push yet: its own post, the first push's `was`,
+  # or the value this socket was born with (`born/1`), which the page shows.
   def base_entry(entries, nil) do
     entries
-    |> Enum.filter(fn {_seq, _value, kind} -> kind in [:own, :origin] end)
+    |> Enum.filter(fn {_seq, _value, kind} -> kind in [:own, :origin, :born] end)
     |> latest()
   end
 
