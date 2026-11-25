@@ -290,13 +290,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   @doc """
-  Another document is shown than `was` (`PostIdentity.of/1` before the
-  navigation): the log is of the one left, keyed by input names the new one
-  may share, so it goes, and the page drops what waits for those names
-  (task-29686209fb9fc5dc). A post on the new document is A's, as typed.
+  The document `was` (`PostIdentity.of/1` before the navigation) is left:
+  the log is of it, keyed by input names the next one may share, so it
+  goes, and the page drops what waits for those names
+  (task-29686209fb9fc5dc). A post on the next document is A's, as typed.
   """
   def forget(socket, was) do
-    if was == BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket) do
+    if not is_binary(was) or was == BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket) do
       socket
     else
       socket
