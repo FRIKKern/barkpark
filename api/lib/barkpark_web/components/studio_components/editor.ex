@@ -1387,6 +1387,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   form when another user saved the open document while the local buffer held
   unsaved edits. Offers a Reload action ("reload-remote-doc") that discards the
   buffer and reloads from the DB. `conflict == false` → nothing renders.
+  Theirs' blocks past five fold under an "N more" line, still in the page
+  (task-66200f2c6a01ab57): no block of theirs is hidden, and a whole clash
+  does not draw a banner taller than the form.
   """
   attr :conflict, :boolean, default: false
 
@@ -1410,7 +1413,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <%= gettext("Updated by another user — your unsaved edits are kept.") %>
           </span>
         </div>
-        <blockquote :for={text <- @theirs} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
+        <blockquote :for={text <- Enum.take(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
+        <details :if={length(@theirs) > 5} class="bp-doc-conflict-more" data-test-id="doc-conflict-more">
+          <summary><%= gettext("%{count} more", count: length(@theirs) - 5) %></summary>
+          <blockquote :for={text <- Enum.drop(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
+        </details>
         <button
           type="button"
           class="btn btn-sm"
