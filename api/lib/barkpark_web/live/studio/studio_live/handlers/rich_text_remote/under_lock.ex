@@ -134,9 +134,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     end
   end
 
-  defp list(value) when is_list(value), do: value
-  defp list(_value), do: []
-
   @doc "The save's options: each value by its content path, and the fields to report."
   def write_opts(values) when map_size(values) == 0, do: []
 
