@@ -224,6 +224,30 @@ check("born: a field not drawn takes the number; a textarea compares its line br
   assert.deepEqual(seen(), { "doc[kicker]": 5, "doc[excerpt]": 6, v: 2 });
 });
 
+// task-f75673bec30873e6 (#28833 review, N2): a value drawn into a field
+// while it composes (IME) made the composition commit again (かかき).
+check("IME: a composing input is not drawn; after compositionend it is", () => {
+  const { title } = mount("one two", "E");
+  title.focus();
+  title.dispatchEvent(new window.CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  title.value = "one twか";
+  push({ "doc[title]": { value: "ONE twか", was: "one twか" } });
+  assert.equal(title.value, "one twか");
+  title.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true, data: "か" }));
+  push({ "doc[title]": { value: "ONE twか", was: "one twか" } });
+  assert.equal(title.value, "ONE twか");
+});
+
+check("IME: a composing input keeps the number of the value it was typed from", () => {
+  const { title } = mount("one two", "E");
+  title.focus();
+  title.dispatchEvent(new window.CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  title.value = "one twか";
+  push({ "doc[title]": { value: "ONE twか", was: "one twか" } }, { "doc[title]": [7, 8] });
+  assert.equal(seen()["doc[title]"], 7);
+  title.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true, data: "か" }));
+});
+
 window.close();
 if (failures) {
   console.log(`\n${failures} check(s) failed`);

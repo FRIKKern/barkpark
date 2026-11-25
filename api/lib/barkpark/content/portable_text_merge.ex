@@ -183,7 +183,7 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # Each base index mine kept, to mine's own block there.
   defp kept(base, mine) do
-    pairs = PortableTextAlign.pairs(Enum.map(base, &drawn/1), Enum.map(mine, &drawn/1))
+    pairs = PortableTextAlign.pairs(Enum.map(base, &shape/1), Enum.map(mine, &shape/1))
     mine_at = List.to_tuple(mine)
     Map.new(pairs, fn {i, j} -> {i, elem(mine_at, j)} end)
   end
@@ -266,7 +266,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp bytes(_block, _m, _t), do: 0
 
   defp same_edit?(:deleted, :deleted), do: true
-  defp same_edit?({:changed, a}, {:changed, b}), do: drawn(a) == drawn(b)
+  defp same_edit?({:changed, a}, {:changed, b}), do: shape(a) == shape(b)
   defp same_edit?(_, _), do: false
 
   # Mine for a clashed block. Inserts at one place come from one side only
@@ -301,7 +301,7 @@ defmodule Barkpark.Content.PortableTextMerge do
   #   * `gaps`: each gap as `{base indexes left out, blocks put in}`;
   #   * `unsure`: base indexes whose line-up can go more than one way.
   defp edits(base, side) do
-    {a, b} = {Enum.map(base, &drawn/1), Enum.map(side, &drawn/1)}
+    {a, b} = {Enum.map(base, &shape/1), Enum.map(side, &shape/1)}
     {pairs, unsure} = lcs(a, b)
     side_at = List.to_tuple(side)
 
@@ -434,6 +434,17 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   defp text(%{"_type" => type}) when is_binary(type), do: "[#{type}]"
   defp text(_block), do: ""
+
+  # A block as the line-up reads it: as drawn, and a text block's own fields
+  # beside the drawing (task-68298dcf20a1ec8a, #28817 review T2). A field
+  # change that draws the same (`level` without `listItem`, an unknown
+  # field, a `style` removed) read as no change, and the merge dropped it.
+  # `same_drawn?/2` stays by the drawing: it compares a page's posted HTML,
+  # which carries no such field.
+  defp shape(%{"_type" => "block"} = block),
+    do: {drawn(block), Map.drop(block, ["_key", "children", "markDefs"])}
+
+  defp shape(block), do: drawn(block)
 
   # A text block as the editor draws it, keys set aside; a custom block (a
   # mediaModule) by its fields, since its drawn summary can hide a change.
