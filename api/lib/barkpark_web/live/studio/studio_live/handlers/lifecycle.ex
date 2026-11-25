@@ -60,6 +60,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_rt_clash: %{}
       )
       |> RichTextRemote.forget()
+      |> RichTextRemote.born()
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so
       # it must not name the page (#28322 review, round 2).

@@ -132,7 +132,24 @@ defmodule BarkparkWeb.ObjectRichText do
     {:ok, view, _html} = live(c.conn, path)
     render_async(view, 5_000)
     assert eventually(fn -> has_element?(view, "#editor-form") end)
+    born(view)
     view
+  end
+
+  @doc """
+  The stored values a connected mount sends (`RichTextRemote.born/1`,
+  task-eeda66fac5af065f). A page that never had a value draws them as it
+  already shows them; the mirror's `page/0` reports 0, read the same way.
+  """
+  def born(view) do
+    assert_push_event(
+      view,
+      "bp:rt-remote",
+      %{values: %{"doc[meta].rt" => %{born: true} = v}},
+      2_000
+    )
+
+    v
   end
 
   def eventually(fun), do: Enum.any?(1..200, fn _ -> fun.() or (Process.sleep(10) && false) end)
@@ -202,7 +219,14 @@ defmodule BarkparkWeb.ObjectRichText do
   def page, do: %{last: 0, first: nil}
 
   def got(page, %{seq: seq} = v, draw?) do
-    first = if page.first && !v[:own], do: page.first, else: seq
+    # A new socket's stored value waits with what the page had before it.
+    first =
+      cond do
+        page.first && !v[:own] -> page.first
+        v[:born] -> page.last + 1
+        true -> seq
+      end
+
     %{last: max(page.last, seq), first: if(draw?, do: nil, else: first)}
   end
 
