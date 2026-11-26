@@ -728,11 +728,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     touched = touched_paths(socket)
     base_form = base_form(socket)
     targets = params |> Map.get("_target") |> List.wrap()
+    row_keys = params |> Enum.filter(fn {k, _} -> doc_key?(k) end) |> posted_row_keys()
 
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
-        is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched) and
-          not kept_value?(k, v, targets, base_form)
+        doc_key?(k) and foldable?(k, v, touched) and
+          not kept_value?(k, v, targets, {row_keys, base_form})
       end)
 
     if dotted == [] do
@@ -740,7 +741,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     else
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
-      row_keys = posted_row_keys(dotted)
 
       doc =
         Enum.reduce(dotted, doc, fn {key, value}, acc ->
@@ -999,15 +999,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # the rule `KeptCodes.only_touched/3` keeps for a top-level codelist. The
   # session's touched set is not enough: a path picked earlier, then given a
   # number by another editor, posts "" with every later change of the form.
-  defp kept_value?(key, "", targets, form) do
+  #
+  # The stored value is read at the row the post is for: by its posted `_key`,
+  # where the row is now (`row_path/3`), never at the posted index, which
+  # after another editor moved the rows holds another row (task-9dc943bf59b530fa).
+  defp kept_value?(key, "", targets, {row_keys, form}) do
     key not in targets and
-      case StudioLive.parse_path(key) do
-        [] -> false
-        path -> stored_at(form, path) |> then(&(not is_nil(&1) and not is_binary(&1)))
+      with [_ | _] = path <- StudioLive.parse_path(key),
+           {:ok, path} <- row_path(path, row_keys, form) do
+        stored_at(form, path) |> then(&(not is_nil(&1) and not is_binary(&1)))
+      else
+        _ -> false
       end
   end
 
   defp kept_value?(_key, _value, _targets, _form), do: false
+
+  defp doc_key?(key), do: is_binary(key) and String.starts_with?(key, "doc[")
 
   defp stored_at(value, []), do: value
 
