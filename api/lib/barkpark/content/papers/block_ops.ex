@@ -5713,9 +5713,6 @@ defmodule Barkpark.Content.Papers.BlockOps do
          source_doc: Map.get(content, "source_doc"),
          goal_id: Map.get(content, "goal_id"),
          event_type: Map.get(content, "event_type"),
-         # The topic names the workspace only: a same-slug paper in a sibling
-         # project shares it. A subscriber holding one of them drops the
-         # other's frames by this (task-62ff63f43817eb08).
          project_id: doc.project_id,
          # The writing process' pid, so a subscriber that is ALSO the writer
          # (a Studio LiveView editing its own paper) can skip the redundant
@@ -5735,16 +5732,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
     )
   end
 
-  # Takes the written row, so the frame always names its project: the topic
-  # names the workspace only, and a same-slug paper in a sibling project
-  # shares it (task-62ff63f43817eb08).
   defp broadcast_paper_block(%Document{} = doc, slug, dataset, frame) do
-    # Stamp the writing process' pid so a subscriber that is ALSO the writer
-    # (a Studio LiveView editing its own paper) skips the redundant self-echo
-    # refetch — the initiator already has the confirmed state (and re-reads it
-    # synchronously in `paper_ops/2`). Without this the async self-echo runs a
-    # DB reload that, in tests, outlives the render_hook and races the shared
-    # sandbox teardown (`client exited`). Mirrors the document `sender` guards.
+    # The writer's pid: the writer's own socket skips the self-echo refetch
+    # (it re-reads in `paper_ops/2`), as the document `sender` guards do. The
+    # row's project, here and in `broadcast_paper_update/1`: the topic names
+    # the workspace only, shared by a sibling project's same-slug paper
+    # (task-62ff63f43817eb08).
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
       Broadcast.paper_topic(slug, doc.workspace_id, dataset),
