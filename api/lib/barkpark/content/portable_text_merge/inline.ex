@@ -76,7 +76,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
          {:ok, ts} <- splice(b, t, fields_changed?(base, theirs)),
          true <- ms == ts or apart?(b, ms, ts),
          elsewhere = Keyword.get(opts, :elsewhere, fn _key -> false end),
-         {:ok, block} <- build(ms, ts, mine, theirs, elsewhere),
+         {:ok, block} <- build(ms, ts, mine, theirs, {elsewhere, defs(base)}),
          # One edit both made: theirs, a side's own text (task-3d00496b0292f20b).
          true <- ms == ts or guard?(block, base, mine, theirs) do
       {:ok, Enum.reduce(fields, block, &field/2)}
@@ -225,7 +225,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   defp build(same, same, _mine, theirs, _elsewhere), do: {:ok, theirs}
   defp build(:none, _ts, _mine, theirs, _elsewhere), do: {:ok, theirs}
 
-  defp build({mp, me, put}, ts, mine, theirs, elsewhere) do
+  defp build({mp, me, put}, ts, mine, theirs, {elsewhere, bdefs}) do
     shift =
       case ts do
         {tp, te, tput} when tp < mp -> length(tput) - (te - tp)
@@ -244,7 +244,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         Enum.zip(put, spans),
         mdefs,
         theirs,
-        {elsewhere, gone(theirs, a, b), outside, kept_marks(theirs, a, b)}
+        {elsewhere, gone(theirs, a, b), outside,
+         kept_marks(theirs, a, b, {bdefs, mdefs, defs(theirs)})}
       )
 
     children = cut(theirs, a, b, new)
@@ -340,8 +341,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   end
 
   # The marks on theirs' letters outside [a, b): theirs' links the result
-  # keeps.
-  defp kept_marks(theirs, a, b) do
+  # keeps. A def base, mine and theirs all hold under one key with one
+  # content is base's own, which both sides kept: one link base already
+  # shares stays one def (#28927 review), not another link of theirs.
+  defp kept_marks(theirs, a, b, {bd, md, td}) do
     {marks, _} =
       Enum.reduce(theirs["children"], {MapSet.new(), 0}, fn c, {acc, o} ->
         n = glen(c)
@@ -354,7 +357,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         {acc, o + n}
       end)
 
-    marks
+    MapSet.reject(marks, fn k -> is_map_key(bd, k) and bd[k] == md[k] and bd[k] == td[k] end)
   end
 
   defp object(value, ms, bkey, st) do

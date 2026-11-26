@@ -682,6 +682,39 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       end
     end
 
+    # #28927 review: base already shares d1 between "two" and "six". Mine
+    # retypes two, theirs retypes six; both keep d1. It stays one def.
+    test "a def base already shares stays one def when each side retypes one of its places" do
+      d1 = %{"_key" => "d1", "_type" => "link", "href" => "https://x.example", "blank" => true}
+
+      side = fn two, six ->
+        block(
+          "k",
+          [
+            span("a", "one "),
+            span("b", two, ["d1"]),
+            span("c", " five "),
+            span("d", six, ["d1"]),
+            span("e", " end")
+          ],
+          [d1]
+        )
+      end
+
+      assert {:ok, blk} =
+               Inline.merge(side.("two", "six"), side.("TWO", "six"), side.("two", "SIX"))
+
+      assert Enum.map(blk["children"], &{&1["text"], &1["marks"]}) == [
+               {"one ", []},
+               {"TWO", ["d1"]},
+               {" five ", []},
+               {"SIX", ["d1"]},
+               {" end", []}
+             ]
+
+      assert blk["markDefs"] == [d1]
+    end
+
     # task-da0afade29ee9aa0: mine runs a y link on across the splice's edge
     # where theirs holds mine's link under two keys; the run took a fresh
     # key beside theirs' key on the next letter.
