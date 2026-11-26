@@ -28,8 +28,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
-  alias BarkparkWeb.Studio.StudioLive.Blocks
-  alias BarkparkWeb.Studio.StudioLive.PaperCanvas
+  alias BarkparkWeb.Studio.StudioLive.{Blocks, LeaveScope, PaperCanvas}
   alias BarkparkWeb.Studio.StudioLive.PaperMastersSeam
   alias BarkparkWeb.Studio.StudioLive.PaperTaskSeam
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -134,13 +133,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc """
   Is this socket's principal denied `:write`? The negation of
   `Caps.write_capable?/2` — THE single copy of the `:write` tier — fed FRESH
-  caps, so a mid-session grant expiry denies immediately.
+  caps, so a mid-session grant expiry denies at once; or `LeaveScope.moved?/1`.
 
   Shared by every hook-invisible write seam (`paper_pane_op/2`, `paper_ops/2`,
   the block-op branch, and `Shared.do_autosave/2`). Do not re-derive it.
   """
   def write_denied?(socket) do
-    not Caps.write_capable?(socket.assigns, Caps.derive(socket))
+    LeaveScope.moved?(socket.assigns) or
+      not Caps.write_capable?(socket.assigns, Caps.derive(socket))
   end
 
   @doc """
