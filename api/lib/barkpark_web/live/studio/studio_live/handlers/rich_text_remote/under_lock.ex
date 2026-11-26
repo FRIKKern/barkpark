@@ -134,6 +134,52 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     end
   end
 
+  @doc """
+  Each top-level rich text the post carries (task-fa07c64d344638fb), with
+  the value its editor shows: the stored row this socket last took
+  (`Lifecycle.base_doc/1`). A top-level editor is remounted on every value
+  the socket draws (its wrapper id carries the form generation), so it
+  shows that row, on every remount except a socket rejoin: a new socket
+  starts at generation 0, the same wrapper id, so the page keeps the editor
+  it had (task-fe9d8741f0641f97). While A is held, the page shows A's view
+  over theirs, and a post on it is A's: read against theirs, so it is
+  written as typed.
+  """
+  def top(socket, posted) when is_map(posted) do
+    # `was` is the row the socket last took only because a top-level
+    # wrapper remounts on every form generation. Not after a socket
+    # rejoin: generation 0 gives the same wrapper id, and the wrapper is
+    # phx-update="ignore", so the page keeps the editor it had while
+    # `base_doc` is the new store; a save B made meanwhile is written over
+    # (main does the same, task-fe9d8741f0641f97). task-8d20a831ddd287a2
+    # would stop those remounts: if it lands, `was` must become the value
+    # the page shows (drawn at mount or its own last post), as
+    # `values/3` reads an object's (#28896).
+    content =
+      case Lifecycle.base_doc(socket) do
+        %{content: %{} = content} -> content
+        _ -> %{}
+      end
+
+    holds = socket.assigns[:editor_rt_held] || %{}
+
+    for %{"name" => key, "type" => "richText"} <- fields(socket.assigns[:editor_schema]),
+        is_binary(key),
+        is_binary(Map.get(posted, key)),
+        name = RichTextRemote.input_name([key]),
+        into: %{} do
+      case holds do
+        %{^name => %{theirs: theirs}} -> {name, {[key], theirs, :resolve}}
+        _ -> {name, {[key], Map.get(content, key), nil}}
+      end
+    end
+  end
+
+  def top(_socket, _posted), do: %{}
+
+  defp fields(%{fields: fields}) when is_list(fields), do: fields
+  defp fields(_schema), do: []
+
   @doc "The save's options: each value by its content path, and the fields to report."
   def write_opts(values) when map_size(values) == 0, do: []
 
@@ -163,35 +209,58 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     now = (is_map(written) && Map.get(written, :content)) || %{}
 
     Enum.reduce(values, {saved, acts}, fn {name, {path, was, page}}, {s, acts} ->
-      before = FormPath.get(over, path)
-      posted = FormPath.get(doc, path)
+      {s, acts} =
+        act(
+          s,
+          acts,
+          {name, path, was, if(page == :resolve, do: nil, else: page)},
+          {over, now},
+          {doc, posted_doc}
+        )
 
-      cond do
-        not Map.has_key?(over, hd(path)) or not is_binary(posted) ->
-          {s, acts}
-
-        # Both stored: a block field another editor set (`level`, an
-        # unknown field) is a move too (task-6174d8fa01658a68, #28867
-        # review B1), or A's words the store kept over went unheld.
-        PortableTextMerge.same_shape?(was, before) ->
-          {s, acts}
-
-        holds?(acts, name) ->
-          rehold(s, acts, {name, path}, list(before), FormPath.get(posted_doc, path))
-
-        true ->
-          moved(
-            s,
-            acts,
-            {name, path},
-            {list(was), list(before), list(FormPath.get(now, path))},
-            {posted, page}
-          )
-      end
+      resolve(s, acts, name, page)
     end)
   end
 
   def acts(saved, acts, _values, _docs), do: {saved, acts}
+
+  # A top-level post on A's view while held (`top/2`'s `:resolve`) is A's:
+  # the hold ends unless the store moved under it again and it is held anew.
+  defp resolve(s, acts, name, :resolve) do
+    if Enum.any?(acts, &match?({:held, ^name, _, _}, &1)),
+      do: {s, acts},
+      else: {s, [{:current, name} | acts]}
+  end
+
+  defp resolve(s, acts, _name, _page), do: {s, acts}
+
+  defp act(s, acts, {name, path, was, page}, {over, now}, {doc, posted_doc}) do
+    before = FormPath.get(over, path)
+    posted = FormPath.get(doc, path)
+
+    cond do
+      not Map.has_key?(over, hd(path)) or not is_binary(posted) ->
+        {s, acts}
+
+      # Both stored: a block field another editor set (`level`, an
+      # unknown field) is a move too (task-6174d8fa01658a68, #28867
+      # review B1), or A's words the store kept over went unheld.
+      PortableTextMerge.same_shape?(was, before) ->
+        {s, acts}
+
+      holds?(acts, name) ->
+        rehold(s, acts, {name, path}, list(before), FormPath.get(posted_doc, path))
+
+      true ->
+        moved(
+          s,
+          acts,
+          {name, path},
+          {list(was), list(before), list(FormPath.get(now, path))},
+          {posted, page}
+        )
+    end
+  end
 
   # Held by `split/3` over the store this socket knew, `before` landed under
   # the lock: A's text (the post; the view for a post still on it) merged
