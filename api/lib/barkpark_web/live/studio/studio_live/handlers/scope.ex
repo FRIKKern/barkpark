@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.Desk.Text
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -318,7 +319,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
       # the owner bound below is the principal above, the token first. So the
       # owner is asked the rule REST and the chrome ask: a read token behind a
       # writing account owned the new workspace (task-d40804433c63ffa4).
-      not Tenancy.Auth.may_create_workspace?(principal, id_of(socket.assigns[:current_workspace])) ->
+      not Tenancy.Auth.may_create_workspace?(
+        fresh(principal),
+        id_of(socket.assigns[:current_workspace])
+      ) ->
         {:noreply, StudioChrome.refuse_unseated_create(socket)}
 
       true ->
@@ -352,6 +356,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
   defp id_of(%{id: id}), do: id
   defp id_of(_), do: nil
+
+  # The rule is asked of the token row as it is now, as `Caps` and the chrome
+  # read it; a revoked token reads as nil and is refused.
+  defp fresh(%ApiToken{} = token), do: Caps.fresh_api_token(token)
+  defp fresh(principal), do: principal
 
   def create_project(%{"name" => name}, socket) do
     ws = socket.assigns[:current_workspace]

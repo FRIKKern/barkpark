@@ -75,6 +75,19 @@ defmodule BarkparkWeb.Studio.StudioCreateWorkspaceOwnerTest do
     assert length(Tenancy.list_workspaces()) == before
   end
 
+  test "a write token revoked mid-session behind a writing account creates nothing", c do
+    {raw, token} = token!(c.ws, ["read", "write"])
+    {session, _user} = account!(c.ws, "member")
+    view = studio(%{"api_token" => raw, "user_session" => session}, c)
+    {:ok, _} = Auth.revoke_token(token)
+    n = name()
+
+    html = render_hook(view, "create-workspace", %{"name" => n})
+
+    assert html =~ @refusal
+    refute made(n)
+  end
+
   test "control: a write token behind an account creates, owned by the token", c do
     {raw, token} = token!(c.ws, ["read", "write"])
     {session, _user} = account!(c.ws, "member")
