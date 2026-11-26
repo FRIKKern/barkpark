@@ -84,7 +84,7 @@ defmodule BarkparkWeb.Studio.RowPostByKeyTest do
     end
 
     @tag timeout: 120_000
-    test "#{surface} #{how}: B swaps the rows: A's words land in A's row", c do
+    test "#{surface} #{how}: B swaps the rows: B's order kept, A's words in A's row", c do
       c = Map.put(c, :surface, unquote(surface))
       put_rows(c, [rt_row("r1", "one two"), rt_row("r2", "three four")])
       a = open(c)
@@ -94,8 +94,9 @@ defmodule BarkparkWeb.Studio.RowPostByKeyTest do
       fields = rt_fields([{"r1", "<p>ONE two</p>"}, {"r2", "<p>three four</p>"}])
       in_flight(a, unquote(how), "doc[meta].rows[0].rt", fields)
 
-      texts = stored(c)["meta"]["rows"] |> by_key("rt") |> Map.new(fn {k, v} -> {k, words(v)} end)
-      assert texts == %{"r1" => ["ONE two"], "r2" => ["three four"]}
+      rows = stored(c)["meta"]["rows"]
+      assert Enum.map(rows, & &1["_key"]) == ["r2", "r1"], "B's move undone: #{inspect(rows)}"
+      assert Enum.map(rows, &words(&1["rt"])) == [["three four"], ["ONE two"]]
     end
 
     @tag timeout: 120_000
