@@ -35,6 +35,7 @@ const page = (held) => {
     `<a id="patch" data-phx-link="patch" href="/w/a/p/b/d/production/studio/post/p2">P2</a>` +
     `<a id="same" href="/w/a/p/b/d/production/studio/post/p1?tab=seo">SEO</a>` +
     `<a id="other" href="https://example.org/x">site</a>` +
+    `<a id="dslash" href="http://localhost//x">x</a><a id="dotslash" href="/.//x">x</a>` +
     `<a id="hash" href="#notes">Notes</a><a id="blank" href="/x" target="_blank">x</a></nav>` +
     `<form id="editor-form"${held ? ` data-studio-held="${held}"` : ""}><a id="inside" href="/y">ref</a></form>` +
     `<button id="studio-leave-ask" type="button" phx-click="studio-leave" hidden></button>` +
@@ -84,6 +85,20 @@ try {
     for (const id of ["same", "hash", "blank", "inside", "other"]) click(id);
     click("away", { metaKey: true });
     assert.deepEqual(sent, [], "own path, hash, new tab, inside the form, another site, a modified click: not held back");
+  }
+
+  {
+    // Held: a same-site path that starts "//" is not one the server takes as
+    // this site's (LeaveGuard.local?/1), so it is not held back: the link
+    // goes, as it does with nothing held, and the tab's close asks
+    // (task-5455fd7fe69eb386).
+    page(QUESTION);
+    for (const id of ["dslash", "dotslash"]) {
+      const e = click(id);
+      assert.equal(e.defaultPrevented, false, `${id}: not held back`);
+      assert.equal(navigated, 1, `${id}: the page's own navigation runs`);
+    }
+    assert.deepEqual(sent, [], "a // path never reaches the server");
   }
 
   {

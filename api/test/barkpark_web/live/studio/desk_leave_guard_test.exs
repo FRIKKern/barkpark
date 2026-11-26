@@ -276,6 +276,29 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
              )
     end
 
+    # task-5455fd7fe69eb386: `push_patch/2` raises on a path that is not a
+    # route of the desk's LiveView, and the socket died with it. Such a
+    # "patch" goes as a page load.
+    test "a patch to a path the desk does not route is a page load; the LiveView lives", c do
+      for href <- ["/no-such-route-5455", "/%2F%2Fevil.example", "/papers"] do
+        a = held(c)
+        render_hook(a, "desk-leave", %{"href" => href, "kind" => "patch"})
+        asks!(a)
+
+        assert has_element?(
+                 a,
+                 ~s|#{@dialog} a[data-desk-leave-go][href="#{href}"]:not([data-phx-link])|
+               )
+
+        assert Process.alive?(a.pid)
+
+        a = open(c)
+
+        assert {:error, {:redirect, %{to: ^href}}} =
+                 render_hook(a, "desk-leave", %{"href" => href, "kind" => "patch"})
+      end
+    end
+
     test "a path with a space or control byte goes nowhere (a browser reads /<TAB>/x as //x)",
          c do
       a = held(c)

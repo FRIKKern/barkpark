@@ -74,6 +74,9 @@
     if (!pane || !root.bpPush) return;
     var to = new URL(link.href, window.location.href), at = window.location;
     if (to.origin !== at.origin || (to.pathname === at.pathname && to.search === at.search)) return;
+    // A "//" path is not one the server takes as this site's
+    // (`LeaveGuard.local?/1`): the browser follows it (task-5455fd7fe69eb386).
+    if (to.pathname.slice(0, 2) === "//") return;
     e.preventDefault();
     e.stopImmediatePropagation();
     var dialog = link.closest("dialog[open]");

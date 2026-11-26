@@ -43,6 +43,7 @@ doc.body.innerHTML =
   `<a id="row" href="${DESK}lg;lg-3" data-phx-link="patch">Doc 3</a>` +
   `<a id="same" href="${DESK}lg;lg-2#x" data-phx-link="patch">here</a>` +
   `<a id="away" href="https://elsewhere.example/x">away</a>` +
+  `<a id="dslash" href="http://localhost//x">x</a><a id="dotslash" href="/.//x">x</a>` +
   `<div id="pane" data-pane-editing data-desk-held="Not saved: Title.">` +
   `<div id="body" style="overflow:auto"><form id="editor-form">` +
   `<input id="t" name="doc[title]" value="Doc 2 FAIL">` +
@@ -83,6 +84,10 @@ for (const [id, init, why] of [
   ["row", { metaKey: true }, "a modified click"],
   ["away", {}, "another site"],
   ["same", {}, "the same page"],
+  // A "//" path is not one the server takes as this site's
+  // (LeaveGuard.local?/1): the link goes (task-5455fd7fe69eb386).
+  ["dslash", {}, "a same-site path that starts //"],
+  ["dotslash", {}, "a path that is // after its dot segments"],
 ]) {
   e = click(id, init);
   assert.ok(!e.defaultPrevented, `${why}: not held back`);
