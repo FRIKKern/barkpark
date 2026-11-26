@@ -111,6 +111,29 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
       is_binary(href) and String.starts_with?(href, "/") and not String.starts_with?(href, "//") and
         not String.contains?(href, "\\")
 
+  @doc """
+  The way a local link goes: a "patch" only to a route of this socket's own
+  LiveView, which `push_patch/2` requires (it raises on any other path, and
+  the socket dies); else a page load, which goes anywhere on this site
+  (task-5455fd7fe69eb386). Any other kind is kept.
+  """
+  def kind(socket, href, "patch") do
+    case Phoenix.Router.route_info(
+           BarkparkWeb.Router,
+           "GET",
+           URI.parse(href).path || "",
+           host(socket)
+         ) do
+      %{phoenix_live_view: {view, _, _, _}} when view == socket.view -> "patch"
+      _ -> ""
+    end
+  end
+
+  def kind(_socket, _href, kind), do: kind
+
+  defp host(%{host_uri: %URI{host: host}}) when is_binary(host), do: host
+  defp host(_socket), do: nil
+
   attr :id, :string, required: true
   attr :leave, :map, required: true, doc: "`desk_leave`: `%{to:, back:}`"
   attr :message, :string, default: nil, doc: "`message/1`"

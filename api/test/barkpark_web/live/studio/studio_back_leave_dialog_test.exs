@@ -244,6 +244,36 @@ defmodule BarkparkWeb.Studio.StudioBackLeaveDialogTest do
                render_click(a, "studio-leave", %{"href" => "/papers", "kind" => ""})
     end
 
+    # task-5455fd7fe69eb386: `push_patch/2` raises on a path that is not a
+    # route of this LiveView, and the socket died with it. Such a "patch"
+    # goes as a page load.
+    test "a patch to a path this LiveView does not route is a page load; the LiveView lives",
+         c do
+      hrefs = ["/no-such-route-5455", "/%2F%2Fevil.example", "/papers"]
+      a = hold(c)
+
+      for href <- hrefs do
+        render_click(a, "studio-leave", %{"href" => href, "kind" => "patch"})
+
+        assert has_element?(
+                 a,
+                 ~s|#{@dialog} a[data-desk-leave-go][href="#{href}"]:not([data-phx-link])|
+               )
+
+        assert Process.alive?(a.pid)
+        press(a, "desk-leave-stay")
+      end
+
+      assert open_id(a) == c.id
+
+      for href <- hrefs do
+        a = open(c)
+
+        assert {:error, {:redirect, %{to: ^href}}} =
+                 render_click(a, "studio-leave", %{"href" => href, "kind" => "patch"})
+      end
+    end
+
     test "a path that is not this site's goes nowhere", c do
       a = hold(c)
       render_click(a, "studio-leave", %{"href" => "//evil.example/x", "kind" => ""})
