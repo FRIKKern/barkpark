@@ -104,6 +104,18 @@ defmodule Barkpark.Content.PortableTextMergeTest do
       end
     end
 
+    # #28928 r2 review, B1: mine's one "Final line" stood for k1 in one pass
+    # and k2 in the other, so theirs' k1 edit was dropped with :ok.
+    test "one block of mine never answers for two of theirs' edits" do
+      was = [b("k0", "Intro"), b("k1", "Draft line"), b("k2", "Draft line")]
+      mine = [b("k0", "Intro"), b("k1", "Intro"), b("k2", "Final line")]
+      theirs = [b("k0", "Intro"), b("k1", "Final line"), b("k2", "Final line")]
+
+      for opts <- [[], [inline: false]], {a, z} <- [{mine, theirs}, {theirs, mine}] do
+        assert {:clash, _, _} = M.merge(was, a, z, opts)
+      end
+    end
+
     test "theirs added the block: theirs, merged" do
       was = [b("k1", "one two"), b("k2", "three")]
       theirs = [b("k1", "one two a1"), b("t1", "gamma"), b("k2", "three")]

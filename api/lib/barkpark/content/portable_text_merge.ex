@@ -92,17 +92,38 @@ defmodule Barkpark.Content.PortableTextMerge do
 
     cond do
       certain?(m, t) and certain?(t, m) -> lined_up(base, mine, theirs, m, t, opts)
-      (both = both_made(base, m, t)) != base -> line_up_again(both, mine, theirs, opts)
+      (both = both_made(base, m, t)) != base -> line_up_again(base, both, mine, theirs, opts)
       true -> whole_clash(mine, theirs)
     end
   end
 
-  defp line_up_again(base, mine, theirs, opts) do
+  defp line_up_again(was, base, mine, theirs, opts) do
     {m, t} = {edits(base, mine), edits(base, theirs)}
 
-    if certain?(m, t) and certain?(t, m),
-      do: lined_up(base, mine, theirs, m, t, opts),
-      else: whole_clash(mine, theirs)
+    with true <- certain?(m, t) and certain?(t, m),
+         {:ok, merged} <- lined_up(base, mine, theirs, m, t, opts),
+         true <- keeps_copies?(was, mine, theirs, merged) do
+      {:ok, merged}
+    else
+      {:clash, _texts, _view} = clash -> clash
+      false -> whole_clash(mine, theirs)
+    end
+  end
+
+  # The second line-up reads a block `both_made/3` swapped in as one both
+  # sides made. Each pass counts a side's gap on its own, so one block of a
+  # side can answer for two base blocks, one per pass, and an edit of the
+  # other side's is dropped (#28928 r2 review, B1). A block neither side had
+  # in the base must be in the merge at least as many times as the side
+  # that holds the most copies of it; else the merge is not certain.
+  defp keeps_copies?(was, mine, theirs, merged) do
+    in_base = MapSet.new(was, &shape/1)
+    got = Enum.frequencies_by(merged, &shape/1)
+    {m, t} = {Enum.frequencies_by(mine, &shape/1), Enum.frequencies_by(theirs, &shape/1)}
+
+    Enum.all?(Map.merge(m, t, fn _shape, a, b -> max(a, b) end), fn {shape, n} ->
+      MapSet.member?(in_base, shape) or Map.get(got, shape, 0) >= n
+    end)
   end
 
   defp lined_up(base, mine, theirs, m, t, opts) do
