@@ -15939,3 +15939,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Not opened: the page has moved to another project. Choose Stay or Leave first."
 msgstr ""
+
+#: lib/barkpark_web/studio_chrome.ex
+#, elixir-autogen, elixir-format
+msgid "You need write access in this workspace to create a workspace"
+msgstr ""
+
+#: lib/barkpark_web/studio_chrome.ex
+#, elixir-autogen, elixir-format
+msgid "This workspace is suspended, so no workspace can be created from it"
+msgstr ""

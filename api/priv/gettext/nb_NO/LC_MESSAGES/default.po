@@ -15944,3 +15944,13 @@ msgstr "Ikke lastet inn på nytt: siden er flyttet til et annet prosjekt. Velg B
 #, elixir-autogen, elixir-format
 msgid "Not opened: the page has moved to another project. Choose Stay or Leave first."
 msgstr "Ikke åpnet: siden er flyttet til et annet prosjekt. Velg Bli her eller Forlat først."
+
+#: lib/barkpark_web/studio_chrome.ex
+#, elixir-autogen, elixir-format
+msgid "You need write access in this workspace to create a workspace"
+msgstr "Du trenger skrivetilgang i dette arbeidsområdet for å opprette et arbeidsområde"
+
+#: lib/barkpark_web/studio_chrome.ex
+#, elixir-autogen, elixir-format
+msgid "This workspace is suspended, so no workspace can be created from it"
+msgstr "Dette arbeidsområdet er suspendert, så det kan ikke opprettes noe arbeidsområde herfra"
