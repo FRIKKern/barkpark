@@ -65,7 +65,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   """
   def push(socket, old_form, new_form) do
     changed = changes(socket.assigns[:editor_schema], old_form || %{}, new_form || %{})
-    tell(socket, changed, %{})
+
+    socket
+    |> __MODULE__.UnderLock.remounted(old_form, new_form)
+    |> tell(changed, %{})
   end
 
   @doc """
@@ -407,7 +410,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_held: %{},
         editor_rt_clash: %{},
         editor_rt_born: %{},
-        editor_rt_page: nil
+        editor_rt_page: nil,
+        editor_rt_rekeyed: nil
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end
