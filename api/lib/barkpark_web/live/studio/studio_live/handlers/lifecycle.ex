@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     RemoteValues,
     RichTextRemote,
+    TextConfirmed,
     UnsavedBases,
     UnsavedObjects
   }
@@ -62,6 +63,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> RichTextRemote.forget()
       |> RichTextRemote.born()
+      |> TextConfirmed.loaded()
       |> RemoteValues.born()
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so
@@ -178,6 +180,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            # footer has no words for it.
            save_status: ""
          )
+         |> TextConfirmed.redrawn(socket)
          |> named_as_seen()}
     end
   end
@@ -277,6 +280,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           editor_unsaved_bases: kept
         )
         |> RichTextRemote.push_held(base, theirs)
+        |> TextConfirmed.redrawn(socket)
 
       {socket, clashed}
     end

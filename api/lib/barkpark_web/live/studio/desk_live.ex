@@ -119,6 +119,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # open document's editor, or the join patch drops the one the browser
       # has, with what was typed offline (task-2f3d3e3835f2a755).
       |> assign(:desk_rejoin?, rejoin?(connected?(socket) && get_connect_params(socket)))
+      # The same rejoin, for the editor's top-level rich text: read against
+      # the digest the page kept (`TextConfirmed.loaded/1`).
+      |> assign(:editor_rejoined?, rejoin?(connected?(socket) && get_connect_params(socket)))
       |> Bulk.init()
       # The navbar's Tasks sidebar (`TasksPanel`): offered while the Tasks
       # plugin is on for the workspace, closed until its button is pressed.

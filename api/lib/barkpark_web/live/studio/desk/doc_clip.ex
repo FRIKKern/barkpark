@@ -197,7 +197,11 @@ defmodule BarkparkWeb.Studio.Desk.DocClip do
       end)
 
     if Enum.any?(writes, fn {_name, field, _value} -> field["type"] in @widget_types end),
-      do: {:noreply, assign(saved, :editor_form_gen, Shared.next_form_gen(saved, true))},
+      do:
+        {:noreply,
+         saved
+         |> assign(:editor_form_gen, Shared.next_form_gen(saved, true))
+         |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(saved)},
       else: {:noreply, saved}
   end
 

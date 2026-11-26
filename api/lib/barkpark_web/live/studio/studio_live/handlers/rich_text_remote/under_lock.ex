@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Path
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
@@ -322,16 +323,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   over theirs, and a post on it is A's: read against theirs, so it is
   written as typed.
   """
-  def top(socket, posted) when is_map(posted) do
+  def top(socket, posted, seen \\ nil)
+
+  def top(socket, posted, seen) when is_map(posted) do
     # `was` is the row the socket last took only because a top-level
     # wrapper remounts on every form generation. Not after a socket
     # rejoin: generation 0 gives the same wrapper id, and the wrapper is
     # phx-update="ignore", so the page keeps the editor it had while
-    # `base_doc` is the new store; a save B made meanwhile is written over
-    # (main does the same, task-fe9d8741f0641f97). task-8d20a831ddd287a2
-    # would stop those remounts: if it lands, `was` must become the value
-    # the page shows (drawn at mount or its own last post), as
-    # `values/3` reads an object's (#28896).
+    # `base_doc` is the new store. There an autosave is read against the
+    # digest the page kept (`TextConfirmed.rejoin_seen/4`,
+    # task-fe9d8741f0641f97). task-8d20a831ddd287a2 would stop the
+    # remounts: if it lands, `was` must become the value the page shows
+    # (drawn at mount or its own last post), as `values/3` reads an
+    # object's (#28896).
     content =
       case Lifecycle.base_doc(socket) do
         %{content: %{} = content} -> content
@@ -345,14 +349,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         is_binary(Map.get(posted, key)),
         name = RichTextRemote.input_name([key]),
         into: %{} do
-      case holds do
-        %{^name => %{theirs: theirs}} -> {name, {[key], theirs, :resolve}}
+      # An autosave (`seen`, its `_bp_seen`) on a socket that mounted as a
+      # rejoin is read against the digest the page kept (`TextConfirmed`,
+      # task-fe9d8741f0641f97) before a hold's view: typing on A's view
+      # stays held until a Save or Reload.
+      case {seen && TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen), holds} do
+        {:unknown, _} -> {name, {[key], :unknown, nil}}
+        {_, %{^name => %{theirs: theirs}}} -> {name, {[key], theirs, :resolve}}
         _ -> {name, {[key], Map.get(content, key), nil}}
       end
     end
   end
 
-  def top(_socket, _posted), do: %{}
+  def top(_socket, _posted, _seen), do: %{}
 
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(_schema), do: []
