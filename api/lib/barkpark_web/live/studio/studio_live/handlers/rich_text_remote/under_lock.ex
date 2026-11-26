@@ -139,12 +139,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   the value its editor shows: the stored row this socket last took
   (`Lifecycle.base_doc/1`). A top-level editor is remounted on every value
   the socket draws (its wrapper id carries the form generation), so it
-  shows that row. While A is held, the page shows A's view over theirs, and
-  a post on it is A's: read against theirs, so it is written as typed.
+  shows that row, on every remount except a socket rejoin: a new socket
+  starts at generation 0, the same wrapper id, so the page keeps the editor
+  it had (task-fe9d8741f0641f97). While A is held, the page shows A's view
+  over theirs, and a post on it is A's: read against theirs, so it is
+  written as typed.
   """
   def top(socket, posted) when is_map(posted) do
     # `was` is the row the socket last took only because a top-level
-    # wrapper remounts on every form generation. task-8d20a831ddd287a2
+    # wrapper remounts on every form generation. Not after a socket
+    # rejoin: generation 0 gives the same wrapper id, and the wrapper is
+    # phx-update="ignore", so the page keeps the editor it had while
+    # `base_doc` is the new store; a save B made meanwhile is written over
+    # (main does the same, task-fe9d8741f0641f97). task-8d20a831ddd287a2
     # would stop those remounts: if it lands, `was` must become the value
     # the page shows (drawn at mount or its own last post), as
     # `values/3` reads an object's (#28896).
