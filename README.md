@@ -14,34 +14,50 @@ Build a website or keep a recipe collection. Use only what you need.
 
 ## What you can do
 
-| Use | What you get |
-|---|---|
-| Content | Your own fields, linked records, drafts, revisions, a visual editor |
-| Papers | Proposals, reports and notes you share, updated live |
-| Sheets | Shared tables, formulas, Excel in and out |
-| Media | Images and files, tags, collections, rights |
-| Work | Task boards, dependencies, agent queues, support tickets |
-| Search | Full text, filters, facets, click analytics |
-| AI | Chat with agents, hand them tasks, check their changes |
-| Websites | Templates, deploys, your own domains |
-| Servers | Start, update, archive and restore instances |
-| Access | Workspaces, scoped tokens, sharing rules, single sign-on |
-| Special tools | Live quizzes, ONIX book data and export |
+| Write | Work | Run |
+|---|---|---|
+| Content: own fields, drafts | Tasks, agent queues, tickets | Websites, deploys, domains |
+| Papers that update live | Agents you task and check | Servers: start, restore |
+| Sheets: formulas, Excel | Search with facets | Tokens, sharing, sign-on |
+| Media: tags, rights | Quizzes, ONIX book data | Revisions to go back to |
 
-Use each tool alone or together: in the browser, the terminal UI, the CLI or through an agent.
+In the browser, the terminal, the CLI or through an agent.
 
 <img src="docs/readme/paper-dark.webp" width="768" alt="A Paper in the reader">
 
-A Paper in the reader. It also opens in Studio to edit, and in the terminal.
+## Where we're going
 
-<img src="docs/readme/console-dark.webp" width="768" alt="The Cloud console's Sites page">
+As of 26 November: an alpha in December, and the focus now is good and stable.
 
-The Cloud console, with sample sites and their deploy state.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/progress-night.svg">
+  <img src="docs/readme/progress-paper.svg" width="768" alt="Paws walk to the bone, one row a pillar below: a paw is a step done">
+</picture>
+
+| Pillar | Now |
+|---|---|
+| UI kit: [BarkUI](js/packages/barkui) | Building. 14 parts; one skin everywhere, 52 of 100 |
+| Next-gen editor: [Fluid editor][fe] | Advanced. 3 of 7 milestones |
+| [BarkBot][bb] | Building. 1 of 8 slices |
+| Apps in use: [Studio][st], Papers, Sheets | Early. Studio: 51 of 66 journeys signed off |
+| Invisible Barkpark: [Barkdown][bd], [Barkever][be] | Partial. Barkever: 3 of 8 milestones |
+
+<img src="docs/readme/barkui-dark.webp" width="768" alt="BarkUI's buttons, in the showroom">
+
+## The family
+
+- **Barkpark**, here: the core, the API, Papers, Sheets, the CLI, BarkUI.
+- **[Studio][st]**: editing that feels like Sanity Studio.
+- **[Barkdown][bd]**: a desktop app for notes, agents and browsing.
+- **[Barkever][be]**: notes and projects for visual thinkers.
+- **[PortableDoc][pd]**: one document format for every app.
+- **[Fluid editor][fe]**: a grid editor that behaves like Squarespace's.
+- **[BarkBot][bb]**: an AI agent with its own computer.
 
 ## Local or remote
 
-On your computer, the server, the database and the files stay with you, and work goes on when the internet is down.
-On a server, several people share one. Each holds its own data; today you move it between them on purpose.
+On your computer it all stays with you and works offline; on a server, several people share it.
+Each holds its own data, and you move it between them on purpose.
 
 ## News
 
@@ -69,3 +85,10 @@ Earlier: [weekly editions](CHANGELOG.md)
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/rib-night.svg">
   <img src="docs/readme/rib-paper.svg" width="768" alt="">
 </picture>
+
+[st]: https://github.com/FRIKKern/barkpark-studio
+[bd]: https://github.com/FRIKKern/barkdown
+[be]: https://github.com/FRIKKern/barkever
+[pd]: https://github.com/FRIKKern/portable-doc
+[fe]: https://github.com/FRIKKern/fluid-editor
+[bb]: https://github.com/FRIKKern/barkbot
