@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
+  alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
@@ -66,9 +67,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   @doc """
   `values/3`, with the owner `_key` each object rich text's editor was drawn
-  under, as the post carries it (`_bp_rt_owner[]`, `[name, key]` as JSON). A value
-  `remounted/3` took under a new owner key is what the page shows only
-  when the post names that key: a post typed on the old mount, still in
+  under, as the post carries it (`_bp_rt_owner[]`, `[name, key, digest]` as
+  JSON). A value `remounted/3` took under a new owner key is what the page
+  shows only when the post names that key and that value's digest
+  (task-c0a696a3a5a3900d): a post typed on the old mount, still in
   flight while the remount went out, names the old one and is read against
   the old value (#28951 r1 review, B1).
   """
@@ -165,24 +167,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     end
   end
 
-  # Whether the post names the owner key `remounted/3` recorded for `name`:
-  # the page draws the re-keyed value. No owner, or one never recorded, is
-  # the old mount.
+  # Whether the post names the owner key `remounted/3` recorded for `name`
+  # AND the digest of the value it recorded: the page draws the re-keyed
+  # value. The key alone is not enough: a key that comes back to one drawn
+  # earlier ("" -> m2 -> "") would let a post typed on the first draw match
+  # the newest (task-c0a696a3a5a3900d). No owner, no digest, or one never
+  # recorded, is the old mount.
   defp drawn?(socket, owners, name) do
     case Map.fetch(rekeyed(socket), name) do
-      {:ok, {key, _value}} -> owner(owners, name) == {:ok, key}
+      {:ok, {key, value}} -> owner(owners, name) == {:ok, key, CompositeField.drawn_digest(value)}
       :error -> false
     end
   end
 
-  # Each entry is `[input_name, owner_key]` as JSON: either may hold any
-  # character. The key is nil for an owner with none, read as "".
+  # Each entry is `[input_name, owner_key, digest]` as JSON: the name and key
+  # may hold any character. The key is nil for an owner with none, read as "".
   defp owner(owners, name) when is_list(owners) do
     Enum.find_value(owners, :error, fn
       entry when is_binary(entry) ->
         case Jason.decode(entry) do
-          {:ok, [^name, key]} when is_binary(key) or is_nil(key) -> {:ok, to_string(key)}
-          _ -> nil
+          {:ok, [^name, key, digest]}
+          when (is_binary(key) or is_nil(key)) and is_integer(digest) ->
+            {:ok, to_string(key), digest}
+
+          _ ->
+            nil
         end
 
       _ ->

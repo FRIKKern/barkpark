@@ -20,7 +20,12 @@ defmodule BarkparkWeb.Studio.ObjectRichTextOwnerKeyTest do
 
   defp rt2(t1, t2), do: [block("k1", t1), block("k2", t2)]
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
-  defp owner_of(name, key), do: Jason.encode!([name, key])
+  # The owner entries the page posts, as drawn (`[name, key, digest]` JSON).
+  defp page_owners(view) do
+    ~r/name="_bp_rt_owner\[\]" value="([^"]*)"/
+    |> Regex.scan(render(view))
+    |> Enum.map(fn [_, v] -> String.replace(v, "&quot;", "\"") end)
+  end
 
   defp put_field(c, field, f) do
     {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, "production")
@@ -68,7 +73,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextOwnerKeyTest do
       send_post(a, "doc[meta].rt", %{
         "doc[meta].label" => "l0",
         "doc[meta].rt" => PT.to_html(rt2("one two", "anchor B more")),
-        "_bp_rt_owner" => [owner_of("doc[meta].rt", key), owner_of("doc[meta].rt2", key)]
+        "_bp_rt_owner" => page_owners(a)
       })
 
     assert words(stored(c)["meta"]["rt"]) == ["one two", "anchor B more"]
@@ -141,7 +146,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextOwnerKeyTest do
       send_post(a, "doc[one].rt", %{
         "doc[one].rt" => PT.to_html(rt2("one two", "anchor B more")),
         "doc[other].rt" => PT.to_html(rt2("x y", "z more")),
-        "_bp_rt_owner" => [owner_of("doc[one].rt", "o2"), owner_of("doc[other].rt", nil)]
+        "_bp_rt_owner" => page_owners(a)
       })
 
       s = stored(c)
