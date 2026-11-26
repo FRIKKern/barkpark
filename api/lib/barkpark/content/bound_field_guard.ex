@@ -135,7 +135,9 @@ defmodule Barkpark.Content.BoundFieldGuard do
   end
 
   # published doc_id => type, for every target that resolves in scope (either
-  # spelling; the published row wins when both exist).
+  # spelling; the published row wins when both exist). Of two rows with one
+  # spelling (two types, or two projects) the first, the oldest, wins: the row
+  # the value resolve renders (task-0db9c861491a2ab2).
   defp target_types(pairs, dataset, opts) do
     ids =
       pairs
@@ -147,8 +149,8 @@ defmodule Barkpark.Content.BoundFieldGuard do
 
     ids
     |> Content.resolve_docs_by_ids(dataset, opts)
-    |> Enum.sort_by(&String.starts_with?(&1.doc_id, DraftId.drafts_prefix()), :desc)
-    |> Map.new(fn doc -> {DraftId.published_id(doc.doc_id), doc.type} end)
+    |> Enum.sort_by(&String.starts_with?(&1.doc_id, DraftId.drafts_prefix()))
+    |> Enum.reduce(%{}, &Map.put_new(&2, DraftId.published_id(&1.doc_id), &1.type))
   end
 
   defp schema_cached(cache, type, dataset, opts) do
