@@ -19,6 +19,15 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
 
   The hook-invisible doors (`handle_info`, component events) ask
   `moved?/1` too, through `Shared.do_autosave/3` and `Paper.write_denied?/1`.
+
+  Three reads are held as well (task-7fbdea7ee305cbc4): they rebuild the
+  panes (`Shared.rebuild_panes/1`), which reads the open document again under
+  the socket's scope, the new place's. That put an empty editor, or the other
+  project's document of the same id, under the held document's address, and
+  dropped the held words without the question. Stay and Leave each make them
+  right again. An unnamed press (`PostIdentity.pressed/3`) does not send the
+  page to its address while `moved?/1`: that address is already the new
+  place's.
   """
 
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
@@ -27,11 +36,19 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
 
   @notice "Not saved: the page has moved to another project. Choose Stay or Leave first."
 
+  @held_notice "Not reloaded: the page has moved to another project. Choose Stay or Leave first."
+
   # The question's own presses, whatever their tier.
   @leave_events ~w(desk-leave desk-leave-stay desk-leave-go studio-leave)
 
+  # `:none` presses that rebuild the panes, the open document with them.
+  @held_reads ~w(reload-remote-doc desk-list-more select-sort)
+
   @doc "The notice a refused press shows."
   def notice, do: @notice
+
+  @doc "The notice a held read shows."
+  def held_notice, do: @held_notice
 
   @doc "Arm the gate. Attached before `Caps.attach/1`."
   def attach(socket), do: attach_hook(socket, :studio_leave_scope, :handle_event, &gate/3)
@@ -50,10 +67,12 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
   def refuse(socket), do: put_flash(socket, :error, @notice)
 
   defp gate(event, _params, socket) do
-    if event not in @leave_events and Caps.classify(event) not in [:none, :read] and
-         moved?(socket.assigns),
-       do: {:halt, refuse(socket)},
-       else: {:cont, socket}
+    cond do
+      event in @leave_events or not moved?(socket.assigns) -> {:cont, socket}
+      event in @held_reads -> {:halt, put_flash(socket, :error, @held_notice)}
+      Caps.classify(event) in [:none, :read] -> {:cont, socket}
+      true -> {:halt, refuse(socket)}
+    end
   end
 
   defp outside?(%{workspace_id: ws_id, project_id: proj_id}, ws, proj),
