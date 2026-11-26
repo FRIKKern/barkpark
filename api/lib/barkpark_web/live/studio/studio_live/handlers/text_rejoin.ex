@@ -17,6 +17,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   A page that typed while away with no other save is held too: a banner
   that was not needed, never words lost without one (task-6496826d722a5a06).
 
+  The hold stays on autosave (task-fe9d8741f0641f97). The page keeps
+  reporting the old socket's number, so each autosave of the field is held
+  again: the store keeps B's value, and the form A's latest words. Before,
+  a field the banner named was written as typed on A's next key, so someone
+  still typing saw the banner for one key and B's words were gone. An
+  explicit Save writes A's words, and Reload takes the store's.
+
   A field other than the post's target whose posted value is a version the
   store held before is stale, not typed (task-727f65fc259d0c7b): the page
   showed it from before B's save. It was held under the banner, and A's
@@ -37,11 +44,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   (`[{key, words, stored}]`). `units` are every free-text field the post
   carries, not only its target (#28830 r1 review, B1): a post from before
   the rejoin carries the whole form as the page showed it, and an explicit
-  Save is one too (B2).
+  Save is one too (B2). `on` is `:autosave` or `:save`: only a Save writes
+  a field the banner names.
   """
-  def split(socket, units, seen, doc, targets \\ [])
+  def split(socket, units, seen, doc, targets \\ [], on \\ :save)
 
-  def split(socket, units, seen, doc, targets) when is_binary(seen) and is_map(doc) do
+  def split(socket, units, seen, doc, targets, on) when is_binary(seen) and is_map(doc) do
     schema = socket.assigns[:editor_schema]
 
     typed =
@@ -52,7 +60,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
 
           for key <- Enum.uniq(units),
               RemoteValues.free_text_at?(schema, key),
-              not told?(socket, key),
+              on == :autosave or not told?(socket, key),
               RemoteValues.born_untaken?(socket, key, seen),
               mine = RemoteValues.value_at(doc, key),
               stored = RemoteValues.value_at(text, key),
@@ -67,7 +75,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
      stale(socket, typed, targets)}
   end
 
-  def split(_socket, _units, _seen, doc, _targets), do: {doc, []}
+  def split(_socket, _units, _seen, doc, _targets, _on), do: {doc, []}
 
   # Each field other than the target whose posted value a stored version
   # held is tagged `:stale`. The store is asked only for such a field.
@@ -174,7 +182,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
     Phoenix.LiveView.push_event(socket, "bp:form-remote-values", %{values: values})
   end
 
-  # A field the banner already names was told: typing on saves A's words.
+  # A field the banner already names was told: a Save writes A's words.
   defp told?(socket, key) do
     fields = socket.assigns[:editor_clash_fields] || []
     socket.assigns[:doc_conflict] == true and (fields == [] or top(key) in fields)

@@ -601,7 +601,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A page that rejoined a new socket, typed on a value it never took
         # (`TextRejoin`, task-4fc7383b936f606a).
         {targets, units} = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
-        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc, targets)
+
+        {doc, typed} =
+          TextRejoin.split(socket, units, params["_bp_seen"], doc, targets, :autosave)
 
         based =
           socket

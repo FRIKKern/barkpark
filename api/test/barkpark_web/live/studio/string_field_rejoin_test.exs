@@ -149,7 +149,7 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
         {"label", @label, ["meta", "label"]},
         {"notes", "doc[notes]", ["notes"]}
       ] do
-    test "#{surface} #{field}: B saves while A's page is away, A's page rejoins and posts its typing: B's kept, A held with the banner; typing on saves A's",
+    test "#{surface} #{field}: B saves while A's page is away, A's page rejoins and posts its typing: B's kept, A held with the banner; typing on stays held, a Save writes A's",
          c do
       {_a, b} = {open(c, unquote(surface)), open(c, unquote(surface))}
       field = unquote(field)
@@ -170,11 +170,17 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       # The banner names the field (`RefusedSave.status/1`).
       assert assigns(a2).editor_clash_fields == [hd(unquote(at))]
 
-      posts_seen(a2, unquote(target), %{field => "one twAA three"}, n)
+      # Typing on is held too (task-fe9d8741f0641f97). On main the next key
+      # wrote "one twAA three" over B's and the banner went.
+      for words <- ["one twAA three", "one twAAA three"] do
+        html = posts_seen(a2, unquote(target), %{field => words}, n)
+        assert get_in(stored(c), unquote(at)) == "one twB three"
+        assert html =~ "doc-conflict-banner"
+        assert get_in(assigns(a2).editor_form, unquote(at)) == words
+      end
 
-      assert ObjectRichText.eventually(fn ->
-               get_in(stored(c), unquote(at)) == "one twAA three"
-             end)
+      saves(a2, %{field => "one twAAA three"}, %{unquote(target) => n})
+      assert get_in(stored(c), unquote(at)) == "one twAAA three"
     end
 
     test "#{surface} #{field}: a plain reconnect, the field shows the stored value: typing saves, no banner",
@@ -207,7 +213,7 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
 
     # Design A's cost (task-6496826d722a5a06): with no other save, typing
     # done while away is held too. A banner that was not needed; no words lost.
-    test "#{surface} #{field}: A's page rejoins with no other save and posts its typing: held with the banner, typing on saves",
+    test "#{surface} #{field}: A's page rejoins with no other save and posts its typing: held with the banner until a Save",
          c do
       field = unquote(field)
       a2 = open(c, unquote(surface))
@@ -217,11 +223,12 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       assert get_in(stored(c), unquote(at)) == "one two three"
       assert html =~ "doc-conflict-banner"
 
-      posts_seen(a2, unquote(target), %{field => "one twAA three"}, n)
+      html = posts_seen(a2, unquote(target), %{field => "one twAA three"}, n)
+      assert get_in(stored(c), unquote(at)) == "one two three"
+      assert html =~ "doc-conflict-banner"
 
-      assert ObjectRichText.eventually(fn ->
-               get_in(stored(c), unquote(at)) == "one twAA three"
-             end)
+      saves(a2, %{field => "one twAA three"}, %{unquote(target) => n})
+      assert get_in(stored(c), unquote(at)) == "one twAA three"
     end
   end
 
@@ -323,7 +330,7 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
     # label; A types in the title while away. The stale label in A's post
     # was held under the banner, and A's next key in the title wrote it over
     # B's, with the banner gone and B never told.
-    test "#{surface}: B saves the label, A typed the title while away: the stale label is put back, never held, and typing on keeps B's",
+    test "#{surface}: B saves the label, A typed the title while away: the stale label is put back, never held; typing on and a Save keep B's",
          c do
       b = open(c, unquote(surface))
       posts(b, @label, %{"label" => "one twB three"})
@@ -340,8 +347,13 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       # The page's input still showing the stale label is drawn B's.
       assert drawn(a2, @label) == %{value: "one twB three", was: "one two three", draw: true}
 
-      # On main: this wrote "one two three" over B's label.
+      # On main: this wrote "one two three" over B's label. The title,
+      # typed while away, stays held on typing on (task-fe9d8741f0641f97).
       changes(a2, "doc[title]", %{"title" => "T0 AAAZ", "label" => "one two three"}, seen)
+      assert stored_title(c) == "T0"
+      assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+
+      saves(a2, %{"title" => "T0 AAAZ", "label" => "one two three"}, seen)
       assert ObjectRichText.eventually(fn -> stored_title(c) == "T0 AAAZ" end)
       assert get_in(stored(c), ["meta", "label"]) == "one twB three"
     end
@@ -383,9 +395,8 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       changes(a2, "doc[title]", %{"title" => "T0 AAA", "label" => "one two three"}, seen)
       refute "meta" in (assigns(a2).editor_clash_fields || [])
 
-      changes(
+      saves(
         a2,
-        "doc[title]",
         %{
           "title" => "T0 AAAZ",
           "label" => get_in(assigns(a2).editor_form, ["meta", "label"])
@@ -442,7 +453,8 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twA three"
     end
 
-    test "#{surface}: the hold draws A's words into the input, and typing on saves them", c do
+    test "#{surface}: the hold draws A's words into the input; typing on stays held, a Save writes them",
+         c do
       b = open(c, unquote(surface))
       posts(b, "doc[notes]", %{"notes" => "one twB three"})
 
@@ -454,8 +466,41 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       # desk's rejoin redraw), so the next key types on A's words.
       assert drawn(a2, "doc[notes]") == %{value: "one twA three", was: "one twB three"}
 
-      changes(a2, "doc[notes]", %{"notes" => "one twA threeZ"}, seen)
-      assert ObjectRichText.eventually(fn -> stored(c)["notes"] == "one twA threeZ" end)
+      html = changes(a2, "doc[notes]", %{"notes" => "one twA threeZ"}, seen)
+      assert stored(c)["notes"] == "one twB three"
+      assert html =~ "doc-conflict-banner"
+
+      saves(a2, %{"notes" => "one twA threeZ"}, seen)
+      assert stored(c)["notes"] == "one twA threeZ"
+    end
+
+    test "#{surface}: a held field leaves the other fields' autosave on", c do
+      b = open(c, unquote(surface))
+      posts(b, @label, %{"label" => "one twB three"})
+
+      a2 = open(c, unquote(surface))
+      seen = a2 |> all_born() |> Map.put(@label, 0)
+      html = changes(a2, @label, %{"label" => "one twA three"}, seen)
+      assert html =~ "doc-conflict-banner"
+
+      # A types on in notes; the post carries the held label as the page shows it.
+      for {notes, title} <- [{"one two three N", "T0"}, {"one two three N", "T0 T"}] do
+        target = if title == "T0", do: "doc[notes]", else: "doc[title]"
+
+        html =
+          changes(
+            a2,
+            target,
+            %{"label" => "one twA three", "notes" => notes, "title" => title},
+            seen
+          )
+
+        assert stored(c)["notes"] == notes
+        assert stored_title(c) == title
+        assert get_in(stored(c), ["meta", "label"]) == "one twB three"
+        assert html =~ "doc-conflict-banner"
+        assert get_in(assigns(a2).editor_form, ["meta", "label"]) == "one twA three"
+      end
     end
   end
 end
