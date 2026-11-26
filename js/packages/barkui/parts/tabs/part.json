@@ -3,15 +3,15 @@
   "family": "navigation",
   "element": "ui-tabs",
   "imports": ["@ui-sdk/web/tabs"],
-  "summary": "Switches between panels in one place, across or down: the selected tab marked by its own edge, a disabled tab that takes focus but is never selected.",
+  "summary": "Switches between panels in one place, across or down: the selected tab marked by UI SDK's sliding indicator, an edge that slides to the tab chosen, and a disabled tab that takes focus but is never selected.",
   "notCovered": [
     {
-      "name": "ui-tabs-indicator",
-      "why": "UI SDK writes the selected tab's position and size onto it as a style attribute, which the check refuses on a stage, so the stage holds none and part.css does not style it."
+      "name": "the indicator with no script",
+      "why": "UI SDK places the indicator by measuring the selected tab at run time, so with no script it has no box, and the selected tab shows by its words alone."
     }
   ],
   "textOnly": [
-    "[data-slot=\"tabs-tab\"]:not([data-selected])",
+    "[data-slot=\"tabs-tab\"]",
     "[data-slot=\"tabs-panel\"]"
   ]
 }

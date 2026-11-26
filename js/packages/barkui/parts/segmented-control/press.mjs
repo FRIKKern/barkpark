@@ -2,19 +2,30 @@
 // none of its script) with the part's example element and a copy of the check's helpers (`h`). Each function is sent
 // alone, so it may not reach anything else in this file. An expect returns true or a reason. Keys go through the
 // browser's own input pipeline, one key per entry, on a US layout. The check focuses the part's heading first; the
-// first Tab lands on the checked item of the range, Day.
+// first Tab lands on the checked item of the Range control, Day.
 
 export function setup() {}
 
 export const steps = [
   {
-    name: 'Tab reaches the range at the checked Day, focus-visible',
+    name: "Tab reaches the Range control at the checked Day, focus-visible, and every control's indicator, the pinned rows' too, sits on its checked item",
     keys: ['Tab'],
     expect: (root, h) => {
       const r = root.querySelector('#segmented-control-day')
       if (document.activeElement !== r) return `focus is on ${h.describe(document.activeElement)}`
       if (r.getAttribute('aria-checked') !== 'true') return `aria-checked is ${r.getAttribute('aria-checked')}`
-      return r.matches(':focus-visible') || 'not :focus-visible'
+      if (!r.matches(':focus-visible')) return 'not :focus-visible'
+      const groups = [...root.querySelectorAll('[data-slot="segmented-control"]')]
+      if (groups.length !== 6) return `${groups.length} segmented controls, not 6`
+      for (const g of groups) {
+        const on = g.querySelector('[data-slot="segmented-control-item"][data-checked]')
+        const ind = g.querySelector(':scope > [data-slot="segmented-control-indicator"]')
+        if (!ind) return `${h.describe(g)} has no indicator`
+        const [a, b] = [ind.getBoundingClientRect(), on.getBoundingClientRect()]
+        const off = Math.max(...['left', 'top', 'width', 'height'].map((k) => Math.abs(a[k] - b[k])))
+        if (off > 1) return `the indicator of ${g.id} sits ${off.toFixed(1)}px off ${h.describe(on)}`
+      }
+      return true
     },
     ax: {
       '#segmented-control-day': { role: 'radio', name: 'Day', checked: 'true' },
@@ -23,26 +34,36 @@ export const steps = [
     },
   },
   {
-    name: 'ArrowRight moves the choice from Day to Week',
+    name: 'ArrowRight moves the choice from Day to Week, and the indicator slides to Week',
     keys: ['ArrowRight'],
     expect: (root, h) => {
       const r = root.querySelector('#segmented-control-week')
       if (document.activeElement !== r) return `focus is on ${h.describe(document.activeElement)}`
       if (r.getAttribute('aria-checked') !== 'true') return `Week: aria-checked is ${r.getAttribute('aria-checked')}`
       const was = root.querySelector('#segmented-control-day').getAttribute('aria-checked')
-      return was === 'false' || `Day: aria-checked is ${was}`
+      if (was !== 'false') return `Day: aria-checked is ${was}`
+      const ind = root.querySelector('#segmented-control-range > [data-slot="segmented-control-indicator"]')
+      if (!ind) return 'the Range control has no indicator'
+      const [a, b] = [ind.getBoundingClientRect(), r.getBoundingClientRect()]
+      const off = Math.max(...['left', 'top', 'width', 'height'].map((k) => Math.abs(a[k] - b[k])))
+      return off <= 1 || `the indicator sits ${off.toFixed(1)}px off Week`
     },
     ax: { '#segmented-control-week': { role: 'radio', name: 'Week', checked: 'true' }, '#segmented-control-day': { role: 'radio', checked: 'false' } },
   },
   {
-    name: 'ArrowRight passes the disabled Month and checks Year',
+    name: 'ArrowRight passes the disabled Month and checks Year, and the indicator slides past Month to Year',
     keys: ['ArrowRight'],
     expect: (root, h) => {
       const r = root.querySelector('#segmented-control-year')
       if (document.activeElement !== r) return `focus is on ${h.describe(document.activeElement)}`
       if (r.getAttribute('aria-checked') !== 'true') return `Year: aria-checked is ${r.getAttribute('aria-checked')}`
       const checked = [...root.querySelectorAll('#segmented-control-range [data-slot="segmented-control-item"]')].filter((o) => o.getAttribute('aria-checked') === 'true')
-      return checked.length === 1 || `${checked.length} items are checked`
+      if (checked.length !== 1) return `${checked.length} items are checked`
+      const ind = root.querySelector('#segmented-control-range > [data-slot="segmented-control-indicator"]')
+      if (!ind) return 'the Range control has no indicator'
+      const [a, b] = [ind.getBoundingClientRect(), r.getBoundingClientRect()]
+      const off = Math.max(...['left', 'top', 'width', 'height'].map((k) => Math.abs(a[k] - b[k])))
+      return off <= 1 || `the indicator sits ${off.toFixed(1)}px off Year`
     },
   },
   {
@@ -56,7 +77,7 @@ export const steps = [
     },
   },
   {
-    name: 'Tab leaves the range after one stop, skips the disabled Theme, for the read-only plan at Pro',
+    name: 'Tab leaves the Range control after one stop, skips the disabled Theme, for the read-only plan at Pro',
     keys: ['Tab'],
     expect: (root, h) => document.activeElement === root.querySelector('#segmented-control-pro') || `focus is on ${h.describe(document.activeElement)}`,
     ax: { '#segmented-control-pro': { role: 'radio', name: 'Pro', checked: 'true' } },

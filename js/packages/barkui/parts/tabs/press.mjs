@@ -8,17 +8,28 @@ export function setup() {}
 
 export const steps = [
   {
-    name: 'Tab enters the list at the selected tab, focus-visible',
+    name: "Tab enters the list at the selected tab, focus-visible, and every list's indicator, the pinned rows' too, sits on its selected tab",
     keys: ['Tab'],
     expect: (root, h) => {
       const t = root.querySelector('#tabs-overview')
       if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
-      return t.matches(':focus-visible') || 'not :focus-visible'
+      if (!t.matches(':focus-visible')) return 'not :focus-visible'
+      const lists = [...root.querySelectorAll('[data-slot="tabs-list"]')]
+      if (lists.length !== 5) return `${lists.length} tab lists, not 5`
+      for (const list of lists) {
+        const on = list.querySelector('[data-slot="tabs-tab"][data-selected]')
+        const ind = list.querySelector(':scope > [data-slot="tabs-indicator"]')
+        if (!ind) return `the list ${list.getAttribute('aria-label')} has no indicator`
+        const [a, b] = [ind.getBoundingClientRect(), on.getBoundingClientRect()]
+        const off = Math.max(...['left', 'top', 'width', 'height'].map((k) => Math.abs(a[k] - b[k])))
+        if (off > 1) return `the indicator of ${list.getAttribute('aria-label')} sits ${off.toFixed(1)}px off ${h.describe(on)}`
+      }
+      return true
     },
     ax: { '#tabs-overview': { role: 'tab', name: 'Overview', selected: true }, '#tabs-reports': { role: 'tab', name: 'Reports', disabled: true } },
   },
   {
-    name: 'ArrowRight selects the next tab, and its panel shows',
+    name: 'ArrowRight selects the next tab, its panel shows, and the indicator slides to it',
     keys: ['ArrowRight'],
     expect: (root, h) => {
       const t = root.querySelector('#tabs-analytics')
@@ -26,7 +37,12 @@ export const steps = [
       if (t.getAttribute('aria-selected') !== 'true') return 'Analytics is not selected'
       const shown = [...root.querySelectorAll('#tabs-main [role="tabpanel"]')].filter((p) => p.checkVisibility())
       if (shown.length !== 1) return `${shown.length} panels show`
-      return shown[0].getAttribute('aria-labelledby') === t.id || `the panel shown is ${h.describe(shown[0])}, not Analytics's`
+      if (shown[0].getAttribute('aria-labelledby') !== t.id) return `the panel shown is ${h.describe(shown[0])}, not Analytics's`
+      const ind = root.querySelector('#tabs-main [data-slot="tabs-indicator"]')
+      if (!ind) return 'the list across has no indicator'
+      const [a, b] = [ind.getBoundingClientRect(), t.getBoundingClientRect()]
+      const off = Math.max(...['left', 'top', 'width', 'height'].map((k) => Math.abs(a[k] - b[k])))
+      return off <= 1 || `the indicator sits ${off.toFixed(1)}px off Analytics`
     },
   },
   {
@@ -80,12 +96,17 @@ export const steps = [
     },
   },
   {
-    name: 'Down the side: Tab reaches the selected tab, ArrowDown selects the next',
+    name: 'Down the side: Tab reaches the selected tab, ArrowDown selects the next, and the indicator slides down to it',
     keys: ['Tab', 'ArrowDown'],
     expect: (root, h) => {
       const t = root.querySelector('#tabs-password')
       if (document.activeElement !== t) return `focus is on ${h.describe(document.activeElement)}`
-      return t.getAttribute('aria-selected') === 'true' || 'Password is not selected'
+      if (t.getAttribute('aria-selected') !== 'true') return 'Password is not selected'
+      const ind = root.querySelector('#tabs-side [data-slot="tabs-indicator"]')
+      if (!ind) return 'the list down the side has no indicator'
+      const [a, b] = [ind.getBoundingClientRect(), t.getBoundingClientRect()]
+      const off = Math.max(...['left', 'top', 'width', 'height'].map((k) => Math.abs(a[k] - b[k])))
+      return off <= 1 || `the indicator sits ${off.toFixed(1)}px off Password`
     },
   },
   {
