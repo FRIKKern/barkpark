@@ -7,6 +7,7 @@
       <ui-segmented-control-item id="segmented-control-week" value="week" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Week</ui-segmented-control-item>
       <ui-segmented-control-item id="segmented-control-month" value="month" disabled data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" aria-disabled="true" data-unchecked data-disabled>Month</ui-segmented-control-item>
       <ui-segmented-control-item id="segmented-control-year" value="year" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Year</ui-segmented-control-item>
+      <ui-segmented-control-indicator data-slot="segmented-control-indicator" role="presentation" data-orientation="horizontal" data-activation-direction="none"></ui-segmented-control-indicator>
     </ui-segmented-control>
   </ui-field>
 </div>
@@ -17,6 +18,7 @@
     <ui-segmented-control id="segmented-control-theme" default-value="light" disabled data-slot="segmented-control" aria-labelledby="segmented-control-theme-label" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-disabled="true" data-disabled>
       <ui-segmented-control-item id="segmented-control-light" value="light" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" aria-disabled="true" tabindex="-1" data-checked data-disabled>Light</ui-segmented-control-item>
       <ui-segmented-control-item id="segmented-control-dark" value="dark" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" aria-disabled="true" tabindex="-1" data-unchecked data-disabled>Dark</ui-segmented-control-item>
+      <ui-segmented-control-indicator data-slot="segmented-control-indicator" role="presentation" data-orientation="horizontal" data-activation-direction="none"></ui-segmented-control-indicator>
     </ui-segmented-control>
   </ui-field>
   <ui-field id="segmented-control-plan-field" data-slot="field">
@@ -25,24 +27,28 @@
     <ui-segmented-control id="segmented-control-plan" default-value="pro" read-only data-slot="segmented-control" aria-labelledby="segmented-control-plan-label" aria-describedby="segmented-control-plan-description" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
       <ui-segmented-control-item id="segmented-control-free" value="free" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly>Free</ui-segmented-control-item>
       <ui-segmented-control-item id="segmented-control-pro" value="pro" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly>Pro</ui-segmented-control-item>
+      <ui-segmented-control-indicator data-slot="segmented-control-indicator" role="presentation" data-orientation="horizontal" data-activation-direction="none"></ui-segmented-control-indicator>
     </ui-segmented-control>
   </ui-field>
 </div>
 <div data-demo-row inert>
   <span data-demo-label>Checked with focus, unchecked under the pointer</span>
-  <span data-slot="segmented-control" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal">
-    <span id="segmented-control-pin-focus" data-slot="segmented-control-item" role="radio" aria-checked="true" data-checked data-pin="focus-visible">Focus</span>
-    <span id="segmented-control-pin-hover" data-slot="segmented-control-item" role="radio" aria-checked="false" data-unchecked data-pin="hover">Hover</span>
-  </span>
+  <ui-segmented-control id="segmented-control-pin" default-value="focus" data-slot="segmented-control" aria-label="Focus and hover" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal">
+    <ui-segmented-control-item id="segmented-control-pin-focus" value="focus" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-pin="focus-visible">Focus</ui-segmented-control-item>
+    <ui-segmented-control-item id="segmented-control-pin-hover" value="hover" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-pin="hover">Hover</ui-segmented-control-item>
+    <ui-segmented-control-indicator data-slot="segmented-control-indicator" role="presentation" data-orientation="horizontal" data-activation-direction="none"></ui-segmented-control-indicator>
+  </ui-segmented-control>
 </div>
 <div data-demo-row inert>
   <span data-demo-label>Read-only with focus: checked, unchecked</span>
-  <span data-slot="segmented-control" role="radiogroup" aria-orientation="horizontal" aria-readonly="true" data-orientation="horizontal" data-readonly>
-    <span id="segmented-control-pin-ro-checked" data-slot="segmented-control-item" role="radio" aria-checked="true" data-checked data-readonly data-pin="focus-visible">Checked</span>
-    <span id="segmented-control-pin-ro-rest" data-slot="segmented-control-item" role="radio" aria-checked="false" data-unchecked data-readonly>Rest</span>
-  </span>
-  <span data-slot="segmented-control" role="radiogroup" aria-orientation="horizontal" aria-readonly="true" data-orientation="horizontal" data-readonly>
-    <span id="segmented-control-pin-ro-on" data-slot="segmented-control-item" role="radio" aria-checked="true" data-checked data-readonly>Rest</span>
-    <span id="segmented-control-pin-ro-unchecked" data-slot="segmented-control-item" role="radio" aria-checked="false" data-unchecked data-readonly data-pin="focus-visible">Unchecked</span>
-  </span>
+  <ui-segmented-control id="segmented-control-pin-ro-a" default-value="checked" read-only data-slot="segmented-control" aria-label="Read-only, checked with focus" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
+    <ui-segmented-control-item id="segmented-control-pin-ro-checked" value="checked" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly data-pin="focus-visible">Checked</ui-segmented-control-item>
+    <ui-segmented-control-item id="segmented-control-pin-ro-rest" value="rest" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly>Rest</ui-segmented-control-item>
+    <ui-segmented-control-indicator data-slot="segmented-control-indicator" role="presentation" data-orientation="horizontal" data-activation-direction="none"></ui-segmented-control-indicator>
+  </ui-segmented-control>
+  <ui-segmented-control id="segmented-control-pin-ro-b" default-value="on" read-only data-slot="segmented-control" aria-label="Read-only, unchecked with focus" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
+    <ui-segmented-control-item id="segmented-control-pin-ro-on" value="on" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly>On</ui-segmented-control-item>
+    <ui-segmented-control-item id="segmented-control-pin-ro-unchecked" value="unchecked" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly data-pin="focus-visible">Unchecked</ui-segmented-control-item>
+    <ui-segmented-control-indicator data-slot="segmented-control-indicator" role="presentation" data-orientation="horizontal" data-activation-direction="none"></ui-segmented-control-indicator>
+  </ui-segmented-control>
 </div>
