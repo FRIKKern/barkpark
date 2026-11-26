@@ -114,6 +114,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> attach_hook(:studio_leave_follow, :after_render, &leave_follow/1)
       |> Mount.init()
       |> LeaveAsk.init()
+      # Before Caps: no write while the question is open over a patch into
+      # another project (task-bc40f41b69eb4d9a).
+      |> BarkparkWeb.Studio.StudioLive.LeaveScope.attach()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
       # After Caps: an event Caps refuses never reaches the quota gate.
