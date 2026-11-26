@@ -131,9 +131,13 @@ defmodule BarkparkWeb.WorkspaceController do
 
   # A suspended workspace creates no other: a new, unsuspended one would step
   # round the operator's stop (task-ca975477b8ca8a67). A token with no home
-  # (a signup PAT) has nothing to be suspended.
+  # (a signup PAT) has nothing to be suspended. The refusal names the reason,
+  # as the mutate gate's does (task-b52ef8bc59eb1060).
   defp home_not_suspended(%ApiToken{workspace_id: home}) do
-    if Barkpark.Tenancy.Quota.suspended?(home), do: {:error, :workspace_suspended}, else: :ok
+    case Barkpark.Tenancy.Quota.suspension(home) do
+      {:suspended, reason} -> {:error, {:workspace_suspended, reason}}
+      nil -> :ok
+    end
   end
 
   # A dataset-bound token makes no project, no workspace and no import
