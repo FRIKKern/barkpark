@@ -133,6 +133,51 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRowOwnMoveTest do
       refute html =~ @rb
     end
 
+    # #29040 r2 review, B1': a duplicate gets a fresh `_key`; no draw was
+    # recorded under it, so A typing in the copy was held.
+    test "#{surface} #{how}: A duplicates r1, then types in the copy: written, no banner", c do
+      a = c |> Map.put(:surface, unquote(surface)) |> two()
+      op(a, "duplicate_row", %{"index" => "0"})
+      [{"r1", _}, {copy, _}, {"r2", _}] = form_rows(a)
+
+      html =
+        post(
+          a,
+          unquote(how),
+          [{"r1", "<p>one two</p>"}, {copy, "<p>one two copy</p>"}, {"r2", "<p>three four</p>"}],
+          page_owners(a)
+        )
+
+      assert by_key(c)[copy] == ["one two copy"]
+      assert held(a) == []
+      refute html =~ @rb
+    end
+
+    # #29040 r2 review, N-a: A's merged save puts "ONE twoB" in the form; A's
+    # move remounts the row drawing it, a value no draw recorded.
+    test "#{surface} #{how}: B edits, A's post merges, A moves the row and types: written, no banner",
+         c do
+      a = c |> Map.put(:surface, unquote(surface)) |> two()
+      own = page_owners(a)
+      b(c, a, [r("r1", "w1", "one twoB"), r("r2", "w2", "three four")])
+      post(a, :auto, [{"r1", "<p>ONE two</p>"}, {"r2", "<p>three four</p>"}], own)
+      assert by_key(c)["r1"] == ["ONE twoB"]
+
+      op(a, "move_down", %{"index" => "0"})
+
+      html =
+        post(
+          a,
+          unquote(how),
+          [{"r2", "<p>three four</p>"}, {"r1", "<p>ONE twoB!</p>"}],
+          page_owners(a)
+        )
+
+      assert by_key(c)["r1"] == ["ONE twoB!"]
+      assert held(a) == []
+      refute html =~ @rb
+    end
+
     test "#{surface} #{how}: A's own post on r1 is not r2's draw after r2 slides to its index",
          c do
       c = Map.put(c, :surface, unquote(surface))
