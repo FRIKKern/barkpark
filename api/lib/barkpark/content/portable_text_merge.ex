@@ -79,7 +79,7 @@ defmodule Barkpark.Content.PortableTextMerge do
         whole_clash(mine, theirs)
 
       objects(base) + objects(mine) + objects(theirs) > @max_objects ->
-        {:clash, plain_banner(mine, theirs), mine}
+        over_cap(base, mine, theirs)
 
       true ->
         line_up(base, mine, theirs, opts)
@@ -107,6 +107,23 @@ defmodule Barkpark.Content.PortableTextMerge do
       end)
     end)
   end
+
+  # Past `@max_objects` the merge is not tried, but a value one side left as
+  # it was, or both sides edited alike, is no clash (task-64eed140345d8927,
+  # #28882 review: the same edit on both sides was held with an empty
+  # banner). Blocks compare as maps with their keys set aside, as the
+  # banner does; nothing is drawn.
+  defp over_cap(base, mine, theirs) do
+    {b, m, t} = {keyless(base), keyless(mine), keyless(theirs)}
+
+    cond do
+      m == t or m == b -> {:ok, theirs}
+      t == b -> {:ok, mine}
+      true -> {:clash, plain_banner(mine, theirs), mine}
+    end
+  end
+
+  defp keyless(blocks), do: Enum.map(blocks, &Map.delete(&1, "_key"))
 
   # The banner past `@max_objects`: theirs' words in each block mine does not
   # hold as it is, never drawn (drawing is what the cap bounds).
@@ -448,19 +465,21 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # A merge can put two blocks with one `_key` side by side (each side kept
   # the key of the base block it changed): the later one gets a new key.
+  # `next` carries each key's counter, so d blocks sharing a key cost d
+  # tries, not d² (task-d1eb66738fe73ed0, as `unique_objects/1`).
   defp unique_keys(blocks) do
     {out, _} =
-      Enum.map_reduce(blocks, MapSet.new(), fn
-        %{"_key" => k} = b, seen when is_binary(k) ->
+      Enum.map_reduce(blocks, {MapSet.new(), %{}}, fn
+        %{"_key" => k} = b, {seen, next} when is_binary(k) ->
           if MapSet.member?(seen, k) do
-            k2 = fresh(k, seen, 1)
-            {Map.put(b, "_key", k2), MapSet.put(seen, k2)}
+            {k2, n} = fresh_n(k, seen, Map.get(next, k, 1))
+            {Map.put(b, "_key", k2), {MapSet.put(seen, k2), Map.put(next, k, n + 1)}}
           else
-            {b, MapSet.put(seen, k)}
+            {b, {MapSet.put(seen, k), next}}
           end
 
-        b, seen ->
-          {b, seen}
+        b, acc ->
+          {b, acc}
       end)
 
     out
@@ -508,11 +527,6 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp fresh_n(k, seen, n) do
     k2 = "#{k}m#{n}"
     if MapSet.member?(seen, k2), do: fresh_n(k, seen, n + 1), else: {k2, n}
-  end
-
-  defp fresh(k, seen, n) do
-    k2 = "#{k}m#{n}"
-    if MapSet.member?(seen, k2), do: fresh(k, seen, n + 1), else: k2
   end
 
   defp text(%{"children" => children}) when is_list(children),

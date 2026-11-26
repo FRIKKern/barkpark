@@ -357,8 +357,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # key on those same letters (mine's letters, one span per letter; mine's
   # splice puts `n` letters for base's [mp, me), theirs' `ts`). It is that
   # link in the result, so mine's letters of it inside the splice take
-  # that key. A link theirs holds under no def of that content there, or
-  # under more than one, is left out.
+  # that key. A link theirs holds under no def of that content there is
+  # left out. One theirs holds under more than one takes theirs' key on the
+  # letter beside the splice where mine's link runs on across its edge, so
+  # that run stays one link (task-da0afade29ee9aa0); else it is left out.
   defp outside_links({letters, mp, me, n}, mdefs, theirs, ts) do
     tdefs = defs(theirs)
     tl = theirs["children"] |> Enum.flat_map(&List.duplicate(&1, glen(&1))) |> List.to_tuple()
@@ -386,23 +388,48 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     after_ =
       letters |> Enum.drop(mp + n) |> Enum.with_index(me)
 
-    (before ++ after_)
-    |> Enum.flat_map(fn {span, j} ->
+    # theirs' keys of mk's content on base's letter `j`
+    tks = fn j, mk ->
       t = at.(j)
       tspan = t && t < tuple_size(tl) && elem(tl, t)
+      if tspan, do: Enum.filter(link_keys(tspan, tdefs), &(tdefs[&1] == mdefs[mk])), else: []
+    end
 
-      for mk <- link_keys(span, mdefs) do
-        tks =
-          if tspan, do: Enum.filter(link_keys(tspan, tdefs), &(tdefs[&1] == mdefs[mk])), else: []
+    # The letters beside the splice that mine's link runs on to from it:
+    # mk => base's index of that letter, the left edge first.
+    sides =
+      if n > 0 do
+        ls = List.to_tuple(letters)
+        mks = &if(&1 >= 0 and &1 < tuple_size(ls), do: link_keys(elem(ls, &1), mdefs), else: [])
 
-        {mk, tks}
+        for {o, i, j} <- [{mp - 1, mp, mp - 1}, {mp + n, mp + n - 1, me}],
+            mk <- mks.(o),
+            mk in mks.(i),
+            reduce: %{} do
+          acc -> Map.put_new(acc, mk, j)
+        end
+      else
+        %{}
       end
+
+    (before ++ after_)
+    |> Enum.flat_map(fn {span, j} ->
+      for mk <- link_keys(span, mdefs), do: {mk, tks.(j, mk)}
     end)
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
     |> Enum.flat_map(fn {mk, lists} ->
       case lists |> List.flatten() |> Enum.uniq() do
-        [tk] -> [{mk, tk}]
-        _ -> []
+        [tk] ->
+          [{mk, tk}]
+
+        [_, _ | _] ->
+          with j when is_integer(j) <- Map.get(sides, mk),
+               [tk] <- tks.(j, mk),
+               do: [{mk, tk}],
+               else: (_ -> [])
+
+        [] ->
+          []
       end
     end)
     |> Map.new()

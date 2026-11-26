@@ -1,0 +1,127 @@
+/* Slider: UI SDK's <ui-slider> in a field, its label and value in a row above one thumb on a track. The control a
+   person moves is the thumb; UI SDK hides a range input inside it, which takes focus and the keys, and base.css draws
+   the one focus ring on the thumb.
+   The track is the sheet's muted fill inside the text field's --ui-input edge, so its length stands at 3:1 against
+   the ground in every skin; the part filled up to the thumb is --ui-primary. The thumb is a --ui-primary disc in a
+   --ui-background rim with a --ui-primary-foreground dot, its ::before, so the check reads the dot as the thumb's
+   graphic; the disc marks the thumb against the track. Under the pointer the disc takes --ui-primary-hover, and while
+   it is dragged (UI SDK's data-dragging) --ui-primary-pressed. Read-only keeps its value and is drawn in
+   --ui-muted-foreground, so it does not look like a thumb a drag moves, and takes no hover; disabled fades the track
+   and the thumb on it.
+   At phone width the control, where a press lands, is 2.75rem tall whatever the pointer.
+   The look keys only on what UI SDK writes: data-readonly, data-disabled and data-dragging, and on :hover. */
+
+[data-slider-row] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--ui-spacing) * 2);
+}
+
+[data-slot="slider-value"] {
+  --bark-slider-value-text: 0.8125rem;
+
+  color: var(--ui-foreground);
+  font-size: var(--bark-slider-value-text);
+  line-height: 1.25;
+}
+
+/* Room for half a thumb at each end, so a thumb at either bound stays inside the control. */
+[data-slot="slider-control"] {
+  box-sizing: border-box;
+  height: 1.5rem;
+  padding-inline: 0.5625rem;
+}
+
+[data-slot="slider-track"] {
+  --bark-slider-fill: var(--ui-primary);
+  --bark-slider-thumb-bg: var(--ui-primary);
+  --bark-slider-thumb-dot: var(--ui-primary-foreground);
+
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 0.375rem;
+  border: 1px solid var(--ui-input);
+  border-radius: calc(var(--ui-radius) * 999);
+  background: var(--ui-muted);
+
+  &[data-readonly] {
+    --bark-slider-fill: var(--ui-muted-foreground);
+    --bark-slider-thumb-bg: var(--ui-muted-foreground);
+    --bark-slider-thumb-dot: var(--ui-muted);
+  }
+
+  &[data-disabled] {
+    opacity: 0.5;
+  }
+}
+
+[data-slot="slider-indicator"] {
+  background: var(--bark-slider-fill);
+}
+
+/* UI SDK places a live thumb on its track in its style attribute; a pinned thumb sits in the middle of its own. */
+[data-slot="slider-thumb"] {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  box-sizing: border-box;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2px solid var(--ui-background);
+  background: var(--bark-slider-thumb-bg);
+  transition: background-color 120ms ease-out;
+
+  &::before {
+    content: "";
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 50%;
+    background: var(--bark-slider-thumb-dot);
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    --bark-slider-thumb-bg: var(--ui-primary-hover);
+  }
+
+  /* As strong as the hover rule and after it, so a drag under the pointer shows pressed. */
+  &[data-dragging]:not([data-disabled], [data-readonly]) {
+    --bark-slider-thumb-bg: var(--ui-primary-pressed);
+  }
+
+  /* The track it sits on is faded already. */
+  &[data-disabled] {
+    opacity: 1;
+  }
+}
+
+/* The range input UI SDK hides in each thumb draws nothing, but the browser gives it a field's colours of its own, which
+   follow no skin; it takes the page's. */
+[data-slot="slider-thumb-input"] {
+  background: transparent;
+  color: var(--ui-foreground);
+}
+
+/* The pinned rows: each state's words beside a short track holding one thumb. */
+[data-slider-pin] {
+  --bark-slider-pin-text: 0.875rem;
+
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--ui-spacing) * 2);
+  font-size: var(--bark-slider-pin-text);
+  line-height: 1.25;
+
+  & > [data-slot="slider-track"] {
+    justify-content: center;
+    width: 2.5rem;
+  }
+}
+
+@media (max-width: 600px) {
+  [data-slot="slider-control"] {
+    height: 2.75rem;
+  }
+}

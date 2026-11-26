@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
 
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [put_flash: 3]
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Studio.Desk.LeaveGuard
 
@@ -43,7 +44,12 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
       {:stay,
        socket
        |> assign(:studio_leave_asked, press)
-       |> put_flash(:error, LeaveGuard.message(socket.assigns))}
+       |> put_flash(:error, message(socket.assigns))}
     end
   end
+
+  # The desk's question, and that the press was stopped and a second one
+  # leaves (#28836 r2 review: the flash named the field and nothing more).
+  defp message(assigns),
+    do: LeaveGuard.message(assigns) <> " " <> gettext("Press again to leave.")
 end
