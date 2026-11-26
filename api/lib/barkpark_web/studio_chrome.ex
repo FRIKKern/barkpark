@@ -349,11 +349,14 @@ defmodule BarkparkWeb.StudioChrome do
   @bound_token_creates_nothing "This token is bound to one dataset and cannot create a workspace or a project"
 
   defp chrome_fallback("create-workspace", %{"name" => name}, socket) do
-    principal = principal(socket)
+    principal = principal_now(socket)
 
     cond do
       is_nil(principal) ->
         put_flash(socket, :error, "Sign in to create a workspace")
+
+      match?(%ApiToken{}, principal) and not Tenancy.Auth.permits?(principal, :write) ->
+        put_flash(socket, :error, "This token cannot create a workspace: it has no write access")
 
       ApiToken.dataset_bound?(principal) ->
         refuse_bound_create(socket)
@@ -378,14 +381,16 @@ defmodule BarkparkWeb.StudioChrome do
   defp chrome_fallback("create-project", %{"name" => name}, socket) do
     ws = socket.assigns[:current_workspace]
 
+    principal = principal_now(socket)
+
     cond do
-      is_nil(principal(socket)) ->
+      is_nil(principal) ->
         put_flash(socket, :error, "Sign in to create a project")
 
       is_nil(ws) ->
         socket
 
-      not can_create_in?(socket, ws) ->
+      not can_create_in?(principal, ws) ->
         # NOT "sign in" — this principal IS signed in, it simply holds no
         # write seat here (non-member, or a read-only member). The silent no-op this replaces was not a lie, but it
         # was not an answer either: the form just did nothing.
@@ -395,7 +400,7 @@ defmodule BarkparkWeb.StudioChrome do
           "You need write access in this workspace to create a project — ask an owner to add you"
         )
 
-      ApiToken.dataset_bound?(principal(socket)) ->
+      ApiToken.dataset_bound?(principal) ->
         refuse_bound_create(socket)
 
       true ->
@@ -438,7 +443,7 @@ defmodule BarkparkWeb.StudioChrome do
     # were already in: teleported by the funnel AND no in-UI way back (#34).
     workspaces =
       socket.assigns
-      |> BarkparkWeb.Studio.ScopeResolver.principal_from_assigns()
+      |> ScopeResolver.principal_from_assigns()
       |> Tenancy.list_workspaces_for()
       |> ensure_current(ws)
 
@@ -626,7 +631,18 @@ defmodule BarkparkWeb.StudioChrome do
   # scope menu already share. Never re-encoded here (two copies of "token wins
   # over user" drift, and a create gate that disagrees with the menu that
   # rendered it is #34 all over again).
-  defp principal(socket), do: ScopeResolver.principal_from_assigns(socket.assigns)
+  # The principal as it is NOW, for the two create arms (task-6dd234b8f84baaf5).
+  # `assigns.api_token` is the row read at mount: a token cut to read, or
+  # revoked, mid-session still carried its old permissions there, so a desk
+  # tab created projects with it. The token is read again the way `Caps` reads
+  # it on every press (`Caps.fresh_api_token/1`); `nil` when it is revoked or
+  # expired. An account's role is read fresh by `Tenancy.Auth` already.
+  defp principal_now(socket) do
+    case socket.assigns[:api_token] do
+      %ApiToken{} = token -> Caps.fresh_api_token(token)
+      _ -> socket.assigns[:current_user]
+    end
+  end
 
   # May THIS principal mint sibling tenancy inside `ws`? A WRITE seat, asked of
   # the principal's OWN kind — `Tenancy.Auth.authorize/3` reads a token id out
@@ -646,12 +662,10 @@ defmodule BarkparkWeb.StudioChrome do
   # `Caps` gate, so a forged `create-project` minted a Project + Dataset the
   # REST door refuses. `authorize/3` is the same single membership load plus
   # the token's write conjunct; for a %User{} it is the role's :write grant.
-  defp can_create_in?(socket, %{id: ws_id}) do
-    case principal(socket) do
-      nil -> false
-      principal -> Tenancy.Auth.authorize(principal, ws_id, :write) == :ok
-    end
-  end
+  defp can_create_in?(nil, _workspace), do: false
+
+  defp can_create_in?(principal, %{id: ws_id}),
+    do: Tenancy.Auth.authorize(principal, ws_id, :write) == :ok
 
   # DELEGATION, deliberately — see `Shared.can_reach_workspace?/2`
   # (@canonical capability:studio-workspace-reachability). This was a

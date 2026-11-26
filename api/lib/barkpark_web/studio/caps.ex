@@ -501,7 +501,13 @@ defmodule BarkparkWeb.Studio.Caps do
   # token principal. Deliberately no TTL memo: a bounded-staleness cache is the
   # same defect with a shorter fuse, and the grant `Repo.all` two lines up
   # already established that per-derive freshness is the price this module pays.
-  defp fresh_api_token(%ApiToken{id: id}) when is_binary(id) do
+  @doc """
+  The mount-time `%ApiToken{}` read again: the row as it is now, or `nil` when
+  it is revoked, expired or gone. The same read `derive_from_assigns/1` makes,
+  for a gate outside this module that must not decide on the mount-time bytes.
+  """
+  @spec fresh_api_token(term()) :: ApiToken.t() | nil
+  def fresh_api_token(%ApiToken{id: id}) when is_binary(id) do
     case Repo.uuid_or_nil(id) do
       nil ->
         nil
@@ -520,7 +526,7 @@ defmodule BarkparkWeb.Studio.Caps do
     end
   end
 
-  defp fresh_api_token(_other), do: nil
+  def fresh_api_token(_other), do: nil
 
   # ONE `Repo.one` per principal, handed to `Tenancy.Auth.seat_capabilities/3`
   # for the whole :read/:write/:admin decision. (The ROLE resolution behind it
