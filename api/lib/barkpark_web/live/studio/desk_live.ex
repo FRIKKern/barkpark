@@ -61,6 +61,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.VisionListen
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
+  alias BarkparkWeb.Studio.StudioLive.LeaveAsk
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   defmodule NotFound do
@@ -386,7 +387,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
     {:noreply, socket |> assign(:desk_leave, nil) |> push_event("bp:desk-leave-stayed", %{})}
   end
 
-  # Leave: what was asked goes on, past the guard once.
+  # Leave: what was asked goes on, past the guard once. A press passed every
+  # handle_event hook when it was made (LiveScope's grant gates, Caps, the
+  # quota gate, …); it passes them again here, as a grant may have gone
+  # while the question was open (`LeaveAsk.hooks/3`, task-91730f627f3b7fdb).
   def handle_event("desk-leave-go", _params, socket) do
     socket = assign(socket, desk_leave_pass: true)
 
@@ -395,7 +399,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
         handle_params(params, uri, socket)
 
       %{to: {:event, event, params}} ->
-        {:noreply, socket} = handle_event(event, params, assign(socket, :desk_leave, nil))
+        socket = assign(socket, :desk_leave, nil)
+
+        socket =
+          case LeaveAsk.hooks(event, params, socket) do
+            {:cont, socket} ->
+              {:noreply, socket} = handle_event(event, params, socket)
+              socket
+
+            {:halt, socket} ->
+              socket
+          end
+
         # The pass is for the patch the event sent; with none, it ends here.
         {:noreply,
          if(socket.redirected, do: socket, else: assign(socket, :desk_leave_pass, false))}
