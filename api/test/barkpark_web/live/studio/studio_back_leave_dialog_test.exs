@@ -178,6 +178,35 @@ defmodule BarkparkWeb.Studio.StudioBackLeaveDialogTest do
     assert open_id(a) == c.id
   end
 
+  # task-eac6c592: Forward to the held document closed the question with no
+  # word and drew the stored document over A's words.
+  test "Back, then Forward to the held document: Stay, A's words still held", c do
+    a = hold(c)
+    render_patch(a, c.other)
+    assert has_element?(a, @dialog)
+
+    render_patch(a, c.doc)
+    refute has_element?(a, @dialog)
+    assert open_id(a) == c.id
+    assert assigns(a).editor_form["notes"] == "one twA three"
+    assert has_element?(a, ~s([data-test-id="doc-conflict-banner"]))
+
+    # Still held: Back again asks again.
+    render_patch(a, c.other)
+    assert has_element?(a, @dialog, "Not saved: Notes.")
+  end
+
+  test "Back, then a patch to a third document: it still asks", c do
+    a = hold(c)
+    render_patch(a, c.other)
+    assert has_element?(a, @dialog)
+
+    render_patch(a, c.doc <> "-3")
+    assert has_element?(a, @dialog, "Not saved: Notes.")
+    assert open_id(a) == c.id
+    assert assigns(a).editor_form["notes"] == "one twA three"
+  end
+
   test "nothing held: Back goes on, nothing asked", c do
     a = open(c)
     render_patch(a, c.other)

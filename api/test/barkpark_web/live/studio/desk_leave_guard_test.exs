@@ -179,6 +179,29 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       asks!(a)
     end
 
+    # task-eac6c592: Forward to the held document while the question is open.
+    test "Back, then Forward to the held document: Stay, the title still held", c do
+      a = held(c)
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+
+      render_patch(a, to_doc(c, c.id))
+      refute has_element?(a, @dialog)
+      assert title(a) == "T0 FAIL"
+      assert has_element?(a, @held)
+
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+    end
+
+    test "Back, then a patch to a third document: it still asks", c do
+      a = held(c)
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+      render_patch(a, to_doc(c, c.id <> "-3"))
+      asks!(a)
+    end
+
     test "Enter on a search hit asks", c do
       a = held(c)
       render_change(a |> element("#desk-search-form"), %{"value" => "T0"})
