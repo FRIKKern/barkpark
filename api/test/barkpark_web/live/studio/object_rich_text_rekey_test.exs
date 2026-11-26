@@ -47,18 +47,25 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
 
   defp rt_post(html), do: %{"doc[meta].label" => "l0", "doc[meta].rt" => html}
 
-  # The owner keys the page posts, as drawn.
-  defp owners(view) do
+  # The owner entries the page posts, as drawn (`[name, key, digest]` JSON).
+  defp page_owners(view) do
     ~r/name="_bp_rt_owner\[\]" value="([^"]*)"/
     |> Regex.scan(render(view))
-    |> Enum.map(fn [_, v] -> v |> String.replace("&quot;", "\"") |> Jason.decode!() end)
+    |> Enum.map(fn [_, v] -> String.replace(v, "&quot;", "\"") end)
   end
 
-  defp owner_of(name, key), do: Jason.encode!([name, key])
+  defp owners(view), do: Enum.map(page_owners(view), &Jason.decode!/1)
+  defp drawn?(view, name, key), do: Enum.any?(owners(view), &match?([^name, ^key, _], &1))
 
-  # The page's own owner keys, as a post carries them, typed on `key`.
-  defp typed_on(key),
-    do: %{"_bp_rt_owner" => [owner_of("doc[meta].rt", key), owner_of("doc[meta].rt2", key)]}
+  # A post typed on what the page draws now: its own owner entries.
+  defp typed_on(%Phoenix.LiveViewTest.View{} = view),
+    do: %{"_bp_rt_owner" => page_owners(view)}
+
+  # A post naming `key` with no digest of a draw: the old mount.
+  defp typed_on(key) do
+    entry = &Jason.encode!([&1, key])
+    %{"_bp_rt_owner" => [entry.("doc[meta].rt"), entry.("doc[meta].rt2")]}
+  end
 
   # A post as a page with no owner input sends it: the event alone, no form
   # values from the page (`render_change` on the form would add them).
@@ -79,7 +86,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
     put_meta(c, &Map.put(&1, "rt", rt2("one two", "anchor")))
     a = open(c)
     w0 = wraps(a)["doc[meta].rt"]
-    assert ["doc[meta].rt", nil] in owners(a)
+    assert drawn?(a, "doc[meta].rt", nil)
     rekey(c, a, key, blocks)
     refute wraps(a)["doc[meta].rt"] == w0
     a
@@ -89,7 +96,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
     put_meta(c, &(&1 |> Map.put("_key", key) |> Map.put("rt", blocks)))
     want = words(blocks)
     assert eventually(fn -> words(form(a)["meta"]["rt"]) == want end)
-    assert ["doc[meta].rt", key] in owners(a)
+    assert drawn?(a, "doc[meta].rt", key)
   end
 
   for surface <- [:desk, :studio], how <- [:auto, :save] do
@@ -99,7 +106,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
       c = Map.put(c, :surface, unquote(surface))
       a = rekeyed(c)
 
-      post = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more"))), typed_on("m2"))
+      post = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more"))), typed_on(a))
       html = a_posts(a, unquote(how), post)
 
       assert words(stored(c)["meta"]["rt"]) == ["one two", "anchor B more"]
@@ -115,7 +122,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
       put_meta(c, &Map.put(&1, "rt", rt2("one two", "anchor BB")))
       assert eventually(fn -> words(form(a)["meta"]["rt"]) == ["one two", "anchor BB"] end)
 
-      post = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more"))), typed_on("m2"))
+      post = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more"))), typed_on(a))
       a_posts(a, unquote(how), post)
 
       assert Enum.at(words(stored(c)["meta"]["rt"]), 1) =~ "BB"
@@ -128,7 +135,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
       c = Map.put(c, :surface, unquote(surface))
       a = rekeyed(c)
 
-      first = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more"))), typed_on("m2"))
+      first = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more"))), typed_on(a))
       a_posts(a, unquote(how), first)
       assert words(stored(c)["meta"]["rt"]) == ["one two", "anchor B more"]
 
@@ -136,7 +143,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
       put_meta(c, &Map.put(&1, "rt", rt2("ONE two", "anchor B more")))
       assert eventually(fn -> words(form(a)["meta"]["rt"]) == ["ONE two", "anchor B more"] end)
 
-      second = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more!"))), typed_on("m2"))
+      second = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor B more!"))), typed_on(a))
       html = a_posts(a, unquote(how), second)
 
       assert words(stored(c)["meta"]["rt"]) == ["ONE two", "anchor B more!"]
@@ -188,11 +195,35 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRekeyTest do
       a = rekeyed(c)
       rekey(c, a, "m3", rt2("one two", "anchor BB"))
 
-      post = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor BB more"))), typed_on("m3"))
+      post = Map.merge(rt_post(PT.to_html(rt2("one two", "anchor BB more"))), typed_on(a))
       html = a_posts(a, unquote(how), post)
 
       assert words(stored(c)["meta"]["rt"]) == ["one two", "anchor BB more"]
       refute html =~ @banner
+    end
+
+    # task-c0a696a3a5a3900d: the owner key goes "" -> m2 -> "" with a new
+    # value. A post typed on the first draw names "" again; matched on the key
+    # alone it was read against B's newest value and written over it.
+    @tag timeout: 120_000
+    test "#{surface} #{how}: a key that comes back (A-B-A), typed on the first draw: B's kept",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      put_meta(c, &Map.put(&1, "rt", rt2("one two", "anchor")))
+      a = open(c)
+      first_draw = page_owners(a)
+      rekey(c, a, "m2", rt2("one two", "anchor B"))
+      put_meta(c, &(&1 |> Map.delete("_key") |> Map.put("rt", rt2("one two", "anchor BB"))))
+      assert eventually(fn -> words(form(a)["meta"]["rt"]) == ["one two", "anchor BB"] end)
+      assert drawn?(a, "doc[meta].rt", nil)
+
+      post = rt_post(PT.to_html(rt2("ONE two", "anchor")))
+      a_posts(a, unquote(how), Map.put(post, "_bp_rt_owner", first_draw))
+
+      kept = words(stored(c)["meta"]["rt"])
+
+      assert kept == ["ONE two", "anchor BB"] or held(a) == ["doc[meta].rt"],
+             "B's edit written over with no hold: #{inspect(kept)}"
     end
 
     # A post with no owner key, or one naming a key never drawn, is the old
