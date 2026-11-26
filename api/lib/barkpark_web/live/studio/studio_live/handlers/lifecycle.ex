@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
-  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, PostedEdits, PostPath, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{LeaveScope, PaperCanvas, PostedEdits, PostPath, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     RemoteValues,
@@ -450,13 +450,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
     end
   end
 
+  # Under the leave question after a patch into another project the socket's
+  # project is already the new one, and the held document is not in it
+  # (`LeaveScope.moved?/1`, task-7fbdea7ee305cbc4): a frame belongs to the
+  # editor only from the held document's own project.
   defp other_project?(msg, socket) do
-    case {Map.get(msg, :project_id), socket.assigns[:current_project]} do
+    case {Map.get(msg, :project_id), held_project(socket)} do
       {msg_proj, %{id: mounted}} when is_binary(msg_proj) and is_binary(mounted) ->
         msg_proj != mounted
 
       _ ->
         false
+    end
+  end
+
+  defp held_project(%{assigns: assigns}) do
+    case assigns[:editor_doc] do
+      %{project_id: id} when is_binary(id) ->
+        if LeaveScope.moved?(assigns), do: %{id: id}, else: assigns[:current_project]
+
+      _ ->
+        assigns[:current_project]
     end
   end
 
