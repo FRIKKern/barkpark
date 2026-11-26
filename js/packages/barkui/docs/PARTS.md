@@ -21,8 +21,9 @@ parts/<name>/
                 given twice in any case are refused. Two limits: a sentence that says it in other words
                 is not caught, and the row reads that the name stands in the sentence, not that the
                 sentence is about that thing; the list is printed under the part, so a reader sees it)
-  part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
-                color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
+  part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours, and apart from them
+                only the places UI SDK writes on a piece (see "Placement"); no literal, no color-mix,
+                no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
                 no escape, no keyframes of its own (see "part.css is judged as the browser parses it")
   example.html  the part in each state worth seeing, in UI SDK's printed markup (works with no script);
