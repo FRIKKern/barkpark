@@ -1112,7 +1112,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
               CallerContext.actor_stamp_from_opts(opts)
             )
 
-          broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
+          broadcast_paper_block(doc, slug, dataset, frame)
           enqueue_edge_projection(saved)
           maybe_save_op_revision(saved, dataset, opts)
           # One combined change event once the editing burst settles (#40).
@@ -1800,7 +1800,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp run_paper_batch_effects(nil, _dataset, _opts), do: :ok
 
   defp run_paper_batch_effects({%Document{} = saved, slug, frame}, dataset, opts) do
-    broadcast_paper_block(slug, saved.workspace_id, dataset, frame)
+    broadcast_paper_block(saved, slug, dataset, frame)
     enqueue_edge_projection(saved)
     maybe_save_batch_revision(saved, dataset, opts)
 
@@ -5713,6 +5713,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
          source_doc: Map.get(content, "source_doc"),
          goal_id: Map.get(content, "goal_id"),
          event_type: Map.get(content, "event_type"),
+         # The topic names the workspace only: a same-slug paper in a sibling
+         # project shares it. A subscriber holding one of them drops the
+         # other's frames by this (task-62ff63f43817eb08).
+         project_id: doc.project_id,
          # The writing process' pid, so a subscriber that is ALSO the writer
          # (a Studio LiveView editing its own paper) can skip the redundant
          # self-refetch — see the `sender == self()` guards in
@@ -5731,7 +5735,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     )
   end
 
-  defp broadcast_paper_block(slug, workspace_id, dataset, frame) do
+  # Takes the written row, so the frame always names its project: the topic
+  # names the workspace only, and a same-slug paper in a sibling project
+  # shares it (task-62ff63f43817eb08).
+  defp broadcast_paper_block(%Document{} = doc, slug, dataset, frame) do
     # Stamp the writing process' pid so a subscriber that is ALSO the writer
     # (a Studio LiveView editing its own paper) skips the redundant self-echo
     # refetch — the initiator already has the confirmed state (and re-reads it
@@ -5740,8 +5747,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # sandbox teardown (`client exited`). Mirrors the document `sender` guards.
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
-      Broadcast.paper_topic(slug, workspace_id, dataset),
-      {:paper_block, Map.put(frame, :sender, self())}
+      Broadcast.paper_topic(slug, doc.workspace_id, dataset),
+      {:paper_block, Map.merge(frame, %{sender: self(), project_id: doc.project_id})}
     )
   end
 

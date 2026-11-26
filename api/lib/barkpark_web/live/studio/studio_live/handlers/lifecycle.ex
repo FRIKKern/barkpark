@@ -486,6 +486,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       socket.assigns[:editor_view] != :paper ->
         {:noreply, socket}
 
+      # A same-slug paper in a sibling project shares the topic
+      # (task-62ff63f43817eb08).
+      other_project?(frame, socket.assigns) ->
+        {:noreply, socket}
+
       not socket.assigns.paper_block_mode ->
         {:noreply, Shared.refetch_paper(socket)}
 
@@ -548,6 +553,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   def paper_updated(%{html: html} = msg, socket) do
     cond do
       socket.assigns[:editor_view] != :paper ->
+        {:noreply, socket}
+
+      # A same-slug paper in a sibling project shares the topic
+      # (task-62ff63f43817eb08).
+      other_project?(msg, socket.assigns) ->
         {:noreply, socket}
 
       # THE THIRD `:paper_html` FEED (task-fa27740cb3162dbd). The two mount-side
