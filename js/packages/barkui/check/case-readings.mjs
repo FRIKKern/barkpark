@@ -99,6 +99,8 @@ export const CASE_READINGS = {
       "placement: a slider's properties stand only on its own pieces, as UI SDK writes them: one on a span, a width on a thumb, a top or an inset UI SDK does not write, a place past 100% and an opaque thumb input fail by name": 0.7,
       "placement: a UI SDK number input, stepped by a click on its increment button, writes only what UI SDK writes on its step buttons and scrub area, and that passes": 3.0,
       "placement: a number input's properties stand only on its step buttons and scrub area, as UI SDK writes them: one on a span or on the input, a hold delay on the scrub area, and a value UI SDK does not write fail by name": 0.7,
+      "placement: UI SDK tabs and a segmented control, each choice moved by a click, write only their six places on their own sliding indicator, and that passes, a place a hair under 0 or with an exponent among them": 3.1,
+      "placement: an indicator's places stand only on its own part's indicator, as a number of pixels: one on a tab, the tab list or an item, one part's on the other's indicator, a place that is not a number of pixels, and pixels on a slider's piece fail by name": 0.7,
     },
   },
   states: {
