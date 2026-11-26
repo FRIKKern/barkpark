@@ -734,22 +734,89 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     else
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
+      row_keys = posted_row_keys(dotted)
 
       doc =
         Enum.reduce(dotted, doc, fn {key, value}, acc ->
-          case StudioLive.parse_path(key) do
-            [] ->
-              acc
-
-            path ->
-              acc
-              |> seed_root(path, base_form)
-              |> write_leaf(socket, path, value)
+          with [_ | _] = path <- StudioLive.parse_path(key),
+               {:ok, path} <- row_path(path, row_keys, base_form) do
+            acc
+            |> seed_root(path, base_form)
+            |> write_leaf(socket, path, value)
+          else
+            _ -> acc
           end
         end)
 
       Map.put(rest, "doc", doc)
     end
+  end
+
+  # ── A row's leaves go to the row of its posted `_key` (task-406358090c6137e7)
+  #
+  # The fold writes by index into the editor's own rows (`seed_root/3`). A post
+  # sent before the page took a change to the rows (another editor took a row
+  # out, so the next one moved up) names its rows by the old indexes: its
+  # `rows[0]` was the row taken out, and its leaves were written over the row
+  # now at 0, `_key` and all. Each row the post names a `_key` for is written
+  # at the index that row has now; a row the editor no longer holds is
+  # dropped, never written into another. A row posted with no `_key` is
+  # written by index, as before.
+  defp posted_row_keys(dotted) do
+    for {name, key} <- dotted,
+        is_binary(key),
+        path = StudioLive.parse_path(name),
+        match?([_, _ | _], path),
+        List.last(path) == "_key",
+        prefix = Enum.drop(path, -1),
+        is_integer(List.last(prefix)),
+        into: %{},
+        do: {prefix, key}
+  end
+
+  defp row_path(path, keys, form) when map_size(keys) == 0 or not is_map(form), do: {:ok, path}
+  defp row_path(path, keys, form), do: row_path(path, [], [], {keys, form})
+
+  defp row_path([], _posted, now, _ctx), do: {:ok, Enum.reverse(now)}
+
+  defp row_path([i | rest], posted, now, {keys, form} = ctx) when is_integer(i) do
+    posted = [i | posted]
+
+    with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
+         rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
+      case row_index(rows, key, i) do
+        nil -> :drop
+        j -> row_path(rest, posted, [j | now], ctx)
+      end
+    else
+      _ -> row_path(rest, posted, [i | now], ctx)
+    end
+  end
+
+  defp row_path([seg | rest], posted, now, ctx),
+    do: row_path(rest, [seg | posted], [seg | now], ctx)
+
+  # The row at `i` still has the key: `i`. Else the one row that has it
+  # now; none: dropped. Two rows of one key (written past the API's own
+  # checks): by index, as before, never matched to the first for both.
+  defp row_index(rows, key, i) do
+    if match?(%{"_key" => ^key}, Enum.at(rows, i)) do
+      i
+    else
+      case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
+        [] -> nil
+        [j] -> j
+        _ -> i
+      end
+    end
+  end
+
+  defp form_at(form, path) do
+    Enum.reduce_while(path, form, fn
+      seg, %{} = acc when is_binary(seg) -> {:cont, Map.get(acc, seg)}
+      i, acc when is_integer(i) and is_list(acc) -> {:cont, Enum.at(acc, i)}
+      _, _ -> {:halt, nil}
+    end)
   end
 
   # ── Seed the CONTAINER before writing into it (this task) ──────────────────
