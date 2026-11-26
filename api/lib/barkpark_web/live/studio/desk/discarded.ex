@@ -42,14 +42,20 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
   require Logger
 
   alias Barkpark.Content
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RichTextRemote}
   alias BarkparkWeb.Studio.StudioLive.Shared
 
-  @doc "Whether `msg` is another session's discard of the draft open in the editor."
+  @doc """
+  Whether `msg` is another session's discard of the draft open in the editor:
+  the same type and id, and the same project (task-097dbe962f85eff0). The doc
+  topic does not tell a sibling project's same-id draft apart, so its discard
+  reloaded A's editor and dropped A's held words.
+  """
   def frame?(%{mutation: "discardDraft", type: type, doc_id: doc_id} = msg, assigns) do
     msg[:sender] != self() and
       match?({_dataset, ^type, _id}, assigns[:editing]) and
-      elem(assigns.editing, 2) == Content.published_id(doc_id)
+      elem(assigns.editing, 2) == Content.published_id(doc_id) and
+      not Lifecycle.other_project?(msg, assigns)
   end
 
   def frame?(_msg, _assigns), do: false
