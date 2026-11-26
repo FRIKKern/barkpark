@@ -18,12 +18,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   the post is held, A's words in the view, with the banner.
   """
 
+  import Phoenix.Component, only: [assign: 2]
+
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @doc """
   Input name => {path, the value this socket believed stored, the value the
@@ -46,6 +49,90 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   end
 
   def values(_socket, _seen), do: %{}
+
+  @doc """
+  `values/2`, and for a post with no `_bp_rt_seen` (a page without
+  bp-rt-remote.js) each rich text inside an object the post carries, read
+  against the value that page shows (`shown/1`): what this socket drew it
+  at mount (`editor_rt_born`), or this socket's own last post of it
+  (`editor_rt_page`). Its editor sits in a `phx-update="ignore"` wrapper
+  that only a remount redraws, so another editor's save, taken by the
+  socket into `editor_form`, never reaches it (#28896 r1 review, B1). A
+  clash then keeps the store and holds A with the banner, as a post with a
+  number does; it was written as posted, over B (task-0437fdf2f2a6ccba). A
+  rich text in a row, or one with no value drawn, is read as before.
+  """
+  def values(socket, seen, _posted) when is_list(seen), do: values(socket, seen)
+
+  def values(socket, nil, posted) when is_map(posted) do
+    shown = shown(socket)
+
+    for {name, path, _html} <- posted_texts(socket, posted),
+        {:ok, was} <- [Map.fetch(shown, name)],
+        into: %{},
+        do: {name, {path, was, nil}}
+  end
+
+  def values(_socket, _seen, _posted), do: %{}
+
+  @doc """
+  The socket after a post with no `_bp_rt_seen`: each object rich text it
+  carries is what the page shows now (`values/3`), read onto the value it
+  showed before so its blocks keep their keys.
+  """
+  def posted(socket, nil, posted) when is_map(posted) do
+    shown = shown(socket)
+
+    page =
+      for {name, _path, html} <- posted_texts(socket, posted),
+          into: own_page(socket),
+          do: {name, PortableText.from_html(html, list(Map.get(shown, name)))}
+
+    assign(socket, editor_rt_page: {PostIdentity.of(socket), page})
+  end
+
+  def posted(socket, _seen, _posted), do: socket
+
+  # Each rich text inside an object (no row index on its path) the post
+  # carries as the page's HTML.
+  defp posted_texts(socket, posted) do
+    for path <-
+          RichTextRemote.every(
+            socket.assigns[:editor_schema],
+            socket.assigns[:editor_form] || %{}
+          ),
+        not Enum.any?(path, &is_integer/1),
+        html = FormPath.get(posted, path),
+        is_binary(html),
+        do: {RichTextRemote.input_name(path), path, html}
+  end
+
+  # The value a page without bp-rt-remote.js shows, by input name, of the
+  # document open: each is stamped with the document it was drawn or posted
+  # on, so a switch that left them in place does not carry them over.
+  defp shown(socket) do
+    born =
+      if socket.assigns[:editor_rt_born_doc] == PostIdentity.of(socket),
+        do:
+          for(
+            {name, {_seq, value}} <- socket.assigns[:editor_rt_born] || %{},
+            into: %{},
+            do: {name, value}
+          ),
+        else: %{}
+
+    Map.merge(born, own_page(socket))
+  end
+
+  defp own_page(socket) do
+    case socket.assigns[:editor_rt_page] do
+      {doc, %{} = page} when not is_nil(doc) ->
+        if doc == PostIdentity.of(socket), do: page, else: %{}
+
+      _ ->
+        %{}
+    end
+  end
 
   @doc """
   Each top-level rich text the post carries (task-fa07c64d344638fb), with

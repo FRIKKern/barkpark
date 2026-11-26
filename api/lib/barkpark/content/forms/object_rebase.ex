@@ -26,9 +26,11 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   is written as the tab read it; the store moved on, and the post is merged
   onto the store from it, and a clash keeps the store (the tab holds its
   words with the banner). Two tabs typing in one word wrote the later post
-  over the earlier with no word. A rich text with no `seen` (a page without
-  bp-rt-remote.js) is merged from `base`, and a clash is written as posted,
-  as before.
+  over the earlier with no word. A Studio post with no `_bp_rt_seen` (a page
+  without bp-rt-remote.js) is given `seen` from the value that page shows
+  (`UnderLock.values/3`, task-0437fdf2f2a6ccba). A rich text with no
+  `seen` here (another caller) is merged from `base`, and a clash is
+  written as posted, as before.
   """
 
   alias Barkpark.Content.PortableTextMerge

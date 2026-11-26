@@ -216,19 +216,25 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRemoteTest do
     refute html =~ "Someone else rewrote"
   end
 
-  test "a post with no _bp_rt_seen (a page from before) is written as before", c do
+  # A page with no bp-rt-remote.js never shows B's save: its editor sits in a
+  # `phx-update="ignore"` wrapper. It typed on the value it was drawn, so
+  # its post over B's word is a clash, held with the banner; it was written
+  # over B (task-0437fdf2f2a6ccba, #28896 r1 review).
+  test "a post with no _bp_rt_seen (a page from before) over B's word: held, B's kept", c do
     a = open(c)
     b = open(c)
 
     b_saves_rt(b, c, "<p>one two B</p>", ["one two B"])
     assert eventually(fn -> words(form(a)["meta"]["rt"]) == ["one two B"] end)
 
-    send_post(a, "doc[meta].rt", %{
-      "doc[meta].label" => "l0",
-      "doc[meta].rt" => "<p>one two A</p>"
-    })
+    html =
+      send_post(a, "doc[meta].rt", %{
+        "doc[meta].label" => "l0",
+        "doc[meta].rt" => "<p>one two A</p>"
+      })
 
-    assert eventually(fn -> words(stored(c)["meta"]["rt"]) == ["one two A"] end)
+    assert words(stored(c)["meta"]["rt"]) == ["one two B"]
+    assert html =~ "Someone else rewrote"
   end
 
   # #28349 r2 review, S9: past 20k the page was told only that it changed,

@@ -255,11 +255,22 @@
     }
     var start = shift(el.selectionStart, change.was, change.value);
     var end = shift(el.selectionEnd, change.was, change.value);
-    // task-e070cb99b86100be: a selection that would span letters the other
-    // editor put in is not carried onto them: B's next key replaced them and
-    // the post read as B's own edit. The caret goes after the other's change.
     var added = changed(change.was, change.value);
-    if (start !== end && added[1] > added[0] && start < added[1] && end > added[0]) start = end = added[1];
+    // task-d9d379ff1f6cf5fb: a selection's start passes letters the other
+    // editor put in right at it, and its end stays before letters put in
+    // right at it, so a change that only touches an edge leaves B's
+    // selection as B made it, and B's next key still replaces it.
+    if (start !== end && start === added[0] && added[1] > added[0]) start = added[1];
+    // task-e070cb99b86100be: a selection is never carried onto letters the
+    // other editor put in: B's next key replaced them and the post read as
+    // B's own edit. It keeps its untouched part, or, with the other's change
+    // inside it, collapses to a caret after that change.
+    if (start < end && added[1] > added[0] && start < added[1] && end > added[0]) {
+      if (added[0] <= start) start = added[1];
+      else if (added[1] >= end) end = added[0];
+      else start = end = added[1];
+      if (start >= end) start = end = added[1];
+    }
     el.value = change.value;
     el.setSelectionRange(start, end);
   }

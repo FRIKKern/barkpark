@@ -619,6 +619,115 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
     end
   end
 
+  # The smallest triples of the #28868 review's S2 fuzz in each class. A
+  # letter is {grapheme, link key or nil}; defs name each key's content.
+  describe "links across the sides (#28868 review fuzz)" do
+    defp lblock(ls, defs, kp) do
+      spans =
+        ls
+        |> Enum.chunk_by(&elem(&1, 1))
+        |> Enum.with_index()
+        |> Enum.map(fn {[{_, k} | _] = run, i} ->
+          span("#{kp}#{i}", Enum.map_join(run, &Atom.to_string(elem(&1, 0))), List.wrap(k))
+        end)
+
+      used = ls |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1) |> MapSet.new()
+
+      md =
+        for {k, c} <- Enum.sort(defs),
+            MapSet.member?(used, k),
+            do: %{"_key" => k, "_type" => "link", "href" => "https://#{c}"}
+
+      block("k", spans, md)
+    end
+
+    defp lmerge({bl, bd}, {ml, md}, {tl, td}) do
+      {:ok, blk} = Inline.merge(lblock(bl, bd, "b"), lblock(ml, md, "m"), lblock(tl, td, "t"))
+      hrefs = Map.new(blk["markDefs"], &{&1["_key"], &1["href"]})
+
+      for c <- blk["children"], g <- String.graphemes(c["text"]) do
+        {g, Enum.map(c["marks"], &{&1, hrefs[&1]})}
+      end
+    end
+
+    defp marks_at(letters, i), do: elem(Enum.at(letters, i), 1)
+
+    # task-da0afade29ee9aa0: mine runs a y link on across the splice's edge
+    # where theirs holds mine's link under two keys; the run took a fresh
+    # key beside theirs' key on the next letter.
+    for {name, base, mine, theirs, run} <- [
+          {"the right edge",
+           {[a: "d1", b: "d1", c: "d1", " ": nil, d: "m9", e: "m9", f: "m9", " ": nil, g: "d2"],
+            %{"d1" => :y, "m9" => :y, "d2" => :y}},
+           {[a: "d1", b: "d1", c: "d1", " ": nil, d: "m9", e: "m9", f: "m9", " ": "d1", g: "d1"],
+            %{"d1" => :y, "m9" => :y}},
+           {[
+              X: "m9",
+              W: nil,
+              b: "t7",
+              c: "t7",
+              " ": nil,
+              d: "d1",
+              e: "d1",
+              f: "d1",
+              " ": nil,
+              g: "m9"
+            ], %{"m9" => :y, "t7" => :y, "d1" => :y}}, 8..9},
+          {"one link run on to a letter theirs re-keyed",
+           {[
+              a: nil,
+              " ": nil,
+              b: "t7",
+              " ": nil,
+              c: nil,
+              " ": nil,
+              d: "d2",
+              " ": nil,
+              e: nil,
+              " ": nil,
+              f: "d1"
+            ], %{"t7" => :y, "d2" => :y, "d1" => :y}},
+           {[
+              a: nil,
+              " ": nil,
+              b: "m9",
+              " ": nil,
+              c: nil,
+              " ": nil,
+              d: "d2",
+              " ": nil,
+              e: nil,
+              " ": "d2",
+              f: "d2"
+            ], %{"m9" => :y, "d2" => :y}},
+           {[
+              a: nil,
+              X: "t7",
+              b: "t7",
+              " ": nil,
+              c: nil,
+              " ": nil,
+              d: "d2",
+              " ": nil,
+              e: nil,
+              " ": nil,
+              f: "d1"
+            ], %{"t7" => :y, "d2" => :y, "d1" => :y}}, 9..10}
+        ] do
+      test "a link of mine run on across the splice's edge stays one key: #{name}" do
+        out =
+          lmerge(
+            unquote(Macro.escape(base)),
+            unquote(Macro.escape(mine)),
+            unquote(Macro.escape(theirs))
+          )
+
+        keys = for i <- unquote(Macro.escape(run)), do: marks_at(out, i)
+        assert [[{_, "https://y"}]] = Enum.uniq(keys)
+      end
+    end
+  end
+
   describe "task-3d00496b0292f20b: needless clashes" do
     test "one edit both sides made that lowers a word's count, spans cut apart: theirs" do
       base = b("dog dog dog x")

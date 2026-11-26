@@ -72,7 +72,8 @@ defmodule BarkparkWeb.Studio.StudioLiveConcurrentEditTest do
       # The remote snapshot is applied to the form.
       assert socket.assigns.editor_form["title"] == "Remote Title"
       assert socket.assigns.doc_conflict == false
-      assert socket.assigns.save_status == "Updated by another user"
+      # Taken in quietly: no conflict, no words (task-3bb95fc2c7113518).
+      assert socket.assigns.save_status == ""
     end
 
     test "own write (sender == self) is ignored" do
