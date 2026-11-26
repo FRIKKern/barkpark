@@ -215,6 +215,14 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # holds" counts each block's own fields (task-6174d8fa01658a68): a
   # `level` or unknown field another editor set draws the same, and mine
   # was written over it.
+  # A row post whose draw is not known (`UnderLock`, task-82519fd79663e072):
+  # the store is kept unless the post draws the same; A is held.
+  defp rich_text(_base, mine, theirs, {:ok, :unknown}) when is_list(mine) do
+    if is_list(theirs) and not PortableTextMerge.same_drawn?(mine, theirs),
+      do: theirs,
+      else: mine
+  end
+
   defp rich_text(_base, mine, theirs, {:ok, was}) when is_list(mine) do
     theirs = if is_list(theirs), do: theirs, else: []
     was = if is_list(was), do: was, else: []

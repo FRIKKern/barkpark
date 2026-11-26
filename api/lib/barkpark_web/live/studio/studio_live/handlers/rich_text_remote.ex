@@ -92,6 +92,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
     socket
     |> drop_holds()
+    |> __MODULE__.RowDraws.record_form(form)
     |> tell(all, %{reload: true})
   end
 
@@ -383,6 +384,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
       socket
       |> assign(editor_rt_born: born, editor_rt_born_doc: PostIdentity.of(socket))
+      |> __MODULE__.RowDraws.record_form(form)
       |> send_values(values)
     end
   end
@@ -411,6 +413,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_clash: %{},
         editor_rt_born: %{},
         editor_rt_page: nil,
+        editor_rt_row_draws: nil,
         editor_rt_rekeyed: nil
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})

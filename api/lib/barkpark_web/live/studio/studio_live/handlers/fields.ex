@@ -304,7 +304,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           )
 
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
-        {:noreply, saved |> TextConfirmed.confirm(units, posted) |> RichTextRemote.hold(held)}
+
+        {:noreply,
+         saved |> TextConfirmed.confirm(units, posted) |> RichTextRemote.hold(held) |> row_draws()}
 
       _ ->
         {:noreply, socket}
@@ -651,12 +653,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> TextConfirmed.confirm(targets, posted)
 
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
-        {:noreply, RichTextRemote.hold(saved, held)}
+        {:noreply, saved |> RichTextRemote.hold(held) |> row_draws()}
 
       _ ->
         {:noreply, socket}
     end
   end
+
+  # Each row rich text the form now holds is a draw the page may show once a
+  # remount reaches it: A's own array press (a duplicate's new key, a move)
+  # and A's own save (a merged value) remount rows too (#29040 r2 review).
+  defp row_draws(socket),
+    do: RichTextRemote.RowDraws.record_form(socket, socket.assigns[:editor_form])
 
   defp page_codes(doc, socket, :page) do
     {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
@@ -1119,7 +1127,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       # A refused array change is held under its own field (`RefusedSave`).
       keys = Enum.take(key_path, 1)
       saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
-      {:noreply, settle_dirty(saved, keys)}
+      {:noreply, saved |> settle_dirty(keys) |> row_draws()}
     end
   end
 
