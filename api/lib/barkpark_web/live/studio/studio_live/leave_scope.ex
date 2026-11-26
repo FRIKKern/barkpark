@@ -30,13 +30,11 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
   place's.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
 
   alias BarkparkWeb.Studio.Caps
-
-  @notice "Not saved: the page has moved to another project. Choose Stay or Leave first."
-
-  @held_notice "Not reloaded: the page has moved to another project. Choose Stay or Leave first."
 
   # The question's own presses, whatever their tier.
   @leave_events ~w(desk-leave desk-leave-stay desk-leave-go studio-leave)
@@ -44,22 +42,26 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
   # `:none` presses that rebuild the panes, the open document with them.
   @held_reads ~w(reload-remote-doc desk-list-more select-sort)
 
-  @held_opens_notice "Not opened: the page has moved to another project. Choose Stay or Leave first."
-
   # `:none` presses that go to another page about the open document: the
   # page they build names the socket's project, so under the question they
   # would go to the moved project's page of the held document, without
   # asking (task-62711814fa586a09).
   @held_opens ~w(view-graph)
 
+  # The three notices are read in the caller's locale, at call time
+  # (task-82f506e97f488de0).
   @doc "The notice a refused press shows."
-  def notice, do: @notice
+  def notice,
+    do: gettext("Not saved: the page has moved to another project. Choose Stay or Leave first.")
 
   @doc "The notice a held read shows."
-  def held_notice, do: @held_notice
+  def held_notice,
+    do:
+      gettext("Not reloaded: the page has moved to another project. Choose Stay or Leave first.")
 
   @doc "The notice a held open (`view-graph`) shows."
-  def held_opens_notice, do: @held_opens_notice
+  def held_opens_notice,
+    do: gettext("Not opened: the page has moved to another project. Choose Stay or Leave first.")
 
   @doc "Arm the gate. Attached before `Caps.attach/1`."
   def attach(socket), do: attach_hook(socket, :studio_leave_scope, :handle_event, &gate/3)
@@ -75,13 +77,13 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
   end
 
   @doc "The refusal: the notice; nothing else on the socket moves."
-  def refuse(socket), do: put_flash(socket, :error, @notice)
+  def refuse(socket), do: put_flash(socket, :error, notice())
 
   defp gate(event, _params, socket) do
     cond do
       event in @leave_events or not moved?(socket.assigns) -> {:cont, socket}
-      event in @held_reads -> {:halt, put_flash(socket, :error, @held_notice)}
-      event in @held_opens -> {:halt, put_flash(socket, :error, @held_opens_notice)}
+      event in @held_reads -> {:halt, put_flash(socket, :error, held_notice())}
+      event in @held_opens -> {:halt, put_flash(socket, :error, held_opens_notice())}
       Caps.classify(event) in [:none, :read] -> {:cont, socket}
       true -> {:halt, refuse(socket)}
     end
