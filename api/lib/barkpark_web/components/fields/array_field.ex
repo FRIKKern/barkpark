@@ -706,7 +706,26 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # draw the same fields under the same names. In the desk's dialog an
   # input's id is the item's path and the field's name
   # (`links[_key=="l1"].url`), as Sanity's Studio names it.
+  #
+  # A row with a `_key` posts it beside its fields, as `ObjectForm` does for a
+  # typed member: the save writes each row's fields to the row of that key, so
+  # a post sent before another editor took a row out or moved one never lands
+  # in the row now at its old index (task-12ff178d188b04b4).
   defp composite_row_body(assigns, item, row_value, idx, id_base \\ nil) do
+    keyed_row_body(%{
+      key: row_key(row_value),
+      name: "#{assigns.path}[#{idx}]._key",
+      body: composite_row_fields(assigns, item, row_value, idx, id_base)
+    })
+  end
+
+  defp keyed_row_body(assigns) do
+    ~H"""
+    <input :if={@key} type="hidden" name={@name} value={@key} /><%= @body %>
+    """
+  end
+
+  defp composite_row_fields(assigns, item, row_value, idx, id_base) do
     CompositeField.composite_field(%{
       id_base: id_base,
       field: item,
