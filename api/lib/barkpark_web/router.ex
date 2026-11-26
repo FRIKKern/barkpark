@@ -4415,9 +4415,9 @@ defmodule BarkparkWeb.Router do
     # The three LISTs (GET /workspaces, …/projects, …/datasets) are in the scope
     # just above: they also take a login-session bearer (task-6224d34a5a8a6017).
 
-    # Create surface: any authenticated token may create a workspace (becomes
-    # its owner-member, + Default project + production dataset); project
-    # creation is member-gated (non-member → 404, no existence leak).
+    # Create surface: a workspace needs write + a home write seat if any
+    # (`Tenancy.Auth.may_create_workspace?/2`; owner, Default project, dataset);
+    # project creation is member-gated (non-member → 404, no existence leak).
     post("/workspaces", WorkspaceController, :create,
       private: %{barkpark_workspaceless_token_allowed: true}
     )
