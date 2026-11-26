@@ -89,9 +89,10 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   write bug and a leak.
 
   The flat spellings pick the row the public reader renders: the Default
-  (`is_default`) workspace with NO project_id predicate, unowned rows only, the
-  oldest of a same-slug tie (`public_paper_one_picker_test.exs` pins the
-  agreement). No row
+  workspace as `Tenancy.get_default_workspace/0` reads it (the reader's cached
+  source), NO project_id predicate, unowned rows only, the oldest of a
+  same-slug tie (`public_paper_one_picker_test.exs`,
+  `public_paper_default_seat_cache_test.exs` pin the agreement). No row
   (including an unseeded Default workspace, or a `drafts.`-prefixed row) ever
   leaves the conn untouched.
   """
@@ -162,18 +163,27 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   # everywhere else on the anonymous/public read path (D5). See the
   # moduledoc's "Scoping (fail closed)" section.
   defp default_public_paper(slug, dataset) do
+    # The Default seat from the reader's own source, `get_default_workspace/0`
+    # (`DefaultScopeCache`), not a live `is_default` join: when the cache still
+    # holds an old seat, the reader serves that seat's paper and the validator
+    # must name it too (task-d2af427518739052). Unseeded: no validator.
+    case Barkpark.Tenancy.get_default_workspace() do
+      %Workspace{id: ws_id} when is_binary(ws_id) -> default_public_paper(slug, dataset, ws_id)
+      _ -> nil
+    end
+  end
+
+  defp default_public_paper(slug, dataset, ws_id) do
     drafts_prefix = drafts_like_prefix()
 
     Repo.one(
       from document in Document,
-        join: workspace in Workspace,
-        on: document.workspace_id == workspace.id,
         # The reader's resolver (`Content.get_public_paper/2`) row for row: the
-        # `is_default` workspace, unowned rows only (`scope_to_owner(nil)`), and
-        # of same-slug rows the oldest. Its own query, not a call to it, to keep
+        # Default seat, unowned rows only (`scope_to_owner(nil)`), and of
+        # same-slug rows the oldest. Its own query, not a call to it, to keep
         # the reader's statement budget (task-0db9c861491a2ab2).
         where:
-          workspace.is_default and document.type == "paper" and
+          document.workspace_id == ^ws_id and document.type == "paper" and
             document.dataset == ^dataset and document.doc_id == ^slug and
             is_nil(document.owner_id) and document.status == "published" and
             not like(document.doc_id, ^drafts_prefix),
