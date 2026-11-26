@@ -1,40 +1,47 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
-# Barkpark
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-night.svg">
+  <img src="docs/readme/banner-paper.svg" width="768" alt="Barkpark: a knitted park band, and Maske the dog beside the name">
+</picture>
+
+**An open-source CMS you can run on your own computer or a server.**
+Define your own fields, edit content visually, and publish it through an API.
+Build a website or keep a recipe collection. Use only what you need.
 
 [![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
 
-What the button does, and how to add it to your own template: [Deploy with Barkpark](docs/setup/DEPLOY-WITH-BARKPARK.md).
-
-Barkpark is an open-source CMS you can run on your computer or a server.
-Define your own fields, edit content visually, and publish it through an API.
-Build a website or just keep a recipe collection. Use only what you need.
-
-Barkpark syncs between a local instance and a remote one. Several people can share one server while each runs Barkpark on their own machine — like running Sanity on your own computer. When the internet is down, everything still works, and you can pass documents to coworkers, family and friends over your local network.
+[What the button does](docs/setup/DEPLOY-WITH-BARKPARK.md), and how to add it to your template.
 
 ## What you can do
 
 | Use | What you get |
 |---|---|
-| Manage content | Custom fields, linked records, drafts, revisions, and a visual editor. |
-| Write documents | Papers: shareable proposals, reports, and notes that update live. |
-| Work with spreadsheets | Sheets: collaborative tables, formulas, and Excel import/export. |
-| Organize media | Upload images and files; manage tags, collections, and rights. |
-| Track work | Task boards, dependencies, agent work queues, and support tickets. |
-| Search content | Full-text search, filters, facets, and click analytics. |
-| Work with AI | Chat with agents, give them tasks, and inspect their changes. |
-| Publish websites | Templates, deployments, and custom domains on your instance. |
-| Manage servers | Provision, update, archive, and restore your Barkpark instances. |
-| Control access | Workspace membership, scoped tokens, sharing rules, and single sign-on. |
-| Run specialist tools | Live quizzes and ONIX book-metadata editing and export. |
+| Content | Your own fields, linked records, drafts, revisions, a visual editor |
+| Papers | Proposals, reports and notes you share, updated live |
+| Sheets | Shared tables, formulas, Excel in and out |
+| Media | Images and files, tags, collections, rights |
+| Work | Task boards, dependencies, agent queues, support tickets |
+| Search | Full text, filters, facets, click analytics |
+| AI | Chat with agents, hand them tasks, check their changes |
+| Websites | Templates, deploys, your own domains |
+| Servers | Start, update, archive and restore instances |
+| Access | Workspaces, scoped tokens, sharing rules, single sign-on |
+| Special tools | Live quizzes, ONIX book data and export |
 
-Use each tool independently or combine them through shared data and access rules.
-Work through the browser, terminal UI, CLI, or AI. Review changes and revoke tokens yourself.
+Use each tool alone or together: in the browser, the terminal UI, the CLI or through an agent.
+
+<img src="docs/readme/paper-dark.webp" width="768" alt="A Paper in the reader">
+
+A Paper in the reader. It also opens in Studio to edit, and in the terminal.
+
+<img src="docs/readme/console-dark.webp" width="768" alt="The Cloud console's Sites page">
+
+The Cloud console, with sample sites and their deploy state.
 
 ## Local or remote
 
-Keep the server, database, and files on your computer. Local work continues when
-the internet or a remote server fails. Run remotely for shared access.
-Local and remote instances hold separate data; transfers are explicit today.
+On your computer, the server, the database and the files stay with you, and work goes on when the internet is down.
+On a server, several people share one. Each holds its own data; today you move it between them on purpose.
 
 ## News
 
@@ -57,3 +64,8 @@ Earlier: [weekly editions](CHANGELOG.md)
 [Documentation](docs/INDEX.md) · [JavaScript docs site](js/docs/README.md) · [Build a plugin](docs/cards/plugins.md) · [Principles](docs/PHILOSOPHY.md)
 
 [Apache-2.0 licensed](LICENSE). Optional [Barkpark Cloud](https://barkpark.cloud) hosting funds development.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/rib-night.svg">
+  <img src="docs/readme/rib-paper.svg" width="768" alt="">
+</picture>
