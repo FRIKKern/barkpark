@@ -75,11 +75,14 @@ defmodule BarkparkWeb.Studio.StudioCreateWorkspaceOwnerTest do
     assert length(Tenancy.list_workspaces()) == before
   end
 
-  test "a write token revoked mid-session behind a writing account creates nothing", c do
+  # A revoke kicks the socket to /login before any press arrives; a narrowed
+  # permission list does not, and `Caps` reads the row as it is now.
+  test "a write token narrowed to read mid-session behind a writing account creates nothing",
+       c do
     {raw, token} = token!(c.ws, ["read", "write"])
     {session, _user} = account!(c.ws, "member")
     view = studio(%{"api_token" => raw, "user_session" => session}, c)
-    {:ok, _} = Auth.revoke_token(token)
+    token |> Ecto.Changeset.change(permissions: ["read"]) |> Repo.update!()
     n = name()
 
     html = render_hook(view, "create-workspace", %{"name" => n})
