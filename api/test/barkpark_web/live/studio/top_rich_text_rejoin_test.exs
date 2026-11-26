@@ -153,6 +153,44 @@ defmodule BarkparkWeb.Studio.TopRichTextRejoinTest do
     assert TextConfirmed.loaded(loaded).assigns.editor_rt_rejoin == MapSet.new()
   end
 
+  # The mount's flag (`_mounts` > 0, which LiveViewTest cannot send) as the
+  # first patch after it reads it: the document that patch loads is read
+  # against the page's digest; one opened later is drawn anew.
+  defp flagged(view, assigns) do
+    :sys.replace_state(view.pid, fn state ->
+      update_in(state.socket.assigns, &Map.merge(&1, assigns))
+    end)
+  end
+
+  defp rejoin_set(view), do: :sys.get_state(view.pid).socket.assigns[:editor_rt_rejoin]
+
+  test "desk: the document a rejoin's first patch loads is read against the page's digest", c do
+    {:ok, view, _} = live(c.conn, "#{c.root}/_desk/#{c.type}")
+    flagged(view, %{desk_rejoin?: true, editor_rejoined?: true})
+    render_patch(view, "#{c.root}/_desk/#{c.type};#{c.id}")
+    assert eventually(fn -> has_element?(view, "#editor-form") end)
+    assert rejoin_set(view) == MapSet.new(["doc[body]"])
+  end
+
+  test "desk: a rejoin whose first patch loads no document: the one opened next is drawn anew",
+       c do
+    {:ok, view, _} = live(c.conn, "#{c.root}/_desk/#{c.type}")
+    flagged(view, %{desk_rejoin?: true, editor_rejoined?: true})
+    render_patch(view, "#{c.root}/_desk/#{c.type}")
+    render_patch(view, "#{c.root}/_desk/#{c.type};#{c.id}")
+    assert eventually(fn -> has_element?(view, "#editor-form") end)
+    assert rejoin_set(view) == MapSet.new()
+  end
+
+  test "studio: the document a rejoin's first patch loads is read against the page's digest", c do
+    {:ok, view, _} = live(c.conn, "#{c.root}/#{c.type}")
+    flagged(view, %{editor_rejoined?: true})
+    render_patch(view, "#{c.root}/#{c.type}/#{c.id}")
+    render_async(view, 5_000)
+    assert eventually(fn -> has_element?(view, "#editor-form") end)
+    assert rejoin_set(view) == MapSet.new(["doc[body]"])
+  end
+
   for surface <- [:desk, :studio] do
     test "#{surface}: a rejoin after A's own autosave, nobody else saving: A's typing is written, no banner",
          c do

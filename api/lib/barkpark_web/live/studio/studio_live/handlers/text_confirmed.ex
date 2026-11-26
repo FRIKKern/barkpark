@@ -83,23 +83,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
 
   def known?(_seen, _key, _stored), do: false
 
-  @doc "Each top-level rich text field of `schema`."
+  @doc """
+  Each top-level rich text field of `schema` its Classic editor draws as
+  HTML. A field on the block editor (`FieldVocabulary.blocks_field?/1`) has
+  no form input: its canvas carries its own revision.
+  """
   def rich_keys(%{fields: fields}) when is_list(fields),
-    do: for(%{"name" => key, "type" => "richText"} <- fields, is_binary(key), do: key)
+    do:
+      for(
+        %{"name" => key, "type" => "richText"} = field <- fields,
+        is_binary(key),
+        not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field),
+        do: key
+      )
 
   def rich_keys(_schema), do: []
 
   defp rich_drawn(schema, form) do
     for key <- rich_keys(schema),
-        Map.has_key?(form, key),
+        value = Map.get(form, key),
+        is_binary(value) or is_list(value),
         into: %{},
-        do: {RemoteValues.input_name(key), rich_digest(Map.get(form, key))}
+        do: {RemoteValues.input_name(key), rich_digest(value)}
   end
 
   # The form holds a top-level rich text as the HTML its editor draws
   # (`Content.Forms`), the store as blocks: one digest for both.
   defp rich_digest(html) when is_binary(html), do: :erlang.phash2(html)
-  defp rich_digest(value), do: CompositeField.drawn_digest(value)
+  defp rich_digest(value) when is_list(value), do: CompositeField.drawn_digest(value)
+  defp rich_digest(_value), do: nil
 
   @doc """
   The base a top-level rich text post `name` is read against (`stored`, as

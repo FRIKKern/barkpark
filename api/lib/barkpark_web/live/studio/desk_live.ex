@@ -265,6 +265,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
     {rejoin?, socket} =
       {socket.assigns[:desk_rejoin?] == true, assign(socket, :desk_rejoin?, false)}
 
+    # Only the document the rejoin's first patch loads is the page's own
+    # (`TextConfirmed.loaded/1`); one opened later is drawn anew.
+    socket =
+      if rejoin? and socket.assigns.pending != nil,
+        do: socket,
+        else: assign(socket, :editor_rejoined?, false)
+
     case socket.assigns.pending do
       nil ->
         {:noreply, socket}
