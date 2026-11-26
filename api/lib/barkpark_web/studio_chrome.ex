@@ -358,7 +358,7 @@ defmodule BarkparkWeb.StudioChrome do
       # The one rule REST asks too, from the mounted workspace, as Studio's
       # `Caps` asks it (task-f4fde845d0c33bcf).
       not Tenancy.Auth.may_create_workspace?(principal, id_of(socket.assigns[:current_workspace])) ->
-        put_flash(socket, :error, "You need write access in this workspace to create a workspace")
+        refuse_unseated_create(socket)
 
       ApiToken.dataset_bound?(principal) ->
         refuse_bound_create(socket)
@@ -424,6 +424,14 @@ defmodule BarkparkWeb.StudioChrome do
   project. One sentence for the chrome and for StudioLive's own handlers.
   """
   def refuse_bound_create(socket), do: put_flash(socket, :error, @bound_token_creates_nothing)
+
+  @doc """
+  The refusal for a principal `Tenancy.Auth.may_create_workspace?/2` says no
+  to: no write seat in the workspace it acts from. One sentence for the
+  chrome and for StudioLive's handler (task-d40804433c63ffa4).
+  """
+  def refuse_unseated_create(socket),
+    do: put_flash(socket, :error, "You need write access in this workspace to create a workspace")
 
   # ── scope-menu state ──────────────────────────────────────────────────────
   #

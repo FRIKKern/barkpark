@@ -294,14 +294,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   # membership. Only a `nil` principal — a genuinely anonymous / public-demo
   # session — still gets "Sign in", and for that one it is TRUE.
   #
-  # The MEMBERSHIP half is NOT re-asked here, unlike the chrome copy. On
-  # StudioLive `Caps.gate/3` already classifies `create-workspace` and
-  # `create-project` as `:write` and halts a principal-carrying socket that
-  # lacks write with "You don't have access to do that." — an honest sentence
-  # that never claims the person is signed out. A `Tenancy.Auth.member?/2` arm
-  # underneath it would be unreachable code (proved: the signed-in non-member
-  # test below never reaches this module). `chrome_fallback/3` needs its own
-  # copy only because those surfaces run without the gate.
+  # On StudioLive `Caps.gate/3` classifies `create-workspace` and
+  # `create-project` as `:write` and halts a principal-carrying socket with no
+  # write seat with "You don't have access to do that." — an honest sentence
+  # that never claims the person is signed out. It passes on either seat of a
+  # token+account socket, so the principal bound as the new workspace's owner
+  # is asked its own seat below, as the chrome asks it.
   #
   # A dataset-bound token makes no workspace and no project
   # (`ApiToken.dataset_bound?/1`). The gate asks only for write, so that is
@@ -315,6 +313,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
       ApiToken.dataset_bound?(principal) ->
         {:noreply, StudioChrome.refuse_bound_create(socket)}
+
+      # `Caps` passes when either seat of a token+account socket writes, but
+      # the owner bound below is the principal above, the token first. So the
+      # owner is asked the rule REST and the chrome ask: a read token behind a
+      # writing account owned the new workspace (task-d40804433c63ffa4).
+      not Tenancy.Auth.may_create_workspace?(principal, id_of(socket.assigns[:current_workspace])) ->
+        {:noreply, StudioChrome.refuse_unseated_create(socket)}
 
       true ->
         case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
@@ -344,6 +349,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   end
 
   def create_workspace(_params, socket), do: {:noreply, socket}
+
+  defp id_of(%{id: id}), do: id
+  defp id_of(_), do: nil
 
   def create_project(%{"name" => name}, socket) do
     ws = socket.assigns[:current_workspace]
