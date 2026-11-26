@@ -31,11 +31,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   store, never held, and the page's input is drawn the stored value.
   """
 
+  import Phoenix.Component, only: [assign: 3]
+
   alias Barkpark.Content.Revisions
   alias BarkparkWeb.ScopeHelpers
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
 
   @doc """
@@ -65,6 +68,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
               mine = RemoteValues.value_at(doc, key),
               stored = RemoteValues.value_at(text, key),
               is_binary(mine) and is_binary(stored) and mine != stored,
+              not TextConfirmed.known?(seen, key, stored),
               do: {key, mine, stored}
 
         _ ->
@@ -115,6 +119,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   end
 
   @doc """
+  The fields whose autosave a hold paused, until a Save or Reload: the
+  banner says so (`editor_text_paused`, `Editor.doc_conflict_banner/1`).
+
   A's words for each held field in the form, unsaved, with the banner, and
   drawn into the page's input. The desk redraws its form on a rejoin, so
   the input already showed the stored value: the banner said A's words were
@@ -124,12 +131,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin do
   """
   def hold(socket, typed, on \\ :autosave)
 
-  def hold(socket, [], _on), do: socket
+  def hold(socket, [], _on), do: assign(socket, :editor_text_paused, [])
 
   def hold(socket, typed, on) do
     {stale, typed} = Enum.split_with(typed, &(tuple_size(&1) == 4))
 
     socket
+    |> assign(:editor_text_paused, typed |> Enum.map(&top(elem(&1, 0))) |> Enum.uniq())
     |> held(typed)
     |> drawn(stale)
     |> named(stale, on)

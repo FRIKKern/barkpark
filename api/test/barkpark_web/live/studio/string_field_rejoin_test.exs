@@ -212,8 +212,10 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
     end
 
     # Design A's cost (task-6496826d722a5a06): with no other save, typing
-    # done while away is held too. A banner that was not needed; no words lost.
-    test "#{surface} #{field}: A's page rejoins with no other save and posts its typing: held with the banner until a Save",
+    # done while away is held too, for a page with no confirmed digest (one
+    # from before `TextConfirmed`; these posts carry none). A page with one is
+    # written (`string_rejoin_confirmed_test.exs`, task-fe9d8741f0641f97).
+    test "#{surface} #{field}: A's page with no digest rejoins with no other save and posts its typing: held with the banner until a Save",
          c do
       field = unquote(field)
       a2 = open(c, unquote(surface))

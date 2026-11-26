@@ -15949,3 +15949,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This workspace is suspended, so no workspace can be created from it"
 msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "Autosave is paused for %{fields} until you Save or Reload."
+msgstr ""
