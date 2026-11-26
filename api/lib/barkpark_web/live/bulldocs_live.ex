@@ -1499,18 +1499,11 @@ defmodule BarkparkWeb.BulldocsLive do
 
   def handle_info({:paper_updated, _msg}, socket), do: {:noreply, refetch(socket)}
 
-  # THE DELETE FRAME (pd-ee-reader-stale-cache). Deletion is the ONE mutation
-  # that reaches this reader as `{:doc_updated, …}` and never as
-  # `{:paper_updated, …}` — the paper-write pipeline emits the latter, the
-  # generic `Content.delete_document/4` path only the former (on the same
-  # topic; see the mount comment). Without this clause the frame fell into the
-  # catch-all and a connected reader served the deleted body indefinitely.
-  #
-  # `refetch/1` re-reads the slug and, on nil, clears the stream, the html and
-  # `:found` — so this one line IS the not-found transition. Every OTHER
-  # `{:doc_updated, …}` on the topic still falls through: an ordinary edit
-  # already arrives as `{:paper_updated, …}`, and refetching twice per edit
-  # would be pure duplicate work on a public reader.
+  # THE DELETE FRAME (pd-ee-reader-stale-cache). Delete reaches this reader only
+  # as `{:doc_updated, …}` (`Content.delete_document/4`), never `{:paper_updated,
+  # …}`. `refetch/1` re-reads the slug and on nil clears the stream, the html and
+  # `:found`: the not-found transition. Other `{:doc_updated, …}` frames fall
+  # through, since an edit already arrives as `{:paper_updated, …}`.
   def handle_info({:doc_updated, %{mutation: "delete"}}, socket),
     do: {:noreply, refetch(socket)}
 
@@ -1518,8 +1511,7 @@ defmodule BarkparkWeb.BulldocsLive do
   # graph. Re-read the compact related-Paper projection without replacing the
   # article body, so cards update in place when links or source details change.
   def handle_info({:paper_relations_changed, _msg}, socket) do
-    paper =
-      fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
+    paper = own_paper(socket)
 
     {:noreply, assign_linked_sections(socket, paper, socket.assigns[:dataset])}
   end
@@ -1605,11 +1597,19 @@ defmodule BarkparkWeb.BulldocsLive do
     |> assign(:found, true)
   end
 
+  # Re-reads keep to the mounted paper's project: a sibling's same-slug paper
+  # is not this one, so P1's delete reads as gone (task-9097b1abe87e7b06).
+  defp own_paper(%{assigns: a}) do
+    case fetch_paper(a.slug, a[:reader_scope], a[:dataset]) do
+      %{project_id: p} when is_binary(a.paper_project_id) and p != a.paper_project_id -> nil
+      paper -> paper
+    end
+  end
+
   @doc false
   def refetch(socket) do
     # Same tenant scoping as mount (Default flat / URL scope on /w/..., P4).
-    paper =
-      fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
+    paper = own_paper(socket)
 
     # Slice 2: a broadcast-driven reload re-derives the EDIT buffer from the
     # same document the View re-streams from, so the two can never disagree.
