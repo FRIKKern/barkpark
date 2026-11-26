@@ -2,18 +2,19 @@ defmodule Barkpark.Content.PublicPaperOnePickerTest do
   @moduledoc """
   task-0db9c861491a2ab2: the public paper surfaces had three pickers.
 
-    * `PaperRevisionHeaders` picked the flat `/papers/<slug>` validator with its
-      own query: Default workspace by slug only, any owner. The reader
-      (`Content.get_public_paper/2`) also reads the shared layer and only
-      unowned rows. So the revision header and the ETag could describe another
-      row than the body, or a row the reader 404s on. The plug now takes the
-      reader's row.
+    * `PaperRevisionHeaders` picked the flat `/papers/<slug>` validator with
+      its own query: the Default workspace, any owner. The reader
+      (`Content.get_public_paper/2`) reads unowned rows only. So the revision
+      header and the ETag could describe another row than the body, or a row
+      the reader 404s on. The plug now takes the reader's row.
     * `BoundFieldGuard` kept the NEWEST of two rows under one doc_id (two
       types), while the value resolve renders the OLDEST. It now keeps the
       oldest too.
 
-  The shared-layer and owned rows are made by moving a fixture row's columns,
-  the two shapes `Query.resolve_docs_by_ids/3` filters on.
+  Owned and shared-layer rows are made by moving a fixture row's columns.
+  Shared-layer rows never disagreed (both pickers read the Default workspace
+  only), so that case is a control. `create_document/3` writes drafts, so the
+  guard case binds two `drafts.q3` rows.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -70,23 +71,28 @@ defmodule Barkpark.Content.PublicPaperOnePickerTest do
           })
         )
 
-      assert is_binary(doc.released_revision_id)
-      doc
+      # A fixture paper carries no released revision; name its current one so
+      # the revision header tells the two rows apart.
+      doc = Repo.reload!(doc)
+      assert is_binary(doc.current_revision_id)
+      move!(doc, released_revision_id: doc.current_revision_id)
+      %{doc | released_revision_id: doc.current_revision_id}
     end
 
     defp move!(doc, set) do
       {1, _} = Repo.update_all(from(d in Document, where: d.id == ^doc.id), set: set)
     end
 
-    test "a shared-layer row the reader renders is the row the revision names",
+    test "control: a lone shared-layer row is served by neither, and mints no validator",
          %{conn: conn} = c do
+      # Both pickers read the Default workspace only (`scope_to_workspace_or_global/3`
+      # with a workspace id is the workspace-only scope), so this case agreed on
+      # main too.
       shared = paper!(c, c.p1, "Shared words")
-      _own = paper!(c, c.p2, "Default words")
       move!(shared, workspace_id: nil, project_id: nil)
 
-      conn = get(conn, "/papers/#{c.slug}")
-      assert html_response(conn, 200) =~ "Shared words"
-      assert get_resp_header(conn, @rev) == [shared.released_revision_id]
+      {404, headers, _body} = assert_error_sent(404, fn -> get(conn, "/papers/#{c.slug}") end)
+      refute List.keymember?(headers, @rev, 0)
     end
 
     test "an owned row the reader skips is not the row the revision names", %{conn: conn} = c do
@@ -136,7 +142,8 @@ defmodule Barkpark.Content.PublicPaperOnePickerTest do
       {:ok, _} =
         Content.create_document("note", %{"doc_id" => "q3", "content" => %{"budget" => "2M"}}, ds)
 
-      assert [%{type: "memo"} | _] = Content.resolve_docs_by_ids(["q3"], ds, [])
+      assert [%{type: "memo"}, %{type: "note"}] =
+               Content.resolve_docs_by_ids(["drafts.q3"], ds, [])
 
       block = %{
         "id" => "v-budget",

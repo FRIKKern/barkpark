@@ -89,9 +89,8 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   write bug and a leak.
 
   The flat spellings do not query at all: they take the row the public reader
-  renders, `Content.get_public_paper/2` (Default workspace or the shared layer,
-  unowned rows only, the oldest of a same-slug tie, published-only clamp
-  hard-coded). A second picker here once described a different row than the
+  renders, `Content.get_public_paper/2` (the Default workspace only, unowned
+  rows only, the oldest of a same-slug tie, published-only clamp hard-coded). A second picker here once described a different row than the
   body (task-0db9c861491a2ab2). No row (including an unseeded Default
   workspace, or a `drafts.`-prefixed slug) ever leaves the conn untouched.
   """
@@ -155,8 +154,8 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   end
 
   # The flat spellings ask the reader's own resolver, so the validator always
-  # describes the row the reader renders: Default workspace or the shared
-  # layer, unowned rows only, oldest of a tie (task-0db9c861491a2ab2).
+  # describes the row the reader renders: the Default workspace only, unowned
+  # rows only, oldest of a tie (task-0db9c861491a2ab2).
   defp default_public_paper(slug, dataset), do: Content.get_public_paper(slug, dataset)
 
   defp drafts_like_prefix, do: DraftId.drafts_prefix() <> "%"
