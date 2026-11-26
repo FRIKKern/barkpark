@@ -104,7 +104,7 @@ defmodule BarkparkWeb.WorkspaceCreateRuleTest do
       {raw, token} = token!(ws, ["read", "write"])
       own!(token, user!([{ws, "member"}]))
       n = name()
-      assert post_ws(build_conn(), raw, n).status == 201
+      assert post_ws(scoped_conn(), raw, n).status == 201
       assert exists?(n)
     end
 
@@ -120,7 +120,7 @@ defmodule BarkparkWeb.WorkspaceCreateRuleTest do
 
       {raw, token} = token!(nil, ["read"])
       own!(token, user!([]))
-      assert post_ws(build_conn(), raw, name()).status == 403
+      assert post_ws(scoped_conn(), raw, name()).status == 403
     end
   end
 
@@ -162,7 +162,7 @@ defmodule BarkparkWeb.WorkspaceCreateRuleTest do
       for change <- [:unseat, :unknown_role] do
         user = user!([{c.ws, "member"}])
         {:ok, raw} = Accounts.create_user_session_token(user)
-        view = media(build_conn(), %{"user_session" => raw}, c.ws, c.proj)
+        view = media(scoped_conn(), %{"user_session" => raw}, c.ws, c.proj)
 
         case change do
           :unseat ->
@@ -199,7 +199,7 @@ defmodule BarkparkWeb.WorkspaceCreateRuleTest do
 
       {:ok, raw} = Accounts.create_user_session_token(user!([{c.ws, "member"}]))
       n = name()
-      view = media(build_conn(), %{"user_session" => raw}, c.ws, c.proj)
+      view = media(scoped_conn(), %{"user_session" => raw}, c.ws, c.proj)
 
       assert {:error, {:live_redirect, _}} =
                render_submit(view, "create-workspace", %{"name" => n})
