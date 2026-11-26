@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.SaveTells
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
@@ -303,7 +304,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           )
 
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
-        {:noreply, saved |> RichTextRemote.hold(held) |> row_draws()}
+
+        {:noreply,
+         saved |> TextConfirmed.confirm(units, posted) |> RichTextRemote.hold(held) |> row_draws()}
 
       _ ->
         {:noreply, socket}
@@ -417,6 +420,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       |> assign(
         editor_dirty: false,
         doc_conflict: false,
+        editor_text_paused: [],
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil
       )
@@ -601,7 +605,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A page that rejoined a new socket, typed on a value it never took
         # (`TextRejoin`, task-4fc7383b936f606a).
         {targets, units} = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
-        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc, targets)
+
+        {doc, typed} =
+          TextRejoin.split(socket, units, params["_bp_seen"], doc, targets, :autosave)
 
         based =
           socket
@@ -644,6 +650,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> settle_dirty(keys)
           |> TextUnderLock.hold(text_held, doc)
           |> TextRejoin.hold(typed)
+          |> TextConfirmed.confirm(targets, posted)
 
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
         {:noreply, saved |> RichTextRemote.hold(held) |> row_draws()}

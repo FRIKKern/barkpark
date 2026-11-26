@@ -840,6 +840,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               conflict={@doc_conflict}
               disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
               theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
+              paused={paused_titles(@editor_schema, @parent_assigns[:editor_text_paused])}
             />
           </div>
           <.paper_halt_banner reason={@paper_halt} />
@@ -1408,6 +1409,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     doc:
       "the words of each rich text block another editor rewrote where this one's text is held (`RichTextRemote`), as TanStack's clash card shows theirs"
 
+  attr :paused, :list,
+    default: [],
+    doc:
+      "the titles of the fields whose autosave a rejoin hold paused until a Save or Reload (`TextRejoin.hold/3`)"
+
   def doc_conflict_banner(assigns) do
     ~H"""
     <%= if @conflict do %>
@@ -1418,6 +1424,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <%= gettext("Updated by another user — your unsaved edits are kept.") %>
           </span>
         </div>
+        <p :if={@paused != []} class="bp-doc-conflict-paused" data-test-id="doc-conflict-paused">
+          <%= gettext("Autosave is paused for %{fields} until you Save or Reload.",
+            fields: Enum.join(@paused, ", ")
+          ) %>
+        </p>
         <blockquote :for={text <- Enum.take(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
         <%!-- A patch would close the fold under the reader: `open` is the page's (#28891 review). --%>
         <details
@@ -1607,6 +1618,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     do: drawable_icon(icon) || "circle"
 
   defp tab_icon(_), do: "circle"
+
+  # The banner names each paused field by its title (`TextRejoin.hold/3`).
+  defp paused_titles(schema, [_ | _] = keys) do
+    fields = (is_map(schema) && Map.get(schema, :fields)) || []
+
+    Enum.map(keys, fn key ->
+      case Enum.find(fields, &(is_map(&1) and &1["name"] == key)) do
+        %{"title" => title} when is_binary(title) and title != "" -> title
+        _ -> key
+      end
+    end)
+  end
+
+  defp paused_titles(_schema, _keys), do: []
 
   # The fields the form draws, in order: on the chosen tab and not hidden by
   # `visibleWhen`, gathered into the schema's fieldsets in the desk.

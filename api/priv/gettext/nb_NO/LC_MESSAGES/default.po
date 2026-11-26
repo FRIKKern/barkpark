@@ -15954,3 +15954,8 @@ msgstr "Du trenger skrivetilgang i dette arbeidsområdet for å opprette et arbe
 #, elixir-autogen, elixir-format
 msgid "This workspace is suspended, so no workspace can be created from it"
 msgstr "Dette arbeidsområdet er suspendert, så det kan ikke opprettes noe arbeidsområde herfra"
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "Autosave is paused for %{fields} until you Save or Reload."
+msgstr "Autolagring er satt på pause for %{fields} til du trykker Lagre eller Last inn på nytt."

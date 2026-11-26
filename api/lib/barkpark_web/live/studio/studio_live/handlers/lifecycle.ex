@@ -53,6 +53,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil,
         doc_conflict: false,
+        editor_text_paused: [],
         editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil,

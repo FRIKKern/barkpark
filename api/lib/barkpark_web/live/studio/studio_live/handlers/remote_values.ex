@@ -59,6 +59,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
   import Phoenix.LiveView, only: [push_event: 3]
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
 
   @event "bp:form-remote-values"
   @born_event "bp:form-born"
@@ -105,7 +106,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
           end
         end)
 
-      payload = if seqs == %{}, do: %{values: values}, else: %{values: values, seqs: seqs}
+      # The digest of each numbered value, taken with its number (`TextConfirmed`).
+      payload =
+        if seqs == %{},
+          do: %{values: values},
+          else: %{values: values, seqs: seqs, oks: oks(values, seqs)}
+
       push_event(socket, @event, payload)
     end
   end
@@ -240,7 +246,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
 
       if values == %{},
         do: socket,
-        else: push_event(socket, @born_event, %{values: values, seqs: seqs})
+        else:
+          push_event(socket, @born_event, %{
+            values: values,
+            seqs: seqs,
+            oks: TextConfirmed.oks(values)
+          })
     end
   end
 
@@ -381,11 +392,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues do
       end
     end)
     |> Map.new()
-    |> case do
-      drawn when drawn == %{} -> "{}"
-      drawn -> Jason.encode!(%{@drawn_key => drawn})
-    end
+    |> then(&%{@drawn_key => &1, TextConfirmed.key() => drawn_oks(assigns)})
+    |> Map.reject(fn {_key, map} -> map == %{} end)
+    |> Jason.encode!()
   end
+
+  defp drawn_oks(assigns), do: TextConfirmed.drawn(assigns[:editor_schema], assigns[:editor_form])
+
+  defp oks(values, seqs),
+    do:
+      values
+      |> Map.take(Map.keys(seqs))
+      |> Map.new(fn {n, %{value: v}} -> {n, v} end)
+      |> TextConfirmed.oks()
 
   @doc """
   Keeps `before`'s history on `socket`, which `Shared.rebuild_panes/1` built

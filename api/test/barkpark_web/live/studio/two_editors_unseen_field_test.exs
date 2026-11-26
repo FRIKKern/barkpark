@@ -256,8 +256,12 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnseenFieldTest do
     end
   end
 
-  test "a form drawn before any push starts from {}", c do
+  # It carries only the digest of each value it shows (`TextConfirmed`,
+  # task-fe9d8741f0641f97), which no number reads.
+  test "a form drawn before any push draws no numbers", c do
     a = open(c, c.url)
-    assert drawn_seen(a) == %{}
+    seen = drawn_seen(a)
+    assert Map.keys(seen) == ["ok"]
+    assert is_integer(seen["ok"]["doc[title]"])
   end
 end
