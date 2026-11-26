@@ -93,6 +93,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def posted(socket, _seen, _posted), do: socket
 
+  @doc """
+  The socket after it took `new_form` over `old_form`: each rich text inside
+  an object whose own `_key` changed is the value taken, as the page shows
+  it. The editor's wrapper id carries that key (`CompositeField`,
+  `bp-rt-sub-…`), so even a page without bp-rt-remote.js remounts it and
+  draws the new value; a post with no `_bp_rt_seen` was typed on that
+  (task-c29534c0655f0489). The mount draw and the numbers the page reported
+  (`editor_rt_born`) are left as they were. A rich text in a row is read as
+  before: a row with a new `_key` is another row.
+  """
+  def remounted(socket, old_form, new_form) do
+    old_form = old_form || %{}
+    new_form = new_form || %{}
+
+    case PostIdentity.of(socket) do
+      nil ->
+        socket
+
+      doc ->
+        moved =
+          for path <- RichTextRemote.every(socket.assigns[:editor_schema], new_form),
+              not Enum.any?(path, &is_integer/1),
+              owner = Enum.drop(path, -1),
+              key(FormPath.get(old_form, owner)) != key(FormPath.get(new_form, owner)),
+              into: %{},
+              do: {RichTextRemote.input_name(path), FormPath.get(new_form, path)}
+
+        if moved == %{},
+          do: socket,
+          else: assign(socket, editor_rt_page: {doc, Map.merge(own_page(socket), moved)})
+    end
+  end
+
+  defp key(%{} = owner), do: Map.get(owner, "_key")
+  defp key(_), do: nil
+
   # Each rich text inside an object (no row index on its path) the post
   # carries as the page's HTML.
   defp posted_texts(socket, posted) do
