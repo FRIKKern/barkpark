@@ -244,6 +244,25 @@ defmodule BarkparkWeb.Studio.StudioBackLeaveDialogTest do
                render_click(a, "studio-leave", %{"href" => "/papers", "kind" => ""})
     end
 
+    test "a path with a space or control byte goes nowhere (a browser reads /<TAB>/x as //x)",
+         c do
+      a = hold(c)
+
+      for href <- [
+            "/\t/evil.example/x",
+            "/\n/evil.example/x",
+            "/\r/evil.example/x",
+            "/ /evil.example/x",
+            "/\0/evil.example/x",
+            "/papers\t"
+          ] do
+        render_click(a, "studio-leave", %{"href" => href, "kind" => ""})
+        refute has_element?(a, @dialog), inspect(href)
+      end
+
+      assert open_id(a) == c.id
+    end
+
     test "a path that is not this site's goes nowhere", c do
       a = hold(c)
       render_click(a, "studio-leave", %{"href" => "//evil.example/x", "kind" => ""})
