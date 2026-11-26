@@ -144,7 +144,9 @@ defmodule BarkparkWeb.Studio.WorkspaceReachabilityParityTest do
     test "does not fold in the create gate — can_create_in?/2 is still its own predicate" do
       src = File.read!(@chrome_src)
 
-      assert src =~ "defp can_create_in?(socket, %{id: ws_id}) do",
+      # It takes the principal read at the press (`principal_now/1`,
+      # task-6dd234b8f84baaf5), not the socket's mount-time one.
+      assert src =~ "defp can_create_in?(principal, %{id: ws_id}),",
              "can_create_in?/2 must NOT be folded into the reachability dedup: " <>
                "it asks membership of the principal's OWN kind on both arms, " <>
                "precisely so the account arm does not inherit can_reach?/2's " <>

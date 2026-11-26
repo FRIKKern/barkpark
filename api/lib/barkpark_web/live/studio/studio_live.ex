@@ -113,6 +113,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> reset_read_memo_per_callback()
       |> attach_hook(:studio_leave_follow, :after_render, &leave_follow/1)
       |> Mount.init()
+      |> LeaveAsk.init()
+      # Before Caps: no write while the question is open over a patch into
+      # another project (task-bc40f41b69eb4d9a).
+      |> BarkparkWeb.Studio.StudioLive.LeaveScope.attach()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
       # After Caps: an event Caps refuses never reaches the quota gate.
@@ -189,11 +193,44 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # A local capture: the LiveView hook census resolves a hook to its clauses.
   defp leave_follow(socket), do: LeaveAsk.follow(socket)
 
+  defp asks("studio-leave", params, socket) do
+    {_, socket} = LeaveAsk.link(params, socket)
+    {:noreply, socket}
+  end
+
   defp asks(event, params, socket) do
     case LeaveAsk.ask(event, params, socket) do
       {:stay, socket} -> {:noreply, socket}
       {:go, socket} -> leave(event, params, socket)
     end
+  end
+
+  # Leave: the patch or the press asked about goes on, past the guard once.
+  # A press passed every handle_event hook when it was made (LiveScope's
+  # grant gates, Caps, the quota gate, …); it passes the same list again here, through the reducer LiveView ran it through, as a grant
+  # may have gone while the question was open (#28937 review, B1). A hook
+  # added later is in that list too.
+  defp leave_go(socket) do
+    case LeaveAsk.go(socket) do
+      {{:patch, params, uri}, socket} ->
+        handle_params(params, uri, socket)
+
+      {{:event, event, params}, socket} ->
+        with {:cont, socket} <- LeaveAsk.hooks(event, params, socket),
+             {:noreply, socket} <- leave(event, params, socket) do
+          {:noreply, LeaveAsk.passed(socket)}
+        else
+          {:halt, socket} -> {:noreply, LeaveAsk.passed(socket)}
+        end
+
+      {nil, socket} ->
+        {:noreply, LeaveAsk.passed(socket)}
+    end
+  end
+
+  defp leave("studio-leave", params, socket) do
+    {_, socket} = LeaveAsk.link(params, socket)
+    {:noreply, socket}
   end
 
   defp leave("select", params, socket), do: Scope.select(params, socket)
@@ -293,6 +330,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # count, plus the desk tree, the pane and the editor.
     # `with_process_memo/1` switches the memo off again when the callback
     # returns or raises, so the request process carries nothing onward.
+    # A held field asks before a patch puts the document away, Back above
+    # all (`LeaveAsk`): the document stays, the URL already moved.
+    place = {params["dataset"] || default_dataset(), Map.get(params, "path", []), params["desk"]}
+
+    case LeaveAsk.params(socket, params, uri, place) do
+      {:stop, socket} -> {:noreply, socket}
+      {:route, socket} -> read_params(params, uri, socket)
+    end
+  end
+
+  defp read_params(params, uri, socket) do
     if connected?(socket),
       do: do_handle_params(params, uri, socket),
       else:
@@ -476,6 +524,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_info({:drop_focus_query, to}, socket),
     do: {:noreply, push_patch(socket, to: to, replace: true)}
 
+  # The hold ended while the question was open: it closes, as Stay.
+  def handle_info(:studio_leave_cleared, socket) do
+    if LeaveAsk.cleared?(socket),
+      do: {:noreply, LeaveAsk.stay(socket)},
+      else: {:noreply, socket}
+  end
+
   def handle_info(_other, socket), do: {:noreply, socket}
 
   # ── handle_event/3 routing heads ────────────────────────────────────────────
@@ -485,6 +540,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("select", params, socket), do: asks("select", params, socket)
   def handle_event("expand-pane", params, socket), do: asks("expand-pane", params, socket)
   def handle_event("new-document", params, socket), do: asks("new-document", params, socket)
+  # The leave dialog's Stay and Leave (`LeaveGuard.dialog/1`, the desk's).
+  def handle_event("desk-leave-stay", _params, socket), do: {:noreply, LeaveAsk.stay(socket)}
+  def handle_event("desk-leave-go", _params, socket), do: leave_go(socket)
+  # A link bp-studio-leave.js held back while a field is held.
+  def handle_event("studio-leave", params, socket), do: asks("studio-leave", params, socket)
 
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)

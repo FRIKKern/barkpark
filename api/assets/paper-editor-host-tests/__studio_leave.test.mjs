@@ -1,5 +1,6 @@
 // __studio_leave.test.mjs — task-c4b59891f88686e0: Studio asks before it
-// leaves a field held under the conflict banner. Runs the TRACKED static
+// leaves a field held under the conflict banner; a link asks on the server,
+// with the desk's dialog (task-5b4914f1b5f21594). Runs the TRACKED static
 // asset api/priv/static/assets/bp-studio-leave.js under jsdom, over the
 // editor form as Studio draws it (`data-studio-held`, LeaveGuard.message/1).
 //
@@ -24,20 +25,25 @@ await import("../../priv/static/assets/bp-studio-leave.js");
 assert.equal(typeof window.BarkparkStudioLeave, "object", "bp-studio-leave.js loaded");
 
 const QUESTION = "Not saved: Notes. What you typed there will be lost.";
-let asked = [];
-let answer = false;
-window.confirm = (message) => {
-  asked.push(message);
-  return answer;
-};
+// What reached the server: the bridge button's values at each click
+// (`LeaveAsk.bridge/1`; LiveView reads `phx-value-*` when it is clicked).
+let sent = [];
 
 const page = (held) => {
   document.body.innerHTML =
-    `<nav><a id="away" href="/w/a/p/b/d/production/studio/post">Posts</a>` +
+    `<nav><a id="away" href="/w/a/p/b/d/production/studio/post?q=1#top">Posts</a>` +
+    `<a id="patch" data-phx-link="patch" href="/w/a/p/b/d/production/studio/post/p2">P2</a>` +
     `<a id="same" href="/w/a/p/b/d/production/studio/post/p1?tab=seo">SEO</a>` +
+    `<a id="other" href="https://example.org/x">site</a>` +
+    `<a id="dslash" href="http://localhost//x">x</a><a id="dotslash" href="/.//x">x</a>` +
     `<a id="hash" href="#notes">Notes</a><a id="blank" href="/x" target="_blank">x</a></nav>` +
-    `<form id="editor-form"${held ? ` data-studio-held="${held}"` : ""}><a id="inside" href="/y">ref</a></form>`;
-  asked = [];
+    `<form id="editor-form"${held ? ` data-studio-held="${held}"` : ""}><a id="inside" href="/y">ref</a></form>` +
+    `<button id="studio-leave-ask" type="button" phx-click="studio-leave" hidden></button>` +
+    `<a id="go" data-desk-leave-go href="/papers">Leave</a>`;
+  sent = [];
+  document.getElementById("studio-leave-ask").addEventListener("click", (e) => {
+    sent.push({ href: e.target.getAttribute("phx-value-href"), kind: e.target.getAttribute("phx-value-kind") });
+  });
 };
 
 // A LiveView-style listener after ours: it runs only if the click goes on.
@@ -55,48 +61,62 @@ const click = (id, init = {}) => {
 
 try {
   {
-    // Held: a link away asks, naming the field; Cancel keeps the page.
+    // Held: a link away is held back and handed to the server, which asks
+    // with the desk's dialog. The browser asks nothing itself.
     page(QUESTION);
-    answer = false;
+    window.confirm = () => assert.fail("window.confirm is no longer the question");
     const e = click("away");
-    assert.deepEqual(asked, [QUESTION], "the link asks with the form's question");
-    assert.equal(e.defaultPrevented, true, "Cancel holds the link back");
-    assert.equal(navigated, 0, "Cancel stops the page's own navigation");
+    assert.equal(e.defaultPrevented, true, "the link is held back");
+    assert.equal(navigated, 0, "the page's own navigation does not run");
+    assert.deepEqual(sent, [{ href: "/w/a/p/b/d/production/studio/post?q=1#top", kind: "" }], "path, query and hash; a page load");
   }
 
   {
-    // Held: OK on the question goes on.
+    // Held: a LiveView patch link carries its kind.
     page(QUESTION);
-    answer = true;
-    const e = click("away");
-    assert.deepEqual(asked, [QUESTION]);
-    assert.equal(e.defaultPrevented, false);
-    assert.equal(navigated, 1, "Leave goes on");
+    click("patch");
+    assert.deepEqual(sent, [{ href: "/w/a/p/b/d/production/studio/post/p2", kind: "patch" }]);
   }
 
   {
-    // Held: links that keep the document, or open elsewhere, do not ask.
+    // Held: links that keep the document, open elsewhere, or leave the site
+    // are not held back.
     page(QUESTION);
-    for (const id of ["same", "hash", "blank", "inside"]) click(id);
+    for (const id of ["same", "hash", "blank", "inside", "other"]) click(id);
     click("away", { metaKey: true });
-    assert.deepEqual(asked, [], "own path, hash, new tab, inside the form, a modified click: no question");
+    assert.deepEqual(sent, [], "own path, hash, new tab, inside the form, another site, a modified click: not held back");
+  }
+
+  {
+    // Held: a same-site path that starts "//" is not one the server takes as
+    // this site's (LeaveGuard.local?/1), so it is not held back: the link
+    // goes, as it does with nothing held, and the tab's close asks
+    // (task-5455fd7fe69eb386).
+    page(QUESTION);
+    for (const id of ["dslash", "dotslash"]) {
+      const e = click(id);
+      assert.equal(e.defaultPrevented, false, `${id}: not held back`);
+      assert.equal(navigated, 1, `${id}: the page's own navigation runs`);
+    }
+    assert.deepEqual(sent, [], "a // path never reaches the server");
   }
 
   {
     // Nothing held, nothing asked.
     page(null);
     const e = click("away");
-    assert.deepEqual(asked, []);
+    assert.deepEqual(sent, []);
     assert.equal(e.defaultPrevented, false);
     assert.equal(navigated, 1);
   }
 
   {
-    // A full-page link answered Leave: its own unload does not ask again
-    // (#28836 r1 review: confirm, then the browser's "Leave site?").
+    // The dialog's Leave link goes on, and its own unload does not ask
+    // again (#28836 r1 review: a full-page link asked twice).
     page(QUESTION);
-    answer = true;
-    click("away");
+    const go = click("go");
+    assert.equal(go.defaultPrevented, false, "Leave is not held back");
+    assert.deepEqual(sent, []);
     const e = new window.Event("beforeunload", { cancelable: true });
     window.dispatchEvent(e);
     assert.equal(e.defaultPrevented, false, "Leave answered: the unload does not ask twice");

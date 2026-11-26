@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
 
   @dataset "production"
   @label "doc[meta].label"
+  @dialog "#studio-leave-dialog"
 
   setup %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -145,8 +146,9 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
 
   # #28836 r1 review: Studio's list rows and New document are phx-click
   # buttons, not links. A row click left the held field with no question
-  # and A's words were gone. The server asks (`StudioLive.LeaveAsk`).
-  test "studio: a row of another document asks first and stays, A's words kept; the same press again leaves",
+  # and A's words were gone. The server asks (`StudioLive.LeaveAsk`), with
+  # the desk's dialog (task-5b4914f1b5f21594).
+  test "studio: a row of another document asks first and stays, A's words kept; Leave leaves",
        c do
     {:ok, _} =
       Content.create_document(
@@ -160,16 +162,18 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     assert ObjectRichText.eventually(fn -> has_element?(a, row) end)
 
     # On r1: the editor moved to the second document, A's words dropped.
-    html = a |> element(row) |> render_click()
-    assert html =~ "Not saved: Notes. What you typed there will be lost."
-    # task-66200f2c6a01ab57: the flash says the press was stopped, and how to go.
-    assert html =~ "What you typed there will be lost. Press again to leave."
+    a |> element(row) |> render_click()
+
+    assert a |> element(@dialog <> " p") |> render() =~
+             "Not saved: Notes. What you typed there will be lost."
+
     assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
     assert assigns(a).editor_form["notes"] == "one twA three"
     assert has_element?(a, "form#editor-form[data-studio-held]")
 
-    a |> element(row) |> render_click()
+    a |> element(~s(#{@dialog} button[phx-click="desk-leave-go"])) |> render_click()
     assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id <> "-2"
+    refute has_element?(a, @dialog)
   end
 
   # #28836 r2 review: the asked press outlived its hold. Asked on row X,
@@ -187,12 +191,16 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     row = ~s(button[phx-click="select"][phx-value-id="#{c.id}-2"])
     assert ObjectRichText.eventually(fn -> has_element?(a, row) end)
     a |> element(row) |> render_click()
+    assert has_element?(a, @dialog)
 
     posts(a, "doc[notes]", %{"notes" => "one twAA three"})
 
     assert ObjectRichText.eventually(fn ->
              not has_element?(a, "form#editor-form[data-studio-held]")
            end)
+
+    # The hold ended under the open question: it closes, as Stay.
+    assert ObjectRichText.eventually(fn -> not has_element?(a, @dialog) end)
 
     b = open(c, :studio)
 
@@ -205,8 +213,8 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     assert has_element?(a, "form#editor-form[data-studio-held]")
 
     # On f28fe5636e: the editor moved to the second document, A's words lost.
-    html = a |> element(row) |> render_click()
-    assert html =~ "Not saved: Notes."
+    a |> element(row) |> render_click()
+    assert has_element?(a, @dialog, "Not saved: Notes.")
     assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
     assert assigns(a).editor_form["notes"] == "one twAA thAee"
   end
@@ -214,9 +222,9 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
   test "studio: New document asks first while a field is held", c do
     a = hold(c, :studio, "doc[notes]", "notes")
 
-    html = render_click(a, "new-document", %{"type" => c.type})
+    render_click(a, "new-document", %{"type" => c.type})
 
-    assert html =~ "Not saved: Notes."
+    assert has_element?(a, @dialog, "Not saved: Notes.")
     assert Content.published_id(assigns(a).editor_doc.doc_id) == c.id
     assert assigns(a).editor_form["notes"] == "one twA three"
   end
@@ -227,9 +235,9 @@ defmodule BarkparkWeb.Studio.StudioLeaveGuardTest do
     row = ~s(button[phx-click="select"][phx-value-id="#{c.id}"])
     assert ObjectRichText.eventually(fn -> has_element?(a, row) end)
 
-    html = a |> element(row) |> render_click()
+    a |> element(row) |> render_click()
 
-    assert html =~ "Not saved: Notes."
+    assert has_element?(a, @dialog, "Not saved: Notes.")
     assert assigns(a).editor_form["notes"] == "one twA three"
   end
 

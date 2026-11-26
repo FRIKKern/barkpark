@@ -61,6 +61,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.Desk.VisionListen
   alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
+  alias BarkparkWeb.Studio.StudioLive.LeaveAsk
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   defmodule NotFound do
@@ -114,6 +115,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(:desk_tool, nil)
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
       |> assign(:desk_scope, nil)
+      # A rejoin after the socket dropped: its first render must hold the
+      # open document's editor, or the join patch drops the one the browser
+      # has, with what was typed offline (task-2f3d3e3835f2a755).
+      |> assign(:desk_rejoin?, rejoin?(connected?(socket) && get_connect_params(socket)))
       |> Bulk.init()
       # The navbar's Tasks sidebar (`TasksPanel`): offered while the Tasks
       # plugin is on for the workspace, closed until its button is pressed.
@@ -252,10 +257,32 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     # The pane's frame goes out with this patch; the editor follows in the
     # next message, so a click is answered before the document is loaded.
-    if target = socket.assigns.pending, do: send(self(), {:desk_edit, target})
+    # On a rejoin's first patch the pending document loads here instead,
+    # so the join render holds its editor in place (`rejoin?/1`).
+    {rejoin?, socket} =
+      {socket.assigns[:desk_rejoin?] == true, assign(socket, :desk_rejoin?, false)}
 
-    {:noreply, socket}
+    case socket.assigns.pending do
+      nil ->
+        {:noreply, socket}
+
+      target when rejoin? ->
+        EditorHost.edit(socket, target)
+
+      target ->
+        send(self(), {:desk_edit, target})
+        {:noreply, socket}
+    end
   end
+
+  # `_mounts` is a connect param LiveView sets itself (phoenix_live_view
+  # 1.1.33: `connectParams` in phoenix_live_view.js; one of the "reserved
+  # params" in the `Phoenix.LiveView` docs): the times this view has mounted,
+  # 0 on its first join, counting up on each reconnect. An upgrade that drops
+  # it makes every join a first one: the deferred load, as before.
+  @doc false
+  def rejoin?(%{"_mounts" => n}) when is_integer(n) and n > 0, do: true
+  def rejoin?(_connect_params), do: false
 
   # The same last pane after a patch that changed only its params (Inspect,
   # a view tab): the title it has is kept. The edit pane's title comes from
@@ -346,10 +373,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # keeps the document goes on; any other asks. Its kind is its LiveView
   # link's (`data-phx-link`): "patch", "redirect", or none, a page load.
   def handle_event("desk-leave", %{"href" => href} = params, socket) do
-    kind = params["kind"]
+    local? = LeaveGuard.local?(href)
+    kind = if local?, do: LeaveGuard.kind(socket, href, params["kind"]), else: params["kind"]
+    params = Map.put(params, "kind", kind)
 
     cond do
-      not LeaveGuard.local?(href) ->
+      not local? ->
         {:noreply, socket}
 
       kind == "patch" and (not LeaveGuard.ask?(socket) or LeaveGuard.keeps_path?(socket, href)) ->
@@ -386,7 +415,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
     {:noreply, socket |> assign(:desk_leave, nil) |> push_event("bp:desk-leave-stayed", %{})}
   end
 
-  # Leave: what was asked goes on, past the guard once.
+  # Leave: what was asked goes on, past the guard once. A press passed every
+  # handle_event hook when it was made (LiveScope's grant gates, Caps, the
+  # quota gate, …); it passes them again here, as a grant may have gone
+  # while the question was open (`LeaveAsk.hooks/3`, task-91730f627f3b7fdb).
   def handle_event("desk-leave-go", _params, socket) do
     socket = assign(socket, desk_leave_pass: true)
 
@@ -395,7 +427,18 @@ defmodule BarkparkWeb.Studio.DeskLive do
         handle_params(params, uri, socket)
 
       %{to: {:event, event, params}} ->
-        {:noreply, socket} = handle_event(event, params, assign(socket, :desk_leave, nil))
+        socket = assign(socket, :desk_leave, nil)
+
+        socket =
+          case LeaveAsk.hooks(event, params, socket) do
+            {:cont, socket} ->
+              {:noreply, socket} = handle_event(event, params, socket)
+              socket
+
+            {:halt, socket} ->
+              socket
+          end
+
         # The pass is for the patch the event sent; with none, it ends here.
         {:noreply,
          if(socket.redirected, do: socket, else: assign(socket, :desk_leave_pass, false))}

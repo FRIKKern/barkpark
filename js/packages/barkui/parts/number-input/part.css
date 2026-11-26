@@ -1,0 +1,111 @@
+/* Number input: UI SDK's <ui-number-input> in a <ui-field>, its label in a scrub area (drag it sideways to change the
+   value), and a group of three: the decrement button, a native <input data-slot="number-input-control"> and the
+   increment button, joined edge to edge. The label, description and error take the text field's look. The input is
+   the text field's box: its --ui-input edge, the sheet's ground and text, the --ui-muted-foreground edge under the
+   pointer, and the --bark-danger-text edge when invalid; read-only and disabled sit on --ui-muted and take no hover.
+   Each step button is the secondary button's: the --ui-input edge, --ui-muted-hover under the pointer; its minus or
+   plus is an inline SVG in currentColor, so UI SDK's mask icon is not drawn and no mask is on the page. A step button
+   at its bound, or in a disabled field, is disabled: --ui-muted ground and --ui-muted-foreground ink, keeping its edge
+   so the group stays whole. In a read-only field the buttons keep their ink on --ui-muted, as the read-only value
+   does, and take no pointer: UI SDK leaves them without disabled and refuses their press, so a mouse press would
+   otherwise leave focus on a button that does nothing. A step button has no pressed look of its own (see
+   notCovered). At phone width the value is 1rem, the size UI SDK gives a coarse
+   pointer, since this sheet's own size would win over UI SDK's there. The look keys only on markup the field and
+   number input write: data-readonly, data-disabled and data-invalid, and on :hover. The focus ring is base.css's,
+   drawn once for every part; UI SDK's own sheet also turns the input's edge to --ui-ring-border on :focus-visible. */
+
+[data-slot="number-input-scrub-area"] {
+  display: block;
+  width: fit-content;
+  cursor: ew-resize;
+}
+
+[data-slot="number-input-group"] {
+  align-items: stretch;
+}
+
+[data-slot="number-input-control"] {
+  --bark-number-height: calc(var(--ui-spacing) * 9);
+  --bark-number-width: calc(var(--ui-spacing) * 16);
+  --bark-number-text: 0.875rem;
+  --bark-number-phone-text: 1rem;
+  --bark-number-bg: var(--ui-background);
+  --bark-number-fg: var(--ui-foreground);
+  --bark-number-edge: var(--ui-input);
+  --bark-number-hover-edge: var(--ui-muted-foreground);
+
+  box-sizing: border-box;
+  width: var(--bark-number-width);
+  height: var(--bark-number-height);
+  padding-inline: calc(var(--ui-spacing) * 2);
+  border: 1px solid var(--bark-number-edge);
+  border-radius: 0;
+  background: var(--bark-number-bg);
+  color: var(--bark-number-fg);
+  caret-color: var(--ui-foreground);
+  font-size: var(--bark-number-text);
+  line-height: 1.25;
+  text-align: center;
+  transition: border-color 120ms ease-out;
+
+  &[data-readonly] {
+    --bark-number-bg: var(--ui-muted);
+  }
+
+  &[data-invalid] {
+    z-index: 1;
+    --bark-number-edge: var(--bark-danger-text);
+    --bark-number-hover-edge: var(--bark-danger-text);
+  }
+
+  &[data-disabled] {
+    --bark-number-bg: var(--ui-muted);
+    --bark-number-fg: var(--ui-muted-foreground);
+    opacity: 1;
+  }
+
+  &:hover:not([data-disabled], [data-readonly]) {
+    z-index: 1;
+    border-color: var(--bark-number-hover-edge);
+  }
+}
+
+[data-slot="number-input-decrement"],
+[data-slot="number-input-increment"] {
+  --bark-step-bg: var(--ui-background);
+  --bark-step-fg: var(--ui-foreground);
+
+  box-sizing: border-box;
+  width: calc(var(--ui-spacing) * 9);
+  height: calc(var(--ui-spacing) * 9);
+  border: 1px solid var(--ui-input);
+  background: var(--bark-step-bg);
+  color: var(--bark-step-fg);
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+
+  & svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  &[data-disabled] {
+    --bark-step-bg: var(--ui-muted);
+    --bark-step-fg: var(--ui-muted-foreground);
+    opacity: 1;
+  }
+
+  &[data-readonly] {
+    --bark-step-fg: var(--ui-foreground);
+    pointer-events: none;
+  }
+
+  &:hover:not([data-disabled]) {
+    background: var(--ui-muted-hover);
+  }
+}
+
+@media (max-width: 600px) {
+  [data-slot="number-input-control"] {
+    font-size: var(--bark-number-phone-text);
+  }
+}
