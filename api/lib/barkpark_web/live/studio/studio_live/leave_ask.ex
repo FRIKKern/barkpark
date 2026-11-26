@@ -85,6 +85,12 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
       return != nil and return == place ->
         {:stop, socket}
 
+      # Forward (or any patch) back to the held document while the question
+      # is open: Stay, with the URL already there. Reading it would draw the
+      # stored document over what is held (task-eac6c59213877806).
+      socket.assigns[:studio_leave] != nil and place == here(socket) ->
+        {:stop, assign(socket, :studio_leave, nil)}
+
       socket.assigns[:studio_leave_pass] != true and held?(socket) and place != here(socket) ->
         {:stop, open(socket, {:patch, params, uri})}
 
@@ -101,10 +107,12 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   not this site's goes nowhere.
   """
   def link(%{"href" => href} = params, socket) do
-    kind = params["kind"]
+    local? = LeaveGuard.local?(href)
+    kind = if local?, do: LeaveGuard.kind(socket, href, params["kind"]), else: params["kind"]
+    params = Map.put(params, "kind", kind)
 
     cond do
-      not LeaveGuard.local?(href) ->
+      not local? ->
         {:stay, socket}
 
       not desk?(socket) and held?(socket) and socket.assigns[:studio_leave_pass] != true ->
