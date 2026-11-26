@@ -11,7 +11,7 @@
 //
 // SLOTS is the third list, with its own reason: the pieces of a control UI SDK lays out, or sets how they take a
 // press, at run time (a slider's control, track, indicator, thumbs and the range input it hides in each thumb; a number
-// input's step buttons and scrub area; the sliding indicator of the tabs and of the segmented control), each with only the properties UI SDK writes on it, by line, and the values it
+// input's step buttons and scrub area), each with only the properties UI SDK writes on it, by line, and the values it
 // writes there. A later control's pieces go in as more entries.
 //
 // SCROLL_LOCK is the second list, with its own reason and its values, for an element that holds a stage: the root
@@ -89,17 +89,12 @@ export const SCROLL_LOCK = [
     lines in the writer's file, or in `file` where another file writes it.
     `values` are the values UI SDK writes there (any one of them, as the browser gives it back), where `{p}` is a place
     on the track, a number from 0 to 100: UI SDK writes every place as a percentage it clamps to that range (percentOf
-    in components/slider/slider-values.js), and `{px}` is a number of pixels, as JavaScript prints a number (a sign, a
-    fraction, an exponent): UI SDK writes a measured box that way (layoutBox). Every entry has its values. A slot carries only its own properties; any other property there, any of them on another
+    in components/slider/slider-values.js). Every entry has its values. A slot carries only its own properties; any other property there, any of them on another
     element, and a value UI SDK does not write fail by name, as any style attribute does. A later control's slots go in as more entries. */
 export const SLOT_REASON = 'UI SDK lays out the pieces of a control and sets how they take a press at run time; that is where a piece sits and how it behaves, not how it looks'
 const SLIDER = 'UI SDK slider, on its pieces (components/slider/slider.js)'
 const PLACE = { values: ['{p}%'] }
 const NUMBER = 'UI SDK number input, on its step buttons and scrub area (components/number-input/number-input.js)'
-const TABS = 'UI SDK tabs, on its indicator (components/tabs/tabs.js)'
-const SEGMENTED = 'UI SDK segmented control, on its indicator (components/segmented-control/segmented-control.js)'
-const SIDES = ['left', 'right', 'top', 'bottom', 'width', 'height']
-const PX = { values: ['{px}px'] }
 export const SLOTS = [
   { slot: 'ui-slider-control', at: 'ui-slider ui-slider-control', writer: SLIDER, writes: [{ property: 'touch-action', values: ['none'], lines: [179] }] },
   { slot: 'ui-slider-track', at: 'ui-slider ui-slider-track', writer: SLIDER, writes: [{ property: 'position', values: ['relative'], lines: [187] }] },
@@ -183,16 +178,6 @@ export const SLOTS = [
       { property: '-webkit-user-select', values: ['none'], lines: [237] },
     ],
   },
-  // The sliding indicator of the tabs and of the segmented control: UI SDK measures the chosen item against its list
-  // (layoutBox, foundation/platform/layout.js) and writes the six sides of that box on the indicator alone, each as a
-  // number of pixels, `{px}`; it takes all six away when nothing is chosen.
-  { slot: 'ui-tabs-indicator', at: 'ui-tabs ui-tabs-indicator', writer: TABS, writes: SIDES.map((side) => ({ property: `--active-tab-${side}`, ...PX, lines: [47] })) },
-  {
-    slot: 'ui-segmented-control-indicator',
-    at: 'ui-segmented-control ui-segmented-control-indicator',
-    writer: SEGMENTED,
-    writes: SIDES.map((side) => ({ property: `--segmented-control-indicator-${side}`, ...PX, lines: [105] })),
-  },
 ]
 
 /** The fail for a property that is not placement, on any element in a stage. */
@@ -209,7 +194,7 @@ export const NOT_LOCK = (at, prop) => `${at} was given ${prop} in a style attrib
 export const LOCK_VALUE = (at, prop, value, entry) => `${at} was given ${prop}: ${value} in a style attribute, and the scroll lock writes ${prop} there only as ${entry.length ? `a ${entry.length} length` : `"${entry.value}"`}`
 /** The fail for a slot's property with a value UI SDK does not write there. */
 export const SLOT_VALUE = (at, prop, value, slot, w) =>
-  `${at} was given ${prop}: ${value} in a style attribute, and UI SDK writes ${w.property} on ${slot} only as ${w.values.map((v) => `"${v}"`).join(' or ')}${w.values.some((v) => v.includes('{p}')) ? ', {p} a number from 0 to 100' : ''}${w.values.some((v) => v.includes('{px}')) ? ', {px} a number' : ''}`
+  `${at} was given ${prop}: ${value} in a style attribute, and UI SDK writes ${w.property} on ${slot} only as ${w.values.map((v) => `"${v}"`).join(' or ')}${w.values.some((v) => v.includes('{p}')) ? ', {p} a number from 0 to 100' : ''}`
 /** The fail for the scroll lock on the root element or body with no dialog open. */
 export const NO_DIALOG = (at, prop) => `${at} was given ${prop} in a style attribute while no dialog was open: the scroll lock stands there only while a dialog is open`
 /** The fail for any property on another element that holds a stage. */
@@ -263,11 +248,6 @@ export function placementWorld(lists, script, say, owner, boxes, describe) {
   const slotFits = (w, prop, value) => {
     const v = value.trim()
     return w.values.some((form) => {
-      // A number of pixels, as JavaScript prints one: the form with that number in it, read back alike.
-      if (form.includes('{px}')) {
-        const n = v.match(/^-?\d+(\.\d+)?(e[+-]?\d+)?(?=px$)/)?.[0]
-        return n !== undefined && Number.isFinite(+n) && given(w, prop, form.replaceAll('{px}', n)) === v
-      }
       if (!form.includes('{p}')) return given(w, prop, form) === v
       const ps = [...v.matchAll(/-?\d+(\.\d+)?/g)].flatMap((m) => [+m[0], +m[0] + 50, 50 - +m[0], -m[0], +m[0] - 50])
       return ps.some((p) => p >= 0 && p <= 100 && given(w, prop, form.replaceAll('{p}', String(p))) === v)

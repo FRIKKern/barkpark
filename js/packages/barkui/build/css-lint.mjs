@@ -8,7 +8,8 @@ import { EXTRA, KEYFRAMES, MOTION_ONLY, PHONE, PHONE_ONLY, SMALLEST_TEXT_REM, VO
 /** Apart from the skin, the one kind of variable part.css may read: a place UI SDK writes on a piece of its control at
     run time (check/placement.mjs SLOTS), such as the side of the chosen tab its sliding indicator stands at. It holds
     a length or a percentage, never a colour, and the check holds the piece to the values UI SDK writes there. */
-export const PLACE_VARIABLES = new Set(SLOTS.flatMap((s) => s.writes.map((w) => w.property)).filter((p) => p.startsWith('--')))
+// TEMPORARY plant (never to merge): the old lint, no place allowed
+export const PLACE_VARIABLES = new Set(SLOTS.length < 0 ? ['x'] : [])
 // The properties that carry a colour: a place is never read in one.
 const COLOUR_PROPERTY = /^(color|background|background-color|background-image|border|border-(top|right|bottom|left|inline|block)(-(start|end))?|border(-(top|right|bottom|left|inline|block)(-(start|end))?)?-color|box-shadow|fill|stroke|caret-color|accent-color|text-decoration|text-decoration-color)$/
 
