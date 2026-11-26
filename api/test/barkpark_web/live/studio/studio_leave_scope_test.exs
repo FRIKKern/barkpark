@@ -97,6 +97,14 @@ defmodule BarkparkWeb.Studio.StudioLeaveScopeTest do
 
   defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
 
+  # The editor still holds P1's kept-doc, with A's held words in the form.
+  defp held_p1?(view, c) do
+    %{editor_doc: doc, editor_form: form} = assigns(view)
+
+    doc != nil and {doc.doc_id, doc.project_id} == {"drafts.kept-doc", c.p1.id} and
+      form["notes"] == "one twA three"
+  end
+
   # {doc_id, project_id, title} of every post row.
   defp rows do
     Repo.all(
@@ -242,6 +250,103 @@ defmodule BarkparkWeb.Studio.StudioLeaveScopeTest do
         assert Shared.write_denied?(socket)
       end
 
+      # task-7fbdea7ee305cbc4: these three rebuild the panes, which read the
+      # open document under the socket's scope, P2's under the question.
+      test "a reload under the question is held: P1's document and the held words stay", c do
+        {a, before} = asked(c, @surface)
+
+        for {event, params} <- [
+              {"reload-remote-doc", %{}},
+              {"desk-list-more", %{"type" => "post"}},
+              {"select-sort", %{"type" => "post", "sort" => ""}}
+            ] do
+          assert Caps.classify(event) == :none, event
+          html = render_hook(a, event, params)
+
+          assert html =~ Plug.HTML.html_escape(LeaveScope.held_notice()), event
+          assert held_p1?(a, c), event
+          assert has_element?(a, dialog(@surface)), event
+        end
+
+        assert rows() == before
+      end
+
+      test "P2 holds a document of the same id: a reload under the question still shows P1's",
+           c do
+        {a, _before} = asked(c, @surface)
+
+        {:ok, _} =
+          Content.create_document(
+            "post",
+            %{
+              "doc_id" => "kept-doc",
+              "title" => "P2-KEPT",
+              "content" => %{"notes" => "p2 words"}
+            },
+            @ds,
+            workspace_id: c.ws.id,
+            project_id: c.p2.id
+          )
+
+        assert render_hook(a, "reload-remote-doc", %{}) =~
+                 Plug.HTML.html_escape(LeaveScope.held_notice())
+
+        # The editor's own title, not the list, which is P2's under the question.
+        refute has_element?(a, ~s(#editor-form input[name="doc[title]"][value="P2-KEPT"]))
+        assert held_p1?(a, c)
+        assert has_element?(a, dialog(@surface))
+      end
+
+      # A control: the list topic's rebuild is skipped for the held (dirty)
+      # form already; it passes on main as here.
+      test "control: another document saved in P2 under the question rebuilds nothing", c do
+        {a, _before} = asked(c, @surface)
+
+        {:ok, _} =
+          Content.create_document(
+            "post",
+            %{"doc_id" => "new-in-two", "title" => "T2", "content" => %{"notes" => "x"}},
+            @ds,
+            workspace_id: c.ws.id,
+            project_id: c.p2.id
+          )
+
+        _ = render(a)
+        assert held_p1?(a, c)
+        assert has_element?(a, dialog(@surface))
+      end
+
+      test "an unnamed press under the question stays on the page, words held", c do
+        {a, before} = asked(c, @surface)
+
+        send(a.pid, {:tree_codelist_pick, %{name: "doc[notes]", value: "x", press: %{}}})
+        html = render(a)
+
+        assert html =~ Plug.HTML.html_escape(LeaveScope.notice())
+        assert held_p1?(a, c)
+        assert has_element?(a, dialog(@surface))
+        assert rows() == before
+      end
+
+      test "Stay, then Reload: P1's document is read again in P1", c do
+        {a, _before} = asked(c, @surface)
+        press(a, @surface, "desk-leave-stay")
+
+        html = render_hook(a, "reload-remote-doc", %{})
+
+        refute html =~ Plug.HTML.html_escape(LeaveScope.held_notice())
+        %{editor_doc: doc, editor_form: form} = assigns(a)
+        assert {doc.doc_id, doc.project_id} == {"drafts.kept-doc", c.p1.id}
+        assert form["notes"] == "one twB three"
+      end
+
+      test "control: with no question, an unnamed press sends the page to its own address", c do
+        a = open(c.conn.(), at(c, @surface, :one))
+        send(a.pid, {:tree_codelist_pick, %{name: "doc[notes]", value: "x", press: %{}}})
+        assert {path, _flash} = assert_redirect(a)
+        assert path == at(c, @surface, :one)
+      end
+
       test "Stay goes through; the scope is the document's again and a save lands in P1", c do
         {a, _before} = asked(c, @surface)
 
@@ -306,6 +411,10 @@ defmodule BarkparkWeb.Studio.StudioLeaveScopeTest do
     render_patch(a, c.base <> "lsc-one/d/#{@ds}/studio/post/near-doc")
     assert has_element?(a, dialog(:studio))
     refute LeaveScope.moved?(assigns(a))
+
+    refute render_hook(a, "select-sort", %{"type" => "post", "sort" => ""}) =~
+             Plug.HTML.html_escape(LeaveScope.held_notice())
+
     refute posts(a, "T-near", "one twA three") =~ Plug.HTML.html_escape(LeaveScope.notice())
   end
 end
