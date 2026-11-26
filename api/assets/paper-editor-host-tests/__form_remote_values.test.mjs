@@ -79,6 +79,30 @@ check("a textarea is set the same way", () => {
   assert.equal(excerpt.selectionStart, 0);
 });
 
+// task-56f93d9e467c5795: the draw kept the selection but not its
+// direction, so after shift+left the next shift+arrow grew the wrong end.
+for (const [name, field] of [["an input", "title"], ["a textarea", "excerpt"]]) {
+  check(`${name}: a backward selection stays backward after the other's change`, () => {
+    const els = mount("Hello world", "Hello world");
+    const el = els[field];
+    el.focus();
+    el.setSelectionRange(6, 11, "backward");
+    push({ [`doc[${field}]`]: { value: "Oh, Hello world", was: "Hello world" } });
+    assert.equal(el.value, "Oh, Hello world");
+    assert.deepEqual([el.selectionStart, el.selectionEnd], [10, 15]);
+    assert.equal(el.selectionDirection, "backward");
+  });
+}
+
+check("a forward selection stays forward after the other's change", () => {
+  const { title } = mount("Hello world", "First");
+  title.focus();
+  title.setSelectionRange(6, 11, "forward");
+  push({ "doc[title]": { value: "Oh, Hello world", was: "Hello world" } });
+  assert.deepEqual([title.selectionStart, title.selectionEnd], [10, 15]);
+  assert.equal(title.selectionDirection, "forward");
+});
+
 check("typing not yet sent (the field no longer shows the old value) is kept", () => {
   const { title } = mount("Fixture post A2 A5", "First");
   title.focus();
