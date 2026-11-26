@@ -277,7 +277,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
         rich =
           Map.merge(
-            RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"], posted),
+            RichTextRemote.UnderLock.values(
+              socket,
+              params["_bp_rt_seen"],
+              posted,
+              params["_bp_rt_owner"]
+            ),
             RichTextRemote.UnderLock.top(socket, posted)
           )
 
@@ -291,7 +296,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         socket =
           socket
           |> assign(editor_rt_under_lock: rich)
-          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
+          |> RichTextRemote.UnderLock.posted(
+            params["_bp_rt_seen"],
+            posted,
+            params["_bp_rt_owner"]
+          )
 
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
         {:noreply, RichTextRemote.hold(saved, held)}
@@ -575,7 +584,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
         rich =
           Map.merge(
-            RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"], posted),
+            RichTextRemote.UnderLock.values(
+              socket,
+              params["_bp_rt_seen"],
+              posted,
+              params["_bp_rt_owner"]
+            ),
             RichTextRemote.UnderLock.top(socket, posted)
           )
 
@@ -601,7 +615,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         based =
           based
           |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
-          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
+          |> RichTextRemote.UnderLock.posted(
+            params["_bp_rt_seen"],
+            posted,
+            params["_bp_rt_owner"]
+          )
 
         written =
           based
