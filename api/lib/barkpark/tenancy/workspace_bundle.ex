@@ -740,7 +740,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       end
   end
 
+  # Seat cache busted AFTER COMMIT, as `Tenancy.delete_workspace/1` does: inside,
+  # a concurrent read re-caches the evicted seat for the TTL (task-e9972c538ed9209f).
   defp run_import_once(manifest, dumps, mode, ctx) do
+    result = import_transaction(manifest, dumps, mode, ctx)
+    Barkpark.Tenancy.DefaultScopeCache.invalidate()
+    result
+  end
+
+  defp import_transaction(manifest, dumps, mode, ctx) do
     Repo.transaction(
       fn ->
         # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs): each
@@ -2414,30 +2422,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   #
   # CLEAR, unconditionally and first. The root `workspaces` member arrives by raw
   # `COPY` off a caller-supplied tar, reaching neither `Workspace.changeset/2`
-  # nor `Tenancy`'s seat guard. `select_expr/3` above exports the column as
-  # `false`, so no bundle THIS instance produced can carry a claim — but a
-  # crafted one can, and with the seat vacant (which the adopt branch's own
-  # delete makes true a few statements earlier) it would simply land and CAPTURE
-  # the instance default. Clearing first also means the SET below can never
-  # collide with the row it is about to replace.
+  # nor `Tenancy`'s seat guard. `select_expr/3` exports the column as `false`,
+  # so no bundle THIS instance produced carries a claim; a crafted one can, and
+  # with the seat vacant (the adopt branch's own delete makes it so) it would
+  # CAPTURE the instance default. Clearing first also keeps the SET below from
+  # colliding with the row it replaces.
   #
-  # SET only on `:seat_evicted` — the adopt branch deleted an empty shell that
-  # was ITSELF holding the seat. That is the supported production flow
-  # `bp cloud support add --ws default` drives (SupportResetDefaultWorkspaceStep
-  # → SupportAdminTokenStep re-mints an empty default → merge-import replaces the
-  # shell), and it is the only shape in which an import is entitled to the seat:
-  # the instance gave the seat away by its own hand, in this transaction, to the
-  # row this import is replacing. Any other import leaves the seat exactly where
-  # it found it.
+  # SET only on `:seat_evicted`: the adopt branch deleted an empty shell that
+  # was ITSELF holding the seat. That is the supported flow `bp cloud support
+  # add --ws default` drives (SupportResetDefaultWorkspaceStep →
+  # SupportAdminTokenStep re-mints an empty default → merge-import replaces the
+  # shell), the only shape in which the instance gave the seat away by its own
+  # hand, in this transaction. Any other import leaves the seat where it was.
   #
-  # TWO statements, on a table the import already writes, inside the transaction
-  # that is already open — the adopt branch's failure surface is unchanged, which
-  # is the constraint that decided the boolean-column shape over a pointer row.
-  #
-  # DEGRADES TO VACANCY, NEVER TO CAPTURE: if the transfer is somehow skipped the
-  # instance is left with no default (`get_default_workspace/0` → nil, unscoped
-  # writes stamp `workspace_id` NULL — bounded), never with a default the
-  # importer chose.
+  # DEGRADES TO VACANCY, NEVER TO CAPTURE: a skipped transfer leaves no default
+  # (`get_default_workspace/0` → nil, unscoped writes stamp NULL, bounded),
+  # never a default the importer chose.
   defp settle_default_seat!(manifest, adopted) do
     ws_id = manifest["workspace_id"]
 
@@ -2450,11 +2450,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       Repo.query!("UPDATE workspaces SET is_default = true WHERE id = $1::text::uuid", [ws_id])
     end
 
-    # Raw SQL, so it bypassed every `Barkpark.Tenancy` write that busts the
-    # singleton cache. `Plugs.AssignDefaultScope` reads through that cache on
-    # every flat request; a stale entry here would serve the evicted shell.
-    Barkpark.Tenancy.DefaultScopeCache.invalidate()
-    :ok
+    # Seat moved, old one still COMMITTED: `run_import_once/4` busts after COMMIT.
+    :telemetry.execute([:barkpark, :workspace_bundle, :import, :seat_settled], %{}, %{
+      workspace_id: ws_id,
+      adopted: adopted
+    })
   end
 
   # ── Cross-tenant blob-path refusal (task-918106d49c62563e) ──────────────────
