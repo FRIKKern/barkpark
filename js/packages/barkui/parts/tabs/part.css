@@ -1,7 +1,10 @@
 /* Tabs: UI SDK's <ui-tabs>, a list of tabs, each a native button, and the panel of the selected one.
-   The selected tab is marked by its own edge, a border under it (across) or beside it (down), in
-   --ui-primary; the other tabs keep the same border in transparent, so nothing moves, and are text only.
-   The edge is a border, not a box-shadow, so base.css's focus ring (a box-shadow) cannot replace it.
+   The selected tab is marked by UI SDK's sliding indicator, <ui-tabs-indicator> in the list: UI SDK measures the
+   selected tab and writes its six sides on the indicator (--active-tab-left and the rest), and the indicator takes
+   that box and draws an edge in --ui-primary along its bottom (across) or its start (down), so the edge slides to
+   the tab chosen. It takes no pointer, so a press reaches the tab under it. Every tab is text only: its words in
+   --ui-muted-foreground, and --ui-foreground when selected or under the pointer.
+   With no script nothing measures, so the indicator has no box and the selected tab shows by its words alone.
    The look keys only on what UI SDK writes: data-selected, data-disabled and data-orientation, and on :hover.
    A disabled tab takes focus from the arrow keys but is never selected; it is drawn faded.
    The focus ring is base.css's, drawn once for every part. */
@@ -27,6 +30,7 @@
 }
 
 [data-slot="tabs-list"] {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: calc(var(--ui-spacing) * 1);
@@ -40,15 +44,12 @@
 
 [data-slot="tabs-tab"] {
   --bark-tab-fg: var(--ui-muted-foreground);
-  --bark-tab-edge: transparent;
-  --bark-tabs-edge: 2px;
 
   box-sizing: border-box;
   height: calc(var(--ui-spacing) * 9);
   padding-inline: calc(var(--ui-spacing) * 3);
-  /* Every side without an edge is 0 wide and transparent, so its colour never follows the text on hover. */
+  /* No edge of its own: every side 0 wide and transparent, so UI SDK's selected edge draws nothing. */
   border: 0 solid transparent;
-  border-bottom: var(--bark-tabs-edge) solid var(--bark-tab-edge);
   background: transparent;
   color: var(--bark-tab-fg);
   font-size: var(--bark-tabs-text);
@@ -61,14 +62,8 @@
     --bark-tab-fg: var(--ui-foreground);
   }
 
-  &[data-orientation="vertical"] {
-    border-bottom: 0 solid transparent;
-    border-inline-start: var(--bark-tabs-edge) solid var(--bark-tab-edge);
-  }
-
   &[data-selected] {
     --bark-tab-fg: var(--ui-foreground);
-    --bark-tab-edge: var(--ui-primary);
   }
 
   &[data-disabled] {
@@ -80,4 +75,25 @@
   color: var(--ui-foreground);
   font-size: var(--bark-tabs-text);
   line-height: 1.5;
+}
+
+/* The sliding indicator: the selected tab's box, as UI SDK measured it in the list, with a 2px --ui-primary edge
+   along its bottom (across) or its start (down). It slides as the selection moves (base.css stills it under
+   reduced motion). */
+[data-slot="tabs-indicator"] {
+  position: absolute;
+  top: var(--active-tab-top);
+  left: var(--active-tab-left);
+  width: var(--active-tab-width);
+  height: var(--active-tab-height);
+  box-sizing: border-box;
+  border: 0 solid transparent;
+  border-bottom: 2px solid var(--ui-primary);
+  pointer-events: none;
+  transition: top 200ms ease-out, left 200ms ease-out, width 200ms ease-out, height 200ms ease-out;
+
+  &[data-orientation="vertical"] {
+    border-bottom: 0 solid transparent;
+    border-inline-start: 2px solid var(--ui-primary);
+  }
 }

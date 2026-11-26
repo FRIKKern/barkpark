@@ -3,12 +3,12 @@
   "family": "form",
   "element": "ui-segmented-control",
   "imports": ["@ui-sdk/web/segmented-control", "@ui-sdk/web/field"],
-  "summary": "Picks one of a few options from a row of items, named by its field, the checked one drawn as the indicator: the arrow keys move the choice and pass a disabled item, with read-only and disabled.",
-  "textOnly": ["[data-slot=\"segmented-control-item\"]:not([data-checked])"],
+  "summary": "Picks one of a few options from a row of items, named by its field, the checked one marked by UI SDK's sliding indicator, which slides to the item chosen: the arrow keys move the choice and pass a disabled item, with read-only and disabled.",
+  "textOnly": ["[data-slot=\"segmented-control-item\"]"],
   "notCovered": [
     {
-      "name": "ui-segmented-control-indicator",
-      "why": "UI SDK writes the checked item's position and size onto it as a style attribute, which the check refuses on a stage, so the stage holds none and part.css does not style it; the checked item draws the indicator's look itself, so the choice moves at once and does not slide."
+      "name": "the indicator with no script",
+      "why": "UI SDK places the indicator by measuring the checked item at run time, so with no script it has no box, and the checked item shows by its words alone."
     },
     {
       "name": "invalid",
