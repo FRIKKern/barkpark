@@ -39,10 +39,12 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       of the field (`:elsewhere`) do not use it, else a fresh key unique in
       both.
     * Defs: theirs' stay, used or not. A link of mine's letters is theirs'
-      def with that content, else mine's def added under mine's key (a
-      fresh one when theirs holds it); two of mine's links with one content
-      stay two. A def of theirs goes only when its last use was in the text
-      mine's splice replaced.
+      def with that content when no letter of theirs the result keeps holds
+      it, else mine's def added under mine's key (a fresh one when theirs
+      holds it): a link of one side never takes a def another link of the
+      other side holds. Two of mine's links with one content stay two. A
+      def of theirs goes only when its last use was in the text mine's
+      splice replaced.
     * A guard on the result: each word is a word of base, mine or theirs,
       at most count(mine) + count(theirs) - count(base) times, and the text
       splits into the graphemes it was built from (no flag made at a join).
@@ -238,7 +240,12 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
     outside = outside_links({all, mp, me, length(put)}, mdefs, theirs, ts)
 
     {new, added} =
-      new_spans(Enum.zip(put, spans), mdefs, theirs, {elsewhere, gone(theirs, a, b), outside})
+      new_spans(
+        Enum.zip(put, spans),
+        mdefs,
+        theirs,
+        {elsewhere, gone(theirs, a, b), outside, kept_marks(theirs, a, b)}
+      )
 
     children = cut(theirs, a, b, new)
 
@@ -262,7 +269,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # An inline object is a child of its own. It keeps mine's key when
   # neither theirs' block nor the rest of the field (`elsewhere`) uses it,
   # else takes a fresh key unique in both (task-8619a5423030aca8).
-  defp new_spans(letters, mdefs, theirs, {elsewhere, gone, outside}) do
+  defp new_spans(letters, mdefs, theirs, {elsewhere, gone, outside, kept}) do
     used =
       MapSet.new(theirs["children"] ++ List.wrap(theirs["markDefs"]), & &1["_key"])
       |> MapSet.difference(gone)
@@ -280,7 +287,8 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       nd: 0,
       no: 0,
       same: Enum.frequencies(Map.values(mdefs)),
-      outside: outside
+      outside: outside,
+      kept: kept
     }
 
     {spans, %{added: added}} =
@@ -329,6 +337,24 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
       end)
 
     keys
+  end
+
+  # The marks on theirs' letters outside [a, b): theirs' links the result
+  # keeps.
+  defp kept_marks(theirs, a, b) do
+    {marks, _} =
+      Enum.reduce(theirs["children"], {MapSet.new(), 0}, fn c, {acc, o} ->
+        n = glen(c)
+
+        acc =
+          if o < a or o + n > b,
+            do: MapSet.union(acc, MapSet.new(List.wrap(c["marks"]))),
+            else: acc
+
+        {acc, o + n}
+      end)
+
+    marks
   end
 
   defp object(value, ms, bkey, st) do
@@ -448,7 +474,9 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # mine's other link (task-985e4a7e234e48a0, #28868 review). Mine's one
   # link of that content takes theirs' def, whatever key mine holds it
   # under: else one link of mine came out as two after mine re-keyed its
-  # defs (task-336c3a9b3baa9d0e).
+  # defs (task-336c3a9b3baa9d0e). It takes it only when no letter of theirs
+  # the result keeps holds it (`kept`): else it is theirs' other link, and
+  # mine's new link was joined to it (task-bdd05322892db2d1).
   defp marks(span, mdefs, tdefs, bkey, st) do
     span["marks"]
     |> List.wrap()
@@ -467,7 +495,7 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
           {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
 
         k && not MapSet.member?(st.took, k) && st.same[mdefs[mk]] == 1 &&
-            not is_map_key(st.outside, mk) ->
+          not is_map_key(st.outside, mk) && not MapSet.member?(st.kept, k) ->
           {k, %{st | taken: Map.put(st.taken, mk, k), took: MapSet.put(st.took, k)}}
 
         true ->

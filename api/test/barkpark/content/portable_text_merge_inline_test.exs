@@ -652,6 +652,36 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
 
     defp marks_at(letters, i), do: elem(Enum.at(letters, i), 1)
 
+    # task-bdd05322892db2d1: mine's new y link took theirs' y def by its
+    # content (mine has one y link), and joined theirs' new y link.
+    for {name, base, mine, theirs, {m, t}} <- [
+          {"mine's key is theirs' key",
+           {[a: "d1", b: "d1", c: "d1", " ": nil, d: nil, e: nil, f: nil], %{"d1" => :x}},
+           {[a: "d1", b: "d1", c: "d1", " ": nil, Q: "d2", d: nil, e: nil, f: nil],
+            %{"d1" => :x, "d2" => :y}},
+           {[a: "d1", b: "d1", c: "d2", " ": nil, d: nil, e: nil, f: nil],
+            %{"d1" => :x, "d2" => :y}}, {4, 2}},
+          {"mine's key is its own",
+           {[a: nil, b: nil, c: nil, " ": nil, d: "d1", e: "d1", f: "d1"], %{"d1" => :y}},
+           {[a: nil, b: nil, c: nil, " ": nil, P: "t7", f: "m9"], %{"t7" => :x, "m9" => :y}},
+           {[a: nil, b: nil, c: "d2", " ": nil, d: "d1", e: "d1", f: "d1"],
+            %{"d1" => :y, "d2" => :x}}, {4, 2}}
+        ] do
+      test "a new link of mine never takes theirs' def of another link: #{name}" do
+        out =
+          lmerge(
+            unquote(Macro.escape(base)),
+            unquote(Macro.escape(mine)),
+            unquote(Macro.escape(theirs))
+          )
+
+        [{mk, mh}] = marks_at(out, unquote(m))
+        [{tk, th}] = marks_at(out, unquote(t))
+        assert mh == th
+        assert mk != tk
+      end
+    end
+
     # task-da0afade29ee9aa0: mine runs a y link on across the splice's edge
     # where theirs holds mine's link under two keys; the run took a fresh
     # key beside theirs' key on the next letter.
@@ -1024,7 +1054,9 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       assert List.last(blk["children"])["text"] == "enXd"
     end
 
-    test "a link theirs holds by content is theirs' def; a key theirs holds is not reused" do
+    # task-bdd05322892db2d1: mine's "one" link once took theirs' d1 by its
+    # content, and the two sides' links became one.
+    test "mine's link keeps a def of its own beside theirs' link of that content; a key theirs holds is not reused" do
       href = "https://a.example"
       base = block("k", [span("m1", "one two three")])
 
@@ -1034,8 +1066,10 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       mine = block("k", [span("a", "one", ["m1"]), span("b", " two three")], [link("m1", href)])
 
       assert {:ok, blk} = Inline.merge(base, mine, theirs)
-      assert [%{"marks" => ["d1"]} | _] = blk["children"]
-      assert blk["markDefs"] == [link("d1", href)]
+      [mk] = hd(blk["children"])["marks"]
+      assert mk not in ["m1", "d1"]
+      assert blk["markDefs"] == [link("d1", href), link(mk, href)]
+      assert List.last(blk["children"])["marks"] == ["d1"]
 
       other =
         block("k", [span("a", "one", ["m1"]), span("b", " two three")], [
