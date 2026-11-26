@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Tags do
   alias BarkparkWeb.Components.Fields.TagsField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.Fields
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
   alias BarkparkWeb.Studio.StudioLive.RefusedSave
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -59,8 +60,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Tags do
   defp save(socket, form, key_path, next) do
     new_form = put(form, key_path, next)
     keys = Enum.take(key_path, 1)
+    {new_form, held} = HeldFields.stored(socket, new_form, keys)
     saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
-    {:noreply, Fields.settle_dirty(saved, keys)}
+    {:noreply, saved |> Fields.settle_dirty(keys) |> HeldFields.restore(held)}
   end
 
   # No tags left: a top-level field is posted empty, which the save reads
