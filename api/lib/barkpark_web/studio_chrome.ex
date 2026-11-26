@@ -355,8 +355,10 @@ defmodule BarkparkWeb.StudioChrome do
       is_nil(principal) ->
         put_flash(socket, :error, "Sign in to create a workspace")
 
-      match?(%ApiToken{}, principal) and not Tenancy.Auth.permits?(principal, :write) ->
-        put_flash(socket, :error, "This token cannot create a workspace: it has no write access")
+      # The one rule REST asks too, from the mounted workspace, as Studio's
+      # `Caps` asks it (task-f4fde845d0c33bcf).
+      not Tenancy.Auth.may_create_workspace?(principal, id_of(socket.assigns[:current_workspace])) ->
+        put_flash(socket, :error, "You need write access in this workspace to create a workspace")
 
       ApiToken.dataset_bound?(principal) ->
         refuse_bound_create(socket)
@@ -637,6 +639,9 @@ defmodule BarkparkWeb.StudioChrome do
   # tab created projects with it. The token is read again the way `Caps` reads
   # it on every press (`Caps.fresh_api_token/1`); `nil` when it is revoked or
   # expired. An account's role is read fresh by `Tenancy.Auth` already.
+  defp id_of(%{id: id}), do: id
+  defp id_of(_), do: nil
+
   defp principal_now(socket) do
     case socket.assigns[:api_token] do
       %ApiToken{} = token -> Caps.fresh_api_token(token)

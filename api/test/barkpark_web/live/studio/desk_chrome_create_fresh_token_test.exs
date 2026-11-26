@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.DeskChromeCreateFreshTokenTest do
     html = render_submit(c.view, "create-workspace", %{"name" => n})
 
     refute workspace?(n)
-    assert html =~ "This token cannot create a workspace: it has no write access"
+    assert html =~ "You need write access in this workspace to create a workspace"
   end
 
   test "a token revoked under the open desk creates neither", c do

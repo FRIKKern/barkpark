@@ -3,8 +3,18 @@
 // alone, so it may not reach anything else in this file. An expect returns true or a reason. Keys go through the
 // browser's own input pipeline, one key per entry, on a US layout. The check focuses the part's heading first; the
 // first Tab lands on the first field, Password, which is empty and hidden.
+//
+// The eye: setup notes how the Password field's show button draws its eye while the password is hidden, as the
+// check draws a ::before alone (check/drawn.mjs, BOX): its size, edges, corners and background images, each colour
+// read as ink or clear. Showing the password must change that picture, and hiding it again must bring the same one
+// back, so a shown eye drawn like the hidden one is red by name.
 
-export function setup() {}
+export function setup(root, h) {
+  const b = root.querySelector('#password-input-new-field [data-slot="password-input-toggle"]')
+  const s = getComputedStyle(b, '::before')
+  const look = ['width', 'height', 'border-width', 'border-style', 'border-radius', 'background-image', 'background-size', 'background-position', 'background-repeat']
+  h.state.hiddenEye = look.map((p) => `${p}: ${s.getPropertyValue(p).replace(/rgba?\([^)]*\)/g, (c) => (/,\s*0\)$/.test(c) ? 'clear' : 'ink'))}`).join('; ')
+}
 
 export const steps = [
   {
@@ -38,7 +48,7 @@ export const steps = [
     ax: { '#password-input-new-field [data-slot="password-input-toggle"]': { name: 'Show password' } },
   },
   {
-    name: 'Space shows the typed text: the field turns to text, the button is pressed and keeps focus',
+    name: 'Space shows the typed text: the field turns to text, the button is pressed and keeps focus, and its eye is drawn unlike the hidden eye',
     keys: ['Space'],
     expect: (root, h) => {
       const t = root.querySelector('#password-input-new')
@@ -46,11 +56,16 @@ export const steps = [
       if (document.activeElement !== b) return `focus is on ${h.describe(document.activeElement)}`
       if (t.type !== 'text') return `the field is type ${t.type}`
       if (t.value !== 'fake-123') return `value is ${JSON.stringify(t.value)}`
-      return b.getAttribute('aria-pressed') === 'true' || `aria-pressed is ${b.getAttribute('aria-pressed')}`
+      if (b.getAttribute('aria-pressed') !== 'true') return `aria-pressed is ${b.getAttribute('aria-pressed')}`
+      const s = getComputedStyle(b, '::before')
+      const look = ['width', 'height', 'border-width', 'border-style', 'border-radius', 'background-image', 'background-size', 'background-position', 'background-repeat']
+      const eye = look.map((p) => `${p}: ${s.getPropertyValue(p).replace(/rgba?\([^)]*\)/g, (c) => (/,\s*0\)$/.test(c) ? 'clear' : 'ink'))}`).join('; ')
+      if (!h.state.hiddenEye) return 'setup noted no hidden eye'
+      return eye !== h.state.hiddenEye || `the shown eye is drawn like the hidden eye: ${eye}`
     },
   },
   {
-    name: 'Space again hides it: the field is a password field again, the button not pressed',
+    name: 'Space again hides it: the field is a password field again, the button not pressed, and its eye is the hidden eye again',
     keys: ['Space'],
     expect: (root, h) => {
       const t = root.querySelector('#password-input-new')
@@ -58,7 +73,11 @@ export const steps = [
       if (document.activeElement !== b) return `focus is on ${h.describe(document.activeElement)}`
       if (t.type !== 'password') return `the field is type ${t.type}`
       if (t.value !== 'fake-123') return `value is ${JSON.stringify(t.value)}`
-      return b.getAttribute('aria-pressed') === 'false' || `aria-pressed is ${b.getAttribute('aria-pressed')}`
+      if (b.getAttribute('aria-pressed') !== 'false') return `aria-pressed is ${b.getAttribute('aria-pressed')}`
+      const s = getComputedStyle(b, '::before')
+      const look = ['width', 'height', 'border-width', 'border-style', 'border-radius', 'background-image', 'background-size', 'background-position', 'background-repeat']
+      const eye = look.map((p) => `${p}: ${s.getPropertyValue(p).replace(/rgba?\([^)]*\)/g, (c) => (/,\s*0\)$/.test(c) ? 'clear' : 'ink'))}`).join('; ')
+      return eye === h.state.hiddenEye || `the eye is not the hidden eye again: ${eye}`
     },
   },
 ]

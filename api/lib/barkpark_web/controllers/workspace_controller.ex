@@ -90,9 +90,13 @@ defmodule BarkparkWeb.WorkspaceController do
   @doc """
   POST /api/workspaces — create a Workspace owned by the bearer token.
 
-  Any authenticated token may create a workspace; the creator is bound as an
-  `"owner"` Membership in the same transaction, and a Default Project +
-  "production" Dataset are bootstrapped so the workspace is immediately usable.
+  A token with `write` may create a workspace (`Tenancy.Auth.
+  may_create_workspace?/2`, the rule Studio applies): one bound to a home
+  workspace needs a write seat there; a workspace-less signup token needs only
+  `write`, so a new user can create a first workspace. Anything else is 403.
+  The creator is bound as an `"owner"` Membership in the same transaction, and
+  a Default Project + "production" Dataset are bootstrapped so the workspace is
+  immediately usable.
 
   The creator binding is BOTH principals when there are two: the token gets its
   `api_token`-typed owner row, and — when the token names a real owner user —
@@ -108,12 +112,21 @@ defmodule BarkparkWeb.WorkspaceController do
     attrs = workspace_attrs(params)
 
     with :ok <- refuse_dataset_bound(token),
+         :ok <- may_create_workspace(token),
          {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, token) do
       conn
       |> put_status(:created)
       |> json(%{workspace: render_workspace(workspace)})
     end
   end
+
+  # The one rule for who may create a workspace, asked from the token's home
+  # workspace (`Tenancy.Auth.may_create_workspace?/2`, task-f4fde845d0c33bcf).
+  defp may_create_workspace(%ApiToken{workspace_id: home} = token) do
+    if Tenancy.Auth.may_create_workspace?(token, home), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp may_create_workspace(_token), do: {:error, :forbidden}
 
   # A dataset-bound token makes no project, no workspace and no import
   # (`ApiToken.dataset_bound?/1`). On the project route it is asked after the
