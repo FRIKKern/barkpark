@@ -1026,6 +1026,7 @@ defmodule Barkpark.Content.Papers do
       |> paper_link_refs()
       |> Content.resolve_docs_by_ids(dataset, scope)
       |> Enum.filter(&(&1.type == @paper_type))
+      |> Enum.uniq_by(& &1.doc_id)
       |> Map.new(fn paper ->
         content = card_fields.(paper)
 
@@ -1696,9 +1697,8 @@ defmodule Barkpark.Content.Papers do
         # unconditional `scope_to_owner(nil)`, byte-identical for
         # non-owner_scoped types whose rows carry a NULL `owner_id`, and the
         # same unowned-rows-only posture `get_document/4` reaches for an
-        # anonymous caller when the type IS owner-scoped). The list return
-        # makes the type pick exact — a same-slug document of another type can
-        # never shadow the requested one.
+        # anonymous caller when the type IS owner-scoped). Type pick exact; of
+        # same-slug rows in two projects the oldest wins (task-ebee9b54706a692b).
         #
         # `published_only: true` is HARD-CODED, not an opt: this resolver serves
         # ONLY anonymous public surfaces (every caller is a `get_public_*` entry
