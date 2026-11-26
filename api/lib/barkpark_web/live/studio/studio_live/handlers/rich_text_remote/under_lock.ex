@@ -62,10 +62,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   number does; it was written as posted, over B (task-0437fdf2f2a6ccba). A
   rich text in a row, or one with no value drawn, is read as before.
   """
-  def values(socket, seen, _posted) when is_list(seen), do: values(socket, seen)
+  def values(socket, seen, posted), do: values(socket, seen, posted, nil)
 
-  def values(socket, nil, posted) when is_map(posted) do
-    shown = shown(socket)
+  @doc """
+  `values/3`, with the owner `_key` each object rich text's editor was drawn
+  under, as the post carries it (`_bp_rt_owner[]`, `[name, key]` as JSON). A value
+  `remounted/3` took under a new owner key is what the page shows only
+  when the post names that key: a post typed on the old mount, still in
+  flight while the remount went out, names the old one and is read against
+  the old value (#28951 r1 review, B1).
+  """
+  def values(socket, seen, _posted, _owners) when is_list(seen), do: values(socket, seen)
+
+  def values(socket, nil, posted, owners) when is_map(posted) do
+    shown = shown(socket, owners)
 
     for {name, path, _html} <- posted_texts(socket, posted),
         {:ok, was} <- [Map.fetch(shown, name)],
@@ -73,25 +83,117 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         do: {name, {path, was, nil}}
   end
 
-  def values(_socket, _seen, _posted), do: %{}
+  def values(_socket, _seen, _posted, _owners), do: %{}
 
   @doc """
   The socket after a post with no `_bp_rt_seen`: each object rich text it
   carries is what the page shows now (`values/3`), read onto the value it
   showed before so its blocks keep their keys.
   """
-  def posted(socket, nil, posted) when is_map(posted) do
-    shown = shown(socket)
+  def posted(socket, seen, posted), do: posted(socket, seen, posted, nil)
+
+  @doc "`posted/3`, reading the post's owner keys as `values/4` does."
+  def posted(socket, nil, posted, owners) when is_map(posted) do
+    shown = shown(socket, owners)
+    texts = posted_texts(socket, posted)
 
     page =
-      for {name, _path, html} <- posted_texts(socket, posted),
+      for {name, _path, html} <- texts,
           into: own_page(socket),
           do: {name, PortableText.from_html(html, list(Map.get(shown, name)))}
 
-    assign(socket, editor_rt_page: {PostIdentity.of(socket), page})
+    # A post typed on the remounted editor is the page's own value from now
+    # on; one typed on the old mount leaves the remount still to come.
+    drawn =
+      Map.drop(
+        rekeyed(socket),
+        for({name, _, _} <- texts, drawn?(socket, owners, name), do: name)
+      )
+
+    assign(socket,
+      editor_rt_page: {PostIdentity.of(socket), page},
+      editor_rt_rekeyed: {PostIdentity.of(socket), drawn}
+    )
   end
 
-  def posted(socket, _seen, _posted), do: socket
+  def posted(socket, _seen, _posted, _owners), do: socket
+
+  @doc """
+  The socket after it took `new_form` over `old_form`: each rich text inside
+  an object whose own `_key` changed is recorded with that key and the value
+  taken (`editor_rt_rekeyed`). The editor's wrapper id carries the key
+  (`CompositeField`, `bp-rt-sub-…`), so even a page without bp-rt-remote.js
+  remounts it and draws the new value, and the owner key it posts
+  (`_bp_rt_owner[]`) changes with it (task-c29534c0655f0489). Until a post
+  names the new key, the page may not show it yet (`values/4`). The mount
+  draw and the numbers the page reported (`editor_rt_born`) are left as they
+  were. A rich text in a row is read as before: a row with a new `_key` is
+  another row.
+  """
+  def remounted(socket, old_form, new_form) do
+    old_form = old_form || %{}
+    new_form = new_form || %{}
+
+    case PostIdentity.of(socket) do
+      nil ->
+        socket
+
+      doc ->
+        moved =
+          for path <- RichTextRemote.every(socket.assigns[:editor_schema], new_form),
+              not Enum.any?(path, &is_integer/1),
+              owner = Enum.drop(path, -1),
+              key(FormPath.get(old_form, owner)) != key(FormPath.get(new_form, owner)),
+              into: %{},
+              do:
+                {RichTextRemote.input_name(path),
+                 {to_string(key(FormPath.get(new_form, owner))), FormPath.get(new_form, path)}}
+
+        if moved == %{},
+          do: socket,
+          else: assign(socket, editor_rt_rekeyed: {doc, Map.merge(rekeyed(socket), moved)})
+    end
+  end
+
+  defp rekeyed(socket) do
+    case socket.assigns[:editor_rt_rekeyed] do
+      {doc, %{} = keyed} when not is_nil(doc) ->
+        if doc == PostIdentity.of(socket), do: keyed, else: %{}
+
+      _ ->
+        %{}
+    end
+  end
+
+  # Whether the post names the owner key `remounted/3` recorded for `name`:
+  # the page draws the re-keyed value. No owner, or one never recorded, is
+  # the old mount.
+  defp drawn?(socket, owners, name) do
+    case Map.fetch(rekeyed(socket), name) do
+      {:ok, {key, _value}} -> owner(owners, name) == {:ok, key}
+      :error -> false
+    end
+  end
+
+  # Each entry is `[input_name, owner_key]` as JSON: either may hold any
+  # character. The key is nil for an owner with none, read as "".
+  defp owner(owners, name) when is_list(owners) do
+    Enum.find_value(owners, :error, fn
+      entry when is_binary(entry) ->
+        case Jason.decode(entry) do
+          {:ok, [^name, key]} when is_binary(key) or is_nil(key) -> {:ok, to_string(key)}
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp owner(_owners, _name), do: :error
+
+  defp key(%{} = owner), do: Map.get(owner, "_key")
+  defp key(_), do: nil
 
   # Each rich text inside an object (no row index on its path) the post
   # carries as the page's HTML.
@@ -110,6 +212,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   # The value a page without bp-rt-remote.js shows, by input name, of the
   # document open: each is stamped with the document it was drawn or posted
   # on, so a switch that left them in place does not carry them over.
+  defp shown(socket, owners) do
+    drawn =
+      for {name, {_key, value}} <- rekeyed(socket),
+          drawn?(socket, owners, name),
+          into: %{},
+          do: {name, value}
+
+    Map.merge(shown(socket), drawn)
+  end
+
   defp shown(socket) do
     born =
       if socket.assigns[:editor_rt_born_doc] == PostIdentity.of(socket),

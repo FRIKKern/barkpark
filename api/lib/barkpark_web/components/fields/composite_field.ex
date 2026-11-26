@@ -243,6 +243,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         # Keyed by the item's `_key` too: a moved item or another document
         # remounts the ignored editor instead of keeping the old text.
         wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
+        owner_key: owner_key,
         html:
           if(value in [nil, "", []], do: "", else: Barkpark.Content.PortableText.to_html(value)),
         label: title_for(sub),
@@ -282,6 +283,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     ~H"""
     <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-pt-subfield={@input_name}>
       <input type="hidden" id={"bp-rt-hidden-#{@input_id}"} name={@input_name} value={@html} phx-debounce="500" />
+      <%!-- The owner `_key` this editor was drawn under, inside the ignored
+           wrapper: it changes only when a remount reaches the page, so a
+           post says which value it was typed on (task-c29534c0655f0489).
+           Outside `doc[...]`, it is never written. --%>
+      <input :if={String.starts_with?(@input_name, "doc[")} type="hidden" name="_bp_rt_owner[]" value={Jason.encode!([@input_name, @owner_key])} />
       <bp-rich-text-editor value={@html} data-bridge-target={"bp-rt-hidden-#{@input_id}"}
         data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={@label}
         data-vocabulary={@vocabulary}
