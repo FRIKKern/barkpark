@@ -44,11 +44,22 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
   # `:none` presses that rebuild the panes, the open document with them.
   @held_reads ~w(reload-remote-doc desk-list-more select-sort)
 
+  @held_opens_notice "Not opened: the page has moved to another project. Choose Stay or Leave first."
+
+  # `:none` presses that go to another page about the open document: the
+  # page they build names the socket's project, so under the question they
+  # would go to the moved project's page of the held document, without
+  # asking (task-62711814fa586a09).
+  @held_opens ~w(view-graph)
+
   @doc "The notice a refused press shows."
   def notice, do: @notice
 
   @doc "The notice a held read shows."
   def held_notice, do: @held_notice
+
+  @doc "The notice a held open (`view-graph`) shows."
+  def held_opens_notice, do: @held_opens_notice
 
   @doc "Arm the gate. Attached before `Caps.attach/1`."
   def attach(socket), do: attach_hook(socket, :studio_leave_scope, :handle_event, &gate/3)
@@ -70,6 +81,7 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveScope do
     cond do
       event in @leave_events or not moved?(socket.assigns) -> {:cont, socket}
       event in @held_reads -> {:halt, put_flash(socket, :error, @held_notice)}
+      event in @held_opens -> {:halt, put_flash(socket, :error, @held_opens_notice)}
       Caps.classify(event) in [:none, :read] -> {:cont, socket}
       true -> {:halt, refuse(socket)}
     end
