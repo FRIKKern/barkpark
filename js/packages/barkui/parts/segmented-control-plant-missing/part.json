@@ -1,0 +1,22 @@
+{
+  "name": "segmented-control-plant-missing",
+  "family": "form",
+  "element": "ui-segmented-control",
+  "imports": ["@ui-sdk/web/segmented-control", "@ui-sdk/web/field"],
+  "summary": "Picks one of a few options from a row of items, named by its field, the checked one marked by UI SDK's sliding indicator, which slides to the item chosen: the arrow keys move the choice and pass a disabled item, with read-only and disabled.",
+  "textOnly": ["[data-slot=\"segmented-control-item\"]"],
+  "notCovered": [
+    {
+      "name": "the indicator with no script",
+      "why": "UI SDK places the indicator by measuring the checked item at run time, so with no script it has no box, and the checked item shows by its words alone."
+    },
+    {
+      "name": "invalid",
+      "why": "UI SDK's sheet gives a segmented control no invalid look, and no segmented control here sits in an invalid field, so the stage holds no invalid state."
+    },
+    {
+      "name": "the touch target",
+      "why": "Under a coarse pointer UI SDK lays an empty box over each item, 2.75rem tall, so a tap near it reaches it. It draws nothing, so no light reads its size, and the part leaves it as UI SDK sets it."
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+<div data-demo-row>
+  <span data-demo-label>Choose one, one disabled</span>
+  <ui-field id="segmented-control-plant-missing-range-field" data-slot="field">
+    <ui-field-label id="segmented-control-plant-missing-range-label" data-slot="field-label" for="segmented-control-plant-missing-range">Range</ui-field-label>
+    <ui-segmented-control id="segmented-control-plant-missing-range" default-value="day" data-slot="segmented-control" aria-labelledby="segmented-control-plant-missing-range-label" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal">
+      <ui-segmented-control-item id="segmented-control-plant-missing-day" value="day" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked>Day</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-plant-missing-week" value="week" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Week</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-plant-missing-month" value="month" disabled data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" aria-disabled="true" data-unchecked data-disabled>Month</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-plant-missing-year" value="year" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked>Year</ui-segmented-control-item>
+    </ui-segmented-control>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Disabled, read-only</span>
+  <ui-field id="segmented-control-plant-missing-theme-field" data-slot="field">
+    <ui-field-label id="segmented-control-plant-missing-theme-label" data-slot="field-label" for="segmented-control-plant-missing-theme">Theme</ui-field-label>
+    <ui-segmented-control id="segmented-control-plant-missing-theme" default-value="light" disabled data-slot="segmented-control" aria-labelledby="segmented-control-plant-missing-theme-label" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-disabled="true" data-disabled>
+      <ui-segmented-control-item id="segmented-control-plant-missing-light" value="light" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" aria-disabled="true" tabindex="-1" data-checked data-disabled>Light</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-plant-missing-dark" value="dark" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" aria-disabled="true" tabindex="-1" data-unchecked data-disabled>Dark</ui-segmented-control-item>
+    </ui-segmented-control>
+  </ui-field>
+  <ui-field id="segmented-control-plant-missing-plan-field" data-slot="field">
+    <ui-field-label id="segmented-control-plant-missing-plan-label" data-slot="field-label" for="segmented-control-plant-missing-plan">Your plan</ui-field-label>
+    <ui-field-description id="segmented-control-plant-missing-plan-description" data-slot="field-description">Ask an admin to change plans.</ui-field-description>
+    <ui-segmented-control id="segmented-control-plant-missing-plan" default-value="pro" read-only data-slot="segmented-control" aria-labelledby="segmented-control-plant-missing-plan-label" aria-describedby="segmented-control-plant-missing-plan-description" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
+      <ui-segmented-control-item id="segmented-control-plant-missing-free" value="free" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly>Free</ui-segmented-control-item>
+      <ui-segmented-control-item id="segmented-control-plant-missing-pro" value="pro" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly>Pro</ui-segmented-control-item>
+    </ui-segmented-control>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Checked with focus, unchecked under the pointer</span>
+  <ui-segmented-control id="segmented-control-plant-missing-pin" default-value="focus" data-slot="segmented-control" aria-label="Focus and hover" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal">
+    <ui-segmented-control-item id="segmented-control-plant-missing-pin-focus" value="focus" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-pin="focus-visible">Focus</ui-segmented-control-item>
+    <ui-segmented-control-item id="segmented-control-plant-missing-pin-hover" value="hover" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-pin="hover">Hover</ui-segmented-control-item>
+  </ui-segmented-control>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only with focus: checked, unchecked</span>
+  <ui-segmented-control id="segmented-control-plant-missing-pin-ro-a" default-value="checked" read-only data-slot="segmented-control" aria-label="Read-only, checked with focus" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
+    <ui-segmented-control-item id="segmented-control-plant-missing-pin-ro-checked" value="checked" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly data-pin="focus-visible">Checked</ui-segmented-control-item>
+    <ui-segmented-control-item id="segmented-control-plant-missing-pin-ro-rest" value="rest" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly>Rest</ui-segmented-control-item>
+  </ui-segmented-control>
+  <ui-segmented-control id="segmented-control-plant-missing-pin-ro-b" default-value="on" read-only data-slot="segmented-control" aria-label="Read-only, unchecked with focus" role="radiogroup" aria-orientation="horizontal" data-orientation="horizontal" aria-readonly="true" data-readonly>
+    <ui-segmented-control-item id="segmented-control-plant-missing-pin-ro-on" value="on" data-slot="segmented-control-item" role="radio" type="button" aria-checked="true" tabindex="0" data-checked data-readonly>On</ui-segmented-control-item>
+    <ui-segmented-control-item id="segmented-control-plant-missing-pin-ro-unchecked" value="unchecked" data-slot="segmented-control-item" role="radio" type="button" aria-checked="false" tabindex="-1" data-unchecked data-readonly data-pin="focus-visible">Unchecked</ui-segmented-control-item>
+  </ui-segmented-control>
+</div>

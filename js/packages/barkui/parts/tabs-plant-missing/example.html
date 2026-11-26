@@ -1,0 +1,52 @@
+<div data-demo-row>
+  <span data-demo-label>Across, one disabled</span>
+  <ui-tabs id="tabs-plant-missing-main" default-value="overview" data-slot="tabs" data-orientation="horizontal" data-activation-direction="none">
+    <ui-tabs-list aria-label="Dashboard" data-slot="tabs-list" role="tablist" data-orientation="horizontal" data-activation-direction="none">
+      <ui-tabs-tab value="overview" role="none"><button id="tabs-plant-missing-overview" type="button" data-slot="tabs-tab" role="tab" tabindex="0" aria-selected="true" data-selected="" data-orientation="horizontal" data-activation-direction="none" aria-controls="tabs-plant-missing-main-panel-overview">Overview</button></ui-tabs-tab>
+      <ui-tabs-tab value="analytics" role="none"><button id="tabs-plant-missing-analytics" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="horizontal" data-activation-direction="none">Analytics</button></ui-tabs-tab>
+      <ui-tabs-tab value="reports" disabled role="none"><button id="tabs-plant-missing-reports" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" aria-disabled="true" data-disabled="" data-orientation="horizontal" data-activation-direction="none">Reports</button></ui-tabs-tab>
+      <ui-tabs-tab value="settings" role="none"><button id="tabs-plant-missing-settings" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="horizontal" data-activation-direction="none">Settings</button></ui-tabs-tab>
+    </ui-tabs-list>
+    <ui-tabs-panel value="overview" data-slot="tabs-panel" role="tabpanel" id="tabs-plant-missing-main-panel-overview" aria-labelledby="tabs-plant-missing-overview" data-selected="" data-orientation="horizontal" data-activation-direction="none" tabindex="0">Revenue, visitors and sign-ups for the last 30 days.</ui-tabs-panel>
+    <ui-tabs-panel value="analytics" data-slot="tabs-panel">Where visitors come from and the pages they read most.</ui-tabs-panel>
+    <ui-tabs-panel value="reports" data-slot="tabs-panel">Monthly reports.</ui-tabs-panel>
+    <ui-tabs-panel value="settings" data-slot="tabs-panel">Who can see the dashboard, and how often it updates.</ui-tabs-panel>
+  </ui-tabs>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Down</span>
+  <ui-tabs id="tabs-plant-missing-side" default-value="profile" orientation="vertical" data-slot="tabs" data-orientation="vertical" data-activation-direction="none">
+    <ui-tabs-list aria-label="Account" data-slot="tabs-list" role="tablist" aria-orientation="vertical" data-orientation="vertical" data-activation-direction="none">
+      <ui-tabs-tab value="profile" role="none"><button id="tabs-plant-missing-profile" type="button" data-slot="tabs-tab" role="tab" tabindex="0" aria-selected="true" data-selected="" data-orientation="vertical" data-activation-direction="none" aria-controls="tabs-plant-missing-side-panel-profile">Profile</button></ui-tabs-tab>
+      <ui-tabs-tab value="password" role="none"><button id="tabs-plant-missing-password" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="vertical" data-activation-direction="none">Password</button></ui-tabs-tab>
+      <ui-tabs-tab value="sessions" role="none"><button id="tabs-plant-missing-sessions" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="vertical" data-activation-direction="none">Sessions</button></ui-tabs-tab>
+    </ui-tabs-list>
+    <ui-tabs-panel value="profile" data-slot="tabs-panel" role="tabpanel" id="tabs-plant-missing-side-panel-profile" aria-labelledby="tabs-plant-missing-profile" data-selected="" data-orientation="vertical" data-activation-direction="none" tabindex="0">Your name and the picture beside it.</ui-tabs-panel>
+    <ui-tabs-panel value="password" data-slot="tabs-panel">Choose a new password.</ui-tabs-panel>
+    <ui-tabs-panel value="sessions" data-slot="tabs-panel">Where you are signed in now.</ui-tabs-panel>
+  </ui-tabs>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Tab: rest, hover, focus, beside the selected one</span>
+  <ui-tabs id="tabs-plant-missing-pin-tab" default-value="chosen" data-slot="tabs" data-orientation="horizontal" data-activation-direction="none">
+    <ui-tabs-list aria-label="Tab states" data-slot="tabs-list" role="tablist" data-orientation="horizontal" data-activation-direction="none">
+      <ui-tabs-tab value="chosen" role="none"><button id="tabs-plant-missing-pin-chosen" type="button" data-slot="tabs-tab" role="tab" tabindex="0" aria-selected="true" data-selected="" data-orientation="horizontal" data-activation-direction="none">Selected</button></ui-tabs-tab>
+      <ui-tabs-tab value="rest" role="none"><button id="tabs-plant-missing-pin-rest" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="horizontal" data-activation-direction="none">Rest</button></ui-tabs-tab>
+      <ui-tabs-tab value="hover" role="none"><button id="tabs-plant-missing-pin-hover" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="horizontal" data-activation-direction="none" data-pin="hover">Hover</button></ui-tabs-tab>
+      <ui-tabs-tab value="focus" role="none"><button id="tabs-plant-missing-pin-focus" type="button" data-slot="tabs-tab" role="tab" tabindex="-1" aria-selected="false" data-orientation="horizontal" data-activation-direction="none" data-pin="focus-visible">Focus</button></ui-tabs-tab>
+    </ui-tabs-list>
+  </ui-tabs>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Selected: hover, focus</span>
+  <ui-tabs id="tabs-plant-missing-pin-sel-hover" default-value="hover" data-slot="tabs" data-orientation="horizontal" data-activation-direction="none">
+    <ui-tabs-list aria-label="Selected under the pointer" data-slot="tabs-list" role="tablist" data-orientation="horizontal" data-activation-direction="none">
+      <ui-tabs-tab value="hover" role="none"><button id="tabs-plant-missing-pin-sel-hover-tab" type="button" data-slot="tabs-tab" role="tab" tabindex="0" aria-selected="true" data-selected="" data-orientation="horizontal" data-activation-direction="none" data-pin="hover">Hover</button></ui-tabs-tab>
+    </ui-tabs-list>
+  </ui-tabs>
+  <ui-tabs id="tabs-plant-missing-pin-sel-focus" default-value="focus" data-slot="tabs" data-orientation="horizontal" data-activation-direction="none">
+    <ui-tabs-list aria-label="Selected with focus" data-slot="tabs-list" role="tablist" data-orientation="horizontal" data-activation-direction="none">
+      <ui-tabs-tab value="focus" role="none"><button id="tabs-plant-missing-pin-sel-focus-tab" type="button" data-slot="tabs-tab" role="tab" tabindex="0" aria-selected="true" data-selected="" data-orientation="horizontal" data-activation-direction="none" data-pin="focus-visible">Focus</button></ui-tabs-tab>
+    </ui-tabs-list>
+  </ui-tabs>
+</div>
