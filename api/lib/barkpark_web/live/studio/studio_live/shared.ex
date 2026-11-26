@@ -513,6 +513,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     type = socket.assigns[:editor_type]
 
     cond do
+      # The leave question open over a patch into another project: this seam
+      # is reached from `handle_info` too, which the event gate never sees
+      # (`LeaveScope`, task-bc40f41b69eb4d9a).
+      BarkparkWeb.Studio.StudioLive.LeaveScope.moved?(socket.assigns) ->
+        BarkparkWeb.Studio.StudioLive.LeaveScope.refuse(socket)
+
       # A read seat may still edit what its type's `readerWrites` opens to
       # it (task-97702b326b8bfd6d): the same rule the event gate applied.
       Paper.write_denied?(socket) and

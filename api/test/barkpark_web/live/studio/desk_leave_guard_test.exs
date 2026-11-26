@@ -179,6 +179,29 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       asks!(a)
     end
 
+    # task-eac6c592: Forward to the held document while the question is open.
+    test "Back, then Forward to the held document: Stay, the title still held", c do
+      a = held(c)
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+
+      render_patch(a, to_doc(c, c.id))
+      refute has_element?(a, @dialog)
+      assert title(a) == "T0 FAIL"
+      assert has_element?(a, @held)
+
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+    end
+
+    test "Back, then a patch to a third document: it still asks", c do
+      a = held(c)
+      render_patch(a, to_doc(c, c.id <> "-link"))
+      asks!(a)
+      render_patch(a, to_doc(c, c.id <> "-3"))
+      asks!(a)
+    end
+
     test "Enter on a search hit asks", c do
       a = held(c)
       render_change(a |> element("#desk-search-form"), %{"value" => "T0"})
@@ -253,6 +276,41 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       assert_patch(a)
     end
 
+    # task-91730f627f3b7fdb: Leave replayed the press it asked about with no
+    # gate. The desk is admin only, so LiveScope's grant gates are not on its
+    # socket; what it can lose under the question is the token's write, which
+    # Caps reads fresh on every press.
+    test "the token loses write under the question: Leave on Create new is refused", c do
+      a = held(c)
+      render_hook(a, "new-document", %{"type" => c.type})
+      asks!(a)
+
+      hash = Barkpark.Auth.ApiToken.hash_token(c.conn.private.plug_session["api_token"])
+
+      {:ok, _} =
+        Barkpark.Auth.ApiToken
+        |> Barkpark.Repo.get_by!(token_hash: hash)
+        |> Ecto.Changeset.change(permissions: ["read"])
+        |> Barkpark.Repo.update()
+
+      html = a |> element(~s(#{@dialog} button[phx-click="desk-leave-go"])) |> render_click()
+
+      assert html =~ "You don&#39;t have access to do that."
+      refute has_element?(a, @dialog)
+      # Nothing was made: no new document's pane, and the held text is where it was.
+      assert title(a) == "T0 FAIL"
+      assert has_element?(a, @held)
+      assert :sys.get_state(a.pid).socket.assigns.desk_leave_pass == false
+    end
+
+    test "control: the token keeps write: Leave on Create new makes it", c do
+      a = held(c)
+      render_hook(a, "new-document", %{"type" => c.type})
+      html = a |> element(~s(#{@dialog} button[phx-click="desk-leave-go"])) |> render_click()
+      refute html =~ "You don&#39;t have access to do that."
+      assert_patch(a)
+    end
+
     test "a link that leaves the page: Leave is that link, and only a path on this site", c do
       a = held(c)
 
@@ -274,6 +332,46 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
                a,
                ~s|#{@dialog} a[data-desk-leave-go][href="/papers"]:not([data-phx-link])|
              )
+    end
+
+    # task-5455fd7fe69eb386: `push_patch/2` raises on a path that is not a
+    # route of the desk's LiveView, and the socket died with it. Such a
+    # "patch" goes as a page load.
+    test "a patch to a path the desk does not route is a page load; the LiveView lives", c do
+      for href <- ["/no-such-route-5455", "/%2F%2Fevil.example", "/papers"] do
+        a = held(c)
+        render_hook(a, "desk-leave", %{"href" => href, "kind" => "patch"})
+        asks!(a)
+
+        assert has_element?(
+                 a,
+                 ~s|#{@dialog} a[data-desk-leave-go][href="#{href}"]:not([data-phx-link])|
+               )
+
+        assert Process.alive?(a.pid)
+
+        a = open(c)
+
+        assert {:error, {:redirect, %{to: ^href}}} =
+                 render_hook(a, "desk-leave", %{"href" => href, "kind" => "patch"})
+      end
+    end
+
+    test "a path with a space or control byte goes nowhere (a browser reads /<TAB>/x as //x)",
+         c do
+      a = held(c)
+
+      for href <- [
+            "/\t/evil.example/x",
+            "/\n/evil.example/x",
+            "/\r/evil.example/x",
+            "/ /evil.example/x",
+            "/\0/evil.example/x",
+            "/papers\t"
+          ] do
+        render_hook(a, "desk-leave", %{"href" => href, "kind" => ""})
+        refute has_element?(a, @dialog), inspect(href)
+      end
     end
 
     test "control: nothing held, nothing asked", c do

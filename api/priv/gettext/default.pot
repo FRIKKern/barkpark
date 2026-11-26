@@ -10827,10 +10827,6 @@ msgstr ""
 msgid "%{count} more"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/leave_ask.ex:54
-#, elixir-autogen, elixir-format
-msgid "Press again to leave."
-msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3661
 #, elixir-autogen, elixir-format
@@ -15987,4 +15983,19 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/refused_save.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/leave_scope.ex
+#, elixir-autogen, elixir-format
+msgid "Not saved: the page has moved to another project. Choose Stay or Leave first."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/leave_scope.ex
+#, elixir-autogen, elixir-format
+msgid "Not reloaded: the page has moved to another project. Choose Stay or Leave first."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/leave_scope.ex
+#, elixir-autogen, elixir-format
+msgid "Not opened: the page has moved to another project. Choose Stay or Leave first."
 msgstr ""

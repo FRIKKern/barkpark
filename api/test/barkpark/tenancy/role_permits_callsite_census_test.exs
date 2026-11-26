@@ -99,6 +99,13 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
         "without reaching the predicate. This site was `authorize/3` until the membership/capability arms " <>
         "were reported apart (task-abc2992adeb04fac); authorize/3 is now a collapse of this function and " <>
         "calls no predicate itself, so the site MOVED without the provenance moving.",
+    {"lib/barkpark/tenancy/auth.ex", "may_create_workspace?"} =>
+      "may_create_workspace?/2 (task-f4fde845d0c33bcf), its token and its %User{} arm: each passes " <>
+        "`membership(principal, ws_id)` loaded INLINE at the call, with the SAME ws_id as the third " <>
+        "argument, so the clause heads' `%Membership{workspace_id: workspace_id}` binding holds by " <>
+        "construction; a non-member loads nil and takes the all-false catch-all. ws_id is never a " <>
+        "param: the chrome passes `current_workspace.id` (a loaded struct), REST the bearer's own " <>
+        "`workspace_id` column. A nil anchor never reaches the predicate.",
     {"lib/barkpark_web/studio/caps.ex", "derive_from_assigns"} =>
       "Caps.derive_from_assigns/1 passes the row it just loaded: `load_memberships(principals, ws_id)` -> " <>
         "Tenancy.Auth.membership/2 per principal, and the SAME ws_id is the third argument, so the " <>
@@ -123,7 +130,7 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
 
   # A second call added INSIDE an already-pinned function would not change the
   # keyed set, so the raw expression count is pinned alongside it.
-  @expected_call_count 6
+  @expected_call_count 8
 
   # The two doors, named once. `role_permits?/3` answers ONE action from the
   # resolver; `seat_capabilities/3` answers all three off one resolution. Both
@@ -177,7 +184,7 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
              "the scan did not reach auth.ex — the census cannot be trusted"
 
       refute Enum.empty?(sites), "the call-site scan found ZERO sites"
-      assert map_size(@expected_callsites) == 6
+      assert map_size(@expected_callsites) == 7
     end
 
     test "the raw call-expression count is pinned, so a second call in a pinned function also reds",

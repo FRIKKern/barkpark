@@ -163,7 +163,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # pair's twins: they list the principal's own membership places and go to
   # one after the same reachability gate, and they write nothing.
   @safe_events ~w(
-    select select-group select-desk select-pane expand-pane
+    select select-group select-desk select-pane expand-pane desk-leave-stay desk-leave-go studio-leave
     switch-workspace switch-project switch-dataset toggle-create
     scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
     desk-scope-load desk-scope-go
@@ -501,7 +501,13 @@ defmodule BarkparkWeb.Studio.Caps do
   # token principal. Deliberately no TTL memo: a bounded-staleness cache is the
   # same defect with a shorter fuse, and the grant `Repo.all` two lines up
   # already established that per-derive freshness is the price this module pays.
-  defp fresh_api_token(%ApiToken{id: id}) when is_binary(id) do
+  @doc """
+  The mount-time `%ApiToken{}` read again: the row as it is now, or `nil` when
+  it is revoked, expired or gone. The same read `derive_from_assigns/1` makes,
+  for a gate outside this module that must not decide on the mount-time bytes.
+  """
+  @spec fresh_api_token(term()) :: ApiToken.t() | nil
+  def fresh_api_token(%ApiToken{id: id}) when is_binary(id) do
     case Repo.uuid_or_nil(id) do
       nil ->
         nil
@@ -520,7 +526,7 @@ defmodule BarkparkWeb.Studio.Caps do
     end
   end
 
-  defp fresh_api_token(_other), do: nil
+  def fresh_api_token(_other), do: nil
 
   # ONE `Repo.one` per principal, handed to `Tenancy.Auth.seat_capabilities/3`
   # for the whole :read/:write/:admin decision. (The ROLE resolution behind it

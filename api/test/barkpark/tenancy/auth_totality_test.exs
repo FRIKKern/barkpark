@@ -108,6 +108,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     create_membership: 3,
     create_membership: 4,
     list_workspaces_for: 1,
+    may_create_workspace?: 2,
     member?: 2,
     member?: 3,
     membership: 2,
@@ -151,6 +152,13 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   #     drive; its own totality (malformed PRINCIPAL id -> []) is pinned by
   #     test/barkpark/tenancy/list_workspaces_for_totality_test.exs, which also
   #     counts queries so the fail-open filter rewrite reds.
+  #   * may_create_workspace?/2 (task-f4fde845d0c33bcf) — not a denial
+  #     predicate over every input: a token with NO anchor workspace (a
+  #     workspace-less signup token) is ALLOWED with `write`, by design, so a
+  #     "malformed -> denial" row would be wrong for the nil anchor. Both
+  #     callers pass an anchor read off a loaded row (the chrome's
+  #     `current_workspace`, the REST token's `workspace_id` column); its rule
+  #     is pinned in test/barkpark_web/workspace_create_rule_test.exs.
   #   * role_permits?/3 — SPLIT expectation, own dedicated test at the bottom.
   #     Its first argument is a ROLE NAME, not a principal id, and built-in
   #     roles are workspace-id-INDEPENDENT by design, so a blanket
@@ -204,7 +212,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 24 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 25 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

@@ -92,6 +92,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
   require Logger
 
   alias Barkpark.Content.DraftId
+  alias BarkparkWeb.Studio.StudioLive.LeaveScope
 
   @key "_bp_doc"
   @end_key "_bp_doc_end"
@@ -166,11 +167,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PostIdentity do
     do: pressed(params, socket, fn _params, socket -> fun.(socket) end)
 
   # The address is the one the Studio's chrome keeps for every page it
-  # draws. A socket without one (built by hand) is left as it is.
+  # draws. A socket without one (built by hand) is left as it is. Under the
+  # leave question after a patch into another project it is already that
+  # place's address, so the page stays, with the refusal (`LeaveScope`).
   defp reload(socket) do
-    case socket.assigns[:current_path] do
-      "/" <> _ = path -> Phoenix.LiveView.redirect(socket, to: path)
-      _ -> socket
+    cond do
+      LeaveScope.moved?(socket.assigns) ->
+        LeaveScope.refuse(socket)
+
+      match?("/" <> _, socket.assigns[:current_path]) ->
+        Phoenix.LiveView.redirect(socket, to: socket.assigns.current_path)
+
+      true ->
+        socket
     end
   end
 

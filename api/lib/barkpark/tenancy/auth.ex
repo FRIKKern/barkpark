@@ -847,6 +847,39 @@ defmodule Barkpark.Tenancy.Auth do
   defp holder_role(_token, _workspace_id), do: nil
 
   @doc """
+  Who may create a workspace (task-f4fde845d0c33bcf): the one rule REST
+  `POST /api/workspaces` and the Studio chrome's `create-workspace` fallback
+  ask, and Studio's own answer (`Caps` classes the event `:write`, a write
+  seat in the mounted workspace).
+
+  `anchor_ws_id` is the workspace the caller acts from: the chrome's mounted
+  workspace, or a token's home workspace on REST.
+
+    * With an anchor, a WRITE seat there: `seat_capabilities/3`, the call
+      `Caps.derive_from_assigns/1` makes, so a read-only token, a removed seat,
+      a user-owned token whose owner lost the seat, and an account with no
+      seat or an unknown role are all refused, as Studio refuses them.
+    * A token with NO anchor is a signup PAT minted before its owner belongs
+      anywhere (`DeriveWorkspaceFromToken`), or a pre-tenancy global token.
+      There is no seat to ask; it needs `write` in its permissions. That is how
+      a new user creates a first workspace.
+    * An account with no anchor, or no principal: no.
+
+  Asked of a FRESH principal: the caller reads the token row as it is now.
+  A dataset-bound token is refused by each caller, with its own message.
+  """
+  @spec may_create_workspace?(ApiToken.t() | User.t() | nil, binary() | nil) :: boolean()
+  def may_create_workspace?(%ApiToken{} = token, nil), do: permits?(token, :write)
+
+  def may_create_workspace?(%ApiToken{} = token, ws_id) when is_binary(ws_id),
+    do: seat_capabilities(token, membership(token, ws_id), ws_id).write
+
+  def may_create_workspace?(%User{} = user, ws_id) when is_binary(ws_id),
+    do: seat_capabilities(user, membership(user, ws_id), ws_id).write
+
+  def may_create_workspace?(_principal, _anchor_ws_id), do: false
+
+  @doc """
   True when the caller sits in a DRAFT-ONLY seat (`contributor`) and so may
   not publish, unpublish or delete a published document in `workspace_id`.
 

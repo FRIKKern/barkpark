@@ -271,8 +271,11 @@
       else start = end = added[1];
       if (start >= end) start = end = added[1];
     }
+    // task-56f93d9e467c5795: a backward selection (shift+left) stays
+    // backward, so the next shift+arrow moves the end the person moved.
+    var direction = el.selectionDirection || "none";
     el.value = change.value;
-    el.setSelectionRange(start, end);
+    el.setSelectionRange(start, end, start < end ? direction : "none");
   }
 
   // task-35956a566dd2c862: per free-text field, the number of the value this

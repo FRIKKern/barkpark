@@ -10830,10 +10830,6 @@ msgstr "Oppdatert av en annen bruker — endringene du ikke har lagret, beholdes
 msgid "%{count} more"
 msgstr "%{count} til"
 
-#: lib/barkpark_web/live/studio/studio_live/leave_ask.ex:54
-#, elixir-autogen, elixir-format
-msgid "Press again to leave."
-msgstr "Trykk igjen for å forlate."
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3661
 #, elixir-autogen, elixir-format
@@ -15993,3 +15989,18 @@ msgstr "Ingen resultater for"
 #, elixir-autogen, elixir-format
 msgid "Someone else rewrote %{fields} meanwhile. Your text is kept here, not saved: type on to save yours over theirs."
 msgstr "Noen andre skrev om %{fields} i mellomtiden. Teksten din er tatt vare på her, ikke lagret: skriv videre for å lagre din over deres."
+
+#: lib/barkpark_web/live/studio/studio_live/leave_scope.ex
+#, elixir-autogen, elixir-format
+msgid "Not saved: the page has moved to another project. Choose Stay or Leave first."
+msgstr "Ikke lagret: siden er flyttet til et annet prosjekt. Velg Bli her eller Forlat først."
+
+#: lib/barkpark_web/live/studio/studio_live/leave_scope.ex
+#, elixir-autogen, elixir-format
+msgid "Not reloaded: the page has moved to another project. Choose Stay or Leave first."
+msgstr "Ikke lastet inn på nytt: siden er flyttet til et annet prosjekt. Velg Bli her eller Forlat først."
+
+#: lib/barkpark_web/live/studio/studio_live/leave_scope.ex
+#, elixir-autogen, elixir-format
+msgid "Not opened: the page has moved to another project. Choose Stay or Leave first."
+msgstr "Ikke åpnet: siden er flyttet til et annet prosjekt. Velg Bli her eller Forlat først."
