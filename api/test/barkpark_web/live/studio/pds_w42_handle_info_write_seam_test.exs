@@ -74,6 +74,8 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # Lifecycle.sheets_persisted/2 — send_update, save-state indicator only
     {"{:sheets_persisted, payload}", :no_write},
     {"presence_diff", :no_write},
+    # LeaveAsk.stay/1 — the leave dialog closes (a patch back): assigns only
+    {":studio_leave_cleared", :no_write},
     # Lifecycle.document_changed/2 — `rebuild_panes` is a read
     {"{:document_changed, msg}", :no_write},
     # closed by pds-w42-paper-op-principal-gate (its own suite)
@@ -268,7 +270,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
       # 18 since `{:autosave_form, …}` went (task-c42545346b93cbb0).
-      assert length(heads) == 18,
+      assert length(heads) == 19,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 

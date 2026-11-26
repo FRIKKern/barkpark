@@ -91,9 +91,75 @@ defmodule Barkpark.Content.PortableTextMerge do
     t = edits(base, theirs)
 
     cond do
-      not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
-      crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
-      true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+      certain?(m, t) and certain?(t, m) -> lined_up(base, mine, theirs, m, t, opts)
+      (both = both_made(base, m, t)) != base -> line_up_again(base, both, mine, theirs, opts)
+      true -> whole_clash(mine, theirs)
+    end
+  end
+
+  defp line_up_again(was, base, mine, theirs, opts) do
+    {m, t} = {edits(base, mine), edits(base, theirs)}
+
+    with true <- certain?(m, t) and certain?(t, m),
+         {:ok, merged} <- lined_up(base, mine, theirs, m, t, opts),
+         true <- keeps_copies?(was, mine, theirs, merged) do
+      {:ok, merged}
+    else
+      {:clash, _texts, _view} = clash -> clash
+      false -> whole_clash(mine, theirs)
+    end
+  end
+
+  # The second line-up reads a block `both_made/3` swapped in as one both
+  # sides made. Each pass counts a side's gap on its own, so one block of a
+  # side can answer for two base blocks, one per pass, and an edit of the
+  # other side's is dropped (#28928 r2 review, B1). A block neither side had
+  # in the base must be in the merge at least as many times as the side
+  # that holds the most copies of it; else the merge is not certain.
+  defp keeps_copies?(was, mine, theirs, merged) do
+    in_base = MapSet.new(was, &shape/1)
+    got = Enum.frequencies_by(merged, &shape/1)
+    {m, t} = {Enum.frequencies_by(mine, &shape/1), Enum.frequencies_by(theirs, &shape/1)}
+
+    Enum.all?(Map.merge(m, t, fn _shape, a, b -> max(a, b) end), fn {shape, n} ->
+      MapSet.member?(in_base, shape) or Map.get(got, shape, 0) >= n
+    end)
+  end
+
+  defp lined_up(base, mine, theirs, m, t, opts) do
+    if crossed?(m, t),
+      do: crossed_view(base, mine, theirs, m, t),
+      else: three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+  end
+
+  # The base with each block one side changed taken as the other side's
+  # where the other side's gap over it holds that very block: an edit both
+  # made, one change. A gap that also added a block beside it (1 → 2) is
+  # then one insert of the side's, not a gap the line-up cannot read
+  # (task-61966bf38be95017: the same edit on both sides and a block one
+  # side added next to it was a whole clash).
+  defp both_made(base, m, t) do
+    made = Map.merge(also(m.gaps, t.at), also(t.gaps, m.at))
+    base |> Enum.with_index() |> Enum.map(fn {b, i} -> Map.get(made, i, b) end)
+  end
+
+  # Each base index of a gap of one side that the other changed to a block
+  # the gap holds: that block.
+  defp also(gaps, at) do
+    for {gone, new} <- gaps, reduce: %{} do
+      acc ->
+        # A block the gap holds once stands for one base block, not two.
+        {acc, _left} =
+          Enum.reduce(gone, {acc, Enum.frequencies_by(new, &shape/1)}, fn i, {acc, left} ->
+            with {:changed, b} <- Map.get(at, i),
+                 n when n > 0 <- Map.get(left, shape(b), 0) do
+              {Map.put(acc, i, b), Map.put(left, shape(b), n - 1)}
+            else
+              _ -> {acc, left}
+            end
+          end)
+
+        acc
     end
   end
 
@@ -263,7 +329,22 @@ defmodule Barkpark.Content.PortableTextMerge do
   blocks: the store still holds what a tab believed it held
   (`Forms.ObjectRebase`, task-00c56c6a88ed0b8f).
   """
-  def same_drawn?(a, b), do: Enum.map(list(a), &drawn/1) == Enum.map(list(b), &drawn/1)
+  def same_drawn?(a, b) do
+    {a, b} = {list(a), list(b)}
+
+    if past_cap?(a, b),
+      do: keyless(a) == keyless(b),
+      else: Enum.map(a, &drawn/1) == Enum.map(b, &drawn/1)
+  end
+
+  @doc """
+  Past `@max_objects` inline objects in the two values, nothing is drawn:
+  `same_drawn?/2` and `same_shape?/2` compare the blocks with their keys set
+  aside, as `over_cap/3` does (task-681d2fd0a0020ff8). Equal so is equal
+  drawn; a value that draws the same with other span keys reads as changed,
+  and the merge past the cap is a clash, never a silent write.
+  """
+  def past_cap?(a, b), do: objects(list(a)) + objects(list(b)) > @max_objects
 
   @doc """
   Whether two stored values are the same as the merge lines blocks up:
@@ -271,7 +352,13 @@ defmodule Barkpark.Content.PortableTextMerge do
   For two stored values; a page's posted HTML carries no such field
   (`same_drawn?/2`).
   """
-  def same_shape?(a, b), do: Enum.map(list(a), &shape/1) == Enum.map(list(b), &shape/1)
+  def same_shape?(a, b) do
+    {a, b} = {list(a), list(b)}
+
+    if past_cap?(a, b),
+      do: keyless(a) == keyless(b),
+      else: Enum.map(a, &shape/1) == Enum.map(b, &shape/1)
+  end
 
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []

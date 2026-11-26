@@ -184,15 +184,8 @@ defmodule BarkparkWeb.ObjectRichText do
   cannot read B's broadcast until the post is done, so A's socket reads the
   post as current, as two Chrome tabs did.
   """
-  def b_saves_inside(a, b, b_html, a_post),
-    do:
-      inside(
-        a,
-        fn ->
-          send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => b_html})
-        end,
-        a_post
-      )
+  def b_saves_inside(a, b, b_html, a_post, seen \\ nil),
+    do: inside(a, fn -> b_post(b, b_html, seen) end, a_post)
 
   @doc "`b_save` (any save of another view) run inside A's post, as `b_saves_inside/4`."
   def inside(a, b_save, a_post) do
@@ -217,9 +210,24 @@ defmodule BarkparkWeb.ObjectRichText do
     end
   end
 
-  def b_saves_rt(b, c, html, words) do
-    send_post(b, "doc[meta].rt", %{"doc[meta].label" => "l0", "doc[meta].rt" => html})
+  def b_saves_rt(b, c, html, words, seen \\ nil) do
+    b_post(b, html, seen)
     assert eventually(fn -> words(stored(c)["meta"]["rt"]) == words end)
+  end
+
+  # B's post of `doc[meta].rt`. `seen` nil: a page without bp-rt-remote.js.
+  # `:store`: a page with it that shows what is stored (its HTML built from
+  # the store): a number past every one B's socket gave, so B typed on the
+  # newest value its socket knows (task-0437fdf2f2a6ccba).
+  defp b_post(b, html, seen) do
+    fields = %{"doc[meta].label" => "l0", "doc[meta].rt" => html}
+
+    fields =
+      if seen == :store,
+        do: Map.put(fields, "_bp_rt_seen", ["doc[meta].rt|#{9_000_000_000_000_000_000}"]),
+        else: fields
+
+    send_post(b, "doc[meta].rt", fields)
   end
 
   @doc """

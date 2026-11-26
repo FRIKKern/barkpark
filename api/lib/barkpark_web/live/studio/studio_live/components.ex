@@ -2190,6 +2190,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         admin?={Caps.admin_affordance?(@caps)}
       />
 
+      <BarkparkWeb.Studio.StudioLive.LeaveAsk.asked a={assigns} />
+
       <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
       <%= if @confirm_modal do %>
         <% modal = @confirm_modal.action["modal"] || %{} %>

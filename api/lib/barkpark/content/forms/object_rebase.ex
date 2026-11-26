@@ -26,9 +26,11 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   is written as the tab read it; the store moved on, and the post is merged
   onto the store from it, and a clash keeps the store (the tab holds its
   words with the banner). Two tabs typing in one word wrote the later post
-  over the earlier with no word. A rich text with no `seen` (a page without
-  bp-rt-remote.js) is merged from `base`, and a clash is written as posted,
-  as before.
+  over the earlier with no word. A Studio post with no `_bp_rt_seen` (a page
+  without bp-rt-remote.js) is given `seen` from the value that page shows
+  (`UnderLock.values/3`, task-0437fdf2f2a6ccba). A rich text with no
+  `seen` here (another caller) is merged from `base`, and a clash is
+  written as posted, as before.
   """
 
   alias Barkpark.Content.PortableTextMerge
@@ -41,8 +43,11 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   @spec onto(map(), map(), map(), map() | nil, map()) :: map()
   def onto(params, base, theirs, schema, seen \\ %{})
 
-  def onto(params, base, theirs, %{fields: fields}, seen) when is_list(fields),
-    do: rebase(fields, params, base, theirs, {seen, []})
+  def onto(params, base, theirs, %{fields: fields}, seen) when is_list(fields) do
+    fields
+    |> rebase(params, base, theirs, {seen, []})
+    |> top_rich(fields, base, theirs, seen)
+  end
 
   def onto(params, _base, _theirs, _schema, _seen), do: params
 
@@ -146,6 +151,25 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
       _ ->
         []
     end
+  end
+
+  # A top-level rich text the post changed, with what the page showed
+  # (`seen`, `UnderLock.top/3`), task-fa07c64d344638fb: read as an object's
+  # is. Two tabs typing in it wrote the later post over the earlier with no
+  # word. With no `seen` it is written as posted, as before.
+  defp top_rich(params, fields, base, theirs, seen) do
+    Enum.reduce(fields, params, fn
+      %{"name" => key, "type" => "richText"}, acc when is_binary(key) ->
+        with {:ok, was} <- Map.fetch(seen, [key]),
+             {:ok, mine} when is_list(mine) <- Map.fetch(acc, key) do
+          Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
+        else
+          _ -> acc
+        end
+
+      _, acc ->
+        acc
+    end)
   end
 
   defp object(field, mine, base, theirs, {seen, at}) do
