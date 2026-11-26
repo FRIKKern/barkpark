@@ -14,7 +14,7 @@ import { JSDOM } from "./jsdom.mjs";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
 const { window } = dom;
-for (const name of ["document", "Element", "Event", "MouseEvent", "HTMLElement", "Node", "MutationObserver"]) {
+for (const name of ["document", "Element", "Event", "CustomEvent", "MouseEvent", "HTMLElement", "Node", "MutationObserver"]) {
   globalThis[name] = window[name];
 }
 globalThis.window = window;
