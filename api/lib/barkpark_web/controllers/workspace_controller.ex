@@ -113,6 +113,7 @@ defmodule BarkparkWeb.WorkspaceController do
 
     with :ok <- refuse_dataset_bound(token),
          :ok <- may_create_workspace(token),
+         :ok <- home_not_suspended(token),
          {:ok, workspace} <- Tenancy.create_workspace_with_owner(attrs, token) do
       conn
       |> put_status(:created)
@@ -127,6 +128,13 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp may_create_workspace(_token), do: {:error, :forbidden}
+
+  # A suspended workspace creates no other: a new, unsuspended one would step
+  # round the operator's stop (task-ca975477b8ca8a67). A token with no home
+  # (a signup PAT) has nothing to be suspended.
+  defp home_not_suspended(%ApiToken{workspace_id: home}) do
+    if Barkpark.Tenancy.Quota.suspended?(home), do: {:error, :workspace_suspended}, else: :ok
+  end
 
   # A dataset-bound token makes no project, no workspace and no import
   # (`ApiToken.dataset_bound?/1`). On the project route it is asked after the

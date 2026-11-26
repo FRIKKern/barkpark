@@ -75,6 +75,18 @@ defmodule Barkpark.Tenancy.Quota do
   def within_quota?(%Workspace{} = ws), do: room_for?(ws, 1)
 
   @doc """
+  Whether workspace `ws_id` is suspended, read from its row now: a socket's
+  struct is set at mount, and `suspend/2` tells no socket. `nil` (no
+  workspace) is not suspended. Creating a workspace asks it of the workspace
+  the create acts from (task-ca975477b8ca8a67).
+  """
+  @spec suspended?(binary() | nil) :: boolean()
+  def suspended?(ws_id) when is_binary(ws_id),
+    do: Repo.exists?(from(w in Workspace, where: w.id == ^ws_id and w.suspended))
+
+  def suspended?(_ws_id), do: false
+
+  @doc """
   Whether the workspace has room for `needed` MORE documents.
 
   This is the invariant the batch gate needs and `within_quota?/1` could not

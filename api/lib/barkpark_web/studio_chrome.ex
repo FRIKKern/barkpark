@@ -360,6 +360,9 @@ defmodule BarkparkWeb.StudioChrome do
       not Tenancy.Auth.may_create_workspace?(principal, id_of(socket.assigns[:current_workspace])) ->
         refuse_unseated_create(socket)
 
+      Tenancy.Quota.suspended?(id_of(socket.assigns[:current_workspace])) ->
+        refuse_suspended_create(socket)
+
       ApiToken.dataset_bound?(principal) ->
         refuse_bound_create(socket)
 
@@ -432,6 +435,18 @@ defmodule BarkparkWeb.StudioChrome do
   """
   def refuse_unseated_create(socket),
     do: put_flash(socket, :error, "You need write access in this workspace to create a workspace")
+
+  @doc """
+  The refusal for a create from a suspended workspace (`Tenancy.Quota.suspended?/1`).
+  One sentence for the chrome and for StudioLive's handler (task-ca975477b8ca8a67).
+  """
+  def refuse_suspended_create(socket),
+    do:
+      put_flash(
+        socket,
+        :error,
+        "This workspace is suspended, so no workspace can be created from it"
+      )
 
   # ── scope-menu state ──────────────────────────────────────────────────────
   #
