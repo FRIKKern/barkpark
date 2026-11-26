@@ -253,6 +253,41 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       assert_patch(a)
     end
 
+    # task-91730f627f3b7fdb: Leave replayed the press it asked about with no
+    # gate. The desk is admin only, so LiveScope's grant gates are not on its
+    # socket; what it can lose under the question is the token's write, which
+    # Caps reads fresh on every press.
+    test "the token loses write under the question: Leave on Create new is refused", c do
+      a = held(c)
+      render_hook(a, "new-document", %{"type" => c.type})
+      asks!(a)
+
+      hash = Barkpark.Auth.ApiToken.hash_token(c.conn.private.plug_session["api_token"])
+
+      {:ok, _} =
+        Barkpark.Auth.ApiToken
+        |> Barkpark.Repo.get_by!(token_hash: hash)
+        |> Ecto.Changeset.change(permissions: ["read"])
+        |> Barkpark.Repo.update()
+
+      html = a |> element(~s(#{@dialog} button[phx-click="desk-leave-go"])) |> render_click()
+
+      assert html =~ "You don&#39;t have access to do that."
+      refute has_element?(a, @dialog)
+      # Nothing was made: no new document's pane, and the held text is where it was.
+      assert title(a) == "T0 FAIL"
+      assert has_element?(a, @held)
+      assert :sys.get_state(a.pid).socket.assigns.desk_leave_pass == false
+    end
+
+    test "control: the token keeps write: Leave on Create new makes it", c do
+      a = held(c)
+      render_hook(a, "new-document", %{"type" => c.type})
+      html = a |> element(~s(#{@dialog} button[phx-click="desk-leave-go"])) |> render_click()
+      refute html =~ "You don&#39;t have access to do that."
+      assert_patch(a)
+    end
+
     test "a link that leaves the page: Leave is that link, and only a path on this site", c do
       a = held(c)
 
