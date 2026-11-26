@@ -276,7 +276,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   # `_mounts` is a connect param LiveView sets itself (phoenix_live_view
-  # 1.1.33: `connectParams`, phoenix_live_view.js:4324; one of the "reserved
+  # 1.1.33: `connectParams` in phoenix_live_view.js; one of the "reserved
   # params" in the `Phoenix.LiveView` docs): the times this view has mounted,
   # 0 on its first join, counting up on each reconnect. An upgrade that drops
   # it makes every join a first one: the deferred load, as before.
