@@ -131,8 +131,14 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   #     cards' (schema_definitions 4 -> 3).
   # Measured: dead 14 (documents 6, schema_definitions 3, workspaces 2,
   # content_edges 1, datasets 1, task_edges 1); both 27; slope still 0.0.
-  @dead_leg_budget 14
-  @both_legs_budget 27
+  #
+  # +1 on both (14→15, 27→28): the validator's seat lookup reads the reader's
+  # cached source (`Tenancy.get_default_workspace/0`, task-d2af427518739052),
+  # so the revision header and the body can never name different Default
+  # seats. A cache hit in prod, 0 statements; a query here only because test
+  # runs the cache off (TTL 0). Measured: dead 15 (workspaces 3), both 28.
+  @dead_leg_budget 15
+  @both_legs_budget 28
   @max_n_plus_one_slope 1.0
 
   setup do
