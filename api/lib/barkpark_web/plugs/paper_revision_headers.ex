@@ -88,8 +88,10 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   belt-and-braces on the read side, not the only thing standing between a
   write bug and a leak.
 
-  The flat spellings additionally scope to the Default workspace by slug — NO
-  project_id predicate (the public reader scopes by workspace only). No row
+  The flat spellings pick the row the public reader renders: the Default
+  (`is_default`) workspace with NO project_id predicate, unowned rows only, the
+  oldest of a same-slug tie (`public_paper_one_picker_test.exs` pins the
+  agreement). No row
   (including an unseeded Default workspace, or a `drafts.`-prefixed row) ever
   leaves the conn untouched.
   """
@@ -166,11 +168,15 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
       from document in Document,
         join: workspace in Workspace,
         on: document.workspace_id == workspace.id,
+        # The reader's resolver (`Content.get_public_paper/2`) row for row: the
+        # `is_default` workspace, unowned rows only (`scope_to_owner(nil)`), and
+        # of same-slug rows the oldest. Its own query, not a call to it, to keep
+        # the reader's statement budget (task-0db9c861491a2ab2).
         where:
-          workspace.slug == "default" and document.type == "paper" and
+          workspace.is_default and document.type == "paper" and
             document.dataset == ^dataset and document.doc_id == ^slug and
-            document.status == "published" and not like(document.doc_id, ^drafts_prefix),
-        # Same-slug rows in two projects: the oldest, the row the reader shows.
+            is_nil(document.owner_id) and document.status == "published" and
+            not like(document.doc_id, ^drafts_prefix),
         order_by: [asc: document.inserted_at, asc: document.id],
         limit: 1,
         select: %{
