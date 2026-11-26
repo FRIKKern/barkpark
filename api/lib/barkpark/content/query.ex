@@ -3887,7 +3887,7 @@ defmodule Barkpark.Content.Query do
       |> scope_to_owner(Keyword.get(opts, :caller_context))
       |> maybe_scope_to_grants(opts)
       |> maybe_published_only(opts)
-      |> order_by([d], asc: d.doc_id)
+      |> order_by([d], asc: d.doc_id, asc: d.inserted_at, asc: d.id)
       |> Repo.all()
     end
   end

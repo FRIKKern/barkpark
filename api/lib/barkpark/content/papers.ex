@@ -1697,8 +1697,8 @@ defmodule Barkpark.Content.Papers do
         # non-owner_scoped types whose rows carry a NULL `owner_id`, and the
         # same unowned-rows-only posture `get_document/4` reaches for an
         # anonymous caller when the type IS owner-scoped). The list return
-        # makes the type pick exact — a same-slug document of another type can
-        # never shadow the requested one.
+        # makes the type pick exact, and its order fixes the project pick: of
+        # same-slug rows in two projects the oldest wins (task-ebee9b54706a692b).
         #
         # `published_only: true` is HARD-CODED, not an opt: this resolver serves
         # ONLY anonymous public surfaces (every caller is a `get_public_*` entry

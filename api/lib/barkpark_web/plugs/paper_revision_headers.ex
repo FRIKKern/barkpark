@@ -170,6 +170,9 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
           workspace.slug == "default" and document.type == "paper" and
             document.dataset == ^dataset and document.doc_id == ^slug and
             document.status == "published" and not like(document.doc_id, ^drafts_prefix),
+        # Same-slug rows in two projects: the oldest, the row the reader shows.
+        order_by: [asc: document.inserted_at, asc: document.id],
+        limit: 1,
         select: %{
           released_revision_id: document.released_revision_id,
           content: document.content
