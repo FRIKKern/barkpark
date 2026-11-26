@@ -259,17 +259,6 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     end
   end
 
-  @doc """
-  The HTML an object rich text's editor draws for `value`, and its digest:
-  the owner entry carries the digest, so a post says which draw it was typed
-  on even when the owner `_key` comes back to an earlier one
-  (task-c0a696a3a5a3900d; `RichTextRemote.UnderLock` records the same).
-  """
-  def drawn_html(value) when value in [nil, "", []], do: ""
-  def drawn_html(value), do: Barkpark.Content.PortableText.to_html(value)
-
-  def drawn_digest(value), do: :erlang.phash2(drawn_html(value))
-
   defp render_subfield_guarded(assigns, %{type: t} = sub)
        when t not in @structured_ok_subfield_types do
     case get_value(assigns.value, sub.name, nil) do
@@ -282,6 +271,17 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp render_subfield_guarded(assigns, sub), do: render_subfield(assigns, sub)
+
+  @doc """
+  The HTML an object rich text's editor draws for `value`, and its digest:
+  the owner entry carries the digest, so a post says which draw it was typed
+  on even when the owner `_key` comes back to an earlier one
+  (task-c0a696a3a5a3900d; `RichTextRemote.UnderLock` records the same).
+  """
+  def drawn_html(value) when value in [nil, "", []], do: ""
+  def drawn_html(value), do: Barkpark.Content.PortableText.to_html(value)
+
+  def drawn_digest(value), do: :erlang.phash2(drawn_html(value))
 
   # The `bp-rich-text-editor` a top-level richText uses, bridged to a hidden
   # input by `BarkparkFieldBridge`. It has no block dialog of its own, so a
