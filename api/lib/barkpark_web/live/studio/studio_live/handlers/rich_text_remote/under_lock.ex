@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Path
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
@@ -106,13 +107,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
             {name,
              PortableText.from_html(html, list(shown_at(socket, shown, owners, name, path)))}
 
-    # A row's own value is the page's on the draw its post named.
-    page_on =
-      for {name, path, _html} <- texts,
-          row?(path),
-          {:ok, _key, digest} <- [owner(owners, name)],
-          into: own_page_on(socket),
-          do: {name, digest}
+    # A row's own value is the page's on the draw its post named, by the
+    # row's key (`RowDraws`): A's own move or delete shifts its index.
+    socket =
+      Enum.reduce(texts, socket, fn {name, path, _html}, s ->
+        case row?(path) && owner(owners, name) do
+          {:ok, key, digest} ->
+            RowDraws.record_own(s, path, {key, digest}, Map.fetch!(page, name))
+
+          _ ->
+            s
+        end
+      end)
 
     # A post typed on the remounted editor is the page's own value from now
     # on; one typed on the old mount leaves the remount still to come.
@@ -124,7 +130,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
     assign(socket,
       editor_rt_page: {PostIdentity.of(socket), page},
-      editor_rt_page_on: {PostIdentity.of(socket), page_on},
       editor_rt_rekeyed: {PostIdentity.of(socket), drawn}
     )
   end
@@ -140,9 +145,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   (`_bp_rt_owner[]`) changes with it (task-c29534c0655f0489). Until a post
   names the new key, the page may not show it yet (`values/4`). The mount
   draw and the numbers the page reported (`editor_rt_born`) are left as they
-  were. A row's rich text is recorded the same way: its wrapper id carries
-  the row's `_key`, so a row moved, added or taken out under an index
-  remounts it (task-82519fd79663e072).
+  were. A row's rich text is recorded by its row's `_key` (`RowDraws`): its
+  wrapper id carries the key, so a row moved, added or taken out under an
+  index remounts it (task-82519fd79663e072).
   """
   def remounted(socket, old_form, new_form) do
     old_form = old_form || %{}
@@ -155,12 +160,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       doc ->
         moved =
           for path <- RichTextRemote.every(socket.assigns[:editor_schema], new_form),
+              not row?(path),
               owner = Enum.drop(path, -1),
               key(FormPath.get(old_form, owner)) != key(FormPath.get(new_form, owner)),
               into: %{},
               do:
                 {RichTextRemote.input_name(path),
                  {to_string(key(FormPath.get(new_form, owner))), FormPath.get(new_form, path)}}
+
+        socket = RowDraws.record_form(socket, new_form)
 
         if moved == %{},
           do: socket,
@@ -231,7 +239,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         do: {name, path, html}
   end
 
-  defp row?(path), do: Enum.any?(path, &is_integer/1)
+  defp row?(path), do: RowDraws.row?(path)
 
   defp row_named?(owners, name, row) do
     case owner(owners, name) do
@@ -248,40 +256,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   end
 
   # What the page showed for `name`. An object's: `shown/2`. A row's: the
-  # draw its owner entry names by key and digest (task-82519fd79663e072):
-  # A's own last post on that draw, the remount that drew it, or the mount
-  # draw. None of them: `:unknown`, and the store is kept and A held
-  # (`ObjectRebase`, `act/5`), never written over.
+  # draw its owner entry names by row key and digest (`RowDraws`,
+  # task-82519fd79663e072): A's own last post on that draw, a value the
+  # socket took, or the mount draw. None of them: `:unknown`, and the store
+  # is kept and A held (`ObjectRebase`, `act/5`), never written over.
   defp was(socket, shown, owners, name, path) do
     if row?(path),
-      do: {:ok, row_draw(socket, owners, name)},
+      do: {:ok, row_draw(socket, owners, name, path)},
       else: Map.fetch(shown, name)
   end
 
-  defp row_draw(socket, owners, name) do
+  defp row_draw(socket, owners, name, path) do
     {:ok, key, digest} = owner(owners, name)
-    born = shown(socket)
 
-    cond do
-      Map.get(own_page_on(socket), name) == digest and Map.has_key?(own_page(socket), name) ->
-        Map.fetch!(own_page(socket), name)
-
-      match?({:ok, {^key, _}}, Map.fetch(rekeyed(socket), name)) and
-          CompositeField.drawn_digest(elem(Map.fetch!(rekeyed(socket), name), 1)) == digest ->
-        elem(Map.fetch!(rekeyed(socket), name), 1)
-
-      born_drawn?(socket, name, digest) ->
-        Map.fetch!(born, name)
-
-      true ->
-        :unknown
-    end
-  end
-
-  defp born_drawn?(socket, name, digest) do
-    case born(socket) do
-      %{^name => value} -> CompositeField.drawn_digest(value) == digest
-      _ -> false
+    case RowDraws.fetch(socket, path, key, digest) do
+      {:ok, value} -> value
+      :error -> :unknown
     end
   end
 
@@ -315,16 +305,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     case socket.assigns[:editor_rt_page] do
       {doc, %{} = page} when not is_nil(doc) ->
         if doc == PostIdentity.of(socket), do: page, else: %{}
-
-      _ ->
-        %{}
-    end
-  end
-
-  defp own_page_on(socket) do
-    case socket.assigns[:editor_rt_page_on] do
-      {doc, %{} = on} when not is_nil(doc) ->
-        if doc == PostIdentity.of(socket), do: on, else: %{}
 
       _ ->
         %{}
