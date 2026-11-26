@@ -118,14 +118,16 @@ defmodule BarkparkWeb.Studio.TopRichTextRejoinTest do
       )
   end
 
-  # A types " A1" and it lands; the page takes the confirmed digest. Then
-  # the socket drops: the page keeps its `_bp_seen` and its editor.
-  defp typed_then_dropped(c, surface) do
+  # A types " A1" and it lands; the page takes the confirmed digest (a
+  # page that lost the confirm keeps the drawn one: a B save is held all
+  # the same). Then the socket drops: the page keeps its `_bp_seen` and
+  # its editor.
+  defp typed_then_dropped(c, surface, confirm? \\ true) do
     a = open_tab(c, surface)
     seen = page(a)
     types(a, ["body0 A1"], seen)
     assert body(c) == ["body0 A1"]
-    seen = confirmed(a, seen)
+    seen = if confirm?, do: confirmed(a, seen), else: seen
     GenServer.stop(a.pid, :normal)
     seen
   end
@@ -167,7 +169,7 @@ defmodule BarkparkWeb.Studio.TopRichTextRejoinTest do
 
     test "#{surface}: B saves while A's page is away: held; typing on stays held, another field autosaves, a Save writes and autosave resumes",
          c do
-      seen = typed_then_dropped(c, unquote(surface))
+      seen = typed_then_dropped(c, unquote(surface), false)
       put_body(c, ["body0 A1 B5"])
       a2 = rejoined(c, unquote(surface))
 
@@ -196,7 +198,7 @@ defmodule BarkparkWeb.Studio.TopRichTextRejoinTest do
     end
 
     test "#{surface}: B saves while A's page is away; Reload takes B's and ends the pause", c do
-      seen = typed_then_dropped(c, unquote(surface))
+      seen = typed_then_dropped(c, unquote(surface), false)
       put_body(c, ["body0 A1 B5"])
       a2 = rejoined(c, unquote(surface))
       types(a2, ["body0 A1 A7"], seen)
