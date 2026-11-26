@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { lintPartCss } from '../build/css-lint.mjs'
+import { lintPartCss, PLACE_VARIABLES } from '../build/css-lint.mjs'
+import { SLOTS } from '../check/placement.mjs'
 import { EXTRA, KEYFRAMES, PHONE, PHONE_ONLY } from '../build/vocabulary.mjs'
 import { discoverParts } from '../build/parts.mjs'
 
@@ -126,6 +127,18 @@ describe('lintPartCss', () => {
     expect(lintPartCss('a { font: 0/0 a; }').join()).toMatch(/line 1: font is outside/)
     expect(lintPartCss('a { --bark-a-text: 0; font-size: var(--bark-a-text); }').join()).toMatch(/line 1: --bark-a-text .*0\.75rem or more/)
     expect(lintPartCss('a { --bark-a-text: 0.875rem; font-size: var(--bark-a-text); }')).toEqual([])
+  })
+
+  it('reads, apart from the skin, only a place UI SDK writes on a piece (check/placement.mjs SLOTS), with no fallback', () => {
+    expect(lintPartCss('a { left: var(--active-tab-left); width: var(--segmented-control-indicator-width); }')).toEqual([])
+    expect(lintPartCss('a { left: var(--active-tab-lefts); }').join()).toMatch(/line 1: left reads --active-tab-lefts/)
+    expect(lintPartCss('a { left: var(--anchor-width); }').join()).toMatch(/line 1: left reads --anchor-width/)
+    expect(lintPartCss('a { left: var(--active-tab-left, 0); }').join()).toMatch(/line 1: left gives --active-tab-left a fallback/)
+    for (const prop of ['color', 'background', 'border-color', 'fill', 'box-shadow'])
+      expect(lintPartCss(`a { ${prop}: var(--active-tab-left); }`).join(), prop).toMatch(new RegExp(`line 1: ${prop} reads --active-tab-left, a place UI SDK writes on a piece; a colour reads only`))
+  })
+  it('takes the places it allows from check/placement.mjs SLOTS itself: every custom property a slot names, and no other', () => {
+    expect([...PLACE_VARIABLES].sort()).toEqual(SLOTS.flatMap((s) => s.writes.map((w) => w.property)).filter((p) => p.startsWith('--')).sort())
   })
 
   // R2: every view part.css can target is one the check renders.

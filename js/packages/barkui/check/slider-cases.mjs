@@ -10,13 +10,13 @@ import { all, edit, each, esc, inDemo, lights, skinsSay } from './plants.mjs'
 // demo.mjs's lint refuses the word "style" spelled out: the plants spell it in two.
 const S = "const S = 'sty' + 'le'"
 const row = (d, html) => appendFileSync(join(d, 'example.html'), `<div data-demo-row>\n<span data-demo-label>Slider</span>\n${html}\n</div>\n`)
-const withSlider = (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), imports: [...JSON.parse(s).imports, '@ui-sdk/web/slider'] }, null, 2))
+export const withSlider = (d) => edit(join(d, 'part.json'), (s) => JSON.stringify({ ...JSON.parse(s), imports: [...JSON.parse(s).imports, '@ui-sdk/web/slider'] }, null, 2))
 const said = (p) => JSON.stringify(p?.parts?.button ?? {})
 const has = (s) => (p) => said(p).includes(JSON.stringify(s).slice(1, -1))
 const STYLE_FAIL = /in a style attribute|carries a style attribute/
 
 /** A UI SDK slider, one thumb per value ("20/60" is two), across or down. */
-const slider = (id, value, down = false) => `<ui-slider id="${id}" default-value="${value}"${down ? ' orientation="vertical"' : ''}>
+export const slider = (id, value, down = false) => `<ui-slider id="${id}" default-value="${value}"${down ? ' orientation="vertical"' : ''}>
   <ui-slider-control id="${id}-control"><ui-slider-track><ui-slider-indicator id="${id}-indicator"></ui-slider-indicator>${value
     .split('/')
     .map((_, i) => `<ui-slider-thumb id="${id}-thumb${i}" aria-label="Level ${i + 1}"></ui-slider-thumb>`)

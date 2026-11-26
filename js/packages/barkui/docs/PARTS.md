@@ -21,8 +21,9 @@ parts/<name>/
                 given twice in any case are refused. Two limits: a sentence that says it in other words
                 is not caught, and the row reads that the name stands in the sentence, not that the
                 sentence is about that thing; the list is printed under the part, so a reader sees it)
-  part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours; no literal, no
-                color-mix, no skin or scheme rule, no focus rule or outline; keeps to the properties in
+  part.css      the look over UI SDK's default: reads only --ui-* / --bark-* colours, and apart from them
+                only the places UI SDK writes on a piece (see "Placement"); no literal, no color-mix,
+                no skin or scheme rule, no focus rule or outline; keeps to the properties in
                 build/vocabulary.mjs, and to @media for the phone breakpoint and reduced motion only;
                 no escape, no keyframes of its own (see "part.css is judged as the browser parses it")
   example.html  the part in each state worth seeing, in UI SDK's printed markup (works with no script);
@@ -322,13 +323,16 @@ puts the old value back in the same task, so a reading taken now and then does n
 
 Apart from both, a third list has its own reason: UI SDK lays out the pieces of a control and sets how they take a
 press at run time, and that is where a piece sits and how it behaves, not how it looks. A piece is the element it
-is, inside its control (a `ui-slider` or a `ui-number-input`), and carries only what UI SDK writes on it, each
-property by its lines in the file that writes it (`components/slider/slider.js`,
-`components/number-input/number-input.js`, or the file named before the lines, in
+is, inside its control (a `ui-slider`, a `ui-number-input`, a `ui-tabs` or a `ui-segmented-control`), and carries
+only what UI SDK writes on it, each property by its lines in the file that writes it (`components/slider/slider.js`,
+`components/number-input/number-input.js`, `components/tabs/tabs.js`,
+`components/segmented-control/segmented-control.js`, or the file named before the lines, in
 `foundation/direct-manipulation/`), and only as one of the values UI SDK writes there, read as the browser gives it
 back. In a value, `{p}` is a place on the track, a number from 0 to 100: UI SDK writes every place as a percentage
-it clamps to that range (`percentOf`, in `components/slider/slider-values.js`). Every entry names its values; none
-takes any value. Which way the slider runs is not read: a piece may carry what UI SDK writes on it running across or
+it clamps to that range (`percentOf`, in `components/slider/slider-values.js`). `{px}` is a number of pixels, as
+JavaScript prints a number: the tabs and the segmented control measure the chosen item against its list
+(`layoutBox`, in `foundation/platform/layout.js`) and write the six sides of that box on their sliding indicator, and
+take them away while nothing is chosen. Every entry names its values; none takes any value. Which way the slider runs is not read: a piece may carry what UI SDK writes on it running across or
 running down. A number input's step button is the first `button` in its piece, the one UI SDK writes on
 (`el.querySelector("button")`, in `@ui-sdk/web`); a second button there carries nothing. It holds a press for the
 400 ms `repeat.js` gives it; `hold.js` also writes `-webkit-touch-callout: none` there, which the browser the check
@@ -353,6 +357,13 @@ runs drops, so it is not on the list.
   UI SDK number input, on its step buttons and scrub area.
 - On `ui-number-input-scrub-area`: `touch-action` as `none` (237), `user-select` as `none` (237),
   `-webkit-user-select` as `none` (237). UI SDK number input, on its step buttons and scrub area.
+- On `ui-tabs-indicator`: `--active-tab-left` as `{px}px` (47), `--active-tab-right` as `{px}px` (47),
+  `--active-tab-top` as `{px}px` (47), `--active-tab-bottom` as `{px}px` (47), `--active-tab-width` as `{px}px` (47),
+  `--active-tab-height` as `{px}px` (47). UI SDK tabs, on its indicator.
+- On `ui-segmented-control-indicator`: `--segmented-control-indicator-left` as `{px}px` (105),
+  `--segmented-control-indicator-right` as `{px}px` (105), `--segmented-control-indicator-top` as `{px}px` (105),
+  `--segmented-control-indicator-bottom` as `{px}px` (105), `--segmented-control-indicator-width` as `{px}px` (105),
+  `--segmented-control-indicator-height` as `{px}px` (105). UI SDK segmented control, on its indicator.
 
 Any other property, a box's property on an element that is not a box, a piece's property on any other element
 or on another piece, an anchor name no box hangs from, any other transition value, and a value UI SDK does not

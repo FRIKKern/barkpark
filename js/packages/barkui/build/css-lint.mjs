@@ -2,7 +2,15 @@
 // variables, never from a literal. It keeps to the vocabulary in vocabulary.mjs
 // (and to the values EXTRA there gives a property beyond it), and to the views
 // the check renders. Returns one message per finding.
+import { SLOTS } from '../check/placement.mjs'
 import { EXTRA, KEYFRAMES, MOTION_ONLY, PHONE, PHONE_ONLY, SMALLEST_TEXT_REM, VOCABULARY } from './vocabulary.mjs'
+
+/** Apart from the skin, the one kind of variable part.css may read: a place UI SDK writes on a piece of its control at
+    run time (check/placement.mjs SLOTS), such as the side of the chosen tab its sliding indicator stands at. It holds
+    a length or a percentage, never a colour, and the check holds the piece to the values UI SDK writes there. */
+export const PLACE_VARIABLES = new Set(SLOTS.flatMap((s) => s.writes.map((w) => w.property)).filter((p) => p.startsWith('--')))
+// The properties that carry a colour: a place is never read in one.
+const COLOUR_PROPERTY = /^(color|background|background-color|background-image|border|border-(top|right|bottom|left|inline|block)(-(start|end))?|border(-(top|right|bottom|left|inline|block)(-(start|end))?)?-color|box-shadow|fill|stroke|caret-color|accent-color|text-decoration|text-decoration-color)$/
 
 const NAMED = `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
 cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen
@@ -165,7 +173,8 @@ export function lintPartCss(css) {
     const named = value.match(NAMED_RE)
     if (named) found.push(`${at}: ${prop} uses the named colour "${named[2]}"`)
     for (const v of value.matchAll(/var\(\s*(--[\w-]+)\s*(,[^)]*)?\)/g)) {
-      if (!/^--(ui|bark)-/.test(v[1])) found.push(`${at}: ${prop} reads ${v[1]}; only --ui-* and --bark-* are allowed`)
+      if (PLACE_VARIABLES.has(v[1]) && COLOUR_PROPERTY.test(prop)) found.push(`${at}: ${prop} reads ${v[1]}, a place UI SDK writes on a piece; a colour reads only --ui-* and --bark-*`)
+      else if (!/^--(ui|bark)-/.test(v[1]) && !PLACE_VARIABLES.has(v[1])) found.push(`${at}: ${prop} reads ${v[1]}; only --ui-* and --bark-* are allowed, and the places UI SDK writes on a piece (check/placement.mjs SLOTS)`)
       if (v[2]) found.push(`${at}: ${prop} gives ${v[1]} a fallback; the sheet sets every variable`)
     }
   }
