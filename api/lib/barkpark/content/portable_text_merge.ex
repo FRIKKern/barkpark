@@ -91,10 +91,47 @@ defmodule Barkpark.Content.PortableTextMerge do
     t = edits(base, theirs)
 
     cond do
-      not (certain?(m, t) and certain?(t, m)) -> whole_clash(mine, theirs)
-      crossed?(m, t) -> crossed_view(base, mine, theirs, m, t)
-      true -> three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+      certain?(m, t) and certain?(t, m) -> lined_up(base, mine, theirs, m, t, opts)
+      (both = both_made(base, m, t)) != base -> line_up_again(both, mine, theirs, opts)
+      true -> whole_clash(mine, theirs)
     end
+  end
+
+  defp line_up_again(base, mine, theirs, opts) do
+    {m, t} = {edits(base, mine), edits(base, theirs)}
+
+    if certain?(m, t) and certain?(t, m),
+      do: lined_up(base, mine, theirs, m, t, opts),
+      else: whole_clash(mine, theirs)
+  end
+
+  defp lined_up(base, mine, theirs, m, t, opts) do
+    if crossed?(m, t),
+      do: crossed_view(base, mine, theirs, m, t),
+      else: three_way(base, m, t, Keyword.get(opts, :inline, true) && keys(mine, theirs))
+  end
+
+  # The base with each block one side changed taken as the other side's
+  # where the other side's gap over it holds that very block: an edit both
+  # made, one change. A gap that also added a block beside it (1 → 2) is
+  # then one insert of the side's, not a gap the line-up cannot read
+  # (task-61966bf38be95017: the same edit on both sides and a block one
+  # side added next to it was a whole clash).
+  defp both_made(base, m, t) do
+    made = Map.merge(also(m.gaps, t.at), also(t.gaps, m.at))
+    base |> Enum.with_index() |> Enum.map(fn {b, i} -> Map.get(made, i, b) end)
+  end
+
+  # Each base index of a gap of one side that the other changed to a block
+  # the gap holds: that block.
+  defp also(gaps, at) do
+    for {gone, new} <- gaps,
+        shapes = MapSet.new(new, &shape/1),
+        i <- gone,
+        {:changed, b} <- [Map.get(at, i)],
+        MapSet.member?(shapes, shape(b)),
+        into: %{},
+        do: {i, b}
   end
 
   # Inline objects (children that are not spans) of a value.

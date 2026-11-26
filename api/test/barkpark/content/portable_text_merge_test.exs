@@ -64,6 +64,71 @@ defmodule Barkpark.Content.PortableTextMergeTest do
     assert words(merged) == ["one!"]
   end
 
+  # task-61966bf38be95017 (#28896 r2): mine's gap over the block was one
+  # base block for two, and the line-up refused it before seeing that
+  # theirs made the same edit.
+  describe "the same edit on both sides, and a block one side added next to it" do
+    test "mine added the block: mine, merged" do
+      was = [b("k1", "one two")]
+      theirs = [b("k1", "one two a1")]
+      mine = [b("k1", "one two a1"), b("x1", "alpha beta")]
+      assert {:ok, merged} = M.merge(was, mine, theirs)
+      assert merged == mine
+    end
+
+    test "mine's block under another key, the block added before it: merged, keys unique" do
+      was = [b("k1", "one two")]
+      theirs = [b("k1", "one two a1")]
+
+      for mine <- [
+            [b("zz", "one two a1"), b("x1", "alpha beta")],
+            [b("x1", "alpha beta"), b("zz", "one two a1")]
+          ] do
+        assert {:ok, merged} = M.merge(was, mine, theirs)
+        assert M.same_drawn?(merged, mine)
+        assert keys_unique?(merged)
+      end
+    end
+
+    test "theirs added the block: theirs, merged" do
+      was = [b("k1", "one two"), b("k2", "three")]
+      theirs = [b("k1", "one two a1"), b("t1", "gamma"), b("k2", "three")]
+      mine = [b("k1", "one two a1"), b("k2", "three")]
+      assert {:ok, merged} = M.merge(was, mine, theirs)
+      assert merged == theirs
+    end
+
+    test "each side's other changes are kept" do
+      was = [b("k1", "one two"), b("k2", "three"), b("k3", "four"), b("k4", "five")]
+      theirs = [b("k1", "one two a1"), b("k2", "three"), b("k3", "four"), b("k4", "FIVE")]
+
+      mine = [
+        b("k1", "one two a1"),
+        b("x1", "alpha"),
+        b("k2", "three"),
+        b("k3", "FOUR"),
+        b("k4", "five")
+      ]
+
+      assert {:ok, merged} = M.merge(was, mine, theirs)
+      assert words(merged) == ["one two a1", "alpha", "three", "FOUR", "FIVE"]
+    end
+
+    test "a different edit to that block is still a clash" do
+      was = [b("k1", "one two")]
+      theirs = [b("k1", "one two a1")]
+      mine = [b("k1", "one two m1"), b("x1", "alpha beta")]
+      assert {:clash, ["one two a1"], ^mine} = M.merge(was, mine, theirs)
+    end
+
+    test "both added a block at that place: still a clash" do
+      was = [b("k1", "one two")]
+      theirs = [b("k1", "one two a1"), b("t1", "gamma")]
+      mine = [b("k1", "one two a1"), b("x1", "alpha beta")]
+      assert {:clash, _, ^mine} = M.merge(was, mine, theirs)
+    end
+  end
+
   test "two identical paragraphs, B edits one and A the other: a clash, never a pick" do
     base = [b("p1", "same"), b("p2", "same")]
     theirs = [b("p1", "same"), b("p2", "same B")]
