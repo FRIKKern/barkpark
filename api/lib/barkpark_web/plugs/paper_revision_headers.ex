@@ -89,10 +89,11 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   write bug and a leak.
 
   The flat spellings pick the row the public reader renders: the Default
-  workspace as `Tenancy.get_default_workspace/0` reads it (the reader's cached
-  source), NO project_id predicate, unowned rows only, the oldest of a
-  same-slug tie (`public_paper_one_picker_test.exs`,
-  `public_paper_default_seat_cache_test.exs` pin the agreement). No row
+  workspace as `Tenancy.get_default_workspace/0` reads it, read once and handed
+  to the reader as `conn.assigns.public_paper_workspace`; NO project_id
+  predicate, unowned rows only, the oldest of a same-slug tie
+  (`public_paper_one_picker_test.exs`, `public_paper_default_seat_cache_test.exs`
+  and `public_paper_seat_once_test.exs` pin the agreement). No row
   (including an unseeded Default workspace, or a `drafts.`-prefixed row) ever
   leaves the conn untouched.
   """
@@ -127,16 +128,16 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   end
 
   def call(%Plug.Conn{path_info: ["papers", slug]} = conn, _opts) do
-    respond(conn, default_public_paper(slug, Content.paper_default_dataset()))
+    public_paper(conn, slug, Content.paper_default_dataset())
   end
 
   def call(%Plug.Conn{path_info: ["d", dataset, "papers", slug]} = conn, _opts) do
-    respond(conn, default_public_paper(slug, dataset))
+    public_paper(conn, slug, dataset)
   end
 
   def call(conn, _opts), do: conn
 
-  # Same published-perspective clamp as `default_public_paper/2` below —
+  # Same published-perspective clamp as `default_public_paper/3` below —
   # `status == "published"` AND `doc_id` not `drafts.`-prefixed. See the
   # moduledoc's "Scoping (fail closed)" section.
   defp scoped_paper(workspace, project, slug) do
@@ -162,18 +163,20 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   # the same `not like/2` idiom `Content.Query.maybe_published_only/2` applies
   # everywhere else on the anonymous/public read path (D5). See the
   # moduledoc's "Scoping (fail closed)" section.
-  defp default_public_paper(slug, dataset) do
-    # The Default seat from the reader's own source, `get_default_workspace/0`
-    # (`DefaultScopeCache`), not a live `is_default` join: when the cache still
-    # holds an old seat, the reader serves that seat's paper and the validator
-    # must name it too (task-d2af427518739052). Unseeded: no validator.
-    case Barkpark.Tenancy.get_default_workspace() do
-      %Workspace{id: ws_id} when is_binary(ws_id) -> default_public_paper(slug, dataset, ws_id)
-      _ -> nil
-    end
+  # The Default seat is read ONCE per request and handed to the reader's dead
+  # render as `conn.assigns.public_paper_workspace` (`BulldocsLive` reads it with
+  # `assign_new/3`), so a cache expiry or bust between plug and reader cannot
+  # split the validator from the body (task-8574bb40259a788a). Unseeded: nil
+  # seat, no validator, and the reader 404s on the same nil.
+  defp public_paper(conn, slug, dataset) do
+    seat = Barkpark.Tenancy.get_default_workspace()
+
+    conn
+    |> assign(:public_paper_workspace, seat)
+    |> respond(default_public_paper(slug, dataset, seat))
   end
 
-  defp default_public_paper(slug, dataset, ws_id) do
+  defp default_public_paper(slug, dataset, %Workspace{id: ws_id}) when is_binary(ws_id) do
     drafts_prefix = drafts_like_prefix()
 
     Repo.one(
@@ -195,6 +198,8 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
         }
     )
   end
+
+  defp default_public_paper(_slug, _dataset, _seat), do: nil
 
   defp drafts_like_prefix, do: DraftId.drafts_prefix() <> "%"
 

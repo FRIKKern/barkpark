@@ -1680,35 +1680,29 @@ defmodule Barkpark.Content.Papers do
 
   @doc """
   `get_public_document/3` that ALSO returns the resolved Default `%Workspace{}`
-  — `{doc, workspace}` or `nil`. The am-w1-s3 reader dedupe seam: the public
-  reader needs the workspace row again after the read (theme identity), and
-  re-fetching what this resolve already loaded was a measured per-mount
-  statement. Same pinned-Default scoping, same fail-closed posture.
+  — `{doc, workspace}` or `nil` (am-w1-s3: the reader reuses the row for its
+  theme instead of a per-mount re-read). Same scoping, same fail-closed posture.
   """
   def get_public_document_with_workspace(type, slug, dataset \\ @paper_default_dataset)
-      when is_binary(type) and is_binary(slug) do
-    case Barkpark.Tenancy.get_default_workspace() do
+      when is_binary(type) and is_binary(slug),
+      do: get_public_document_in(Barkpark.Tenancy.get_default_workspace(), type, slug, dataset)
+
+  @doc "`get_public_document_with_workspace/3` in a seat the caller resolved (task-8574bb40259a788a)."
+  def get_public_document_in(workspace, type, slug, dataset) do
+    case workspace do
       %{id: ws_id} = workspace when is_binary(ws_id) ->
         # Typeless batched read + type pick, NOT `get_document/4`: the typed
-        # read pays an `owner_scoped?` schema round-trip on every call, pure
-        # overhead on this public pinned-tenant resolve (am-w1-s3). The scoping
-        # stack is the documented typeless-read precedent
-        # (`Query.resolve_docs_by_ids/3` — dataset + workspace_or_global +
-        # unconditional `scope_to_owner(nil)`, byte-identical for
-        # non-owner_scoped types whose rows carry a NULL `owner_id`, and the
-        # same unowned-rows-only posture `get_document/4` reaches for an
-        # anonymous caller when the type IS owner-scoped). Type pick exact; of
+        # read pays an `owner_scoped?` schema round-trip on every call (am-w1-s3).
+        # The scoping is `Query.resolve_docs_by_ids/3`'s (dataset + workspace +
+        # unconditional `scope_to_owner(nil)`, the unowned-rows-only posture
+        # `get_document/4` gives an anonymous caller). Type pick exact; of
         # same-slug rows in two projects the oldest wins (task-ebee9b54706a692b).
         #
-        # `published_only: true` is HARD-CODED, not an opt: this resolver serves
-        # ONLY anonymous public surfaces (every caller is a `get_public_*` entry
-        # point), and leaving the perspective opt-in is exactly what opened the
-        # leak. `slug` is a caller-supplied doc_id, so the bare spelling AND the
-        # `drafts.` spelling are both addressable here; the clamp's prefix
-        # conjunct (`Query.maybe_published_only/2`) is what makes
-        # `GET /papers/drafts.<slug>` a 404 instead of the unpublished body.
-        # Anything that legitimately reads a draft (the Studio, an authorized
-        # scope) goes through `get_paper/3` / `get_document/4`, never here.
+        # `published_only: true` is HARD-CODED: every caller is an anonymous
+        # `get_public_*` surface, and an opt-in perspective is what opened the
+        # leak. The clamp's prefix conjunct (`Query.maybe_published_only/2`)
+        # makes `GET /papers/drafts.<slug>` a 404, not the unpublished body; a
+        # legitimate draft read goes through `get_paper/3` / `get_document/4`.
         doc =
           [slug]
           |> Content.resolve_docs_by_ids(dataset, workspace_id: ws_id, published_only: true)
@@ -1726,9 +1720,12 @@ defmodule Barkpark.Content.Papers do
   see `get_public_document_with_workspace/3`.
   """
   def get_public_paper_with_workspace(slug, dataset \\ @paper_default_dataset)
-      when is_binary(slug) do
-    get_public_document_with_workspace(@paper_type, slug, dataset)
-  end
+      when is_binary(slug),
+      do: get_public_document_with_workspace(@paper_type, slug, dataset)
+
+  @doc "`get_public_paper_with_workspace/2` in an already-resolved seat."
+  def get_public_paper_in(workspace, slug, dataset) when is_binary(slug),
+    do: get_public_document_in(workspace, @paper_type, slug, dataset)
 
   @doc """
   The paper's block list, or `nil` for an HTML-only (legacy) paper.
