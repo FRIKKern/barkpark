@@ -197,6 +197,17 @@ defmodule BarkparkWeb.Studio.StudioLeaveRegateTest do
       refute html =~ "outside your access grant"
     end
 
+    test "every write grant revoked with a field held: a link held back still asks", c do
+      a = hold(open(c.conn_a, c.doc), open(c.conn_b, c.doc))
+      assert {:ok, _} = Access.revoke(c.broad.id, c.grantor)
+      assert {:ok, _} = Access.revoke(c.narrow.id, c.grantor)
+      _ = :sys.get_state(a.pid)
+
+      html = render_click(a, "studio-leave", %{"href" => "/papers", "kind" => ""})
+      assert has_element?(a, ~s|#{@dialog} a[data-desk-leave-go][href="/papers"]|)
+      refute html =~ "outside your access grant"
+    end
+
     test "room for one more document: Leave makes it once; the quota counts one create", c do
       {a, n0} = asked(c)
       ws = Barkpark.Tenancy.get_workspace_by_id(c.ws.id)
