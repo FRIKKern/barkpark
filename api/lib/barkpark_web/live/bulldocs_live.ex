@@ -170,6 +170,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # the anonymous COUNT is made of.
       |> assign(:paper_actor, PaperActor.from_assigns(socket.assigns))
       |> assign(:paper_workspace_id, paper.workspace_id)
+      |> assign(:paper_project_id, Map.get(paper, :project_id))
       |> assign(
         :presence_topic,
         PaperPresence.topic(paper.workspace_id, Map.get(paper, :project_id), dataset, slug)
@@ -1453,36 +1454,35 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_info({:paper_op, %{"op" => _} = op}, socket),
     do: {:noreply, Edit.apply_op(socket, op)}
 
-  # An atomic batch broadcasts one receipt for several blocks, without a
-  # per-block HTML fragment. Re-read the saved tree so connected readers keep
-  # every changed block and its unchanged siblings in the stream.
+  # Another project's same-slug paper shares the topic (task-62ff63f43817eb08).
+  def handle_info({tag, %{project_id: p}}, %{assigns: %{paper_project_id: own}} = s)
+      when tag in [:paper_block, :paper_updated] and is_binary(p) and is_binary(own) and p != own,
+      do: {:noreply, s}
+
+  # An atomic batch broadcasts one receipt without per-block HTML: re-read the
+  # saved tree so readers keep every changed block and its siblings in order.
   def handle_info({:paper_block, %{op_kind: :batch}}, socket),
     do: {:noreply, refetch(socket)}
 
   def handle_info({:paper_block, frame}, socket) do
     cond do
-      # A cached delta fragment cannot carry fresh metadata for `paper-links`.
-      # Re-resolve the complete block list whenever this reader has one.
+      # A cached fragment cannot carry fresh `paper-links` metadata: re-resolve.
       socket.assigns[:paper_link_refs] != [] ->
         {:noreply, refetch(socket)}
 
-      # An in-order external delta must refresh the ignored contextual editors,
-      # not only the reader stream. Reconcile from the same authoritative tree
-      # so a Table's shape/eligibility echo cannot lag its stored revision.
+      # An external delta must refresh the ignored contextual editors too, from
+      # the stored tree, so a Table's shape echo cannot lag its revision.
       socket.assigns[:editing?] == true ->
         {:noreply, refetch(socket)}
 
-      # First block delta to a view still in HTML-only mode: we have no stream
-      # to append onto, so adopt the block list wholesale via a refetch rather
-      # than blindly inserting one item over the opaque HTML body.
+      # First block delta to a view still in HTML-only mode: no stream to
+      # append onto, so adopt the block list wholesale via a refetch.
       not socket.assigns.block_mode ->
         {:noreply, refetch(socket)}
 
-      # A canvas batch (`paper-ops`) broadcasts ONE frame with op_kind: :batch
-      # and NO fragment_html: there is nothing to paint per block. Streaming
-      # that nil fragment over the last touched block blanked it in every
-      # View-mode reader while an editor typed. Re-read the document instead,
-      # exactly as the rev-gap path does.
+      # A canvas batch (`paper-ops`) frame has NO fragment_html: streaming it
+      # blanked the last touched block in every View-mode reader while an
+      # editor typed. Re-read the document, as the rev-gap path does.
       is_nil(Map.get(frame, :fragment_html)) ->
         {:noreply, refetch(socket)}
 
