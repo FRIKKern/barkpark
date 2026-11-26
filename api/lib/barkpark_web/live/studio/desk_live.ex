@@ -115,6 +115,10 @@ defmodule BarkparkWeb.Studio.DeskLive do
       |> assign(:desk_tool, nil)
       # The navbar's workspace, project and dataset card (`ScopeSwitch`): closed.
       |> assign(:desk_scope, nil)
+      # A rejoin after the socket dropped: its first render must hold the
+      # open document's editor, or the join patch drops the one the browser
+      # has, with what was typed offline (task-2f3d3e3835f2a755).
+      |> assign(:desk_rejoin?, rejoin?(connected?(socket) && get_connect_params(socket)))
       |> Bulk.init()
       # The navbar's Tasks sidebar (`TasksPanel`): offered while the Tasks
       # plugin is on for the workspace, closed until its button is pressed.
@@ -253,10 +257,32 @@ defmodule BarkparkWeb.Studio.DeskLive do
 
     # The pane's frame goes out with this patch; the editor follows in the
     # next message, so a click is answered before the document is loaded.
-    if target = socket.assigns.pending, do: send(self(), {:desk_edit, target})
+    # On a rejoin's first patch the pending document loads here instead,
+    # so the join render holds its editor in place (`rejoin?/1`).
+    {rejoin?, socket} =
+      {socket.assigns[:desk_rejoin?] == true, assign(socket, :desk_rejoin?, false)}
 
-    {:noreply, socket}
+    case socket.assigns.pending do
+      nil ->
+        {:noreply, socket}
+
+      target when rejoin? ->
+        EditorHost.edit(socket, target)
+
+      target ->
+        send(self(), {:desk_edit, target})
+        {:noreply, socket}
+    end
   end
+
+  # `_mounts` is a connect param LiveView sets itself (phoenix_live_view
+  # 1.1.33: `connectParams`, phoenix_live_view.js:4324; one of the "reserved
+  # params" in the `Phoenix.LiveView` docs): the times this view has mounted,
+  # 0 on its first join, counting up on each reconnect. An upgrade that drops
+  # it makes every join a first one: the deferred load, as before.
+  @doc false
+  def rejoin?(%{"_mounts" => n}) when is_integer(n) and n > 0, do: true
+  def rejoin?(_connect_params), do: false
 
   # The same last pane after a patch that changed only its params (Inspect,
   # a view tab): the title it has is kept. The edit pane's title comes from
