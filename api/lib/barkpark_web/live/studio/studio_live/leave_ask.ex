@@ -116,7 +116,7 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
 
   This is LiveView 1.1's own reducer, `Phoenix.LiveView.Lifecycle.handle_event/3`,
   which is private to LiveView (`@moduledoc false`). An upgrade that renames
-  or reshapes it reds `studio_back_leave_dialog_test.exs`'s "a revoked grant"
+  or reshapes it reds `studio_leave_regate_test.exs`'s "revoked under the question"
   tests, rather than letting a stored press skip the gates.
   """
   def hooks(event, params, socket) do

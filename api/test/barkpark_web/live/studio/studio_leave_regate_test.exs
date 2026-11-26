@@ -147,7 +147,7 @@ defmodule BarkparkWeb.Studio.StudioLeaveRegateTest do
 
       {:ok,
        conn_a: Plug.Test.init_test_session(conn, %{"user_session" => raw}),
-       conn_b: Plug.Test.init_test_session(build_conn(), %{"api_token" => raw_b}),
+       conn_b: Plug.Test.init_test_session(scoped_conn(), %{"api_token" => raw_b}),
        broad: broad,
        narrow: narrow,
        grantor: grantor,

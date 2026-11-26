@@ -198,9 +198,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   end
 
   # Leave: the patch or the press asked about goes on, past the guard once.
-  # A press passed every handle_event hook when it was made (Caps, the quota
-  # gate, LiveScope's grant gates, write admission, …); it passes the same
-  # list again here, through the reducer LiveView ran it through, as a grant
+  # A press passed every handle_event hook when it was made (LiveScope's
+  # grant gates, Caps, the quota gate, …); it passes the same list again here, through the reducer LiveView ran it through, as a grant
   # may have gone while the question was open (#28937 review, B1). A hook
   # added later is in that list too.
   defp leave_go(socket) do
