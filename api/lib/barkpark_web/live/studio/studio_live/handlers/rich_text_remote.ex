@@ -372,7 +372,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         end)
 
       socket
-      |> assign(editor_rt_born: born)
+      |> assign(editor_rt_born: born, editor_rt_born_doc: PostIdentity.of(socket))
       |> send_values(values)
     end
   end
@@ -399,7 +399,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_folded: %{},
         editor_rt_held: %{},
         editor_rt_clash: %{},
-        editor_rt_born: %{}
+        editor_rt_born: %{},
+        editor_rt_page: nil
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end
@@ -460,6 +461,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   @doc "Each rich text path inside an object or a row whose drawn value changed."
   def changes(schema, old_form, new_form), do: paths(schema, old_form, new_form, :changed)
+
+  @doc "Each rich text path inside an object or a row of `form`."
+  def every(schema, form) when is_map(form),
+    do: for({path, _, _} <- paths(schema, form, form, :all), do: path)
+
+  def every(_schema, _form), do: []
 
   # Every rich text path inside an object or a row (`:all`), or each one whose
   # drawn value differs between the two forms (`:changed`).

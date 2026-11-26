@@ -510,19 +510,21 @@ defmodule Barkpark.Content.PortableTextMerge do
 
   # A merge can put two blocks with one `_key` side by side (each side kept
   # the key of the base block it changed): the later one gets a new key.
+  # `next` carries each key's counter, so d blocks sharing a key cost d
+  # tries, not d² (task-d1eb66738fe73ed0, as `unique_objects/1`).
   defp unique_keys(blocks) do
     {out, _} =
-      Enum.map_reduce(blocks, MapSet.new(), fn
-        %{"_key" => k} = b, seen when is_binary(k) ->
+      Enum.map_reduce(blocks, {MapSet.new(), %{}}, fn
+        %{"_key" => k} = b, {seen, next} when is_binary(k) ->
           if MapSet.member?(seen, k) do
-            k2 = fresh(k, seen, 1)
-            {Map.put(b, "_key", k2), MapSet.put(seen, k2)}
+            {k2, n} = fresh_n(k, seen, Map.get(next, k, 1))
+            {Map.put(b, "_key", k2), {MapSet.put(seen, k2), Map.put(next, k, n + 1)}}
           else
-            {b, MapSet.put(seen, k)}
+            {b, {MapSet.put(seen, k), next}}
           end
 
-        b, seen ->
-          {b, seen}
+        b, acc ->
+          {b, acc}
       end)
 
     out
@@ -570,11 +572,6 @@ defmodule Barkpark.Content.PortableTextMerge do
   defp fresh_n(k, seen, n) do
     k2 = "#{k}m#{n}"
     if MapSet.member?(seen, k2), do: fresh_n(k, seen, n + 1), else: {k2, n}
-  end
-
-  defp fresh(k, seen, n) do
-    k2 = "#{k}m#{n}"
-    if MapSet.member?(seen, k2), do: fresh(k, seen, n + 1), else: k2
   end
 
   defp text(%{"children" => children}) when is_list(children),
