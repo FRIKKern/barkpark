@@ -682,6 +682,49 @@ defmodule Barkpark.Content.PortableTextMergeInlineTest do
       end
     end
 
+    # task-d28db1ff76655ff2 (#28927 r2 review E6, E6b): one side re-keys
+    # base's shared link on both its places (an API client, a key swap).
+    # Each side still holds that content under one key: it stays one link.
+    for {name, mk, tk, want} <- [
+          {"mine re-keys d1 -> m1 (E6)", "m1", "d1", "d1"},
+          {"theirs re-keys d1 -> t1 (E6b)", "d1", "t1", "t1"}
+        ] do
+      test "a link base shares stays one def when #{name} on both its places" do
+        link = fn k -> %{"_key" => k, "_type" => "link", "href" => "https://x.example"} end
+
+        side = fn two, six, k ->
+          block(
+            "k",
+            [
+              span("a", "one "),
+              span("b", two, [k]),
+              span("c", " five "),
+              span("d", six, [k]),
+              span("e", " end")
+            ],
+            [link.(k)]
+          )
+        end
+
+        assert {:ok, blk} =
+                 Inline.merge(
+                   side.("two", "six", "d1"),
+                   side.("TWO", "six", unquote(mk)),
+                   side.("two", "SIX", unquote(tk))
+                 )
+
+        assert Enum.map(blk["children"], &{&1["text"], &1["marks"]}) == [
+                 {"one ", []},
+                 {"TWO", [unquote(want)]},
+                 {" five ", []},
+                 {"SIX", [unquote(want)]},
+                 {" end", []}
+               ]
+
+        assert blk["markDefs"] == [link.(unquote(want))]
+      end
+    end
+
     # #28927 review: base already shares d1 between "two" and "six". Mine
     # retypes two, theirs retypes six; both keep d1. It stays one def.
     test "a def base already shares stays one def when each side retypes one of its places" do

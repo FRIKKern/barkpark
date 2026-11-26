@@ -343,7 +343,10 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
   # The marks on theirs' letters outside [a, b): theirs' links the result
   # keeps. A def base, mine and theirs all hold under one key with one
   # content is base's own, which both sides kept: one link base already
-  # shares stays one def (#28927 review), not another link of theirs.
+  # shares stays one def (#28927 review), not another link of theirs. So is
+  # one whose content base, mine and theirs each hold under exactly one key:
+  # a side that re-keyed every use of base's link still has that one link
+  # (task-d28db1ff76655ff2, #28927 r2 review S1).
   defp kept_marks(theirs, a, b, {bd, md, td}) do
     {marks, _} =
       Enum.reduce(theirs["children"], {MapSet.new(), 0}, fn c, {acc, o} ->
@@ -357,7 +360,11 @@ defmodule Barkpark.Content.PortableTextMerge.Inline do
         {acc, o + n}
       end)
 
-    MapSet.reject(marks, fn k -> is_map_key(bd, k) and bd[k] == md[k] and bd[k] == td[k] end)
+    MapSet.reject(marks, fn k ->
+      (is_map_key(bd, k) and bd[k] == md[k] and bd[k] == td[k]) or
+        (is_map_key(td, k) and
+           Enum.all?([bd, md, td], &(Enum.count(&1, fn {_, d} -> d == td[k] end) == 1)))
+    end)
   end
 
   defp object(value, ms, bkey, st) do
