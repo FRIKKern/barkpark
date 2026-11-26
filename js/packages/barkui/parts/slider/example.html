@@ -1,0 +1,63 @@
+<div data-demo-row>
+  <span data-demo-label>One thumb, at rest</span>
+  <ui-field id="slider-volume-field" data-slot="field">
+    <ui-slider id="slider-volume" default-value="40" data-slot="slider" role="group" data-orientation="horizontal">
+      <div data-slider-row>
+        <ui-field-label id="slider-volume-label" data-slot="field-label" for="slider-volume-thumb-0">Volume</ui-field-label>
+        <ui-slider-value id="slider-volume-value" data-text data-slot="slider-value" role="status" for="slider-volume-thumb-0" aria-live="off" data-orientation="horizontal">40</ui-slider-value>
+      </div>
+      <ui-slider-control id="slider-volume-control" data-slot="slider-control" data-orientation="horizontal">
+        <ui-slider-track id="slider-volume-track" data-slot="slider-track" data-orientation="horizontal">
+          <ui-slider-indicator id="slider-volume-indicator" data-slot="slider-indicator" data-orientation="horizontal"></ui-slider-indicator>
+          <ui-slider-thumb id="slider-volume-thumb" data-slot="slider-thumb" data-orientation="horizontal" data-index="0"></ui-slider-thumb>
+        </ui-slider-track>
+      </ui-slider-control>
+    </ui-slider>
+    <ui-field-description id="slider-volume-description" data-slot="field-description">How loud alerts play.</ui-field-description>
+  </ui-field>
+</div>
+<div data-demo-row>
+  <span data-demo-label>Disabled at the lowest, read-only at the highest</span>
+  <ui-field id="slider-brightness-field" data-slot="field">
+    <ui-slider id="slider-brightness" default-value="0" disabled data-slot="slider" role="group" data-orientation="horizontal" data-disabled>
+      <div data-slider-row>
+        <ui-field-label id="slider-brightness-label" data-slot="field-label" for="slider-brightness-thumb-0">Brightness</ui-field-label>
+        <ui-slider-value id="slider-brightness-value" data-text data-slot="slider-value" role="status" for="slider-brightness-thumb-0" aria-live="off" data-orientation="horizontal" data-disabled>0</ui-slider-value>
+      </div>
+      <ui-slider-control id="slider-brightness-control" data-slot="slider-control" data-orientation="horizontal" data-disabled>
+        <ui-slider-track id="slider-brightness-track" data-slot="slider-track" data-orientation="horizontal" data-disabled>
+          <ui-slider-indicator id="slider-brightness-indicator" data-slot="slider-indicator" data-orientation="horizontal" data-disabled></ui-slider-indicator>
+          <ui-slider-thumb id="slider-brightness-thumb" data-slot="slider-thumb" data-orientation="horizontal" data-disabled data-index="0"></ui-slider-thumb>
+        </ui-slider-track>
+      </ui-slider-control>
+    </ui-slider>
+    <ui-field-description id="slider-brightness-description" data-slot="field-description">Managed by your organization.</ui-field-description>
+  </ui-field>
+  <ui-field id="slider-storage-field" data-slot="field">
+    <ui-slider id="slider-storage" default-value="100" read-only data-slot="slider" role="group" data-orientation="horizontal" data-readonly>
+      <div data-slider-row>
+        <ui-field-label id="slider-storage-label" data-slot="field-label" for="slider-storage-thumb-0">Storage</ui-field-label>
+        <ui-slider-value id="slider-storage-value" data-text data-slot="slider-value" role="status" for="slider-storage-thumb-0" aria-live="off" data-orientation="horizontal" data-readonly>100</ui-slider-value>
+      </div>
+      <ui-slider-control id="slider-storage-control" data-slot="slider-control" data-orientation="horizontal" data-readonly>
+        <ui-slider-track id="slider-storage-track" data-slot="slider-track" data-orientation="horizontal" data-readonly>
+          <ui-slider-indicator id="slider-storage-indicator" data-slot="slider-indicator" data-orientation="horizontal" data-readonly></ui-slider-indicator>
+          <ui-slider-thumb id="slider-storage-thumb" data-slot="slider-thumb" data-orientation="horizontal" data-readonly data-index="0"></ui-slider-thumb>
+        </ui-slider-track>
+      </ui-slider-control>
+    </ui-slider>
+    <ui-field-description id="slider-storage-description" data-slot="field-description">Set by your plan.</ui-field-description>
+  </ui-field>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Thumb: hover, pressed, focus, hover with focus, pressed with focus</span>
+  <span data-slider-pin>Hover <span data-slot="slider-track"><span id="slider-pin-hover" data-slot="slider-thumb" role="slider" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" data-pin="hover"></span></span></span>
+  <span data-slider-pin>Pressed <span data-slot="slider-track" data-dragging><span id="slider-pin-pressed" data-slot="slider-thumb" role="slider" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" data-dragging data-pin="hover"></span></span></span>
+  <span data-slider-pin>Focus <span data-slot="slider-track"><span id="slider-pin-focus" data-slot="slider-thumb" role="slider" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" data-pin="focus-visible"></span></span></span>
+  <span data-slider-pin>Hover with focus <span data-slot="slider-track"><span id="slider-pin-hover-focus" data-slot="slider-thumb" role="slider" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" data-pin="hover focus-visible"></span></span></span>
+  <span data-slider-pin>Pressed with focus <span data-slot="slider-track" data-dragging><span id="slider-pin-pressed-focus" data-slot="slider-thumb" role="slider" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" data-dragging data-pin="hover focus-visible"></span></span></span>
+</div>
+<div data-demo-row inert>
+  <span data-demo-label>Read-only thumb: focus</span>
+  <span data-slider-pin>Focus <span data-slot="slider-track" data-readonly><span id="slider-pin-readonly-focus" data-slot="slider-thumb" role="slider" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" aria-readonly="true" data-readonly data-pin="focus-visible"></span></span></span>
+</div>

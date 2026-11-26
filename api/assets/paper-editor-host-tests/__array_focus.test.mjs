@@ -342,6 +342,45 @@ try {
       assert.equal(input.value.slice(input.selectionStart, input.selectionEnd), "three");
     }
 
+    // task-d9d379ff1f6cf5fb (#28833 review S1): a change that only touches
+    // an edge of B's selection leaves it as B made it; B's key replaces it.
+    {
+      // A inserts right before B's selection.
+      const input = field("one two three");
+      input.setSelectionRange(4, 7);
+      remote(input, "one two three", "one AAAtwo three");
+      assert.equal(input.value.slice(input.selectionStart, input.selectionEnd), "two", "B's selection keeps its text");
+      typed(input, "X");
+      assert.equal(input.value, "one AAAX three", "B's key replaces what B selected, A's letters kept");
+    }
+
+    {
+      // A inserts right after B's selection.
+      const input = field("one two three");
+      input.setSelectionRange(4, 7);
+      remote(input, "one two three", "one twoAAA three");
+      assert.equal(input.value.slice(input.selectionStart, input.selectionEnd), "two");
+      typed(input, "X");
+      assert.equal(input.value, "one XAAA three");
+    }
+
+    {
+      // A replaces letters across the start of B's selection: the selection
+      // keeps its untouched part.
+      const input = field("one two three");
+      input.setSelectionRange(5, 13);
+      remote(input, "one two three", "one TWo three");
+      assert.equal(input.value.slice(input.selectionStart, input.selectionEnd), "o three");
+    }
+
+    {
+      // A replaces letters across the end of B's selection.
+      const input = field("one two three");
+      input.setSelectionRange(0, 5);
+      remote(input, "one two three", "one TWo three");
+      assert.equal(input.value.slice(input.selectionStart, input.selectionEnd), "one ");
+    }
+
     {
       // A caret keeps its place in the text around the other's change.
       const input = field("one two three");
