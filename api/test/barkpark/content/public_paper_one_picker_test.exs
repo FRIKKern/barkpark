@@ -6,7 +6,8 @@ defmodule Barkpark.Content.PublicPaperOnePickerTest do
       its own query: the Default workspace, any owner. The reader
       (`Content.get_public_paper/2`) reads unowned rows only. So the revision
       header and the ETag could describe another row than the body, or a row
-      the reader 404s on. The plug now takes the reader's row.
+      the reader 404s on. The plug's query now carries the reader's predicates
+      (an extra resolve would cost the reader's statement budget a statement).
     * `BoundFieldGuard` kept the NEWEST of two rows under one doc_id (two
       types), while the value resolve renders the OLDEST. It now keeps the
       oldest too.

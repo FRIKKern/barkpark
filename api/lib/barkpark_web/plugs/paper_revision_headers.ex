@@ -75,8 +75,8 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   ## Scoping (fail closed)
 
   The plug SELF-GATES on `path_info`; the shared `:public_root` bucket's
-  siblings (sheets/quiz/finder/share) fall through untouched. The scoped query
-  below enforces the published perspective directly — `status == "published"`
+  siblings (sheets/quiz/finder/share) fall through untouched. Both queries
+  below enforce the published perspective directly — `status == "published"`
   AND `doc_id` is not `drafts.`-prefixed — rather than delegating to (or
   merely resembling) another module's resolver: the prefix conjunct reuses
   `DraftId.drafts_prefix()`, the SAME constant and `not like/2` idiom
@@ -88,11 +88,12 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   belt-and-braces on the read side, not the only thing standing between a
   write bug and a leak.
 
-  The flat spellings do not query at all: they take the row the public reader
-  renders, `Content.get_public_paper/2` (the Default workspace only, unowned
-  rows only, the oldest of a same-slug tie, published-only clamp hard-coded). A second picker here once described a different row than the
-  body (task-0db9c861491a2ab2). No row (including an unseeded Default
-  workspace, or a `drafts.`-prefixed slug) ever leaves the conn untouched.
+  The flat spellings pick the row the public reader renders: the Default
+  (`is_default`) workspace with NO project_id predicate, unowned rows only, the
+  oldest of a same-slug tie (`public_paper_one_picker_test.exs` pins the
+  agreement). No row
+  (including an unseeded Default workspace, or a `drafts.`-prefixed row) ever
+  leaves the conn untouched.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -103,6 +104,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   alias Barkpark.Content.DraftId
   alias Barkpark.EpicFleet
   alias Barkpark.Repo
+  alias Barkpark.Tenancy.Workspace
   alias BarkparkWeb.Http.IfNoneMatch
 
   @bucket_seconds 604_800
@@ -153,10 +155,36 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
     )
   end
 
-  # The flat spellings ask the reader's own resolver, so the validator always
-  # describes the row the reader renders: the Default workspace only, unowned
-  # rows only, oldest of a tie (task-0db9c861491a2ab2).
-  defp default_public_paper(slug, dataset), do: Content.get_public_paper(slug, dataset)
+  # Default-workspace pinning, fail closed — workspace scope only, no
+  # project_id predicate. Published-perspective clamp: `status == "published"`
+  # AND `doc_id` not `drafts.`-prefixed, reusing `DraftId.drafts_prefix()` and
+  # the same `not like/2` idiom `Content.Query.maybe_published_only/2` applies
+  # everywhere else on the anonymous/public read path (D5). See the
+  # moduledoc's "Scoping (fail closed)" section.
+  defp default_public_paper(slug, dataset) do
+    drafts_prefix = drafts_like_prefix()
+
+    Repo.one(
+      from document in Document,
+        join: workspace in Workspace,
+        on: document.workspace_id == workspace.id,
+        # The reader's resolver (`Content.get_public_paper/2`) row for row: the
+        # `is_default` workspace, unowned rows only (`scope_to_owner(nil)`), and
+        # of same-slug rows the oldest. Its own query, not a call to it, to keep
+        # the reader's statement budget (task-0db9c861491a2ab2).
+        where:
+          workspace.is_default and document.type == "paper" and
+            document.dataset == ^dataset and document.doc_id == ^slug and
+            is_nil(document.owner_id) and document.status == "published" and
+            not like(document.doc_id, ^drafts_prefix),
+        order_by: [asc: document.inserted_at, asc: document.id],
+        limit: 1,
+        select: %{
+          released_revision_id: document.released_revision_id,
+          content: document.content
+        }
+    )
+  end
 
   defp drafts_like_prefix, do: DraftId.drafts_prefix() <> "%"
 
