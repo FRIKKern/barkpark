@@ -217,8 +217,43 @@ defmodule BarkparkWeb.Studio.PaperFrameProjectFenceTest do
       assert html =~ "P1 words"
       assert :sys.get_state(view.pid).socket.assigns.paper_project_id == c.p1.id
       reader_paper!(c, c.p2, "P2 words")
-      _ = settle(view)
+      assert settle(view) =~ "P1 words"
       view
+    end
+
+    test "P2's same-slug upsert after mount does not repaint it", %{conn: conn} = c do
+      view = reader!(conn, c)
+
+      reader_paper!(c, c.p2, "P2 upsert")
+      out = settle(view)
+
+      assert out =~ "P1 words"
+      refute out =~ "P2 upsert"
+    end
+
+    # The public resolver's pick between same-slug rows follows heap order, so
+    # the test above can pass unfenced. With P1's row gone (no broadcast), a
+    # refetch can only find P2's: the frame alone decides.
+    test "P2's upsert is not refetched even when only P2's row is left", %{conn: conn} = c do
+      view = reader!(conn, c)
+      Barkpark.Repo.delete!(Barkpark.Repo.get!(Barkpark.Content.Document, p1_doc_id(c)))
+
+      reader_paper!(c, c.p2, "P2 upsert")
+      out = settle(view)
+
+      assert out =~ "P1 words"
+      refute out =~ "P2 upsert"
+    end
+
+    defp p1_doc_id(c) do
+      import Ecto.Query
+
+      Barkpark.Repo.one!(
+        from(d in Barkpark.Content.Document,
+          where: d.project_id == ^c.p1.id and d.type == "paper" and d.dataset == ^c.ds,
+          select: d.id
+        )
+      )
     end
 
     test "P2's same-slug block write does not paint into it", %{conn: conn} = c do

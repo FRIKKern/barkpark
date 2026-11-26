@@ -1455,8 +1455,8 @@ defmodule BarkparkWeb.BulldocsLive do
     do: {:noreply, Edit.apply_op(socket, op)}
 
   # Another project's same-slug paper shares the topic (task-62ff63f43817eb08).
-  def handle_info({:paper_block, %{project_id: p}}, %{assigns: %{paper_project_id: own}} = s)
-      when is_binary(p) and is_binary(own) and p != own,
+  def handle_info({tag, %{project_id: p}}, %{assigns: %{paper_project_id: own}} = s)
+      when tag in [:paper_block, :paper_updated] and is_binary(p) and is_binary(own) and p != own,
       do: {:noreply, s}
 
   # An atomic batch broadcasts one receipt without per-block HTML: re-read the
