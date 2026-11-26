@@ -297,7 +297,9 @@ defmodule BarkparkWeb.Studio.StudioLeaveScopeTest do
         assert has_element?(a, dialog(@surface))
       end
 
-      test "another document saved in P2 under the question rebuilds nothing", c do
+      # A control: the list topic's rebuild is skipped for the held (dirty)
+      # form already; it passes on main as here.
+      test "control: another document saved in P2 under the question rebuilds nothing", c do
         {a, _before} = asked(c, @surface)
 
         {:ok, _} =

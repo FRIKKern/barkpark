@@ -643,12 +643,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       not Shared.own_tenant?(msg, ws_id) ->
         {:noreply, socket}
 
-      # Under the leave question after a patch into another project, a
-      # rebuild reads the held document under that project's scope
-      # (`LeaveScope`, task-7fbdea7ee305cbc4): Stay or Leave rebuilds.
-      LeaveScope.moved?(socket.assigns) ->
-        {:noreply, socket}
-
       # Our OWN write — the handle_event that performed it already refreshed our
       # state, so a broadcast-driven `rebuild_panes` (a fresh DB reload) is both
       # redundant AND, in tests, an in-flight query that outlives the test that
