@@ -497,6 +497,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       other_project?(frame, socket.assigns) ->
         {:noreply, socket}
 
+      # Under the leave question every paper re-read runs in the socket's new
+      # scope and finds that project's same-slug paper: the frame is held until
+      # Stay or Leave (task-bb212404529d765c).
+      LeaveScope.moved?(socket.assigns) ->
+        {:noreply, socket}
+
       not socket.assigns.paper_block_mode ->
         {:noreply, Shared.refetch_paper(socket)}
 
@@ -564,6 +570,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # A same-slug paper in a sibling project shares the topic
       # (task-62ff63f43817eb08).
       other_project?(msg, socket.assigns) ->
+        {:noreply, socket}
+
+      # Held under the leave question, as in `paper_block/2`.
+      LeaveScope.moved?(socket.assigns) ->
         {:noreply, socket}
 
       # THE THIRD `:paper_html` FEED (task-fa27740cb3162dbd). The two mount-side
