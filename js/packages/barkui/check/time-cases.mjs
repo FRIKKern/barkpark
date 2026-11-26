@@ -1,5 +1,5 @@
 // The selftest's rows for a job's page and its parts' time (check/check.mjs runCheck, given `names`): the job reads its
-// own parts on a page that prints their stages, and the one that follows the last of them, and loads every part folder's sheet, and prints each part's
+// own parts on a page that prints their stages, and the one that follows each of them, and loads every part folder's sheet, and prints each part's
 // seconds against its limit and the parts that used more than two thirds of it (check/part-time.mjs); each part is read
 // on a copy of that page whose other stages are hidden but the one that follows it (check/part-page.mjs).
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -38,17 +38,24 @@ const say = (what, held) => (held ? true : (console.log(`    ${what}`), false))
 
 export const TIME_CASES = [
   {
-    name: "a job's page prints its parts' stages and the one that follows the last of them on the page of every part, and no other stage",
+    name: "a job's page prints its parts' stages and the one that follows each of them on the page of every part, and no other stage",
     only: ONLY,
     direct: async () => {
       // On the page of every part: aa-button, button, other-button, zz-button. The job reads the button.
-      const { ok, logs, html } = await job(() => {}, ONLY, ['aa-button', 'zz-button'])
-      const printed = (n) => html.includes(`data-part="${n}"`)
+      const one = await job(() => {}, ONLY, ['aa-button', 'zz-button'])
+      // On the page of every part: aa-button, ab-button, button, other-button, zz-button. The job reads aa-button and
+      // the button, which are no run of neighbours there (check/jobs.mjs split): ab-button follows aa-button.
+      const two = await job(() => {}, ONLY, ['aa-button', 'ab-button', 'zz-button'], OTHER, ['aa-button', 'button'])
+      const printed = (r, n) => r.html.includes(`data-part="${n}"`)
       return (
-        say(`the job did not pass: ${logs.join(' | ')}`, ok) &&
-        say('the page read holds no button', printed('button')) &&
-        say(`the page read holds no ${OTHER}, the stage that follows the button on the page of every part`, printed(OTHER)) &&
-        say('the page read holds aa-button or zz-button, stages that neither are read nor follow the last part read', !printed('aa-button') && !printed('zz-button'))
+        say(`the job did not pass: ${one.logs.join(' | ')}`, one.ok) &&
+        say('the page read holds no button', printed(one, 'button')) &&
+        say(`the page read holds no ${OTHER}, the stage that follows the button on the page of every part`, printed(one, OTHER)) &&
+        say('the page read holds aa-button or zz-button, stages that neither are read nor follow a part read', !printed(one, 'aa-button') && !printed(one, 'zz-button')) &&
+        say(`the job of aa-button and the button did not pass: ${two.logs.join(' | ')}`, two.ok) &&
+        say('its page holds no ab-button, the stage that follows aa-button on the page of every part', printed(two, 'ab-button')) &&
+        say(`its page holds no ${OTHER}, the stage that follows the button`, printed(two, OTHER)) &&
+        say('its page holds zz-button, a stage that neither is read nor follows a part read', !printed(two, 'zz-button'))
       )
     },
   },
