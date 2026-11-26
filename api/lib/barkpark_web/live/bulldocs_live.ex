@@ -170,6 +170,9 @@ defmodule BarkparkWeb.BulldocsLive do
       # the anonymous COUNT is made of.
       |> assign(:paper_actor, PaperActor.from_assigns(socket.assigns))
       |> assign(:paper_workspace_id, paper.workspace_id)
+      # The paper topic names the workspace only; a same-slug paper in a
+      # sibling project shares it (task-62ff63f43817eb08).
+      |> assign(:paper_project_id, Map.get(paper, :project_id))
       |> assign(
         :presence_topic,
         PaperPresence.topic(paper.workspace_id, Map.get(paper, :project_id), dataset, slug)
@@ -1456,6 +1459,14 @@ defmodule BarkparkWeb.BulldocsLive do
   # An atomic batch broadcasts one receipt for several blocks, without a
   # per-block HTML fragment. Re-read the saved tree so connected readers keep
   # every changed block and its unchanged siblings in the stream.
+  # Another project's same-slug paper: its fragment is not this paper's
+  # (task-62ff63f43817eb08). A frame or a reader naming no project is read as
+  # before.
+  def handle_info({:paper_block, %{project_id: frame_proj}}, socket)
+      when is_binary(frame_proj) and is_binary(socket.assigns.paper_project_id) and
+             frame_proj != socket.assigns.paper_project_id,
+      do: {:noreply, socket}
+
   def handle_info({:paper_block, %{op_kind: :batch}}, socket),
     do: {:noreply, refetch(socket)}
 

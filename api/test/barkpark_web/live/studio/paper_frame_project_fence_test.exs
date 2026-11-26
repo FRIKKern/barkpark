@@ -151,6 +151,94 @@ defmodule BarkparkWeb.Studio.PaperFrameProjectFenceTest do
     end
   end
 
+  describe "the /papers reader holding P1's paper" do
+    setup c do
+      ds = Content.paper_default_dataset()
+
+      for p <- [c.p1, c.p2] do
+        {:ok, _} =
+          Content.upsert_schema(
+            %{
+              "name" => "paper",
+              "title" => "Papers",
+              "visibility" => "public",
+              "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+            },
+            ds,
+            workspace_id: c.ws.id,
+            project_id: p.id
+          )
+      end
+
+      Barkpark.LabelFixtures.register_tags!(ds)
+      {:ok, ds: ds}
+    end
+
+    defp reader_paper!(c, p, text) do
+      {:ok, doc} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => c.slug,
+            "title" => "T",
+            "dataset" => c.ds,
+            "workspace_id" => c.ws.id,
+            "project_id" => p.id,
+            "blocks" => [
+              %{"id" => "h-1", "type" => "heading", "text" => "Title"},
+              %{
+                "id" => "b-1",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => text}]
+              }
+            ]
+          })
+        )
+
+      assert doc.project_id == p.id
+    end
+
+    defp reader_append!(c, p, id, text) do
+      op = %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => id,
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+
+      {:ok, _} =
+        Content.apply_paper_block_op(c.slug, op, c.ds, workspace_id: c.ws.id, project_id: p.id)
+    end
+
+    defp reader!(conn, c) do
+      reader_paper!(c, c.p1, "P1 words")
+      {:ok, view, html} = live(conn, "/papers/#{c.slug}")
+      assert html =~ "P1 words"
+      assert :sys.get_state(view.pid).socket.assigns.paper_project_id == c.p1.id
+      reader_paper!(c, c.p2, "P2 words")
+      _ = settle(view)
+      view
+    end
+
+    test "P2's same-slug block write does not paint into it", %{conn: conn} = c do
+      view = reader!(conn, c)
+
+      reader_append!(c, c.p2, "b-p2", "P2 streamed")
+      out = settle(view)
+
+      assert out =~ "P1 words"
+      refute out =~ "P2 streamed"
+    end
+
+    test "control: P1's own block write still streams into it", %{conn: conn} = c do
+      view = reader!(conn, c)
+
+      reader_append!(c, c.p1, "b-p1", "P1 streamed")
+      assert settle(view) =~ "P1 streamed"
+    end
+  end
+
   describe "every paper frame names its project" do
     test "both frames carry the written row's project_id", c do
       blocks_paper!(c, c.p2, "P2 words")
