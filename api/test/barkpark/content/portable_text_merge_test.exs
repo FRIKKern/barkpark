@@ -90,6 +90,20 @@ defmodule Barkpark.Content.PortableTextMergeTest do
       end
     end
 
+    # #28928 review (fuzz seed 11287): theirs made the same edit and a copy
+    # of it. Mine's gap holds that block once, so it stands for one base
+    # block, not two; theirs' copy is not dropped.
+    test "theirs added a copy of the block both edited: theirs' copy is never dropped" do
+      was = [b("k0", "zero"), b("k1", "one two")]
+      mine = [b("k1", "one three")]
+      theirs = [b("k1", "one three"), b("t0", "one three")]
+
+      case M.merge(was, mine, theirs) do
+        {:ok, merged} -> assert length(merged) == 2
+        {:clash, _, _} -> :ok
+      end
+    end
+
     test "theirs added the block: theirs, merged" do
       was = [b("k1", "one two"), b("k2", "three")]
       theirs = [b("k1", "one two a1"), b("t1", "gamma"), b("k2", "three")]

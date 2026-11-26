@@ -125,13 +125,21 @@ defmodule Barkpark.Content.PortableTextMerge do
   # Each base index of a gap of one side that the other changed to a block
   # the gap holds: that block.
   defp also(gaps, at) do
-    for {gone, new} <- gaps,
-        shapes = MapSet.new(new, &shape/1),
-        i <- gone,
-        {:changed, b} <- [Map.get(at, i)],
-        MapSet.member?(shapes, shape(b)),
-        into: %{},
-        do: {i, b}
+    for {gone, new} <- gaps, reduce: %{} do
+      acc ->
+        # A block the gap holds once stands for one base block, not two.
+        {acc, _left} =
+          Enum.reduce(gone, {acc, Enum.frequencies_by(new, &shape/1)}, fn i, {acc, left} ->
+            with {:changed, b} <- Map.get(at, i),
+                 n when n > 0 <- Map.get(left, shape(b), 0) do
+              {Map.put(acc, i, b), Map.put(left, shape(b), n - 1)}
+            else
+              _ -> {acc, left}
+            end
+          end)
+
+        acc
+    end
   end
 
   # Inline objects (children that are not spans) of a value.
