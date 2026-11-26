@@ -7,7 +7,7 @@
    when read-only or disabled), and the button beside it the secondary button's (--ui-input edge, --ui-muted-hover
    under the pointer, --ui-muted-pressed held down, --ui-muted with no edge when disabled). The button's eye is its
    ::before in currentColor, as the radio draws its dot: an oval edge and a round pupil while the password is hidden,
-   struck through while it is shown (data-visible). --ui-icon is none, so UI SDK's mask is off and no mask is on the
+   and a slash that crosses the oval's edge on both sides while it is shown (data-visible). --ui-icon is none, so UI SDK's mask is off and no mask is on the
    page; an svg icon would sit inside the root, which has no box of its own, and the no-script light asks every
    element holding an svg for one. Read-only takes no hover on the field; its button still works.
    At phone width the text is 1rem, the size UI SDK gives a coarse pointer, since this sheet's own size would win
@@ -90,18 +90,22 @@
   /* UI SDK masks the button's ::before with --ui-icon; none leaves no mask, and the eye is drawn here instead. */
   --ui-icon: none;
 
+  /* The eye is all background images on a 20px square, so the shown eye's slash can run past the oval to the
+     square's corners: a border oval would clip every background inside its own curve. The oval's edge is a
+     radial ring 18 x 13px, the pupil a 3px disc, the slash a 2px band from corner to corner. */
   &::before {
-    width: calc(var(--ui-spacing) * 4.5);
-    height: calc(var(--ui-spacing) * 3);
-    border: 2px solid currentColor;
-    border-radius: 50%;
-    background: radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px));
+    width: calc(var(--ui-spacing) * 5);
+    height: calc(var(--ui-spacing) * 5);
+    background:
+      radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px)),
+      radial-gradient(calc(var(--ui-spacing) * 2.25) calc(var(--ui-spacing) * 1.625) at center, transparent calc(100% - 3px), currentColor calc(100% - 2.5px), currentColor calc(100% - 0.5px), transparent 100%);
   }
 
   &[data-visible]::before {
-    background-image:
-      linear-gradient(to top right, transparent calc(50% - 1px), currentColor calc(50% - 1px), currentColor calc(50% + 1px), transparent calc(50% + 1px)),
-      radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px));
+    background:
+      linear-gradient(to top right, transparent calc(50% - 1.5px), currentColor calc(50% - 1px), currentColor calc(50% + 1px), transparent calc(50% + 1.5px)),
+      radial-gradient(circle at center, currentColor calc(var(--ui-spacing) * 0.75 - 0.5px), transparent calc(var(--ui-spacing) * 0.75 + 0.5px)),
+      radial-gradient(calc(var(--ui-spacing) * 2.25) calc(var(--ui-spacing) * 1.625) at center, transparent calc(100% - 3px), currentColor calc(100% - 2.5px), currentColor calc(100% - 0.5px), transparent 100%);
   }
 
   &[data-disabled] {
