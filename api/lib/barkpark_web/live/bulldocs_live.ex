@@ -114,10 +114,8 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:reader_scope, reader_scope)
       |> assign(:dataset, dataset)
 
-    # Mount-only twin of `fetch_paper/3` that keeps the Default workspace row
-    # the public resolve already loaded (am-w1-s3) — `reader_theme/3` below
-    # reuses it instead of re-reading the same workspace by id.
-    {paper, paper_workspace} = fetch_paper_with_workspace(slug, reader_scope, dataset)
+    # Keeps the Default workspace row for `reader_theme/3` (am-w1-s3).
+    {paper, paper_workspace} = fetch_paper_with_workspace(socket, slug, reader_scope, dataset)
 
     paper ||
       raise NotFound, message: "no published paper #{inspect(slug)}"
@@ -2094,15 +2092,17 @@ defmodule BarkparkWeb.BulldocsLive do
   # "production" exactly as before (no dataset segment on that route).
   def fetch_paper(slug, scope, _dataset), do: Content.get_paper(slug, "production", scope)
 
-  # Mount-only sibling of `fetch_paper/3`: `{paper, workspace_row_or_nil}`. On
-  # the public surface the resolve pins the Default workspace anyway (am-w1-s3)
-  # — keep that row for `reader_theme/3`. The scoped surface resolves no
-  # workspace row here, so it threads nil and reader_theme reads by id as
-  # before. Refetch paths (rev-gap, action reload) keep calling `fetch_paper/3`.
-  defp fetch_paper_with_workspace(slug, nil, dataset) do
-    Content.Papers.get_public_paper_with_workspace(slug, dataset) || {nil, nil}
+  # Mount-only sibling of `fetch_paper/3`: `{paper, workspace_row_or_nil}`. The
+  # public door's dead render reads the seat `PaperRevisionHeaders` resolved
+  # (conn.assigns), so header and body name one seat (task-8574bb40259a788a).
+  # Scoped door: nil. Refetch paths (rev-gap, action reload): `fetch_paper/3`.
+  defp fetch_paper_with_workspace(socket, slug, nil, dataset) do
+    %{public_paper_workspace: seat} =
+      assign_new(socket, :public_paper_workspace, &Barkpark.Tenancy.get_default_workspace/0).assigns
+
+    Content.Papers.get_public_paper_in(seat, slug, dataset) || {nil, nil}
   end
 
-  defp fetch_paper_with_workspace(slug, scope, dataset),
+  defp fetch_paper_with_workspace(_socket, slug, scope, dataset),
     do: {fetch_paper(slug, scope, dataset), nil}
 end

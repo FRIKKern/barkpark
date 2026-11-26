@@ -137,8 +137,13 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   # so the revision header and the body can never name different Default
   # seats. A cache hit in prod, 0 statements; a query here only because test
   # runs the cache off (TTL 0). Measured: dead 15 (workspaces 3), both 28.
-  @dead_leg_budget 15
-  @both_legs_budget 28
+  #
+  # -1 on both, back to 14 / 27 (task-8574bb40259a788a): the plug reads the
+  # seat once and hands it to the dead render through `conn.assigns`, so the
+  # reader's mount no longer reads it again. The connected mount still reads it
+  # (no conn there). Measured: dead 14 (workspaces 2), both 27 (workspaces 4).
+  @dead_leg_budget 14
+  @both_legs_budget 27
   @max_n_plus_one_slope 1.0
 
   setup do
