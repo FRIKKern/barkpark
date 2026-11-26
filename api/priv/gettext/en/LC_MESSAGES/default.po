@@ -2018,11 +2018,6 @@ msgstr ""
 msgid "No active grants in this workspace."
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/modals.ex:730
-#, elixir-autogen, elixir-format
-msgid "No documents found"
-msgstr ""
-
 #: lib/barkpark_web/components/studio_components/modals.ex:649
 #, elixir-autogen, elixir-format
 msgid "No expiry"
@@ -2031,11 +2026,6 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:790
 #, elixir-autogen, elixir-format
 msgid "No history yet"
-msgstr ""
-
-#: lib/barkpark_web/components/studio_components/modals.ex:92
-#, elixir-autogen, elixir-format
-msgid "No images yet. Upload one above."
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:279
@@ -2143,21 +2133,6 @@ msgstr ""
 msgid "Search documents"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/modals.ex:719
-#, elixir-autogen, elixir-format
-msgid "Search..."
-msgstr ""
-
-#: lib/barkpark_web/components/studio_components/modals.ex:69
-#, elixir-autogen, elixir-format
-msgid "Select Image"
-msgstr ""
-
-#: lib/barkpark_web/components/studio_components/modals.ex:715
-#, elixir-autogen, elixir-format
-msgid "Select reference"
-msgstr ""
-
 #: lib/barkpark_web/components/studio_components/modals.ex:876
 #, elixir-autogen, elixir-format
 msgid "Sep"
@@ -2201,21 +2176,6 @@ msgstr ""
 msgid "Surfaces"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/modals.ex:1199
-#, elixir-autogen, elixir-format
-msgid "That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG."
-msgstr ""
-
-#: lib/barkpark_web/components/studio_components/modals.ex:1201
-#, elixir-autogen, elixir-format
-msgid "That image couldn't be uploaded."
-msgstr ""
-
-#: lib/barkpark_web/components/studio_components/modals.ex:1193
-#, elixir-autogen, elixir-format
-msgid "That image is too large — the limit is 10 MB."
-msgstr ""
-
 #: lib/barkpark_web/components/studio_components/modals.ex:986
 #, elixir-autogen, elixir-format
 msgid "The published version will remain untouched."
@@ -2243,11 +2203,6 @@ msgstr ""
 #: lib/barkpark_web/studio/workspace_switcher.ex:88
 #, elixir-autogen, elixir-format
 msgid "Workspace"
-msgstr ""
-
-#: lib/barkpark_web/components/studio_components/modals.ex:1196
-#, elixir-autogen, elixir-format
-msgid "You can only upload one image at a time."
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:578
@@ -10488,11 +10443,6 @@ msgstr ""
 msgid "History step failed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/handlers/media.ex:103
-#, elixir-autogen, elixir-format
-msgid "Image upload failed. Please try again with a supported file."
-msgstr ""
-
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:556
 #, elixir-autogen, elixir-format
 msgid "No document loaded"
@@ -13500,11 +13450,6 @@ msgstr ""
 msgid "Other views and inspectors are not shown here."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/desk/editor_host.ex
-#, elixir-autogen, elixir-format
-msgid "References"
-msgstr ""
-
 #: lib/barkpark_web/live/studio/desk_live.ex
 #, elixir-autogen, elixir-format
 msgid "Resize pane"
@@ -13523,11 +13468,6 @@ msgstr ""
 #: lib/barkpark_web/live/studio/desk/incoming_refs.ex:189
 #, elixir-autogen, elixir-format
 msgid "Showing the first %{shown} of %{total}."
-msgstr ""
-
-#: lib/barkpark_web/live/studio/desk/pane_component.ex
-#, elixir-autogen, elixir-format
-msgid "Sort by"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/desk/list_search.ex lib/barkpark_web/live/studio/desk/pane_component.ex
