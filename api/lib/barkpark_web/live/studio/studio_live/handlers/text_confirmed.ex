@@ -110,7 +110,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   # The form holds a top-level rich text as the HTML its editor draws
   # (`Content.Forms`), the store as blocks: one digest for both.
   defp rich_digest(html) when is_binary(html), do: :erlang.phash2(html)
-  defp rich_digest(value) when is_list(value), do: CompositeField.drawn_digest(value)
+  # A body never set draws "" (`CompositeField.drawn_digest(nil)`).
+  defp rich_digest(value) when is_list(value) or is_nil(value),
+    do: CompositeField.drawn_digest(value)
+
   defp rich_digest(_value), do: nil
 
   @doc """

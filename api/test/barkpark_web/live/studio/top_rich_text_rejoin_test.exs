@@ -191,7 +191,70 @@ defmodule BarkparkWeb.Studio.TopRichTextRejoinTest do
     assert rejoin_set(view) == MapSet.new(["doc[body]"])
   end
 
+  defp set_body(c, value) do
+    {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, "production")
+
+    content =
+      if value == :drop,
+        do: Map.delete(doc.content, "body"),
+        else: Map.put(doc.content, "body", value)
+
+    {:ok, _} =
+      Content.upsert_document(
+        c.type,
+        %{"doc_id" => "drafts." <> c.id, "title" => doc.title, "content" => content},
+        "production"
+      )
+  end
+
+  # Every digest the page was sent, as its `onConfirmed` writes them.
+  defp drain_confirm(view, seen) do
+    %{proxy: {ref, _topic, _}} = view
+
+    receive do
+      {^ref, {:push_event, "bp:form-confirmed", %{oks: oks}}} ->
+        drain_confirm(view, Map.update(seen, "ok", oks, &Map.merge(&1, oks)))
+    after
+      300 -> seen
+    end
+  end
+
   for surface <- [:desk, :studio] do
+    # #29054 r1 F1: the page drew "" for a body never set; the store's nil
+    # must read as that digest.
+    test "#{surface}: a body never set: a rejoin, then A types: written, not held", c do
+      set_body(c, :drop)
+      a = open_tab(c, unquote(surface))
+      seen = page(a)
+      GenServer.stop(a.pid, :normal)
+
+      a2 = rejoined(c, unquote(surface))
+      html = types(a2, ["A7"], seen)
+      # A first post onto a doc with no body key is written as posted (HTML).
+      assert stored(c)["body"] == "<p>A7</p>"
+      refute html =~ "doc-conflict-banner"
+    end
+
+    # #29054 r1 F2: B's save reached A's clean form through the list
+    # broadcast's rebuild (a new form generation): the page takes its digest.
+    test "#{surface}: a B save A's clean form took, then a rejoin: A types on it, written, not held",
+         c do
+      a = open_tab(c, unquote(surface))
+      seen = page(a)
+      b = open_tab(c, unquote(surface))
+      types(b, ["body0 B5"], page(b))
+      assert body(c) == ["body0 B5"]
+      assert eventually(fn -> render(a) =~ "body0 B5" end)
+      seen = drain_confirm(a, seen)
+      GenServer.stop(a.pid, :normal)
+      GenServer.stop(b.pid, :normal)
+
+      a2 = rejoined(c, unquote(surface))
+      html = types(a2, ["body0 B5 A7"], seen)
+      assert body(c) == ["body0 B5 A7"]
+      refute html =~ "doc-conflict-banner"
+    end
+
     test "#{surface}: a rejoin after A's own autosave, nobody else saving: A's typing is written, no banner",
          c do
       seen = typed_then_dropped(c, unquote(surface))

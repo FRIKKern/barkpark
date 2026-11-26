@@ -386,6 +386,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           socket
           |> saved_flash()
           |> Shared.rebuild_panes()
+          |> TextConfirmed.redrawn(socket)
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
           |> Shared.assign_page_title()
           |> clear_touched()

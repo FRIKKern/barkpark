@@ -705,7 +705,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # reloads it tells the page what changed.
       true ->
         old_form = socket.assigns[:editor_form] || %{}
-        rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
+        # A new form generation draws the rich text wrappers anew: the page
+        # takes their digests (`TextConfirmed`), or a rejoin holds them.
+        rebuilt =
+          socket
+          |> Shared.rebuild_panes()
+          |> RemoteValues.keep_history(socket)
+          |> TextConfirmed.redrawn(socket)
+
         new_form = rebuilt.assigns[:editor_form] || %{}
 
         {:noreply,
