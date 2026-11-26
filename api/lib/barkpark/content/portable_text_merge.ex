@@ -263,7 +263,22 @@ defmodule Barkpark.Content.PortableTextMerge do
   blocks: the store still holds what a tab believed it held
   (`Forms.ObjectRebase`, task-00c56c6a88ed0b8f).
   """
-  def same_drawn?(a, b), do: Enum.map(list(a), &drawn/1) == Enum.map(list(b), &drawn/1)
+  def same_drawn?(a, b) do
+    {a, b} = {list(a), list(b)}
+
+    if past_cap?(a, b),
+      do: keyless(a) == keyless(b),
+      else: Enum.map(a, &drawn/1) == Enum.map(b, &drawn/1)
+  end
+
+  @doc """
+  Past `@max_objects` inline objects in the two values, nothing is drawn:
+  `same_drawn?/2` and `same_shape?/2` compare the blocks with their keys set
+  aside, as `over_cap/3` does (task-681d2fd0a0020ff8). Equal so is equal
+  drawn; a value that draws the same with other span keys reads as changed,
+  and the merge past the cap is a clash, never a silent write.
+  """
+  def past_cap?(a, b), do: objects(list(a)) + objects(list(b)) > @max_objects
 
   @doc """
   Whether two stored values are the same as the merge lines blocks up:
@@ -271,7 +286,13 @@ defmodule Barkpark.Content.PortableTextMerge do
   For two stored values; a page's posted HTML carries no such field
   (`same_drawn?/2`).
   """
-  def same_shape?(a, b), do: Enum.map(list(a), &shape/1) == Enum.map(list(b), &shape/1)
+  def same_shape?(a, b) do
+    {a, b} = {list(a), list(b)}
+
+    if past_cap?(a, b),
+      do: keyless(a) == keyless(b),
+      else: Enum.map(a, &shape/1) == Enum.map(b, &shape/1)
+  end
 
   defp list(v) when is_list(v), do: v
   defp list(_v), do: []

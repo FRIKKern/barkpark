@@ -253,16 +253,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   # Typed on a socket gone (`born/1`): the base is not known. The stored
   # value posted back saves nothing; anything else is held over it.
   defp unknown(doc, acts, {_name, path, posted} = at, theirs) do
-    if drawn(PortableText.from_html(posted, list(theirs))) == drawn(theirs),
+    if unchanged?(PortableText.from_html(posted, list(theirs)), theirs),
       do: {FormPath.put(doc, path, html(theirs)), acts},
       else: over(doc, acts, at, theirs, theirs, true)
+  end
+
+  @doc "Whether a post draws as `base`; past the merge's object cap, by `PortableTextMerge.same_drawn?/2`."
+  def unchanged?(mine, base) do
+    if PortableTextMerge.past_cap?(mine, list(base)),
+      do: PortableTextMerge.same_drawn?(mine, base),
+      else: drawn(mine) == drawn(base)
   end
 
   defp over(doc, acts, {name, path, posted}, base, theirs, held?) do
     mine = PortableText.from_html(posted, list(base))
     stays = FormPath.put(doc, path, html(theirs))
 
-    if not held? and drawn(mine) == drawn(base) do
+    if not held? and unchanged?(mine, base) do
       {stays, acts}
     else
       case PortableTextMerge.merge(list(base), mine, list(theirs)) do
