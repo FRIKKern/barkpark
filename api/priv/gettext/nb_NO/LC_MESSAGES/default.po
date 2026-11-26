@@ -10830,10 +10830,6 @@ msgstr "Oppdatert av en annen bruker — endringene du ikke har lagret, beholdes
 msgid "%{count} more"
 msgstr "%{count} til"
 
-#: lib/barkpark_web/live/studio/studio_live/leave_ask.ex:54
-#, elixir-autogen, elixir-format
-msgid "Press again to leave."
-msgstr "Trykk igjen for å forlate."
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3661
 #, elixir-autogen, elixir-format

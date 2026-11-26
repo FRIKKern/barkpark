@@ -10827,10 +10827,6 @@ msgstr ""
 msgid "%{count} more"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/leave_ask.ex:54
-#, elixir-autogen, elixir-format
-msgid "Press again to leave."
-msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3661
 #, elixir-autogen, elixir-format
