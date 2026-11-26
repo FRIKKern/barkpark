@@ -107,10 +107,12 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   not this site's goes nowhere.
   """
   def link(%{"href" => href} = params, socket) do
-    kind = params["kind"]
+    local? = LeaveGuard.local?(href)
+    kind = if local?, do: LeaveGuard.kind(socket, href, params["kind"]), else: params["kind"]
+    params = Map.put(params, "kind", kind)
 
     cond do
-      not LeaveGuard.local?(href) ->
+      not local? ->
         {:stay, socket}
 
       not desk?(socket) and held?(socket) and socket.assigns[:studio_leave_pass] != true ->

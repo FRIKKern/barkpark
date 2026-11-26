@@ -346,10 +346,12 @@ defmodule BarkparkWeb.Studio.DeskLive do
   # keeps the document goes on; any other asks. Its kind is its LiveView
   # link's (`data-phx-link`): "patch", "redirect", or none, a page load.
   def handle_event("desk-leave", %{"href" => href} = params, socket) do
-    kind = params["kind"]
+    local? = LeaveGuard.local?(href)
+    kind = if local?, do: LeaveGuard.kind(socket, href, params["kind"]), else: params["kind"]
+    params = Map.put(params, "kind", kind)
 
     cond do
-      not LeaveGuard.local?(href) ->
+      not local? ->
         {:noreply, socket}
 
       kind == "patch" and (not LeaveGuard.ask?(socket) or LeaveGuard.keeps_path?(socket, href)) ->

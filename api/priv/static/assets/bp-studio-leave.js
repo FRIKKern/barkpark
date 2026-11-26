@@ -48,6 +48,10 @@
       return false;
     }
     if (url.origin !== window.location.origin) return false;
+    // A path that starts "//" is not one the server takes as this site's
+    // (`LeaveGuard.local?/1`): the browser follows it, and the tab's close
+    // asks while a field is held (task-5455fd7fe69eb386).
+    if (url.pathname.slice(0, 2) === "//") return false;
     return url.pathname !== window.location.pathname ? url : false;
   }
 
