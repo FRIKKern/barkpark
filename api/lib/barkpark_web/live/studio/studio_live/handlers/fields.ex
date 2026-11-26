@@ -274,14 +274,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # and is read again under the lock (`RichTextRemote.UnderLock`,
         # task-8f15f5c9c15ce748).
         {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
-        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
+        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"], posted)
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
         # A Save from a page that rejoined a new socket is read as its
         # autosave is (`TextRejoin`, #28830 r1 review, B2).
         units = RemoteValues.text_units(socket.assigns[:editor_schema], doc)
         {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc)
         {socket, text} = text_bases(socket, doc, params["_bp_seen"])
-        socket = assign(socket, editor_rt_under_lock: rich)
+
+        socket =
+          socket
+          |> assign(editor_rt_under_lock: rich)
+          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
+
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
         {:noreply, RichTextRemote.hold(saved, held)}
 
@@ -562,7 +567,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
         # Read again under the document's lock: the store may have moved
         # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
-        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"])
+        rich = RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"], posted)
         # A free-text field's post is merged onto the stored value from the
         # base the page reports (`RemoteValues`, task-35956a566dd2c862).
         keys = target_key(params, socket.assigns[:editor_schema])
@@ -581,7 +586,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # So is a free-text field (`TextUnderLock`, task-5b8f13c40a052514),
         # read against what the page showed (task-eeecd067e3fb1b1f).
         text = TextUnderLock.values(based, keys, params["_bp_seen"], path)
-        based = assign(based, editor_rt_under_lock: rich, editor_text_under_lock: text)
+
+        based =
+          based
+          |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
+          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
 
         written =
           based
