@@ -271,6 +271,31 @@ defmodule BarkparkWeb.Studio.StudioLeaveScopeTest do
         assert rows() == before
       end
 
+      # task-62711814fa586a09: View graph builds its page from the socket's
+      # project, P2 under the question: it went to P2's graph of kept-doc.
+      test "View graph under the question is held: no page change, the question stays", c do
+        {a, before} = asked(c, @surface)
+
+        assert Caps.classify("view-graph") == :none
+        html = render_hook(a, "view-graph", %{})
+
+        assert is_binary(html), inspect(html)
+        assert html =~ Plug.HTML.html_escape(LeaveScope.held_opens_notice())
+        refute assigns(a)[:live_action] == :graph
+        assert held_p1?(a, c)
+        assert has_element?(a, dialog(@surface))
+        assert rows() == before
+      end
+
+      test "control: with no question, View graph goes to P1's graph", c do
+        a = open(c.conn.(), at(c, @surface, :one))
+
+        case render_hook(a, "view-graph", %{}) do
+          {:error, {:live_redirect, %{to: to}}} -> assert to =~ "lsc-one/", to
+          html when is_binary(html) -> assert assert_patch(a) =~ "lsc-one/"
+        end
+      end
+
       test "P2 holds a document of the same id: a reload under the question still shows P1's",
            c do
         {a, _before} = asked(c, @surface)
