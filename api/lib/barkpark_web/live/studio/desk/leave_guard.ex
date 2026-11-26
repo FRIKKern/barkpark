@@ -105,11 +105,17 @@ defmodule BarkparkWeb.Studio.Desk.LeaveGuard do
 
   defp pass(socket), do: socket
 
-  @doc "A link `bp-desk-leave.js` may hand over: a path on this site."
+  @doc """
+  A link `bp-desk-leave.js` may hand over: a path on this site. No space,
+  control byte or backslash anywhere: a browser drops a tab or newline from
+  a URL, so "/<TAB>/evil.example" is read as "//evil.example", another site
+  (task-bbe2d34a97db65c9). The script hands over a parsed path, which has
+  none of them.
+  """
   def local?(href),
     do:
       is_binary(href) and String.starts_with?(href, "/") and not String.starts_with?(href, "//") and
-        not String.contains?(href, "\\")
+        not Regex.match?(~r/[\x00-\x20\x7f\\]/, href)
 
   @doc """
   The way a local link goes: a "patch" only to a route of this socket's own

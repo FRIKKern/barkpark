@@ -299,6 +299,23 @@ defmodule BarkparkWeb.Studio.DeskLeaveGuardTest do
       end
     end
 
+    test "a path with a space or control byte goes nowhere (a browser reads /<TAB>/x as //x)",
+         c do
+      a = held(c)
+
+      for href <- [
+            "/\t/evil.example/x",
+            "/\n/evil.example/x",
+            "/\r/evil.example/x",
+            "/ /evil.example/x",
+            "/\0/evil.example/x",
+            "/papers\t"
+          ] do
+        render_hook(a, "desk-leave", %{"href" => href, "kind" => ""})
+        refute has_element?(a, @dialog), inspect(href)
+      end
+    end
+
     test "control: nothing held, nothing asked", c do
       a = open(c)
       render_patch(a, to_doc(c, c.id <> "-link"))
