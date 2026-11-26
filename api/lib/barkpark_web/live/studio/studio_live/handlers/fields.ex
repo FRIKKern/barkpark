@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.SaveTells
@@ -458,8 +459,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case value do
       t when is_binary(t) and t != "" ->
         posted = %{field => document_slug(t)}
+        {posted, held} = HeldFields.stored(socket, posted, [field])
         saved = Shared.do_autosave(socket, posted, :slug_derive)
-        {:noreply, saved |> keep_unsaved_values(posted, [field]) |> settle_dirty([field])}
+
+        {:noreply,
+         saved
+         |> keep_unsaved_values(posted, [field])
+         |> settle_dirty([field])
+         |> HeldFields.restore(held)}
 
       _ ->
         {:noreply, socket}
@@ -485,8 +492,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {%{}, [_ | _] = path} ->
           form = picked_form(socket, path, code)
           socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1), path)
+          {form, held} = HeldFields.stored(socket, form, Enum.take(path, 1))
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
-          {:noreply, settle_dirty(saved, Enum.take(path, 1))}
+          {:noreply, saved |> settle_dirty(Enum.take(path, 1)) |> HeldFields.restore(held)}
 
         _ ->
           {:noreply, socket}
@@ -1134,8 +1142,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       new_form = StudioLive.put_value_at(form, key_path, new_list)
       # A refused array change is held under its own field (`RefusedSave`).
       keys = Enum.take(key_path, 1)
+      {new_form, held} = HeldFields.stored(socket, new_form, keys)
       saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
-      {:noreply, saved |> settle_dirty(keys) |> row_draws()}
+      {:noreply, saved |> settle_dirty(keys) |> row_draws() |> HeldFields.restore(held)}
     end
   end
 
