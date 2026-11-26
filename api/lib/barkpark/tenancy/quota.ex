@@ -87,6 +87,23 @@ defmodule Barkpark.Tenancy.Quota do
   def suspended?(_ws_id), do: false
 
   @doc """
+  `{:suspended, reason}` when the workspace is suspended, read fresh like
+  `suspended?/1`; `nil` otherwise. For refusals that name the operator's
+  reason in `details.reason` (task-b52ef8bc59eb1060).
+  """
+  @spec suspension(binary() | nil) :: {:suspended, String.t() | nil} | nil
+  def suspension(ws_id) when is_binary(ws_id),
+    do:
+      Repo.one(
+        from(w in Workspace,
+          where: w.id == ^ws_id and w.suspended,
+          select: {:suspended, w.suspended_reason}
+        )
+      )
+
+  def suspension(_ws_id), do: nil
+
+  @doc """
   Whether the workspace has room for `needed` MORE documents.
 
   This is the invariant the batch gate needs and `within_quota?/1` could not

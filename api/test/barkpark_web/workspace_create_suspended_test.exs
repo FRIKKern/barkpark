@@ -79,6 +79,17 @@ defmodule BarkparkWeb.WorkspaceCreateSuspendedTest do
       refute exists?(n)
     end
 
+    test "the refusal names the operator's reason in details.reason (task-b52ef8bc59eb1060)",
+         c do
+      {raw, _} = token!(c.ws.id)
+      suspend!(c.ws)
+
+      conn = post_ws(raw, name())
+
+      assert %{"error" => %{"code" => "workspace_suspended", "details" => %{"reason" => "wcs"}}} =
+               Jason.decode!(conn.resp_body)
+    end
+
     test "control: reinstated, the same token creates; a signup PAT with no home creates", c do
       {raw, _} = token!(c.ws.id)
       suspend!(c.ws)
