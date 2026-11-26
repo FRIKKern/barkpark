@@ -4,8 +4,8 @@ defmodule BarkparkWeb.WorkspaceCreateRuleTest do
   (`Tenancy.Auth.may_create_workspace?/2`), asked by REST
   `POST /api/workspaces` and by the Studio chrome's `create-workspace`
   fallback (Media, the desk), as Studio's `Caps` asks it: a write seat in the
-  workspace the caller acts from. On main REST let any authenticated token
-  create one, and the chrome asked only the token's permissions, never a seat.
+  workspace the caller acts from. On main REST asked only the token's
+  permissions (the mount write gate), never a seat, and so did the chrome.
   A workspace-less signup token still creates its first workspace with `write`.
   """
   use BarkparkWeb.ConnCase, async: false
@@ -55,7 +55,13 @@ defmodule BarkparkWeb.WorkspaceCreateRuleTest do
       |> post("/api/workspaces", %{"name" => name})
 
   describe "REST POST /api/workspaces" do
-    test "a read-only token seated in its home workspace is refused 403", %{conn: conn, ws: ws} do
+    # Green on main too: the `:require_token` mount write gate already refuses
+    # a read token on this route (task-a85afbbc0c4b1be3,
+    # require_token_write_gate_test.exs). Kept so the rule and the gate agree.
+    test "control: a read-only token seated in its home workspace is refused 403", %{
+      conn: conn,
+      ws: ws
+    } do
       {raw, _} = token!(ws, ["read"])
       n = name()
 
