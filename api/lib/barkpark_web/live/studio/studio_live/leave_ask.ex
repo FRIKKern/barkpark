@@ -8,6 +8,13 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
       bp-studio-leave.js never sees). It stays where it is and asks; Leave
       makes the press. A press on the open document's own row asks too: it
       opens the document again from the store, and the held words go;
+    * a link (bp-studio-leave.js): while a field is held, a plain click on
+      a link to another place on this site is held back before the URL
+      moves and handed to the server through the bridge button
+      (`bridge/1`, `studio-leave`), which goes on at once (nothing held by
+      then) or asks. Leave on a link that leaves the page is that link
+      (`data-desk-leave-go`, so the tab's `beforeunload` does not ask too);
+      a patch link is made again past the guard;
     * any patch to another place, Back above all. LiveView turns Back into
       `handle_params/3`, the URL already moved: the document stays and the
       dialog asks; Leave goes on with that patch, Stay patches the URL back.
@@ -87,6 +94,42 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
     end
   end
 
+  @doc """
+  A link bp-studio-leave.js held back (`studio-leave`, `href` and its
+  LiveView `kind`: "patch", "redirect", or "" for a page load):
+  `{:go, socket}` with the way there, or the question open. A path that is
+  not this site's goes nowhere.
+  """
+  def link(%{"href" => href} = params, socket) do
+    kind = params["kind"]
+
+    cond do
+      not LeaveGuard.local?(href) ->
+        {:stay, socket}
+
+      not desk?(socket) and held?(socket) and socket.assigns[:studio_leave_pass] != true ->
+        to =
+          case kind do
+            "patch" -> {:event, "studio-leave", params}
+            "redirect" -> {:link, href, :redirect}
+            _ -> {:link, href, :page}
+          end
+
+        {:stay, open(socket, to)}
+
+      kind == "patch" ->
+        {:go, push_patch(socket, to: href)}
+
+      kind == "redirect" ->
+        {:go, Phoenix.LiveView.push_navigate(socket, to: href)}
+
+      true ->
+        {:go, Phoenix.LiveView.redirect(socket, to: href)}
+    end
+  end
+
+  def link(_params, socket), do: {:stay, socket}
+
   @doc "Stay: the question closes; a patch it asked about is patched back."
   def stay(socket) do
     socket =
@@ -129,9 +172,10 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
 
   attr :a, :map, required: true, doc: "the Studio's assigns"
 
-  @doc "The question, when one is open, drawn from the Studio's assigns."
+  @doc "The bridge, and the question when one is open, drawn from the Studio's assigns."
   def asked(assigns) do
     ~H"""
+    <.bridge />
     <.dialog
       :if={@a[:studio_leave]}
       leave={@a.studio_leave}
@@ -143,6 +187,17 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   @doc "After Leave's press: the pass is for the patch it sent; with none, it ends here."
   def passed(%{redirected: {:live, :patch, _}} = socket), do: socket
   def passed(socket), do: assign(socket, :studio_leave_pass, false)
+
+  @doc """
+  The button bp-studio-leave.js hands a held-back link to: it sets
+  `phx-value-href` and `phx-value-kind` and clicks it, so the link reaches
+  the server with no hook.
+  """
+  def bridge(assigns) do
+    ~H"""
+    <button id="studio-leave-ask" type="button" phx-click="studio-leave" hidden aria-hidden="true" tabindex="-1"></button>
+    """
+  end
 
   attr :leave, :map, required: true
   attr :message, :string, default: nil

@@ -185,6 +185,73 @@ defmodule BarkparkWeb.Studio.StudioBackLeaveDialogTest do
     assert open_id(a) == c.id <> "-2"
   end
 
+  # A link bp-studio-leave.js held back reaches the server through the
+  # bridge button (`studio-leave`, PR 2): the dialog asks for it, as for Back.
+  describe "a link held back" do
+    test "the bridge the script clicks is on the page", c do
+      a = open(c)
+      assert has_element?(a, ~s(button#studio-leave-ask[phx-click="studio-leave"][hidden]))
+    end
+
+    test "held, a patch link asks; Leave makes the patch", c do
+      a = hold(c)
+      render_click(a, "studio-leave", %{"href" => c.other, "kind" => "patch"})
+
+      assert has_element?(a, @dialog, "Not saved: Notes.")
+      assert open_id(a) == c.id
+
+      press(a, "desk-leave-go")
+      assert_patch(a, c.other)
+      assert open_id(a) == c.id <> "-2"
+    end
+
+    test "held, a page link asks; Leave is that link, marked so the unload does not ask again",
+         c do
+      a = hold(c)
+      render_click(a, "studio-leave", %{"href" => "/papers", "kind" => ""})
+
+      assert has_element?(
+               a,
+               ~s|#{@dialog} a[data-desk-leave-go][href="/papers"]:not([data-phx-link])|
+             )
+
+      render_click(a, "studio-leave", %{"href" => c.other, "kind" => "redirect"})
+
+      assert has_element?(
+               a,
+               ~s|#{@dialog} a[data-desk-leave-go][data-phx-link="redirect"][href="#{c.other}"]|
+             )
+
+      assert open_id(a) == c.id
+    end
+
+    test "Stay on a link: the question closes, nothing moves", c do
+      a = hold(c)
+      render_click(a, "studio-leave", %{"href" => c.other, "kind" => "patch"})
+      press(a, "desk-leave-stay")
+
+      refute has_element?(a, @dialog)
+      assert open_id(a) == c.id
+      assert assigns(a).editor_form["notes"] == "one twA three"
+    end
+
+    test "nothing held: the link goes on at once", c do
+      a = open(c)
+      render_click(a, "studio-leave", %{"href" => c.other, "kind" => "patch"})
+      assert_patch(a, c.other)
+
+      assert {:error, {:redirect, %{to: "/papers"}}} =
+               render_click(a, "studio-leave", %{"href" => "/papers", "kind" => ""})
+    end
+
+    test "a path that is not this site's goes nowhere", c do
+      a = hold(c)
+      render_click(a, "studio-leave", %{"href" => "//evil.example/x", "kind" => ""})
+      refute has_element?(a, @dialog)
+      assert open_id(a) == c.id
+    end
+  end
+
   describe "LeaveAsk.params/4" do
     # The mark is read on the very next patch and never again, and it only
     # stops a patch to the place it names.

@@ -190,6 +190,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # A local capture: the LiveView hook census resolves a hook to its clauses.
   defp leave_follow(socket), do: LeaveAsk.follow(socket)
 
+  defp asks("studio-leave", params, socket) do
+    {_, socket} = LeaveAsk.link(params, socket)
+    {:noreply, socket}
+  end
+
   defp asks(event, params, socket) do
     case LeaveAsk.ask(event, params, socket) do
       {:stay, socket} -> {:noreply, socket}
@@ -218,6 +223,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
       {nil, socket} ->
         {:noreply, LeaveAsk.passed(socket)}
     end
+  end
+
+  defp leave("studio-leave", params, socket) do
+    {_, socket} = LeaveAsk.link(params, socket)
+    {:noreply, socket}
   end
 
   defp leave("select", params, socket), do: Scope.select(params, socket)
@@ -530,6 +540,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # The leave dialog's Stay and Leave (`LeaveGuard.dialog/1`, the desk's).
   def handle_event("desk-leave-stay", _params, socket), do: {:noreply, LeaveAsk.stay(socket)}
   def handle_event("desk-leave-go", _params, socket), do: leave_go(socket)
+  # A link bp-studio-leave.js held back while a field is held.
+  def handle_event("studio-leave", params, socket), do: asks("studio-leave", params, socket)
 
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)
