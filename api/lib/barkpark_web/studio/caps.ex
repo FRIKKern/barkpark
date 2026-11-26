@@ -685,9 +685,6 @@ defmodule BarkparkWeb.Studio.Caps do
     end
   end
 
-  @doc "The gate for `event`, for a press made later than it was asked (Studio's leave dialog)."
-  def gate_event(event, params, socket), do: gate(event, params, socket)
-
   defp gate(event, params, socket) do
     case classify(event) do
       tier when tier in [:none, :read] ->

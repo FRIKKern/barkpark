@@ -2190,11 +2190,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         admin?={Caps.admin_affordance?(@caps)}
       />
 
-      <BarkparkWeb.Studio.StudioLive.LeaveAsk.dialog
-        :if={assigns[:studio_leave]}
-        leave={@studio_leave}
-        message={BarkparkWeb.Studio.Desk.LeaveGuard.message(assigns)}
-      />
+      <BarkparkWeb.Studio.StudioLive.LeaveAsk.asked a={assigns} />
 
       <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
       <%= if @confirm_modal do %>

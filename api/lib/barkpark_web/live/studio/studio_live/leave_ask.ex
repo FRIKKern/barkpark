@@ -109,6 +109,37 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
     {to, assign(socket, studio_leave: nil, studio_leave_pass: true)}
   end
 
+  @doc """
+  A press asked about, run again through every `handle_event` hook the
+  socket has, in order: the list the press passed when it was made. `{:cont,
+  socket}`, or `{:halt, socket}` from the first hook that refuses it.
+
+  This is LiveView 1.1's own reducer, `Phoenix.LiveView.Lifecycle.handle_event/3`,
+  which is private to LiveView (`@moduledoc false`). An upgrade that renames
+  or reshapes it reds `studio_back_leave_dialog_test.exs`'s "a revoked grant"
+  tests, rather than letting a stored press skip the gates.
+  """
+  def hooks(event, params, socket) do
+    case Phoenix.LiveView.Lifecycle.handle_event(event, params, socket) do
+      {:cont, socket} -> {:cont, socket}
+      {:halt, socket} -> {:halt, socket}
+      {:halt, _reply, socket} -> {:halt, socket}
+    end
+  end
+
+  attr :a, :map, required: true, doc: "the Studio's assigns"
+
+  @doc "The question, when one is open, drawn from the Studio's assigns."
+  def asked(assigns) do
+    ~H"""
+    <.dialog
+      :if={@a[:studio_leave]}
+      leave={@a.studio_leave}
+      message={BarkparkWeb.Studio.Desk.LeaveGuard.message(@a)}
+    />
+    """
+  end
+
   @doc "After Leave's press: the pass is for the patch it sent; with none, it ends here."
   def passed(%{redirected: {:live, :patch, _}} = socket), do: socket
   def passed(socket), do: assign(socket, :studio_leave_pass, false)
@@ -119,14 +150,15 @@ defmodule BarkparkWeb.Studio.StudioLive.LeaveAsk do
   @doc """
   The desk's question, in Studio's look: the frame's own stylesheet is the
   desk's (`.dk`, its tokens), so Studio draws it with its modal's
-  (`.modal-backdrop`, `.modal-card` in root.html.heex).
+  (`.modal-backdrop`, `.modal-card` in root.html.heex). Where it sits (fixed,
+  centred) is the frame's sheet, for `.studio-leave` as for `.dk`.
   """
   def dialog(assigns) do
     ~H"""
     <div class="studio-leave">
       <style>
         .studio-leave .dk-dialog-backdrop { z-index: 51; background: hsl(var(--bp-scrim-hsl) / 0.45); }
-        .studio-leave .dk-dialog { position: fixed; z-index: 52; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--fg); box-shadow: 0 16px 48px hsl(var(--bp-shadow-hsl) / 0.25); }
+        .studio-leave .dk-dialog { z-index: 52; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--fg); box-shadow: 0 16px 48px hsl(var(--bp-shadow-hsl) / 0.25); }
         .studio-leave .dk-dialog-head { display: flex; align-items: center; gap: 8px; padding: 16px 16px 0 20px; }
         .studio-leave .dk-dialog-head h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--text-base); font-weight: 600; }
         .studio-leave .dk-dialog-close { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--fg-muted); cursor: pointer; }

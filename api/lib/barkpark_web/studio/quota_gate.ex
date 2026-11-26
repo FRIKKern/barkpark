@@ -91,9 +91,6 @@ defmodule BarkparkWeb.Studio.QuotaGate do
     end
   end
 
-  @doc "The gate for `event`, for a press made later than it was asked (Studio's leave dialog)."
-  def gate_event(event, params, socket), do: studio_event(event, params, socket)
-
   defp studio_event(event, _params, socket) do
     cond do
       event in @exempt -> {:cont, socket}
