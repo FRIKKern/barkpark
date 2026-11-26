@@ -35,12 +35,12 @@ defmodule Barkpark.Content.PublicPaperSameSlugProjectTest do
     %{ws: ws, p1: p1, p2: p2, ds: ds, slug: "ppsp-#{System.unique_integer([:positive])}"}
   end
 
-  defp paper!(c, p, text) do
+  defp paper!(c, p, text, title \\ "T") do
     {:ok, doc} =
       Content.upsert_paper(
         Barkpark.LabelFixtures.paper_attrs(%{
           "slug" => c.slug,
-          "title" => "T",
+          "title" => title,
           "dataset" => c.ds,
           "workspace_id" => c.ws.id,
           "project_id" => p.id,
@@ -90,5 +90,31 @@ defmodule Barkpark.Content.PublicPaperSameSlugProjectTest do
 
     assert out =~ "P1 refetched"
     refute out =~ "P2 words"
+  end
+
+  test "GET /papers/<slug> serves the oldest of two same-slug papers, not a 500",
+       %{conn: conn} = c do
+    paper!(c, c.p1, "P1 words")
+    paper!(c, c.p2, "P2 words")
+
+    conn = get(conn, "/papers/#{c.slug}")
+
+    assert conn.status == 200
+    assert conn.resp_body =~ "P1 words"
+    refute conn.resp_body =~ "P2 words"
+  end
+
+  test "a paper-links card names the oldest of two same-slug papers, as the reader does", c do
+    paper!(c, c.p1, "P1 words", "P1 title")
+    paper!(c, c.p2, "P2 words", "P2 title")
+    block = %{"type" => "paper-links", "refs" => [%{"slug" => c.slug}]}
+
+    details =
+      Content.Papers.resolve_paper_link_details([block], c.ds,
+        workspace_id: c.ws.id,
+        published_only: true
+      )
+
+    assert %{title: "P1 title"} = details[c.slug]
   end
 end
