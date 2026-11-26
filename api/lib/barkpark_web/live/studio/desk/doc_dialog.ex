@@ -228,12 +228,15 @@ defmodule BarkparkWeb.Studio.Desk.DocDialog do
 
   # The TanStack Studio's `.dialog` (barkpark-studio `styles.css`), in the
   # desk's own colours, so it follows light and dark with the rest of the
-  # desk. Drawn with the dialog, so a closed one costs nothing.
+  # desk. Drawn with the dialog, so a closed one costs nothing. Studio's
+  # leave question (`.studio-leave`, `LeaveAsk.dialog/1`) takes its place
+  # from here and its colours from Studio's own tokens.
   defp sheet(assigns) do
     ~H"""
     <style>
       .dk .dk-dialog-backdrop { z-index: 200; background: var(--dk-backdrop); }
-      .dk .dk-dialog { position: fixed; z-index: 201; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
+      .dk .dk-dialog, .studio-leave .dk-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
+      .dk .dk-dialog { z-index: 201; border-radius: 6px; background: var(--dk-bg); color: var(--dk-fg); box-shadow: var(--dk-popover-shadow); font-size: 13px; line-height: 19px; }
       .dk .dk-dialog-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0 20px; }
       .dk .dk-dialog-head h2 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg); }
       .dk .dk-dialog-close { display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); cursor: pointer; }

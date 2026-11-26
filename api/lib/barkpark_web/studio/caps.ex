@@ -163,7 +163,7 @@ defmodule BarkparkWeb.Studio.Caps do
   # pair's twins: they list the principal's own membership places and go to
   # one after the same reachability gate, and they write nothing.
   @safe_events ~w(
-    select select-group select-desk select-pane expand-pane
+    select select-group select-desk select-pane expand-pane desk-leave-stay desk-leave-go
     switch-workspace switch-project switch-dataset toggle-create
     scope-menu-toggle scope-menu-close scope-menu-ws scope-menu-proj scope-open
     desk-scope-load desk-scope-go

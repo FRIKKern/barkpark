@@ -330,7 +330,12 @@ defmodule BarkparkWeb.LiveScope do
     jump-to-user show-profile preview-profile close-profile
     toggle-content-preview toggle-diff toggle-category
     editor-set-mode search
+    desk-leave-stay desk-leave-go
   )
+
+  # `desk-leave-stay` only closes the leave question, and `desk-leave-go`
+  # only moves the page: a press it replays runs every handle_event hook
+  # again, these gates included (`StudioLive.leave_go/1`, #28937 review S1).
 
   defp maybe_attach_readonly_gate(socket, :share_read),
     do: attach_readonly_gate(socket, "This workspace is shared read-only")
