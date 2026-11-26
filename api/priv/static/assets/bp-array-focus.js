@@ -321,11 +321,29 @@
     true,
   );
 
+  // task-6496826d722a5a06: the text each reported number stands for, per
+  // `_bp_seen` input (it lives as long as the page, across a rejoin). A
+  // field showing typing done while away still reports the new socket's
+  // number when the value that number stands for is the very text the
+  // typing was done on: nobody else saved, so the post is the page's own
+  // edit of the stored value.
+  var bases = new WeakMap();
+
+  function baseOf(input) {
+    var b = bases.get(input);
+    if (!b) {
+      b = {};
+      bases.set(input, b);
+    }
+    return b;
+  }
+
   function recordSeen(values, seqs) {
     var form = document.getElementById("editor-form");
     var input = form && form.querySelector('input[name="_bp_seen"]');
     if (!input) return;
     var seen = readSeen(input);
+    var base = baseOf(input);
     seen.v = SEEN_VERSION;
     Object.keys(seqs).forEach(function (name) {
       var pair = seqs[name];
@@ -338,12 +356,18 @@
       // from an older value than the one the person saw.
       if (!field) {
         seen[name] = pair[1];
+        base[name] = change.value;
         return;
       }
       if (typeof field.value !== "string") return;
       // A textarea's value has its line breaks as "\n" only.
-      if (lf(field.value) === lf(change.value)) seen[name] = pair[1];
-      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = pair[0];
+      if (lf(field.value) === lf(change.value)) {
+        seen[name] = pair[1];
+        base[name] = change.value;
+      } else if (!Object.prototype.hasOwnProperty.call(seen, name)) {
+        seen[name] = pair[0];
+        if (typeof change.was === "string") base[name] = change.was;
+      }
     });
     input.value = JSON.stringify(seen);
   }
@@ -376,9 +400,11 @@
   // task-4fc7383b936f606a: a connected mount sends each free-text field its
   // stored value with a number (`RemoteValues.born/1`). A page that rejoins
   // a new socket keeps this input, the old socket's numbers. A field showing
-  // the value takes the number. One that does not (typed while away) keeps
-  // its number, or reports 0, a number no socket sends: the server holds its
-  // post rather than write it over a save it never showed. Nothing is drawn.
+  // the value takes the number, and so does one showing typing done on that
+  // very value (task-6496826d722a5a06): its post is its own edit of the
+  // stored value. One typed on any other value keeps its number, or reports
+  // 0, a number no socket sends: the server holds its post rather than write
+  // it over a save it never showed. Nothing is drawn.
   function onBorn(e) {
     var detail = (e && e.detail) || {};
     var values = detail.values || {};
@@ -387,14 +413,19 @@
     var input = form && form.querySelector('input[name="_bp_seen"]');
     if (!input) return;
     var seen = readSeen(input);
+    var base = baseOf(input);
     seen.v = SEEN_VERSION;
     Object.keys(seqs).forEach(function (name) {
       var value = values[name];
       var field = form.elements.namedItem(name);
       if (typeof value !== "string" || typeof seqs[name] !== "number") return;
-      // A field not drawn now is drawn later from the server's form.
-      if (!field || (typeof field.value === "string" && lf(field.value) === lf(value))) seen[name] = seqs[name];
-      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = 0;
+      var had = Object.prototype.hasOwnProperty.call(base, name) && lf(base[name]) === lf(value);
+      // A field not drawn now is drawn later from the server's form. One
+      // showing typing done on the stored value takes the number too.
+      if (!field || had || (typeof field.value === "string" && lf(field.value) === lf(value))) {
+        seen[name] = seqs[name];
+        base[name] = value;
+      } else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = 0;
     });
     input.value = JSON.stringify(seen);
   }

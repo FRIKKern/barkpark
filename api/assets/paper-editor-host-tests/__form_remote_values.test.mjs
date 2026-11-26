@@ -218,6 +218,47 @@ check("born: a field with the old socket's number keeps it when it does not show
   assert.deepEqual(seen(), { "doc[title]": 4, v: 2 });
 });
 
+// task-6496826d722a5a06: the page keeps the text each number stands for.
+// Typing done on the stored value, with no other save, is the page's own
+// edit: it takes the new socket's number and posts with no banner.
+check("born: typing done while away on the value the number stands for takes the new number and keeps the typing", () => {
+  const { title } = mount("Fixture post B3", "First");
+  born({ "doc[title]": "Fixture post B3" }, { "doc[title]": 4 });
+  title.focus();
+  title.value = "Fixture post B3 A7";
+  born({ "doc[title]": "Fixture post B3" }, { "doc[title]": 9 });
+  assert.equal(title.value, "Fixture post B3 A7", "the typing stays");
+  assert.deepEqual(seen(), { "doc[title]": 9, v: 2 });
+});
+
+check("born: typing done on a value the field took from a push takes the new number", () => {
+  const { title } = mount("one two three", "First");
+  title.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three" } }, { "doc[title]": [1, 2] });
+  title.value = "one twB three A";
+  born({ "doc[title]": "one twB three" }, { "doc[title]": 9 });
+  assert.equal(title.value, "one twB three A");
+  assert.deepEqual(seen(), { "doc[title]": 9, v: 2 });
+});
+
+check("born: another save while away keeps the old number, and the typing", () => {
+  const { title } = mount("Fixture post B3", "First");
+  born({ "doc[title]": "Fixture post B3" }, { "doc[title]": 4 });
+  title.value = "Fixture post B3 A7";
+  born({ "doc[title]": "Fixture post C1" }, { "doc[title]": 9 });
+  assert.equal(title.value, "Fixture post B3 A7");
+  assert.deepEqual(seen(), { "doc[title]": 4, v: 2 });
+});
+
+check("born: typing on a value a push did not draw stands for the old value, not the pushed one", () => {
+  const { title } = mount("one twA three", "First");
+  title.focus();
+  push({ "doc[title]": { value: "one twB three", was: "one two three" } }, { "doc[title]": [1, 2] });
+  born({ "doc[title]": "one twB three" }, { "doc[title]": 9 });
+  assert.equal(title.value, "one twA three");
+  assert.deepEqual(seen(), { "doc[title]": 1, v: 2 });
+});
+
 check("born: a field not drawn takes the number; a textarea compares its line breaks as \\n", () => {
   mount("T", "one\ntwo");
   born({ "doc[kicker]": "K", "doc[excerpt]": "one\r\ntwo" }, { "doc[kicker]": 5, "doc[excerpt]": 6 });

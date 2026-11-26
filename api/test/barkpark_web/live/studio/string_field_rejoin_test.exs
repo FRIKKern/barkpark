@@ -205,23 +205,19 @@ defmodule BarkparkWeb.Studio.StringFieldRejoinTest do
       refute html =~ "doc-conflict-banner"
     end
 
-    # Design A's cost (task-6496826d722a5a06): with no other save, typing
-    # done while away is held too. A banner that was not needed; no words lost.
-    test "#{surface} #{field}: A's page rejoins with no other save and posts its typing: held with the banner, typing on saves",
+    # task-6496826d722a5a06 (design A's cost): with no other save, typing
+    # done while away was held too, a banner that was not needed. The page
+    # keeps the text its number stands for; the born value is that text, so
+    # it reports the born number, and its post saves.
+    test "#{surface} #{field}: A's page rejoins with no other save and posts its typing: saved, no banner",
          c do
       field = unquote(field)
       a2 = open(c, unquote(surface))
-      n = born(a2, unquote(target), false)
+      n = born(a2, unquote(target), true)
       html = posts_seen(a2, unquote(target), %{field => "one twA three"}, n)
 
-      assert get_in(stored(c), unquote(at)) == "one two three"
-      assert html =~ "doc-conflict-banner"
-
-      posts_seen(a2, unquote(target), %{field => "one twAA three"}, n)
-
-      assert ObjectRichText.eventually(fn ->
-               get_in(stored(c), unquote(at)) == "one twAA three"
-             end)
+      assert get_in(stored(c), unquote(at)) == "one twA three"
+      refute html =~ "doc-conflict-banner"
     end
   end
 
