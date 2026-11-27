@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.TopRichTextInFlightTest do
   import BarkparkWeb.ObjectRichText
 
   alias Barkpark.Content
+  alias BarkparkWeb.PageSeen
 
   @moduletag :studio_live
 
@@ -53,25 +54,9 @@ defmodule BarkparkWeb.Studio.TopRichTextInFlightTest do
     view
   end
 
-  # The page's `_bp_seen` as the form drew it, and the digests the load sent.
-  defp page(view) do
-    [_, value] = Regex.run(~r/name="_bp_seen"[^>]*value="([^"]*)"/, render(view))
-    seen = value |> String.replace("&quot;", ~s(")) |> Jason.decode!() |> Map.put("v", 2)
-
-    oks =
-      receive_oks(view, %{})
-
-    Map.update(seen, "ok", oks, &Map.merge(&1, oks))
-  end
-
-  defp receive_oks(%{proxy: {ref, _topic, _}} = view, acc) do
-    receive do
-      {^ref, {:push_event, "bp:form-confirmed", %{oks: oks}}} ->
-        receive_oks(view, Map.merge(acc, oks))
-    after
-      300 -> acc
-    end
-  end
+  # The page's `_bp_seen` as bp-array-focus.js keeps it (`PageSeen`). A
+  # test keeps a copy to post later as an in-flight page would.
+  defp page(view), do: view |> PageSeen.seen() |> Map.put("v", 2)
 
   defp types(view, words, seen) do
     view
@@ -127,14 +112,18 @@ defmodule BarkparkWeb.Studio.TopRichTextInFlightTest do
       seen = page(a)
       b = tab(c, @surface)
 
+      # A's socket takes each frame on its own: two taken as one log one
+      # value, and body0 would still be in the log.
       for i <- 1..9 do
         types(b, ["body0 B#{i}"], page(b))
         assert eventually(fn -> body(c) == ["body0 B#{i}"] end)
+        assert eventually(fn -> form(a)["body"] =~ "body0 B#{i}" end)
       end
 
-      render(a)
       log = :sys.get_state(a.pid).socket.assigns[:editor_rt_took]["doc[body]"]
       assert length(log) == 8
+      assert is_binary(seen["ok"]["doc[body]"])
+      refute List.keymember?(log, seen["ok"]["doc[body]"], 0)
 
       html = types(a, ["body0 A7"], seen)
 
