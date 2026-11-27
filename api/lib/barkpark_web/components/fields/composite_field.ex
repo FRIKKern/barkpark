@@ -25,7 +25,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
   alias BarkparkWeb.Studio.Desk.Fieldsets
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
+  alias BarkparkWeb.Studio.StudioLive.Path, as: FieldPath
 
   attr :field, :map, required: true
   attr :value, :map, default: %{}
@@ -243,7 +245,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         input_id: input_id,
         # Keyed by the item's `_key` too: a moved item or another document
         # remounts the ignored editor instead of keeping the old text.
-        wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
+        wrap_id:
+          "bp-rt-sub-#{input_id}-#{:erlang.phash2(row_keys(assigns, sub.name, owner_key))}",
         owner_key: owner_key,
         html: drawn_html(value),
         label: title_for(sub),
@@ -870,6 +873,15 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp own_findings(_, _), do: []
+
+  # A row rich text's own row key, and every row key on the way when the
+  # document (`root`) is known. Two sections whose items share a key (a
+  # duplicated section) kept their editors' ids when they swapped, so each
+  # page kept the other section's text in its slot (task-d7a6ed432944fff5).
+  defp row_keys(%{root: %{} = root, path: path}, name, own),
+    do: {RowDraws.outer_keys(root, FieldPath.parse_path(child_path(path, name))), own}
+
+  defp row_keys(_assigns, _name, own), do: own
 
   defp child_path("", child), do: child
   defp child_path(parent, child), do: "#{parent}.#{child}"

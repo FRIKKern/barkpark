@@ -89,11 +89,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   defp id(form, path, key) do
     case to_string(key) do
       "" -> {path, ""}
-      key -> {Enum.reject(path, &is_integer/1), outer(form, path), key}
+      key -> {Enum.reject(path, &is_integer/1), outer_keys(form, path), key}
     end
   end
 
-  defp outer(form, path) do
+  @doc """
+  The `_key` of each row a field at `path` sits in, read from `form`, its
+  own row's left out; a row with no key gives its index. The row editor's
+  wrapper id names them too (`CompositeField`).
+  """
+  def outer_keys(form, path) do
     path
     |> Enum.with_index()
     |> Enum.filter(fn {seg, _n} -> is_integer(seg) end)

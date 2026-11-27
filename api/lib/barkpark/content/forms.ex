@@ -1253,7 +1253,7 @@ defmodule Barkpark.Content.Forms do
   # refresh the derived article HTML, while preserving the exact authored block
   # tree and every unknown body key.
   defp classic_save_without_top_level_blocks(base_content, params, schema, dataset, scope) do
-    case historical_body_blocks(base_content) do
+    case base_content |> historical_body_blocks() |> cleared_body(schema) do
       {:ok, blocks, body_source} ->
         classic_save_historical_blocks(
           base_content,
@@ -1365,6 +1365,19 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp historical_body_blocks(_content), do: :none
+
+  # A cleared Portable Text `body` is stored as `[]`, which reads as an empty
+  # PortableDoc block list: the save kept it, and A's next words were dropped
+  # with no banner (task-2e5deec3fa974d15). For a body the schema declares
+  # Portable Text, `[]` is the empty field value. A legacy `body` (no
+  # format) keeps its reading: its stored value decides, and `[]` says nothing.
+  defp cleared_body({:ok, [], :list} = found, %{fields: fields}) when is_list(fields) do
+    if Enum.any?(fields, &(&1["name"] == "body" and plain_rich_text?(&1))),
+      do: :none,
+      else: found
+  end
+
+  defp cleared_body(found, _schema), do: found
 
   defp historical_body_value({:map, body}, blocks, html) do
     body
