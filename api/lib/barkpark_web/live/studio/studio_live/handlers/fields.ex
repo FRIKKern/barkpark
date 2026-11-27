@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldSeed
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.SaveTells
@@ -802,11 +803,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
 
+      seed = HeldSeed.form(socket, base_form)
+
       {doc, dropped} =
         Enum.reduce(dotted, {doc, []}, fn {key, value}, {acc, dropped} ->
-          with [_ | _] = path <- StudioLive.parse_path(key),
-               {:ok, path} <- row_path(path, row_keys, base_form) do
-            {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), dropped}
+          with [_ | _] = posted <- StudioLive.parse_path(key),
+               {:ok, path} <- row_path(posted, row_keys, seed),
+               false <- HeldSeed.moved_hold?(socket, posted, path) do
+            {acc |> seed_root(path, seed) |> write_leaf(socket, path, value), dropped}
           else
             :drop -> {acc, [{key, value} | dropped]}
             _ -> {acc, dropped}
