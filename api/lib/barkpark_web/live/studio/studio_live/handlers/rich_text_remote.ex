@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
 
@@ -301,10 +302,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   def hold(socket, acts) do
     Enum.reduce(Enum.reverse(acts), socket, fn
       {:current, name}, s ->
-        assign(s,
+        s
+        |> assign(
           editor_rt_clash: Map.delete(s.assigns[:editor_rt_clash] || %{}, name),
           editor_rt_held: Map.delete(s.assigns[:editor_rt_held] || %{}, name)
         )
+        |> HeldFields.drop_paths([{:rt, name}])
 
       # `own`: the page reads its text from this one, not from what waited
       # before it (task-2833650e2e72d380).
@@ -330,7 +333,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     [key | _] = path
     clash = socket.assigns[:editor_rt_clash] || %{}
 
-    assign(socket,
+    socket
+    # The row the hold is in, by its `_key`, before an op moves it.
+    |> HeldFields.hold_paths([{{:rt, name}, path}])
+    |> assign(
       editor_form: put_view(socket, path, view),
       editor_dirty: true,
       editor_unsaved_keys: MapSet.put(socket.assigns[:editor_unsaved_keys] || MapSet.new(), key),
@@ -434,6 +440,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_folded: %{},
         editor_rt_held: %{},
         editor_rt_clash: %{},
+        editor_held_paths: %{},
         editor_rt_born: %{},
         editor_rt_page: nil,
         editor_rt_row_draws: nil,
@@ -444,7 +451,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   end
 
   @doc "Ends every hold: the form was read again from the store."
-  def drop_holds(socket), do: assign(socket, editor_rt_held: %{}, editor_rt_clash: %{})
+  def drop_holds(socket),
+    do:
+      socket
+      |> assign(editor_rt_held: %{}, editor_rt_clash: %{})
+      |> HeldFields.drop_paths()
 
   @doc """
   While A's words in an object are held (`Lifecycle`'s unsaved branch keeps

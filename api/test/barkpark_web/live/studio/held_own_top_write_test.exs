@@ -150,6 +150,53 @@ defmodule BarkparkWeb.Studio.HeldOwnTopWriteTest do
       assert has_element?(a, @banner)
     end
 
+    # #29078 r1 review: the hold's input name keeps the index it started at.
+    test "#{surface}: add, move the held row, add again: B's row stays", c do
+      c = Map.put(c, :surface, unquote(surface))
+      {a, view} = row_held(c)
+
+      op(a, "add_row")
+      assert eventually(fn -> length(rows(c)) == 2 end)
+      op(a, "move_up", %{"index" => "1"})
+      assert eventually(fn -> List.last(rows(c))["_key"] == "r1" end)
+      op(a, "add_row")
+
+      assert eventually(fn -> length(rows(c)) == 3 end)
+      # On the first round: the second add read the held name's index, the
+      # new row, and wrote A's "rowtextA" over B's row.
+      assert words(row(rows(c), "r1")["rt"]) == ["rowtexB"]
+      assert row(form(a)["meta"]["rows"], "r1")["rt"] == view
+      assert has_element?(a, @banner)
+    end
+
+    test "#{surface}: add, move the held row, remove the new row: B's row stays", c do
+      c = Map.put(c, :surface, unquote(surface))
+      {a, view} = row_held(c)
+
+      op(a, "add_row")
+      assert eventually(fn -> length(rows(c)) == 2 end)
+      op(a, "move_up", %{"index" => "1"})
+      assert eventually(fn -> List.last(rows(c))["_key"] == "r1" end)
+      op(a, "remove_row", %{"index" => "0"})
+
+      assert eventually(fn -> length(rows(c)) == 1 end)
+      assert words(row(rows(c), "r1")["rt"]) == ["rowtexB"]
+      assert row(form(a)["meta"]["rows"], "r1")["rt"] == view
+      assert has_element?(a, @banner)
+    end
+
+    test "#{surface}: a Save ends the recorded hold paths", c do
+      c = Map.put(c, :surface, unquote(surface))
+      a = label_held(c)
+      assert map_size(:sys.get_state(a.pid).socket.assigns[:editor_held_paths]) > 0
+
+      a
+      |> element("#editor-form")
+      |> render_submit(%{"doc" => %{"title" => "T0"}, @label => form(a)["meta"]["label"]})
+
+      assert :sys.get_state(a.pid).socket.assigns[:editor_held_paths] == %{}
+    end
+
     test "#{surface}: a row added to meta.rows while meta.label is held keeps B's label", c do
       c = Map.put(c, :surface, unquote(surface))
       a = label_held(c)

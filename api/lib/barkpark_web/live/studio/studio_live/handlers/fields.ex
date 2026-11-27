@@ -372,6 +372,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          socket
          |> Shared.rebuild_panes()
          |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+         |> HeldFields.drop_paths()
          |> Shared.assign_page_title()
          |> clear_touched()
          |> TextUnderLock.hold(text_held, params)}
@@ -388,6 +389,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> Shared.rebuild_panes()
           |> TextConfirmed.redrawn(socket)
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+          |> HeldFields.drop_paths()
           |> Shared.assign_page_title()
           |> clear_touched()
 

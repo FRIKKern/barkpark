@@ -19,11 +19,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
 
   A held path inside the write's own top (a row's rich text, a label in an
   object, while an array op writes the object) takes the store's value too,
-  and gets A's words back after (task-ffb773f49c564973). The paths are each
-  held rich text's (`editor_rt_held`) and each held text's
-  (`editor_text_held`, `TextUnderLock.hold/3`). A row on the path is found
-  by its `_key`, in the form after the op and in the store: the op can move
-  it. An entry of a hold that has ended only keeps a value the form shows
+  and gets A's words back after (task-ffb773f49c564973). Each hold records
+  its path when it starts (`hold_paths/2`: `RichTextRemote.keep_held`,
+  `TextUnderLock.hold/3`), each row on it by its `_key`, in
+  `editor_held_paths`: an op moves rows, and a hold's input name keeps the
+  index it started at (#29078 r1 review). The row is found by its `_key` in
+  the form after the op and in the store. A rich text's entry counts while
+  `editor_rt_held` holds it; a Save, a Reload or a load ends them all. An
+  entry of a text hold that has ended only keeps a value the form shows
   unsaved until A's next post or Save, and only while the banner names its
   top.
   """
@@ -37,7 +40,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
   @kept [
     :editor_clash_fields,
     :editor_text_paused,
-    :editor_text_held,
+    :editor_held_paths,
     :editor_rt_held,
     :editor_rt_clash
   ]
@@ -71,6 +74,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
 
   def stored(_socket, form, _own), do: {form, nil}
 
+  @doc """
+  Records each `{id, path}` of a hold that starts (`{:rt, name}` or
+  `{:text, key}`), its rows by `_key` in the form as it is now. A hold
+  already recorded keeps its path: its input name may have kept an index
+  an op has since moved.
+  """
+  def hold_paths(socket, entries) do
+    form = socket.assigns[:editor_form] || %{}
+
+    paths =
+      Enum.reduce(entries, socket.assigns[:editor_held_paths] || %{}, fn {id, path}, paths ->
+        Map.put_new(paths, id, keyed(form, path))
+      end)
+
+    assign(socket, editor_held_paths: paths)
+  end
+
+  @doc "Forgets the recorded path of each hold in `ids`: it has ended."
+  def drop_paths(socket, ids),
+    do:
+      assign(socket, editor_held_paths: Map.drop(socket.assigns[:editor_held_paths] || %{}, ids))
+
+  @doc "Ends every recorded hold path: a Save, a Reload, a load."
+  def drop_paths(socket), do: assign(socket, editor_held_paths: %{})
+
   @doc "The hold `stored/3` read, back on the socket after the write."
   def restore(socket, nil), do: socket
 
@@ -95,8 +123,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
       editor_clash_fields:
         Enum.uniq((kept[:editor_clash_fields] || []) ++ (a[:editor_clash_fields] || [])),
       editor_text_paused: kept[:editor_text_paused] || a[:editor_text_paused] || [],
-      editor_text_held:
-        Enum.uniq((kept[:editor_text_held] || []) ++ (a[:editor_text_held] || [])),
+      editor_held_paths: Map.merge(a[:editor_held_paths] || %{}, kept[:editor_held_paths] || %{}),
       editor_rt_held: Map.merge(a[:editor_rt_held] || %{}, kept[:editor_rt_held] || %{}),
       editor_rt_clash: Map.merge(a[:editor_rt_clash] || %{}, kept[:editor_rt_clash] || %{})
     )
@@ -108,21 +135,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
       else: []
   end
 
-  # Each held path below a top in `own` that the banner names, its rows by
-  # `_key` where they carry one (`keyed/2`). A held top-level field is the
-  # write's own field: the write is A's edit of it.
+  # Each recorded held path (`hold_paths/2`) below a top in `own` that the
+  # banner names. A held top-level field is the write's own field: the
+  # write is A's edit of it. A rich text held with no recorded path is read
+  # from its name against the form.
   defp own_paths(assigns, own, mine) do
     if assigns[:doc_conflict] == true do
       named = assigns[:editor_clash_fields] || []
+      recorded = assigns[:editor_held_paths] || %{}
 
-      rich = for name <- Map.keys(assigns[:editor_rt_held] || %{}), do: Path.parse_path(name)
-      text = for key <- assigns[:editor_text_held] || [], do: List.wrap(key)
+      rich =
+        for name <- Map.keys(assigns[:editor_rt_held] || %{}),
+            do: Map.get_lazy(recorded, {:rt, name}, fn -> keyed(mine, Path.parse_path(name)) end)
 
-      for [top, _ | _] = path <- Enum.uniq(rich ++ text),
+      text = for {{:text, _}, path} <- recorded, do: path
+
+      for [top, _ | _] = path <- rich ++ text,
           top in List.wrap(own),
           top in named,
           uniq: true,
-          do: keyed(mine, path)
+          do: path
     else
       []
     end
