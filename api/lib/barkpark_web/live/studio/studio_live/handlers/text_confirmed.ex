@@ -152,6 +152,63 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
     do: Map.get(oks, name) == rich_digest(stored)
 
   @doc """
+  Another editor's save taken over `before` (`Lifecycle.doc_updated/2`, or
+  the pane rebuild of `Lifecycle.document_changed/2`, which reloads the row):
+  each top-level rich text it changed is logged as the value a page may
+  still show, by its digest (`editor_rt_took`, the last 8 per field).
+
+  A page's autosave sent before the redraw of that frame reached it was
+  typed on that value, and the socket now reads the frame's row as what
+  the editor shows (`RichTextRemote.UnderLock.top/3`). `page_base/4` gives
+  it back (task-a368aa61eb491d9f).
+  """
+  def took(socket, %{content: %{} = was}, %{content: %{} = now}) do
+    log =
+      for key <- rich_keys(socket.assigns[:editor_schema]),
+          old = Map.get(was, key),
+          Map.get(now, key) != old,
+          reduce: socket.assigns[:editor_rt_took] || %{} do
+        log ->
+          name = RemoteValues.input_name(key)
+
+          Map.update(
+            log,
+            name,
+            [{rich_digest(old), old}],
+            &Enum.take([{rich_digest(old), old} | &1], 8)
+          )
+      end
+
+    assign(socket, editor_rt_took: log)
+  end
+
+  def took(socket, _was, _frame), do: socket
+
+  @doc """
+  The base a top-level rich text post `name` is read against on a socket
+  that has it drawn (`stored`, the row it last took): the value logged by
+  `took/3` whose digest the page reports (`seen`, the raw `_bp_seen`), when
+  the page reports one that is not `stored`'s. A digest of anything else (a
+  confirm of A's own post not yet taken) reads as before: `stored`.
+  """
+  def page_base(socket, name, stored, seen) do
+    case Map.get(seen_oks(seen), name) do
+      nil ->
+        stored
+
+      ok ->
+        log = Map.get(socket.assigns[:editor_rt_took] || %{}, name, [])
+
+        with false <- ok == rich_digest(stored),
+             {_, value} <- List.keyfind(log, ok, 0) do
+          value
+        else
+          _ -> stored
+        end
+    end
+  end
+
+  @doc """
   At a document's load: a socket that mounted as a rejoin reads each
   top-level rich text against the page's digest (`rejoin_seen/4`); any other
   load draws the wrappers anew, and the page is sent their digests.
@@ -161,12 +218,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
       names = Enum.map(rich_keys(socket.assigns[:editor_schema]), &RemoteValues.input_name/1)
 
       socket
-      |> assign(editor_rejoined?: false, editor_rt_rejoin: MapSet.new(names))
+      |> assign(editor_rejoined?: false, editor_rt_rejoin: MapSet.new(names), editor_rt_took: %{})
       |> RejoinForm.loaded()
     else
       socket
       |> RejoinForm.forget()
-      |> assign(editor_rt_rejoin: MapSet.new())
+      |> assign(editor_rt_rejoin: MapSet.new(), editor_rt_took: %{})
       |> push_rich(socket.assigns[:editor_form])
     end
   end
@@ -175,9 +232,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   After a change that may have drawn the top-level rich text wrappers anew
   (a new form generation since `before`): the page shows the form's values.
   """
-  def redrawn(socket, before) do
+  def redrawn(socket, before, except \\ []) do
     if socket.assigns[:editor_form_gen] != before.assigns[:editor_form_gen],
-      do: push_rich(socket, socket.assigns[:editor_form]),
+      do: push_rich(socket, socket.assigns[:editor_form], except),
       else: socket
   end
 
@@ -185,8 +242,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   # words (`RichTextRemote.keep_held`), not the store's, so a redraw caused
   # by another field (B's save of it, a desk paste) does not end the hold
   # (task-7234490778404641). A Save or Reload does.
-  defp push_rich(socket, form) when is_map(form) do
-    case rich_drawn(socket.assigns[:editor_schema], form) do
+  # `except`: the names a Save holds as it redraws (`Fields.do_saved/4`).
+  # Their hold is put on after the redraw (`RichTextRemote.hold/2`), so the
+  # form still has the store's value there, and the page keeps A's words:
+  # its digest stays the one A typed on (#29110 r1).
+  defp push_rich(socket, form, except \\ [])
+
+  defp push_rich(socket, form, except) when is_map(form) do
+    case Map.drop(rich_drawn(socket.assigns[:editor_schema], form), except) do
       oks when oks == %{} ->
         socket
 
@@ -199,7 +262,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
     end
   end
 
-  defp push_rich(socket, _form), do: socket
+  defp push_rich(socket, _form, _except), do: socket
 
   defp taken(socket, names),
     do:

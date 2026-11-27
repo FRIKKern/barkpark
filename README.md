@@ -1,40 +1,63 @@
 <!-- doc-tier: human | canonical-for: project-overview | budget: 1750tok -->
-# Barkpark
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-night.svg">
+  <img src="docs/readme/banner-paper.svg" width="768" alt="Barkpark: a knitted park band, and Maske the dog beside the name">
+</picture>
+
+**An open-source CMS you can run on your own computer or a server.**
+Define your own fields, edit content visually, and publish it through an API.
+Build a website or keep a recipe collection. Use only what you need.
 
 [![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
 
-What the button does, and how to add it to your own template: [Deploy with Barkpark](docs/setup/DEPLOY-WITH-BARKPARK.md).
-
-Barkpark is an open-source CMS you can run on your computer or a server.
-Define your own fields, edit content visually, and publish it through an API.
-Build a website or just keep a recipe collection. Use only what you need.
-
-Barkpark syncs between a local instance and a remote one. Several people can share one server while each runs Barkpark on their own machine — like running Sanity on your own computer. When the internet is down, everything still works, and you can pass documents to coworkers, family and friends over your local network.
+[What the button does](docs/setup/DEPLOY-WITH-BARKPARK.md), and how to add it to your template.
 
 ## What you can do
 
-| Use | What you get |
-|---|---|
-| Manage content | Custom fields, linked records, drafts, revisions, and a visual editor. |
-| Write documents | Papers: shareable proposals, reports, and notes that update live. |
-| Work with spreadsheets | Sheets: collaborative tables, formulas, and Excel import/export. |
-| Organize media | Upload images and files; manage tags, collections, and rights. |
-| Track work | Task boards, dependencies, agent work queues, and support tickets. |
-| Search content | Full-text search, filters, facets, and click analytics. |
-| Work with AI | Chat with agents, give them tasks, and inspect their changes. |
-| Publish websites | Templates, deployments, and custom domains on your instance. |
-| Manage servers | Provision, update, archive, and restore your Barkpark instances. |
-| Control access | Workspace membership, scoped tokens, sharing rules, and single sign-on. |
-| Run specialist tools | Live quizzes and ONIX book-metadata editing and export. |
+| Write | Work | Run |
+|---|---|---|
+| Content: own fields, drafts | Tasks, agent queues, tickets | Websites, deploys, domains |
+| Papers that update live | Agents you task and check | Servers: start, restore |
+| Sheets: formulas, Excel | Search with facets | Tokens, sharing, sign-on |
+| Media: tags, rights | Quizzes, ONIX book data | Revisions to go back to |
 
-Use each tool independently or combine them through shared data and access rules.
-Work through the browser, terminal UI, CLI, or AI. Review changes and revoke tokens yourself.
+In the browser, the terminal, the CLI or through an agent.
+
+<img src="docs/readme/paper-dark.webp" width="768" alt="A Paper in the reader">
+
+## Where we're going
+
+As of 26 November: an alpha in December, and the focus now is good and stable.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/progress-night.svg">
+  <img src="docs/readme/progress-paper.svg" width="768" alt="Paws walk toward the bone, one row for each pillar in the table's order; the further along, the more is done. BarkUI's row only marks it as building.">
+</picture>
+
+| Pillar | Now |
+|---|---|
+| UI kit: [BarkUI](js/packages/barkui) | Building. 14 parts |
+| Next-gen editor: [Fluid editor][fe] | Advanced. 3 of 7 milestones |
+| [BarkBot][bb] | Building. 1 of 8 slices |
+| Apps in use: [Studio][st], Papers, Sheets | Early. Studio: 51 of 66 journeys signed off |
+| Invisible Barkpark: [Barkdown][bd], [Barkever][be] | Partial. Barkever: 3 of 8 milestones |
+
+<img src="docs/readme/barkui-dark.webp" width="768" alt="BarkUI's buttons, in the showroom">
+
+## The family
+
+- **Barkpark**, here: the core, the API, Papers, Sheets, the CLI, BarkUI.
+- **[Studio][st]**: the editing room, fast and calm.
+- **[Barkdown][bd]**: a desktop app for notes, agents and browsing.
+- **[Barkever][be]**: notes and projects for visual thinkers.
+- **[PortableDoc][pd]**: one document format for every app.
+- **[Fluid editor][fe]**: a grid editor where you place blocks freely.
+- **[BarkBot][bb]**: an AI agent with its own computer.
 
 ## Local or remote
 
-Keep the server, database, and files on your computer. Local work continues when
-the internet or a remote server fails. Run remotely for shared access.
-Local and remote instances hold separate data; transfers are explicit today.
+On your computer it all stays with you and works offline; on a server, several people share it.
+Each holds its own data, and you move it between them on purpose.
 
 ## News
 
@@ -59,3 +82,15 @@ Earlier: [weekly editions](CHANGELOG.md)
 [Documentation](docs/INDEX.md) · [JavaScript docs site](js/docs/README.md) · [Build a plugin](docs/cards/plugins.md) · [Principles](docs/PHILOSOPHY.md)
 
 [Apache-2.0 licensed](LICENSE). Optional [Barkpark Cloud](https://barkpark.cloud) hosting funds development.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/rib-night.svg">
+  <img src="docs/readme/rib-paper.svg" width="768" alt="">
+</picture>
+
+[st]: https://github.com/FRIKKern/barkpark-studio
+[bd]: https://github.com/FRIKKern/barkdown
+[be]: https://github.com/FRIKKern/barkever
+[pd]: https://github.com/FRIKKern/portable-doc
+[fe]: https://github.com/FRIKKern/fluid-editor
+[bb]: https://github.com/FRIKKern/barkbot

@@ -201,7 +201,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # (`base_doc/1`).
   defp took_frame(socket, frame),
     do:
-      assign(socket,
+      socket
+      |> TextConfirmed.took(base_doc(socket), frame)
+      |> assign(
         editor_store_doc: frame,
         editor_store_over: row_key(socket.assigns[:editor_doc])
       )
@@ -725,6 +727,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           |> RemoteValues.keep_history(socket)
           |> TextConfirmed.redrawn(socket)
 
+        # The rebuild read the row anew: the value it replaced is logged.
+        rebuilt = TextConfirmed.took(rebuilt, base_doc(socket), base_doc(rebuilt))
         new_form = rebuilt.assigns[:editor_form] || %{}
 
         {:noreply,

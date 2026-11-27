@@ -101,6 +101,7 @@ defmodule BarkparkWeb.ChatController do
   alias BarkparkWeb.ChatHostRefusal
   alias BarkparkWeb.ChatSendFailure
   alias BarkparkWeb.ChatSessionDoor
+  alias BarkparkWeb.ChatStreamSeat
   alias BarkparkWeb.ChatUserTurn
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.HostExecutionGate
@@ -613,12 +614,13 @@ defmodule BarkparkWeb.ChatController do
       nil ->
         not_found(conn)
 
-      _session ->
+      session ->
         since = last_event_id(conn)
         forwarder = start_forwarder(Recorder.topic(id), self())
 
         conn =
           conn
+          |> ChatStreamSeat.watch(session)
           |> put_resp_content_type("text/event-stream")
           |> put_resp_header("cache-control", "no-cache")
           |> put_resp_header("connection", "keep-alive")
@@ -986,28 +988,12 @@ defmodule BarkparkWeb.ChatController do
 
   # ── The chat SSE streams outlive no credential (r4a realtime authz sweep) ──
   #
-  # Both streams (`events/2`, `fleet_events/2`) authorized ONCE, at connect, and
-  # never shed (D5), so a revoked or expired bearer — including a SCIM bulk
-  # revoke — kept receiving a session's live transcript frames and the fleet
-  # herd until the client chose to disconnect. Before writing each frame (and
-  # each keepalive) the stream re-asks `Auth.token_live?/1`, at most once per
-  # `:chat_sse_reauth_interval_ms` (default 2s); a dead bearer gets one
-  # `unauthorized` frame and the stream ends. The never-shed law is about load,
-  # not about authority.
-  defp sse_credential_live?(conn) do
-    now = System.monotonic_time(:millisecond)
-    interval = Application.get_env(:barkpark, :chat_sse_reauth_interval_ms, 2_000)
-
-    case Process.get(:chat_sse_credential_checked_at) do
-      at when is_integer(at) and now - at < interval ->
-        true
-
-      _ ->
-        live? = Barkpark.Auth.token_live?(conn.assigns[:api_token])
-        if live?, do: Process.put(:chat_sse_credential_checked_at, now)
-        live?
-    end
-  end
+  # Both streams authorize at connect and never shed (D5). Before each write the
+  # stream re-asks the token and, for a registered-host chat, the host seat, at
+  # most once per `:chat_sse_reauth_interval_ms` (default 2s); a lost credential
+  # or seat gets one `unauthorized` frame and the stream ends. The never-shed
+  # law is about load, not about authority. See `ChatStreamSeat`.
+  defp sse_credential_live?(conn), do: ChatStreamSeat.live?(conn)
 
   defp end_unauthorized(conn) do
     case chunk(conn, "event: unauthorized\ndata: {}\n\n") do
