@@ -98,44 +98,49 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
     refute html =~ @banner
   end
 
-  test "studio: Show more on the desk list draws B's body; after a rejoin A is not held", c do
-    a = open_tab(c, :studio)
+  for surface <- [:desk, :studio] do
+    @surface surface
 
-    redrawn_then_rejoin(c, :studio, a, fn a ->
-      render_click(a, "desk-list-more", %{"type" => c.type})
-    end)
-  end
+    test "#{surface}: Show more on the desk list draws B's body; after a rejoin A is not held",
+         c do
+      a = open_tab(c, @surface)
 
-  test "studio: a sort pick draws B's body; after a rejoin A is not held", c do
-    a = open_tab(c, :studio)
-
-    redrawn_then_rejoin(c, :studio, a, fn a ->
-      render_click(a, "select-sort", %{"type" => c.type, "sort" => ""})
-    end)
-  end
-
-  test "studio: Publish draws B's body; after a rejoin A is not held", c do
-    a = open_tab(c, :studio)
-    redrawn_then_rejoin(c, :studio, a, &EditorPost.press(&1, "publish"))
-  end
-
-  test "studio: Unpublish draws B's body; after a rejoin A is not held", c do
-    {:ok, _} = Content.publish_document(c.id, c.type, "production")
-    a = open_tab(c, :studio)
-    redrawn_then_rejoin(c, :studio, a, &EditorPost.press(&1, "unpublish"))
-  end
-
-  test "studio: a bulk Publish of the open document draws B's body; after a rejoin A is not held",
-       c do
-    a = open_tab(c, :studio)
-
-    redrawn_then_rejoin(c, :studio, a, fn a ->
-      :sys.replace_state(a.pid, fn state ->
-        update_in(state.socket.assigns, &Map.put(&1, :selected_doc_ids, MapSet.new([c.id])))
+      redrawn_then_rejoin(c, @surface, a, fn a ->
+        render_click(a, "desk-list-more", %{"type" => c.type})
       end)
+    end
 
-      render_click(a, "bulk-publish", %{})
-    end)
+    test "#{surface}: a sort pick draws B's body; after a rejoin A is not held", c do
+      a = open_tab(c, @surface)
+
+      redrawn_then_rejoin(c, @surface, a, fn a ->
+        render_click(a, "select-sort", %{"type" => c.type, "sort" => ""})
+      end)
+    end
+
+    test "#{surface}: Publish draws B's body; after a rejoin A is not held", c do
+      a = open_tab(c, @surface)
+      redrawn_then_rejoin(c, @surface, a, &EditorPost.press(&1, "publish"))
+    end
+
+    test "#{surface}: Unpublish draws B's body; after a rejoin A is not held", c do
+      {:ok, _} = Content.publish_document(c.id, c.type, "production")
+      a = open_tab(c, @surface)
+      redrawn_then_rejoin(c, @surface, a, &EditorPost.press(&1, "unpublish"))
+    end
+
+    test "#{surface}: a bulk Publish of the open document draws B's body; after a rejoin A is not held",
+         c do
+      a = open_tab(c, @surface)
+
+      redrawn_then_rejoin(c, @surface, a, fn a ->
+        :sys.replace_state(a.pid, fn state ->
+          update_in(state.socket.assigns, &Map.put(&1, :selected_doc_ids, MapSet.new([c.id])))
+        end)
+
+        render_click(a, "bulk-publish", %{})
+      end)
+    end
   end
 
   test "studio control: Show more with no other save draws nothing anew; after a rejoin A is not held",
@@ -238,6 +243,40 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
         end,
         b_save
       )
+    end
+
+    # #29110 r1: the Save holds the body itself (B's body lands inside it).
+    # The redraw draws the store's body, but the page keeps A's words under
+    # the banner, so the digest it keeps is the one A typed on. A digest of
+    # B's body sent with the redraw made A's next key, after a rejoin, read
+    # as typed on B's body: written over it, with no banner.
+    test "#{surface}: a Save that holds the body sends no digest of B's body; after a rejoin B is kept",
+         c do
+      a = open_tab(c, @surface)
+      b = open_tab(c, @surface)
+      a_seen = page(a)
+      b_seen = page(b)
+      b_save = fn -> post(b, "doc[body]", %{"body" => h(["body0 B"])}, b_seen) end
+
+      html =
+        inside(a, b_save, fn ->
+          a
+          |> element("#editor-form")
+          |> render_submit(%{
+            "doc" => %{"title" => "T0", "body" => h(["body0 A"])},
+            "_bp_seen" => Jason.encode!(a_seen)
+          })
+        end)
+
+      assert html =~ @banner, "the Save did not hold the body: no test"
+      assert body(c) == ["body0 B"]
+      seen = page(a)
+
+      GenServer.stop(a.pid, :normal)
+      a2 = rejoined(c, @surface)
+      post(a2, "doc[body]", %{"body" => h(["body0 A more"])}, seen)
+
+      assert body(c) == ["body0 B"], "A's key after the rejoin was written over B's body"
     end
   end
 end
