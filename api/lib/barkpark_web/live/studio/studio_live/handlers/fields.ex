@@ -278,7 +278,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # editor's change is not written over it (#28349 r2 review, V1),
         # and is read again under the lock (`RichTextRemote.UnderLock`,
         # task-8f15f5c9c15ce748).
-        {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
+        {doc, held} =
+          RichTextRemote.split(socket, posted, params["_bp_rt_seen"], params["_bp_rt_owner"])
 
         rich =
           Map.merge(
@@ -619,7 +620,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       %{"doc" => posted} ->
         # A rich text in an object written over another editor's change is
         # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
-        {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
+        {doc, held} =
+          RichTextRemote.split(socket, posted, params["_bp_rt_seen"], params["_bp_rt_owner"])
+
         # Read again under the document's lock: the store may have moved
         # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
         rich =
