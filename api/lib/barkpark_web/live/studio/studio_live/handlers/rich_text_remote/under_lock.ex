@@ -203,12 +203,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   # Each entry is `[input_name, owner_key, digest]` as JSON: the name and key
   # may hold any character. The key is nil for an owner with none, read as "".
+  # The digest is `CompositeField.drawn_digest/1`'s hex string. A page drawn
+  # before it was one posts its old number: never an object's new draw, and
+  # a row's draw as it was read before (`RowDraws.fetch/4`).
   defp owner(owners, name) when is_list(owners) do
     Enum.find_value(owners, :error, fn
       entry when is_binary(entry) ->
         case Jason.decode(entry) do
           {:ok, [^name, key, digest]}
-          when (is_binary(key) or is_nil(key)) and is_integer(digest) ->
+          when (is_binary(key) or is_nil(key)) and (is_binary(digest) or is_integer(digest)) ->
             {:ok, to_string(key), digest}
 
           _ ->
