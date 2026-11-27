@@ -331,7 +331,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     clash = socket.assigns[:editor_rt_clash] || %{}
 
     assign(socket,
-      editor_form: put_view(socket.assigns[:editor_form] || %{}, path, view),
+      editor_form: put_view(socket, path, view),
       editor_dirty: true,
       editor_unsaved_keys: MapSet.put(socket.assigns[:editor_unsaved_keys] || MapSet.new(), key),
       doc_conflict: true,
@@ -341,20 +341,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     )
   end
 
-  # The view in the shape the form holds at `path`. A top-level rich text's
-  # form value is the HTML its editor draws (`Content.Forms`); blocks there
-  # draw the read-only field, with no input, so A's held words could not be
-  # edited or saved (task-f69efe9a4365aeb5). An object's or a row's rich
-  # text holds blocks.
-  defp put_view(form, path, view) do
-    case FormPath.get(form, path) do
-      html when is_binary(html) and is_list(view) ->
-        FormPath.put(form, path, PortableText.to_html(view))
+  # The view in the shape the form holds for that field. A top-level rich
+  # text (not on the block editor) is edited as the HTML its editor draws
+  # (`Content.Forms`); blocks there draw the read-only field, with no input,
+  # so A's held words could not be edited or saved (task-f69efe9a4365aeb5).
+  # Read from the schema, not the form's value: a body never set has none.
+  # An object's or a row's rich text holds blocks.
+  defp put_view(socket, path, view) do
+    form = socket.assigns[:editor_form] || %{}
 
-      _ ->
-        FormPath.put(form, path, view)
-    end
+    if is_list(view) and html_field?(socket.assigns[:editor_schema], path),
+      do: FormPath.put(form, path, PortableText.to_html(view)),
+      else: FormPath.put(form, path, view)
   end
+
+  defp html_field?(%{fields: fields}, [key]) when is_list(fields) and is_binary(key) do
+    Enum.any?(fields, fn field ->
+      match?(%{"name" => ^key, "type" => "richText"}, field) and
+        not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+    end)
+  end
+
+  defp html_field?(_schema, _path), do: false
 
   # A new number for the view; the hold, and the log, read a post against
   # the base A typed on (never A's own earlier post: review blocker 1).
