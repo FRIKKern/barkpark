@@ -3383,7 +3383,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_link_eyebrow_style("timeline"),
     do:
-      "display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
+      "display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #836615)"
 
   defp paper_link_card_presentation(ref, style, "chapters") do
     href = "/papers/" <> ref.slug
@@ -3428,7 +3428,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         meta_text: ref.meta,
         footer_style:
           theme_free(
-            "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)",
+            "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #836615)",
             style
           )
       })
@@ -3511,7 +3511,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       case style do
         :article ->
           theme_free(
-            "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none",
+            "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #836615);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none",
             style
           )
 
@@ -3531,7 +3531,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         eyebrow_style: nil,
         title_style:
           theme_free(
-            "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)",
+            "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #836615)",
             style
           ),
         description_style: paper_link_description_style(style),

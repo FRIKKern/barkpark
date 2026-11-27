@@ -441,12 +441,12 @@ test("ts-w5a: a BARE {bg,ink,accent}×2 skin resolves ALL 156 slots (no unresolv
   for (const slot of SLOTS) assert.notEqual(bare.values[slot], undefined, `slot ${slot} unresolved on a bare skin`);
 });
 
-test("ts-w5a: derive(evergreen) is complete AND byte-frozen at 79 pins (the ratchet)", () => {
+test("ts-w5a: derive(evergreen) is complete AND byte-frozen at 74 pins (the ratchet)", () => {
   const r = derive(EVERGREEN_THEME);
   assert.equal(r.unresolved.length, 0, "evergreen leaves no slot unresolved");
-  assert.equal(r.pinned.length, 79, "evergreen override count is frozen at 79 (53 legacy + 26 zinc characterization freezes; the three tinted line pins retired to the neutral line formula 2026-10-05)");
+  assert.equal(r.pinned.length, 74, "evergreen override count is frozen at 74 (79, less the five green on-accent/ring/paper-accent pins the gold brand retired to the formulas)");
   // byte identity is what the seam guard rides on — spot-check across formats.
-  assert.equal(r.values["primary.light"], "151.96 71.81% 29.22%");  // HSL native (designer mint #15804e, gui-remake GR2)
+  assert.equal(r.values["primary.light"], "44.1 72.81% 55.29%");    // HSL native (warm gold #e0b43a)
   assert.equal(r.values["border.light"], "240 5.9% 90%");           // HSL pinned (zinc freeze)
   assert.equal(r.values["cliChrome.chrome-ink.dark"], "#e4e4e7");   // hex pinned (zinc freeze)
   assert.equal(r.values["cliChrome.chrome-toolbar-bg.light"], "#fafafa"); // hex NATIVE (formula hits it)
@@ -527,10 +527,13 @@ test("ts-w5a: overrides still win over the new formulas (characterization freeze
 });
 
 test("ts-w5a: on-accent flip is exercised on BOTH primary-fg modes (D16)", () => {
-  // light deep-green fill → warm-white; a mid-L dark accent → near-ink (the FLIP).
+  // a deep fill → warm-white (fjord's deep teal); a light fill → near-ink of the
+  // fill's own hue (evergreen's warm gold, both modes) — the FLIP, both branches.
+  const fjord = JSON.parse(readFileSync(new URL("./themes/fjord.json", import.meta.url), "utf8"));
+  assert.equal(derive({ ...fjord, overrides: {}, _overrideReasons: {} }).values["primary-fg.light"], "0 0% 100%", "deep fill → warm-white");
   const bare = derive({ ...EVERGREEN_THEME, overrides: {}, _overrideReasons: {} });
-  assert.equal(bare.values["primary-fg.light"], "0 0% 100%", "deep fill → warm-white");
-  // evergreen's dark accent is a mid-L green — the near-ink branch of the flip.
+  assert.equal(bare.values["primary-fg.light"], "44.1 45% 8%", "light gold fill → near-ink of the gold hue");
+  // evergreen's dark accent is a light gold — the near-ink branch of the flip.
   const darkFg = bare.values["primary-fg.dark"];
   assert.ok(contrast(`hsl(${darkFg})`, "160 42% 62%") >= contrast("0 0% 100%", "160 42% 62%"),
     "dark on-accent picked the higher-contrast foreground (the flip)");

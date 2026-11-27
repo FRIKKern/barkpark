@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Studio.Desk.StyleTest do
   end
 
   test "reference chips and the close link have the rows' focus ring" do
-    ring = "outline: 2px solid var(--primary); outline-offset: -2px;"
+    ring = "outline: 2px solid var(--ring); outline-offset: -2px;"
     assert rule(@css, ".dk a.pane-item:focus-visible") =~ ring
     assert rule(@css, ".dk .dk-ref:focus-visible") =~ ring
     assert rule(@css, ".dk .dk-close:focus-visible") =~ ring

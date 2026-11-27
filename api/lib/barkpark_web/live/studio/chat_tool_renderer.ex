@@ -237,7 +237,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
     ~H"""
     <div style="font-family: var(--font-mono);">
       <div class="text-xs" style="overflow-wrap: anywhere;">
-        <span style="color: var(--primary);">●</span>
+        <span style="color: var(--primary-text);">●</span>
         <span>Update todos</span>
         <span :if={@todos != []} style="opacity: 0.6;"> · <%= todo_progress(@todos) %></span>
       </div>
@@ -567,7 +567,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
     case settle_state(message) do
       :ok -> "var(--life-done)"
       :error -> "var(--danger)"
-      :pending -> "var(--primary)"
+      :pending -> "var(--primary-text)"
     end
   end
 
@@ -576,14 +576,14 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   defdelegate todo_glyph(status), to: ToolRows
 
   defp todo_glyph_style(:completed), do: "flex: none; color: var(--ok);"
-  defp todo_glyph_style(:in_progress), do: "flex: none; color: var(--primary);"
+  defp todo_glyph_style(:in_progress), do: "flex: none; color: var(--primary-text);"
   defp todo_glyph_style(_), do: "flex: none; opacity: 0.6;"
 
   defp todo_text_style(:completed),
     do: "overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;"
 
   defp todo_text_style(:in_progress),
-    do: "overflow-wrap: anywhere; color: var(--primary); font-weight: 600;"
+    do: "overflow-wrap: anywhere; color: var(--primary-text); font-weight: 600;"
 
   defp todo_text_style(_), do: "overflow-wrap: anywhere;"
 
@@ -1037,7 +1037,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
         <summary
           style="cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface);"
         >
-          <span style="color: var(--primary);">◍</span>
+          <span style="color: var(--primary-text);">◍</span>
           <span data-gutter-text><%= @chip.total %> <%= result_word(@chip.total) %></span>
         </summary>
         <ul
@@ -1052,7 +1052,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
             <a
               :if={hit.href}
               href={hit.href}
-              style="color: var(--primary); text-decoration: none; overflow-wrap: anywhere;"
+              style="color: var(--primary-text); text-decoration: none; overflow-wrap: anywhere;"
               data-gutter-text
             ><%= hit.label %></a>
             <span
@@ -1084,7 +1084,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
         <summary
           style="cursor: pointer; list-style: none; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface);"
         >
-          <span style="color: var(--primary); flex: none;"><%= chip_glyph(:prime) %></span>
+          <span style="color: var(--primary-text); flex: none;"><%= chip_glyph(:prime) %></span>
           <span data-gutter-text><%= @chip.ready_total %> ready</span>
           <span
             :for={c <- @chip.counts}
@@ -1103,7 +1103,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
             <a
               :if={row.href}
               href={row.href}
-              style="color: var(--primary); text-decoration: none; overflow-wrap: anywhere;"
+              style="color: var(--primary-text); text-decoration: none; overflow-wrap: anywhere;"
               data-gutter-text
             ><%= row.label %></a>
             <span
@@ -1180,7 +1180,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   defp chip_accent(chip) do
     case chip[:state] do
       state when is_binary(state) -> life_color(state)
-      _ -> "var(--primary)"
+      _ -> "var(--primary-text)"
     end
   end
 

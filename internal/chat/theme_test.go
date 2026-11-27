@@ -12,7 +12,7 @@ import (
 
 // headingBlocks is a one-heading document whose level-2 heading wears the
 // theme's ChromeAccent — the color that differs skin-to-skin (charple #c78ae0
-// vs evergreen #3fcf8e in dark). The render path colors headings via lipgloss's
+// vs evergreen #e8c55a in dark). The render path colors headings via lipgloss's
 // GLOBAL profile, so the byte difference only appears once TrueColor is forced.
 func headingBlocks(text string) json.RawMessage {
 	doc := map[string]any{

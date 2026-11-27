@@ -48,16 +48,16 @@
 /* BEGIN SNAPSHOT: tokens (generated — see the note above; this outer marker exists only for scripts/templates-literal-check.sh) */
 /* BEGIN GENERATED: template theme tokens (design/tokens.json + design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
 @theme {
-  --color-primary: hsl(151.96 71.81% 29.22%);
-  --color-primary-hover: hsl(151.96 71.81% 23.22%);
-  --color-primary-fg: hsl(0 0% 100%);
+  --color-primary: hsl(44.1 72.81% 55.29%);
+  --color-primary-hover: hsl(44.1 72.81% 49.29%);
+  --color-primary-fg: hsl(44.1 45% 8%);
   --color-bg: hsl(0 0% 100%);
   --color-surface: hsl(0 0% 100%);
   --color-muted-surface: hsl(240 4.8% 95.9%);
   --color-text: hsl(240 10% 3.9%);
   --color-muted-text: hsl(240 3.8% 45%);
   --color-border: hsl(240 5.9% 90%);
-  --color-ring: hsl(163 42% 30%);
+  --color-ring: hsl(44.1 72.81% 29.79%);
   --color-accent: hsl(30 92% 42%);
   --color-ok: hsl(142 72% 26%);
   --color-warn: hsl(35 92% 38%);
@@ -69,16 +69,16 @@
   --dur-3: 0.28s;
 }
 [data-theme="dark"] {
-  --color-primary: hsl(152.92 60% 52.94%);
-  --color-primary-hover: hsl(152.92 60% 60.94%);
-  --color-primary-fg: hsl(163 45% 8%);
+  --color-primary: hsl(45.21 75.53% 63.14%);
+  --color-primary-hover: hsl(45.21 75.53% 71.14%);
+  --color-primary-fg: hsl(45.21 45% 8%);
   --color-bg: hsl(240 10% 3.9%);
   --color-surface: hsl(240 10% 5.5%);
   --color-muted-surface: hsl(240 3.7% 12%);
   --color-text: hsl(0 0% 95%);
   --color-muted-text: hsl(240 5% 64.9%);
   --color-border: hsl(240 3.7% 15.9%);
-  --color-ring: hsl(152.92 60% 52.94%);
+  --color-ring: hsl(45.21 75.53% 63.14%);
   --color-accent: hsl(33 92% 60%);
   --color-ok: hsl(142 52% 52%);
   --color-warn: hsl(38 94% 56%);
@@ -87,16 +87,16 @@
 }
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 [data-bp-theme="evergreen"] {
-  --color-primary: hsl(151.96 71.81% 29.22%);
-  --color-primary-hover: hsl(151.96 71.81% 23.22%);
-  --color-primary-fg: hsl(0 0% 100%);
+  --color-primary: hsl(44.1 72.81% 55.29%);
+  --color-primary-hover: hsl(44.1 72.81% 49.29%);
+  --color-primary-fg: hsl(44.1 45% 8%);
   --color-bg: hsl(0 0% 100%);
   --color-surface: hsl(0 0% 100%);
   --color-muted-surface: hsl(240 4.8% 95.9%);
   --color-text: hsl(240 10% 3.9%);
   --color-muted-text: hsl(240 3.8% 45%);
   --color-border: hsl(240 5.9% 90%);
-  --color-ring: hsl(163 42% 30%);
+  --color-ring: hsl(44.1 72.81% 29.79%);
   --color-accent: hsl(30 92% 42%);
   --color-ok: hsl(142 72% 26%);
   --color-warn: hsl(35 92% 38%);
@@ -104,16 +104,16 @@
   --color-info: hsl(217.2 91.2% 59.8%);
 }
 [data-bp-theme="evergreen"][data-theme="dark"] {
-  --color-primary: hsl(152.92 60% 52.94%);
-  --color-primary-hover: hsl(152.92 60% 60.94%);
-  --color-primary-fg: hsl(163 45% 8%);
+  --color-primary: hsl(45.21 75.53% 63.14%);
+  --color-primary-hover: hsl(45.21 75.53% 71.14%);
+  --color-primary-fg: hsl(45.21 45% 8%);
   --color-bg: hsl(240 10% 3.9%);
   --color-surface: hsl(240 10% 5.5%);
   --color-muted-surface: hsl(240 3.7% 12%);
   --color-text: hsl(0 0% 95%);
   --color-muted-text: hsl(240 5% 64.9%);
   --color-border: hsl(240 3.7% 15.9%);
-  --color-ring: hsl(152.92 60% 52.94%);
+  --color-ring: hsl(45.21 75.53% 63.14%);
   --color-accent: hsl(33 92% 60%);
   --color-ok: hsl(142 52% 52%);
   --color-warn: hsl(38 94% 56%);

@@ -323,13 +323,13 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
       {:ok, root: File.read!(@root_layout)}
     end
 
-    test "GENERATED block emits the evergreen primary for light and dark", %{root: root} do
-      # light :root primary + ring are evergreen (design/tokens.json color.primary/ring.light)
-      assert root =~ "--primary: hsl(151.96 71.81% 29.22%);"
-      assert root =~ "--ring: hsl(163 42% 30%);"
+    test "GENERATED block emits the gold primary for light and dark", %{root: root} do
+      # light :root primary + ring are the gold brand (design/tokens.json color.primary/ring.light)
+      assert root =~ "--primary: hsl(44.1 72.81% 55.29%);"
+      assert root =~ "--ring: hsl(44.1 72.81% 29.79%);"
       # dark base is keyed on the data-theme toggle (the emitter extension), not @media
       assert root =~ ~s(html[data-theme="dark"] {)
-      assert root =~ "--primary: hsl(152.92 60% 52.94%);"
+      assert root =~ "--primary: hsl(45.21 75.53% 63.14%);"
     end
 
     test "no hand-authored block re-declares --primary/--ring in the old blue/zinc", %{root: root} do

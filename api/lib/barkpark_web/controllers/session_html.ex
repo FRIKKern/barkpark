@@ -47,124 +47,148 @@ defmodule BarkparkWeb.SessionHTML do
   def auth_styles(assigns) do
     ~H"""
     <style>
-      /* Auth-page brand override: evergreen --primary/--ring (the exact emitted
-         primary/ring tokens) + the decoupled auth button fills (color.authButton
-         — deep-green fill, light text, per the Cloud dashboard). De-literalized
+      /* Auth-page brand override: --primary/--primary-hover/--primary-text/--ring (the exact emitted
+         tokens) + the auth button fills (color.authButton
+         — the gold brand fill under dark ink). De-literalized
          onto design/tokens.json via the page-scoped block below; light on
          .bp-auth, dark keyed on html[data-theme="dark"] .bp-auth. The layout +
          component rules that follow stay hand-authored. */
       /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
       .bp-auth {
-        --primary: hsl(151.96 71.81% 29.22%);
-        --primary-fg: hsl(0 0% 100%);
-        --ring: hsl(163 42% 30%);
-        --ring-soft: hsl(163 42% 30% / 0.15);
+        --primary: hsl(44.1 72.81% 55.29%);
+        --primary-fg: hsl(44.1 45% 8%);
+        --primary-hover: hsl(44.1 72.81% 49.29%);
+        --primary-text: hsl(44.1 72.81% 29.79%);
+        --ring: hsl(44.1 72.81% 29.79%);
+        --ring-soft: hsl(44.1 72.81% 29.79% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
-        --btn-bg-hover: hsl(163 46% 17%);
+        --btn-bg-hover: var(--primary-hover);
         --dur-1: 0.15s;
         --dur-2: 0.18s;
         --dur-3: 0.28s;
       }
       html[data-theme="dark"] .bp-auth {
-        --primary: hsl(152.92 60% 52.94%);
-        --primary-fg: hsl(163 45% 8%);
-        --ring: hsl(152.92 60% 52.94%);
-        --ring-soft: hsl(152.92 60% 52.94% / 0.2);
-        --btn-bg: hsl(163 45% 30%);
-        --btn-fg: hsl(0 0% 100%);
-        --btn-bg-hover: hsl(163 45% 26%);
+        --primary: hsl(45.21 75.53% 63.14%);
+        --primary-fg: hsl(45.21 45% 8%);
+        --primary-hover: hsl(45.21 75.53% 71.14%);
+        --primary-text: hsl(45.21 75.53% 63.14%);
+        --ring: hsl(45.21 75.53% 63.14%);
+        --ring-soft: hsl(45.21 75.53% 63.14% / 0.2);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: var(--primary-hover);
       }
       /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
       html[data-bp-theme="evergreen"] .bp-auth {
-        --primary: hsl(151.96 71.81% 29.22%);
-        --primary-fg: hsl(0 0% 100%);
-        --ring: hsl(163 42% 30%);
-        --ring-soft: hsl(163 42% 30% / 0.15);
+        --primary: hsl(44.1 72.81% 55.29%);
+        --primary-fg: hsl(44.1 45% 8%);
+        --primary-hover: hsl(44.1 72.81% 49.29%);
+        --primary-text: hsl(44.1 72.81% 29.79%);
+        --ring: hsl(44.1 72.81% 29.79%);
+        --ring-soft: hsl(44.1 72.81% 29.79% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
-        --btn-bg-hover: hsl(163 46% 17%);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="evergreen"][data-theme="dark"] .bp-auth {
-        --primary: hsl(152.92 60% 52.94%);
-        --primary-fg: hsl(163 45% 8%);
-        --ring: hsl(152.92 60% 52.94%);
-        --ring-soft: hsl(152.92 60% 52.94% / 0.2);
-        --btn-bg: hsl(163 45% 30%);
-        --btn-fg: hsl(0 0% 100%);
-        --btn-bg-hover: hsl(163 45% 26%);
+        --primary: hsl(45.21 75.53% 63.14%);
+        --primary-fg: hsl(45.21 45% 8%);
+        --primary-hover: hsl(45.21 75.53% 71.14%);
+        --primary-text: hsl(45.21 75.53% 63.14%);
+        --ring: hsl(45.21 75.53% 63.14%);
+        --ring-soft: hsl(45.21 75.53% 63.14% / 0.2);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="charple"] .bp-auth {
         --primary: hsl(282.39 44.23% 40.78%);
         --primary-fg: hsl(0 0% 100%);
+        --primary-hover: hsl(282.39 44.23% 34.78%);
+        --primary-text: hsl(282.39 44.23% 40.78%);
         --ring: hsl(282.39 44.23% 48.78%);
         --ring-soft: hsl(282.39 44.23% 48.78% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
-        --btn-bg-hover: hsl(163 46% 17%);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="charple"][data-theme="dark"] .bp-auth {
         --primary: hsl(282.56 58.11% 70.98%);
         --primary-fg: hsl(282.56 45% 8%);
+        --primary-hover: hsl(282.56 58.11% 78.98%);
+        --primary-text: hsl(282.56 58.11% 71.98%);
         --ring: hsl(282.56 58.11% 70.98%);
         --ring-soft: hsl(282.56 58.11% 70.98% / 0.2);
-        --btn-bg: hsl(163 45% 30%);
-        --btn-fg: hsl(0 0% 100%);
-        --btn-bg-hover: hsl(163 45% 26%);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="ember"] .bp-auth {
         --primary: hsl(19.33 71.29% 40.98%);
         --primary-fg: hsl(0 0% 100%);
+        --primary-hover: hsl(19.33 71.29% 34.98%);
+        --primary-text: hsl(19.33 71.29% 36.98%);
         --ring: hsl(19.33 71.29% 48.98%);
         --ring-soft: hsl(19.33 71.29% 48.98% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
-        --btn-bg-hover: hsl(163 46% 17%);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="ember"][data-theme="dark"] .bp-auth {
         --primary: hsl(19.01 75.53% 63.14%);
         --primary-fg: hsl(19.01 45% 8%);
+        --primary-hover: hsl(19.01 75.53% 71.14%);
+        --primary-text: hsl(19.01 75.53% 63.14%);
         --ring: hsl(19.01 75.53% 63.14%);
         --ring-soft: hsl(19.01 75.53% 63.14% / 0.2);
-        --btn-bg: hsl(163 45% 30%);
-        --btn-fg: hsl(0 0% 100%);
-        --btn-bg-hover: hsl(163 45% 26%);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="fjord"] .bp-auth {
         --primary: hsl(191.6 80.95% 28.82%);
         --primary-fg: hsl(0 0% 100%);
+        --primary-hover: hsl(191.6 80.95% 22.82%);
+        --primary-text: hsl(191.6 80.95% 27.82%);
         --ring: hsl(191.6 80.95% 36.82%);
         --ring-soft: hsl(191.6 80.95% 36.82% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
-        --btn-bg-hover: hsl(163 46% 17%);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="fjord"][data-theme="dark"] .bp-auth {
         --primary: hsl(193.27 62.43% 64.51%);
         --primary-fg: hsl(193.27 45% 8%);
+        --primary-hover: hsl(193.27 62.43% 72.51%);
+        --primary-text: hsl(193.27 62.43% 64.51%);
         --ring: hsl(193.27 62.43% 64.51%);
         --ring-soft: hsl(193.27 62.43% 64.51% / 0.2);
-        --btn-bg: hsl(163 45% 30%);
-        --btn-fg: hsl(0 0% 100%);
-        --btn-bg-hover: hsl(163 45% 26%);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="iris"] .bp-auth {
         --primary: hsl(248.75 63.72% 55.69%);
         --primary-fg: hsl(0 0% 100%);
+        --primary-hover: hsl(248.75 63.72% 49.69%);
+        --primary-text: hsl(248.75 63.72% 55.69%);
         --ring: hsl(248.75 63.72% 62%);
         --ring-soft: hsl(248.75 63.72% 62% / 0.15);
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
-        --btn-bg-hover: hsl(163 46% 17%);
+        --btn-bg-hover: var(--primary-hover);
       }
       html[data-bp-theme="iris"][data-theme="dark"] .bp-auth {
         --primary: hsl(248.87 100% 77.45%);
         --primary-fg: hsl(248.87 45% 8%);
+        --primary-hover: hsl(248.87 100% 85.45%);
+        --primary-text: hsl(248.87 100% 77.45%);
         --ring: hsl(248.87 100% 77.45%);
         --ring-soft: hsl(248.87 100% 77.45% / 0.2);
-        --btn-bg: hsl(163 45% 30%);
-        --btn-fg: hsl(0 0% 100%);
-        --btn-bg-hover: hsl(163 45% 26%);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: var(--primary-hover);
       }
       /* END GENERATED: tokens */
       .bp-auth {
@@ -193,7 +217,7 @@ defmodule BarkparkWeb.SessionHTML do
         margin-bottom: 20px;
         color: var(--fg);
       }
-      .bp-auth-mark { width: 22px; height: 22px; color: var(--primary); flex: none; }
+      .bp-auth-mark { width: 22px; height: 22px; color: var(--primary-text); flex: none; }
       .bp-auth-wordmark { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
       .bp-auth-wordmark b { font-weight: 700; }
 
@@ -214,7 +238,7 @@ defmodule BarkparkWeb.SessionHTML do
         justify-content: space-between;
       }
       .bp-auth-label-row .form-label { margin-bottom: 6px; }
-      .bp-auth-label-row a { font-size: 12px; font-weight: 500; color: var(--primary); text-decoration: none; }
+      .bp-auth-label-row a { font-size: 12px; font-weight: 500; color: var(--primary-text); text-decoration: none; }
       .bp-auth-label-row a:hover { text-decoration: underline; }
 
       .bp-auth-input-affix { position: relative; }
@@ -272,7 +296,7 @@ defmodule BarkparkWeb.SessionHTML do
         padding: 0;
         border: 0;
         background: none;
-        color: var(--primary);
+        color: var(--primary-text);
         font: inherit;
         font-weight: 500;
         cursor: pointer;
@@ -291,11 +315,11 @@ defmodule BarkparkWeb.SessionHTML do
       .bp-auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
       .bp-auth-foot { margin-top: 20px; font-size: 13px; color: var(--fg-muted); line-height: 1.5; }
-      .bp-auth-foot a { color: var(--primary); text-decoration: none; font-weight: 500; }
+      .bp-auth-foot a { color: var(--primary-text); text-decoration: none; font-weight: 500; }
       .bp-auth-foot a:hover { text-decoration: underline; }
 
       .bp-auth-alt { margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--fg-muted); }
-      .bp-auth-alt a { color: var(--primary); text-decoration: none; font-weight: 500; }
+      .bp-auth-alt a { color: var(--primary-text); text-decoration: none; font-weight: 500; }
       .bp-auth-alt a:hover { text-decoration: underline; }
 
       .bp-auth details { margin-top: 16px; }
@@ -314,7 +338,7 @@ defmodule BarkparkWeb.SessionHTML do
       .bp-auth .flash-info {
         background: var(--ring-soft);
         border-color: var(--ring-soft);
-        color: var(--primary);
+        color: var(--primary-text);
       }
 
       /* MFA: the one-time code reads as a code. */

@@ -591,7 +591,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
         /* Key management */
         .bp-tk-keys { max-width:760px; }
-        .bp-tk-handoff { border:1px solid var(--primary); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:18px; background:hsl(var(--primary-hsl) / 0.06); }
+        .bp-tk-handoff { border:1px solid var(--primary-text); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:18px; background:hsl(var(--primary-hsl) / 0.06); }
         .bp-tk-handoff-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
         .bp-tk-secret { font-family:var(--font-mono,ui-monospace,monospace); font-size:13px; padding:10px 12px; border-radius:var(--radius-sm); background:var(--bg); border:1px solid var(--border); color:var(--text); overflow-x:auto; user-select:all; margin:8px 0; }
         .bp-tk-mint { display:flex; gap:8px; margin-bottom:18px; }

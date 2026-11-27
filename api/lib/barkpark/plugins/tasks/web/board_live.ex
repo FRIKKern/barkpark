@@ -1648,7 +1648,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         color: var(--muted-text); transition: transform 140ms ease;
       }
       .bp-filters[open] > summary::before { transform: rotate(90deg); }
-      .bp-filters-active { color: var(--primary); font-weight: 600; }
+      .bp-filters-active { color: var(--primary-text); font-weight: 600; }
       .bp-filters-body {
         display: flex; flex-direction: column; gap: 8px;
         margin-top: 10px; padding: 12px 14px; max-height: 38vh; overflow-y: auto;

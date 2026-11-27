@@ -751,7 +751,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     %{"kind" => "_raw", "html" => heat} =
       Compose.compose_block(%{"type" => "heatmap", "cells" => [[1.0, 0.0]]}, :email)
 
-    assert heat =~ "background:#1e5347"
+    assert heat =~ "background:#836615"
     assert heat =~ "background:#eaf1ee"
   end
 

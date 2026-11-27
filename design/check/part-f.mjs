@@ -37,13 +37,15 @@ const failedBeforeF = failed;
 // must follow). ts-w5a raised evergreen 56 → 82: promoting the neutral ladder +
 // CLI chrome ramp into skin-responsive formulas (D14ii/v) means evergreen's
 // shadcn-zinc bytes no longer match the formula, so its 26 zinc rungs are
-// CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). MEMBERSHIP is
+// CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). The gold brand
+// lowered evergreen 79 → 74: the green on-accent ink, focus ring and paper accent
+// pins retired to the formulas once the seed moved to gold. MEMBERSHIP is
 // NOT this map's to decide: every design/themes/*.json MUST have an entry, and a
 // theme without one is a hard FAIL below, so a sixth committed theme cannot land
 // un-ratcheted in silence. The map supplies the NUMBER; the directory listing
 // supplies the ROSTER. (Fixture themes are handed to derive() directly by tests
 // and never reach this loop, which reads design/themes/ off disk.)
-const OVERRIDE_COUNT_FROZEN = { evergreen: 79, ember: 3, fjord: 3, charple: 2, iris: 0 };
+const OVERRIDE_COUNT_FROZEN = { evergreen: 74, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
 // DISK — never the `tokens` singleton re-exported by emit.mjs. Since the w4 seam

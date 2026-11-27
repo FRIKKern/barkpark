@@ -3,10 +3,10 @@
 
 /** Light-theme canvas colours for listings-map.tsx, mapped from design/tokens.json. */
 export const canvas = {
-  primary: "hsl(151.96 71.81% 29.22%)",
+  primary: "hsl(44.1 72.81% 55.29%)",
   mutedText: "hsl(240 3.8% 45%)",
   surface: "hsl(0 0% 100%)",
-  primaryFg: "hsl(0 0% 100%)",
+  primaryFg: "hsl(44.1 45% 8%)",
   text: "hsl(240 10% 3.9%)",
   mutedSurface: "hsl(240 4.8% 95.9%)",
 } as const;

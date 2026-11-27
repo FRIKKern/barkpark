@@ -48,7 +48,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
       assert bare == unknown
       assert bare == nil_theme
       # and it carries the evergreen brand, not the override
-      assert bare =~ "background:#1e5347"
+      assert bare =~ "background:#836615"
       assert bare =~ "color:#ffffff"
     end
 
@@ -112,14 +112,14 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
     end
 
     test "colour accessors default to evergreen and fold unknown → evergreen" do
-      assert TokensGen.email_brand() == "#1e5347"
-      assert TokensGen.email_brand(:evergreen) == "#1e5347"
-      assert TokensGen.email_brand("no-such-theme") == "#1e5347"
+      assert TokensGen.email_brand() == "#836615"
+      assert TokensGen.email_brand(:evergreen) == "#836615"
+      assert TokensGen.email_brand("no-such-theme") == "#836615"
       assert TokensGen.email_rule() == "#e2e6e5"
       assert TokensGen.tone_ok() == "#137236"
       assert TokensGen.reading_accent() == "#a23925"
       assert TokensGen.callout(:success) == %{bg: "#e7f2ec", fg: "#1e6b52"}
-      assert TokensGen.email_skin(:evergreen).brand == "#1e5347"
+      assert TokensGen.email_skin(:evergreen).brand == "#836615"
     end
   end
 
@@ -128,7 +128,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
       ever = Palettes.palette_for(:email)
       themed = Palettes.palette_for(:email, @theme)
 
-      assert ever.accent == "#1e5347"
+      assert ever.accent == "#836615"
       assert ever.brand_text == "#ffffff"
       assert themed.accent == "#ff0000"
       assert themed.link_color == "#ff0000"
@@ -143,7 +143,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
     end
 
     test "brand/rule accessors take the theme arg, default evergreen" do
-      assert Palettes.brand() == "#1e5347"
+      assert Palettes.brand() == "#836615"
       assert Palettes.brand(@theme) == "#ff0000"
       assert Palettes.rule() == "#e2e6e5"
       assert Palettes.rule(@theme) == "#0000ff"

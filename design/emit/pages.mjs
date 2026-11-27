@@ -16,8 +16,9 @@ import { alpha, hsl, motionVarLines, softAlpha } from "./vocab.mjs";
 const pageVal = (v) => (v.startsWith("var(") || v.startsWith("#") ? v : hsl(v));
 
 // ── surface: login (api/lib/barkpark_web/controllers/session_html.ex) ────────
-// The auth pages' brand override — evergreen --primary/--ring (the exact emitted
-// primary/ring tokens) + the decoupled auth button fills (color.authButton),
+// The auth pages' brand override — evergreen --primary/--primary-hover/
+// --primary-text/--ring (the exact emitted tokens) + the auth button fills
+// (color.authButton),
 // scoped under .bp-auth. Light on the scoped selector; dark keyed on
 // html[data-theme="dark"] .bp-auth (Studio themes via the data-theme attribute).
 // Indented 6 spaces to sit inside the ~H <style>. The ring-soft alpha reuses the
@@ -33,6 +34,9 @@ const authRows = (theme, t = tokens) => {
   return [
     `--primary: ${hsl(c.primary[theme])};`,
     `--primary-fg: ${hsl(c["primary-fg"][theme])};`,
+    `--primary-hover: ${hsl(c["primary-hover"][theme])};`,
+    // The brand drawn ON the card (links, the mark): the AA text voice.
+    `--primary-text: ${hsl(c.onTint["primary-text"][theme])};`,
     `--ring: ${hsl(c.ring[theme])};`,
     `--ring-soft: hsl(${c.ring[theme]} / ${alpha(softAlpha[theme])});`,
     `--btn-bg: ${pageVal(ab.bg[theme])};`,

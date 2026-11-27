@@ -15,7 +15,7 @@ defmodule Barkpark.PortableDoc.Render.PalettesTest do
     end
 
     test "brand returns the evergreen hex" do
-      assert Palettes.brand() == "#1e5347"
+      assert Palettes.brand() == "#836615"
     end
 
     test "default_width returns 600" do

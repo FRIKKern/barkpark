@@ -1354,7 +1354,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     header =
       ~s|<div class="text-xs" style="overflow-wrap: anywhere;">| <>
-        ~s|<span style="color: var(--primary);">●</span> <span>Update todos</span>#{progress}</div>|
+        ~s|<span style="color: var(--primary-text, var(--primary));">●</span> <span>Update todos</span>#{progress}</div>|
 
     items =
       if todos == [] do
@@ -1745,14 +1745,17 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp chat_todo_status_atom(_), do: :pending
 
   defp chat_todo_glyph_style("completed"), do: "flex: none; color: var(--ok);"
-  defp chat_todo_glyph_style("in_progress"), do: "flex: none; color: var(--primary);"
+
+  defp chat_todo_glyph_style("in_progress"),
+    do: "flex: none; color: var(--primary-text, var(--primary));"
+
   defp chat_todo_glyph_style(_), do: "flex: none; opacity: 0.6;"
 
   defp chat_todo_text_style("completed"),
     do: "overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;"
 
   defp chat_todo_text_style("in_progress"),
-    do: "overflow-wrap: anywhere; color: var(--primary); font-weight: 600;"
+    do: "overflow-wrap: anywhere; color: var(--primary-text, var(--primary)); font-weight: 600;"
 
   defp chat_todo_text_style(_), do: "overflow-wrap: anywhere;"
 

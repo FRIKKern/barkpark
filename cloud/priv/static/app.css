@@ -139,17 +139,19 @@
   --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red-strong); --info: var(--cc-blue);
   --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: #7d5500;
-  --primary: hsl(151.96 71.81% 29.22%);
-  --primary-fg: hsl(0 0% 100%);
-  --ring: hsl(163 42% 30%);
-  --primary-hsl: 151.96 71.81% 29.22%;
-  --ring-hsl: 163 42% 30%;
+  --primary: hsl(44.1 72.81% 55.29%);
+  --primary-fg: hsl(44.1 45% 8%);
+  --ring: hsl(44.1 72.81% 29.79%);
+  --primary-hsl: 44.1 72.81% 55.29%;
+  --primary-text: hsl(44.1 72.81% 29.79%);
+  --ring-hsl: 44.1 72.81% 29.79%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 142 72% 26%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
   --ok-strong: hsl(142 72% 20%);
+  --on-status: hsl(0 0% 100%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
   /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-
@@ -187,17 +189,19 @@
   --warn: hsl(var(--warn-hsl)); --danger: var(--cc-red); --info: var(--cc-blue);
   --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: #e8b45a;
-  --primary: hsl(152.92 60% 52.94%);
-  --primary-fg: hsl(163 45% 8%);
-  --ring: hsl(152.92 60% 52.94%);
-  --primary-hsl: 152.92 60% 52.94%;
-  --ring-hsl: 152.92 60% 52.94%;
+  --primary: hsl(45.21 75.53% 63.14%);
+  --primary-fg: hsl(45.21 45% 8%);
+  --ring: hsl(45.21 75.53% 63.14%);
+  --primary-hsl: 45.21 75.53% 63.14%;
+  --primary-text: hsl(45.21 75.53% 63.14%);
+  --ring-hsl: 45.21 75.53% 63.14%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 142 52% 52%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
   --ok-strong: hsl(142 52% 60%);
+  --on-status: hsl(240 10% 3.9%);
   --provider-hetzner: #f0728a;
   --provider-azure: #4aa3e0;
 }
@@ -214,20 +218,22 @@
 .bp-inst--adopted { color: var(--info); }
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 html[data-bp-theme="evergreen"] {
-  --primary: hsl(151.96 71.81% 29.22%);
-  --primary-fg: hsl(0 0% 100%);
-  --ring: hsl(163 42% 30%);
-  --primary-hsl: 151.96 71.81% 29.22%;
-  --ring-hsl: 163 42% 30%;
+  --primary: hsl(44.1 72.81% 55.29%);
+  --primary-fg: hsl(44.1 45% 8%);
+  --ring: hsl(44.1 72.81% 29.79%);
+  --primary-hsl: 44.1 72.81% 55.29%;
+  --primary-text: hsl(44.1 72.81% 29.79%);
+  --ring-hsl: 44.1 72.81% 29.79%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] {
-  --primary: hsl(152.92 60% 52.94%);
-  --primary-fg: hsl(163 45% 8%);
-  --ring: hsl(152.92 60% 52.94%);
-  --primary-hsl: 152.92 60% 52.94%;
-  --ring-hsl: 152.92 60% 52.94%;
+  --primary: hsl(45.21 75.53% 63.14%);
+  --primary-fg: hsl(45.21 45% 8%);
+  --ring: hsl(45.21 75.53% 63.14%);
+  --primary-hsl: 45.21 75.53% 63.14%;
+  --primary-text: hsl(45.21 75.53% 63.14%);
+  --ring-hsl: 45.21 75.53% 63.14%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
@@ -236,6 +242,7 @@ html[data-bp-theme="charple"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(282.39 44.23% 48.78%);
   --primary-hsl: 282.39 44.23% 40.78%;
+  --primary-text: hsl(282.39 44.23% 40.78%);
   --ring-hsl: 282.39 44.23% 48.78%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
@@ -245,6 +252,7 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-fg: hsl(282.56 45% 8%);
   --ring: hsl(282.56 58.11% 70.98%);
   --primary-hsl: 282.56 58.11% 70.98%;
+  --primary-text: hsl(282.56 58.11% 71.98%);
   --ring-hsl: 282.56 58.11% 70.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
@@ -254,6 +262,7 @@ html[data-bp-theme="ember"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(19.33 71.29% 48.98%);
   --primary-hsl: 19.33 71.29% 40.98%;
+  --primary-text: hsl(19.33 71.29% 36.98%);
   --ring-hsl: 19.33 71.29% 48.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
@@ -263,6 +272,7 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-fg: hsl(19.01 45% 8%);
   --ring: hsl(19.01 75.53% 63.14%);
   --primary-hsl: 19.01 75.53% 63.14%;
+  --primary-text: hsl(19.01 75.53% 63.14%);
   --ring-hsl: 19.01 75.53% 63.14%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
@@ -272,6 +282,7 @@ html[data-bp-theme="fjord"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(191.6 80.95% 36.82%);
   --primary-hsl: 191.6 80.95% 28.82%;
+  --primary-text: hsl(191.6 80.95% 27.82%);
   --ring-hsl: 191.6 80.95% 36.82%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
@@ -281,6 +292,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-fg: hsl(193.27 45% 8%);
   --ring: hsl(193.27 62.43% 64.51%);
   --primary-hsl: 193.27 62.43% 64.51%;
+  --primary-text: hsl(193.27 62.43% 64.51%);
   --ring-hsl: 193.27 62.43% 64.51%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
@@ -290,6 +302,7 @@ html[data-bp-theme="iris"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(248.75 63.72% 62%);
   --primary-hsl: 248.75 63.72% 55.69%;
+  --primary-text: hsl(248.75 63.72% 55.69%);
   --ring-hsl: 248.75 63.72% 62%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --primary-soft: hsl(var(--primary-hsl) / 0.15);
@@ -299,6 +312,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-fg: hsl(248.87 45% 8%);
   --ring: hsl(248.87 100% 77.45%);
   --primary-hsl: 248.87 100% 77.45%;
+  --primary-text: hsl(248.87 100% 77.45%);
   --ring-hsl: 248.87 100% 77.45%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --primary-soft: hsl(var(--primary-hsl) / 0.2);
@@ -510,7 +524,7 @@ body {
 
 h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
 h2 { font-size: 16px; font-weight: 600; margin: 0; }
-a { color: var(--primary); text-decoration: none; }
+a { color: var(--primary-text); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .dim { color: var(--dim); }
@@ -526,7 +540,7 @@ a:hover { text-decoration: underline; }
   height: 18px;
   display: block;
   flex: 0 0 auto;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 .wordmark-text { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
 .wordmark-text b { font-weight: 700; }
@@ -1442,7 +1456,7 @@ select.form-input {
   background: none; border: 1px dashed var(--border); border-radius: 8px;
 }
 .session-fold:hover { color: var(--text); border-color: var(--muted-text); }
-.badge-current { background: var(--success); color: var(--primary-fg); }
+.badge-current { background: var(--success); color: var(--on-status); }
 .pw-form { display: flex; flex-direction: column; gap: 4px; }
 .pw-form .field { margin-bottom: 10px; }
 .pw-form .field span { display: block; font-size: 12px; color: var(--muted-text); margin-bottom: 4px; }
@@ -1482,7 +1496,7 @@ select.form-input {
   border-radius: var(--pill);
   display: grid; place-items: center;
   font-size: 11px; font-weight: 700;
-  color: var(--primary-fg); /* glyph-on-status, both themes — contrast-gated */
+  color: var(--on-status); /* glyph-on-status, both themes — contrast-gated */
   margin-top: 1px;
 }
 .toast-success .toast-ico { background: var(--success); }
@@ -1646,7 +1660,7 @@ select.form-input {
    is reversed rather than repointed — --primary-soft is emitted again, same
    channel and the same per-theme alpha the borrow relied on, and the bytes
    painted here are once more identical to what GR22 shipped. */
-.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--primary-soft); }
+.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary-text); background: var(--primary-soft); }
 .size-opt-radio { flex: 0 0 auto; accent-color: var(--primary); }
 .size-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .size-opt-name { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -2796,7 +2810,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .set-matrix-cell input { width: 15px; height: 15px; accent-color: var(--primary); cursor: pointer; }
 .set-matrix-cell input:disabled { cursor: not-allowed; opacity: 0.4; }
-.set-matrix-cell--default input { outline: 1px dashed var(--primary); outline-offset: 2px; }
+.set-matrix-cell--default input { outline: 1px dashed var(--ring); outline-offset: 2px; }
 .set-matrix-testcell {
   grid-column: span 6;
   padding: var(--space-2) var(--space-3);
@@ -3250,7 +3264,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--radius);
   transition: border-color var(--t), background var(--t);
 }
-.new-pick:hover { border-color: var(--primary); background: var(--muted-surface); text-decoration: none; }
+.new-pick:hover { border-color: var(--primary-text); background: var(--muted-surface); text-decoration: none; }
 .new-pick-title { font-weight: 600; color: var(--text); }
 .new-pick-desc { font-size: 13px; }
 
@@ -3312,7 +3326,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   height: 100%;
   width: 0;
   border-radius: var(--pill);
-  background: var(--primary);
+  background: var(--primary-text);
   transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .prov-overall.is-done .prov-overall-fill { background: var(--ok); }
@@ -3340,7 +3354,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  color: var(--primary-fg);
+  color: var(--on-status);
   /* Styleguide motion contract: state advance eases 250ms… */
   transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease;
 }
@@ -3356,7 +3370,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 @property --p { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
 .new-step.active .new-step-dot {
   border: 0;
-  background: conic-gradient(var(--primary) var(--p, 0%), var(--ring-soft) 0);
+  background: conic-gradient(var(--primary-text) var(--p, 0%), var(--ring-soft) 0);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
   transition: --p 0.9s linear;
@@ -3371,7 +3385,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    flat --ring-soft disc once --p is gone, and the --p transition has nothing
    left to tween. */
 .new-step.active .new-step-dot[data-ring-unpaced] {
-  border: 2px solid var(--primary);
+  border: 2px solid var(--primary-text);
   background: none;
   -webkit-mask: none;
   mask: none;
@@ -3386,7 +3400,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-step.skipped .new-step-label { color: var(--dim); }
 /* Between-steps honesty: the `next` row (previous step done, this one about to
    report — e.g. the SSH boot wait) pulses instead of sitting frozen. */
-.new-step.next .new-step-dot { border-color: var(--primary); animation: new-next-pulse 1.4s ease-in-out infinite; }
+.new-step.next .new-step-dot { border-color: var(--primary-text); animation: new-next-pulse 1.4s ease-in-out infinite; }
 .new-step.next .new-step-label { color: var(--text); }
 .new-step.next .new-step-spin { opacity: 0.55; }
 @keyframes new-next-pulse {
@@ -3456,7 +3470,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 0 0 14px;
   margin-left: auto;
   border: 2px solid var(--ring-soft);
-  border-top-color: var(--primary);
+  border-top-color: var(--primary-text);
   border-radius: var(--pill);
   animation: new-spin 0.7s linear infinite;
 }
@@ -4128,7 +4142,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 14px; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.attention-name:hover { color: var(--primary); }
+.attention-name:hover { color: var(--primary-text); }
 /* The reason is the row's WHY and the pill beside it is chip-only (statusPill
    with detail:false), so this column is the ONE place the sentence prints —
    it wraps rather than ellipsing ("release-ta…" told nobody anything).
@@ -4144,7 +4158,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .attention-row--group .status-pill { margin-top: 1px; }
 .attention-group-names { display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; margin-top: 2px; }
 .attention-group-name { font-size: var(--text-xs); font-weight: 500; color: var(--muted-text); overflow-wrap: anywhere; }
-.attention-group-name:hover { color: var(--primary); }
+.attention-group-name:hover { color: var(--primary-text); }
 /* A chip carrying a hover note says so. */
 .status-pill-chip[title] { cursor: help; }
 
@@ -4266,7 +4280,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    reason recorded at :2261 — is what stops the shrink from clipping. Folded
    into the existing rule: no new head, no new @media. */
 .instance-card-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-right: auto; min-width: 0; overflow-wrap: break-word; }
-.instance-card-name:hover { color: var(--primary); }
+.instance-card-name:hover { color: var(--primary-text); }
 /* cch-w20-s3: the front screen's address line WRAPS instead of ellipsising.
    `white-space: nowrap` + `text-overflow: ellipsis` dropped the tail of a real
    public address at every phone width — and the tail is the TLD, so two boxes
@@ -4328,7 +4342,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* A plain-text link styled as a button (Open Studio in a card, runway actions). */
 .btn-link {
   background: none; border: none; padding: 0; cursor: pointer;
-  font: inherit; color: var(--primary); text-align: left;
+  font: inherit; color: var(--primary-text); text-align: left;
 }
 .btn-link:hover { text-decoration: underline; }
 .btn-link:disabled { opacity: 0.55; cursor: not-allowed; text-decoration: none; }
@@ -4447,7 +4461,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   position: absolute;
   left: 8px; right: 8px; bottom: -1px;
   height: 2px;
-  background: var(--primary);
+  background: var(--primary-text);
   border-radius: 2px 2px 0 0;
 }
 .inst-tabpanel { display: block; }
@@ -6144,7 +6158,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .ws-plan {
   flex: 0 0 auto; padding: 2px 8px; border-radius: var(--pill);
   font-size: var(--text-xs); font-weight: 600;
-  background: hsl(var(--primary-hsl) / 0.12); color: var(--primary);
+  background: hsl(var(--primary-hsl) / 0.12); color: var(--primary-text);
 }
 .ws-caret { flex: 0 0 auto; margin-left: auto; opacity: 0.55; color: var(--muted-text); }
 
@@ -6199,7 +6213,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .sidebar .nav-link:hover { background: rgba(var(--cc-line-rgb), 0.05); color: var(--text); text-decoration: none; }
 .sidebar .nav-link.is-active { background: hsl(var(--primary-hsl) / 0.1); color: var(--text); }
-.sidebar .nav-link.is-active .nav-ico { color: var(--primary); }
+.sidebar .nav-link.is-active .nav-ico { color: var(--primary-text); }
 .nav-ico { flex: 0 0 auto; color: currentColor; }
 .nav-sub { padding-left: 12px; font-weight: 500; }
 

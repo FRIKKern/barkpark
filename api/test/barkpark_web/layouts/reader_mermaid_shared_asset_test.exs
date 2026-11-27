@@ -176,12 +176,12 @@ defmodule BarkparkWeb.Layouts.ReaderMermaidSharedAssetTest do
       # Dark branch — spot values carried over verbatim from the reader's
       # inline copy on origin/main.
       assert a =~ ~s(background: "#0e1614")
-      assert a =~ ~s(primaryBorderColor: "#45b394")
+      assert a =~ ~s(primaryBorderColor: "#e8c55a")
       assert a =~ ~s(noteBkgColor: "#1c2620")
 
       # Light branch.
       assert a =~ ~s(background: "#f6faf9")
-      assert a =~ ~s(primaryBorderColor: "#1e5347")
+      assert a =~ ~s(primaryBorderColor: "#836615")
       assert a =~ ~s(noteBkgColor: "#e6f0eb")
     end
   end

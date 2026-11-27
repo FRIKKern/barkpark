@@ -15,7 +15,7 @@
     "blocks/chat-plan.golden.json": "793260d390394a4924c6eb779ac940c7f86c6ee2d3f9f21e7975ee541e332812",
     "blocks/chat-question.golden.json": "e3acb56fa20fd20bac4c5b232b93ecf44cea6cae4bfbc7e8a96672d584cf1fa2",
     "blocks/chat-thinking.golden.json": "c613804085ea30fc73962987b5a1e82b448f31985f5ff5eb672ddfaa158cdc7c",
-    "blocks/chat-todo.golden.json": "d366e8e3091f0d1c30f9e0f0abfb3a096834acc2c3415abe4cf199a76e316f40",
+    "blocks/chat-todo.golden.json": "8171a6fe6eb459d4beb5b0cbb4f9ff3e81359d8887cc1c700b0d087c853cfe13",
     "blocks/chat-tool-diff.golden.json": "d82f4a7a4fd9d9a271809d5ed2af3a7fd40656e750dc4a293c791ea4adc4c4a4",
     "blocks/code-tabs.golden.json": "08035e382688b624045ab797c6702c01e063d667ef3c05348128ff906d72aeac",
     "blocks/code.golden.json": "4fd6c0a12088f915a5622d704e28b9e458af9994c0f3b299f8721441f78177df",
@@ -82,9 +82,9 @@
     "blocks/video.golden.json": "ed58b7c02665275ccd2c4386808226783c2b567dd0cdfe63bf6a9cdf4c574182",
     "canvas-forbidden-classes.json": "89f29c11c518f4bdf664b12856c0131ec05abb25fb7f666b08ac12e6a0e75076",
     "css/code-tokens.css": "c2228bc03e6b4a8184341ea54249fb715507a6b9886c209b470bf3c5d910689c",
-    "css/paper-surface.css": "c334ebacf2ad57942a26b373b55f1e02bc85f6a0a5661d38508937e458f906c0",
-    "email.html": "d1bbb210a0004a821e7351f207c6e93ddf71fc12d72c090de5d8fe2fa8a291d7",
-    "fragments.json": "039b56eef3d20802952b44f28e8ab5bcbae63ad383ff1f32096249faf2bee574",
+    "css/paper-surface.css": "989805de616aff3ebfe30658c5247ec9bad44410e4bd3c875c37bd0cca5eb96b",
+    "email.html": "addac50d92a5bc0bb57fdde6ca6a78bbfd1d2786e855945c7dcd41b15f5f4ea3",
+    "fragments.json": "cbf81b1822d3228b770a177dbc135be6a46bf7928aaea56be71673530a920e6c",
     "from-markdown/diagram-caption.json": "46b100c61c1247460535c89d08caa0ba6a55a77e649d7b95362dc143867ab0ca",
     "from-markdown/entities.json": "e571ade7653d56345c27b3db98fcd31e008e261cf0f008bd8d4906c8ed0eb7a6",
     "from-markdown/fence-must-validate.json": "8a8902c62cf1d2aafd1b240d9dd1af4b7edeb6015df75b39c3ad86ec8af54e9e",
@@ -170,10 +170,10 @@
     "ops/patch-table-structure.json": "c31a68e9c2610ab655b8fb3c41a513590e9f8234e70ffefb57ed327b7697fd0b",
     "ops/remove-block.json": "61837d01ff16bbdaf1acf8adb46e4045ecfe93666f8e6af00c54975d0bce2d3a",
     "ops/replace-block.json": "6d080b29f857c6f4803206bf5528ff6c26636b951537d57517f8cc64eeefc8b2",
-    "pages/dark-en.html": "7c480cdb6b7f34287d91b43a6ea5057aa69de3bd269a0d253f28a1f3da9cbe7f",
-    "pages/dark-nb-NO.html": "86af79dd36dea7836628ce24500819286566d99cf9ef1240e573dec39b3be023",
-    "pages/light-en.html": "de7e55515804efe8ce8ac20da92ed367f18e37848ba029bcb02a1a4dc3859f3b",
-    "pages/light-nb-NO.html": "ea0ec0f17e7a042425b6b28422f789c6dfa516ca7c4fc97b633f0a39521f5d45"
+    "pages/dark-en.html": "a364564986307b60594c9658e2763fb8aad520bf7157358078af8ac598c7029c",
+    "pages/dark-nb-NO.html": "03fe85e75096caf3759f07580413165a5f83994381ba7e7f48cb5830563eecd7",
+    "pages/light-en.html": "e39be0ddbf919512555ed2e93b5849198da30f4c44d9798087e5ea70dc0b639d",
+    "pages/light-nb-NO.html": "840144bce56ead2932e3f36ebb700d2143f87b95ff73ce85d999b5390dce2469"
   },
   "gettext_sha256": "aed86523539dd0eb179fe2dd669085eec3f3dd048b09f1954d8e8fc2c20459bc",
   "inputs": [
@@ -186,6 +186,6 @@
     "test/support/fixtures/portable-doc-limits.json"
   ],
   "inputs_sha256": "0648d300e378ecc17b34ddab73b0d52288793f4496e265688d12df3c17dcac07",
-  "render_version": "e0ab3b1a131fcf757eeffcc150e7e3a753f3094786ceec5d317f58696401bdbf",
-  "stylesheet_sha256": "2c4e6c236de276d47b285258d0800aba079c05de4b4934cfda1c111baf5bd01d"
+  "render_version": "1feac01b74af37acb088ad409e707deea7e2d77687983177c4c9f20c4428f8b0",
+  "stylesheet_sha256": "00a203ef419bb22edaa5392d33836e0de1f3a73ba50f8bb5317d2e908ad0b553"
 }
