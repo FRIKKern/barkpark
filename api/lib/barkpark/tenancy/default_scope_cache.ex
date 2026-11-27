@@ -90,6 +90,8 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
   @table :barkpark_tenancy_default_scope_cache
   @generation :__generation__
   @default_ttl_ms 60_000
+  # This process's `transaction/2` nesting depth.
+  @depth {__MODULE__, :transaction_depth}
 
   @doc """
   Read `key` through the cache, calling `loader` on a miss or an expired entry.
@@ -138,12 +140,34 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
   COMMIT, and a raise skips one placed after the call; either way a load
   made in between keeps what it read, the old row or the row this process
   saw before a rollback took it away (task-2d336fb1b6c90c7a).
+
+  Nested in another `transaction/2` of this process, its inner bust comes
+  before the outer COMMIT, and the outer one's bust after it covers that.
+  Nested in a plain `Repo.transaction/2` (or an `Ecto.Multi`), nothing
+  busts after the outer COMMIT: a concurrent load between the inner bust and
+  that COMMIT keeps the old seat for the TTL. That is refused with an
+  `ArgumentError` before anything is written (task-5c41ef4f5b3f11b2): open
+  the outer transaction with `transaction/2`.
   """
   @spec transaction((-> term()), keyword()) :: {:ok, term()} | {:error, term()}
   def transaction(fun, opts \\ []) when is_function(fun, 0) do
-    Barkpark.Repo.transaction(fun, opts)
-  after
-    invalidate()
+    depth = Process.get(@depth, 0)
+
+    if depth == 0 and Barkpark.Repo.in_transaction?() do
+      raise ArgumentError,
+            "DefaultScopeCache.transaction/2 nested in a plain Repo.transaction: " <>
+              "its seat cache bust would come before the outer COMMIT. " <>
+              "Open the outer transaction with DefaultScopeCache.transaction/2."
+    end
+
+    Process.put(@depth, depth + 1)
+
+    try do
+      Barkpark.Repo.transaction(fun, opts)
+    after
+      if depth == 0, do: Process.delete(@depth), else: Process.put(@depth, depth)
+      invalidate()
+    end
   end
 
   @doc "Cache lifetime in milliseconds; `0` (or less) disables the cache."
