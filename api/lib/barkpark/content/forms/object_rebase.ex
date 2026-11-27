@@ -34,6 +34,7 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   """
 
   alias Barkpark.Content.Forms.HtmlBody
+  alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
 
   @doc """
@@ -204,9 +205,22 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
             end
 
           {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) ->
-            if HtmlBody.field?(field, stored),
-              do: Map.put(acc, key, HtmlBody.rebase(mine, stored, was)),
-              else: acc
+            cond do
+              HtmlBody.field?(field, stored) ->
+                Map.put(acc, key, HtmlBody.rebase(mine, stored, was))
+
+              # A field the snapshot held empty is posted as the editor's
+              # HTML (`Content.Forms` reads a post as blocks only over
+              # stored blocks): when the store holds blocks now, another
+              # editor filled it, and A's first words are read against the
+              # empty draw like any edit (task-fe3cbbb28707625d).
+              PortableText.value?(stored) and not is_binary(was) ->
+                blocks = PortableText.from_html(mine, if(is_list(was), do: was, else: []))
+                Map.put(acc, key, rich_text(base[key], blocks, stored, {:ok, was}))
+
+              true ->
+                acc
+            end
 
           _ ->
             acc
