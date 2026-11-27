@@ -78,7 +78,10 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     drawn = params["_bp_drawn"]
     at = picked_on(params, socket)
     picks = picked(params, {drawn, params["_bp_drawn_at"]}, socket, {schema, form})
-    {params, dropped} = split(params, schema, form, {own(socket, :now), own(socket, :any)})
+
+    {params, dropped} =
+      split(params, schema, form, {own(socket, :now), own(socket, :any), earlier(at, socket)})
+
     socket = assign(socket, editor_post_picks: picks)
 
     case fun.(params, socket) do
@@ -93,9 +96,14 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   @doc false
   # `own`: this document's picks kept for the drawing on the page now, and
   # its picks as this socket last wrote them, whatever was drawn since.
-  def split(params, schema, form, own \\ {%{}, %{}})
+  def split(params, schema, form, own \\ {%{}, %{}, MapSet.new()})
 
-  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema, form, {now, any}) do
+  def split(
+        %{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params,
+        schema,
+        form,
+        {now, any, earlier}
+      ) do
     target = target(params)
 
     # Only where the form, the socket's newest stored value, draws another
@@ -112,7 +120,7 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
             posted,
             drawn[name],
             {Map.get(now, name), Map.get(any, name)},
-            drawn(type, Map.get(form, name))
+            {drawn(type, Map.get(form, name)), MapSet.member?(earlier, name)}
           ),
           into: %{},
           do: {name, {type, posted}}
@@ -127,15 +135,31 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   # Posted as the page drew it, where the store holds neither that nor this
   # page's own pick made on that drawing (task-030e09c0bde818b1: a pick made
   # before the widget was drawn again is not a pick back on it).
-  defp stale?(posted, posted, {own, _any}, now), do: now not in [posted, own]
+  defp stale?(posted, posted, {own, _any}, {now, _earlier?}), do: now not in [posted, own]
 
   # Posted as this page last wrote it, where the store has since moved to
   # another's value: the page still shows its own pick, the redraw of the
   # other save not yet drawn (task-775ad6b350f78f2e). A page that drew the
-  # store's value and posts its own again picked it again: written.
-  defp stale?(posted, drawn, {_own, posted}, now), do: now != posted and drawn != now
+  # store's value and posts its own again picked it again: written, but only
+  # from the drawing the socket draws now. From an earlier one, the store
+  # moved back to the value the old widget was drawn with (B's undo of A's
+  # pick) and the redraw has not reached the page: the post is A's old pick,
+  # not one on the store's value (task-2e3d79fc1480d2db, the Studio's H1).
+  defp stale?(posted, drawn, {_own, posted}, {now, earlier?}),
+    do: now != posted and (drawn != now or earlier?)
 
   defp stale?(_posted, _drawn, _own, _now), do: false
+
+  # The picks this post's widgets posted from an earlier drawing than the
+  # socket draws now (`picked_on/2`). A forged or missing `_bp_drawn_at`
+  # can only drop A's own pick posted again, never write a post.
+  defp earlier(at, socket) do
+    for %{"type" => type, "name" => name} <- fields(socket.assigns[:editor_schema]),
+        type in @types,
+        at.(name) != gen(socket, name),
+        into: MapSet.new(),
+        do: name
+  end
 
   defp redraw(socket, dropped) when map_size(dropped) == 0, do: socket
 
