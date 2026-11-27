@@ -5,10 +5,14 @@ defmodule BarkparkWeb.Studio.TopRichTextPtUnsetTest do
   the field (an `unset`, or a `/v1` create or replace without it) under A's
   desk or Studio post, or while A's page was away. The store then held no
   string, so the string rule (`HtmlBody.stored_string?/2`) was not read, and
-  A's post was written over B's removal as blocks, with no banner. A block
-  body B removes keeps the removal and holds A (`ObjectRebase.rich_text/4`
-  merges A's edit against no blocks and keeps the store), and so does the
-  string one now: the page showed a string the store no longer holds.
+  A's post was written over B's removal as blocks, with no banner.
+
+  The rule is the block body's: B's removal under A's post is a move of the
+  store, kept, and A is held (`ObjectRebase.rich_text/4` merges A's edit
+  against no blocks and keeps the store). A block body B removed while A's
+  page was away was written over too: the rejoin's post is read against an
+  unknown draw. Both now keep the removal and hold A. A first post into a
+  field that was empty from the start is written, also after a rejoin.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -161,6 +165,23 @@ defmodule BarkparkWeb.Studio.TopRichTextPtUnsetTest do
       a = tab(c, @surface)
       html = types(a, "<p>body0 A1</p>", page(a))
       assert words(body(c)) == ["body0 A1"]
+      refute html =~ "doc-conflict-banner"
+    end
+  end
+
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    test "#{surface} control: the page rejoins on a field absent from the start, A types: written",
+         c do
+      put_body(c, :drop)
+      a = tab(c, @surface)
+      seen = page(a)
+      GenServer.stop(a.pid, :normal)
+
+      a2 = rejoined(c, @surface)
+      html = types(a2, "<p>first A</p>", seen)
+      assert words(body(c)) == ["first A"], "A's first words into the empty field were dropped"
       refute html =~ "doc-conflict-banner"
     end
   end
