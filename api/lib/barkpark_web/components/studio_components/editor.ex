@@ -987,6 +987,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
+              data-bp-form-gen={@editor_form_gen}
               data-desk-undo-keys={desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.DocUndo.names(@editor_schema)}
               data-studio-held={not desk?(@parent_assigns) && BarkparkWeb.Studio.Desk.LeaveGuard.message(@parent_assigns)}
               phx-value-_bp_doc={BarkparkWeb.Studio.StudioLive.PostIdentity.value(@dataset, @editor_doc.type, @editor_doc.doc_id)}

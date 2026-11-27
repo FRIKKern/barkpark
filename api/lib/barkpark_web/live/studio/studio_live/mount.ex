@@ -375,6 +375,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # top-level rich text editors, read against the digest it kept
       # (`TextConfirmed.loaded/1`, task-fe9d8741f0641f97).
       editor_rejoined?: BarkparkWeb.Studio.DeskLive.rejoin?(connect_params),
+      # The form generation the page's editor was drawn at (`RejoinForm`).
+      editor_rejoin_form: BarkparkWeb.Studio.StudioLive.RejoinForm.from_params(connect_params),
       editor_rt_rejoin: MapSet.new(),
       # The dotted form keys (`doc[altText].nob`) whose input the author has
       # actually touched this buffer, accumulated from `phx-change`'s
