@@ -248,22 +248,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   def confirm(socket, _keys, _posted), do: socket
 
   # A top-level rich text post the store holds as it draws: the page shows
-  # the stored value. A body the store holds as an HTML string holds the
-  # post as posted (`Forms.HtmlBody`, task-bb19ab06ab1e87b2).
+  # the stored value.
   defp rich_confirmed(socket, stored, posted) do
     for key <- rich_keys(socket.assigns[:editor_schema]),
         html = Map.get(posted, key),
         is_binary(html),
         value = Map.get(stored, key),
-        stored_as_posted?(html, value),
+        is_list(value),
+        PortableTextMerge.same_drawn?(PortableText.from_html(html, value), value),
         into: %{},
         do: {RemoteValues.input_name(key), rich_digest(value)}
   end
-
-  defp stored_as_posted?(html, value) when is_binary(value), do: html == value
-
-  defp stored_as_posted?(html, value) when is_list(value),
-    do: PortableTextMerge.same_drawn?(PortableText.from_html(html, value), value)
-
-  defp stored_as_posted?(_html, _value), do: false
 end
