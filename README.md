@@ -36,7 +36,7 @@ As of 26 November: an alpha in December, and the focus now is good and stable.
 
 | Pillar | Now |
 |---|---|
-| UI kit: [BarkUI](js/packages/barkui) | Building. 14 parts; one skin everywhere, 52 of 100 |
+| UI kit: [BarkUI](js/packages/barkui) | Building. 14 parts |
 | Next-gen editor: [Fluid editor][fe] | Advanced. 3 of 7 milestones |
 | [BarkBot][bb] | Building. 1 of 8 slices |
 | Apps in use: [Studio][st], Papers, Sheets | Early. Studio: 51 of 66 journeys signed off |
@@ -47,11 +47,11 @@ As of 26 November: an alpha in December, and the focus now is good and stable.
 ## The family
 
 - **Barkpark**, here: the core, the API, Papers, Sheets, the CLI, BarkUI.
-- **[Studio][st]**: editing that feels like Sanity Studio.
+- **[Studio][st]**: the editing room, fast and calm.
 - **[Barkdown][bd]**: a desktop app for notes, agents and browsing.
 - **[Barkever][be]**: notes and projects for visual thinkers.
 - **[PortableDoc][pd]**: one document format for every app.
-- **[Fluid editor][fe]**: a grid editor that behaves like Squarespace's.
+- **[Fluid editor][fe]**: a grid editor where you place blocks freely.
 - **[BarkBot][bb]**: an AI agent with its own computer.
 
 ## Local or remote
