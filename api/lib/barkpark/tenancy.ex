@@ -1616,7 +1616,7 @@ defmodule Barkpark.Tenancy do
   end
 
   defp do_create_owned_workspace(ws_attrs, principal_id, principal_type, co_owner_user_id) do
-    Repo.transaction(fn ->
+    DefaultScopeCache.transaction(fn ->
       with {:ok, workspace} <- create_workspace(ws_attrs),
            {:ok, _membership} <-
              TenancyAuth.create_membership(workspace.id, principal_id, "owner", principal_type),
@@ -1761,7 +1761,7 @@ defmodule Barkpark.Tenancy do
   def create_project_with_dataset(ws_id, attrs) when is_binary(ws_id) do
     project_attrs = put_derived_slug(attrs)
 
-    Repo.transaction(fn ->
+    DefaultScopeCache.transaction(fn ->
       with {:ok, project} <- create_project(ws_id, project_attrs),
            {:ok, _dataset} <-
              create_dataset(project, %{
@@ -2128,7 +2128,7 @@ defmodule Barkpark.Tenancy do
     # clears on rollback; it is a no-op when an enclosing owner already exists.
     result =
       Broadcast.with_deferred_queue(fn ->
-        Repo.transaction(fn ->
+        DefaultScopeCache.transaction(fn ->
           case do_delete_workspace(workspace) do
             {:ok, ws} -> ws
             {:error, reason} -> Repo.rollback(reason)

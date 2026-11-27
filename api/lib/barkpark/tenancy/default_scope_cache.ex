@@ -62,6 +62,10 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
       inside it: clearing mid-transaction lets a concurrent reader repopulate
       from the still-visible old row.
 
+  A write that opens its own transaction (`delete_workspace/1`, the bundle
+  import, `create_project_with_dataset/2`, `do_create_owned_workspace/4`)
+  opens it with `transaction/2`, which busts on every exit, a raise included.
+
   ## A load that straddles an invalidate
 
   A load reads the rows, then stores what it read. One that read before a
@@ -94,6 +98,11 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
   a non-positive TTL the cache is off and this is exactly `loader.()`.
   """
   @spec fetch(atom(), (-> term())) :: term()
+  # The generation counter's own key: an entry stored there would take the
+  # counter's place, and the next `invalidate/0` would raise.
+  def fetch(@generation, _loader),
+    do: raise(ArgumentError, "#{inspect(@generation)} is the cache's generation counter")
+
   def fetch(key, loader) when is_atom(key) and is_function(loader, 0) do
     ttl = ttl_ms()
 
@@ -119,6 +128,22 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
         bump_generation()
         safe_delete_all()
     end
+  end
+
+  @doc """
+  `Repo.transaction(fun, opts)`, with `invalidate/0` run on every exit from
+  it: a COMMIT, a rollback, a raise.
+
+  For a write that opens its own transaction. A bust inside it comes before
+  COMMIT, and a raise skips one placed after the call; either way a load
+  made in between keeps what it read, the old row or the row this process
+  saw before a rollback took it away (task-2d336fb1b6c90c7a).
+  """
+  @spec transaction((-> term()), keyword()) :: {:ok, term()} | {:error, term()}
+  def transaction(fun, opts \\ []) when is_function(fun, 0) do
+    Barkpark.Repo.transaction(fun, opts)
+  after
+    invalidate()
   end
 
   @doc "Cache lifetime in milliseconds; `0` (or less) disables the cache."
