@@ -447,6 +447,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div id={pick_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen, @pick_gens)} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-filter-params={@ref_filter_params}>
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <input type="hidden" name={"_bp_drawn[#{@n}]"} value={@v} />
+      <input type="hidden" name={"_bp_drawn_at[#{@n}]"} value={pick_drawing(@form_gen, @pick_gens, @n)} />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
         ref-type={@ref_type}
@@ -493,6 +494,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div id={pick_wrap_id("bp-mp-wrap", @n, @doc_key, @form_gen, @pick_gens)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <input type="hidden" name={"_bp_drawn[#{@n}]"} value={@v} />
+      <input type="hidden" name={"_bp_drawn_at[#{@n}]"} value={pick_drawing(@form_gen, @pick_gens, @n)} />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         id={@id_prefix == "" && @n}
         chrome={@id_prefix == "" && "bar"}
@@ -857,6 +859,14 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def label_target(_field, _form, _prefix), do: nil
+
+  @doc """
+  The drawing a reference or image widget is on: its wrapper's form
+  generation and its own, as the page posts it (`_bp_drawn_at[name]`,
+  `KeptPicks`).
+  """
+  def pick_drawing(form_gen, pick_gens, name),
+    do: "#{form_gen || 0}.#{Map.get(pick_gens || %{}, name, 0)}"
 
   # [doc-keyed-ignore-wrappers] The id of a `phx-update="ignore"` wrapper that
   # owns a hidden input + web component (rich text, reference, image,
