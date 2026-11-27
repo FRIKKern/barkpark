@@ -476,6 +476,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_type={@doc_type}
             document_rev={@document_rev}
             form_gen={@form_gen}
+            pick_gens={Map.get(@parent_assigns, :editor_pick_gens) || %{}}
             schema_admin={BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(@parent_assigns, :caps))}
           />
         <% end %>
@@ -544,6 +545,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_type={@doc_type}
             document_rev={@document_rev}
             form_gen={@form_gen}
+            pick_gens={Map.get(@parent_assigns, :editor_pick_gens) || %{}}
             id_prefix={label_prefix}
             schema_admin={BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(@parent_assigns, :caps))}
           />
