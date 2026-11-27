@@ -31,10 +31,13 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   drawing: a remote replace draws the widget again from the store (a new
   form generation, or the widget's own). Read past it, the store taking
   back A's old pick made the redrawn widget's stale post read as A's
-  (task-030e09c0bde818b1). The drawing is the one the widget posts
-  (`_bp_drawn_at[name]`), not the socket's: a pick posted from the old
-  drawing after another's redraw is kept for that drawing, so the redrawn
-  widget's next post is not read as a pick back (task-b7d86444f258c7aa).
+  (task-030e09c0bde818b1). A pick is kept for the drawing its widget posts
+  (`_bp_drawn_at[name]`) where that is an earlier one than the socket's: a
+  pick posted from the old drawing after another's redraw is not on the
+  redrawn widget, so that widget's next post is not read as a pick back
+  (task-b7d86444f258c7aa). The posted drawing only moves a pick off the
+  drawing the socket shows, so it can keep a post from being written, never
+  write one.
 
   A pick the page posts as this socket last wrote it, where the store has
   since moved to another editor's value, is dropped the same way: the page
@@ -63,8 +66,8 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     schema = socket.assigns[:editor_schema]
     form = socket.assigns[:editor_form] || %{}
     drawn = params["_bp_drawn"]
-    at = drawings(params, socket)
-    {params, dropped} = split(params, schema, form, {own(socket, at), own(socket, :any)})
+    at = picked_on(params, socket)
+    {params, dropped} = split(params, schema, form, {own(socket, :now), own(socket, :any)})
 
     case fun.(params, socket) do
       {:noreply, socket} ->
@@ -177,7 +180,7 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     do: Map.new(kept(socket, drawing), fn {name, {value, _gen}} -> {name, value} end)
 
   # This document's picks as this socket last wrote them (`:any`), or only
-  # those made on the widget drawing this post came from (`at`).
+  # those made on the widget drawing the socket draws now (`:now`).
   defp kept(socket, drawing) do
     case socket.assigns[:editor_own_picks] do
       {doc, %{} = picks} ->
@@ -185,7 +188,7 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
           do:
             for(
               {name, {_value, gen} = pick} <- picks,
-              drawing == :any or gen == drawing.(name),
+              drawing == :any or gen == gen(socket, name),
               into: %{},
               do: {name, pick}
             ),
@@ -196,29 +199,44 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     end
   end
 
-  # The drawing each widget of this post was on: the one it posts
-  # (`_bp_drawn_at[name]`, `FieldInputs.pick_drawing/3`), else the one the
-  # socket draws now (a page drawn before the widgets posted it). Read from
-  # the socket alone, a pick in flight across another's redraw was kept for
-  # the new drawing, and the redrawn widget's next post read as a pick back
-  # (task-b7d86444f258c7aa).
-  defp drawings(params, socket) do
+  # The drawing a pick of this post is kept for: the one its widget posts
+  # (`_bp_drawn_at[name]`, `FieldInputs.pick_drawing/3`) where that is an
+  # earlier one than the socket draws now, else the socket's. Kept for the
+  # socket's drawing, a pick in flight across another's redraw read the
+  # redrawn widget's next post as a pick back (task-b7d86444f258c7aa).
+  # Both parts of a drawing only grow on a socket's document, so a pick kept
+  # for an earlier one never counts as on the drawing again: a forged or
+  # missing `_bp_drawn_at` can only lose a pick back, never write a post
+  # that would be dropped.
+  defp picked_on(params, socket) do
     posted = if is_map(params["_bp_drawn_at"]), do: params["_bp_drawn_at"], else: %{}
 
     fn name ->
-      case posted do
-        %{^name => drawing} when is_binary(drawing) and drawing != "" ->
-          drawing
+      {f, p} = now = gen(socket, name)
 
-        _ ->
-          FieldInputs.pick_drawing(
-            socket.assigns[:editor_form_gen],
-            socket.assigns[:editor_pick_gens],
-            name
-          )
+      case parse(posted[name]) do
+        {pf, pp} = at when pf <= f and pp <= p and at != now -> at
+        _ -> now
       end
     end
   end
+
+  defp parse(drawing) when is_binary(drawing) do
+    with [f, p] <- String.split(drawing, "."),
+         {f, ""} when f >= 0 <- Integer.parse(f),
+         {p, ""} when p >= 0 <- Integer.parse(p),
+         do: {f, p},
+         else: (_ -> nil)
+  end
+
+  defp parse(_drawing), do: nil
+
+  # The drawing of `name`'s widget: its wrapper id's form generation and its
+  # own (`FieldInputs.pick_wrap_id/5`, `FieldInputs.pick_drawing/3`).
+  defp gen(socket, name),
+    do:
+      {socket.assigns[:editor_form_gen] || 0,
+       Map.get(socket.assigns[:editor_pick_gens] || %{}, name, 0)}
 
   # The value the widget draws for a form value (`FieldInputs.input/1`).
   defp drawn("reference", value), do: FieldInputs.reference_id(value)

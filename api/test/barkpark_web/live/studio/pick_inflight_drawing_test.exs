@@ -194,6 +194,27 @@ defmodule BarkparkWeb.Studio.PickInflightDrawingTest do
       assert page_picks(a).drawn["reviewer"] == x, "the widget was not drawn again from the store"
     end
 
+    test "#{surface} N2 forged: a redrawn post naming the pick's old drawing is still dropped",
+         c do
+      a = tab(c, @surface)
+      picks0 = page_picks(a)
+      assert picks0.at["reviewer"] not in [nil, ""], "the widget posts no drawing: no test"
+      {x, y} = {c.id <> "-x", c.id <> "-y"}
+
+      put_field(c, "reviewer", ref(y))
+      assert eventually(fn -> page_picks(a).drawn["reviewer"] == y end)
+      post(a, ["doc[reviewer]"], %{picks0.doc | "reviewer" => x}, picks0)
+      assert eventually(fn -> reviewer(c)["_ref"] == x end)
+
+      # The redrawn widget posts Y as drawn, but names the drawing A's pick
+      # was kept for: a posted drawing never makes a post A's pick back.
+      now = page_picks(a)
+      assert now.drawn["reviewer"] == y
+      body_key(a, "body0 N2f", %{now | at: picks0.at})
+      assert eventually(fn -> words(stored(c)["body"]) == ["body0 N2f"] end)
+      assert reviewer(c)["_ref"] == x, "a forged _bp_drawn_at wrote the redrawn Y over A's X"
+    end
+
     test "#{surface} P1: a pick back on the drawing the pick was made on is written", c do
       a = tab(c, @surface)
       picks = page_picks(a)
