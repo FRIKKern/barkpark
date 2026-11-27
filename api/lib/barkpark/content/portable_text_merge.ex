@@ -102,7 +102,8 @@ defmodule Barkpark.Content.PortableTextMerge do
 
     with true <- certain?(m, t) and certain?(t, m),
          {:ok, merged} <- lined_up(base, mine, theirs, m, t, opts),
-         true <- keeps_copies?(was, mine, theirs, merged) do
+         true <- keeps_copies?(was, mine, theirs, merged),
+         true <- keeps_order?(was, mine, merged) and keeps_order?(was, theirs, merged) do
       {:ok, merged}
     else
       {:clash, _texts, _view} = clash -> clash
@@ -125,6 +126,21 @@ defmodule Barkpark.Content.PortableTextMerge do
       MapSet.member?(in_base, shape) or Map.get(got, shape, 0) >= n
     end)
   end
+
+  # So can a side's order: the blocks a side has that the base had none
+  # of are in the merge in that side's order (#28928 r2 review, N1, fuzz
+  # seed 13472, task-f32d84dcf9e632d8: theirs' "b" before "a" was lost with
+  # :ok). A merge that keeps each side's order always passes.
+  defp keeps_order?(was, side, merged) do
+    in_base = MapSet.new(was, &shape/1)
+    new = for b <- side, not MapSet.member?(in_base, s = shape(b)), do: s
+    in_order?(new, Enum.map(merged, &shape/1))
+  end
+
+  defp in_order?([], _merged), do: true
+  defp in_order?(_new, []), do: false
+  defp in_order?([s | rest], [s | merged]), do: in_order?(rest, merged)
+  defp in_order?(new, [_ | merged]), do: in_order?(new, merged)
 
   defp lined_up(base, mine, theirs, m, t, opts) do
     if crossed?(m, t),
