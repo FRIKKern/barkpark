@@ -68,6 +68,7 @@ defmodule Barkpark.Content.PortableText do
   """
 
   alias Barkpark.Content.LinkHref
+  alias Barkpark.Content.PortableText.ParseMemo
   alias Barkpark.Content.{PortableTextAlign, PortableTextPairing}
 
   @decorators %{
@@ -317,7 +318,10 @@ defmodule Barkpark.Content.PortableText do
   objects by `_key`).
   """
   @spec from_html(String.t(), [map()], keyword()) :: [map()]
-  def from_html(html, stored \\ [], opts \\ []) when is_binary(html) do
+  def from_html(html, stored \\ [], opts \\ []) when is_binary(html),
+    do: ParseMemo.parsed({html, stored, opts}, fn -> parse_html(html, stored, opts) end)
+
+  defp parse_html(html, stored, opts) do
     stored = if value?(stored), do: stored, else: []
     annotations = declared_annotations(Keyword.get(opts, :field))
 
@@ -468,7 +472,12 @@ defmodule Barkpark.Content.PortableText do
   defp keep_stored(blocks, []), do: for({block, _src} <- blocks, not empty?(block), do: block)
 
   defp keep_stored(blocks, stored) do
-    seen = Enum.map(stored, &{{normalize(fragment_html(&1)), drawn_list(&1)}, to_html([&1])})
+    seen =
+      Enum.map(stored, fn b ->
+        html = to_html([b])
+        frag = if Map.has_key?(b, "listItem"), do: fragment_html(b), else: html
+        {{normalize(frag), drawn_list(b)}, html}
+      end)
 
     posted =
       Enum.map(blocks, fn {block, src} ->
@@ -1013,6 +1022,13 @@ defmodule Barkpark.Content.PortableText do
   # mark definition; any other span is styling and carries no mark.
   # An inline object span: the stored object becomes a child of the current
   # block, and its label text is skipped up to the span's close.
+  # With no stored objects no attribute can name one (`stored_object/2`):
+  # the span is read as a plain one without reading its JSON. A post read
+  # against no stored value (the coerce of a whole post) skipped nothing
+  # else (task-6a5c3e075299d4bc).
+  defp open_span(%{skip: 0, objects: objects} = state, attrs) when map_size(objects) == 0,
+    do: open_mark_span(state, attrs)
+
   defp open_span(%{skip: 0} = state, attrs) do
     case attr(attrs, "data-pt-object") do
       nil ->
@@ -1068,8 +1084,26 @@ defmodule Barkpark.Content.PortableText do
 
   defp close_span(state), do: state
 
+  # Each attribute's pattern is compiled once, here: built in the call, it
+  # was compiled for every tag, 13 times per inline object of a post
+  # (task-6a5c3e075299d4bc).
+  for name <- ~w(data-link-kind data-pt-block data-pt-def data-pt-mark data-pt-object) do
+    defp attr_re(unquote(name)),
+      do: unquote(Macro.escape(Regex.compile!(name <> ~S"\s*=\s*(\"([^\"]*)\"|'([^']*)')", "i")))
+  end
+
+  for name <- ~w(data-file-name data-link-params data-new-tab) do
+    defp present_re(unquote(name)),
+      do:
+        unquote(
+          Macro.escape(
+            Regex.compile!(~S"(?:^|\s)" <> name <> ~S"\s*=\s*(\"([^\"]*)\"|'([^']*)')", "i")
+          )
+        )
+  end
+
   defp attr(attrs, name) do
-    case Regex.run(~r/#{name}\s*=\s*("([^"]*)"|'([^']*)')/i, attrs) do
+    case Regex.run(attr_re(name), attrs) do
       [_, _, dq] when dq != "" -> decode(dq)
       [_, _, "", sq] when sq != "" -> decode(sq)
       _ -> nil
@@ -1079,7 +1113,7 @@ defmodule Barkpark.Content.PortableText do
   # Like `attr/2`, but an attribute set to "" reads as "" and only a missing
   # one as nil: an empty `data-link-params` clears the stored parameters.
   defp attr_present(attrs, name) do
-    case Regex.run(~r/(?:^|\s)#{name}\s*=\s*("([^"]*)"|'([^']*)')/i, attrs) do
+    case Regex.run(present_re(name), attrs) do
       [_, _, dq] -> decode(dq)
       [_, _, "", sq] -> decode(sq)
       _ -> nil
@@ -1432,16 +1466,36 @@ defmodule Barkpark.Content.PortableText do
 
   defp trim_span(object, _side), do: object
 
+  # Every entity starts with "&": a text with none is as it is.
   defp decode(text) do
-    text
-    |> String.replace(["&nbsp;", "&#160;", "&#xA0;", "&#xa0;"], "\u00A0")
-    |> String.replace("&lt;", "<")
-    |> String.replace("&gt;", ">")
-    |> String.replace("&quot;", "\"")
-    |> String.replace("&#39;", "'")
-    |> String.replace("&#x27;", "'")
-    |> String.replace("&amp;", "&")
+    if :binary.match(text, "&") == :nomatch, do: text, else: entities(text)
   end
+
+  # One pass over the text's "&"s. As the replaces it stands for, in the
+  # same order: an entity holds no "&", and "&amp;" is read last, so
+  # "&amp;lt;" is "&lt;" (task-6a5c3e075299d4bc: eight passes over each
+  # inline object's JSON were a fifth of a large post's save).
+  defp entities(text) do
+    [head | rest] = :binary.split(text, "&", [:global])
+    IO.iodata_to_binary([head | Enum.map(rest, &entity/1)])
+  end
+
+  for {name, char} <- [
+        {"nbsp;", "\u00A0"},
+        {"#160;", "\u00A0"},
+        {"#xA0;", "\u00A0"},
+        {"#xa0;", "\u00A0"},
+        {"lt;", "<"},
+        {"gt;", ">"},
+        {"quot;", "\""},
+        {"#39;", "'"},
+        {"#x27;", "'"},
+        {"amp;", "&"}
+      ] do
+    defp entity(unquote(name) <> rest), do: [unquote(char), rest]
+  end
+
+  defp entity(rest), do: ["&", rest]
 
   # ── blocks → HTML ────────────────────────────────────────────────────────
 
@@ -1659,7 +1713,13 @@ defmodule Barkpark.Content.PortableText do
   # also escapes `'`; `decode/1` reads every entity it emits back.
   defp attr_escape(text), do: text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 
+  # Text with none of the four characters is as it is: a 50k-object block
+  # drew 200k replaces of nothing (task-6a5c3e075299d4bc).
   defp escape(text) do
+    if :binary.match(text, ["&", "<", ">", "\""]) == :nomatch, do: text, else: escaped(text)
+  end
+
+  defp escaped(text) do
     text
     |> String.replace("&", "&amp;")
     |> String.replace("<", "&lt;")

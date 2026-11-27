@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias Barkpark.Content
   alias Barkpark.Content.Forms
   alias Barkpark.Content.Forms.CodelistShape
+  alias Barkpark.Content.PortableText.ParseMemo
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
@@ -338,7 +339,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # outcome is read before the reload drops it (`:saved_over`).
   defp do_save(params, not_codes, socket, text, {held, rich, posted, typed}) do
     before = socket.assigns[:editor_form] || %{}
-    written = Shared.do_autosave(socket, params, :save)
+    written = autosave(socket, params, :save)
     text_held = TextUnderLock.held(written, text, params)
     {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
     # A rich text still held from before (`:still`) is not saved either: no
@@ -666,7 +667,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         written =
           based
           |> RefusedSave.target(keys, path)
-          |> Shared.do_autosave(doc, :change)
+          |> autosave(doc, :change)
 
         text_held = TextUnderLock.held(written, text, doc)
 
@@ -697,6 +698,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {:noreply, socket}
     end
   end
+
+  # One parse per distinct rich text post for the whole write: the buffer's
+  # coerce and the save's edit read parse the same HTML
+  # (`PortableText.ParseMemo`, task-6a5c3e075299d4bc).
+  defp autosave(socket, params, trigger),
+    do: ParseMemo.around(fn -> Shared.do_autosave(socket, params, trigger) end)
 
   # Each row rich text the form now holds is a draw the page may show once a
   # remount reaches it: A's own array press (a duplicate's new key, a move)

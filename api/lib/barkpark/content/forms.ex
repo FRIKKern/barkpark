@@ -22,6 +22,7 @@ defmodule Barkpark.Content.Forms do
   alias Barkpark.Content
   alias Barkpark.Content.Forms.ObjectRebase
   alias Barkpark.Content.Forms.Unset
+  alias Barkpark.Content.PortableText.ParseMemo
 
   alias Barkpark.Content.{
     CanonicalShapes,
@@ -1162,11 +1163,14 @@ defmodule Barkpark.Content.Forms do
 
   # The posted content fields the save reads as edits: a field whose post is
   # only what the form drew for `snapshot` is dropped.
+  # One parse per distinct posted rich text (`PortableText.ParseMemo`).
   defp edits(params, snapshot, schema) do
-    params
-    |> preserve_datetime_values(snapshot, schema)
-    |> preserve_untouched_fields(snapshot, schema)
-    |> drop_unset()
+    ParseMemo.around(fn ->
+      params
+      |> preserve_datetime_values(snapshot, schema)
+      |> preserve_untouched_fields(snapshot, schema)
+      |> drop_unset()
+    end)
   end
 
   @doc """
