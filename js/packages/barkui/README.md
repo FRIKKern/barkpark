@@ -32,14 +32,13 @@ No app moves before the step written in [0004](docs/decisions/0004-ready-before-
 The daily news run fills this block from merged work that touches BarkUI. Nothing here is written by hand.
 
 <!-- news:start -->
+**Thursday 26 November.** The number input joined the BarkUI showroom, with its five keyboard rows red on a planted break, and the password input's eye now carries a slash across the eye while the password is shown. The check deals radio and select, its two slowest parts, to different jobs, and holds the tabs' and segmented control's sliding indicators to the six places UI SDK writes on them. [The full day](../../../docs/news/2026-11-26.md)
+- **Showroom:** the number input, read in every skin, scheme, surface and at phone width; the shown password eye's slash crosses the eye ([#28878](https://github.com/FRIKKern/barkpark/pull/28878), [#28903](https://github.com/FRIKKern/barkpark/pull/28903))
+- **Check:** the heaviest parts go to different jobs; each sliding indicator may carry only its own six places, each a number of pixels ([#28912](https://github.com/FRIKKern/barkpark/pull/28912), [#28995](https://github.com/FRIKKern/barkpark/pull/28995))
+
 **Wednesday 25 November.** Two parts joined the BarkUI showroom: the password input and the slider, each with its keyboard rows red on a planted break. The check now holds a slider's pieces, and a number input's step buttons and scrub area, to the style properties UI SDK writes on them, each only as UI SDK writes it. [The full day](../../../docs/news/2026-11-25.md)
 - **Showroom:** the password input and the slider, read in every skin, scheme, surface and at phone width ([#28685](https://github.com/FRIKKern/barkpark/pull/28685), [#28901](https://github.com/FRIKKern/barkpark/pull/28901))
 - **Check:** a slider's pieces and a number input's step buttons carry only what UI SDK writes there; a slider's hidden input is read on its thumb ([#28674](https://github.com/FRIKKern/barkpark/pull/28674), [#28777](https://github.com/FRIKKern/barkpark/pull/28777))
-
-**Tuesday 24 November.** Eight parts joined the BarkUI showroom: the select, the dialog, the menu, the switch, the checkbox, the radio group, the textarea and the segmented control, each with its keyboard rows red on a planted break. The check now reads each part with the stages it does not read hidden, so group 1 runs at 133 to 163 s of its 360 s limit, down from 240 to 318 s. [The full day](../../../docs/news/2026-11-24.md)
-- **Showroom:** the select, dialog, menu, switch, checkbox, radio group, textarea and segmented control, each read in every skin, scheme, surface and at phone width ([#28362](https://github.com/FRIKKern/barkpark/pull/28362), [#28559](https://github.com/FRIKKern/barkpark/pull/28559), [#28575](https://github.com/FRIKKern/barkpark/pull/28575), [#28586](https://github.com/FRIKKern/barkpark/pull/28586), [#28590](https://github.com/FRIKKern/barkpark/pull/28590), [#28606](https://github.com/FRIKKern/barkpark/pull/28606), [#28642](https://github.com/FRIKKern/barkpark/pull/28642), [#28669](https://github.com/FRIKKern/barkpark/pull/28669))
-- **Check time:** a part is read with every stage but its own and the next one hidden; each part's seconds printed against its limit ([#28654](https://github.com/FRIKKern/barkpark/pull/28654), [#28620](https://github.com/FRIKKern/barkpark/pull/28620))
-- **Capture:** a capture whose clip lies inside the view leaves the page where it was ([#28553](https://github.com/FRIKKern/barkpark/pull/28553))
 <!-- news:end -->
 
 ## Where things stand
