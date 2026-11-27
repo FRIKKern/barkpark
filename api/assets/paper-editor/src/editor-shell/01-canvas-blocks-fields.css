@@ -374,7 +374,7 @@
        deletes). Same 2px accent outline as every other keyboard affordance here.
        MUST stay in lockstep with styles.css. */
     .bp-canvas-readonly:focus-visible {
-      outline: 2px solid var(--paper-accent, #1e5347);
+      outline: 2px solid var(--paper-accent, #836615);
       outline-offset: 2px;
       border-radius: 6px;
     }
@@ -383,7 +383,7 @@
        .ProseMirror-selectednode but ships no CSS for it; without this rule the
        armed state is invisible. MUST stay in lockstep with styles.css. */
     .bp-canvas-readonly.ProseMirror-selectednode {
-      outline: 2px solid var(--paper-accent, #1e5347);
+      outline: 2px solid var(--paper-accent, #836615);
       outline-offset: 2px;
       border-radius: 6px;
       background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));

@@ -228,13 +228,13 @@ function todoGlyph(status: string): string {
 
 function glyphStyle(status: string): string {
   if (status === 'completed') return 'flex: none; color: var(--ok);'
-  if (status === 'in_progress') return 'flex: none; color: var(--primary);'
+  if (status === 'in_progress') return 'flex: none; color: var(--primary-text, var(--primary));'
   return 'flex: none; opacity: 0.6;'
 }
 
 function textStyle(status: string): string {
   if (status === 'completed') return 'overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;'
-  if (status === 'in_progress') return 'overflow-wrap: anywhere; color: var(--primary); font-weight: 600;'
+  if (status === 'in_progress') return 'overflow-wrap: anywhere; color: var(--primary-text, var(--primary)); font-weight: 600;'
   return 'overflow-wrap: anywhere;'
 }
 
@@ -265,7 +265,7 @@ const chatTodo: Emit = (block) => {
   const progress = todos.length === 0 ? '' : ` <span style="opacity: 0.6;"> · ${todoProgress(todos)}</span>`
   const header =
     `<div class="text-xs" style="overflow-wrap: anywhere;">` +
-    `<span style="color: var(--primary);">●</span> <span>Update todos</span>${progress}</div>`
+    `<span style="color: var(--primary-text, var(--primary));">●</span> <span>Update todos</span>${progress}</div>`
   const items =
     todos.length === 0
       ? `<div class="text-xs text-dim" style="padding-left: 16px;">⎿ no items</div>`

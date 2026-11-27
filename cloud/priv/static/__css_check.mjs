@@ -786,8 +786,8 @@ const CONTRAST_PAIRS = [
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
   { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
   { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
-  { fg: "--primary", bg: "--bg", min: 4.5, why: "links" },
-  { fg: "--primary", bg: "--surface", min: 4.5, why: "links on cards" },
+  { fg: "--primary-text", bg: "--bg", min: 4.5, why: "links" },
+  { fg: "--primary-text", bg: "--surface", min: 4.5, why: "links on cards" },
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
   { fg: "--ok-strong", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip (green=accent: strong text voice on the soft tint, GR6)" },
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
@@ -819,9 +819,9 @@ const CONTRAST_PAIRS = [
   { fg: "--ring", bg: "--muted-surface", min: 3, why: "focus ring on muted/hover rows (.actfilter-chip)" },
   { fg: "--ring", bg: "--cc-bg-side", min: 3, why: "focus ring in the sidebar (.ws-switch, .nav-find, .nav-account spacer)" },
   { fg: "--ring", bg: "--cc-modal", min: 3, why: "focus ring inside modals (.modal-x, .btn in modal footers)" },
-  { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
-  { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
-  { fg: "--primary-fg", bg: "--muted-text", min: 3, why: "toast-info icon glyph" },
+  { fg: "--on-status", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
+  { fg: "--on-status", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
+  { fg: "--on-status", bg: "--muted-text", min: 3, why: "toast-info icon glyph" },
   // Cloud-console families (charter azure-hetzner S4). instanceLifecycle glyph
   // tones read THROUGH a status role; the only role not already paired on
   // --surface is --warn (degraded). Provider IDENTITY marks (--provider-*) are
@@ -844,7 +844,7 @@ const CONTRAST_PAIRS = [
   { fg: "--cc-blue", bg: "--cc-bg", min: 4.5, why: "styleguide 03: links (blue on bg)" },
   { fg: "--cc-amber", bg: "--cc-bg", min: 4.5, why: "styleguide 03: warning text (amber on bg)" },
   { fg: "--cc-red", bg: "--cc-bg", min: 4.5, why: "styleguide 03: danger text (red on bg)" },
-  { fg: "--primary", bg: "--cc-bg", min: 3, why: "styleguide 03: accent badge/UI (primary on bg) — fans per identity" },
+  { fg: "--primary-text", bg: "--cc-bg", min: 3, why: "styleguide 03: accent UI drawn on the page (primary-text on bg: rails, rings, active marks) — fans per identity" },
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "styleguide 03: button label on the accent (primary-fg on primary)" },
 ];
 

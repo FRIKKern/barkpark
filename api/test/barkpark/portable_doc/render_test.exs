@@ -153,7 +153,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<a href="https://example.com" style="color:#1e5347;text-decoration:underline">click &lt;here&gt;</a>)
+               ~s(<a href="https://example.com" style="color:#836615;text-decoration:underline">click &lt;here&gt;</a>)
     end
 
     test "PdInlineCode escapes its value" do
@@ -409,7 +409,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;background:#1e5347;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
+               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;background:#836615;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
     end
 
     test "PdButton secondary uses brand border" do
@@ -421,7 +421,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;border:2px solid #1e5347;color:#1e5347;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
+               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;border:2px solid #836615;color:#836615;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
     end
 
     test "PdHr respects thickness, defaults to 1" do
@@ -536,7 +536,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<a href="https://example.com/notes" style="display:inline-block;padding:10px 20px;background:#1e5347;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read more</a>)
+               ~s(<a href="https://example.com/notes" style="display:inline-block;padding:10px 20px;background:#836615;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read more</a>)
     end
 
     test "section wraps children between leading/trailing hr rules" do
@@ -634,7 +634,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       assert Render.render_block(block) ==
                email_p(
-                 ~s(<a href="https://x.test" style="color:#1e5347;text-decoration:underline">click</a>)
+                 ~s(<a href="https://x.test" style="color:#836615;text-decoration:underline">click</a>)
                )
     end
 
@@ -807,7 +807,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       # Wave 2 slice 6: :article render_html is now a self-contained export — the
       # canonical paper-surface stylesheet is embedded in <head>, so the accent
-      # token (`--paper-accent: #1e5347`) and the serif stack legitimately live in
+      # token (`--paper-accent: #836615`) and the serif stack legitimately live in
       # that <style> block (covered by the ":article document wrapper" describe).
       # These guards are about the BODY carrying no INLINE theme, so scope to it.
       body = html |> String.split("</head>", parts: 2) |> List.last()
@@ -816,7 +816,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # lives in `.bp-paper-surface .bp-button--primary` (single-sourced from
       # `var(--paper-accent)`), so no accent hex rides the button inline anymore.
       assert body =~ ~s(class="bp-button bp-button--primary")
-      refute body =~ "#1e5347"
+      refute body =~ "#836615"
       # Stage 2: the article container is bare of ink/bg/font — the
       # `.bp-paper-surface` root owns the serif family (single-sourced from
       # `--paper-font-serif`). No serif stack rides the container inline anymore.
@@ -1684,7 +1684,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
                ~s|<a href="https://example.com/docs" class="bp-button bp-button--primary">Read the docs</a>|
 
       assert Render.render_block(input, %{style: :email}) ==
-               ~s|<a href="https://example.com/docs" style="display:inline-block;padding:10px 20px;background:#1e5347;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read the docs</a>|
+               ~s|<a href="https://example.com/docs" style="display:inline-block;padding:10px 20px;background:#836615;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read the docs</a>|
     end
 
     test "a nonempty filetree is byte-identical to the pre-guard emitter" do
@@ -1835,14 +1835,14 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "font-style:italic"
 
       refute html =~
-               ~s(<span style="margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #1e5347;color:#15211d;font-style:italic;font-size:19px;font-style:italic">The medium is the message.</span>)
+               ~s(<span style="margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #836615;color:#15211d;font-style:italic;font-size:19px;font-style:italic">The medium is the message.</span>)
     end
 
     test "email mode renders an inline-styled block pullquote (accent rule + rhythm)" do
       html = Render.render_block(@pull, %{style: :email})
       assert html =~ "The medium is the message."
       assert html =~ "font-style:italic"
-      assert html =~ "border-left:3px solid #1e5347"
+      assert html =~ "border-left:3px solid #836615"
       assert html =~ "margin:22px 0"
       # a real block, not an inline span — spans cannot carry vertical margins
       assert String.starts_with?(html, "<p ")

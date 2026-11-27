@@ -5384,7 +5384,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       refute html =~ "data-life-state"
       refute html =~ "data-engagement-object"
-      assert html =~ "var(--primary)"
+      assert html =~ "var(--primary-text)"
     end
 
     test "the engagement object marker is drawn ONLY for the thought states" do
@@ -5622,7 +5622,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-parent="toolu_spawn")
       assert html =~ "reading the file"
       assert html =~ "grep -rn parent_tool_use_id"
-      assert html =~ "border-left: 2px solid var(--primary)"
+      assert html =~ "border-left: 2px solid var(--primary-text)"
     end
 
     test "reopening replays the nested trace from the store", %{conn: conn, sid: sid} do
@@ -5839,7 +5839,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       assert html =~ "orphan-work-line"
       assert html =~ ~s(data-parent="toolu_ghost")
-      assert html =~ "border-left: 2px solid var(--primary)"
+      assert html =~ "border-left: 2px solid var(--primary-text)"
     end
 
     test "replay hydrates the last task line for a mid-run reopen", %{conn: conn} do

@@ -70,7 +70,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   # Paper email surface — verbatim hand hex (light-only; email has no dark mode).
   @email %{
     evergreen: %{
-      brand: "#1e5347",
+      brand: "#836615",
       brand_text: "#ffffff",
       rule: "#e2e6e5",
       page_bg: "#eaf1ee",

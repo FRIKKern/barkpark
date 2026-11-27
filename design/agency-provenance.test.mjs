@@ -59,10 +59,22 @@ const themeNames = readdirSync(join(DESIGN, "themes"))
 
 const MODES = ["light", "dark"];
 
+// OWNER RULINGS: an accent the owner moved off the delivered ramp on purpose.
+// The ramp stays the record of what the agency delivered; a ruling names the
+// exact byte that replaced it and why, so the comparator still pins every byte.
+// One entry per theme, never a wildcard.
+export const OWNER_RULINGS = {
+  evergreen: {
+    light: "#e0b43a",
+    dark: "#e8c55a",
+    why: "owner 2026-11-27 (task-64dd0e77878d838b): the brand is warm gold, not the delivered green",
+  },
+};
+
 // --- the comparators. Pure, so the controls can drive them over planted input.
 
 /** Every shipped theme's accent, as the hex the emitters will paint. */
-export function accentDrift(themes, accents) {
+export function accentDrift(themes, accents, rulings = OWNER_RULINGS) {
   const out = [];
   const shipped = Object.keys(themes).sort();
   const delivered = Object.keys(accents).sort();
@@ -78,11 +90,13 @@ export function accentDrift(themes, accents) {
         continue;
       }
       const got = hslToHex(channels);
-      const want = accents[name]?.[mode]?.primary;
+      const ruled = rulings[name]?.[mode];
+      const want = ruled ?? accents[name]?.[mode]?.primary;
+      const source = ruled ? "owner ruled" : "agency delivered";
       if (typeof want !== "string") {
         out.push(`${name}.${mode}: agency ramp has no .primary`);
       } else if (got.toLowerCase() !== want.toLowerCase()) {
-        out.push(`${name}.${mode}: canonical accent ${channels} = ${got}, agency delivered ${want}`);
+        out.push(`${name}.${mode}: canonical accent ${channels} = ${got}, ${source} ${want}`);
       }
     }
   }
@@ -132,14 +146,23 @@ test("control: the accent comparator fires on a one-nibble retint and on a dropp
     themeNames.map((n) => [n, readJson(join(DESIGN, "themes", `${n}.json`))]),
   );
 
-  // A retint of the flagship: evergreen light 151.96 -> 140 is still a
+  // A retint of the flagship: evergreen light 44.1 -> 140 is still a
   // well-formed HSL triplet, so validate.mjs and check.mjs both stay green.
   const retinted = structuredClone(themes);
   retinted.evergreen.modes.light.accent = "140 71.81% 29.22%";
   const hits = accentDrift(retinted, agency.accents);
   assert.equal(hits.length, 1, `expected exactly one drift, got ${JSON.stringify(hits)}`);
   assert.match(hits[0], /^evergreen\.light: canonical accent 140 /);
-  assert.match(hits[0], /agency delivered #15804e$/);
+  assert.match(hits[0], /owner ruled #e0b43a$/);
+
+  // Without its ruling the flagship answers to the delivered green again, so a
+  // ruling only ever covers the theme and bytes it names.
+  const unruled = accentDrift(themes, agency.accents, {});
+  assert.deepEqual(unruled.map((h) => h.replace(/ = .*/, "")), [
+    "evergreen.light: canonical accent 44.1 72.81% 55.29%",
+    "evergreen.dark: canonical accent 45.21 75.53% 63.14%",
+  ]);
+  assert.match(unruled[0], /agency delivered #15804e$/);
 
   // A ramp deleted from the source of truth.
   const trimmed = structuredClone(agency.accents);

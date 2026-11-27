@@ -109,7 +109,7 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
 
     # The evergreen profile, inline (email clients strip <style>).
     assert html =~ "#eaf1ee"
-    assert html =~ "#1e5347" or html =~ "#15211d"
+    assert html =~ "#836615" or html =~ "#15211d"
     refute html =~ "<style"
     refute html =~ "#4f46e5"
 

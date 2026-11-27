@@ -2347,7 +2347,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
           <div :if={@message.text not in [nil, ""]} style="display: flex; gap: 8px;">
             <span
-              style="color: var(--primary); font-family: var(--font-mono); font-weight: 700; flex: none;"
+              style="color: var(--primary-text); font-family: var(--font-mono); font-weight: 700; flex: none;"
               aria-hidden="true"
             >
               ❯
@@ -2374,7 +2374,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <%!-- Terminal anatomy: assistant prose wears the ● gutter. --%>
         <div style="display: flex; gap: 8px;">
           <span
-            style="color: var(--primary); font-family: var(--font-mono); flex: none; line-height: 1.6;"
+            style="color: var(--primary-text); font-family: var(--font-mono); flex: none; line-height: 1.6;"
             aria-hidden="true"
           >
             ●
@@ -2475,7 +2475,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <div
           :if={@message.approval_status == :pending}
           data-approval={@message.request_id}
-          style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
+          style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary-text); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
         >
           <div style="flex: 1; min-width: 0;">
             <div class="text-sm" style="font-weight: 600;">
@@ -2807,7 +2807,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     ~H"""
     <div data-role="agent" data-agent={@agent[:tool_use_id]} style="font-family: var(--font-mono);">
       <div class="text-xs" style="display: flex; gap: 6px; align-items: baseline;">
-        <span style="color: var(--primary); flex: none;">●</span>
+        <span style="color: var(--primary-text); flex: none;">●</span>
         <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
           <span style="font-weight: 650;">Agent(<%= agent_headline(@agent) %>)</span>
           <span :if={@kids != []} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
@@ -2834,7 +2834,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         :if={agent_running?(@agent)}
         class="text-xs bp-chat-agent-run"
         data-agent-running={@agent[:tool_use_id]}
-        style="font-family: var(--font-mono); color: var(--primary); padding-left: 16px; overflow-wrap: anywhere;"
+        style="font-family: var(--font-mono); color: var(--primary-text); padding-left: 16px; overflow-wrap: anywhere;"
       >
         <%= gettext("Running: %{progress}", progress: @agent[:task_progress] || "…") %>
       </div>
@@ -2891,7 +2891,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         .bp-chat-spinner {
           display: inline-block; width: 11px; height: 11px; border-radius: 50%;
           border: 2px solid hsl(var(--primary-hsl) / 0.25);
-          border-top-color: var(--primary);
+          border-top-color: var(--primary-text);
           animation: bp-chat-spin 0.8s linear infinite;
         }
         /* Claude-TUI-style shimmer: an evergreen highlight sweeps through the
@@ -2989,7 +2989,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         .bp-chat-rename-input {
           width: 100%; box-sizing: border-box; font: inherit;
           background: var(--bg); color: var(--text);
-          border: 1px solid var(--primary); border-radius: 6px; padding: 6px 8px;
+          border: 1px solid var(--primary-text); border-radius: 6px; padding: 6px 8px;
         }
         /* Proposed-plan card (charter D34): evergreen-accented, the full plan
            rendered through the paper engine, clamped to ~8 lines until expanded.
@@ -2998,7 +2998,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
            the whole doc), only the RENDERED height. */
         .bp-chat-plan {
           border: 1px solid var(--border-muted);
-          border-left: 3px solid var(--primary);
+          border-left: 3px solid var(--primary-text);
           border-radius: 8px; padding: 12px 14px;
         }
         .bp-chat-plan-body { position: relative; overflow: hidden; }
@@ -3282,7 +3282,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <div
                     :if={act && act.line}
                     class="text-xs"
-                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--primary); font-family: var(--font-mono);"
+                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--primary-text); font-family: var(--font-mono);"
                     data-test-id={"chat-activity-#{s.id}"}
                   >
                     ▸ <%= act.line %>
@@ -3634,7 +3634,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           data-task-id={task_id}
           style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px; padding: 2px 0; min-width: 0;"
         >
-          <span aria-hidden="true" style="color: var(--primary);">⚒</span>
+          <span aria-hidden="true" style="color: var(--primary-text);">⚒</span>
           <span style="color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
             {t.title}
           </span>
@@ -4473,7 +4473,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         data-task-id={l.id}
         style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px; padding: 2px 0; min-width: 0;"
       >
-        <span aria-hidden="true" style="color: var(--primary);">⚒</span>
+        <span aria-hidden="true" style="color: var(--primary-text);">⚒</span>
         <span style="flex: none; opacity: 0.7;">{l.label}</span>
         <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           {Enum.join(l.text, " · ")}
@@ -7031,7 +7031,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       :if={@message.approval_status == :pending}
       data-approval={@message.request_id}
       data-question={@message.request_id}
-      style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px;"
+      style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary-text); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px;"
     >
       <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
         <div class="text-sm" style="font-weight: 600;"><%= gettext("The agent is asking you") %></div>
@@ -7117,7 +7117,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # border); unselected is a plain outlined chip. All var(--…) tokens.
   defp chip_style(true),
     do:
-      "text-align: left; padding: 6px 10px; border-radius: 8px; cursor: pointer; border: 1px solid var(--primary); background: var(--primary-soft);"
+      "text-align: left; padding: 6px 10px; border-radius: 8px; cursor: pointer; border: 1px solid var(--primary-text); background: var(--primary-soft);"
 
   defp chip_style(false),
     do:
@@ -7347,7 +7347,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # connecting evergreen gutter — the nested-trace feel of the terminal. Tokens
   # only (no color literals): the gate stays green.
   defp trace_child_style,
-    do: "margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--primary);"
+    do: "margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--primary-text);"
 
   # ── agent drill-down grouping + state (charter D46) ─────────────────────────
 

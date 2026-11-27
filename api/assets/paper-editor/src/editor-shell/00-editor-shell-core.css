@@ -573,16 +573,16 @@
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty {
       flex-direction: column; gap: 6px;
       min-height: 132px; padding: 28px 20px;
-      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border: 1.5px dashed var(--paper-accent, #836615);
       border-radius: 10px;
       background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
-      color: var(--paper-accent, #1e5347);
+      color: var(--paper-accent, #836615);
       font-size: 0; /* hide the WC's own copy; ::before/::after carry ours */
     }
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:hover,
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:focus-visible {
-      border-color: var(--paper-accent, #1e5347);
-      color: var(--paper-accent, #1e5347);
+      border-color: var(--paper-accent, #836615);
+      color: var(--paper-accent, #836615);
       background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
     }
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::before {

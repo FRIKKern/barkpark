@@ -401,7 +401,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
   end
 
   defp grouping_digest(:evergreen),
-    do: "964ea6b986fd897c8954792d3df5c0533598029e1b965f5e7f5542949fcb9a62"
+    do: "252ca4f37ea0fd14d0ac6ab5cd33ee979afe74ddebc8fd51236f9bd57f4a7a2d"
 
   defp grouping_digest(:ember),
     do: "9ebef2f6263e1bdcb83ea3bc7564ba4c1d91af97fcdf39f40e036395b3f3bd3a"

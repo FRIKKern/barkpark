@@ -136,12 +136,12 @@
       --paper-ink:        #15211d;
       --paper-ink-soft:   #55635e;
       --paper-rule:       #e2e6e5;
-      --paper-accent:     #1e5347;
+      --paper-accent:     #836615;
       /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links
          read it). Light value matches the shared source's fallback; the dark
          block below MUST re-skin it — otherwise dark-mode link borders resolve
          to this light rgba and vanish against the dark page. */
-      --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-accent-soft: rgba(131, 102, 21, 0.10);
       --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
     }
     /* GROUND (task-ddb1e0ab09a62466): the reader body stands on --paper-bg —
@@ -179,11 +179,11 @@
         --paper-ink:        #e7ede9;
         --paper-ink-soft:   #9aaaa3;
         --paper-rule:       rgba(255, 255, 255, 0.10);
-        --paper-accent:     #45b394;
+        --paper-accent:     #e8c55a;
         /* Warm-dark link border (same value as Studio's html[data-theme=dark]
            block in paper-surface.css) — without it links keep the light-theme
            rgba(162,57,37,0.10) border, invisible on the dark page. */
-        --paper-accent-soft: rgba(70, 179, 148, 0.16);
+        --paper-accent-soft: rgba(232, 197, 90, 0.16);
         --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
         /* Callout TONE tokens + faint ink + chrome — the SAME reason as the
            --paper-* above: paper-surface.css keys their DARK values on
@@ -214,12 +214,12 @@
        with the theme. */
     #bp-mailapp {
       --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
-      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #836615;
     }
     @media (prefers-color-scheme: dark) {
       #bp-mailapp {
         --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
-        --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
+        --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #e8c55a;
       }
     }
     /* Explicit mode stamp — html[data-theme] companions to the light
@@ -237,8 +237,8 @@
       --paper-ink:        #15211d;
       --paper-ink-soft:   #55635e;
       --paper-rule:       #e2e6e5;
-      --paper-accent:     #1e5347;
-      --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-accent:     #836615;
+      --paper-accent-soft: rgba(131, 102, 21, 0.10);
       --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
       /* Light re-declarations for every token the @media dark block above
          re-skins — its selector outranks the bare paper-surface light
@@ -262,8 +262,8 @@
       --paper-ink:        #e7ede9;
       --paper-ink-soft:   #9aaaa3;
       --paper-rule:       rgba(255, 255, 255, 0.10);
-      --paper-accent:     #45b394;
-      --paper-accent-soft: rgba(70, 179, 148, 0.16);
+      --paper-accent:     #e8c55a;
+      --paper-accent-soft: rgba(232, 197, 90, 0.16);
       --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
       --paper-ink-faint:    #788680;
       --paper-ink-faint-line: #6c7a74;
@@ -277,11 +277,11 @@
     }
     html[data-theme="light"] #bp-mailapp {
       --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
-      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #836615;
     }
     html[data-theme="dark"] #bp-mailapp {
       --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
-      --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
+      --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #e8c55a;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
        light blocks above — paged output is ink on white whatever the screen
@@ -298,8 +298,8 @@
         --paper-ink:        #15211d;
         --paper-ink-soft:   #55635e;
         --paper-rule:       #e2e6e5;
-        --paper-accent:     #1e5347;
-        --paper-accent-soft: rgba(30, 83, 71, 0.10);
+        --paper-accent:     #836615;
+        --paper-accent-soft: rgba(131, 102, 21, 0.10);
         --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
         --paper-ink-faint:    #62706b;
         --paper-ink-faint-line: #82918b;
@@ -320,8 +320,8 @@
       --paper-ink: #15211d;
       --paper-ink-soft: #55635e;
       --paper-rule: #e2e6e5;
-      --paper-accent: #1e5347;
-      --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-accent: #836615;
+      --paper-accent-soft: rgba(131, 102, 21, 0.10);
       --paper-reading-accent: #a23925;
     }
     @media (prefers-color-scheme: dark) {
@@ -332,8 +332,8 @@
         --paper-ink: #e7ede9;
         --paper-ink-soft: #9aaaa3;
         --paper-rule: rgba(255, 255, 255, 0.10);
-        --paper-accent: #45b394;
-        --paper-accent-soft: rgba(70, 179, 148, 0.16);
+        --paper-accent: #e8c55a;
+        --paper-accent-soft: rgba(232, 197, 90, 0.16);
         --paper-reading-accent: #d98a6a;
         --paper-ink-faint: #788680;
         --paper-ink-faint-line: #6c7a74;
@@ -348,12 +348,12 @@
     }
     html[data-bp-theme="evergreen"] #bp-mailapp {
       --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
-      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #836615;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="evergreen"] #bp-mailapp {
         --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
-        --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
+        --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #e8c55a;
       }
     }
     html[data-bp-theme="evergreen"][data-theme="light"] body:has(.bp-paper-article),
@@ -363,8 +363,8 @@
       --paper-ink: #15211d;
       --paper-ink-soft: #55635e;
       --paper-rule: #e2e6e5;
-      --paper-accent: #1e5347;
-      --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-accent: #836615;
+      --paper-accent-soft: rgba(131, 102, 21, 0.10);
       --paper-reading-accent: #a23925;
       --paper-ink-faint: #62706b;
       --paper-ink-faint-line: #82918b;
@@ -383,8 +383,8 @@
       --paper-ink: #e7ede9;
       --paper-ink-soft: #9aaaa3;
       --paper-rule: rgba(255, 255, 255, 0.10);
-      --paper-accent: #45b394;
-      --paper-accent-soft: rgba(70, 179, 148, 0.16);
+      --paper-accent: #e8c55a;
+      --paper-accent-soft: rgba(232, 197, 90, 0.16);
       --paper-reading-accent: #d98a6a;
       --paper-ink-faint: #788680;
       --paper-ink-faint-line: #6c7a74;
@@ -398,11 +398,11 @@
     }
     html[data-bp-theme="evergreen"][data-theme="light"] #bp-mailapp {
       --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
-      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #836615;
     }
     html[data-bp-theme="evergreen"][data-theme="dark"] #bp-mailapp {
       --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
-      --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
+      --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #e8c55a;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
        light blocks above — paged output is ink on white whatever the screen
@@ -419,8 +419,8 @@
         --paper-ink: #15211d;
         --paper-ink-soft: #55635e;
         --paper-rule: #e2e6e5;
-        --paper-accent: #1e5347;
-        --paper-accent-soft: rgba(30, 83, 71, 0.10);
+        --paper-accent: #836615;
+        --paper-accent-soft: rgba(131, 102, 21, 0.10);
         --paper-reading-accent: #a23925;
         --paper-ink-faint: #62706b;
         --paper-ink-faint-line: #82918b;

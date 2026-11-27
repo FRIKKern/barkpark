@@ -923,6 +923,16 @@ function shiftHsl(hslStr, dh, ds = 0) {
 // ── the derivation map: slot → (ctx) => value ────────────────────────────────
 // Every slot is EITHER here (native) OR in the theme's overrides (pinned). A
 // slot in neither resolves to undefined — Part F reds that as an uncovered slot.
+// A brand role drawn straight on a ground (a link, a ring, terminal accent text)
+// is the seed when the seed clears `floor` there; a seed that cannot (a light
+// fill such as gold, which carries dark text) hands the role to the brand's text
+// voice, onTint.primary-text — the same AA walk the tint badges use. A seed that
+// already clears ships unchanged, so the dark-seed themes keep every byte.
+function onPageOr(c, mode, seed, floor, ground = `bg.${mode}`) {
+  if (contrast(parseColor(seed), parseColor(c.resolve(ground))) >= floor) return seed;
+  return c.resolve(`onTint.primary-text.${mode}`);
+}
+
 function buildFormulas() {
   const F = {};
   const modes = ["light", "dark"];
@@ -941,9 +951,14 @@ function buildFormulas() {
   M((m) => [`text.${m}`, (c) => c.skin[m].ink]);
   F["surface.light"] = (c) => c.skin.light.bg; // paper-flat page bg
   F["surface.dark"] = (c) => neutralII(c.skin, "dark", NEUTRAL_II["surface"].dark);
-  // ring — a mid-L brand tone (light) / the brand dark accent (dark).
-  F["ring.light"] = (c) => { const p = hslParse(c.skin.light.accent); return hslFormat({ ...p, l: Math.min(62, p.l + 8) }); };
-  F["ring.dark"] = (c) => c.skin.dark.accent;
+  // ring — a mid-L brand tone (light) / the brand dark accent (dark). A ring is a
+  // thin line on the page, so it must clear the 3:1 non-text floor there; a light
+  // brand fill (gold) cannot, and the ring then takes the brand's text voice.
+  F["ring.light"] = (c) => {
+    const p = hslParse(c.skin.light.accent);
+    return onPageOr(c, "light", hslFormat({ ...p, l: Math.min(62, p.l + 8) }), 3);
+  };
+  F["ring.dark"] = (c) => onPageOr(c, "dark", c.skin.dark.accent, 3);
 
   // — decorative + reading accents (sibling hues of the brand seed) —
   // accent = the brand seed by default (a theme MAY pin a second hue, as evergreen
@@ -999,8 +1014,10 @@ function buildFormulas() {
   // chrome-accent = hslToHex(primary) per mode; selection-fg = primary (light) /
   // primary-hover (dark) as hex; selection-bg = primary mixed 10% over the mode
   // bg, flattened to a solid gamma-sRGB hex. NATIVE — zero pins (D19). —
-  M((m) => [`cliChrome.chrome-accent.${m}`, (c) => hslToHex(c.skin[m].accent)]);
-  F["cliChrome.chrome-selection-fg.light"] = (c) => hslToHex(c.skin.light.accent);
+  // The accent and the light selection fg are TEXT on the terminal ground, so a
+  // brand seed under AA there (a light gold fill) speaks in its text voice.
+  M((m) => [`cliChrome.chrome-accent.${m}`, (c) => hslToHex(onPageOr(c, m, c.skin[m].accent, 4.5))]);
+  F["cliChrome.chrome-selection-fg.light"] = (c) => hslToHex(onPageOr(c, "light", c.skin.light.accent, 4.5));
   F["cliChrome.chrome-selection-fg.dark"] = (c) => {
     const p = hslParse(c.skin.dark.accent);
     return rgbToHex(hslToRgb({ ...p, l: p.l + HOVER_HSL_STEP.dark }));
@@ -1019,7 +1036,9 @@ function buildFormulas() {
   for (const role of Object.keys(PAPER_BASE_II))
     M((m) => [`paper.surface.${role}.${m}`, (c) => oklchHex(PAPER_BASE_II[role][m].L, PAPER_BASE_II[role][m].C, accentHueOf(c.skin, m))]);
   M((m) => [`paper.surface.ink-faint.${m}`, (c) => paperFaintII(c, m)]);
-  M((m) => [`paper.surface.accent.${m}`, (c) => hslToHex(c.skin[m].accent)]);
+  // The paper accent is link and rail ink on the reading page: the seed when it
+  // clears AA on the page, else the brand's text voice.
+  M((m) => [`paper.surface.accent.${m}`, (c) => hslToHex(onPageOr(c, m, c.skin[m].accent, 4.5, `paper.surface.bg.${m}`))]);
   for (const role of ["rule", "chrome-border"])
     M((m) => [`paper.surface.${role}.${m}`, () => rgbaFrom(LINE_INK[m], PAPER_ALPHA[role][m])]);
   M((m) => [`paper.surface.edit-hover.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.ink.${m}`), PAPER_ALPHA["edit-hover"][m])]);

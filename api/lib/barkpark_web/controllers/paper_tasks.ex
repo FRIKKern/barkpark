@@ -38,7 +38,7 @@ defmodule BarkparkWeb.PaperTasks do
   @ink "var(--paper-ink, #15211d)"
   @muted "var(--paper-ink-soft, #55635e)"
   @rule "var(--paper-rule, #e2e6e5)"
-  @accent "var(--paper-accent, #1e5347)"
+  @accent "var(--paper-accent, #836615)"
 
   @doc """
   Render the "Driven tasks" section for a `driven_tasks/2` result (or a bare

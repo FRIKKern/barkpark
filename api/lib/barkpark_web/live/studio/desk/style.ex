@@ -115,7 +115,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk h2.pane-header-title { margin: 0; }
       .dk a.pane-item:hover { color: var(--fg); }
       .dk [data-lit] > a.pane-item:not(.selected) { background: var(--dk-card-hover); }
-      .dk a.pane-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk a.pane-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
       .dk .pane-item-chevron, .dk .pane-item:hover .pane-item-chevron, .dk .pane-item.selected .pane-item-chevron { opacity: 0.5; color: inherit; display: flex; margin-right: -2px; }
       .dk .pane-item-chevron svg { width: 21px; height: 21px; }
       /* The rows' containing block: a row's sr-only words (position: absolute) must not escape the pane's scroll area and make the page scroll. */
@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-lost-text { margin: 8px 0; padding: 6px 10px; border-left: 2px solid var(--border-subtle); color: var(--fg); white-space: pre-wrap; max-height: 12em; overflow: auto; }
       .dk .dk-lost-copy { border: 1px solid var(--border-subtle); background: none; color: var(--fg); font: inherit; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
       .dk .dk-lost-copy:hover { background: var(--bg-accent); }
-      .dk .dk-lost-copy:focus-visible, .dk .dk-lost summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+      .dk .dk-lost-copy:focus-visible, .dk .dk-lost summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
       .dk .dk-doc:not(.dk-edit) > .pane-body { container: dk-ro / inline-size; }
       .dk .dk-ro { padding: 28px max(20px, calc(50% - 300px)) 161px; }
       .dk .dk-ro .dk-kind { font-size: 13px; line-height: 19px; color: var(--dk-muted); }
@@ -160,11 +160,11 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-fields a.dk-ref[aria-current] { background: var(--dk-row-chain-bg); color: var(--dk-row-chain-fg); }
       .dk .dk-fields a.dk-ref:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--dk-focus-ring); }
       .dk .dk-close { color: var(--fg-muted); text-decoration: none; padding: 4px 8px; }
-      .dk .dk-close:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-close:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
       .dk .dk-doc-menu { margin-left: auto; }
       .dk .dk-split { margin-left: auto; display: inline-flex; align-items: center; color: var(--fg-muted); padding: 4px 8px; border-radius: 6px; }
       .dk .dk-split:hover { background: var(--bg-accent); color: var(--fg); }
-      .dk .dk-split:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-split:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
       .dk .dk-split + .dk-split, .dk .dk-split + .dk-doc-menu, .dk .dk-doc-menu + .dk-doc-menu, .dk .dk-doc-menu + .dk-split { margin-left: 0; }
       .dk[data-narrow] .dk-doc > .pane-header :is([data-desk-split-right], [data-desk-close-split]) { display: none; }
       .dk .dk-share-menu .dk-doc-menu-button { display: inline-flex; align-items: center; }
@@ -172,7 +172,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-focus-crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13px; font-weight: 400; color: var(--fg); }
       .dk .dk-crumb { flex: none; font: inherit; padding: 4px; border: 0; border-radius: 3px; background: none; color: inherit; cursor: pointer; white-space: nowrap; }
       .dk button.dk-crumb:hover { background: var(--bg-accent); }
-      .dk button.dk-crumb:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk button.dk-crumb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
       .dk .dk-crumb.current { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: default; }
       .dk .dk-toast { inset: auto; left: 50%; bottom: 56px; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 32px); padding: 8px 14px; border-radius: 8px; background: var(--bg-card); color: var(--fg); border: 1px solid var(--border-subtle); font-size: var(--text-sm); }
       .dk .dk-edit-footer { flex: none; box-sizing: border-box; min-height: 49px; display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; font-size: 13px; line-height: 19px; color: var(--dk-foot-meta); }
@@ -231,7 +231,7 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-inspect-tree li[hidden] { display: none; }
       .dk .dk-doc-menu-button { border: 0; background: none; color: var(--fg-muted); font: inherit; line-height: 1; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
       .dk .dk-doc-menu-button:hover, .dk .dk-doc-menu-button[aria-expanded="true"] { background: var(--bg-accent); color: var(--fg); }
-      .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-doc-menu-button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
       .dk .dk-create-new, .dk .dk-list-options { margin-left: auto; display: inline-flex; align-items: center; }
       .dk .dk-create-new + .dk-list-options { margin-left: 0; }
       .dk .dk-create-new[hidden] { display: none; }
@@ -346,8 +346,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       @media (max-width: 599px) { .dk-search-dialog { width: 100%; height: 100%; max-height: none; margin: 0; border-radius: 0; box-shadow: none; } }
       .dk .dk-refs { display: flex; flex-wrap: wrap; gap: 6px; font-size: var(--text-sm); }
       .dk .dk-ref { padding: 2px 8px; border: 1px solid var(--fg-dim); border-radius: 6px; color: var(--fg); text-decoration: none; }
-      .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary); }
-      .dk .dk-ref:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+      .dk .dk-ref:hover, .dk .dk-ref[aria-current] { background: var(--bg-accent); border-color: var(--primary-text); }
+      .dk .dk-ref:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
       .dk .dk-ref-missing { color: var(--fg-muted); }
       .dk .dk-doc > .pane-header { flex: none; box-sizing: border-box; height: 51px; min-height: 51px; gap: 4px; padding: 0 12px; border-bottom: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-head-fg); }
       .dk .dk-doc > .pane-header > .pane-header-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

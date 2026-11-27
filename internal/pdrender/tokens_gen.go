@@ -18,8 +18,8 @@ var GenToneNeutral = lipgloss.AdaptiveColor{Light: "#374151", Dark: "#9ca3af"}
 
 // Generated chrome + reading-accent tokens (design/tokens.json color.* → hex).
 var (
-	GenPrimary       = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#3fcf8e"}
-	GenPrimaryFg     = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1e18"}
+	GenPrimary       = lipgloss.AdaptiveColor{Light: "#e0b43a", Dark: "#e8c55a"}
+	GenPrimaryFg     = lipgloss.AdaptiveColor{Light: "#1e190b", Dark: "#1e190b"}
 	GenInk           = lipgloss.AdaptiveColor{Light: "#09090b", Dark: "#f2f2f2"}
 	GenDim           = lipgloss.AdaptiveColor{Light: "#6e6e77", Dark: "#a1a1aa"}
 	GenRule          = lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}
@@ -31,7 +31,7 @@ var (
 // evergreen genPalette entry below and threaded through theme.go's buildTheme
 // (pal.ChromeAccent/ChromeInk/ChromeTextSecondary/ChromeDim, via Resolve).
 var (
-	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#3fcf8e"}
+	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#836615", Dark: "#e8c55a"}
 	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
 	GenChromeTextSecondary = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}
 	GenChromeDim           = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"}

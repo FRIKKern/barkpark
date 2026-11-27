@@ -108,6 +108,10 @@ function cloudAccentVars(theme, indent, t = tokens) {
     `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
     `--ring: hsl(${t.color.ring[theme]});`,
     `--primary-hsl: ${p};`,
+    // --primary-text: the brand drawn ON the page (links, active labels, selected
+    // borders). A light fill such as gold cannot be text on white, so text reads
+    // this AA voice (color.onTint.primary-text) and fills keep --primary.
+    `--primary-text: hsl(${t.color.onTint["primary-text"][theme]});`,
     // --primary-soft UN-RETIRED (cch DEFECT-A). GR22 retired it because its sole
     // consumer, the .size-opt selected tint, could read --ok-soft for the
     // identical channel/alpha while --ok TRACKED accent.primary (GR6). Breaking
@@ -164,6 +168,12 @@ function cloudOkVars(theme, indent) {
     `--ok: hsl(var(--ok-hsl));`,
     `--ok-soft: hsl(var(--ok-hsl) / ${a});`,
     `--ok-strong: hsl(${okStrongTriplet(theme)});`,
+    // The glyph ON a status fill (toast icon, done/failed step dot, current
+    // badge). Light status fills are deep, so the glyph is the on-status white
+    // (color.onStatus); dark-mode fills are bright, so it is the dark page ink
+    // (color.text.light). It used to borrow --primary-fg, which stopped being
+    // white in light when the brand became a light gold fill under dark ink.
+    `--on-status: hsl(${theme === "light" ? tokens.color.onStatus["ok-fg"].light : tokens.color.text.light});`,
   ];
   return lines.map((l) => indent + l).join("\n");
 }
@@ -290,7 +300,7 @@ const SWATCH_TOKENS = [
   { css: "--cc-fg2", cc: "fg2" },
   { css: "--cc-fg3", cc: "fg3" },
   { css: "--cc-fg4", cc: "fg4" },
-  { css: "--primary", accent: true }, // the mint/evergreen accent (restyles per identity)
+  { css: "--primary", accent: true }, // the gold brand accent (restyles per identity)
   { css: "--cc-amber", cc: "amber" },
   { css: "--cc-red", cc: "red" },
   { css: "--cc-blue", cc: "blue" },

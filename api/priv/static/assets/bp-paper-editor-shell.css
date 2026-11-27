@@ -573,16 +573,16 @@
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty {
       flex-direction: column; gap: 6px;
       min-height: 132px; padding: 28px 20px;
-      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border: 1.5px dashed var(--paper-accent, #836615);
       border-radius: 10px;
       background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
-      color: var(--paper-accent, #1e5347);
+      color: var(--paper-accent, #836615);
       font-size: 0; /* hide the WC's own copy; ::before/::after carry ours */
     }
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:hover,
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:focus-visible {
-      border-color: var(--paper-accent, #1e5347);
-      color: var(--paper-accent, #1e5347);
+      border-color: var(--paper-accent, #836615);
+      color: var(--paper-accent, #836615);
       background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
     }
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::before {
@@ -1114,7 +1114,7 @@
        deletes). Same 2px accent outline as every other keyboard affordance here.
        MUST stay in lockstep with styles.css. */
     .bp-canvas-readonly:focus-visible {
-      outline: 2px solid var(--paper-accent, #1e5347);
+      outline: 2px solid var(--paper-accent, #836615);
       outline-offset: 2px;
       border-radius: 6px;
     }
@@ -1123,7 +1123,7 @@
        .ProseMirror-selectednode but ships no CSS for it; without this rule the
        armed state is invisible. MUST stay in lockstep with styles.css. */
     .bp-canvas-readonly.ProseMirror-selectednode {
-      outline: 2px solid var(--paper-accent, #1e5347);
+      outline: 2px solid var(--paper-accent, #836615);
       outline-offset: 2px;
       border-radius: 6px;
       background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
@@ -1320,10 +1320,10 @@ bp-paper-canvas[block-cards]:not([editable="false"]) .bp-canvas-object-row .bp-c
       min-height: 132px;
       margin: 0.4em 0;
       padding: 28px 20px;
-      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border: 1.5px dashed var(--paper-accent, #836615);
       border-radius: 10px;
       background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
-      color: var(--paper-accent, #1e5347);
+      color: var(--paper-accent, #836615);
       cursor: pointer;
       user-select: none;
       text-align: center;
@@ -1433,10 +1433,10 @@ bp-paper-canvas[block-cards]:not([editable="false"]) .bp-canvas-object-row .bp-c
       gap: 12px;
       width: 100%;
       padding: 12px 16px;
-      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border: 1.5px dashed var(--paper-accent, #836615);
       border-radius: 10px;
       background: var(--paper-accent-soft, rgba(30, 83, 71, 0.08));
-      color: var(--paper-accent, #1e5347);
+      color: var(--paper-accent, #836615);
       font: inherit;
       text-align: left;
       cursor: pointer;
