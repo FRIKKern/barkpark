@@ -803,24 +803,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
 
-      {doc, moved} =
-        Enum.reduce(dotted, {doc, []}, fn {key, value}, {acc, moved} ->
+      {doc, moved, written} =
+        Enum.reduce(dotted, {doc, [], MapSet.new()}, fn {key, value}, {acc, moved, written} ->
           case leaf_path(key, row_keys, base_form) do
             {:ok, path} ->
-              {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), moved}
+              {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), moved,
+               MapSet.put(written, path)}
 
             {:moved, path} ->
-              {acc, [{key, path, value} | moved]}
+              {acc, [{key, path, value} | moved], written}
 
             _ ->
-              {acc, moved}
+              {acc, moved, written}
           end
         end)
 
       # A row found under another parent is never written: its rich texts
-      # A typed in are held there (`RichTextRemote.MovedRows`).
+      # A typed in are held there (`RichTextRemote.MovedRows`). A held row
+      # rich text the post did not carry keeps the stored value, not the
+      # view the seeded root took from the form.
       rest
-      |> Map.put("doc", doc)
+      |> Map.put("doc", RichTextRemote.MovedRows.stored_at_holds(doc, socket, written))
       |> then(&if(moved == [], do: &1, else: Map.put(&1, @moved, Enum.reverse(moved))))
     end
   end

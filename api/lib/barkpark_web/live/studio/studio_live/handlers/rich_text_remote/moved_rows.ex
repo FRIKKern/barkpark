@@ -19,8 +19,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.MovedRows do
 
   alias Barkpark.Content.PortableText
   alias BarkparkWeb.Components.Fields.CompositeField
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
+  alias BarkparkWeb.Studio.StudioLive.Path
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @doc """
   Each re-targeted leaf (`{posted name, form path, value}`) A typed in,
@@ -30,19 +34,66 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.MovedRows do
 
   def hold(socket, moved, owners) do
     drawn = drawn(owners)
-    form = socket.assigns[:editor_form] || %{}
+    stored = stored(socket)
 
     acts =
       for {name, path, html} <- moved,
           is_binary(html),
           {:ok, digest} <- [Map.fetch(drawn, name)],
           not drawn?(PortableText.from_html(html, []), digest) do
-        theirs = list(FormPath.get(form, path))
+        # The store's row, never the form's: a hold already open there put
+        # A's view in the form (#29180 review, round 2).
+        theirs = list(FormPath.get(stored, path))
         view = PortableText.from_html(html, theirs)
         {:held, RichTextRemote.input_name(path), path, {theirs, theirs, view, texts(theirs)}}
       end
 
     RichTextRemote.hold(socket, acts)
+  end
+
+  @doc """
+  The folded post `doc` with the stored value at each held row rich text
+  the post did not write (`written`, the paths the fold wrote from it).
+
+  A hold puts A's view in the form at its path (`RichTextRemote.hold/2`).
+  A post from A's stale page names the row's old path, so `split/3` never
+  reads the held name, and the fold seeds the array from the form, A's
+  view with it: it was written over the store, over a later save of
+  another editor, or into a Duplicate copy (#29180 review, round 2: F1.1,
+  F4, F8). The value the socket knows as stored goes there instead, so
+  the row is written as stored, and the save's rebase takes a newer one.
+  Only a value the seed took from the form is replaced.
+  """
+  def stored_at_holds(doc, socket, written) do
+    form = socket.assigns[:editor_form] || %{}
+    stored = stored(socket)
+
+    Enum.reduce(holds(socket), doc, fn {name, _hold}, doc ->
+      path = Path.parse_path(name)
+      value = FormPath.get(stored, path)
+
+      if RowDraws.row?(path) and not MapSet.member?(written, path) and not is_nil(value) and
+           FormPath.get(doc, path) == FormPath.get(form, path),
+         do: FormPath.put(doc, path, value),
+         else: doc
+    end)
+  end
+
+  # The holds of the document this socket shows (`editor_rt_doc`).
+  defp holds(socket) do
+    if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
+      do: socket.assigns[:editor_rt_held] || %{},
+      else: %{}
+  end
+
+  # The newest stored row this socket has seen: another editor's frame
+  # taken in since its own last write counts (`Lifecycle.base_doc/1`), or
+  # a hold over a later save of B's wrote the older row back (F4).
+  defp stored(socket) do
+    case Lifecycle.base_doc(socket) do
+      %{content: %{} = content} -> content
+      _ -> %{}
+    end
   end
 
   # Each owner entry's input name and the digest of the HTML drawn
