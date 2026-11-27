@@ -265,6 +265,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def save(_params, socket), do: {:noreply, socket}
 
+  # The fold's re-targeted row leaves, `[{input name, path, value}]`.
+  @moved "_bp_rt_moved"
+
   defp save_open(params, socket) do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
@@ -273,7 +276,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => posted} ->
+      %{"doc" => posted} = folded ->
         # As an autosave: a rich text in an object written over another
         # editor's change is not written over it (#28349 r2 review, V1),
         # and is read again under the lock (`RichTextRemote.UnderLock`,
@@ -314,12 +317,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> TextConfirmed.confirm(units, posted)
          |> RichTextRemote.hold(held)
          |> TextConfirmed.paused(rich)
-         |> row_draws()}
+         |> row_draws()
+         |> moved_rows(folded, params)}
 
       _ ->
         {:noreply, socket}
     end
   end
+
+  defp moved_rows(socket, folded, params),
+    do:
+      RichTextRemote.MovedRows.hold(
+        socket,
+        Map.get(folded, @moved, []),
+        params["_bp_rt_owner"]
+      )
 
   # As an autosave: each free-text field of the Save is merged onto the
   # store from the base the page reports, and read again under the lock
@@ -616,7 +628,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => posted} ->
+      %{"doc" => posted} = folded ->
         # A rich text in an object written over another editor's change is
         # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
         {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
@@ -691,7 +703,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
 
         {:noreply,
-         saved |> RichTextRemote.hold(held) |> TextConfirmed.paused(rich) |> row_draws()}
+         saved
+         |> RichTextRemote.hold(held)
+         |> TextConfirmed.paused(rich)
+         |> row_draws()
+         |> moved_rows(folded, params)}
 
       _ ->
         {:noreply, socket}
@@ -787,19 +803,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
 
-      doc =
-        Enum.reduce(dotted, doc, fn {key, value}, acc ->
-          with [_ | _] = path <- StudioLive.parse_path(key),
-               {:ok, path} <- row_path(path, row_keys, base_form) do
-            acc
-            |> seed_root(path, base_form)
-            |> write_leaf(socket, path, value)
-          else
-            _ -> acc
+      {doc, moved} =
+        Enum.reduce(dotted, {doc, []}, fn {key, value}, {acc, moved} ->
+          case leaf_path(key, row_keys, base_form) do
+            {:ok, path} ->
+              {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), moved}
+
+            {:moved, path} ->
+              {acc, [{key, path, value} | moved]}
+
+            _ ->
+              {acc, moved}
           end
         end)
 
-      Map.put(rest, "doc", doc)
+      # A row found under another parent is never written: its rich texts
+      # A typed in are held there (`RichTextRemote.MovedRows`).
+      rest
+      |> Map.put("doc", doc)
+      |> then(&if(moved == [], do: &1, else: Map.put(&1, @moved, Enum.reverse(moved))))
     end
   end
 
@@ -810,10 +832,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # out, so the next one moved up) names its rows by the old indexes: its
   # `rows[0]` was the row taken out, and its leaves were written over the row
   # now at 0, `_key` and all. Each row the post names a `_key` for is written
-  # at the index that row has now, or under the parent another editor moved
-  # it to (`moved/3`); a row the editor no longer holds is dropped, never
-  # written into another. A row posted with no `_key` is written by index,
-  # as before.
+  # at the index that row has now. A row found under another parent
+  # (`moved/3`) is held there, not written; a row the editor no longer holds
+  # is dropped, never written into another. A row posted with no `_key` is
+  # written by index, as before.
   defp posted_row_keys(dotted) do
     for {name, key} <- dotted,
         is_binary(key),
@@ -839,7 +861,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       case row_index(rows, key, i) do
         nil ->
           case moved(form, Enum.reverse(posted), key) do
-            {:ok, at} -> row_path(rest, posted, Enum.reverse(at), ctx)
+            {:ok, at} -> moved_path(row_path(rest, posted, Enum.reverse(at), ctx))
             :error -> :drop
           end
 
@@ -869,10 +891,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
+  defp leaf_path(key, row_keys, base_form) do
+    case StudioLive.parse_path(key) do
+      [_ | _] = path -> row_path(path, row_keys, base_form)
+      _ -> :error
+    end
+  end
+
+  defp moved_path({:ok, path}), do: {:moved, path}
+  defp moved_path(other), do: other
+
   # A row whose list no longer holds its `_key`: another editor moved it
-  # under another parent (task-3422ba9e403f8b75). Its leaves go to the one
-  # row of that field shape (the posted path, any indexes) that holds the
-  # key, and are read under the lock there; none, or two: dropped.
+  # under another parent (task-3422ba9e403f8b75), or Duplicate copied it
+  # with its `_key` and the original is gone (#29180 review, P1b): the post
+  # cannot tell. Its leaves name the one row of that field shape (the posted
+  # path, any indexes) that holds the key, `{:moved, path}`, and are never
+  # written there: A's typed rich texts are held in it. None, or two:
+  # dropped.
   defp moved(form, posted, key) do
     shape = Enum.map(posted, &if(is_integer(&1), do: :row, else: &1))
 
