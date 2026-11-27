@@ -135,6 +135,26 @@ defmodule BarkparkWeb.Studio.HeldOwnTopWriteTest do
       assert has_element?(a, @banner)
     end
 
+    # #29078 r2 review, S6: B saves the held row again while A is held. The
+    # op takes the store's row, not the one A's socket had when the hold
+    # began (task-50094855250e5dad).
+    test "#{surface}: B saves the held row again during the hold; an added row keeps B's newest",
+         c do
+      c = Map.put(c, :surface, unquote(surface))
+      {a, view} = row_held(c)
+      row_post(open(c), "<p>rowtexBtwo</p>", nil)
+      assert eventually(fn -> words(row(rows(c), "r1")["rt"]) == ["rowtexBtwo"] end)
+      render(a)
+
+      op(a, "add_row")
+
+      assert eventually(fn -> length(rows(c)) == 2 end), "the added row was not written"
+      # On main: B's first "rowtexB", from A's socket, was written over it.
+      assert words(row(rows(c), "r1")["rt"]) == ["rowtexBtwo"]
+      assert row(form(a)["meta"]["rows"], "r1")["rt"] == view
+      assert has_element?(a, @banner)
+    end
+
     test "#{surface}: the held row moved by the op is found by its _key", c do
       c = Map.put(c, :surface, unquote(surface))
       {a, view} = row_held(c)
