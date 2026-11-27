@@ -1845,6 +1845,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_has_published: has_published,
         editor_form: new_form,
         editor_form_gen: form_gen,
+        # A load starts a new page: no pick of the last one is its (`KeptPicks`).
+        editor_own_picks: if(same_doc?, do: socket.assigns[:editor_own_picks]),
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
         editor_table_target_ids: editor_table_target_ids,
