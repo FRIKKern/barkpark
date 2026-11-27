@@ -81,12 +81,55 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def values(socket, nil, posted, owners) when is_map(posted) do
     shown = shown(socket, owners)
+    shifted = shifted(socket, owners)
 
     for {name, path, _html} <- posted_texts(socket, posted, owners),
         {:ok, was} <- [was(socket, shown, owners, name, path)],
         into: %{},
-        do: {name, {path, was, nil}}
+        do: {name, {path, if(list_of(path) in shifted, do: :unknown, else: was), nil}}
   end
+
+  # The lists whose keyless rows A's page drew at other indexes than the
+  # form holds them now: another editor put a keyless row in or took one
+  # out before them. A keyless row goes by its index, so a draw there names
+  # another row, and A's edit that did not clash with that row's blocks was
+  # merged into it unseen (#29178 review, Q2-Q4c). Each rich text of such a
+  # list is read as a draw not known: the store kept, A held.
+  defp shifted(socket, owners) do
+    form = socket.assigns[:editor_form] || %{}
+
+    drawn =
+      for entry <- List.wrap(owners),
+          t = entry(entry),
+          is_tuple(t) and elem(t, 1) == "",
+          path = Path.parse_path(elem(t, 0)),
+          is_integer(row_index(path)),
+          reduce: %{} do
+        acc ->
+          Map.update(
+            acc,
+            list_of(path),
+            MapSet.new([row_index(path)]),
+            &MapSet.put(&1, row_index(path))
+          )
+      end
+
+    for {list, at} <- drawn, at != keyless_rows(FormPath.get(form, list)), do: list
+  end
+
+  # The list a row rich text's row is in, and the row's index there.
+  defp list_of(path), do: Enum.drop(path, -2)
+  defp row_index(path), do: Enum.at(path, -2)
+
+  defp keyless_rows(rows) when is_list(rows) do
+    for {%{} = row, i} <- Enum.with_index(rows),
+        not is_struct(row),
+        Map.get(row, "_key") in [nil, ""],
+        into: MapSet.new(),
+        do: i
+  end
+
+  defp keyless_rows(_rows), do: MapSet.new()
 
   def values(_socket, _seen, _posted, _owners), do: %{}
 

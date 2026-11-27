@@ -122,6 +122,10 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessTest do
     render_hook(a, "autosave", params)
   end
 
+  # Rows whose blocks share keys, as `from_html` makes them (#29178 review).
+  defp itk(text), do: %{"_type" => "item", "rt" => [block("b0", text)]}
+  defp itk2(t1, t2), do: %{"_type" => "item", "rt" => [block("b0", t1), block("b1", t2)]}
+
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
 
   for surface <- [:desk, :studio] do
@@ -166,6 +170,87 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessTest do
       html = autosave(a, ["<p>alpha A</p>", "<p>beta</p>"], page_owners(a))
 
       assert items_words(stored(c)) == [["alpha A"], ["beta"]]
+      assert held(a) == []
+      refute html =~ @rb
+    end
+
+    # #29178 review: with a keyless row inserted or removed before A's, the
+    # index names another row. A's edit that did not clash with that row's
+    # blocks was merged into it, with no banner. It is now read as a draw
+    # not known: the store kept, A held.
+    test "#{surface} Q2: B inserts a keyless row before A's; A adds a paragraph: B's row kept, A held",
+         c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+
+      html = autosave(a, ["<p>alpha</p><p>new A</p>"], owners)
+
+      assert items_words(stored(c)) == [["zed B"], ["alpha"]],
+             "A's words were merged into B's row: #{inspect(items_words(stored(c)))}"
+
+      assert held(a) == ["doc[sections][0].items[0].rt"]
+      assert html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} Q2, A's stale page posts again: B's row still kept, A still held", c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+
+      autosave(a, ["<p>alpha</p><p>new A</p>"], owners)
+      html = autosave(a, ["<p>alpha</p><p>new A</p><p>more A</p>"], owners)
+
+      assert items_words(stored(c)) == [["zed B"], ["alpha"]],
+             "A's second post was written: #{inspect(items_words(stored(c)))}"
+
+      assert held(a) == ["doc[sections][0].items[0].rt"]
+      assert html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} Q2t: B inserts a two-block row before A's; A edits its second block: B's row kept, A held",
+         c do
+      put_items(c, [itk2("alpha", "omega")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk2("zed B", "omega"), itk2("alpha", "omega")])
+
+      html = autosave(a, ["<p>alpha</p><p>omega A</p>"], owners)
+
+      assert items_words(stored(c)) == [["zed B", "omega"], ["alpha", "omega"]],
+             "A's words were merged into B's row: #{inspect(items_words(stored(c)))}"
+
+      assert held(a) == ["doc[sections][0].items[0].rt"]
+      assert html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} Q4c: B removes keyless row 0; A adds a paragraph to it: the row now first kept, A held",
+         c do
+      put_items(c, [itk("alpha"), itk("beta")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk("beta")])
+
+      html = autosave(a, ["<p>alpha</p><p>new A</p>", "<p>beta</p>"], owners)
+
+      assert hd(items_words(stored(c))) == ["beta"],
+             "A's words were merged into the row now first: #{inspect(items_words(stored(c)))}"
+
+      assert "doc[sections][0].items[0].rt" in held(a)
+      assert html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} Q7: B edits one block of a keyless row, A another: merged", c do
+      put_items(c, [itk2("alpha", "omega")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk2("alpha", "omega B")])
+
+      html = autosave(a, ["<p>alpha A</p><p>omega</p>"], owners)
+
+      assert items_words(stored(c)) == [["alpha A", "omega B"]]
       assert held(a) == []
       refute html =~ @rb
     end
