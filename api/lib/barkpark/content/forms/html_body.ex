@@ -38,11 +38,20 @@ defmodule Barkpark.Content.Forms.HtmlBody do
   post typed on that string is written, as blocks (owner ruling #44 turns a
   stored string into blocks at the next save); one typed on another value
   leaves the string as stored, never merged or converted, and A is held.
+  "Typed on that string" is the exact string (`string_held?/2`), never the
+  drawing: `PortableText.from_html/1` drops markup the editor does not draw.
   """
   def stored_string?(%{"type" => "richText"} = field, stored) when is_binary(stored),
     do: RichTextFormat.format(field) == :portable_text
 
   def stored_string?(_field, _stored), do: false
+
+  @doc """
+  Whether a post on a `stored_string?/2` field is held: the page showed
+  (`was`, `:unknown` after a rejoin) another value than the string the store
+  held before the write (`before`), compared exactly (#29116 r1).
+  """
+  def string_held?(before, was), do: was !== before
 
   @doc """
   Whether two values of the field draw the same: equal strings first, then

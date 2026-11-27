@@ -171,7 +171,10 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
               not HtmlBody.stored_string?(field, stored) ->
                 Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
 
-              HtmlBody.rebase(mine, stored, was) === mine ->
+              # Read against the exact string: `from_html/1` drops markup
+              # (an image, an iframe, a class), so a drawing compare reads
+              # a string B changed only there as the one A saw (#29116 r1).
+              was === stored ->
                 acc
 
               # The store's string stays as stored: the field is left out

@@ -117,7 +117,13 @@ defmodule BarkparkWeb.Studio.TopRichTextPtStringTest do
   # moduledoc.
   @bs [
     {"B rewrites", "<p>bodB</p>"},
-    {"B adds a paragraph", "<p>body0</p><p>B para</p>"}
+    {"B adds a paragraph", "<p>body0</p><p>B para</p>"},
+    # #29116 r1: B's string differs from body0 only where
+    # `PortableText.from_html/1` drops it, so it draws as body0. The read is
+    # by the exact string, not the drawing.
+    {"B adds an image", ~s(<p>body0</p><img src="x.png">)},
+    {"B adds an iframe", ~s(<p>body0</p><iframe src="https://y"></iframe>)},
+    {"B adds a class", ~s(<p class="lead">body0</p>)}
   ]
 
   for surface <- [:desk, :studio] do
