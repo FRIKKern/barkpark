@@ -245,11 +245,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         input_name: child_path(assigns.path, sub.name),
         input_id: input_id,
         # Keyed by the item's `_key` too: a moved item or another document
-        # remounts the ignored editor instead of keeping the old text. A row
-        # in no other row keeps the id it had before outer keys (#29171
-        # review): an open page's editors do not remount at a deploy.
+        # remounts the ignored editor instead of keeping the old text. The
+        # same id as main's: an open page's editors do not remount at a deploy.
         wrap_id:
-          "bp-rt-sub-#{input_id}-#{:erlang.phash2(if(outer in [nil, []], do: owner_key, else: {outer, owner_key}))}",
+          "bp-rt-sub-#{input_id}-#{:erlang.phash2(if(outer == nil, do: owner_key, else: {outer, owner_key}))}",
         owner: owner_entry(child_path(assigns.path, sub.name), owner_key, value, outer),
         html: drawn_html(value),
         label: title_for(sub),

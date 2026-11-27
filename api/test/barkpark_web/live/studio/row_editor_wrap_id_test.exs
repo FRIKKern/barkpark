@@ -1,9 +1,10 @@
 defmodule BarkparkWeb.Studio.RowEditorWrapIdTest do
   @moduledoc """
-  #29171 review: the row rich text editor's wrapper id names the outer row
-  keys, so a nested row's editor remounts when its outer rows change. A row
-  in no other row keeps the id it had before (its own `_key` only), so the
-  editors of an open page do not all remount at a deploy.
+  #29171: the row rich text editor's wrapper id names the outer row keys,
+  so a nested row's editor remounts when its outer rows change. #29206
+  keeps those ids exactly (`{outer, key}`, `{[], key}` for a top-level row,
+  `{[], nil}` for an object's rich text), so an open page's editors do not
+  remount a second time at its deploy (#29206 review, round 1).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -26,6 +27,7 @@ defmodule BarkparkWeb.Studio.RowEditorWrapIdTest do
 
     fields = [
       %{"name" => "title", "title" => "Title", "type" => "string"},
+      %{"name" => "meta", "title" => "Meta", "type" => "composite", "fields" => [rt()]},
       array("rows", member("row", [rt()])),
       array("sections", member("section", [array("items", member("item", [rt()]))]))
     ]
@@ -37,6 +39,7 @@ defmodule BarkparkWeb.Studio.RowEditorWrapIdTest do
       )
 
     content = %{
+      "meta" => %{"rt" => [block("mb", "meta")]},
       "rows" => [%{"_type" => "row", "_key" => "r1", "rt" => [block("rb", "row")]}],
       "sections" => [
         %{
@@ -70,7 +73,7 @@ defmodule BarkparkWeb.Studio.RowEditorWrapIdTest do
   for surface <- [:desk, :studio] do
     @surface surface
 
-    test "#{surface}: a top-level row's editor id is its own key's, a nested row's names its section",
+    test "#{surface}: editor ids are main's: {[], key} for a top-level row, {outer, key} nested, {[], nil} for an object",
          c do
       path =
         case @surface do
@@ -82,7 +85,14 @@ defmodule BarkparkWeb.Studio.RowEditorWrapIdTest do
       render_async(view, 5_000)
       assert eventually(fn -> has_element?(view, "#editor-form") end)
 
-      assert String.ends_with?(wrap_id(view, "doc[rows][0].rt"), "-#{:erlang.phash2("r1")}")
+      assert String.ends_with?(
+               wrap_id(view, "doc[rows][0].rt"),
+               "-#{:erlang.phash2({[], "r1"})}"
+             ),
+             "a top-level row's editor id changed from main's"
+
+      assert String.ends_with?(wrap_id(view, "doc[meta].rt"), "-#{:erlang.phash2({[], nil})}"),
+             "an object rich text's editor id changed from main's"
 
       assert String.ends_with?(
                wrap_id(view, "doc[sections][0].items[0].rt"),
