@@ -3,6 +3,10 @@ defmodule Barkpark.Content.Forms.HtmlBody do
   A top-level rich text the store holds as an HTML string, read under the
   write lock (task-bb19ab06ab1e87b2).
 
+  A Portable Text richText the store holds as a string is read the same
+  way (`stored_string?/2`): its post is blocks, and the string is kept or
+  written over, never merged.
+
   A `body` or `blocks` richText with no `format` and no block editor is
   read by its stored value (`RichTextFormat`, `:legacy`). Written first into
   an empty field, it is stored as the posted HTML, and every later save
@@ -26,6 +30,19 @@ defmodule Barkpark.Content.Forms.HtmlBody do
     do: RichTextFormat.format(field) == :legacy
 
   def field?(_field, _stored), do: false
+
+  @doc """
+  Whether `stored` is an HTML string in a Portable Text richText: a `/v1`
+  write takes a string for one as it is, and an import or an old row leaves
+  one (task-49a96a7780dad558). Read as `field?/2`'s are, under the lock: a
+  post typed on that string is written, as blocks (owner ruling #44 turns a
+  stored string into blocks at the next save); one typed on another value
+  leaves the string as stored, never merged or converted, and A is held.
+  """
+  def stored_string?(%{"type" => "richText"} = field, stored) when is_binary(stored),
+    do: RichTextFormat.format(field) == :portable_text
+
+  def stored_string?(_field, _stored), do: false
 
   @doc """
   Whether two values of the field draw the same: equal strings first, then

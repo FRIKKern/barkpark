@@ -431,13 +431,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp resolve(s, acts, _name, _page), do: {s, acts}
 
   # A top-level body the store held as an HTML string or as nothing
-  # (`HtmlBody.field?/2`, task-bb19ab06ab1e87b2, task-077fbe951d7c338e):
+  # (`HtmlBody.field?/2`, task-bb19ab06ab1e87b2, task-077fbe951d7c338e), or
+  # a Portable Text field it held as a string (`HtmlBody.stored_string?/2`,
+  # task-49a96a7780dad558):
   # the write kept the store over a post typed on a value it no longer
   # holds, and A is held, as on a block body. Read as blocks for the hold's
   # view; the store stays a string.
   defp html_body?(s, [key], over) when is_map_key(over, key) do
     field = Enum.find(fields(s.assigns[:editor_schema]), &match?(%{"name" => ^key}, &1))
-    HtmlBody.field?(field, Map.fetch!(over, key))
+    stored = Map.fetch!(over, key)
+    HtmlBody.field?(field, stored) or HtmlBody.stored_string?(field, stored)
   end
 
   defp html_body?(_s, _path, _over), do: false

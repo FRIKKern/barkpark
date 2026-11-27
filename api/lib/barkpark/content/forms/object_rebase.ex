@@ -159,13 +159,27 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # is. Two tabs typing in it wrote the later post over the earlier with no
   # word. With no `seen` it is written as posted, as before. A body the
   # store holds as an HTML string is posted as one, and read as one
-  # (`HtmlBody`, task-bb19ab06ab1e87b2).
+  # (`HtmlBody`, task-bb19ab06ab1e87b2). A Portable Text field the store
+  # holds as a string is posted as blocks, and read as such a body is
+  # (`HtmlBody.stored_string?/2`, task-49a96a7780dad558).
   defp top_rich(params, fields, base, theirs, seen) do
     Enum.reduce(fields, params, fn
       %{"name" => key, "type" => "richText"} = field, acc when is_binary(key) ->
         case {Map.fetch(seen, [key]), Map.fetch(acc, key), theirs[key]} do
-          {{:ok, was}, {:ok, mine}, _} when is_list(mine) ->
-            Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
+          {{:ok, was}, {:ok, mine}, stored} when is_list(mine) ->
+            cond do
+              not HtmlBody.stored_string?(field, stored) ->
+                Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
+
+              HtmlBody.rebase(mine, stored, was) === mine ->
+                acc
+
+              # The store's string stays as stored: the field is left out
+              # of the write (`Content.Forms` keeps a stored key the post
+              # does not carry), and A is held (`UnderLock`).
+              true ->
+                Map.delete(acc, key)
+            end
 
           {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) ->
             if HtmlBody.field?(field, stored),
