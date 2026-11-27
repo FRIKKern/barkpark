@@ -355,9 +355,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       # task-fe9d8741f0641f97) before a hold's view: typing on A's view
       # stays held until a Save or Reload.
       case {seen && TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen), holds} do
-        {:unknown, _} -> {name, {[key], :unknown, nil}}
-        {_, %{^name => %{theirs: theirs}}} -> {name, {[key], theirs, :resolve}}
-        _ -> {name, {[key], Map.get(content, key), nil}}
+        {:unknown, _} ->
+          {name, {[key], :unknown, nil}}
+
+        {_, %{^name => %{theirs: theirs}}} ->
+          {name, {[key], theirs, :resolve}}
+
+        # Sent before the redraw of another's save reached the page: read
+        # against the value the page still showed (`TextConfirmed.took/3`).
+        _ ->
+          {name, {[key], TextConfirmed.page_base(socket, name, Map.get(content, key), seen), nil}}
       end
     end
   end

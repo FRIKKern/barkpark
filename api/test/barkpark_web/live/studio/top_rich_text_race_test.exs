@@ -15,14 +15,22 @@ defmodule BarkparkWeb.Studio.TopRichTextRaceTest do
 
   import BarkparkWeb.ObjectRichText
 
+  alias BarkparkWeb.PageSeen
+
   @moduletag :studio_live
 
   @rb "Someone else rewrote"
 
   setup %{conn: conn}, do: setup_doc(conn)
 
+  # The page's `_bp_seen` with the digests it took (`PageSeen`): a real page
+  # takes the redraw's digest of B's save (task-a368aa61eb491d9f).
   defp body_post(view, html),
-    do: send_post(view, "doc[body]", %{"doc" => %{"title" => "T0", "body" => html}})
+    do:
+      send_post(view, "doc[body]", %{
+        "doc" => %{"title" => "T0", "body" => html},
+        "_bp_seen" => PageSeen.json(view)
+      })
 
   defp body(c), do: words(stored(c)["body"])
 
