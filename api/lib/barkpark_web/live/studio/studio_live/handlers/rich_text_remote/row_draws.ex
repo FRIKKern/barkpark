@@ -57,13 +57,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
     ])
   end
 
-  @doc "The value the draw `digest` of the row `key` at `path` showed."
+  @doc """
+  The value the draw `digest` of the row `key` at `path` showed. A number
+  is the 27-bit digest a page drawn before the 64-bit one posts
+  (task-9b705d11bf85560e): read by the old hash of each draw, as before.
+  """
   def fetch(socket, path, key, digest) do
-    case List.keyfind(Map.get(all(socket), id(path, key), []), digest, 0) do
+    draws = Map.get(all(socket), id(path, key), [])
+
+    found =
+      if is_integer(digest),
+        do: Enum.find(draws, fn {d, value} -> d == digest or legacy(value) == digest end),
+        else: List.keyfind(draws, digest, 0)
+
+    case found do
       {_digest, value} -> {:ok, value}
       nil -> :error
     end
   end
+
+  defp legacy(value), do: :erlang.phash2(CompositeField.drawn_html(value))
 
   # A row rich text is named by its path without indexes and its row's key.
   # A row with no key (task-12ff178d188b04b4) has only its index, as before.
