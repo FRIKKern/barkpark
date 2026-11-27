@@ -31,7 +31,7 @@ As of 26 November: an alpha in December, and the focus now is good and stable.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/progress-night.svg">
-  <img src="docs/readme/progress-paper.svg" width="768" alt="Paws walk to the bone, one row a pillar below: a paw is a step done">
+  <img src="docs/readme/progress-paper.svg" width="768" alt="Paws walk toward the bone, one row for each pillar in the table's order; the further along, the more is done. BarkUI's row only marks it as building.">
 </picture>
 
 | Pillar | Now |
