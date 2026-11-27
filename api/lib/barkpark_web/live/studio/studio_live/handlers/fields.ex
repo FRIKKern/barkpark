@@ -23,6 +23,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
+  alias BarkparkWeb.Studio.StudioLive.KeptPicks
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -257,7 +258,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # A post built for another document than the editor holds is not written
   # (`PostIdentity`).
   def save(params, socket) when is_map(params) do
-    if PostIdentity.ours?(params, socket), do: save_open(params, socket), else: {:noreply, socket}
+    if PostIdentity.ours?(params, socket),
+      do: KeptPicks.through(params, socket, &save_open/2),
+      else: {:noreply, socket}
   end
 
   def save(_params, socket), do: {:noreply, socket}
@@ -560,7 +563,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def autosave(params, socket) when is_map(params) do
     if PostIdentity.ours?(params, socket),
-      do: autosave_open(params, socket, :page),
+      do: KeptPicks.through(params, socket, &autosave_open(&1, &2, :page)),
       else: {:noreply, socket}
   end
 

@@ -740,16 +740,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       end
   end
 
-  # Seat cache busted AFTER COMMIT, as `Tenancy.delete_workspace/1` does: inside,
-  # a concurrent read re-caches the evicted seat for the TTL (task-e9972c538ed9209f).
-  defp run_import_once(manifest, dumps, mode, ctx) do
-    result = import_transaction(manifest, dumps, mode, ctx)
-    Barkpark.Tenancy.DefaultScopeCache.invalidate()
-    result
-  end
+  # Seat cache busted AFTER COMMIT, and on a raise (`DefaultScopeCache.transaction/2`):
+  # inside, a concurrent read re-caches the evicted seat for the TTL (task-e9972c538ed9209f).
+  defp run_import_once(manifest, dumps, mode, ctx),
+    do: import_transaction(manifest, dumps, mode, ctx)
 
   defp import_transaction(manifest, dumps, mode, ctx) do
-    Repo.transaction(
+    Barkpark.Tenancy.DefaultScopeCache.transaction(
       fn ->
         # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs): each
         # member restores through a single `COPY … FROM STDIN` fed in 64 KiB
