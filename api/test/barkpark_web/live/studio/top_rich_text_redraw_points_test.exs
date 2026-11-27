@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
 
   alias Barkpark.Content
   alias BarkparkWeb.EditorPost
+  alias BarkparkWeb.PageSeen
 
   @moduletag :studio_live
 
@@ -56,22 +57,8 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
     view
   end
 
-  defp page(view) do
-    [_, value] = Regex.run(~r/name="_bp_seen"[^>]*value="([^"]*)"/, render(view))
-    value |> String.replace("&quot;", ~s(")) |> Jason.decode!() |> Map.put("v", 2)
-  end
-
-  # The digests the page takes from what the server pushed it.
-  defp took(view, seen) do
-    %{proxy: {ref, _topic, _}} = view
-
-    receive do
-      {^ref, {:push_event, "bp:form-confirmed", %{oks: oks}}} ->
-        took(view, Map.update(seen, "ok", oks, &Map.merge(&1, oks)))
-    after
-      300 -> seen
-    end
-  end
+  # The page's `_bp_seen` as bp-array-focus.js keeps it (`PageSeen`).
+  defp page(view), do: view |> PageSeen.seen() |> Map.put("v", 2)
 
   defp post(view, target, fields, seen) do
     view
@@ -89,7 +76,7 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
   # body (a new form generation). Then A's socket drops, the page rejoins,
   # and A types on what it shows, alone: written, never held.
   defp redrawn_then_rejoin(c, surface, a, press, b_save \\ nil) do
-    seen = took(a, page(a))
+    page(a)
     b = open_tab(c, surface)
     b_seen = page(b)
     was = gen(a)
@@ -101,7 +88,7 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
     assert body(c) == ["body0 B"]
     render(a)
     assert gen(a) != was, "the press did not draw the form anew: no test"
-    seen = took(a, seen)
+    seen = page(a)
 
     GenServer.stop(a.pid, :normal)
     a2 = rejoined(c, surface)
@@ -149,6 +136,23 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
 
       render_click(a, "bulk-publish", %{})
     end)
+  end
+
+  test "studio control: Show more with no other save draws nothing anew; after a rejoin A is not held",
+       c do
+    a = open_tab(c, :studio)
+    seen = page(a)
+    was = gen(a)
+    render_click(a, "desk-list-more", %{"type" => c.type})
+    assert gen(a) == was
+    seen = Map.merge(seen, page(a))
+
+    GenServer.stop(a.pid, :normal)
+    a2 = rejoined(c, :studio)
+    html = post(a2, "doc[body]", %{"body" => h(["body0 A"])}, seen)
+
+    assert body(c) == ["body0 A"]
+    refute html =~ @banner
   end
 
   for surface <- [:desk, :studio] do
