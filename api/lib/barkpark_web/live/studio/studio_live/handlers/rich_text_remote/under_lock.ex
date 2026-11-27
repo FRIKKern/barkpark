@@ -89,6 +89,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         do: {name, {path, if(list_of(path) in shifted, do: :unknown, else: was), nil}}
   end
 
+  def values(_socket, _seen, _posted, _owners), do: %{}
+
   # The lists whose keyless rows A's page drew at other indexes than the
   # form holds them now: another editor put a keyless row in or took one
   # out before them. A keyless row goes by its index, so a draw there names
@@ -130,8 +132,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   end
 
   defp keyless_rows(_rows), do: MapSet.new()
-
-  def values(_socket, _seen, _posted, _owners), do: %{}
 
   @doc """
   The socket after a post with no `_bp_rt_seen`: each object rich text it
