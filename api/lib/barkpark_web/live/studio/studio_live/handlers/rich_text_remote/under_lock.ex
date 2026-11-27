@@ -431,22 +431,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp resolve(s, acts, _name, _page), do: {s, acts}
 
   # A top-level body the store held as an HTML string or as nothing
-  # (`HtmlBody.field?/2`, task-bb19ab06ab1e87b2, task-077fbe951d7c338e):
+  # (`HtmlBody.field?/2`, task-bb19ab06ab1e87b2, task-077fbe951d7c338e), or
+  # a Portable Text field it held as a string (`HtmlBody.stored_string?/2`,
+  # task-49a96a7780dad558):
   # the write kept the store over a post typed on a value it no longer
   # holds, and A is held, as on a block body. Read as blocks for the hold's
   # view; the store stays a string.
   defp html_body?(s, [key], over) when is_map_key(over, key) do
-    field = Enum.find(fields(s.assigns[:editor_schema]), &match?(%{"name" => ^key}, &1))
-    HtmlBody.field?(field, Map.fetch!(over, key))
+    stored = Map.fetch!(over, key)
+    HtmlBody.field?(field(s, key), stored) or string_field?(s, key, stored)
   end
 
   defp html_body?(_s, _path, _over), do: false
+
+  defp string_field?(s, key, stored), do: HtmlBody.stored_string?(field(s, key), stored)
+
+  defp field(s, key),
+    do: Enum.find(fields(s.assigns[:editor_schema]), &match?(%{"name" => ^key}, &1))
 
   defp html_act(s, acts, {name, [key] = path, was, _page}, {over, _now}, {doc, _posted_doc}) do
     before = Map.fetch!(over, key)
     posted = FormPath.get(doc, path)
 
-    if is_binary(posted) and not holds?(acts, name) and HtmlBody.held?(posted, before, was),
+    held? =
+      if string_field?(s, key, before),
+        do: HtmlBody.string_held?(before, was),
+        else: HtmlBody.held?(posted, before, was)
+
+    if is_binary(posted) and not holds?(acts, name) and held?,
       do: {s, [{:held, name, path, html_hold(posted, before, was)} | drop(acts, name)]},
       else: {s, acts}
   end
