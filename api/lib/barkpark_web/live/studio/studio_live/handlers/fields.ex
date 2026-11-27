@@ -23,6 +23,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
+  alias BarkparkWeb.Studio.StudioLive.KeptPicks
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -257,7 +258,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # A post built for another document than the editor holds is not written
   # (`PostIdentity`).
   def save(params, socket) when is_map(params) do
-    if PostIdentity.ours?(params, socket), do: save_open(params, socket), else: {:noreply, socket}
+    if PostIdentity.ours?(params, socket),
+      do: KeptPicks.through(params, socket, &save_open/2),
+      else: {:noreply, socket}
   end
 
   def save(_params, socket), do: {:noreply, socket}
@@ -558,7 +561,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def autosave(params, socket) when is_map(params) do
     if PostIdentity.ours?(params, socket),
-      do: autosave_open(params, socket, :page),
+      do: KeptPicks.through(params, socket, &autosave_open(&1, &2, :page)),
       else: {:noreply, socket}
   end
 
@@ -580,7 +583,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   """
   def autosave_built(params, socket) when is_map(params) do
     {bases, params} = Map.pop(params, :bases, %{})
-    autosave_open(params, socket, {:built, bases})
+    # A field held under the banner keeps its hold through the write, as
+    # it does through a write of the whole form (`HeldFields`,
+    # task-25de1fd76bf1f6d8): the save's "Saved" cleared the banner.
+    {doc, held} =
+      HeldFields.stored(
+        socket,
+        params["doc"] || %{},
+        target_key(params, socket.assigns[:editor_schema])
+      )
+
+    params = if Map.has_key?(params, "doc"), do: Map.put(params, "doc", doc), else: params
+    {:noreply, saved} = autosave_open(params, socket, {:built, bases})
+
+    # The hold puts "Updated by another user" where the save said "Saved":
+    # whether it landed is kept for the desk's undo (`DocUndo`).
+    landed? = saved.assigns[:save_status] == "Saved"
+    {:noreply, saved |> HeldFields.restore(held) |> assign(editor_built_landed: landed?)}
   end
 
   # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
@@ -588,7 +607,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # (`CodelistShape`): a built one writes a stored value back as it is.
   defp autosave_open(params, socket, origin) do
     params = PostIdentity.no_marks(params)
-    socket = track_touched(socket, params)
+    socket = socket |> track_touched(params) |> assign(editor_built_landed: nil)
 
     case params
          |> fold_dot_paths(socket)

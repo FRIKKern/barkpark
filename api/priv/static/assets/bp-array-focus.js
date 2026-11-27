@@ -438,6 +438,18 @@
   window.addEventListener("phx:bp:form-born", onBorn);
   window.addEventListener("phx:bp:form-confirmed", onConfirmed);
   window.BarkparkFormRemoteValues = onRemoteValues;
+
+  // The connect params of each join (root.html.heex's LiveSocket `params`):
+  // the document and form generation the editor was drawn at. A socket
+  // that rejoins draws that generation, so the widget wrappers keep the
+  // page's ids and the editor keeps what was typed while the socket was
+  // down (`RejoinForm`, task-b656db94cc1dbd17).
+  window.BarkparkFormConnectParams = function () {
+    var form = document.getElementById("editor-form");
+    var doc = form && form.getAttribute("phx-value-_bp_doc");
+    var gen = form && form.getAttribute("data-bp-form-gen");
+    return doc && gen ? { _bp_form: { doc: doc, gen: gen } } : {};
+  };
 })();
 
 // task-7f47b7ad78b08048: an array row's open state is the person's. The row

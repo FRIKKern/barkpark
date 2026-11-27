@@ -44,6 +44,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   alias Barkpark.Content.PortableTextMerge
   alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
+  alias BarkparkWeb.Studio.StudioLive.RejoinForm
 
   @event "bp:form-confirmed"
   @key "ok"
@@ -158,9 +159,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   def loaded(socket) do
     if socket.assigns[:editor_rejoined?] == true do
       names = Enum.map(rich_keys(socket.assigns[:editor_schema]), &RemoteValues.input_name/1)
-      assign(socket, editor_rejoined?: false, editor_rt_rejoin: MapSet.new(names))
+
+      socket
+      |> assign(editor_rejoined?: false, editor_rt_rejoin: MapSet.new(names))
+      |> RejoinForm.loaded()
     else
-      socket |> assign(editor_rt_rejoin: MapSet.new()) |> push_rich(socket.assigns[:editor_form])
+      socket
+      |> RejoinForm.forget()
+      |> assign(editor_rt_rejoin: MapSet.new())
+      |> push_rich(socket.assigns[:editor_form])
     end
   end
 

@@ -161,6 +161,7 @@ jobs:
         run: |
           node ../paper-editor-host-tests/__array_focus.test.mjs
           node ../paper-editor-host-tests/__form_remote_values.test.mjs
+          node ../paper-editor-host-tests/__form_connect_params.test.mjs
           node ../paper-editor-host-tests/__form_confirmed_ok.test.mjs
           node ../paper-editor-host-tests/__editor_form_leave.test.mjs
           node ../paper-editor-host-tests/__studio_leave.test.mjs
