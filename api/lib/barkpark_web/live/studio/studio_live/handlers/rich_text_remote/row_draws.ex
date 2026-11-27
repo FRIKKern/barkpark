@@ -38,7 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
           row?(path),
           key = row_key(form, path),
           value = FormPath.get(form, path),
-          do: {id(path, key), CompositeField.drawn_digest(value), value}
+          do: {id(form, path, key), CompositeField.drawn_digest(value), value}
 
     record(socket, entries)
   end
@@ -51,9 +51,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   of the row draws.
   """
   def record_own(socket, path, {key, digest}, value) do
+    id = id(form(socket), path, key)
+
     record(socket, [
-      {id(path, key), digest, value},
-      {id(path, key), CompositeField.drawn_digest(value), value}
+      {id, digest, value},
+      {id, CompositeField.drawn_digest(value), value}
     ])
   end
 
@@ -63,7 +65,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   (task-9b705d11bf85560e): read by the old hash of each draw, as before.
   """
   def fetch(socket, path, key, digest) do
-    draws = Map.get(all(socket), id(path, key), [])
+    draws = Map.get(all(socket), id(form(socket), path, key), [])
 
     found =
       if is_integer(digest),
@@ -78,14 +80,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
 
   defp legacy(value), do: :erlang.phash2(CompositeField.drawn_html(value))
 
-  # A row rich text is named by its path without indexes and its row's key.
-  # A row with no key (task-12ff178d188b04b4) has only its index, as before.
-  defp id(path, key) do
+  # A row rich text is named by its path without indexes, the `_key` of
+  # each row it sits in on the way (read from `form` at `path`), and its own
+  # row's key. Two sections whose items share a key (a duplicated section)
+  # shared one list of draws, by the inner key alone, and one section's
+  # saves pushed the other's out (task-3811ae4146de3c91). A row with no key
+  # (task-12ff178d188b04b4) has only its index, as before, at any depth.
+  defp id(form, path, key) do
     case to_string(key) do
       "" -> {path, ""}
-      key -> {Enum.reject(path, &is_integer/1), key}
+      key -> {Enum.reject(path, &is_integer/1), outer(form, path), key}
     end
   end
+
+  defp outer(form, path) do
+    path
+    |> Enum.with_index()
+    |> Enum.filter(fn {seg, _n} -> is_integer(seg) end)
+    |> Enum.drop(-1)
+    |> Enum.map(fn {i, n} ->
+      case FormPath.get(form, Enum.take(path, n + 1)) do
+        %{"_key" => k} when is_binary(k) and k != "" -> k
+        _ -> i
+      end
+    end)
+  end
+
+  defp form(socket), do: socket.assigns[:editor_form] || %{}
 
   defp row_key(form, path) do
     case FormPath.get(form, Enum.drop(path, -1)) do

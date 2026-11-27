@@ -113,7 +113,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     # row's key (`RowDraws`): A's own move or delete shifts its index.
     socket =
       Enum.reduce(texts, socket, fn {name, path, _html}, s ->
-        case row?(path) && owner(owners, name) do
+        case row?(path) && row_owner(s, owners, name, path) do
           {:ok, key, digest} ->
             RowDraws.record_own(s, path, {key, digest}, Map.fetch!(page, name))
 
@@ -207,23 +207,64 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   # before it was one posts its old number: never an object's new draw, and
   # a row's draw as it was read before (`RowDraws.fetch/4`).
   defp owner(owners, name) when is_list(owners) do
-    Enum.find_value(owners, :error, fn
-      entry when is_binary(entry) ->
-        case Jason.decode(entry) do
-          {:ok, [^name, key, digest]}
-          when (is_binary(key) or is_nil(key)) and (is_binary(digest) or is_integer(digest)) ->
-            {:ok, to_string(key), digest}
-
-          _ ->
-            nil
-        end
-
-      _ ->
-        nil
+    Enum.find_value(owners, :error, fn entry ->
+      case entry(entry) do
+        {^name, key, digest} -> {:ok, key, digest}
+        _ -> nil
+      end
     end)
   end
 
   defp owner(_owners, _name), do: :error
+
+  defp entry(entry) when is_binary(entry) do
+    case Jason.decode(entry) do
+      {:ok, [name, key, digest]}
+      when is_binary(name) and (is_binary(key) or is_nil(key)) and
+             (is_binary(digest) or is_integer(digest)) ->
+        {name, to_string(key), digest}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp entry(_entry), do: nil
+
+  # A row's owner entry, matched to the row the form holds at `path` by its
+  # `_key`: the entry of its input name where that names the row's key, else
+  # the one entry of that name with other indexes that does. A post sent
+  # before the page drew another's insert or move names the row by the
+  # index it was drawn at, and the fold (`Fields.fold_dot_paths/2`) put its
+  # text into the row of its `_key`: matched by index, the row was not read
+  # under the lock and A's text was written over another's edit of it
+  # (task-46bcc2dfb805acce). Two entries of one shape and key name none.
+  defp row_owner(socket, owners, name, path) do
+    form = socket.assigns[:editor_form] || %{}
+    key = to_string(key(FormPath.get(form, Enum.drop(path, -1))))
+
+    case owner(owners, name) do
+      {:ok, ^key, _digest} = found ->
+        found
+
+      _ ->
+        shape = shape(name)
+
+        found =
+          for entry <- List.wrap(owners),
+              {other, ^key, digest} <- [entry(entry)],
+              shape(other) == shape,
+              uniq: true,
+              do: {:ok, key, digest}
+
+        case found do
+          [one] -> one
+          _ -> :error
+        end
+    end
+  end
+
+  defp shape(name), do: String.replace(name, ~r/\[\d+\]/, "[]")
 
   defp key(%{} = owner), do: Map.get(owner, "_key")
   defp key(_), do: nil
@@ -238,20 +279,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
     for path <- RichTextRemote.every(socket.assigns[:editor_schema], form),
         name = RichTextRemote.input_name(path),
-        not row?(path) or row_named?(owners, name, FormPath.get(form, Enum.drop(path, -1))),
+        not row?(path) or row_owner(socket, owners, name, path) != :error,
         html = FormPath.get(posted, path),
         is_binary(html),
         do: {name, path, html}
   end
 
   defp row?(path), do: RowDraws.row?(path)
-
-  defp row_named?(owners, name, row) do
-    case owner(owners, name) do
-      {:ok, key, _digest} -> key == to_string(key(row))
-      :error -> false
-    end
-  end
 
   defp shown_at(socket, shown, owners, name, path) do
     case was(socket, shown, owners, name, path) do
@@ -272,7 +306,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   end
 
   defp row_draw(socket, owners, name, path) do
-    {:ok, key, digest} = owner(owners, name)
+    {:ok, key, digest} = row_owner(socket, owners, name, path)
 
     case RowDraws.fetch(socket, path, key, digest) do
       {:ok, value} -> value
