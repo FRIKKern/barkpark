@@ -138,5 +138,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PostedEdits do
     end
   end
 
-  defp target(socket), do: List.wrap(socket.assigns[:editor_post_target])
+  # The post's target, and each pick it made on the widget drawn from the
+  # newest version (`KeptPicks`, task-36b1558c058a5f3b).
+  defp target(socket),
+    do:
+      List.wrap(socket.assigns[:editor_post_target]) ++
+        List.wrap(socket.assigns[:editor_post_picks])
 end
