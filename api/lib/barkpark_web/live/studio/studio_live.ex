@@ -56,6 +56,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Scope,
     Secondary,
     Shares,
+    TextConfirmed,
     Views
   }
 
@@ -570,7 +571,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply,
      socket
      |> assign(:desk_list_limits, Map.put(limits, type, next))
-     |> Shared.rebuild_panes()}
+     |> Shared.rebuild_panes()
+     |> TextConfirmed.redrawn(socket)}
   end
 
   # The desk list's sort menu (task-fa57815041bead3d): remember the named sort
@@ -589,7 +591,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply,
      socket
      |> assign(:desk_list_sorts, sorts)
-     |> Shared.rebuild_panes()}
+     |> Shared.rebuild_panes()
+     |> TextConfirmed.redrawn(socket)}
   end
 
   def handle_event("save", params, socket),

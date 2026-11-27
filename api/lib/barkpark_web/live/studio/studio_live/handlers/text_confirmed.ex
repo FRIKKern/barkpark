@@ -232,9 +232,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   After a change that may have drawn the top-level rich text wrappers anew
   (a new form generation since `before`): the page shows the form's values.
   """
-  def redrawn(socket, before) do
+  def redrawn(socket, before, except \\ []) do
     if socket.assigns[:editor_form_gen] != before.assigns[:editor_form_gen],
-      do: push_rich(socket, socket.assigns[:editor_form]),
+      do: push_rich(socket, socket.assigns[:editor_form], except),
       else: socket
   end
 
@@ -242,8 +242,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   # words (`RichTextRemote.keep_held`), not the store's, so a redraw caused
   # by another field (B's save of it, a desk paste) does not end the hold
   # (task-7234490778404641). A Save or Reload does.
-  defp push_rich(socket, form) when is_map(form) do
-    case rich_drawn(socket.assigns[:editor_schema], form) do
+  # `except`: the names a Save holds as it redraws (`Fields.do_saved/4`).
+  # Their hold is put on after the redraw (`RichTextRemote.hold/2`), so the
+  # form still has the store's value there, and the page keeps A's words:
+  # its digest stays the one A typed on (#29110 r1).
+  defp push_rich(socket, form, except \\ [])
+
+  defp push_rich(socket, form, except) when is_map(form) do
+    case Map.drop(rich_drawn(socket.assigns[:editor_schema], form), except) do
       oks when oks == %{} ->
         socket
 
@@ -256,7 +262,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
     end
   end
 
-  defp push_rich(socket, _form), do: socket
+  defp push_rich(socket, _form, _except), do: socket
 
   defp taken(socket, names),
     do:

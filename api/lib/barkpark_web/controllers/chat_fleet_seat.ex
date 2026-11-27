@@ -19,6 +19,13 @@ defmodule BarkparkWeb.ChatFleetSeat do
   appears (a primary-key read), and caches the answer for the connection. It
   never queries per flip (charter D43h). A session id with no row is left out
   (fail closed).
+
+  RE-SEAT (task-aa5e85a40c317b3a). A seat can be lost while the stream is open
+  (the owner demoted or removed). When a frame arrives more than one re-auth
+  interval (`ChatStreamSeat.interval_ms/0`) after the forwarder last checked,
+  it re-checks every registered-host session it has cached, in one batch, so a
+  host chat stops getting frames at most one interval after its seat is gone.
+  Managed sessions are never re-read.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -26,6 +33,7 @@ defmodule BarkparkWeb.ChatFleetSeat do
   alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Session
+  alias BarkparkWeb.ChatStreamSeat
   alias BarkparkWeb.HostExecutionGate
 
   # StudioChat's `@rollup_precedence`, which is private there; the rollup test
@@ -84,7 +92,7 @@ defmodule BarkparkWeb.ChatFleetSeat do
         Process.put(:"$callers", callers)
         Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
         send(caller, {:chat_forwarder_ready, self()})
-        forward_loop(listener, principal, %{})
+        forward_loop(listener, principal, %{}, now())
       end)
 
     receive do
@@ -92,15 +100,42 @@ defmodule BarkparkWeb.ChatFleetSeat do
     end
   end
 
-  defp forward_loop(listener, principal, seen) do
+  # `seen` caches `sid => {visible?, host?}`; `checked_at` is when the cached
+  # host sessions' seats were last read.
+  defp forward_loop(listener, principal, seen, checked_at) do
     receive do
       :stop ->
         :ok
 
       msg ->
-        {keep?, seen} = keep?(frame_session(msg), principal, seen)
+        session = frame_session(msg)
+        {seen, checked_at} = reseat(session, principal, seen, checked_at)
+        {keep?, seen} = keep?(session, principal, seen)
         if keep?, do: send(listener, msg)
-        forward_loop(listener, principal, seen)
+        forward_loop(listener, principal, seen, checked_at)
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  defp reseat(:other, _principal, seen, checked_at), do: {seen, checked_at}
+
+  defp reseat(_session, principal, seen, checked_at) do
+    now = now()
+
+    if now - checked_at < ChatStreamSeat.interval_ms() do
+      {seen, checked_at}
+    else
+      case for({sid, {_visible?, true}} <- seen, do: sid) do
+        [] ->
+          {seen, now}
+
+        hosts ->
+          # A row gone since is hidden (and re-read next interval); a row that
+          # left the registered host is visible and is not re-read again.
+          gone = Map.new(hosts, &{&1, {false, true}})
+          {Map.merge(seen, Map.merge(gone, seats(principal, hosts))), now}
+      end
     end
   end
 
@@ -113,18 +148,23 @@ defmodule BarkparkWeb.ChatFleetSeat do
 
   defp keep?({:session, sid}, principal, seen) do
     case seen do
-      %{^sid => visible?} ->
+      %{^sid => {visible?, _host?}} ->
         {visible?, seen}
 
       _ ->
-        visible? = MapSet.member?(visible_ids(principal, [sid]), sid)
-        {visible?, Map.put(seen, sid, visible?)}
+        entry = Map.get(seats(principal, [sid]), sid, {false, false})
+        {elem(entry, 0), Map.put(seen, sid, entry)}
     end
   end
 
-  # One read for the batch: managed sessions are visible, a registered-host
-  # session takes the seat (asked once per workspace), a missing row is not.
   defp visible_ids(principal, ids) do
+    for {id, {true, _host?}} <- seats(principal, ids), into: MapSet.new(), do: id
+  end
+
+  # One read for the batch, `id => {visible?, host?}`: managed sessions are
+  # visible, a registered-host session takes the seat (asked once per
+  # workspace), a missing row is absent (callers treat it as not visible).
+  defp seats(principal, ids) do
     uuids = for id <- Enum.uniq(ids), {:ok, uuid} <- [Ecto.UUID.cast(id)], do: uuid
 
     from(s in Session,
@@ -132,9 +172,9 @@ defmodule BarkparkWeb.ChatFleetSeat do
       select: {s.id, s.execution_target, s.owner_workspace_id}
     )
     |> Repo.all()
-    |> Enum.reduce({MapSet.new(), %{}}, fn {id, target, ws}, {visible, seats} ->
+    |> Enum.reduce({%{}, %{}}, fn {id, target, ws}, {acc, seats} ->
       {seated?, seats} = seat(principal, target, ws, seats)
-      {if(seated?, do: MapSet.put(visible, id), else: visible), seats}
+      {Map.put(acc, id, {seated?, target == "registered_host"}), seats}
     end)
     |> elem(0)
   end
