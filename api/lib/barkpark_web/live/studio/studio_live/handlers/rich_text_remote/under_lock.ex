@@ -94,7 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   # The lists whose keyless rows moved under A's page (`KeylessShift`):
   # each rich text of such a list is read as a draw not known, the store
-  # kept and A held (#29178 review, Q2-Q4c and R2r).
+  # kept and A held (#29178 review, Q2-Q4c).
   defp shifted(socket, owners), do: KeylessShift.lists(socket.assigns[:editor_form], owners)
 
   defp list_of(path), do: KeylessShift.list_of(path)

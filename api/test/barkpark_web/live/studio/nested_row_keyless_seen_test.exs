@@ -1,17 +1,15 @@
 defmodule BarkparkWeb.Studio.NestedRowKeylessSeenTest do
   @moduledoc """
-  task-7085fe2cc12fb328 (#29178 review, round 2: J2, J2t, J4c and R2r).
-  Rows with no `_key` go by their index. B puts a keyless row in before
-  A's, or takes one out; A's stale page posts. #29178 read such a post as
-  a draw not known only with no `_bp_rt_seen`, by the indexes of the
-  keyless rows the page drew. A page with bp-rt-remote.js posts
-  `_bp_rt_seen`, and `RichTextRemote.split/3` merged A's words by name,
-  so by index, into B's row with no banner (J2-J4c). A page re-rendered
-  after B's insert drew an entry at every index, the first still with
-  A's draw, so the indexes matched (R2r). A list whose keyless rows moved
-  is now found on both paths, also by a draw that sits at another index
-  in the form: the store is kept and A held. B's edit of a row in place
-  still merges (J7, Q7).
+  task-7085fe2cc12fb328 (#29178 review, round 2: J2, J2t, J4c). Rows with
+  no `_key` go by their index. B puts a keyless row in before A's, or
+  takes one out; A's stale page posts. #29178 read such a post as a draw
+  not known only with no `_bp_rt_seen`, by the indexes of the keyless
+  rows the page drew. A page with bp-rt-remote.js posts `_bp_rt_seen`,
+  and `RichTextRemote.split/3` merged A's words by name, so by index,
+  into B's row with no banner. The same check now reads that post: the
+  store kept, A held. B's edit of a row in place still merges (J7, Q7),
+  and two rows of the same text are read as on main (#29235 review,
+  D1-D5).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -135,6 +133,11 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessSeenTest do
   # The numbers a page with bp-rt-remote.js posts before any push: 0.
   defp seen0(n), do: for(i <- 0..(n - 1), do: "doc[sections][0].items[#{i}].rt|0")
 
+  defp post(a, htmls, owners, true), do: autosave(a, htmls, owners, seen0(length(htmls)))
+  defp post(a, htmls, owners, false), do: autosave(a, htmls, owners)
+
+  defp empty_it, do: %{"_type" => "item", "rt" => []}
+
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
 
   for surface <- [:desk, :studio] do
@@ -188,25 +191,6 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessSeenTest do
       assert html =~ "doc-conflict-banner"
     end
 
-    test "#{surface} R2r: B inserts a keyless row; A's page re-rendered, no seen, adds a paragraph: B's row kept, A held",
-         c do
-      put_items(c, [it("alpha")])
-      a = tab(c, @surface)
-      b_saves(c, a, [it("zed B"), it("alpha")])
-      # Read after the re-render: an entry at each index, the first still
-      # with alpha's draw (its editor sits in an ignored wrapper).
-      owners = page_owners(a)
-      assert length(owners) == 2, "the page did not draw both rows: no test"
-
-      html = autosave(a, ["<p>alpha</p><p>new A</p>", "<p>alpha</p>"], owners)
-
-      assert items_words(stored(c)) == [["zed B"], ["alpha"]],
-             "A's words were merged into B's row: #{inspect(items_words(stored(c)))}"
-
-      assert "doc[sections][0].items[0].rt" in held(a)
-      assert html =~ "doc-conflict-banner"
-    end
-
     test "#{surface} J7: B edits keyless row 1, A's page with seen types in row 0: merged", c do
       put_items(c, [it("alpha"), it("beta")])
       a = tab(c, @surface)
@@ -231,6 +215,85 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessSeenTest do
       assert items_words(stored(c)) == [["alpha A", "omega B"]]
       assert held(a) == []
       refute html =~ @rb
+    end
+  end
+
+  # #29235 review: two keyless rows of the same text (or two empty ones)
+  # are read as main reads them, on both paths.
+  for surface <- [:desk, :studio], seen? <- [true, false] do
+    @surface surface
+    @seen? seen?
+
+    test "#{surface} seen=#{seen?} D1: A alone, two rows of the same text, types in row 0 twice: written",
+         c do
+      put_items(c, [itk("same"), itk("same")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+
+      post(a, ["<p>same A</p>", "<p>same</p>"], owners, @seen?)
+      html = post(a, ["<p>same AA</p>", "<p>same</p>"], owners, @seen?)
+
+      assert items_words(stored(c)) == [["same AA"], ["same"]]
+      assert held(a) == []
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} seen=#{seen?} D2: A alone, two empty rows, types in row 0 twice: written",
+         c do
+      put_items(c, [empty_it(), empty_it()])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+
+      post(a, ["<p>x</p>", ""], owners, @seen?)
+      post(a, ["<p>xy</p>", ""], owners, @seen?)
+
+      assert hd(items_words(stored(c))) == ["xy"]
+      assert held(a) == []
+    end
+
+    test "#{surface} seen=#{seen?} D3: rows of the same text; B edits row 0, A row 1: both kept",
+         c do
+      put_items(c, [itk2("same", "tail"), itk2("same", "tail")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk2("same", "tail B"), itk2("same", "tail")])
+
+      post(a, ["<p>same</p><p>tail</p>", "<p>same A</p><p>tail</p>"], owners, @seen?)
+
+      assert items_words(stored(c)) == [["same", "tail B"], ["same A", "tail"]]
+      assert held(a) == []
+    end
+
+    test "#{surface} seen=#{seen?} D4: rows of the same text; B and A edit two blocks of row 0: merged",
+         c do
+      put_items(c, [itk2("same", "tail"), itk2("same", "tail")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk2("same", "tail B"), itk2("same", "tail")])
+
+      post(a, ["<p>same A</p><p>tail</p>", "<p>same</p><p>tail</p>"], owners, @seen?)
+
+      assert items_words(stored(c)) == [["same A", "tail B"], ["same", "tail"]]
+      assert held(a) == []
+    end
+  end
+
+  # D5 with no seen loses B's words on main too (#29235 review); with seen
+  # it merges.
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    test "#{surface} D5: two empty rows; B types in row 0, A's page with seen in row 1: both kept",
+         c do
+      put_items(c, [empty_it(), empty_it()])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk("b words"), empty_it()])
+
+      autosave(a, ["", "<p>a words</p>"], owners, seen0(2))
+
+      assert items_words(stored(c)) == [["b words"], ["a words"]]
+      assert held(a) == []
     end
   end
 end
