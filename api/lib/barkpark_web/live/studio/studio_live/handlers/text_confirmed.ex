@@ -170,10 +170,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
       else: socket
   end
 
+  # A held rich text stays in the rejoin set: its wrapper draws A's held
+  # words (`RichTextRemote.keep_held`), not the store's, so a redraw caused
+  # by another field (B's save of it, a desk paste) does not end the hold
+  # (task-7234490778404641). A Save or Reload does.
   defp push_rich(socket, form) when is_map(form) do
     case rich_drawn(socket.assigns[:editor_schema], form) do
-      oks when oks == %{} -> socket
-      oks -> socket |> taken(Map.keys(oks)) |> push_event(@event, %{oks: oks})
+      oks when oks == %{} ->
+        socket
+
+      oks ->
+        held = socket.assigns[:editor_rt_held] || %{}
+
+        socket
+        |> taken(Enum.reject(Map.keys(oks), &Map.has_key?(held, &1)))
+        |> push_event(@event, %{oks: oks})
     end
   end
 
