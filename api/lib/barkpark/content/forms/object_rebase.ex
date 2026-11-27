@@ -156,15 +156,21 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # A top-level rich text the post changed, with what the page showed
   # (`seen`, `UnderLock.top/3`), task-fa07c64d344638fb: read as an object's
   # is. Two tabs typing in it wrote the later post over the earlier with no
-  # word. With no `seen` it is written as posted, as before.
+  # word. With no `seen` it is written as posted, as before. A body the
+  # store holds as an HTML string is posted as one, and read as one
+  # (`HtmlBody`, task-bb19ab06ab1e87b2).
   defp top_rich(params, fields, base, theirs, seen) do
     Enum.reduce(fields, params, fn
       %{"name" => key, "type" => "richText"}, acc when is_binary(key) ->
-        with {:ok, was} <- Map.fetch(seen, [key]),
-             {:ok, mine} when is_list(mine) <- Map.fetch(acc, key) do
-          Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
-        else
-          _ -> acc
+        case {Map.fetch(seen, [key]), Map.fetch(acc, key), theirs[key]} do
+          {{:ok, was}, {:ok, mine}, _} when is_list(mine) ->
+            Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
+
+          {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) and is_binary(stored) ->
+            Map.put(acc, key, Barkpark.Content.Forms.HtmlBody.rebase(mine, stored, was))
+
+          _ ->
+            acc
         end
 
       _, acc ->

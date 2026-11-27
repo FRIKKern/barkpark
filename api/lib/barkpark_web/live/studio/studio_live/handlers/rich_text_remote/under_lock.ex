@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   import Phoenix.Component, only: [assign: 2]
 
+  alias Barkpark.Content.Forms.HtmlBody
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
   alias BarkparkWeb.Components.Fields.CompositeField
@@ -420,6 +421,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   defp resolve(s, acts, _name, _page), do: {s, acts}
 
+  # A top-level body the store held as an HTML string (`HtmlBody`,
+  # task-bb19ab06ab1e87b2): the write kept the store over a post typed on
+  # a value it no longer holds, and A is held, as on a block body. Read as
+  # blocks for the hold's view; the store stays a string.
+  defp act(s, acts, {name, [key] = path, was, _page}, {over, _now}, {doc, _posted_doc})
+       when is_map_key(over, key) and is_binary(:erlang.map_get(key, over)) do
+    before = Map.fetch!(over, key)
+    posted = FormPath.get(doc, path)
+
+    if is_binary(posted) and not holds?(acts, name) and HtmlBody.held?(posted, before, was),
+      do: {s, [{:held, name, path, html_hold(posted, before, was)} | drop(acts, name)]},
+      else: {s, acts}
+  end
+
   # A row post whose draw is not known (`was/5`): read against the store it
   # landed on, so A's words the store kept are held, never lost unheld.
   defp act(s, acts, {name, path, :unknown, page}, {over, now}, {doc, _posted_doc}) do
@@ -540,6 +555,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         form = FormPath.put(s.assigns[:editor_form] || %{}, path, after_write)
         acts = [{:merged, name, path, mine || written} | drop(acts, name)]
         {Phoenix.Component.assign(s, editor_form: form), acts}
+    end
+  end
+
+  defp html_hold(posted, before, was) do
+    base = HtmlBody.blocks(if was == :unknown, do: before, else: was)
+    theirs = HtmlBody.blocks(before)
+    mine = PortableText.from_html(posted, base)
+
+    case PortableTextMerge.merge(base, mine, theirs) do
+      {:clash, texts, view} -> {base, theirs, view, texts}
+      {:ok, _merged} -> {base, theirs, mine, nil}
     end
   end
 
