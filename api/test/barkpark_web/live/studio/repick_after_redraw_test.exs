@@ -176,7 +176,7 @@ defmodule BarkparkWeb.Studio.RepickAfterRedrawTest do
   # draws (an undo of A's pick). A's socket takes it, and the redraw has not
   # reached the page: its post of X (drawn old, on the old drawing) is A's
   # stale pick, not a pick on the redrawn widget. The desk keeps B's undo.
-  # (The Studio writes X here on main too: filed apart.)
+  # The Studio too (task-2e3d79fc1480d2db).
   defp undone_before_redraw(c, a, field, x, old, old_form?) do
     picks = page_picks(a)
     post(a, ["doc[#{field}]"], %{picks.doc | field => x.post}, picks)
@@ -192,9 +192,12 @@ defmodule BarkparkWeb.Studio.RepickAfterRedrawTest do
   defp old_ref?(c), do: &(FieldInputs.reference_id(&1) == c.id <> "-old")
   defp old_img?(v), do: FieldInputs.image_form_value(v) =~ "image-old"
 
-  describe "H1 on the desk" do
-    test "desk H1: B undoes A's pick before the redraw; A's body key posts X: B's undo kept", c do
-      a = tab(c, :desk)
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    test "#{@surface} H1: B undoes A's pick before the redraw; A's body key posts X: B's undo kept",
+         c do
+      a = tab(c, @surface)
       {x, _y} = ref_case(c)
       stale = undone_before_redraw(c, a, "reviewer", x, ref(c.id <> "-old"), old_ref?(c))
       body_key(a, "body0 H1", stale)
@@ -202,8 +205,8 @@ defmodule BarkparkWeb.Studio.RepickAfterRedrawTest do
       assert reviewer(c)["_ref"] == c.id <> "-old", "A's stale X was written over B's undo"
     end
 
-    test "desk H1i: the same for an image: B's undo kept", c do
-      a = tab(c, :desk)
+    test "#{@surface} H1i: the same for an image: B's undo kept", c do
+      a = tab(c, @surface)
       {x, _y} = img_case()
       stale = undone_before_redraw(c, a, "cover", x, @old_img, &old_img?/1)
       body_key(a, "body0 H1i", stale)
@@ -213,8 +216,9 @@ defmodule BarkparkWeb.Studio.RepickAfterRedrawTest do
              "A's stale image X was written over B's undo"
     end
 
-    test "desk H1s: B undoes A's pick before the redraw; A presses Save: B's undo kept", c do
-      a = tab(c, :desk)
+    test "#{@surface} H1s: B undoes A's pick before the redraw; A presses Save: B's undo kept",
+         c do
+      a = tab(c, @surface)
       {x, _y} = ref_case(c)
       stale = undone_before_redraw(c, a, "reviewer", x, ref(c.id <> "-old"), old_ref?(c))
       save(a, stale)

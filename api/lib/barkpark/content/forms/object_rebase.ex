@@ -168,13 +168,26 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # (`HtmlBody`, task-bb19ab06ab1e87b2). A Portable Text field the store
   # holds as a string is posted as blocks, and read as such a body is
   # (`HtmlBody.stored_string?/2`, task-49a96a7780dad558).
+  # A post read against an unknown draw (a rejoin) over a field the store
+  # holds no value for: another editor removed it while the page was away.
+  # It stays removed, and A is held (task-7565817187a53934); a legacy HTML
+  # body keeps reading it as `HtmlBody.rebase/3` does.
   defp top_rich(params, fields, base, theirs, seen) do
     Enum.reduce(fields, params, fn
       %{"name" => key, "type" => "richText"} = field, acc when is_binary(key) ->
         case {Map.fetch(seen, [key]), Map.fetch(acc, key), theirs[key]} do
+          {{:ok, :unknown}, {:ok, mine}, nil} ->
+            cond do
+              not HtmlBody.field?(field, nil) -> Map.delete(acc, key)
+              is_binary(mine) -> Map.put(acc, key, HtmlBody.rebase(mine, nil, :unknown))
+              true -> Map.put(acc, key, rich_text(base[key], mine, nil, {:ok, :unknown}))
+            end
+
           {{:ok, was}, {:ok, mine}, stored} when is_list(mine) ->
             cond do
-              not HtmlBody.stored_string?(field, stored) ->
+              # The page showed a string: read by it, also when the store no
+              # longer holds one (removed: task-7565817187a53934).
+              not HtmlBody.stored_string?(field, stored) and not is_binary(was) ->
                 Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
 
               # Read against the exact string: `from_html/1` drops markup
