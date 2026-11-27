@@ -63,6 +63,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
   alias BarkparkWeb.Studio.StudioLive.LeaveAsk
   alias BarkparkWeb.Studio.StudioLive.Paths
+  alias BarkparkWeb.Studio.StudioLive.RejoinForm
 
   defmodule NotFound do
     @moduledoc "Raised for a desk URL that names nothing: its dataset segment is not text."
@@ -122,6 +123,11 @@ defmodule BarkparkWeb.Studio.DeskLive do
       # The same rejoin, for the editor's top-level rich text: read against
       # the digest the page kept (`TextConfirmed.loaded/1`).
       |> assign(:editor_rejoined?, rejoin?(connected?(socket) && get_connect_params(socket)))
+      # The form generation the page's editor was drawn at (`RejoinForm`).
+      |> assign(
+        :editor_rejoin_form,
+        RejoinForm.from_params(connected?(socket) && get_connect_params(socket))
+      )
       |> Bulk.init()
       # The navbar's Tasks sidebar (`TasksPanel`): offered while the Tasks
       # plugin is on for the workspace, closed until its button is pressed.
@@ -270,7 +276,7 @@ defmodule BarkparkWeb.Studio.DeskLive do
     socket =
       if rejoin? and socket.assigns.pending != nil,
         do: socket,
-        else: assign(socket, :editor_rejoined?, false)
+        else: socket |> assign(:editor_rejoined?, false) |> RejoinForm.forget()
 
     case socket.assigns.pending do
       nil ->
