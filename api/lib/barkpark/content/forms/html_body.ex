@@ -14,6 +14,18 @@ defmodule Barkpark.Content.Forms.HtmlBody do
 
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
+  alias Barkpark.Content.RichTextFormat
+
+  @doc """
+  Whether `field`'s stored value `stored` is read this way: a richText
+  whose format the stored value decides (`RichTextFormat`, `:legacy`),
+  holding an HTML string or nothing. Written first into nothing, it is
+  stored as the posted HTML.
+  """
+  def field?(%{"type" => "richText"} = field, stored) when is_binary(stored) or is_nil(stored),
+    do: RichTextFormat.format(field) == :legacy
+
+  def field?(_field, _stored), do: false
 
   @doc """
   Whether two values of the field draw the same: equal strings first, then
