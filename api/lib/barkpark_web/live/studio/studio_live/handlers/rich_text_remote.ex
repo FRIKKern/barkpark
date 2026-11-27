@@ -331,7 +331,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     clash = socket.assigns[:editor_rt_clash] || %{}
 
     assign(socket,
-      editor_form: FormPath.put(socket.assigns[:editor_form] || %{}, path, view),
+      editor_form: put_view(socket.assigns[:editor_form] || %{}, path, view),
       editor_dirty: true,
       editor_unsaved_keys: MapSet.put(socket.assigns[:editor_unsaved_keys] || MapSet.new(), key),
       doc_conflict: true,
@@ -339,6 +339,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ [key]),
       editor_rt_clash: Map.put(clash, name, texts || Map.get(clash, name, []))
     )
+  end
+
+  # The view in the shape the form holds at `path`. A top-level rich text's
+  # form value is the HTML its editor draws (`Content.Forms`); blocks there
+  # draw the read-only field, with no input, so A's held words could not be
+  # edited or saved (task-f69efe9a4365aeb5). An object's or a row's rich
+  # text holds blocks.
+  defp put_view(form, path, view) do
+    case FormPath.get(form, path) do
+      html when is_binary(html) and is_list(view) ->
+        FormPath.put(form, path, PortableText.to_html(view))
+
+      _ ->
+        FormPath.put(form, path, view)
+    end
   end
 
   # A new number for the view; the hold, and the log, read a post against
