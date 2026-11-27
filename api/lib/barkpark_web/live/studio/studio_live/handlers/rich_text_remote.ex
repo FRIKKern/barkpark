@@ -301,8 +301,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   def hold(socket, []), do: socket
 
   def hold(socket, acts) do
-    raw = socket.assigns[:editor_rt_held_raw] || %{}
-    socket = if raw == %{}, do: socket, else: assign(socket, editor_rt_held_raw: %{})
+    strings = socket.assigns[:editor_rt_held_raw] || %{}
+    socket = if strings == %{}, do: socket, else: assign(socket, editor_rt_held_raw: %{})
 
     Enum.reduce(Enum.reverse(acts), socket, fn
       {:current, name}, s ->
@@ -328,15 +328,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       {:held, name, path, {base, theirs, view, texts}}, s ->
         s
         |> keep_held(name, path, view, texts)
-        |> send_view(name, {base, theirs, view}, raw(raw, name, theirs))
+        |> send_view(name, {base, theirs, view}, held_string(strings, name, theirs))
     end)
   end
 
   # The HTML string a hold's `theirs` (its blocks) was read from
   # (`UnderLock.html_act`), kept with the hold: a resolve reads A's post
   # against it byte for byte (task-d9ffbd2e6639496b).
-  defp raw(raw, name, theirs) do
-    case raw do
+  defp held_string(strings, name, theirs) do
+    case strings do
       %{^name => string} -> if HtmlBody.blocks(string) == theirs, do: string
       _ -> nil
     end
@@ -386,11 +386,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   # A new number for the view; the hold, and the log, read a post against
   # the base A typed on (never A's own earlier post: review blocker 1).
-  defp send_view(socket, name, {base, theirs, view}, raw \\ nil) do
+  defp send_view(socket, name, {base, theirs, view}, string \\ nil) do
     {socket, seq} = next_seq(socket)
     holds = socket.assigns[:editor_rt_held] || %{}
     hold = %{seq: seq, base: base, theirs: theirs, view: view}
-    hold = if is_binary(raw), do: Map.put(hold, :raw, raw), else: hold
+    hold = if is_binary(string), do: Map.put(hold, :raw, string), else: hold
 
     socket
     |> log(name, {seq, base, theirs})
