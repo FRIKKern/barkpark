@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   @doc """
   `values/3`, with the owner `_key` each object rich text's editor was drawn
-  under, as the post carries it (`_bp_rt_owner[]`, `[name, key, digest]` as
+  under, as the post carries it (`_bp_rt_owner[]`, `[name, key, digest, outer keys]` as
   JSON). A value `remounted/3` took under a new owner key is what the page
   shows only when the post names that key and that value's digest
   (task-c0a696a3a5a3900d): a post typed on the old mount, still in
@@ -209,7 +209,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp owner(owners, name) when is_list(owners) do
     Enum.find_value(owners, :error, fn entry ->
       case entry(entry) do
-        {^name, key, digest} -> {:ok, key, digest}
+        {^name, key, digest, _outer} -> {:ok, key, digest}
         _ -> nil
       end
     end)
@@ -217,12 +217,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   defp owner(_owners, _name), do: :error
 
+  # A row's entry also names the `_key` of each row on the way, its own left
+  # out (`RowDraws.outer_keys/2`, an index for a keyless one); a page drawn
+  # before posts none, read as `:any`.
   defp entry(entry) when is_binary(entry) do
     case Jason.decode(entry) do
-      {:ok, [name, key, digest]}
+      {:ok, [name, key, digest | rest]}
       when is_binary(name) and (is_binary(key) or is_nil(key)) and
              (is_binary(digest) or is_integer(digest)) ->
-        {name, to_string(key), digest}
+        case rest do
+          [] -> {name, to_string(key), digest, :any}
+          [outer] when is_list(outer) -> {name, to_string(key), digest, outer}
+          _ -> nil
+        end
 
       _ ->
         nil
@@ -232,33 +239,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp entry(_entry), do: nil
 
   # A row's owner entry, matched to the row the form holds at `path` by its
-  # `_key`: the entry of its input name where that names the row's key, else
-  # the one entry of that name with other indexes that does. A post sent
-  # before the page drew another's insert or move names the row by the
-  # index it was drawn at, and the fold (`Fields.fold_dot_paths/2`) put its
-  # text into the row of its `_key`: matched by index, the row was not read
-  # under the lock and A's text was written over another's edit of it
-  # (task-46bcc2dfb805acce). Two entries of one shape and key name none.
+  # `_key` and the keys of the rows on the way: the entry of its input name
+  # where those name the row, else the one entry of that name with other
+  # indexes that does. A post sent before the page drew another's insert or
+  # move names the row by the index it was drawn at, and the fold
+  # (`Fields.fold_dot_paths/2`) put its text into the row of its `_key`:
+  # matched by index, the row was not read under the lock and A's text was
+  # written over another's edit of it (task-46bcc2dfb805acce). Matched by
+  # the inner key alone, two sections whose items share a key (a duplicated
+  # section) swapped named each other's draw, and A was held
+  # (task-1a748ef7bc04ae49). Two entries of one shape and keys name none.
   defp row_owner(socket, owners, name, path) do
     form = socket.assigns[:editor_form] || %{}
     key = to_string(key(FormPath.get(form, Enum.drop(path, -1))))
+    outer = RowDraws.outer_keys(form, path)
+    shape = shape(name)
 
-    case owner(owners, name) do
-      {:ok, ^key, _digest} = found ->
-        found
+    found =
+      for entry <- List.wrap(owners),
+          {other, ^key, digest, at} <- [entry(entry)],
+          at in [:any, outer],
+          shape(other) == shape,
+          do: {other, digest}
 
-      _ ->
-        shape = shape(name)
+    case List.keyfind(found, name, 0) do
+      {_, digest} ->
+        {:ok, key, digest}
 
-        found =
-          for entry <- List.wrap(owners),
-              {other, ^key, digest} <- [entry(entry)],
-              shape(other) == shape,
-              uniq: true,
-              do: {:ok, key, digest}
-
-        case found do
-          [one] -> one
+      nil ->
+        case found |> Enum.map(&elem(&1, 1)) |> Enum.uniq() do
+          [digest] -> {:ok, key, digest}
           _ -> :error
         end
     end
