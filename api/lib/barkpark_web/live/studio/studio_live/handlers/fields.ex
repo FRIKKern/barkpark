@@ -343,14 +343,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
     # A rich text still held from before (`:still`) is not saved either: no
     # "Saved" beside its banner (#28832 review, N1).
-    rich_held? = Enum.any?(held, &(match?({:held, _, _, _}, &1) or match?({:still, _, _}, &1)))
+    rich_held =
+      for({:held, name, _, _} <- held, do: name) ++ for({:still, name, _} <- held, do: name)
 
     socket =
       written
       |> assign(editor_field_bases: %{}, editor_text_under_lock: nil, editor_rt_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
-    {:noreply, saved} = do_saved(socket, text_held, rich_held? or typed != [], params)
+    {:noreply, saved} = do_saved(socket, text_held, {rich_held, typed != []}, params)
 
     # The page is told what landed during the Save; a field held here
     # (under the lock, or by `TextRejoin`) is left out: its hold draws it.
@@ -365,15 +366,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {TextRejoin.hold(saved, typed, :save), held}
   end
 
-  defp do_saved(socket, text_held, rich_held?, params) do
+  # `{rich_held, typed?}`: the rich texts the Save holds, and whether
+  # `TextRejoin` held a field.
+  defp do_saved(socket, text_held, {rich_held, typed?}, params) do
     case socket.assigns[:save_status] do
-      "Saved" when text_held != [] or rich_held? ->
+      "Saved" when text_held != [] or rich_held != [] or typed? ->
         # The store kept another editor's words over a field of the Save:
         # the rest is saved; that field holds A's words, unsaved, with the
-        # banner, as an autosave holds it.
+        # banner, as an autosave holds it. A rich text held here is left
+        # out of the redraw's digests: the page keeps A's words there.
         {:noreply,
          socket
          |> Shared.rebuild_panes()
+         |> TextConfirmed.redrawn(socket, rich_held)
          |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
          |> HeldFields.drop_paths()
          |> Shared.assign_page_title()

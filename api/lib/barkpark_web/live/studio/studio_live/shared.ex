@@ -25,7 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues, TextConfirmed}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, PostPath, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
@@ -969,7 +969,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       case action.(doc, type) do
         {:ok, _} ->
           {:noreply,
-           socket |> put_flash(:info, with_advisories(msg, Warnings.drain())) |> rebuild_panes()}
+           socket
+           |> put_flash(:info, with_advisories(msg, Warnings.drain()))
+           |> rebuild_panes()
+           |> TextConfirmed.redrawn(socket)}
 
         {:error, {:halted, reason}} ->
           {:noreply,
@@ -1353,6 +1356,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       |> assign(selected_doc_ids: MapSet.new())
       |> put_flash(:info, with_advisories(flash, advisories))
       |> rebuild_panes()
+      |> TextConfirmed.redrawn(socket)
     end
   end
 
