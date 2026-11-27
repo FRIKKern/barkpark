@@ -1,15 +1,13 @@
 defmodule BarkparkWeb.Studio.NestedRowMovedRepostTest do
   @moduledoc """
-  task-3422ba9e403f8b75, #29180 review round 2. A's words held at a row
-  another editor moved (or at a Duplicate copy of it) stay held on the
-  posts that follow. The hold put A's view in the form at the moved path;
-  the next post from A's stale page names the old path, so nothing read
-  the held name, and the fold seeded the array from the form with A's
-  view in it: written over the store (F1.1), over B's later save (F4), or
-  into the copy (F8). A held path a post does not carry now gets the
-  stored value. A post on the shown view, Reload, a Save and a title-only
-  post behave as before (F2, F3, F5, F9), and so does a hold in place
-  (F10).
+  task-3422ba9e403f8b75, #29180 and #29223 reviews. A's words typed in a
+  row another editor moved under another parent are shown in the banner,
+  never written there and never held. A hold at the moved row froze A's
+  form, so A's next stale post wrote the old rows back over B's later
+  change: B's removal undone (G3), B's new row lost (G3b, G4), B's move
+  undone (G4b), B's second save lost (F4), A's words written into a
+  Duplicate copy (F8). Each now keeps B's change, as main does, and the
+  banner still shows A's words.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -20,6 +18,7 @@ defmodule BarkparkWeb.Studio.NestedRowMovedRepostTest do
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @moduletag :studio_live
+  @lost "Your text was in a row another editor moved or removed. Copy it before you reload."
 
   defp rt, do: %{"name" => "rt", "title" => "rt", "type" => "richText"}
 
@@ -127,198 +126,135 @@ defmodule BarkparkWeb.Studio.NestedRowMovedRepostTest do
     })
   end
 
-  defp holds(a), do: :sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{}
-
-  defp seen_autosave(a, sections, owners, seen) do
-    params = a |> post_params(sections, owners) |> Map.put("_bp_rt_seen", seen)
-    render_hook(a, "autosave", params)
-  end
-
-  defp save(a, sections, owners) do
-    params = a |> post_params(sections, owners) |> Map.delete("_target")
-    a |> element("#editor-form") |> render_submit(params)
-  end
-
-  defp title_only(a) do
-    %{editor_doc: d, dataset: ds} = :sys.get_state(a.pid).socket.assigns
-
-    render_hook(a, "autosave", %{
-      "doc" => %{"title" => "T1"},
-      "_target" => ["doc", "title"],
-      "_bp_doc" => PostIdentity.value(ds, d.type, d.doc_id)
-    })
+  # A's words the banner shows as A's.
+  defp mine(view) do
+    ~r/<blockquote[^>]*data-version="mine"[^>]*>(.*?)<\/blockquote>/s
+    |> Regex.scan(render(view))
+    |> Enum.map(fn [_, text] -> String.trim(text) end)
   end
 
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
-
-  defp held_words(a, path), do: words(get_in(form(a), path))
 
   defp two, do: [sec("s1", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])]
   defp moved, do: [sec("s1", []), sec("s2", [it("i2", "beta"), it("i1", "alpha")])]
   defp copied, do: [sec("s1", []), sec("s1x", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])]
   defp stale, do: [{"s1", [{"i1", "<p>alpha A</p>"}]}, {"s2", [{"i2", "<p>beta</p>"}]}]
 
-  @moved_at "doc[sections][1].items[1].rt"
-  defp moved_path, do: ["sections", Access.at(1), "items", Access.at(1), "rt"]
+  # A types in i1, B moves it into s2, A's stale page posts: the banner.
+  defp moved_banner(c, surface) do
+    put_doc(c, two())
+    a = tab(c, surface)
+    owners = page_owners(a)
+    b_saves(c, a, moved())
+    html = autosave(a, stale(), owners)
+    assert html =~ @lost, "A's words were not in the banner: no test"
+    {a, owners}
+  end
+
+  defp banner_shows_a(a, html) do
+    assert html =~ @lost
+    assert mine(a) == ["alpha A"]
+    assert held(a) == []
+  end
 
   for surface <- [:desk, :studio] do
     @surface surface
 
-    test "#{surface} F1.1: held at the moved row; A's stale page posts again: still held, never written",
+    test "#{surface} F1.1: A's stale page posts again: nothing written, the banner still shows A's words",
          c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, moved())
-      autosave(a, stale(), owners)
+      {a, owners} = moved_banner(c, @surface)
 
       html = autosave(a, stale(), owners)
 
-      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha"]}]}],
-             "A's held words were written: #{inspect(shape(stored(c)))}"
+      assert shape(stored(c)) == shape(%{"sections" => moved()}),
+             "A's words were written: #{inspect(shape(stored(c)))}"
 
-      assert held(a) == [@moved_at]
-      assert held_words(a, moved_path()) == ["alpha A"]
-      assert html =~ "doc-conflict-banner"
-
-      autosave(
-        a,
-        [{"s1", [{"i1", "<p>alpha A more</p>"}]}, {"s2", [{"i2", "<p>beta</p>"}]}],
-        owners
-      )
-
-      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha"]}]}]
+      banner_shows_a(a, html)
     end
 
-    test "#{surface} F4: held at the moved row; B saves it again; A's stale page posts: B's save kept",
+    test "#{surface} G3: B then removes i1; A's stale page posts twice: B's removal kept", c do
+      {a, owners} = moved_banner(c, @surface)
+      b_saves(c, a, [sec("s1", []), sec("s2", [it("i2", "beta")])])
+
+      autosave(a, stale(), owners)
+      html = autosave(a, stale(), owners)
+
+      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}]}],
+             "B's removal was undone: #{inspect(shape(stored(c)))}"
+
+      banner_shows_a(a, html)
+    end
+
+    test "#{surface} G3b: B then removes i1 and adds i9; A's stale page posts: i9 kept", c do
+      {a, owners} = moved_banner(c, @surface)
+      b_saves(c, a, [sec("s1", []), sec("s2", [it("i2", "beta"), it("i9", "nine")])])
+
+      html = autosave(a, stale(), owners)
+
+      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i9", ["nine"]}]}],
+             "B's new row was lost: #{inspect(shape(stored(c)))}"
+
+      banner_shows_a(a, html)
+    end
+
+    test "#{surface} G4: B then inserts i0 before i2; A's stale page posts twice: every row kept",
          c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, moved())
+      {a, owners} = moved_banner(c, @surface)
+
+      b_saves(c, a, [
+        sec("s1", []),
+        sec("s2", [it("i0", "zero"), it("i2", "beta"), it("i1", "alpha")])
+      ])
+
+      autosave(a, stale(), owners)
+      html = autosave(a, stale(), owners)
+
+      assert shape(stored(c)) == [
+               {"s1", []},
+               {"s2", [{"i0", ["zero"]}, {"i2", ["beta"]}, {"i1", ["alpha"]}]}
+             ],
+             "B's insert was lost: #{inspect(shape(stored(c)))}"
+
+      banner_shows_a(a, html)
+    end
+
+    test "#{surface} G4b: B then moves i1 back to s1; A's stale page posts: B's move kept, A's edit in place",
+         c do
+      {a, owners} = moved_banner(c, @surface)
+      b_saves(c, a, two())
+
       autosave(a, stale(), owners)
 
-      b2 = [sec("s1", []), sec("s2", [it("i2", "beta"), it("i1", "alpha B2")])]
-      put_doc(c, b2)
+      assert shape(stored(c)) == [{"s1", [{"i1", ["alpha A"]}]}, {"s2", [{"i2", ["beta"]}]}],
+             "B's move was undone: #{inspect(shape(stored(c)))}"
+    end
 
-      assert eventually(fn ->
-               assigns = :sys.get_state(a.pid).socket.assigns
-               inspect(assigns, limit: :infinity, printable_limit: :infinity) =~ "alpha B2"
-             end),
-             "A's socket did not hear B's second save: no test"
+    test "#{surface} F4: B then saves i1 again; A's stale page posts: B's second save kept", c do
+      {a, owners} = moved_banner(c, @surface)
+      b_saves(c, a, [sec("s1", []), sec("s2", [it("i2", "beta"), it("i1", "alpha B2")])])
 
       html = autosave(a, stale(), owners)
 
       assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha B2"]}]}],
              "B's second save was lost: #{inspect(shape(stored(c)))}"
 
-      assert @moved_at in held(a)
-      assert html =~ "doc-conflict-banner"
+      banner_shows_a(a, html)
     end
 
-    test "#{surface} F8: held at a Duplicate copy; A's stale page posts again: the copy kept",
+    test "#{surface} F8: B duplicates s1 and removes the original i1; A's stale page posts twice: the copy kept",
          c do
       put_doc(c, two())
       a = tab(c, @surface)
       owners = page_owners(a)
       b_saves(c, a, copied())
-      autosave(a, stale(), owners)
 
+      autosave(a, stale(), owners)
       html = autosave(a, stale(), owners)
 
-      assert shape(stored(c)) == [
-               {"s1", []},
-               {"s1x", [{"i1", ["alpha"]}]},
-               {"s2", [{"i2", ["beta"]}]}
-             ],
+      assert shape(stored(c)) == shape(%{"sections" => copied()}),
              "A's words were written into the copy: #{inspect(shape(stored(c)))}"
 
-      assert held(a) == ["doc[sections][1].items[0].rt"]
-      assert html =~ "doc-conflict-banner"
-    end
-
-    test "#{surface} F2: held at the moved row; A types on the view it was shown: written, hold ends",
-         c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, moved())
-      autosave(a, stale(), owners)
-      %{seq: seq} = holds(a)[@moved_at]
-
-      seen_autosave(
-        a,
-        [{"s1", []}, {"s2", [{"i2", "<p>beta</p>"}, {"i1", "<p>alpha A Z</p>"}]}],
-        page_owners(a),
-        [@moved_at <> "|#{seq}"]
-      )
-
-      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha A Z"]}]}]
-      assert held(a) == []
-    end
-
-    test "#{surface} F3: held at a Duplicate copy; Reload ends the hold; a stale post is held again",
-         c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, copied())
-      autosave(a, stale(), owners)
-
-      a |> element("[phx-click=reload-remote-doc]") |> render_click()
-
-      assert held(a) == []
-      assert shape(form(a)) == shape(%{"sections" => copied()})
-      refute render(a) =~ "doc-conflict-banner"
-
-      autosave(a, stale(), owners)
-
-      assert shape(stored(c)) == shape(%{"sections" => copied()})
-      assert held(a) == ["doc[sections][1].items[0].rt"]
-    end
-
-    test "#{surface} F5: a Save from the stale page holds A at the moved row, never written", c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, moved())
-
-      save(a, stale(), owners)
-
-      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha"]}]}]
-      assert held(a) == [@moved_at]
-    end
-
-    test "#{surface} F9: held at the moved row; a title-only post: the row kept, still held",
-         c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, moved())
-      autosave(a, stale(), owners)
-
-      title_only(a)
-
-      assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha"]}]}]
-      assert held(a) == [@moved_at]
-    end
-
-    test "#{surface} F10: a hold in place; a stale re-post and a title-only post: B kept, still held",
-         c do
-      put_doc(c, two())
-      a = tab(c, @surface)
-      owners = page_owners(a)
-      b_saves(c, a, [sec("s1", [it("i1", "alpha B")]), sec("s2", [it("i2", "beta")])])
-      autosave(a, stale(), owners)
-      assert held(a) == ["doc[sections][0].items[0].rt"]
-
-      autosave(a, stale(), owners)
-      assert shape(stored(c)) == [{"s1", [{"i1", ["alpha B"]}]}, {"s2", [{"i2", ["beta"]}]}]
-      assert held(a) == ["doc[sections][0].items[0].rt"]
-
-      title_only(a)
-      assert shape(stored(c)) == [{"s1", [{"i1", ["alpha B"]}]}, {"s2", [{"i2", ["beta"]}]}]
-      assert held(a) == ["doc[sections][0].items[0].rt"]
+      banner_shows_a(a, html)
     end
   end
 end

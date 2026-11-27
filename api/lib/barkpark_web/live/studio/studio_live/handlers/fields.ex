@@ -265,8 +265,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def save(_params, socket), do: {:noreply, socket}
 
-  # The fold's re-targeted row leaves, `[{input name, path, value}]`.
-  @moved "_bp_rt_moved"
+  # The fold's dropped row leaves, `[{input name, value}]` (`fold_dot_paths/2`).
+  @dropped "_bp_rt_dropped"
 
   defp save_open(params, socket) do
     params = PostIdentity.no_marks(params)
@@ -318,20 +318,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> RichTextRemote.hold(held)
          |> TextConfirmed.paused(rich)
          |> row_draws()
-         |> moved_rows(folded, params)}
+         |> dropped(folded, params)}
 
       _ ->
         {:noreply, socket}
     end
   end
 
-  defp moved_rows(socket, folded, params),
-    do:
-      RichTextRemote.MovedRows.hold(
-        socket,
-        Map.get(folded, @moved, []),
-        params["_bp_rt_owner"]
-      )
+  defp dropped(socket, folded, params) do
+    folded
+    |> Map.get(@dropped, [])
+    |> RichTextRemote.DroppedRows.typed(params["_bp_rt_owner"])
+    |> then(&RichTextRemote.DroppedRows.keep(socket, &1))
+  end
 
   # As an autosave: each free-text field of the Save is merged onto the
   # store from the base the page reports, and read again under the lock
@@ -707,7 +706,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> RichTextRemote.hold(held)
          |> TextConfirmed.paused(rich)
          |> row_draws()
-         |> moved_rows(folded, params)}
+         |> dropped(folded, params)}
 
       _ ->
         {:noreply, socket}
@@ -803,28 +802,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
 
-      {doc, moved, written} =
-        Enum.reduce(dotted, {doc, [], MapSet.new()}, fn {key, value}, {acc, moved, written} ->
-          case leaf_path(key, row_keys, base_form) do
-            {:ok, path} ->
-              {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), moved,
-               MapSet.put(written, path)}
-
-            {:moved, path} ->
-              {acc, [{key, path, value} | moved], written}
-
-            _ ->
-              {acc, moved, written}
+      {doc, dropped} =
+        Enum.reduce(dotted, {doc, []}, fn {key, value}, {acc, dropped} ->
+          with [_ | _] = path <- StudioLive.parse_path(key),
+               {:ok, path} <- row_path(path, row_keys, base_form) do
+            {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), dropped}
+          else
+            :drop -> {acc, [{key, value} | dropped]}
+            _ -> {acc, dropped}
           end
         end)
 
-      # A row found under another parent is never written: its rich texts
-      # A typed in are held there (`RichTextRemote.MovedRows`). A held row
-      # rich text the post did not carry keeps the stored value, not the
-      # view the seeded root took from the form.
+      # A row's leaves with no row to go to under its parent (another
+      # editor moved it elsewhere or removed it): never written, and A's
+      # words typed in one are shown in the banner (`RichTextRemote.DroppedRows`).
       rest
-      |> Map.put("doc", RichTextRemote.MovedRows.stored_at_holds(doc, socket, written))
-      |> then(&if(moved == [], do: &1, else: Map.put(&1, @moved, Enum.reverse(moved))))
+      |> Map.put("doc", doc)
+      |> then(&if(dropped == [], do: &1, else: Map.put(&1, @dropped, Enum.reverse(dropped))))
     end
   end
 
@@ -835,9 +829,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # out, so the next one moved up) names its rows by the old indexes: its
   # `rows[0]` was the row taken out, and its leaves were written over the row
   # now at 0, `_key` and all. Each row the post names a `_key` for is written
-  # at the index that row has now. A row found under another parent
-  # (`moved/3`) is held there, not written; a row the editor no longer holds
-  # is dropped, never written into another. A row posted with no `_key` is
+  # at the index that row has now; a row the editor no longer holds is
+  # dropped, never written into another. A row posted with no `_key` is
   # written by index, as before.
   defp posted_row_keys(dotted) do
     for {name, key} <- dotted,
@@ -862,14 +855,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
          rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
       case row_index(rows, key, i) do
-        nil ->
-          case moved(form, Enum.reverse(posted), key) do
-            {:ok, at} -> moved_path(row_path(rest, posted, Enum.reverse(at), ctx))
-            :error -> :drop
-          end
-
-        j ->
-          row_path(rest, posted, [j | now], ctx)
+        nil -> :drop
+        j -> row_path(rest, posted, [j | now], ctx)
       end
     else
       _ -> row_path(rest, posted, [i | now], ctx)
@@ -893,45 +880,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       end
     end
   end
-
-  defp leaf_path(key, row_keys, base_form) do
-    case StudioLive.parse_path(key) do
-      [_ | _] = path -> row_path(path, row_keys, base_form)
-      _ -> :error
-    end
-  end
-
-  defp moved_path({:ok, path}), do: {:moved, path}
-  defp moved_path(other), do: other
-
-  # A row whose list no longer holds its `_key`: another editor moved it
-  # under another parent (task-3422ba9e403f8b75), or Duplicate copied it
-  # with its `_key` and the original is gone (#29180 review, P1b): the post
-  # cannot tell. Its leaves name the one row of that field shape (the posted
-  # path, any indexes) that holds the key, `{:moved, path}`, and are never
-  # written there: A's typed rich texts are held in it. None, or two:
-  # dropped.
-  defp moved(form, posted, key) do
-    shape = Enum.map(posted, &if(is_integer(&1), do: :row, else: &1))
-
-    case for({at, %{"_key" => ^key}} <- rows_of(form, shape, []), do: at) do
-      [at] -> {:ok, at}
-      _ -> :error
-    end
-  end
-
-  defp rows_of(value, [], at), do: [{Enum.reverse(at), value}]
-
-  defp rows_of(rows, [:row | rest], at) when is_list(rows) do
-    rows
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {row, i} -> rows_of(row, rest, [i | at]) end)
-  end
-
-  defp rows_of(%{} = value, [seg | rest], at) when is_binary(seg),
-    do: rows_of(Map.get(value, seg), rest, [seg | at])
-
-  defp rows_of(_value, _shape, _at), do: []
 
   defp form_at(form, path) do
     Enum.reduce_while(path, form, fn

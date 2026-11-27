@@ -3,11 +3,11 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
   task-3422ba9e403f8b75 (#29164 review, E13). B moves item i1 from section
   s1 to s2; A's page, not yet redrawn, types in i1 under s1. The fold
   (`Fields.row_path/4`) found no i1 in s1 and dropped A's words with no
-  banner. The one row of that field shape that holds i1 now gets A's words
-  as a hold, with the banner, never written: it may be a copy Duplicate
-  made with the same `_key` while B removed the original (#29180 review,
-  P1b-P1d), and the post cannot tell. Two rows of that key: dropped, as
-  before.
+  banner. They are still never written where i1 landed: it may be a copy
+  Duplicate made with the same `_key` while B removed the original
+  (#29180 review, P1b-P1d), and a hold there froze A's form over B's later
+  saves (#29223 review, G3-G4b). A's words are shown in the banner, as for
+  a row B removed (`RichTextRemote.DroppedRows`), and nothing else changes.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @moduletag :studio_live
+  @lost "Your text was in a row another editor moved or removed. Copy it before you reload."
 
   defp rt, do: %{"name" => "rt", "title" => "rt", "type" => "richText"}
 
@@ -127,12 +128,17 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
 
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
 
-  defp held_words(a, path), do: words(get_in(form(a), path))
+  # A's words the banner shows as A's.
+  defp mine(view) do
+    ~r/<blockquote[^>]*data-version="mine"[^>]*>(.*?)<\/blockquote>/s
+    |> Regex.scan(render(view))
+    |> Enum.map(fn [_, text] -> String.trim(text) end)
+  end
 
   for surface <- [:desk, :studio] do
     @surface surface
 
-    test "#{surface} E13: B moves i1 from s1 to s2; A's old page types in i1: held at the moved row, nothing lost",
+    test "#{surface} E13: B moves i1 from s1 to s2; A's old page types in i1: A's words in the banner, nothing written",
          c do
       put_doc(c, [sec("s1", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])])
       a = tab(c, @surface)
@@ -146,16 +152,15 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
           owners
         )
 
-      # Before: A's words dropped, no banner.
-      assert held(a) == ["doc[sections][1].items[1].rt"],
-             "A's words were not held: #{inspect(held(a))}"
-
-      assert held_words(a, ["sections", Access.at(1), "items", Access.at(1), "rt"]) == ["alpha A"]
-      assert html =~ "doc-conflict-banner"
       assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha"]}]}]
+      # Before: A's words dropped, no banner.
+      assert html =~ "doc-conflict-banner", "A's words were dropped with no banner"
+      assert html =~ @lost
+      assert mine(a) == ["alpha A"]
+      assert held(a) == []
     end
 
-    test "#{surface} E13, B also edits i1: B kept, A held", c do
+    test "#{surface} E13, B also edits i1: B kept, A's words in the banner", c do
       put_doc(c, [sec("s1", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])])
       a = tab(c, @surface)
       owners = page_owners(a)
@@ -171,12 +176,12 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
       assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta"]}, {"i1", ["alpha B"]}]}],
              "A's post was written over B's edit: #{inspect(shape(stored(c)))}"
 
-      assert held(a) == ["doc[sections][1].items[1].rt"]
-      assert held_words(a, ["sections", Access.at(1), "items", Access.at(1), "rt"]) == ["alpha A"]
-      assert html =~ "doc-conflict-banner"
+      assert html =~ @lost
+      assert mine(a) == ["alpha A"]
+      assert held(a) == []
     end
 
-    test "#{surface} E13, A did not type in i1: nothing held, nothing written", c do
+    test "#{surface} E13, A did not type in i1: no banner, nothing written", c do
       put_doc(c, [sec("s1", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])])
       a = tab(c, @surface)
       owners = page_owners(a)
@@ -190,14 +195,14 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
         )
 
       assert shape(stored(c)) == [{"s1", []}, {"s2", [{"i2", ["beta A"]}, {"i1", ["alpha"]}]}]
-      assert held(a) == []
+      assert mine(a) == []
       refute html =~ "doc-conflict-banner"
     end
 
     # #29180 review: Duplicate re-keys the section, not its items, so the
     # copy's i1 has the original's `_key`. With the original gone, the one
-    # i1 left is the copy: A's words are held there, never written into it.
-    test "#{surface} P1b: B duplicates s1 and removes the original i1; A types in it: the copy kept, A held",
+    # i1 left is the copy: A's words are never written into it.
+    test "#{surface} P1b: B duplicates s1 and removes the original i1; A types in it: the copy kept, A's words in the banner",
          c do
       put_doc(c, [sec("s1", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])])
       a = tab(c, @surface)
@@ -223,11 +228,12 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
              ],
              "A's words were written into the copy: #{inspect(shape(stored(c)))}"
 
-      assert held(a) == ["doc[sections][1].items[0].rt"]
-      assert html =~ "doc-conflict-banner"
+      assert html =~ @lost
+      assert mine(a) == ["alpha A"]
+      assert held(a) == []
     end
 
-    test "#{surface} P1c: A drew the copy before the original; B removes the original i1: the copy kept, A held",
+    test "#{surface} P1c: A drew the copy before the original; B removes the original i1: the copy kept, A's words in the banner",
          c do
       put_doc(c, [
         sec("s1x", [it("i1", "alpha")]),
@@ -262,11 +268,12 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
              ],
              "A's words were written into the copy: #{inspect(shape(stored(c)))}"
 
-      assert held(a) == ["doc[sections][0].items[0].rt"]
-      assert html =~ "doc-conflict-banner"
+      assert html =~ @lost
+      assert mine(a) == ["alpha A"]
+      assert held(a) == []
     end
 
-    test "#{surface} P1d: A's page posts only the section it typed in; B removed the original i1: the copy kept, A held",
+    test "#{surface} P1d: A's page posts only the section it typed in; B removed the original i1: the copy kept, A's words in the banner",
          c do
       put_doc(c, [
         sec("s1", [it("i1", "alpha"), it("i3", "gamma")]),
@@ -282,11 +289,12 @@ defmodule BarkparkWeb.Studio.NestedRowMovedTest do
       assert shape(stored(c)) == [{"s1", [{"i3", ["gamma"]}]}, {"s1x", [{"i1", ["alpha"]}]}],
              "A's words were written into the copy: #{inspect(shape(stored(c)))}"
 
-      assert held(a) == ["doc[sections][1].items[0].rt"]
-      assert html =~ "doc-conflict-banner"
+      assert html =~ @lost
+      assert mine(a) == ["alpha A"]
+      assert held(a) == []
     end
 
-    test "#{surface} two rows of i1 now: nothing written into either, as before", c do
+    test "#{surface} two rows of i1 now: nothing written into either", c do
       put_doc(c, [
         sec("s1", [it("i1", "alpha")]),
         sec("s2", [it("i2", "beta")]),
