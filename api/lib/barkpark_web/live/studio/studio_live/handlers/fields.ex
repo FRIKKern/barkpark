@@ -810,9 +810,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # out, so the next one moved up) names its rows by the old indexes: its
   # `rows[0]` was the row taken out, and its leaves were written over the row
   # now at 0, `_key` and all. Each row the post names a `_key` for is written
-  # at the index that row has now; a row the editor no longer holds is
-  # dropped, never written into another. A row posted with no `_key` is
-  # written by index, as before.
+  # at the index that row has now, or under the parent another editor moved
+  # it to (`moved/3`); a row the editor no longer holds is dropped, never
+  # written into another. A row posted with no `_key` is written by index,
+  # as before.
   defp posted_row_keys(dotted) do
     for {name, key} <- dotted,
         is_binary(key),
@@ -836,8 +837,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
          rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
       case row_index(rows, key, i) do
-        nil -> :drop
-        j -> row_path(rest, posted, [j | now], ctx)
+        nil ->
+          case moved(form, Enum.reverse(posted), key) do
+            {:ok, at} -> row_path(rest, posted, Enum.reverse(at), ctx)
+            :error -> :drop
+          end
+
+        j ->
+          row_path(rest, posted, [j | now], ctx)
       end
     else
       _ -> row_path(rest, posted, [i | now], ctx)
@@ -861,6 +868,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       end
     end
   end
+
+  # A row whose list no longer holds its `_key`: another editor moved it
+  # under another parent (task-3422ba9e403f8b75). Its leaves go to the one
+  # row of that field shape (the posted path, any indexes) that holds the
+  # key, and are read under the lock there; none, or two: dropped.
+  defp moved(form, posted, key) do
+    shape = Enum.map(posted, &if(is_integer(&1), do: :row, else: &1))
+
+    case for({at, %{"_key" => ^key}} <- rows_of(form, shape, []), do: at) do
+      [at] -> {:ok, at}
+      _ -> :error
+    end
+  end
+
+  defp rows_of(value, [], at), do: [{Enum.reverse(at), value}]
+
+  defp rows_of(rows, [:row | rest], at) when is_list(rows) do
+    rows
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {row, i} -> rows_of(row, rest, [i | at]) end)
+  end
+
+  defp rows_of(%{} = value, [seg | rest], at) when is_binary(seg),
+    do: rows_of(Map.get(value, seg), rest, [seg | at])
+
+  defp rows_of(_value, _shape, _at), do: []
 
   defp form_at(form, path) do
     Enum.reduce_while(path, form, fn
