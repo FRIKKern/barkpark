@@ -81,9 +81,12 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   end
 
   # Each posted row with a `_key` the store still holds: its rich text
-  # subfields read as an object's are, onto the store's row of that key.
-  # The row's other subfields, its order and the rows themselves are
-  # written as posted, as before.
+  # subfields read as an object's are, onto the store's row of that key,
+  # and its object and array subfields rebased as anywhere else (a rich text
+  # in an array in a row, or in an object in a row: task-19452fe7c3af65d4,
+  # written as posted over another editor's saves before). The row's other
+  # subfields, its order and the rows themselves are written as posted, as
+  # before.
   #
   # Only when every row's `_key` is unique in all three (as `Forms`'
   # `keyed_rows?`): two rows of one key matched the first for both, and the
@@ -106,9 +109,13 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
       with %{"_key" => k} when is_binary(k) <- row,
            false <- is_struct(row),
            %{} = t <- by_key(theirs, k),
-           [_ | _] = rich <- rich_subs(field["of"], row) do
+           [_ | _] = subs <- member_fields(field["of"], row) do
         b = by_key(base, k) || %{}
-        Enum.reduce(rich, row, &row_text(&1, &2, b, t, {seen, at ++ [i, &1]}))
+        rich = for %{"name" => n, "type" => "richText"} when is_binary(n) <- subs, do: n
+
+        rich
+        |> Enum.reduce(row, &row_text(&1, &2, b, t, {seen, at ++ [i, &1]}))
+        |> then(&rebase(subs, &1, b, t, {seen, at ++ [i]}))
       else
         _ -> row
       end
@@ -138,7 +145,9 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
 
   defp by_key(rows, key), do: Enum.find(rows, &(is_map(&1) and Map.get(&1, "_key") == key))
 
-  defp rich_subs(of, row) do
+  # The fields of the row's member type, by its `_type` (the one member
+  # when the row names none).
+  defp member_fields(of, row) do
     of = if is_list(of), do: of, else: [of]
     type = Map.get(row, "_type")
 
@@ -146,11 +155,8 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
            of,
            &(is_map(&1) and (&1["name"] == type or (is_nil(type) and length(of) == 1)))
          ) do
-      %{"fields" => subs} when is_list(subs) ->
-        for %{"name" => n, "type" => "richText"} when is_binary(n) <- subs, do: n
-
-      _ ->
-        []
+      %{"fields" => subs} when is_list(subs) -> subs
+      _ -> []
     end
   end
 
