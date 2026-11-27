@@ -362,7 +362,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
           {name, {[key], :unknown, nil}}
 
         {_, %{^name => %{theirs: theirs}}} ->
-          {name, {[key], theirs, :resolve}}
+          {name, {[key], Map.get(holds[name], :raw, theirs), :resolve}}
 
         # Sent before the redraw of another's save reached the page: read
         # against the value the page still showed (`TextConfirmed.took/3`).
@@ -472,9 +472,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         else: HtmlBody.held?(posted, before, was)
 
     if is_binary(posted) and not holds?(acts, name) and held?,
-      do: {s, [{:held, name, path, html_hold(posted, before, was)} | drop(acts, name)]},
+      do:
+        {keep_string(s, name, before),
+         [{:held, name, path, html_hold(posted, before, was)} | drop(acts, name)]},
       else: {s, acts}
   end
+
+  # The string a body is held on, for the hold (`RichTextRemote.hold/2`
+  # keeps it as its `raw`): the hold's `theirs` is its blocks
+  # (`html_hold/3`), which drop markup the editor does not draw. Read
+  # against them, a resolve took a string changed only there (an iframe)
+  # for the one A was held on, and wrote over it; and a Portable Text field
+  # holding a string never matched its string, so typing on the view stayed
+  # held (task-d9ffbd2e6639496b).
+  defp keep_string(s, name, before) when is_binary(before) do
+    raw = s.assigns[:editor_rt_held_raw] || %{}
+    Phoenix.Component.assign(s, editor_rt_held_raw: Map.put(raw, name, before))
+  end
+
+  defp keep_string(s, _name, _before), do: s
 
   # A row post whose draw is not known (`was/5`): read against the store it
   # landed on, so A's words the store kept are held, never lost unheld.
