@@ -324,7 +324,20 @@
     true,
   );
 
-  function recordSeen(values, seqs) {
+  // task-fe9d8741f0641f97: per field, the server's digest of the last value
+  // it confirmed this page shows (`TextConfirmed`), under `ok`. It rides a
+  // socket rejoin, which the numbers do not: a post whose digest is the
+  // store's was typed on the store. A digest is taken only with the value.
+  // It is 64 bits of sha256 as 16 hex characters (task-8a35dcc94956b8aa).
+  var OK_DIGEST = /^[0-9a-f]{16}$/;
+
+  function takeOk(seen, name, oks) {
+    if (!oks || typeof oks[name] !== "string" || !OK_DIGEST.test(oks[name])) return;
+    if (!seen.ok || typeof seen.ok !== "object") seen.ok = {};
+    seen.ok[name] = oks[name];
+  }
+
+  function recordSeen(values, seqs, oks) {
     var form = document.getElementById("editor-form");
     var input = form && form.querySelector('input[name="_bp_seen"]');
     if (!input) return;
@@ -341,12 +354,15 @@
       // from an older value than the one the person saw.
       if (!field) {
         seen[name] = pair[1];
+        takeOk(seen, name, oks);
         return;
       }
       if (typeof field.value !== "string") return;
       // A textarea's value has its line breaks as "\n" only.
-      if (lf(field.value) === lf(change.value)) seen[name] = pair[1];
-      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = pair[0];
+      if (lf(field.value) === lf(change.value)) {
+        seen[name] = pair[1];
+        takeOk(seen, name, oks);
+      } else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = pair[0];
     });
     input.value = JSON.stringify(seen);
   }
@@ -373,7 +389,7 @@
     var values = detail.values || {};
     takeFocused(values);
     drawShown(values);
-    if (detail.seqs) recordSeen(values, detail.seqs);
+    if (detail.seqs) recordSeen(values, detail.seqs, detail.oks);
   }
 
   // task-4fc7383b936f606a: a connected mount sends each free-text field its
@@ -396,15 +412,44 @@
       var field = form.elements.namedItem(name);
       if (typeof value !== "string" || typeof seqs[name] !== "number") return;
       // A field not drawn now is drawn later from the server's form.
-      if (!field || (typeof field.value === "string" && lf(field.value) === lf(value))) seen[name] = seqs[name];
-      else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = 0;
+      if (!field || (typeof field.value === "string" && lf(field.value) === lf(value))) {
+        seen[name] = seqs[name];
+        takeOk(seen, name, detail.oks);
+      } else if (!Object.prototype.hasOwnProperty.call(seen, name)) seen[name] = 0;
+    });
+    input.value = JSON.stringify(seen);
+  }
+
+  // A post whose value the store holds as posted: the page shows the
+  // stored value (`TextConfirmed.confirm/3`).
+  function onConfirmed(e) {
+    var oks = (e && e.detail && e.detail.oks) || {};
+    var form = document.getElementById("editor-form");
+    var input = form && form.querySelector('input[name="_bp_seen"]');
+    if (!input) return;
+    var seen = readSeen(input);
+    Object.keys(oks).forEach(function (name) {
+      takeOk(seen, name, oks);
     });
     input.value = JSON.stringify(seen);
   }
 
   window.addEventListener("phx:bp:form-remote-values", onRemoteValues);
   window.addEventListener("phx:bp:form-born", onBorn);
+  window.addEventListener("phx:bp:form-confirmed", onConfirmed);
   window.BarkparkFormRemoteValues = onRemoteValues;
+
+  // The connect params of each join (root.html.heex's LiveSocket `params`):
+  // the document and form generation the editor was drawn at. A socket
+  // that rejoins draws that generation, so the widget wrappers keep the
+  // page's ids and the editor keeps what was typed while the socket was
+  // down (`RejoinForm`, task-b656db94cc1dbd17).
+  window.BarkparkFormConnectParams = function () {
+    var form = document.getElementById("editor-form");
+    var doc = form && form.getAttribute("phx-value-_bp_doc");
+    var gen = form && form.getAttribute("data-bp-form-gen");
+    return doc && gen ? { _bp_form: { doc: doc, gen: gen } } : {};
+  };
 })();
 
 // task-7f47b7ad78b08048: an array row's open state is the person's. The row

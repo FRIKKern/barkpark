@@ -24,6 +24,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
 
   import Phoenix.Component, only: [assign: 2]
 
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
@@ -114,7 +115,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
 
     tops = Enum.map(keys, &top/1)
 
-    assign(socket,
+    socket
+    |> assign(
       editor_form: form,
       editor_dirty: true,
       editor_unsaved_keys:
@@ -123,6 +125,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
       save_status: "Updated by another user",
       editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ tops)
     )
+    |> HeldFields.hold_paths(Enum.map(keys, &{{:text, &1}, List.wrap(&1)}))
   end
 
   defp top([key | _]), do: key

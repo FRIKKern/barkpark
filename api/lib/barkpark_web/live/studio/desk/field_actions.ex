@@ -305,7 +305,10 @@ defmodule BarkparkWeb.Studio.Desk.FieldActions do
   # A reference's input is a widget the patch leaves alone; it is drawn again
   # with the pasted value.
   defp remount(socket, %{"type" => type}) when type in @widget_types,
-    do: assign(socket, :editor_form_gen, Shared.next_form_gen(socket, true))
+    do:
+      socket
+      |> assign(:editor_form_gen, Shared.next_form_gen(socket, true))
+      |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(socket)
 
   defp remount(socket, _field), do: socket
 

@@ -325,9 +325,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
       ) ->
         {:noreply, StudioChrome.refuse_unseated_create(socket)}
 
-      # A suspended workspace creates no other (task-ca975477b8ca8a67); QuotaGate
-      # lets `create-workspace` through, since it changes no document here.
-      Tenancy.Quota.suspended?(id_of(socket.assigns[:current_workspace])) ->
+      # A suspended workspace creates no other (task-ca975477b8ca8a67), nor does
+      # a token whose home is suspended (task-3e88aa09df6a3b81); QuotaGate lets
+      # `create-workspace` through, since it changes no document here.
+      StudioChrome.suspended_create?(principal, socket.assigns[:current_workspace]) ->
         {:noreply, StudioChrome.refuse_suspended_create(socket)}
 
       true ->

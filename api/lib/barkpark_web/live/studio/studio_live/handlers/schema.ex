@@ -59,7 +59,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Schema do
              socket
              |> assign(confirm_modal: nil)
              |> put_flash(:info, gettext("%{name} enqueued", name: name))
-             |> Shared.rebuild_panes()}
+             |> Shared.rebuild_panes()
+             |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(socket)}
 
           {:error, reason} ->
             {:noreply,

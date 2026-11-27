@@ -62,6 +62,21 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
       inside it: clearing mid-transaction lets a concurrent reader repopulate
       from the still-visible old row.
 
+  A write that opens its own transaction (`delete_workspace/1`, the bundle
+  import, `create_project_with_dataset/2`, `do_create_owned_workspace/4`)
+  opens it with `transaction/2`, which busts on every exit, a raise included.
+
+  ## A load that straddles an invalidate
+
+  A load reads the rows, then stores what it read. One that read before a
+  write's COMMIT and stores after the write's `invalidate/0` would cache the
+  old row for the TTL. `invalidate/0` bumps a generation counter before it
+  drops the entries. A load notes the generation when it starts, stores, and
+  then reads the generation again. If it moved, the load takes its own entry
+  back out (`:ets.delete_object/2`, so a newer load's entry is left alone).
+  It still returns what it read. Checking after the store covers an
+  invalidate that lands between the check and the insert.
+
   ## Disabled in `:test`
 
   `config/test.exs` sets the TTL to `0`, which makes `fetch/2` a straight
@@ -73,6 +88,7 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
   """
 
   @table :barkpark_tenancy_default_scope_cache
+  @generation :__generation__
   @default_ttl_ms 60_000
 
   @doc """
@@ -82,6 +98,11 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
   a non-positive TTL the cache is off and this is exactly `loader.()`.
   """
   @spec fetch(atom(), (-> term())) :: term()
+  # The generation counter's own key: an entry stored there would take the
+  # counter's place, and the next `invalidate/0` would raise.
+  def fetch(@generation, _loader),
+    do: raise(ArgumentError, "#{inspect(@generation)} is the cache's generation counter")
+
   def fetch(key, loader) when is_atom(key) and is_function(loader, 0) do
     ttl = ttl_ms()
 
@@ -92,13 +113,37 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
     end
   end
 
-  @doc "Drop every cached entry. Safe to call when the table was never created."
+  @doc """
+  Drop every cached entry, and make a load already under way not store what
+  it read (the moduledoc's generation). Safe to call when the table was never
+  created.
+  """
   @spec invalidate() :: :ok
   def invalidate do
     case :ets.whereis(@table) do
-      :undefined -> :ok
-      _ref -> safe_delete_all()
+      :undefined ->
+        :ok
+
+      _ref ->
+        bump_generation()
+        safe_delete_all()
     end
+  end
+
+  @doc """
+  `Repo.transaction(fun, opts)`, with `invalidate/0` run on every exit from
+  it: a COMMIT, a rollback, a raise.
+
+  For a write that opens its own transaction. A bust inside it comes before
+  COMMIT, and a raise skips one placed after the call; either way a load
+  made in between keeps what it read, the old row or the row this process
+  saw before a rollback took it away (task-2d336fb1b6c90c7a).
+  """
+  @spec transaction((-> term()), keyword()) :: {:ok, term()} | {:error, term()}
+  def transaction(fun, opts \\ []) when is_function(fun, 0) do
+    Barkpark.Repo.transaction(fun, opts)
+  after
+    invalidate()
   end
 
   @doc "Cache lifetime in milliseconds; `0` (or less) disables the cache."
@@ -121,15 +166,34 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
   end
 
   defp load_and_store(key, loader, ttl) do
+    started = generation()
+
     case loader.() do
       nil ->
         nil
 
       value ->
-        expires_at = System.monotonic_time(:millisecond) + ttl
-        safe_insert({key, value, expires_at})
+        entry = {key, value, System.monotonic_time(:millisecond) + ttl}
+        safe_insert(entry)
+        if generation() != started, do: safe_delete_object(entry)
         value
     end
+  end
+
+  defp generation do
+    case :ets.lookup(@table, @generation) do
+      [{@generation, n}] -> n
+      [] -> 0
+    end
+  rescue
+    ArgumentError -> 0
+  end
+
+  defp bump_generation do
+    :ets.update_counter(@table, @generation, 1, {@generation, 0})
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # Fallback only: the table is created at boot by init_cache/0.
@@ -168,8 +232,16 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
     ArgumentError -> :ok
   end
 
+  # The entries only: the generation counter (a 2-tuple) stays.
   defp safe_delete_all do
-    :ets.delete_all_objects(@table)
+    :ets.match_delete(@table, {:_, :_, :_})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp safe_delete_object(entry) do
+    :ets.delete_object(@table, entry)
     :ok
   rescue
     ArgumentError -> :ok

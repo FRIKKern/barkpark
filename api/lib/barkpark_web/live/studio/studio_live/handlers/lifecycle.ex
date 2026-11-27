@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     RemoteValues,
     RichTextRemote,
+    TextConfirmed,
     UnsavedBases,
     UnsavedObjects
   }
@@ -53,6 +54,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil,
         doc_conflict: false,
+        editor_text_paused: [],
+        editor_held_paths: %{},
         editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
         object_dialog: nil,
@@ -61,6 +64,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> RichTextRemote.forget()
       |> RichTextRemote.born()
+      |> TextConfirmed.loaded()
       |> RemoteValues.born()
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so
@@ -146,7 +150,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
               assign(socket,
                 doc_conflict: true,
                 save_status: "Updated by another user",
-                editor_clash_fields: if(keys == :all, do: [], else: keys)
+                editor_clash_fields:
+                  if(keys == :all, do: buffer_fields(socket, doc_data), else: keys)
               )
           end
 
@@ -177,8 +182,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            # footer has no words for it.
            save_status: ""
          )
+         |> TextConfirmed.redrawn(socket)
          |> named_as_seen()}
     end
+  end
+
+  # The whole buffer kept (`keep_unsaved_fields/2`'s `:all`): each top-level
+  # field whose buffer is not the save's is A's, held under the banner, so
+  # a write of the whole form keeps the save in it (`HeldFields`,
+  # task-f3e8c7b97e1239e3). A Save still writes the buffer, as it did.
+  defp buffer_fields(socket, doc_data) do
+    local = socket.assigns[:editor_form] || %{}
+    theirs = Content.doc_to_form(doc_data, socket.assigns[:editor_schema])
+    for {key, value} <- local, is_binary(key), Map.get(theirs, key) != value, do: key
   end
 
   # Another editor's frame, and the row of this tab's it arrived over
@@ -276,6 +292,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           editor_unsaved_bases: kept
         )
         |> RichTextRemote.push_held(base, theirs)
+        |> TextConfirmed.redrawn(socket)
 
       {socket, clashed}
     end
@@ -700,7 +717,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # reloads it tells the page what changed.
       true ->
         old_form = socket.assigns[:editor_form] || %{}
-        rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
+        # A new form generation draws the rich text wrappers anew: the page
+        # takes their digests (`TextConfirmed`), or a rejoin holds them.
+        rebuilt =
+          socket
+          |> Shared.rebuild_panes()
+          |> RemoteValues.keep_history(socket)
+          |> TextConfirmed.redrawn(socket)
+
         new_form = rebuilt.assigns[:editor_form] || %{}
 
         {:noreply,

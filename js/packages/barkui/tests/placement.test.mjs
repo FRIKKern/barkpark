@@ -50,6 +50,8 @@ const passageSlots = (text = PARTS()) => {
 const CONTROLS = [
   { root: 'ui-slider ', writer: 'UI SDK slider, on its pieces (components/slider/slider.js)' },
   { root: 'ui-number-input ', writer: 'UI SDK number input, on its step buttons and scrub area (components/number-input/number-input.js)' },
+  { root: 'ui-tabs ', writer: 'UI SDK tabs, on its indicator (components/tabs/tabs.js)' },
+  { root: 'ui-segmented-control ', writer: 'UI SDK segmented control, on its indicator (components/segmented-control/segmented-control.js)' },
 ]
 
 describe("a control's pieces, the third list", () => {
@@ -79,9 +81,18 @@ describe("a control's pieces, the third list", () => {
     expect(step[0].slot).toMatch(/^the first button in /)
     for (const s of SLOTS) expect(s.first === undefined || s.first === true, s.slot).toBe(true)
   })
+  it("holds each sliding indicator to its own six place variables, each a number of pixels, and no other piece to them", () => {
+    const own = { 'ui-tabs-indicator': '--active-tab-', 'ui-segmented-control-indicator': '--segmented-control-indicator-' }
+    for (const [slot, prefix] of Object.entries(own)) {
+      const s = SLOTS.find((x) => x.slot === slot)
+      expect(s?.writes.map((w) => w.property), slot).toEqual(['left', 'right', 'top', 'bottom', 'width', 'height'].map((side) => `${prefix}${side}`))
+      for (const w of s.writes) expect(w.values, `${slot} ${w.property}`).toEqual(['{px}px'])
+      for (const x of SLOTS.filter((y) => y !== s)) expect(x.writes.some((w) => w.property.startsWith(prefix)), `${x.slot} ${prefix}`).toBe(false)
+    }
+  })
   it('is red when the two differ, either way', () => {
     const text = PARTS()
-    const plants = [text.replace('`touch-action` as `none` (179)', '`touch-action` as `auto` (179)'), text.replace('`z-index` as `1` or `2` (67)', '`z-index` as `1` or `2` (66)'), text.replace('- On `ui-slider-track`', '- On `ui-slider-tracks`'), text.replace('`--hold-delay` as `400ms` (hold.js 9)', '`--hold-delay` as `500ms` (hold.js 9)'), text.replace('`--hold-delay` as `400ms` (hold.js 9)', '`--hold-delay` as `400ms` (9)')]
+    const plants = [text.replace('`touch-action` as `none` (179)', '`touch-action` as `auto` (179)'), text.replace('`z-index` as `1` or `2` (67)', '`z-index` as `1` or `2` (66)'), text.replace('- On `ui-slider-track`', '- On `ui-slider-tracks`'), text.replace('`--hold-delay` as `400ms` (hold.js 9)', '`--hold-delay` as `500ms` (hold.js 9)'), text.replace('`--hold-delay` as `400ms` (hold.js 9)', '`--hold-delay` as `400ms` (9)'), text.replace('`--active-tab-top` as `{px}px` (47)', '`--active-tab-top` as `{p}%` (47)'), text.replace('- On `ui-segmented-control-indicator`', '- On `ui-segmented-control-item`')]
     for (const t of plants) {
       expect(t).not.toBe(text)
       expect(passageSlots(t)).not.toEqual(SLOTS.map(slotLine))

@@ -33,6 +33,7 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   written as posted, as before.
   """
 
+  alias Barkpark.Content.Forms.HtmlBody
   alias Barkpark.Content.PortableTextMerge
 
   @doc """
@@ -156,15 +157,23 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # A top-level rich text the post changed, with what the page showed
   # (`seen`, `UnderLock.top/3`), task-fa07c64d344638fb: read as an object's
   # is. Two tabs typing in it wrote the later post over the earlier with no
-  # word. With no `seen` it is written as posted, as before.
+  # word. With no `seen` it is written as posted, as before. A body the
+  # store holds as an HTML string is posted as one, and read as one
+  # (`HtmlBody`, task-bb19ab06ab1e87b2).
   defp top_rich(params, fields, base, theirs, seen) do
     Enum.reduce(fields, params, fn
-      %{"name" => key, "type" => "richText"}, acc when is_binary(key) ->
-        with {:ok, was} <- Map.fetch(seen, [key]),
-             {:ok, mine} when is_list(mine) <- Map.fetch(acc, key) do
-          Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
-        else
-          _ -> acc
+      %{"name" => key, "type" => "richText"} = field, acc when is_binary(key) ->
+        case {Map.fetch(seen, [key]), Map.fetch(acc, key), theirs[key]} do
+          {{:ok, was}, {:ok, mine}, _} when is_list(mine) ->
+            Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
+
+          {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) ->
+            if HtmlBody.field?(field, stored),
+              do: Map.put(acc, key, HtmlBody.rebase(mine, stored, was)),
+              else: acc
+
+          _ ->
+            acc
         end
 
       _, acc ->
@@ -215,6 +224,14 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # holds" counts each block's own fields (task-6174d8fa01658a68): a
   # `level` or unknown field another editor set draws the same, and mine
   # was written over it.
+  # A row post whose draw is not known (`UnderLock`, task-82519fd79663e072):
+  # the store is kept unless the post draws the same; A is held.
+  defp rich_text(_base, mine, theirs, {:ok, :unknown}) when is_list(mine) do
+    if is_list(theirs) and not PortableTextMerge.same_drawn?(mine, theirs),
+      do: theirs,
+      else: mine
+  end
+
   defp rich_text(_base, mine, theirs, {:ok, was}) when is_list(mine) do
     theirs = if is_list(theirs), do: theirs, else: []
     was = if is_list(was), do: was, else: []

@@ -76,6 +76,7 @@ defmodule BarkparkWeb.Studio.Desk.Discarded do
       |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
       |> assign(:editor_refused_clears, nil)
       |> Shared.rebuild_panes()
+      |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(socket)
       # The header, h1, big title and tab name what the store now holds, not
       # the dead draft's title (task-38498e7e9fd76ede).
       |> Shared.assign_page_title()
