@@ -33,6 +33,7 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   written as posted, as before.
   """
 
+  alias Barkpark.Content.Forms.HtmlBody
   alias Barkpark.Content.PortableTextMerge
 
   @doc """
@@ -161,13 +162,15 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # (`HtmlBody`, task-bb19ab06ab1e87b2).
   defp top_rich(params, fields, base, theirs, seen) do
     Enum.reduce(fields, params, fn
-      %{"name" => key, "type" => "richText"}, acc when is_binary(key) ->
+      %{"name" => key, "type" => "richText"} = field, acc when is_binary(key) ->
         case {Map.fetch(seen, [key]), Map.fetch(acc, key), theirs[key]} do
           {{:ok, was}, {:ok, mine}, _} when is_list(mine) ->
             Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
 
-          {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) and is_binary(stored) ->
-            Map.put(acc, key, Barkpark.Content.Forms.HtmlBody.rebase(mine, stored, was))
+          {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) ->
+            if HtmlBody.field?(field, stored),
+              do: Map.put(acc, key, HtmlBody.rebase(mine, stored, was)),
+              else: acc
 
           _ ->
             acc

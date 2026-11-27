@@ -396,8 +396,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     now = (is_map(written) && Map.get(written, :content)) || %{}
 
     Enum.reduce(values, {saved, acts}, fn {name, {path, was, page}}, {s, acts} ->
+      act = if html_body?(s, path, over), do: &html_act/5, else: &act/5
+
       {s, acts} =
-        act(
+        act.(
           s,
           acts,
           {name, path, was, if(page == :resolve, do: nil, else: page)},
@@ -421,12 +423,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   defp resolve(s, acts, _name, _page), do: {s, acts}
 
-  # A top-level body the store held as an HTML string (`HtmlBody`,
-  # task-bb19ab06ab1e87b2): the write kept the store over a post typed on
-  # a value it no longer holds, and A is held, as on a block body. Read as
-  # blocks for the hold's view; the store stays a string.
-  defp act(s, acts, {name, [key] = path, was, _page}, {over, _now}, {doc, _posted_doc})
-       when is_map_key(over, key) and is_binary(:erlang.map_get(key, over)) do
+  # A top-level body the store held as an HTML string or as nothing
+  # (`HtmlBody.field?/2`, task-bb19ab06ab1e87b2, task-077fbe951d7c338e):
+  # the write kept the store over a post typed on a value it no longer
+  # holds, and A is held, as on a block body. Read as blocks for the hold's
+  # view; the store stays a string.
+  defp html_body?(s, [key], over) when is_map_key(over, key) do
+    field = Enum.find(fields(s.assigns[:editor_schema]), &match?(%{"name" => ^key}, &1))
+    HtmlBody.field?(field, Map.fetch!(over, key))
+  end
+
+  defp html_body?(_s, _path, _over), do: false
+
+  defp html_act(s, acts, {name, [key] = path, was, _page}, {over, _now}, {doc, _posted_doc}) do
     before = Map.fetch!(over, key)
     posted = FormPath.get(doc, path)
 
@@ -565,7 +574,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
     case PortableTextMerge.merge(base, mine, theirs) do
       {:clash, texts, view} -> {base, theirs, view, texts}
-      {:ok, _merged} -> {base, theirs, mine, nil}
+      # The view A types on is the two merged (drawn as HTML,
+      # `RichTextRemote.keep_held`): a Save or the next key keeps B's
+      # change (task-077fbe951d7c338e).
+      {:ok, merged} -> {base, theirs, merged, nil}
     end
   end
 
