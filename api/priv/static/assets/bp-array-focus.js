@@ -328,8 +328,11 @@
   // it confirmed this page shows (`TextConfirmed`), under `ok`. It rides a
   // socket rejoin, which the numbers do not: a post whose digest is the
   // store's was typed on the store. A digest is taken only with the value.
+  // It is 64 bits of sha256 as 16 hex characters (task-8a35dcc94956b8aa).
+  var OK_DIGEST = /^[0-9a-f]{16}$/;
+
   function takeOk(seen, name, oks) {
-    if (!oks || typeof oks[name] !== "number") return;
+    if (!oks || typeof oks[name] !== "string" || !OK_DIGEST.test(oks[name])) return;
     if (!seen.ok || typeof seen.ok !== "object") seen.ok = {};
     seen.ok[name] = oks[name];
   }
