@@ -248,17 +248,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   # written over another's edit of it (task-46bcc2dfb805acce). Matched by
   # the inner key alone, two sections whose items share a key (a duplicated
   # section) swapped named each other's draw, and A was held
-  # (task-1a748ef7bc04ae49). Two entries of one shape and keys name none.
+  # (task-1a748ef7bc04ae49), unless one row of that shape holds the key
+  # (`only_row?/3`). Two entries of one shape and keys name none.
   defp row_owner(socket, owners, name, path) do
     form = socket.assigns[:editor_form] || %{}
     key = to_string(key(FormPath.get(form, Enum.drop(path, -1))))
-    outer = RowDraws.outer_keys(form, path)
+
+    outer =
+      if only_row?(form, Enum.drop(path, -1), key),
+        do: :any,
+        else: RowDraws.outer_keys(form, path)
+
     shape = shape(name)
 
     found =
       for entry <- List.wrap(owners),
           {other, ^key, digest, at} <- [entry(entry)],
-          at in [:any, outer],
+          :any in [at, outer] or at == outer,
           shape(other) == shape,
           do: {other, digest}
 
@@ -273,6 +279,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         end
     end
   end
+
+  # One row of this field shape (its path, any indexes) holds `key`: an
+  # entry drawn under other outer rows names it, as another editor moved it
+  # there (task-3422ba9e403f8b75). Two (a duplicated section): only the
+  # entry drawn under the same outer rows does.
+  defp only_row?(_form, _at, ""), do: false
+
+  defp only_row?(form, at, key) do
+    shape = Enum.map(at, &if(is_integer(&1), do: :row, else: &1))
+    match?([_], for(%{"_key" => ^key} <- rows_of(form, shape), do: key))
+  end
+
+  defp rows_of(value, []), do: [value]
+
+  defp rows_of(rows, [:row | rest]) when is_list(rows),
+    do: Enum.flat_map(rows, &rows_of(&1, rest))
+
+  defp rows_of(%{} = value, [seg | rest]) when is_binary(seg),
+    do: rows_of(Map.get(value, seg), rest)
+
+  defp rows_of(_value, _shape), do: []
 
   defp shape(name), do: String.replace(name, ~r/\[\d+\]/, "[]")
 
