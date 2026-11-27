@@ -12,7 +12,10 @@ defmodule BarkparkWeb.Studio.TopRichTextPtUnsetTest do
   against no blocks and keeps the store). A block body B removed while A's
   page was away was written over too: the rejoin's post is read against an
   unknown draw. Both now keep the removal and hold A. A first post into a
-  field that was empty from the start is written, also after a rejoin.
+  field that was empty from the start is written, also after a rejoin, and
+  so is one after the page saw the field empty (A's own unset, confirmed)
+  or never drew it (added to the schema after it loaded): the removal is
+  read only where the page names a draw of the field that differs.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -183,6 +186,99 @@ defmodule BarkparkWeb.Studio.TopRichTextPtUnsetTest do
       html = types(a2, "<p>first A</p>", seen)
       assert words(body(c)) == ["first A"], "A's first words into the empty field were dropped"
       refute html =~ "doc-conflict-banner"
+    end
+  end
+
+  defp add_field(c, name, extra) do
+    {:ok, schema} = Content.get_schema(c.type, "production")
+    field = Map.merge(%{"name" => name, "title" => name, "type" => "richText"}, extra)
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => c.type,
+          "title" => "Object rich text",
+          "visibility" => "public",
+          "fields" => schema.fields ++ [field]
+        },
+        "production"
+      )
+  end
+
+  # #29148 r1 review: a rejoin's post over a store that holds no value is
+  # dropped only when the page names a draw of that field that differs.
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    for format <- [:portable_text, :legacy] do
+      @format format
+
+      test "#{surface} F2 #{format}: a field added after the page loaded, rejoin, A's first words: written",
+           c do
+        a = tab(c, @surface)
+        seen = page(a)
+        GenServer.stop(a.pid, :normal)
+
+        add_field(
+          c,
+          "body2",
+          if(@format == :portable_text, do: %{"format" => "portableText"}, else: %{})
+        )
+
+        a2 = tab(c, @surface)
+
+        :sys.replace_state(a2.pid, fn state ->
+          update_in(
+            state.socket.assigns,
+            &Map.put(&1, :editor_rt_rejoin, MapSet.new(["doc[body]", "doc[body2]"]))
+          )
+        end)
+
+        refute Map.has_key?(seen["ok"] || %{}, "doc[body2]"), "the page drew body2: no test"
+
+        html =
+          a2
+          |> element("#editor-form")
+          |> render_change(%{
+            "_target" => ["doc[body2]"],
+            "doc" => %{"title" => "T0", "body2" => "<p>first A2</p>"},
+            "_bp_seen" => Jason.encode!(seen)
+          })
+
+        assert words(stored(c)["body2"] || []) == ["first A2"],
+               "A's first words in the new field were dropped: #{inspect(stored(c)["body2"])}"
+
+        refute html =~ "doc-conflict-banner"
+      end
+    end
+
+    test "#{surface} F3: A unsets the body (confirmed), rejoin, A types new words: written", c do
+      put_body(c, "<p>body0</p>")
+      a = tab(c, @surface)
+      types(a, "", page(a))
+      assert body(c) == nil, "A's unset did not land: no test"
+      seen = page(a)
+      GenServer.stop(a.pid, :normal)
+
+      a2 = rejoined(c, @surface)
+      html = types(a2, "<p>new A</p>", seen)
+      assert words(body(c) || []) == ["new A"], "A's new words after its own unset were dropped"
+      refute html =~ "doc-conflict-banner"
+    end
+
+    # F4 stays held: the page left before the confirm of A's own unset, and
+    # the server cannot tell it from B's removal while the page was away.
+    test "#{surface} F4: A unsets the body, the page leaves before the confirm, rejoin: held",
+         c do
+      put_body(c, "<p>body0</p>")
+      a = tab(c, @surface)
+      seen = page(a)
+      types(a, "", seen)
+      GenServer.stop(a.pid, :normal)
+
+      a2 = rejoined(c, @surface)
+      html = types(a2, "<p>new A</p>", seen)
+      kept_and_held(c, a2, html)
     end
   end
 
