@@ -22,10 +22,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
 
   The digest is the server's own (`:erlang.phash2/1`); the page never
   computes one, it only keeps what it was sent.
+
+  A top-level rich text keeps one too, under its input name (`doc[body]`):
+  the digest of the HTML its editor draws (`CompositeField.drawn_digest/1`).
+  Its wrapper is phx-update="ignore" and has the same id after a rejoin,
+  so the page keeps the editor it had while the new socket reads the new
+  store (#28933 review). It is drawn with the form, confirmed after a post
+  the store holds as it draws (`confirm/3`), and again whenever the wrapper
+  is drawn anew (`redrawn/2`, `loaded/1`). A socket that mounted as a rejoin
+  (`_mounts` > 0) reads a top-level post against that digest until it has
+  drawn or confirmed the field itself (`rejoin_seen/4`).
   """
 
+  import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView, only: [push_event: 3]
 
+  alias Barkpark.Content.PortableText
+  alias Barkpark.Content.PortableTextMerge
+  alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
 
   @event "bp:form-confirmed"
@@ -44,11 +58,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
 
   @doc "The digests a form drawn now starts from: each free-text value it shows."
   def drawn(schema, form) when is_map(form) do
-    for key <- RemoteValues.text_units(schema, form),
-        value = RemoteValues.value_at(form, key),
-        is_binary(value),
-        into: %{},
-        do: {RemoteValues.input_name(key), digest(value)}
+    for(
+      key <- RemoteValues.text_units(schema, form),
+      value = RemoteValues.value_at(form, key),
+      is_binary(value),
+      into: %{},
+      do: {RemoteValues.input_name(key), digest(value)}
+    )
+    |> Map.merge(rich_drawn(schema, form))
   end
 
   def drawn(_schema, _form), do: %{}
@@ -65,6 +82,126 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   end
 
   def known?(_seen, _key, _stored), do: false
+
+  @doc """
+  Each top-level rich text field of `schema` its Classic editor draws as
+  HTML. A field on the block editor (`FieldVocabulary.blocks_field?/1`) has
+  no form input: its canvas carries its own revision.
+  """
+  def rich_keys(%{fields: fields}) when is_list(fields),
+    do:
+      for(
+        %{"name" => key, "type" => "richText"} = field <- fields,
+        is_binary(key),
+        not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field),
+        do: key
+      )
+
+  def rich_keys(_schema), do: []
+
+  defp rich_drawn(schema, form) do
+    for key <- rich_keys(schema),
+        value = Map.get(form, key),
+        is_binary(value) or is_list(value),
+        into: %{},
+        do: {RemoteValues.input_name(key), rich_digest(value)}
+  end
+
+  # The form holds a top-level rich text as the HTML its editor draws
+  # (`Content.Forms`), the store as blocks: one digest for both.
+  defp rich_digest(html) when is_binary(html), do: :erlang.phash2(html)
+  # A body never set draws "" (`CompositeField.drawn_digest(nil)`).
+  defp rich_digest(value) when is_list(value) or is_nil(value),
+    do: CompositeField.drawn_digest(value)
+
+  defp rich_digest(_value), do: nil
+
+  @doc """
+  The base a top-level rich text post `name` is read against (`stored`, as
+  `RichTextRemote.UnderLock.top/3` reads it), on a socket that mounted as a
+  rejoin and has not drawn or confirmed that field itself: `stored` when the
+  page's digest (`seen`, the raw `_bp_seen`) is the store's, else `:unknown`
+  (`Forms.ObjectRebase` keeps the store's, and the post is held). The hold
+  lasts until a Save or Reload: the page's digest does not move until then.
+  """
+  def rejoin_seen(socket, name, stored, seen) do
+    rejoin = socket.assigns[:editor_rt_rejoin] || MapSet.new()
+
+    cond do
+      not MapSet.member?(rejoin, name) -> stored
+      rich_known?(seen_oks(seen), name, stored) -> stored
+      true -> :unknown
+    end
+  end
+
+  defp seen_oks(seen) when is_binary(seen) do
+    case Jason.decode(seen) do
+      {:ok, %{@key => %{} = oks}} -> oks
+      _ -> %{}
+    end
+  end
+
+  defp seen_oks(_seen), do: %{}
+
+  defp rich_known?(oks, name, stored),
+    do: Map.get(oks, name) == rich_digest(stored)
+
+  @doc """
+  At a document's load: a socket that mounted as a rejoin reads each
+  top-level rich text against the page's digest (`rejoin_seen/4`); any other
+  load draws the wrappers anew, and the page is sent their digests.
+  """
+  def loaded(socket) do
+    if socket.assigns[:editor_rejoined?] == true do
+      names = Enum.map(rich_keys(socket.assigns[:editor_schema]), &RemoteValues.input_name/1)
+      assign(socket, editor_rejoined?: false, editor_rt_rejoin: MapSet.new(names))
+    else
+      socket |> assign(editor_rt_rejoin: MapSet.new()) |> push_rich(socket.assigns[:editor_form])
+    end
+  end
+
+  @doc """
+  After a change that may have drawn the top-level rich text wrappers anew
+  (a new form generation since `before`): the page shows the form's values.
+  """
+  def redrawn(socket, before) do
+    if socket.assigns[:editor_form_gen] != before.assigns[:editor_form_gen],
+      do: push_rich(socket, socket.assigns[:editor_form]),
+      else: socket
+  end
+
+  defp push_rich(socket, form) when is_map(form) do
+    case rich_drawn(socket.assigns[:editor_schema], form) do
+      oks when oks == %{} -> socket
+      oks -> socket |> taken(Map.keys(oks)) |> push_event(@event, %{oks: oks})
+    end
+  end
+
+  defp push_rich(socket, _form), do: socket
+
+  defp taken(socket, names),
+    do:
+      assign(socket,
+        editor_rt_rejoin:
+          MapSet.difference(socket.assigns[:editor_rt_rejoin] || MapSet.new(), MapSet.new(names))
+      )
+
+  @doc """
+  The fields a rejoin hold of a top-level rich text paused (`rejoin_seen/4`),
+  named by the banner's paused line beside the text fields `TextRejoin` held.
+  """
+  def paused(socket, rich) when is_map(rich) do
+    held = socket.assigns[:editor_rt_held] || %{}
+    keys = rich_keys(socket.assigns[:editor_schema])
+
+    mine =
+      for {name, {[key], :unknown, _page}} <- rich, Map.has_key?(held, name), do: key
+
+    paused = (socket.assigns[:editor_text_paused] || []) -- keys
+    assign(socket, editor_text_paused: Enum.uniq(paused ++ mine))
+  end
+
+  def paused(socket, _rich), do: socket
 
   @doc """
   Tells the page each free-text field in `keys` whose posted value (`posted`,
@@ -90,8 +227,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
           into: %{},
           do: {RemoteValues.input_name(key), mine}
 
-    if confirmed == %{}, do: socket, else: push_event(socket, @event, %{oks: oks(confirmed)})
+    oks = Map.merge(oks(confirmed), rich_confirmed(socket, text, posted))
+
+    if oks == %{},
+      do: socket,
+      else: socket |> taken(Map.keys(oks)) |> push_event(@event, %{oks: oks})
   end
 
   def confirm(socket, _keys, _posted), do: socket
+
+  # A top-level rich text post the store holds as it draws: the page shows
+  # the stored value.
+  defp rich_confirmed(socket, stored, posted) do
+    for key <- rich_keys(socket.assigns[:editor_schema]),
+        html = Map.get(posted, key),
+        is_binary(html),
+        value = Map.get(stored, key),
+        is_list(value),
+        PortableTextMerge.same_drawn?(PortableText.from_html(html, value), value),
+        into: %{},
+        do: {RemoteValues.input_name(key), rich_digest(value)}
+  end
 end

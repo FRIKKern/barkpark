@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     RemoteValues,
     RichTextRemote,
+    TextConfirmed,
     UnsavedBases,
     UnsavedObjects
   }
@@ -62,6 +63,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> RichTextRemote.forget()
       |> RichTextRemote.born()
+      |> TextConfirmed.loaded()
       |> RemoteValues.born()
       # Named after the reset: another editor's last frame is older than the
       # row just read, and may be of a draft that is gone (a Discard), so
@@ -178,6 +180,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            # footer has no words for it.
            save_status: ""
          )
+         |> TextConfirmed.redrawn(socket)
          |> named_as_seen()}
     end
   end
@@ -277,6 +280,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
           editor_unsaved_bases: kept
         )
         |> RichTextRemote.push_held(base, theirs)
+        |> TextConfirmed.redrawn(socket)
 
       {socket, clashed}
     end
@@ -701,7 +705,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # reloads it tells the page what changed.
       true ->
         old_form = socket.assigns[:editor_form] || %{}
-        rebuilt = socket |> Shared.rebuild_panes() |> RemoteValues.keep_history(socket)
+        # A new form generation draws the rich text wrappers anew: the page
+        # takes their digests (`TextConfirmed`), or a rejoin holds them.
+        rebuilt =
+          socket
+          |> Shared.rebuild_panes()
+          |> RemoteValues.keep_history(socket)
+          |> TextConfirmed.redrawn(socket)
+
         new_form = rebuilt.assigns[:editor_form] || %{}
 
         {:noreply,

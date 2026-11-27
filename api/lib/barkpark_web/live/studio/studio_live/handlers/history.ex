@@ -124,6 +124,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
           )
           |> put_flash(:info, gettext("Restored from history"))
           |> Shared.rebuild_panes()
+          |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(socket)
           |> RichTextRemote.repaint(was)
           # The header names the restored title (task-42a6f063263338f6).
           |> Shared.assign_page_title()
@@ -158,6 +159,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
             gettext("The document changed since you loaded it — reload and retry.")
           )
           |> Shared.rebuild_panes()
+          |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(socket)
           |> RichTextRemote.repaint(was)
           |> Shared.assign_page_title()
 

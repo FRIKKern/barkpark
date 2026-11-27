@@ -307,7 +307,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
 
         {:noreply,
-         saved |> TextConfirmed.confirm(units, posted) |> RichTextRemote.hold(held) |> row_draws()}
+         saved
+         |> TextConfirmed.confirm(units, posted)
+         |> RichTextRemote.hold(held)
+         |> TextConfirmed.paused(rich)
+         |> row_draws()}
 
       _ ->
         {:noreply, socket}
@@ -382,6 +386,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           socket
           |> saved_flash()
           |> Shared.rebuild_panes()
+          |> TextConfirmed.redrawn(socket)
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
           |> Shared.assign_page_title()
           |> clear_touched()
@@ -425,6 +430,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil
       )
+      |> TextConfirmed.loaded()
       |> Shared.assign_page_title()
       |> clear_touched()
 
@@ -602,7 +608,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
               posted,
               params["_bp_rt_owner"]
             ),
-            RichTextRemote.UnderLock.top(socket, posted)
+            RichTextRemote.UnderLock.top(socket, posted, params["_bp_seen"])
           )
 
         # A free-text field's post is merged onto the stored value from the
@@ -661,7 +667,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> TextConfirmed.confirm(targets, posted)
 
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
-        {:noreply, saved |> RichTextRemote.hold(held) |> row_draws()}
+
+        {:noreply,
+         saved |> RichTextRemote.hold(held) |> TextConfirmed.paused(rich) |> row_draws()}
 
       _ ->
         {:noreply, socket}
