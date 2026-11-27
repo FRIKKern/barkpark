@@ -13,8 +13,7 @@ defmodule BarkparkWeb.Studio.TopRichTextPtStringTest do
   turns a stored string into blocks at the next save).
 
   Not here: B removing the field (`unset`) under A's post or while A was
-  away. The store then holds no string, and A's post is written over the
-  removal (task-7565817187a53934).
+  away: `top_rich_text_pt_unset_test.exs` (task-7565817187a53934).
   """
   use BarkparkWeb.ConnCase, async: false
 
