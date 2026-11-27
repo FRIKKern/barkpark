@@ -602,11 +602,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     params = if Map.has_key?(params, "doc"), do: Map.put(params, "doc", doc), else: params
     {:noreply, saved} = autosave_open(params, socket, {:built, bases})
-
-    # The hold puts "Updated by another user" where the save said "Saved":
-    # whether it landed is kept for the desk's undo (`DocUndo`).
-    landed? = saved.assigns[:save_status] == "Saved"
-    {:noreply, saved |> HeldFields.restore(held) |> assign(editor_built_landed: landed?)}
+    {:noreply, HeldFields.restore(saved, held)}
   end
 
   # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
@@ -614,7 +610,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # (`CodelistShape`): a built one writes a stored value back as it is.
   defp autosave_open(params, socket, origin) do
     params = PostIdentity.no_marks(params)
-    socket = socket |> track_touched(params) |> assign(editor_built_landed: nil)
+    socket = socket |> track_touched(params) |> assign(editor_write_landed: nil)
 
     case params
          |> fold_dot_paths(socket)

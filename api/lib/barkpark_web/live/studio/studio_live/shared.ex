@@ -508,6 +508,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # user-facing wording.
   @doc false
   def do_autosave(socket, params, trigger \\ :unknown) do
+    # Whether this write landed (`:editor_write_landed`), for the desk's undo.
+    socket = assign(socket, :editor_write_landed, nil)
     doc = socket.assigns[:editor_doc]
     doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
     type = socket.assigns[:editor_type]
@@ -675,6 +677,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_is_draft: Content.draft?(saved_doc.doc_id),
             editor_form: form,
             save_status: "Saved",
+            # Kept when a hold puts its own status over "Saved" (`DocUndo`).
+            editor_write_landed: true,
             validation_errors: findings.errors,
             validation_warnings: findings.warnings,
             cross_violations: compute_cross_violations(schema, form)
