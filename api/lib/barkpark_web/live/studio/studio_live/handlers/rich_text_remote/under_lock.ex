@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   @doc """
   `values/3`, with the owner `_key` each object rich text's editor was drawn
-  under, as the post carries it (`_bp_rt_owner[]`, `[name, key, digest]` as
+  under, as the post carries it (`_bp_rt_owner[]`, `[name, key, digest, outer keys]` as
   JSON). A value `remounted/3` took under a new owner key is what the page
   shows only when the post names that key and that value's digest
   (task-c0a696a3a5a3900d): a post typed on the old mount, still in
@@ -81,14 +81,57 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def values(socket, nil, posted, owners) when is_map(posted) do
     shown = shown(socket, owners)
+    shifted = shifted(socket, owners)
 
     for {name, path, _html} <- posted_texts(socket, posted, owners),
         {:ok, was} <- [was(socket, shown, owners, name, path)],
         into: %{},
-        do: {name, {path, was, nil}}
+        do: {name, {path, if(list_of(path) in shifted, do: :unknown, else: was), nil}}
   end
 
   def values(_socket, _seen, _posted, _owners), do: %{}
+
+  # The lists whose keyless rows A's page drew at other indexes than the
+  # form holds them now: another editor put a keyless row in or took one
+  # out before them. A keyless row goes by its index, so a draw there names
+  # another row, and A's edit that did not clash with that row's blocks was
+  # merged into it unseen (#29178 review, Q2-Q4c). Each rich text of such a
+  # list is read as a draw not known: the store kept, A held.
+  defp shifted(socket, owners) do
+    form = socket.assigns[:editor_form] || %{}
+
+    drawn =
+      for entry <- List.wrap(owners),
+          t = entry(entry),
+          is_tuple(t) and elem(t, 1) == "",
+          path = Path.parse_path(elem(t, 0)),
+          is_integer(row_index(path)),
+          reduce: %{} do
+        acc ->
+          Map.update(
+            acc,
+            list_of(path),
+            MapSet.new([row_index(path)]),
+            &MapSet.put(&1, row_index(path))
+          )
+      end
+
+    for {list, at} <- drawn, at != keyless_rows(FormPath.get(form, list)), do: list
+  end
+
+  # The list a row rich text's row is in, and the row's index there.
+  defp list_of(path), do: Enum.drop(path, -2)
+  defp row_index(path), do: Enum.at(path, -2)
+
+  defp keyless_rows(rows) when is_list(rows) do
+    for {%{} = row, i} <- Enum.with_index(rows),
+        not is_struct(row),
+        Map.get(row, "_key") in [nil, ""],
+        into: MapSet.new(),
+        do: i
+  end
+
+  defp keyless_rows(_rows), do: MapSet.new()
 
   @doc """
   The socket after a post with no `_bp_rt_seen`: each object rich text it
@@ -209,7 +252,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp owner(owners, name) when is_list(owners) do
     Enum.find_value(owners, :error, fn entry ->
       case entry(entry) do
-        {^name, key, digest} -> {:ok, key, digest}
+        {^name, key, digest, _outer} -> {:ok, key, digest}
         _ -> nil
       end
     end)
@@ -217,12 +260,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   defp owner(_owners, _name), do: :error
 
+  # A row inside another row also names the `_key` of each row on the way,
+  # its own left out (`RowDraws.outer_keys/2`, an index for a keyless one).
+  # Any other entry, and one from a page drawn before, has none: `:any`.
   defp entry(entry) when is_binary(entry) do
     case Jason.decode(entry) do
-      {:ok, [name, key, digest]}
+      {:ok, [name, key, digest | rest]}
       when is_binary(name) and (is_binary(key) or is_nil(key)) and
              (is_binary(digest) or is_integer(digest)) ->
-        {name, to_string(key), digest}
+        case rest do
+          [] -> {name, to_string(key), digest, :any}
+          [outer] when is_list(outer) -> {name, to_string(key), digest, outer}
+          _ -> nil
+        end
 
       _ ->
         nil
@@ -232,37 +282,67 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp entry(_entry), do: nil
 
   # A row's owner entry, matched to the row the form holds at `path` by its
-  # `_key`: the entry of its input name where that names the row's key, else
-  # the one entry of that name with other indexes that does. A post sent
-  # before the page drew another's insert or move names the row by the
-  # index it was drawn at, and the fold (`Fields.fold_dot_paths/2`) put its
-  # text into the row of its `_key`: matched by index, the row was not read
-  # under the lock and A's text was written over another's edit of it
-  # (task-46bcc2dfb805acce). Two entries of one shape and key name none.
+  # `_key` and the keys of the rows on the way: the entry of its input name
+  # where those name the row, else the one entry of that name with other
+  # indexes that does. A post sent before the page drew another's insert or
+  # move names the row by the index it was drawn at, and the fold
+  # (`Fields.fold_dot_paths/2`) put its text into the row of its `_key`:
+  # matched by index, the row was not read under the lock and A's text was
+  # written over another's edit of it (task-46bcc2dfb805acce). Matched by
+  # the inner key alone, two sections whose items share a key (a duplicated
+  # section) swapped named each other's draw, and A was held
+  # (task-1a748ef7bc04ae49), unless one row of that shape holds the key
+  # (`only_row?/3`). Two entries of one shape and keys name none.
   defp row_owner(socket, owners, name, path) do
     form = socket.assigns[:editor_form] || %{}
     key = to_string(key(FormPath.get(form, Enum.drop(path, -1))))
 
-    case owner(owners, name) do
-      {:ok, ^key, _digest} = found ->
-        found
+    outer =
+      if only_row?(form, Enum.drop(path, -1), key),
+        do: :any,
+        else: RowDraws.outer_keys(form, path)
 
-      _ ->
-        shape = shape(name)
+    shape = shape(name)
 
-        found =
-          for entry <- List.wrap(owners),
-              {other, ^key, digest} <- [entry(entry)],
-              shape(other) == shape,
-              uniq: true,
-              do: {:ok, key, digest}
+    found =
+      for entry <- List.wrap(owners),
+          {other, ^key, digest, at} <- [entry(entry)],
+          :any in [at, outer] or at == outer,
+          shape(other) == shape,
+          do: {other, digest}
 
-        case found do
-          [one] -> one
+    case List.keyfind(found, name, 0) do
+      {_, digest} ->
+        {:ok, key, digest}
+
+      nil ->
+        case found |> Enum.map(&elem(&1, 1)) |> Enum.uniq() do
+          [digest] -> {:ok, key, digest}
           _ -> :error
         end
     end
   end
+
+  # One row of this field shape (its path, any indexes) holds `key`: an
+  # entry drawn under other outer rows names it, as another editor moved it
+  # there (task-3422ba9e403f8b75). Two (a duplicated section): only the
+  # entry drawn under the same outer rows does.
+  defp only_row?(_form, _at, ""), do: false
+
+  defp only_row?(form, at, key) do
+    shape = Enum.map(at, &if(is_integer(&1), do: :row, else: &1))
+    match?([_], for(%{"_key" => ^key} <- rows_of(form, shape), do: key))
+  end
+
+  defp rows_of(value, []), do: [value]
+
+  defp rows_of(rows, [:row | rest]) when is_list(rows),
+    do: Enum.flat_map(rows, &rows_of(&1, rest))
+
+  defp rows_of(%{} = value, [seg | rest]) when is_binary(seg),
+    do: rows_of(Map.get(value, seg), rest)
+
+  defp rows_of(_value, _shape), do: []
 
   defp shape(name), do: String.replace(name, ~r/\[\d+\]/, "[]")
 

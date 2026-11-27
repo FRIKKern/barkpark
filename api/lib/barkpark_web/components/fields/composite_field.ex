@@ -25,7 +25,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
   alias BarkparkWeb.Studio.Desk.Fieldsets
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
+  alias BarkparkWeb.Studio.StudioLive.Path, as: FieldPath
 
   attr :field, :map, required: true
   attr :value, :map, default: %{}
@@ -237,14 +239,17 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
          Barkpark.Content.RichTextFormat.format(Map.get(sub, :raw) || %{}) != :portable_doc do
       input_id = sub_id(assigns, sub.name)
       owner_key = get_value(assigns.value, "_key", nil)
+      outer = outer_keys(assigns, sub.name)
 
       rich_text_subfield_input(%{
         input_name: child_path(assigns.path, sub.name),
         input_id: input_id,
         # Keyed by the item's `_key` too: a moved item or another document
-        # remounts the ignored editor instead of keeping the old text.
-        wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
-        owner_key: owner_key,
+        # remounts the ignored editor instead of keeping the old text. The
+        # same id as main's: an open page's editors do not remount at a deploy.
+        wrap_id:
+          "bp-rt-sub-#{input_id}-#{:erlang.phash2(if(outer == nil, do: owner_key, else: {outer, owner_key}))}",
+        owner: owner_entry(child_path(assigns.path, sub.name), owner_key, value, outer),
         html: drawn_html(value),
         label: title_for(sub),
         vocabulary:
@@ -303,7 +308,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
            remount reaches the page, so a post says which value it was typed
            on (task-c29534c0655f0489), even after a key comes back
            (task-c0a696a3a5a3900d). Outside `doc[...]`, never written. --%>
-      <input :if={String.starts_with?(@input_name, "doc[")} type="hidden" name="_bp_rt_owner[]" value={Jason.encode!([@input_name, @owner_key, TextConfirmed.digest(@html)])} />
+      <input :if={String.starts_with?(@input_name, "doc[")} type="hidden" name="_bp_rt_owner[]" value={@owner} />
       <bp-rich-text-editor value={@html} data-bridge-target={"bp-rt-hidden-#{@input_id}"}
         data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={@label}
         data-vocabulary={@vocabulary}
@@ -870,6 +875,26 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp own_findings(_, _), do: []
+
+  # Every row key on the way to a row rich text, its own row's left out,
+  # when the document (`root`) is known; nil without it. Two sections whose
+  # items share a key (a duplicated section) kept their editors' ids when
+  # they swapped, so each page kept the other section's text in its slot
+  # (task-d7a6ed432944fff5), and their owner entries named each other's draw
+  # (task-1a748ef7bc04ae49).
+  defp outer_keys(%{root: %{} = root, path: path}, name),
+    do: RowDraws.outer_keys(root, FieldPath.parse_path(child_path(path, name)))
+
+  defp outer_keys(_assigns, _name), do: nil
+
+  # The owner entry the editor posts (`UnderLock`): its input name, its row's
+  # `_key`, the digest of the HTML drawn, and, in a row inside another row,
+  # the outer row keys. An object's or a top-level row's entry has none and
+  # keeps its three elements.
+  defp owner_entry(name, key, value, outer) do
+    entry = [name, key, TextConfirmed.digest(drawn_html(value))]
+    Jason.encode!(if(outer in [nil, []], do: entry, else: entry ++ [outer]))
+  end
 
   defp child_path("", child), do: child
   defp child_path(parent, child), do: "#{parent}.#{child}"
