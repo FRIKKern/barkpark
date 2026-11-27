@@ -406,7 +406,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     now = (is_map(written) && Map.get(written, :content)) || %{}
 
     Enum.reduce(values, {saved, acts}, fn {name, {path, was, page}}, {s, acts} ->
-      act = if html_body?(s, path, over), do: &html_act/5, else: &act/5
+      act =
+        if html_body?(s, path, over) or shown_string?(s, path, over, was),
+          do: &html_act/5,
+          else: &act/5
 
       {s, acts} =
         act.(
@@ -447,6 +450,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   defp html_body?(_s, _path, _over), do: false
 
+  # A Portable Text field whose page showed a string the store no longer
+  # holds as one (removed: task-7565817187a53934) is read by that string.
+  defp shown_string?(s, [key], over, was) when is_map_key(over, key) and is_binary(was),
+    do: HtmlBody.stored_string?(field(s, key), was)
+
+  defp shown_string?(_s, _path, _over, _was), do: false
+
   defp string_field?(s, key, stored), do: HtmlBody.stored_string?(field(s, key), stored)
 
   defp field(s, key),
@@ -457,7 +467,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     posted = FormPath.get(doc, path)
 
     held? =
-      if string_field?(s, key, before),
+      if string_field?(s, key, before) or (is_binary(was) and string_field?(s, key, was)),
         do: HtmlBody.string_held?(before, was),
         else: HtmlBody.held?(posted, before, was)
 

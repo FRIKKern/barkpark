@@ -104,13 +104,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
 
   def rich_keys(_schema), do: []
 
+  # An empty field (nil: never set, or another's removal taken) is drawn as
+  # well: the page then says it saw it empty, and a rejoin's post over a
+  # store that holds nothing reads as known (#29148 r1 review, F3). Not
+  # bound in the comprehension: a nil binding there filters the key out.
   defp rich_drawn(schema, form) do
     for key <- rich_keys(schema),
-        value = Map.get(form, key),
-        is_binary(value) or is_list(value),
+        drawable?(Map.get(form, key)),
         into: %{},
-        do: {RemoteValues.input_name(key), rich_digest(value)}
+        do: {RemoteValues.input_name(key), rich_digest(Map.get(form, key))}
   end
+
+  defp drawable?(value), do: is_binary(value) or is_list(value) or is_nil(value)
 
   # The form holds a top-level rich text as the HTML its editor draws
   # (`Content.Forms`), the store as blocks: one digest for both.
@@ -132,9 +137,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   def rejoin_seen(socket, name, stored, seen) do
     rejoin = socket.assigns[:editor_rt_rejoin] || MapSet.new()
 
+    oks = seen_oks(seen)
+
     cond do
       not MapSet.member?(rejoin, name) -> stored
-      rich_known?(seen_oks(seen), name, stored) -> stored
+      rich_known?(oks, name, stored) -> stored
+      # The page never drew the field (added to the schema after it loaded)
+      # and the store holds none: its first words are written, as before
+      # (#29148 r1 review, F2). A draw the page names that differs is a
+      # removal while it was away: kept (`Forms.ObjectRebase`).
+      is_nil(stored) and not Map.has_key?(oks, name) -> stored
       true -> :unknown
     end
   end
@@ -322,15 +334,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   def confirm(socket, _keys, _posted), do: socket
 
   # A top-level rich text post the store holds as it draws: the page shows
-  # the stored value.
+  # the stored value. An empty post the store holds as no value (A's own
+  # unset) is confirmed as the empty field it draws: a rejoin's post then
+  # reads as made on it, not as over B's removal (#29148 r1 review, F3).
   defp rich_confirmed(socket, stored, posted) do
     for key <- rich_keys(socket.assigns[:editor_schema]),
         html = Map.get(posted, key),
         is_binary(html),
-        value = Map.get(stored, key),
-        is_list(value),
-        PortableTextMerge.same_drawn?(PortableText.from_html(html, value), value),
+        drawn?(html, Map.get(stored, key)),
         into: %{},
-        do: {RemoteValues.input_name(key), rich_digest(value)}
+        do: {RemoteValues.input_name(key), rich_digest(Map.get(stored, key))}
   end
+
+  defp drawn?(html, value) when is_list(value),
+    do: PortableTextMerge.same_drawn?(PortableText.from_html(html, value), value)
+
+  defp drawn?(html, nil), do: String.trim(html) == ""
+  defp drawn?(_html, _value), do: false
 end
