@@ -80,8 +80,9 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
     end)
   end
 
-  # Each posted row with a `_key` the store still holds: its rich text
-  # subfields read as an object's are, onto the store's row of that key,
+  # Each posted row with a `_key` the store still holds, and each keyless
+  # row over a keyless one at its index: its rich text subfields read as an
+  # object's are, onto the store's row,
   # and its object and array subfields rebased as anywhere else (a rich text
   # in an array in a row, or in an object in a row: task-19452fe7c3af65d4,
   # written as posted over another editor's saves before). The row's other
@@ -106,11 +107,10 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
     mine
     |> Enum.with_index()
     |> Enum.map(fn {row, i} ->
-      with %{"_key" => k} when is_binary(k) <- row,
+      with %{} <- row,
            false <- is_struct(row),
-           %{} = t <- by_key(theirs, k),
+           {b, %{} = t} <- pair(row, i, base, theirs),
            [_ | _] = subs <- member_fields(field["of"], row) do
-        b = by_key(base, k) || %{}
         rich = for %{"name" => n, "type" => "richText"} when is_binary(n) <- subs, do: n
 
         rich
@@ -144,6 +144,26 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   end
 
   defp by_key(rows, key), do: Enum.find(rows, &(is_map(&1) and Map.get(&1, "_key") == key))
+
+  # A row's counterparts in the snapshot and the store: the rows of its
+  # `_key`. A row with none goes by its index (the fold wrote it into the
+  # row at its posted index): the keyless row there, never a keyed one. It
+  # was written as posted, over another editor's edit of that row or over a
+  # row inserted before it (task-f10341a15bcac784).
+  defp pair(%{"_key" => k}, _i, base, theirs) when is_binary(k) and k != "",
+    do: {by_key(base, k) || %{}, by_key(theirs, k)}
+
+  defp pair(_row, i, base, theirs), do: {keyless_at(base, i) || %{}, keyless_at(theirs, i)}
+
+  defp keyless_at(rows, i) do
+    case Enum.at(rows, i) do
+      %{} = row when not is_struct(row) ->
+        if Map.get(row, "_key") in [nil, ""], do: row
+
+      _ ->
+        nil
+    end
+  end
 
   # The fields of the row's member type, by its `_type` (the one member
   # when the row names none).
