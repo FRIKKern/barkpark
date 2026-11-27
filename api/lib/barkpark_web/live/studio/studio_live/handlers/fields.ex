@@ -265,6 +265,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def save(_params, socket), do: {:noreply, socket}
 
+  # The fold's dropped row leaves, `[{input name, value}]` (`fold_dot_paths/2`).
+  @dropped "_bp_rt_dropped"
+
   defp save_open(params, socket) do
     params = PostIdentity.no_marks(params)
     socket = track_touched(socket, params)
@@ -273,7 +276,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => posted} ->
+      %{"doc" => posted} = folded ->
         # As an autosave: a rich text in an object written over another
         # editor's change is not written over it (#28349 r2 review, V1),
         # and is read again under the lock (`RichTextRemote.UnderLock`,
@@ -314,11 +317,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> TextConfirmed.confirm(units, posted)
          |> RichTextRemote.hold(held)
          |> TextConfirmed.paused(rich)
-         |> row_draws()}
+         |> row_draws()
+         |> dropped(folded, params)}
 
       _ ->
         {:noreply, socket}
     end
+  end
+
+  defp dropped(socket, folded, params) do
+    folded
+    |> Map.get(@dropped, [])
+    |> RichTextRemote.DroppedRows.typed(params["_bp_rt_owner"])
+    |> then(&RichTextRemote.DroppedRows.keep(socket, &1))
   end
 
   # As an autosave: each free-text field of the Save is merged onto the
@@ -616,7 +627,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> fold_dot_paths(socket)
          |> KeptRows.only_stored(base_form(socket))
          |> KeptCodes.only_touched(base_form(socket), socket.assigns[:editor_schema]) do
-      %{"doc" => posted} ->
+      %{"doc" => posted} = folded ->
         # A rich text in an object written over another editor's change is
         # not written over it (`RichTextRemote`, task-47be2cdf59d0acd5).
         {doc, held} = RichTextRemote.split(socket, posted, params["_bp_rt_seen"])
@@ -691,7 +702,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
 
         {:noreply,
-         saved |> RichTextRemote.hold(held) |> TextConfirmed.paused(rich) |> row_draws()}
+         saved
+         |> RichTextRemote.hold(held)
+         |> TextConfirmed.paused(rich)
+         |> row_draws()
+         |> dropped(folded, params)}
 
       _ ->
         {:noreply, socket}
@@ -787,19 +802,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       rest = Map.new(rest)
       doc = Map.get(rest, "doc", %{})
 
-      doc =
-        Enum.reduce(dotted, doc, fn {key, value}, acc ->
+      {doc, dropped} =
+        Enum.reduce(dotted, {doc, []}, fn {key, value}, {acc, dropped} ->
           with [_ | _] = path <- StudioLive.parse_path(key),
                {:ok, path} <- row_path(path, row_keys, base_form) do
-            acc
-            |> seed_root(path, base_form)
-            |> write_leaf(socket, path, value)
+            {acc |> seed_root(path, base_form) |> write_leaf(socket, path, value), dropped}
           else
-            _ -> acc
+            :drop -> {acc, [{key, value} | dropped]}
+            _ -> {acc, dropped}
           end
         end)
 
-      Map.put(rest, "doc", doc)
+      # A row's leaves with no row to go to: A's words typed in one are
+      # shown in the banner (`RichTextRemote.DroppedRows`).
+      rest
+      |> Map.put("doc", doc)
+      |> then(&if(dropped == [], do: &1, else: Map.put(&1, @dropped, Enum.reverse(dropped))))
     end
   end
 
