@@ -215,8 +215,11 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   # ── Recording ───────────────────────────────────────────────────────────
 
   # The post was written: the store holds another document than before it.
+  # A built write over a held field says so on its own: the hold kept the
+  # banner's status in place of "Saved" (`Fields.autosave_built/2`).
   defp landed?(socket, before) do
-    socket.assigns[:save_status] == "Saved" and is_map(socket.assigns[:editor_doc]) and
+    (socket.assigns[:save_status] == "Saved" or socket.assigns[:editor_built_landed] == true) and
+      is_map(socket.assigns[:editor_doc]) and
       socket.assigns[:editor_doc] != before.assigns[:editor_doc]
   end
 
