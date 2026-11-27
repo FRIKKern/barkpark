@@ -333,4 +333,41 @@ defmodule BarkparkWeb.Studio.RejoinStalePickTest do
       assert eventually(fn -> reviewer(c)["_ref"] == c.id <> "-saved" end)
     end
   end
+
+  # #29085 r1 (3): the page drew B's Y, and A picks X again; the pick rides
+  # the next key or a Save (the widget's own change is still in its
+  # debounce). Studio only: the desk drops it on main too, by a way of its
+  # own, outside this task.
+  test "studio live control: A re-picks their own value after B's save is drawn, on a body key: written",
+       c do
+    a = tab(c, :studio)
+    picks = page_picks(a)
+    {x, y} = {c.id <> "-x", c.id <> "-y"}
+    post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => x}, picks)
+    assert eventually(fn -> reviewer(c)["_ref"] == x end)
+    put_field(c, "reviewer", ref(y))
+    assert eventually(fn -> page_picks(a).drawn["reviewer"] == y end)
+
+    at_y = page_picks(a)
+    body_key(a, "body0 D3", %{at_y | doc: %{at_y.doc | "reviewer" => x}})
+
+    assert eventually(fn -> words(stored(c)["body"]) == ["body0 D3"] end)
+    assert reviewer(c)["_ref"] == x, "A's re-pick after the redraw was dropped"
+  end
+
+  test "studio live control: A re-picks their own value after B's save is drawn, then Save: written",
+       c do
+    a = tab(c, :studio)
+    picks = page_picks(a)
+    {x, y} = {c.id <> "-x", c.id <> "-y"}
+    post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => x}, picks)
+    assert eventually(fn -> reviewer(c)["_ref"] == x end)
+    put_field(c, "reviewer", ref(y))
+    assert eventually(fn -> page_picks(a).drawn["reviewer"] == y end)
+
+    at_y = page_picks(a)
+    save(a, %{at_y | doc: %{at_y.doc | "reviewer" => x}})
+
+    assert reviewer(c)["_ref"] == x, "A's re-pick after the redraw, then Save, was dropped"
+  end
 end

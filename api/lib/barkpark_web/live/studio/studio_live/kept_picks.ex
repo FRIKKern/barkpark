@@ -93,8 +93,9 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
 
   # Posted as this page last wrote it, where the store has since moved to
   # another's value: the page still shows its own pick, the redraw of the
-  # other save not yet drawn (task-775ad6b350f78f2e).
-  defp stale?(posted, _drawn, posted, now), do: now != posted
+  # other save not yet drawn (task-775ad6b350f78f2e). A page that drew the
+  # store's value and posts its own again picked it again: written.
+  defp stale?(posted, drawn, posted, now), do: now != posted and drawn != now
 
   defp stale?(_posted, _drawn, _own, _now), do: false
 
