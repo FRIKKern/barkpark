@@ -252,6 +252,55 @@ defmodule BarkparkWeb.Studio.RejoinStalePickTest do
       assert reviewer(c) in [nil, ""], "A's clear was dropped"
     end
 
+    # task-775ad6b350f78f2e (#29075 r2 review, BRK2): A's own pick, still
+    # shown, rode over B's live save before the redraw reached A's page.
+    test "#{surface} live: A's own pick posted after B saves another, before the redraw, keeps B's",
+         c do
+      a = tab(c, @surface)
+      picks = page_picks(a)
+      {x, y} = {c.id <> "-x", c.id <> "-y"}
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => x}, picks)
+      assert eventually(fn -> reviewer(c)["_ref"] == x end)
+      ref_wrap = wrap(a, "bp-ref-wrap-reviewer")
+
+      put_field(c, "reviewer", ref(y))
+      body_key(a, "body0 B2", %{picks | doc: %{picks.doc | "reviewer" => x}})
+
+      assert eventually(fn -> words(stored(c)["body"]) == ["body0 B2"] end)
+      # On main (studio): A's X was written over B's Y, with no banner.
+      assert reviewer(c)["_ref"] == y, "A's own earlier pick rode over B's"
+      refute wrap(a, "bp-ref-wrap-reviewer") == ref_wrap, "the widget was not drawn again"
+      assert page_picks(a).doc["reviewer"] == y
+    end
+
+    test "#{surface} live control: A picks their own value again after B's save: written", c do
+      a = tab(c, @surface)
+      picks = page_picks(a)
+      {x, y} = {c.id <> "-x", c.id <> "-y"}
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => x}, picks)
+      assert eventually(fn -> reviewer(c)["_ref"] == x end)
+      put_field(c, "reviewer", ref(y))
+      render(a)
+
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => x}, page_picks(a))
+
+      assert eventually(fn -> reviewer(c)["_ref"] == x end)
+    end
+
+    test "#{surface} live control: a new pick after B's save rides a body key and is written",
+         c do
+      a = tab(c, @surface)
+      picks = page_picks(a)
+      {x, y, z} = {c.id <> "-x", c.id <> "-y", c.id <> "-z"}
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => x}, picks)
+      assert eventually(fn -> reviewer(c)["_ref"] == x end)
+      put_field(c, "reviewer", ref(y))
+
+      body_key(a, "body0 B4", %{picks | doc: %{picks.doc | "reviewer" => z}})
+
+      assert eventually(fn -> reviewer(c)["_ref"] == z end)
+    end
+
     test "#{surface} control: a pick posted with a key in another field is written", c do
       a = tab(c, @surface)
       picks = page_picks(a)

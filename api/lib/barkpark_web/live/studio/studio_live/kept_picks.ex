@@ -26,6 +26,11 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   its `_bp_drawn` stays the first value, and a pick back to it, on a key in
   another field or a Save, is A's and written (#29075 r1 review).
 
+  A pick the page posts as this socket last wrote it, where the store has
+  since moved to another editor's value, is dropped the same way: the page
+  still shows A's own pick because the other save's redraw had not reached
+  it (task-775ad6b350f78f2e). A pick of it again on its own change is A's.
+
   Where the store holds another value than the page drew, the widget is
   drawn again from it (`editor_pick_gens`, a part of its wrapper id), so the
   page shows it and posts it as drawn from then on. A nested reference or
@@ -69,11 +74,11 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
       for %{"type" => type, "name" => name} <- fields(schema),
           type in @types,
           name != target,
-          is_binary(drawn[name]),
-          Map.get(doc, name) == drawn[name],
-          drawn(type, Map.get(form, name)) not in [drawn[name], Map.get(own, name)],
+          posted = Map.get(doc, name),
+          is_binary(posted),
+          stale?(posted, drawn[name], Map.get(own, name), drawn(type, Map.get(form, name))),
           into: %{},
-          do: {name, {type, drawn[name]}}
+          do: {name, {type, posted}}
 
     {params |> Map.put("doc", Map.drop(doc, Map.keys(dropped))) |> Map.delete("_bp_drawn"),
      dropped}
@@ -81,6 +86,17 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
 
   def split(params, _schema, _form, _own) when is_map(params),
     do: {Map.delete(params, "_bp_drawn"), %{}}
+
+  # Posted as the page drew it, where the store holds neither that nor this
+  # page's own pick.
+  defp stale?(posted, posted, own, now), do: now not in [posted, own]
+
+  # Posted as this page last wrote it, where the store has since moved to
+  # another's value: the page still shows its own pick, the redraw of the
+  # other save not yet drawn (task-775ad6b350f78f2e).
+  defp stale?(posted, _drawn, posted, now), do: now != posted
+
+  defp stale?(_posted, _drawn, _own, _now), do: false
 
   defp redraw(socket, dropped) when map_size(dropped) == 0, do: socket
 
