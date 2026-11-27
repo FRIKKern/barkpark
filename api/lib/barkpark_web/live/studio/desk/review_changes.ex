@@ -306,7 +306,10 @@ defmodule BarkparkWeb.Studio.Desk.ReviewChanges do
     {:noreply, saved} = EditorHost.write_built(params, socket)
 
     if field["type"] in @widget_types,
-      do: assign(saved, :editor_form_gen, Shared.next_form_gen(saved, true)),
+      do:
+        saved
+        |> assign(:editor_form_gen, Shared.next_form_gen(saved, true))
+        |> BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed.redrawn(saved),
       else: saved
   end
 

@@ -110,6 +110,7 @@ defmodule BarkparkWeb.StudioChrome do
 
   import Phoenix.Component, only: [assign: 2, assign: 3, assign_new: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, put_flash: 3]
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.{Content, Tenancy}
   alias Barkpark.Auth.ApiToken
@@ -360,7 +361,7 @@ defmodule BarkparkWeb.StudioChrome do
       not Tenancy.Auth.may_create_workspace?(principal, id_of(socket.assigns[:current_workspace])) ->
         refuse_unseated_create(socket)
 
-      Tenancy.Quota.suspended?(id_of(socket.assigns[:current_workspace])) ->
+      suspended_create?(principal, socket.assigns[:current_workspace]) ->
         refuse_suspended_create(socket)
 
       ApiToken.dataset_bound?(principal) ->
@@ -434,7 +435,25 @@ defmodule BarkparkWeb.StudioChrome do
   chrome and for StudioLive's handler (task-d40804433c63ffa4).
   """
   def refuse_unseated_create(socket),
-    do: put_flash(socket, :error, "You need write access in this workspace to create a workspace")
+    do:
+      put_flash(
+        socket,
+        :error,
+        gettext("You need write access in this workspace to create a workspace")
+      )
+
+  @doc """
+  Whether a create is under a suspension: the socket's workspace, or, for a
+  token, its home workspace, so one token gets REST's answer on every surface
+  (task-3e88aa09df6a3b81). An account has no single home; a suspension of
+  another of its workspaces does not stop it here. Fresh reads.
+  """
+  def suspended_create?(principal, current_workspace) do
+    Tenancy.Quota.suspended?(id_of(current_workspace)) or token_home_suspended?(principal)
+  end
+
+  defp token_home_suspended?(%ApiToken{workspace_id: home}), do: Tenancy.Quota.suspended?(home)
+  defp token_home_suspended?(_principal), do: false
 
   @doc """
   The refusal for a create from a suspended workspace (`Tenancy.Quota.suspended?/1`).
@@ -445,7 +464,7 @@ defmodule BarkparkWeb.StudioChrome do
       put_flash(
         socket,
         :error,
-        "This workspace is suspended, so no workspace can be created from it"
+        gettext("This workspace is suspended, so no workspace can be created from it")
       )
 
   # ── scope-menu state ──────────────────────────────────────────────────────

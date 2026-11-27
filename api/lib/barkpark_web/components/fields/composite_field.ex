@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
   alias BarkparkWeb.Studio.Desk.Fieldsets
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
 
   attr :field, :map, required: true
   attr :value, :map, default: %{}
@@ -243,8 +244,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         # Keyed by the item's `_key` too: a moved item or another document
         # remounts the ignored editor instead of keeping the old text.
         wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
-        html:
-          if(value in [nil, "", []], do: "", else: Barkpark.Content.PortableText.to_html(value)),
+        owner_key: owner_key,
+        html: drawn_html(value),
         label: title_for(sub),
         vocabulary:
           case Barkpark.Content.PortableText.editor_vocabulary(Map.get(sub, :raw) || %{},
@@ -272,6 +273,21 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   defp render_subfield_guarded(assigns, sub), do: render_subfield(assigns, sub)
 
+  @doc """
+  The HTML an object rich text's editor draws for `value`, and its digest:
+  the owner entry carries the digest, so a post says which draw it was typed
+  on even when the owner `_key` comes back to an earlier one
+  (task-c0a696a3a5a3900d; `RichTextRemote.UnderLock` records the same).
+  The digest is `TextConfirmed.digest/1`'s 64 bits of sha256. It was a
+  27-bit `:erlang.phash2/1`: two row draws that shared one were kept as one,
+  and a post typed on the first read as typed on the other
+  (task-9b705d11bf85560e).
+  """
+  def drawn_html(value) when value in [nil, "", []], do: ""
+  def drawn_html(value), do: Barkpark.Content.PortableText.to_html(value)
+
+  def drawn_digest(value), do: TextConfirmed.digest(drawn_html(value))
+
   # The `bp-rich-text-editor` a top-level richText uses, bridged to a hidden
   # input by `BarkparkFieldBridge`. It has no block dialog of its own, so a
   # custom block inside this value shows as its box and is saved unchanged.
@@ -282,6 +298,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     ~H"""
     <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-pt-subfield={@input_name}>
       <input type="hidden" id={"bp-rt-hidden-#{@input_id}"} name={@input_name} value={@html} phx-debounce="500" />
+      <%!-- The owner `_key` this editor was drawn under and the digest of
+           the HTML drawn, inside the ignored wrapper: they change only when a
+           remount reaches the page, so a post says which value it was typed
+           on (task-c29534c0655f0489), even after a key comes back
+           (task-c0a696a3a5a3900d). Outside `doc[...]`, never written. --%>
+      <input :if={String.starts_with?(@input_name, "doc[")} type="hidden" name="_bp_rt_owner[]" value={Jason.encode!([@input_name, @owner_key, TextConfirmed.digest(@html)])} />
       <bp-rich-text-editor value={@html} data-bridge-target={"bp-rt-hidden-#{@input_id}"}
         data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={@label}
         data-vocabulary={@vocabulary}

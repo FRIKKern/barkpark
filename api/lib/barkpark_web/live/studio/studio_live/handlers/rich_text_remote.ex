@@ -40,8 +40,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView, only: [push_event: 3]
 
+  alias Barkpark.Content.Forms.HtmlBody
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
 
@@ -65,7 +67,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   """
   def push(socket, old_form, new_form) do
     changed = changes(socket.assigns[:editor_schema], old_form || %{}, new_form || %{})
-    tell(socket, changed, %{})
+
+    socket
+    |> __MODULE__.UnderLock.remounted(old_form, new_form)
+    |> tell(changed, %{})
   end
 
   @doc """
@@ -89,6 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
     socket
     |> drop_holds()
+    |> __MODULE__.RowDraws.record_form(form)
     |> tell(all, %{reload: true})
   end
 
@@ -295,12 +301,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   def hold(socket, []), do: socket
 
   def hold(socket, acts) do
+    strings = socket.assigns[:editor_rt_held_raw] || %{}
+    socket = if strings == %{}, do: socket, else: assign(socket, editor_rt_held_raw: %{})
+
     Enum.reduce(Enum.reverse(acts), socket, fn
       {:current, name}, s ->
-        assign(s,
+        s
+        |> assign(
           editor_rt_clash: Map.delete(s.assigns[:editor_rt_clash] || %{}, name),
           editor_rt_held: Map.delete(s.assigns[:editor_rt_held] || %{}, name)
         )
+        |> HeldFields.drop_paths([{:rt, name}])
 
       # `own`: the page reads its text from this one, not from what waited
       # before it (task-2833650e2e72d380).
@@ -317,8 +328,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       {:held, name, path, {base, theirs, view, texts}}, s ->
         s
         |> keep_held(name, path, view, texts)
-        |> send_view(name, {base, theirs, view})
+        |> send_view(name, {base, theirs, view}, held_string(strings, name, theirs))
     end)
+  end
+
+  # The HTML string a hold's `theirs` (its blocks) was read from
+  # (`UnderLock.html_act`), kept with the hold: a resolve reads A's post
+  # against it byte for byte (task-d9ffbd2e6639496b).
+  defp held_string(strings, name, theirs) do
+    case strings do
+      %{^name => string} -> if HtmlBody.blocks(string) == theirs, do: string
+      _ -> nil
+    end
   end
 
   # The form shows A's view, unsaved, with the banner.
@@ -326,8 +347,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     [key | _] = path
     clash = socket.assigns[:editor_rt_clash] || %{}
 
-    assign(socket,
-      editor_form: FormPath.put(socket.assigns[:editor_form] || %{}, path, view),
+    socket
+    # The row the hold is in, by its `_key`, before an op moves it.
+    |> HeldFields.hold_paths([{{:rt, name}, path}])
+    |> assign(
+      editor_form: put_view(socket, path, view),
       editor_dirty: true,
       editor_unsaved_keys: MapSet.put(socket.assigns[:editor_unsaved_keys] || MapSet.new(), key),
       doc_conflict: true,
@@ -337,12 +361,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     )
   end
 
+  # The view in the shape the form holds for that field. A top-level rich
+  # text (not on the block editor) is edited as the HTML its editor draws
+  # (`Content.Forms`); blocks there draw the read-only field, with no input,
+  # so A's held words could not be edited or saved (task-f69efe9a4365aeb5).
+  # Read from the schema, not the form's value: a body never set has none.
+  # An object's or a row's rich text holds blocks.
+  defp put_view(socket, path, view) do
+    form = socket.assigns[:editor_form] || %{}
+
+    if is_list(view) and html_field?(socket.assigns[:editor_schema], path),
+      do: FormPath.put(form, path, PortableText.to_html(view)),
+      else: FormPath.put(form, path, view)
+  end
+
+  defp html_field?(%{fields: fields}, [key]) when is_list(fields) and is_binary(key) do
+    Enum.any?(fields, fn field ->
+      match?(%{"name" => ^key, "type" => "richText"}, field) and
+        not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+    end)
+  end
+
+  defp html_field?(_schema, _path), do: false
+
   # A new number for the view; the hold, and the log, read a post against
   # the base A typed on (never A's own earlier post: review blocker 1).
-  defp send_view(socket, name, {base, theirs, view}) do
+  defp send_view(socket, name, {base, theirs, view}, string \\ nil) do
     {socket, seq} = next_seq(socket)
     holds = socket.assigns[:editor_rt_held] || %{}
     hold = %{seq: seq, base: base, theirs: theirs, view: view}
+    hold = if is_binary(string), do: Map.put(hold, :raw, string), else: hold
 
     socket
     |> log(name, {seq, base, theirs})
@@ -380,6 +428,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
       socket
       |> assign(editor_rt_born: born, editor_rt_born_doc: PostIdentity.of(socket))
+      |> __MODULE__.RowDraws.record_form(form)
       |> send_values(values)
     end
   end
@@ -406,15 +455,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_folded: %{},
         editor_rt_held: %{},
         editor_rt_clash: %{},
+        editor_held_paths: %{},
         editor_rt_born: %{},
-        editor_rt_page: nil
+        editor_rt_page: nil,
+        editor_rt_row_draws: nil,
+        editor_rt_rekeyed: nil
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end
   end
 
   @doc "Ends every hold: the form was read again from the store."
-  def drop_holds(socket), do: assign(socket, editor_rt_held: %{}, editor_rt_clash: %{})
+  def drop_holds(socket),
+    do:
+      socket
+      |> assign(editor_rt_held: %{}, editor_rt_clash: %{})
+      |> HeldFields.drop_paths()
 
   @doc """
   While A's words in an object are held (`Lifecycle`'s unsaved branch keeps

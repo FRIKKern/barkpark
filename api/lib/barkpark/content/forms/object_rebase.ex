@@ -33,6 +33,7 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   written as posted, as before.
   """
 
+  alias Barkpark.Content.Forms.HtmlBody
   alias Barkpark.Content.PortableTextMerge
 
   @doc """
@@ -80,9 +81,12 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   end
 
   # Each posted row with a `_key` the store still holds: its rich text
-  # subfields read as an object's are, onto the store's row of that key.
-  # The row's other subfields, its order and the rows themselves are
-  # written as posted, as before.
+  # subfields read as an object's are, onto the store's row of that key,
+  # and its object and array subfields rebased as anywhere else (a rich text
+  # in an array in a row, or in an object in a row: task-19452fe7c3af65d4,
+  # written as posted over another editor's saves before). The row's other
+  # subfields, its order and the rows themselves are written as posted, as
+  # before.
   #
   # Only when every row's `_key` is unique in all three (as `Forms`'
   # `keyed_rows?`): two rows of one key matched the first for both, and the
@@ -105,9 +109,13 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
       with %{"_key" => k} when is_binary(k) <- row,
            false <- is_struct(row),
            %{} = t <- by_key(theirs, k),
-           [_ | _] = rich <- rich_subs(field["of"], row) do
+           [_ | _] = subs <- member_fields(field["of"], row) do
         b = by_key(base, k) || %{}
-        Enum.reduce(rich, row, &row_text(&1, &2, b, t, {seen, at ++ [i, &1]}))
+        rich = for %{"name" => n, "type" => "richText"} when is_binary(n) <- subs, do: n
+
+        rich
+        |> Enum.reduce(row, &row_text(&1, &2, b, t, {seen, at ++ [i, &1]}))
+        |> then(&rebase(subs, &1, b, t, {seen, at ++ [i]}))
       else
         _ -> row
       end
@@ -137,7 +145,9 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
 
   defp by_key(rows, key), do: Enum.find(rows, &(is_map(&1) and Map.get(&1, "_key") == key))
 
-  defp rich_subs(of, row) do
+  # The fields of the row's member type, by its `_type` (the one member
+  # when the row names none).
+  defp member_fields(of, row) do
     of = if is_list(of), do: of, else: [of]
     type = Map.get(row, "_type")
 
@@ -145,26 +155,61 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
            of,
            &(is_map(&1) and (&1["name"] == type or (is_nil(type) and length(of) == 1)))
          ) do
-      %{"fields" => subs} when is_list(subs) ->
-        for %{"name" => n, "type" => "richText"} when is_binary(n) <- subs, do: n
-
-      _ ->
-        []
+      %{"fields" => subs} when is_list(subs) -> subs
+      _ -> []
     end
   end
 
   # A top-level rich text the post changed, with what the page showed
   # (`seen`, `UnderLock.top/3`), task-fa07c64d344638fb: read as an object's
   # is. Two tabs typing in it wrote the later post over the earlier with no
-  # word. With no `seen` it is written as posted, as before.
+  # word. With no `seen` it is written as posted, as before. A body the
+  # store holds as an HTML string is posted as one, and read as one
+  # (`HtmlBody`, task-bb19ab06ab1e87b2). A Portable Text field the store
+  # holds as a string is posted as blocks, and read as such a body is
+  # (`HtmlBody.stored_string?/2`, task-49a96a7780dad558).
+  # A post read against an unknown draw (a rejoin) over a field the store
+  # holds no value for: another editor removed it while the page was away.
+  # It stays removed, and A is held (task-7565817187a53934); a legacy HTML
+  # body keeps reading it as `HtmlBody.rebase/3` does.
   defp top_rich(params, fields, base, theirs, seen) do
     Enum.reduce(fields, params, fn
-      %{"name" => key, "type" => "richText"}, acc when is_binary(key) ->
-        with {:ok, was} <- Map.fetch(seen, [key]),
-             {:ok, mine} when is_list(mine) <- Map.fetch(acc, key) do
-          Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
-        else
-          _ -> acc
+      %{"name" => key, "type" => "richText"} = field, acc when is_binary(key) ->
+        case {Map.fetch(seen, [key]), Map.fetch(acc, key), theirs[key]} do
+          {{:ok, :unknown}, {:ok, mine}, nil} ->
+            cond do
+              not HtmlBody.field?(field, nil) -> Map.delete(acc, key)
+              is_binary(mine) -> Map.put(acc, key, HtmlBody.rebase(mine, nil, :unknown))
+              true -> Map.put(acc, key, rich_text(base[key], mine, nil, {:ok, :unknown}))
+            end
+
+          {{:ok, was}, {:ok, mine}, stored} when is_list(mine) ->
+            cond do
+              # The page showed a string: read by it, also when the store no
+              # longer holds one (removed: task-7565817187a53934).
+              not HtmlBody.stored_string?(field, stored) and not is_binary(was) ->
+                Map.put(acc, key, rich_text(base[key], mine, theirs[key], {:ok, was}))
+
+              # Read against the exact string: `from_html/1` drops markup
+              # (an image, an iframe, a class), so a drawing compare reads
+              # a string B changed only there as the one A saw (#29116 r1).
+              was === stored ->
+                acc
+
+              # The store's string stays as stored: the field is left out
+              # of the write (`Content.Forms` keeps a stored key the post
+              # does not carry), and A is held (`UnderLock`).
+              true ->
+                Map.delete(acc, key)
+            end
+
+          {{:ok, was}, {:ok, mine}, stored} when is_binary(mine) ->
+            if HtmlBody.field?(field, stored),
+              do: Map.put(acc, key, HtmlBody.rebase(mine, stored, was)),
+              else: acc
+
+          _ ->
+            acc
         end
 
       _, acc ->
@@ -215,6 +260,14 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
   # holds" counts each block's own fields (task-6174d8fa01658a68): a
   # `level` or unknown field another editor set draws the same, and mine
   # was written over it.
+  # A row post whose draw is not known (`UnderLock`, task-82519fd79663e072):
+  # the store is kept unless the post draws the same; A is held.
+  defp rich_text(_base, mine, theirs, {:ok, :unknown}) when is_list(mine) do
+    if is_list(theirs) and not PortableTextMerge.same_drawn?(mine, theirs),
+      do: theirs,
+      else: mine
+  end
+
   defp rich_text(_base, mine, theirs, {:ok, was}) when is_list(mine) do
     theirs = if is_list(theirs), do: theirs, else: []
     was = if is_list(was), do: was, else: []

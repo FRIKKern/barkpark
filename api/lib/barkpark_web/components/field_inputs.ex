@@ -68,6 +68,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # Moves when the server replaced a rich text / reference / image value of the
   # open document (Shared.next_form_gen/2) — part of doc_wrap_id/4.
   attr :form_gen, :integer, default: 0
+  # Moves for one reference or image when the store kept another value than
+  # the page drew and posted (`KeptPicks`): that widget alone is drawn again.
+  attr :pick_gens, :map, default: %{}
   attr :doc_type, :string, default: "document"
   attr :document_rev, :string, default: nil
   # Whether the viewer may change a `readOnly` schema field (an admin, as the
@@ -441,8 +444,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
       )
 
     ~H"""
-    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-filter-params={@ref_filter_params}>
+    <div id={pick_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen, @pick_gens)} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-filter-params={@ref_filter_params}>
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <input type="hidden" name={"_bp_drawn[#{@n}]"} value={@v} />
+      <input type="hidden" name={"_bp_drawn_at[#{@n}]"} value={pick_drawing(@form_gen, @pick_gens, @n)} />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
         ref-type={@ref_type}
@@ -486,8 +491,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
       )
 
     ~H"""
-    <div id={doc_wrap_id("bp-mp-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={pick_wrap_id("bp-mp-wrap", @n, @doc_key, @form_gen, @pick_gens)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <input type="hidden" name={"_bp_drawn[#{@n}]"} value={@v} />
+      <input type="hidden" name={"_bp_drawn_at[#{@n}]"} value={pick_drawing(@form_gen, @pick_gens, @n)} />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         id={@id_prefix == "" && @n}
         chrome={@id_prefix == "" && "bar"}
@@ -853,6 +860,14 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def label_target(_field, _form, _prefix), do: nil
 
+  @doc """
+  The drawing a reference or image widget is on: its wrapper's form
+  generation and its own, as the page posts it (`_bp_drawn_at[name]`,
+  `KeptPicks`).
+  """
+  def pick_drawing(form_gen, pick_gens, name),
+    do: "#{form_gen || 0}.#{Map.get(pick_gens || %{}, name, 0)}"
+
   # [doc-keyed-ignore-wrappers] The id of a `phx-update="ignore"` wrapper that
   # owns a hidden input + web component (rich text, reference, image,
   # mediaAsset reference). LiveView never patches the children of an ignored
@@ -865,6 +880,17 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # caret mid-word. `form_gen` adds the same remount for a value the SERVER
   # replaced in the open document — another tab's save, Reload, a revision
   # restore (task-c7b0565a482b9d21); it is 0, and left out of the id, until then.
+  # A reference or image wrapper: drawn again when the form generation
+  # moves, or its own (`KeptPicks`).
+  defp pick_wrap_id(prefix, name, doc_key, form_gen, pick_gens) do
+    key = doc_wrap_id(prefix, name, doc_key, form_gen)
+
+    case pick_gens do
+      %{^name => n} when is_integer(n) and n > 0 -> "#{key}-p#{n}"
+      _ -> key
+    end
+  end
+
   defp doc_wrap_id(prefix, name, doc_key, form_gen) do
     key = "#{prefix}-#{name}-#{Barkpark.Content.DraftId.published_id(to_string(doc_key))}"
     if is_integer(form_gen) and form_gen > 0, do: "#{key}-g#{form_gen}", else: key

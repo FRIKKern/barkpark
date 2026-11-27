@@ -107,6 +107,8 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   (task-2f3af2d2f7f56811).
   """
   def around(event, params, socket, fun) do
+    socket = assign(socket, :editor_write_landed, nil)
+
     case DocUndoValues.target(event, params, socket.assigns) do
       nil ->
         if event == "autosave", do: record(fun.(socket), params, socket), else: fun.(socket)
@@ -157,6 +159,7 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   and not kept.
   """
   def write_built(%{"_target" => ["doc", key]} = params, socket) when is_binary(key) do
+    socket = assign(socket, :editor_write_landed, nil)
     schema = socket.assigns[:editor_schema]
     write = &EditorHost.write_built(params, &1)
 
@@ -215,8 +218,15 @@ defmodule BarkparkWeb.Studio.Desk.DocUndo do
   # ── Recording ───────────────────────────────────────────────────────────
 
   # The post was written: the store holds another document than before it.
+  # The write says so itself (`:editor_write_landed`, set by
+  # `Shared.do_autosave/3` when the store took it, cleared as each write and
+  # each event here starts), not by "Saved": a hold puts the banner's status
+  # in its place (task-728b054a91a0c385). A typed post, an array op and a
+  # built write over a held field each keep their step, and none carries
+  # another's.
   defp landed?(socket, before) do
-    socket.assigns[:save_status] == "Saved" and is_map(socket.assigns[:editor_doc]) and
+    socket.assigns[:editor_write_landed] == true and
+      is_map(socket.assigns[:editor_doc]) and
       socket.assigns[:editor_doc] != before.assigns[:editor_doc]
   end
 

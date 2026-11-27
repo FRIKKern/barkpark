@@ -14,13 +14,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
+  alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.SaveTells
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock
   alias BarkparkWeb.Studio.StudioLive.Handlers.UnsavedBases
   alias BarkparkWeb.Studio.StudioLive.KeptCodes
+  alias BarkparkWeb.Studio.StudioLive.KeptPicks
   alias BarkparkWeb.Studio.StudioLive.KeptRows
   alias BarkparkWeb.Studio.StudioLive.PostedEdits
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
@@ -255,7 +258,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # A post built for another document than the editor holds is not written
   # (`PostIdentity`).
   def save(params, socket) when is_map(params) do
-    if PostIdentity.ours?(params, socket), do: save_open(params, socket), else: {:noreply, socket}
+    if PostIdentity.ours?(params, socket),
+      do: KeptPicks.through(params, socket, &save_open/2),
+      else: {:noreply, socket}
   end
 
   def save(_params, socket), do: {:noreply, socket}
@@ -277,7 +282,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
         rich =
           Map.merge(
-            RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"], posted),
+            RichTextRemote.UnderLock.values(
+              socket,
+              params["_bp_rt_seen"],
+              posted,
+              params["_bp_rt_owner"]
+            ),
             RichTextRemote.UnderLock.top(socket, posted)
           )
 
@@ -291,10 +301,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         socket =
           socket
           |> assign(editor_rt_under_lock: rich)
-          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
+          |> RichTextRemote.UnderLock.posted(
+            params["_bp_rt_seen"],
+            posted,
+            params["_bp_rt_owner"]
+          )
 
         {saved, held} = do_save(doc, not_codes, socket, text, {held, rich, posted, typed})
-        {:noreply, RichTextRemote.hold(saved, held)}
+
+        {:noreply,
+         saved
+         |> TextConfirmed.confirm(units, posted)
+         |> RichTextRemote.hold(held)
+         |> TextConfirmed.paused(rich)
+         |> row_draws()}
 
       _ ->
         {:noreply, socket}
@@ -323,14 +343,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
     # A rich text still held from before (`:still`) is not saved either: no
     # "Saved" beside its banner (#28832 review, N1).
-    rich_held? = Enum.any?(held, &(match?({:held, _, _, _}, &1) or match?({:still, _, _}, &1)))
+    rich_held =
+      for({:held, name, _, _} <- held, do: name) ++ for({:still, name, _} <- held, do: name)
 
     socket =
       written
       |> assign(editor_field_bases: %{}, editor_text_under_lock: nil, editor_rt_under_lock: nil)
       |> RefusedSave.not_codes(not_codes)
 
-    {:noreply, saved} = do_saved(socket, text_held, rich_held? or typed != [], params)
+    {:noreply, saved} = do_saved(socket, text_held, {rich_held, typed != []}, params)
 
     # The page is told what landed during the Save; a field held here
     # (under the lock, or by `TextRejoin`) is left out: its hold draws it.
@@ -345,16 +366,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {TextRejoin.hold(saved, typed, :save), held}
   end
 
-  defp do_saved(socket, text_held, rich_held?, params) do
+  # `{rich_held, typed?}`: the rich texts the Save holds, and whether
+  # `TextRejoin` held a field.
+  defp do_saved(socket, text_held, {rich_held, typed?}, params) do
     case socket.assigns[:save_status] do
-      "Saved" when text_held != [] or rich_held? ->
+      "Saved" when text_held != [] or rich_held != [] or typed? ->
         # The store kept another editor's words over a field of the Save:
         # the rest is saved; that field holds A's words, unsaved, with the
-        # banner, as an autosave holds it.
+        # banner, as an autosave holds it. A rich text held here is left
+        # out of the redraw's digests: the page keeps A's words there.
         {:noreply,
          socket
          |> Shared.rebuild_panes()
+         |> TextConfirmed.redrawn(socket, rich_held)
          |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+         |> HeldFields.drop_paths()
          |> Shared.assign_page_title()
          |> clear_touched()
          |> TextUnderLock.hold(text_held, params)}
@@ -369,7 +395,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           socket
           |> saved_flash()
           |> Shared.rebuild_panes()
+          |> TextConfirmed.redrawn(socket)
           |> assign(editor_dirty: false, doc_conflict: false, editor_unsaved_keys: MapSet.new())
+          |> HeldFields.drop_paths()
           |> Shared.assign_page_title()
           |> clear_touched()
 
@@ -408,9 +436,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       |> assign(
         editor_dirty: false,
         doc_conflict: false,
+        editor_text_paused: [],
         editor_unsaved_keys: MapSet.new(),
         editor_refused_clears: nil
       )
+      |> TextConfirmed.loaded()
       |> Shared.assign_page_title()
       |> clear_touched()
 
@@ -445,8 +475,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case value do
       t when is_binary(t) and t != "" ->
         posted = %{field => document_slug(t)}
+        {posted, held} = HeldFields.stored(socket, posted, [field])
         saved = Shared.do_autosave(socket, posted, :slug_derive)
-        {:noreply, saved |> keep_unsaved_values(posted, [field]) |> settle_dirty([field])}
+
+        {:noreply,
+         saved
+         |> keep_unsaved_values(posted, [field])
+         |> settle_dirty([field])
+         |> HeldFields.restore(held)}
 
       _ ->
         {:noreply, socket}
@@ -472,8 +508,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {%{}, [_ | _] = path} ->
           form = picked_form(socket, path, code)
           socket = socket |> PostedEdits.put(form) |> RefusedSave.target(Enum.take(path, 1), path)
+          {form, held} = HeldFields.stored(socket, form, Enum.take(path, 1))
           saved = Shared.do_autosave(socket, form, :tree_codelist_pick)
-          {:noreply, settle_dirty(saved, Enum.take(path, 1))}
+          {:noreply, saved |> settle_dirty(Enum.take(path, 1)) |> HeldFields.restore(held)}
 
         _ ->
           {:noreply, socket}
@@ -531,7 +568,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   def autosave(params, socket) when is_map(params) do
     if PostIdentity.ours?(params, socket),
-      do: autosave_open(params, socket, :page),
+      do: KeptPicks.through(params, socket, &autosave_open(&1, &2, :page)),
       else: {:noreply, socket}
   end
 
@@ -553,7 +590,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   """
   def autosave_built(params, socket) when is_map(params) do
     {bases, params} = Map.pop(params, :bases, %{})
-    autosave_open(params, socket, {:built, bases})
+    # A field held under the banner keeps its hold through the write, as
+    # it does through a write of the whole form (`HeldFields`,
+    # task-25de1fd76bf1f6d8): the save's "Saved" cleared the banner.
+    {doc, held} =
+      HeldFields.stored(
+        socket,
+        params["doc"] || %{},
+        target_key(params, socket.assigns[:editor_schema])
+      )
+
+    params = if Map.has_key?(params, "doc"), do: Map.put(params, "doc", doc), else: params
+    {:noreply, saved} = autosave_open(params, socket, {:built, bases})
+    {:noreply, HeldFields.restore(saved, held)}
   end
 
   # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
@@ -561,7 +610,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # (`CodelistShape`): a built one writes a stored value back as it is.
   defp autosave_open(params, socket, origin) do
     params = PostIdentity.no_marks(params)
-    socket = track_touched(socket, params)
+    socket = socket |> track_touched(params) |> assign(editor_write_landed: nil)
 
     case params
          |> fold_dot_paths(socket)
@@ -575,8 +624,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # since (`RichTextRemote.UnderLock`, task-00c56c6a88ed0b8f).
         rich =
           Map.merge(
-            RichTextRemote.UnderLock.values(socket, params["_bp_rt_seen"], posted),
-            RichTextRemote.UnderLock.top(socket, posted)
+            RichTextRemote.UnderLock.values(
+              socket,
+              params["_bp_rt_seen"],
+              posted,
+              params["_bp_rt_owner"]
+            ),
+            RichTextRemote.UnderLock.top(socket, posted, params["_bp_seen"])
           )
 
         # A free-text field's post is merged onto the stored value from the
@@ -587,7 +641,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # A page that rejoined a new socket, typed on a value it never took
         # (`TextRejoin`, task-4fc7383b936f606a).
         {targets, units} = TextRejoin.units(socket.assigns[:editor_schema], keys, path, doc)
-        {doc, typed} = TextRejoin.split(socket, units, params["_bp_seen"], doc, targets)
+
+        {doc, typed} =
+          TextRejoin.split(socket, units, params["_bp_seen"], doc, targets, :autosave)
 
         based =
           socket
@@ -601,7 +657,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         based =
           based
           |> assign(editor_rt_under_lock: rich, editor_text_under_lock: text)
-          |> RichTextRemote.UnderLock.posted(params["_bp_rt_seen"], posted)
+          |> RichTextRemote.UnderLock.posted(
+            params["_bp_rt_seen"],
+            posted,
+            params["_bp_rt_owner"]
+          )
 
         written =
           based
@@ -626,14 +686,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           |> settle_dirty(keys)
           |> TextUnderLock.hold(text_held, doc)
           |> TextRejoin.hold(typed)
+          |> TextConfirmed.confirm(targets, posted)
 
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
-        {:noreply, RichTextRemote.hold(saved, held)}
+
+        {:noreply,
+         saved |> RichTextRemote.hold(held) |> TextConfirmed.paused(rich) |> row_draws()}
 
       _ ->
         {:noreply, socket}
     end
   end
+
+  # Each row rich text the form now holds is a draw the page may show once a
+  # remount reaches it: A's own array press (a duplicate's new key, a move)
+  # and A's own save (a merged value) remount rows too (#29040 r2 review).
+  defp row_draws(socket),
+    do: RichTextRemote.RowDraws.record_form(socket, socket.assigns[:editor_form])
 
   defp page_codes(doc, socket, :page) do
     {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
@@ -704,11 +773,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     touched = touched_paths(socket)
     base_form = base_form(socket)
     targets = params |> Map.get("_target") |> List.wrap()
+    row_keys = params |> Enum.filter(fn {k, _} -> doc_key?(k) end) |> posted_row_keys()
 
     {dotted, rest} =
       Enum.split_with(params, fn {k, v} ->
-        is_binary(k) and String.starts_with?(k, "doc[") and foldable?(k, v, touched) and
-          not kept_value?(k, v, targets, base_form)
+        doc_key?(k) and foldable?(k, v, touched) and
+          not kept_value?(k, v, targets, {row_keys, base_form})
       end)
 
     if dotted == [] do
@@ -719,19 +789,85 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
       doc =
         Enum.reduce(dotted, doc, fn {key, value}, acc ->
-          case StudioLive.parse_path(key) do
-            [] ->
-              acc
-
-            path ->
-              acc
-              |> seed_root(path, base_form)
-              |> write_leaf(socket, path, value)
+          with [_ | _] = path <- StudioLive.parse_path(key),
+               {:ok, path} <- row_path(path, row_keys, base_form) do
+            acc
+            |> seed_root(path, base_form)
+            |> write_leaf(socket, path, value)
+          else
+            _ -> acc
           end
         end)
 
       Map.put(rest, "doc", doc)
     end
+  end
+
+  # ── A row's leaves go to the row of its posted `_key` (task-406358090c6137e7)
+  #
+  # The fold writes by index into the editor's own rows (`seed_root/3`). A post
+  # sent before the page took a change to the rows (another editor took a row
+  # out, so the next one moved up) names its rows by the old indexes: its
+  # `rows[0]` was the row taken out, and its leaves were written over the row
+  # now at 0, `_key` and all. Each row the post names a `_key` for is written
+  # at the index that row has now; a row the editor no longer holds is
+  # dropped, never written into another. A row posted with no `_key` is
+  # written by index, as before.
+  defp posted_row_keys(dotted) do
+    for {name, key} <- dotted,
+        is_binary(key),
+        path = StudioLive.parse_path(name),
+        match?([_, _ | _], path),
+        List.last(path) == "_key",
+        prefix = Enum.drop(path, -1),
+        is_integer(List.last(prefix)),
+        into: %{},
+        do: {prefix, key}
+  end
+
+  defp row_path(path, keys, form) when map_size(keys) == 0 or not is_map(form), do: {:ok, path}
+  defp row_path(path, keys, form), do: row_path(path, [], [], {keys, form})
+
+  defp row_path([], _posted, now, _ctx), do: {:ok, Enum.reverse(now)}
+
+  defp row_path([i | rest], posted, now, {keys, form} = ctx) when is_integer(i) do
+    posted = [i | posted]
+
+    with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
+         rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
+      case row_index(rows, key, i) do
+        nil -> :drop
+        j -> row_path(rest, posted, [j | now], ctx)
+      end
+    else
+      _ -> row_path(rest, posted, [i | now], ctx)
+    end
+  end
+
+  defp row_path([seg | rest], posted, now, ctx),
+    do: row_path(rest, [seg | posted], [seg | now], ctx)
+
+  # The row at `i` still has the key: `i`. Else the one row that has it
+  # now; none: dropped. Two rows of one key (written past the API's own
+  # checks): by index, as before, never matched to the first for both.
+  defp row_index(rows, key, i) do
+    if match?(%{"_key" => ^key}, Enum.at(rows, i)) do
+      i
+    else
+      case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
+        [] -> nil
+        [j] -> j
+        _ -> i
+      end
+    end
+  end
+
+  defp form_at(form, path) do
+    Enum.reduce_while(path, form, fn
+      seg, %{} = acc when is_binary(seg) -> {:cont, Map.get(acc, seg)}
+      i, acc when is_integer(i) and is_list(acc) -> {:cont, Enum.at(acc, i)}
+      _, _ -> {:halt, nil}
+    end)
   end
 
   # ── Seed the CONTAINER before writing into it (this task) ──────────────────
@@ -908,15 +1044,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # the rule `KeptCodes.only_touched/3` keeps for a top-level codelist. The
   # session's touched set is not enough: a path picked earlier, then given a
   # number by another editor, posts "" with every later change of the form.
-  defp kept_value?(key, "", targets, form) do
+  #
+  # The stored value is read at the row the post is for: by its posted `_key`,
+  # where the row is now (`row_path/3`), never at the posted index, which
+  # after another editor moved the rows holds another row (task-9dc943bf59b530fa).
+  defp kept_value?(key, "", targets, {row_keys, form}) do
     key not in targets and
-      case StudioLive.parse_path(key) do
-        [] -> false
-        path -> stored_at(form, path) |> then(&(not is_nil(&1) and not is_binary(&1)))
+      with [_ | _] = path <- StudioLive.parse_path(key),
+           {:ok, path} <- row_path(path, row_keys, form) do
+        stored_at(form, path) |> then(&(not is_nil(&1) and not is_binary(&1)))
+      else
+        _ -> false
       end
   end
 
   defp kept_value?(_key, _value, _targets, _form), do: false
+
+  defp doc_key?(key), do: is_binary(key) and String.starts_with?(key, "doc[")
 
   defp stored_at(value, []), do: value
 
@@ -1028,8 +1172,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       new_form = StudioLive.put_value_at(form, key_path, new_list)
       # A refused array change is held under its own field (`RefusedSave`).
       keys = Enum.take(key_path, 1)
+      {new_form, held} = HeldFields.stored(socket, new_form, keys)
       saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
-      {:noreply, settle_dirty(saved, keys)}
+      {:noreply, saved |> settle_dirty(keys) |> row_draws() |> HeldFields.restore(held)}
     end
   end
 

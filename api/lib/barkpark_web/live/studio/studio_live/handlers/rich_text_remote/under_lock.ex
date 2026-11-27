@@ -20,11 +20,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   import Phoenix.Component, only: [assign: 2]
 
+  alias Barkpark.Content.Forms.HtmlBody
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
+  alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
+  alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Path
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
@@ -62,66 +66,244 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   number does; it was written as posted, over B (task-0437fdf2f2a6ccba). A
   rich text in a row, or one with no value drawn, is read as before.
   """
-  def values(socket, seen, _posted) when is_list(seen), do: values(socket, seen)
+  def values(socket, seen, posted), do: values(socket, seen, posted, nil)
 
-  def values(socket, nil, posted) when is_map(posted) do
-    shown = shown(socket)
+  @doc """
+  `values/3`, with the owner `_key` each object rich text's editor was drawn
+  under, as the post carries it (`_bp_rt_owner[]`, `[name, key, digest]` as
+  JSON). A value `remounted/3` took under a new owner key is what the page
+  shows only when the post names that key and that value's digest
+  (task-c0a696a3a5a3900d): a post typed on the old mount, still in
+  flight while the remount went out, names the old one and is read against
+  the old value (#28951 r1 review, B1).
+  """
+  def values(socket, seen, _posted, _owners) when is_list(seen), do: values(socket, seen)
 
-    for {name, path, _html} <- posted_texts(socket, posted),
-        {:ok, was} <- [Map.fetch(shown, name)],
+  def values(socket, nil, posted, owners) when is_map(posted) do
+    shown = shown(socket, owners)
+
+    for {name, path, _html} <- posted_texts(socket, posted, owners),
+        {:ok, was} <- [was(socket, shown, owners, name, path)],
         into: %{},
         do: {name, {path, was, nil}}
   end
 
-  def values(_socket, _seen, _posted), do: %{}
+  def values(_socket, _seen, _posted, _owners), do: %{}
 
   @doc """
   The socket after a post with no `_bp_rt_seen`: each object rich text it
   carries is what the page shows now (`values/3`), read onto the value it
   showed before so its blocks keep their keys.
   """
-  def posted(socket, nil, posted) when is_map(posted) do
-    shown = shown(socket)
+  def posted(socket, seen, posted), do: posted(socket, seen, posted, nil)
+
+  @doc "`posted/3`, reading the post's owner keys as `values/4` does."
+  def posted(socket, nil, posted, owners) when is_map(posted) do
+    shown = shown(socket, owners)
+    texts = posted_texts(socket, posted, owners)
 
     page =
-      for {name, _path, html} <- posted_texts(socket, posted),
+      for {name, path, html} <- texts,
           into: own_page(socket),
-          do: {name, PortableText.from_html(html, list(Map.get(shown, name)))}
+          do:
+            {name,
+             PortableText.from_html(html, list(shown_at(socket, shown, owners, name, path)))}
 
-    assign(socket, editor_rt_page: {PostIdentity.of(socket), page})
+    # A row's own value is the page's on the draw its post named, by the
+    # row's key (`RowDraws`): A's own move or delete shifts its index.
+    socket =
+      Enum.reduce(texts, socket, fn {name, path, _html}, s ->
+        case row?(path) && owner(owners, name) do
+          {:ok, key, digest} ->
+            RowDraws.record_own(s, path, {key, digest}, Map.fetch!(page, name))
+
+          _ ->
+            s
+        end
+      end)
+
+    # A post typed on the remounted editor is the page's own value from now
+    # on; one typed on the old mount leaves the remount still to come.
+    drawn =
+      Map.drop(
+        rekeyed(socket),
+        for({name, _, _} <- texts, drawn?(socket, owners, name), do: name)
+      )
+
+    assign(socket,
+      editor_rt_page: {PostIdentity.of(socket), page},
+      editor_rt_rekeyed: {PostIdentity.of(socket), drawn}
+    )
   end
 
-  def posted(socket, _seen, _posted), do: socket
+  def posted(socket, _seen, _posted, _owners), do: socket
 
-  # Each rich text inside an object (no row index on its path) the post
-  # carries as the page's HTML.
-  defp posted_texts(socket, posted) do
-    for path <-
-          RichTextRemote.every(
-            socket.assigns[:editor_schema],
-            socket.assigns[:editor_form] || %{}
-          ),
-        not Enum.any?(path, &is_integer/1),
+  @doc """
+  The socket after it took `new_form` over `old_form`: each rich text inside
+  an object whose own `_key` changed is recorded with that key and the value
+  taken (`editor_rt_rekeyed`). The editor's wrapper id carries the key
+  (`CompositeField`, `bp-rt-sub-…`), so even a page without bp-rt-remote.js
+  remounts it and draws the new value, and the owner key it posts
+  (`_bp_rt_owner[]`) changes with it (task-c29534c0655f0489). Until a post
+  names the new key, the page may not show it yet (`values/4`). The mount
+  draw and the numbers the page reported (`editor_rt_born`) are left as they
+  were. A row's rich text is recorded by its row's `_key` (`RowDraws`): its
+  wrapper id carries the key, so a row moved, added or taken out under an
+  index remounts it (task-82519fd79663e072).
+  """
+  def remounted(socket, old_form, new_form) do
+    old_form = old_form || %{}
+    new_form = new_form || %{}
+
+    case PostIdentity.of(socket) do
+      nil ->
+        socket
+
+      doc ->
+        moved =
+          for path <- RichTextRemote.every(socket.assigns[:editor_schema], new_form),
+              not row?(path),
+              owner = Enum.drop(path, -1),
+              key(FormPath.get(old_form, owner)) != key(FormPath.get(new_form, owner)),
+              into: %{},
+              do:
+                {RichTextRemote.input_name(path),
+                 {to_string(key(FormPath.get(new_form, owner))), FormPath.get(new_form, path)}}
+
+        socket = RowDraws.record_form(socket, new_form)
+
+        if moved == %{},
+          do: socket,
+          else: assign(socket, editor_rt_rekeyed: {doc, Map.merge(rekeyed(socket), moved)})
+    end
+  end
+
+  defp rekeyed(socket) do
+    case socket.assigns[:editor_rt_rekeyed] do
+      {doc, %{} = keyed} when not is_nil(doc) ->
+        if doc == PostIdentity.of(socket), do: keyed, else: %{}
+
+      _ ->
+        %{}
+    end
+  end
+
+  # Whether the post names the owner key `remounted/3` recorded for `name`
+  # AND the digest of the value it recorded: the page draws the re-keyed
+  # value. The key alone is not enough: a key that comes back to one drawn
+  # earlier ("" -> m2 -> "") would let a post typed on the first draw match
+  # the newest (task-c0a696a3a5a3900d). No owner, no digest, or one never
+  # recorded, is the old mount.
+  defp drawn?(socket, owners, name) do
+    case Map.fetch(rekeyed(socket), name) do
+      {:ok, {key, value}} -> owner(owners, name) == {:ok, key, CompositeField.drawn_digest(value)}
+      :error -> false
+    end
+  end
+
+  # Each entry is `[input_name, owner_key, digest]` as JSON: the name and key
+  # may hold any character. The key is nil for an owner with none, read as "".
+  # The digest is `CompositeField.drawn_digest/1`'s hex string. A page drawn
+  # before it was one posts its old number: never an object's new draw, and
+  # a row's draw as it was read before (`RowDraws.fetch/4`).
+  defp owner(owners, name) when is_list(owners) do
+    Enum.find_value(owners, :error, fn
+      entry when is_binary(entry) ->
+        case Jason.decode(entry) do
+          {:ok, [^name, key, digest]}
+          when (is_binary(key) or is_nil(key)) and (is_binary(digest) or is_integer(digest)) ->
+            {:ok, to_string(key), digest}
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp owner(_owners, _name), do: :error
+
+  defp key(%{} = owner), do: Map.get(owner, "_key")
+  defp key(_), do: nil
+
+  # Each rich text the post carries as the page's HTML: inside an object,
+  # and in a row when the post names the draw it was typed on (an owner
+  # entry with a digest) under the `_key` of the row at that index now. A
+  # row post with none is written as posted, as before: its index may name
+  # another row than the one drawn there.
+  defp posted_texts(socket, posted, owners) do
+    form = socket.assigns[:editor_form] || %{}
+
+    for path <- RichTextRemote.every(socket.assigns[:editor_schema], form),
+        name = RichTextRemote.input_name(path),
+        not row?(path) or row_named?(owners, name, FormPath.get(form, Enum.drop(path, -1))),
         html = FormPath.get(posted, path),
         is_binary(html),
-        do: {RichTextRemote.input_name(path), path, html}
+        do: {name, path, html}
+  end
+
+  defp row?(path), do: RowDraws.row?(path)
+
+  defp row_named?(owners, name, row) do
+    case owner(owners, name) do
+      {:ok, key, _digest} -> key == to_string(key(row))
+      :error -> false
+    end
+  end
+
+  defp shown_at(socket, shown, owners, name, path) do
+    case was(socket, shown, owners, name, path) do
+      {:ok, value} -> value
+      :error -> nil
+    end
+  end
+
+  # What the page showed for `name`. An object's: `shown/2`. A row's: the
+  # draw its owner entry names by row key and digest (`RowDraws`,
+  # task-82519fd79663e072): A's own last post on that draw, a value the
+  # socket took, or the mount draw. None of them: `:unknown`, and the store
+  # is kept and A held (`ObjectRebase`, `act/5`), never written over.
+  defp was(socket, shown, owners, name, path) do
+    if row?(path),
+      do: {:ok, row_draw(socket, owners, name, path)},
+      else: Map.fetch(shown, name)
+  end
+
+  defp row_draw(socket, owners, name, path) do
+    {:ok, key, digest} = owner(owners, name)
+
+    case RowDraws.fetch(socket, path, key, digest) do
+      {:ok, value} -> value
+      :error -> :unknown
+    end
   end
 
   # The value a page without bp-rt-remote.js shows, by input name, of the
   # document open: each is stamped with the document it was drawn or posted
   # on, so a switch that left them in place does not carry them over.
-  defp shown(socket) do
-    born =
-      if socket.assigns[:editor_rt_born_doc] == PostIdentity.of(socket),
-        do:
-          for(
-            {name, {_seq, value}} <- socket.assigns[:editor_rt_born] || %{},
-            into: %{},
-            do: {name, value}
-          ),
-        else: %{}
+  defp shown(socket, owners) do
+    drawn =
+      for {name, {_key, value}} <- rekeyed(socket),
+          drawn?(socket, owners, name),
+          into: %{},
+          do: {name, value}
 
-    Map.merge(born, own_page(socket))
+    Map.merge(shown(socket), drawn)
+  end
+
+  defp shown(socket), do: Map.merge(born(socket), own_page(socket))
+
+  defp born(socket) do
+    if socket.assigns[:editor_rt_born_doc] == PostIdentity.of(socket),
+      do:
+        for(
+          {name, {_seq, value}} <- socket.assigns[:editor_rt_born] || %{},
+          into: %{},
+          do: {name, value}
+        ),
+      else: %{}
   end
 
   defp own_page(socket) do
@@ -145,16 +327,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   over theirs, and a post on it is A's: read against theirs, so it is
   written as typed.
   """
-  def top(socket, posted) when is_map(posted) do
+  def top(socket, posted, seen \\ nil)
+
+  def top(socket, posted, seen) when is_map(posted) do
     # `was` is the row the socket last took only because a top-level
     # wrapper remounts on every form generation. Not after a socket
     # rejoin: generation 0 gives the same wrapper id, and the wrapper is
     # phx-update="ignore", so the page keeps the editor it had while
-    # `base_doc` is the new store; a save B made meanwhile is written over
-    # (main does the same, task-fe9d8741f0641f97). task-8d20a831ddd287a2
-    # would stop those remounts: if it lands, `was` must become the value
-    # the page shows (drawn at mount or its own last post), as
-    # `values/3` reads an object's (#28896).
+    # `base_doc` is the new store. There an autosave is read against the
+    # digest the page kept (`TextConfirmed.rejoin_seen/4`,
+    # task-fe9d8741f0641f97). task-8d20a831ddd287a2 would stop the
+    # remounts: if it lands, `was` must become the value the page shows
+    # (drawn at mount or its own last post), as `values/3` reads an
+    # object's (#28896).
     content =
       case Lifecycle.base_doc(socket) do
         %{content: %{} = content} -> content
@@ -168,14 +353,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         is_binary(Map.get(posted, key)),
         name = RichTextRemote.input_name([key]),
         into: %{} do
-      case holds do
-        %{^name => %{theirs: theirs}} -> {name, {[key], theirs, :resolve}}
-        _ -> {name, {[key], Map.get(content, key), nil}}
+      # An autosave (`seen`, its `_bp_seen`) on a socket that mounted as a
+      # rejoin is read against the digest the page kept (`TextConfirmed`,
+      # task-fe9d8741f0641f97) before a hold's view: typing on A's view
+      # stays held until a Save or Reload.
+      case {seen && TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen), holds} do
+        {:unknown, _} ->
+          {name, {[key], :unknown, nil}}
+
+        {_, %{^name => %{theirs: theirs}}} ->
+          {name, {[key], Map.get(holds[name], :raw, theirs), :resolve}}
+
+        # Sent before the redraw of another's save reached the page: read
+        # against the value the page still showed (`TextConfirmed.took/3`).
+        _ ->
+          {name, {[key], TextConfirmed.page_base(socket, name, Map.get(content, key), seen), nil}}
       end
     end
   end
 
-  def top(_socket, _posted), do: %{}
+  def top(_socket, _posted, _seen), do: %{}
 
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(_schema), do: []
@@ -209,8 +406,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     now = (is_map(written) && Map.get(written, :content)) || %{}
 
     Enum.reduce(values, {saved, acts}, fn {name, {path, was, page}}, {s, acts} ->
+      act =
+        if html_body?(s, path, over) or shown_string?(s, path, over, was),
+          do: &html_act/5,
+          else: &act/5
+
       {s, acts} =
-        act(
+        act.(
           s,
           acts,
           {name, path, was, if(page == :resolve, do: nil, else: page)},
@@ -233,6 +435,80 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   end
 
   defp resolve(s, acts, _name, _page), do: {s, acts}
+
+  # A top-level body the store held as an HTML string or as nothing
+  # (`HtmlBody.field?/2`, task-bb19ab06ab1e87b2, task-077fbe951d7c338e), or
+  # a Portable Text field it held as a string (`HtmlBody.stored_string?/2`,
+  # task-49a96a7780dad558):
+  # the write kept the store over a post typed on a value it no longer
+  # holds, and A is held, as on a block body. Read as blocks for the hold's
+  # view; the store stays a string.
+  defp html_body?(s, [key], over) when is_map_key(over, key) do
+    stored = Map.fetch!(over, key)
+    HtmlBody.field?(field(s, key), stored) or string_field?(s, key, stored)
+  end
+
+  defp html_body?(_s, _path, _over), do: false
+
+  # A Portable Text field whose page showed a string the store no longer
+  # holds as one (removed: task-7565817187a53934) is read by that string.
+  defp shown_string?(s, [key], over, was) when is_map_key(over, key) and is_binary(was),
+    do: HtmlBody.stored_string?(field(s, key), was)
+
+  defp shown_string?(_s, _path, _over, _was), do: false
+
+  defp string_field?(s, key, stored), do: HtmlBody.stored_string?(field(s, key), stored)
+
+  defp field(s, key),
+    do: Enum.find(fields(s.assigns[:editor_schema]), &match?(%{"name" => ^key}, &1))
+
+  defp html_act(s, acts, {name, [key] = path, was, _page}, {over, _now}, {doc, _posted_doc}) do
+    before = Map.fetch!(over, key)
+    posted = FormPath.get(doc, path)
+
+    held? =
+      if string_field?(s, key, before) or (is_binary(was) and string_field?(s, key, was)),
+        do: HtmlBody.string_held?(before, was),
+        else: HtmlBody.held?(posted, before, was)
+
+    if is_binary(posted) and not holds?(acts, name) and held?,
+      do:
+        {keep_string(s, name, before),
+         [{:held, name, path, html_hold(posted, before, was)} | drop(acts, name)]},
+      else: {s, acts}
+  end
+
+  # The string a body is held on, for the hold (`RichTextRemote.hold/2`
+  # keeps it as its `raw`): the hold's `theirs` is its blocks
+  # (`html_hold/3`), which drop markup the editor does not draw. Read
+  # against them, a resolve took a string changed only there (an iframe)
+  # for the one A was held on, and wrote over it; and a Portable Text field
+  # holding a string never matched its string, so typing on the view stayed
+  # held (task-d9ffbd2e6639496b).
+  defp keep_string(s, name, before) when is_binary(before) do
+    raw = s.assigns[:editor_rt_held_raw] || %{}
+    Phoenix.Component.assign(s, editor_rt_held_raw: Map.put(raw, name, before))
+  end
+
+  defp keep_string(s, _name, _before), do: s
+
+  # A row post whose draw is not known (`was/5`): read against the store it
+  # landed on, so A's words the store kept are held, never lost unheld.
+  defp act(s, acts, {name, path, :unknown, page}, {over, now}, {doc, _posted_doc}) do
+    before = FormPath.get(over, path)
+    posted = FormPath.get(doc, path)
+
+    if Map.has_key?(over, hd(path)) and is_binary(posted),
+      do:
+        moved(
+          s,
+          acts,
+          {name, path},
+          {list(before), list(before), list(FormPath.get(now, path))},
+          {posted, page}
+        ),
+      else: {s, acts}
+  end
 
   defp act(s, acts, {name, path, was, page}, {over, now}, {doc, posted_doc}) do
     before = FormPath.get(over, path)
@@ -336,6 +612,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
         form = FormPath.put(s.assigns[:editor_form] || %{}, path, after_write)
         acts = [{:merged, name, path, mine || written} | drop(acts, name)]
         {Phoenix.Component.assign(s, editor_form: form), acts}
+    end
+  end
+
+  defp html_hold(posted, before, was) do
+    base = HtmlBody.blocks(if was == :unknown, do: before, else: was)
+    theirs = HtmlBody.blocks(before)
+    mine = PortableText.from_html(posted, base)
+
+    case PortableTextMerge.merge(base, mine, theirs) do
+      {:clash, texts, view} -> {base, theirs, view, texts}
+      # The view A types on is the two merged (drawn as HTML,
+      # `RichTextRemote.keep_held`): a Save or the next key keeps B's
+      # change (task-077fbe951d7c338e).
+      {:ok, merged} -> {base, theirs, merged, nil}
     end
   end
 

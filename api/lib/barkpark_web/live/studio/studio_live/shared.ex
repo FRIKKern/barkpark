@@ -25,7 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.{Desk.NewDoc, PaneBuilder, PresenceState}
-  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues}
+  alias BarkparkWeb.Studio.StudioLive.Handlers.{Lifecycle, RemoteValues, TextConfirmed}
   alias BarkparkWeb.Studio.StudioLive.Handlers.Shares, as: SharesHandler
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Paths, PostedEdits, PostPath, RefusedSave}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
@@ -508,6 +508,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # user-facing wording.
   @doc false
   def do_autosave(socket, params, trigger \\ :unknown) do
+    # Whether this write landed (`:editor_write_landed`), for the desk's undo.
+    socket = assign(socket, :editor_write_landed, nil)
     doc = socket.assigns[:editor_doc]
     doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
     type = socket.assigns[:editor_type]
@@ -675,6 +677,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_is_draft: Content.draft?(saved_doc.doc_id),
             editor_form: form,
             save_status: "Saved",
+            # Kept when a hold puts its own status over "Saved" (`DocUndo`).
+            editor_write_landed: true,
             validation_errors: findings.errors,
             validation_warnings: findings.warnings,
             cross_violations: compute_cross_violations(schema, form)
@@ -969,7 +973,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       case action.(doc, type) do
         {:ok, _} ->
           {:noreply,
-           socket |> put_flash(:info, with_advisories(msg, Warnings.drain())) |> rebuild_panes()}
+           socket
+           |> put_flash(:info, with_advisories(msg, Warnings.drain()))
+           |> rebuild_panes()
+           |> TextConfirmed.redrawn(socket)}
 
         {:error, {:halted, reason}} ->
           {:noreply,
@@ -1353,6 +1360,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       |> assign(selected_doc_ids: MapSet.new())
       |> put_flash(:info, with_advisories(flash, advisories))
       |> rebuild_panes()
+      |> TextConfirmed.redrawn(socket)
     end
   end
 
@@ -1841,6 +1849,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_has_published: has_published,
         editor_form: new_form,
         editor_form_gen: form_gen,
+        # A load starts a new page: no pick of the last one is its (`KeptPicks`).
+        editor_own_picks: if(same_doc?, do: socket.assigns[:editor_own_picks]),
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
         editor_table_target_ids: editor_table_target_ids,

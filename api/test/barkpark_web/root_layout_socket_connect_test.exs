@@ -62,4 +62,25 @@ defmodule BarkparkWeb.RootLayoutSocketConnectTest do
     assert canvas_at < gate_at
     assert gate_at < socket_at
   end
+
+  # task-b656db94cc1dbd17: each join sends the document and form generation
+  # the editor was drawn at (`RejoinForm`), read afresh by the params
+  # closure from bp-array-focus.js, which is loaded before the socket.
+  test "the socket's params send the editor's form on every join", %{src: src} do
+    [params] =
+      Regex.run(
+        ~r/new LiveView\.LiveSocket\("\/live", Phoenix\.Socket, \{\n\s+params: \(\) => \(\{.*?\n\s+\}\),/s,
+        src
+      )
+
+    assert params =~ "...(window.BarkparkPaperEditorConnectParams?.() || {})"
+    assert params =~ "...(window.BarkparkFormConnectParams?.() || {})"
+
+    {focus_at, _} = :binary.match(src, ~S|StaticAssets.path("bp-array-focus.js")|)
+    {socket_at, _} = :binary.match(src, "new LiveView.LiveSocket(")
+    assert focus_at < socket_at
+
+    js = File.read!(Path.join(:code.priv_dir(:barkpark), "static/assets/bp-array-focus.js"))
+    assert js =~ "window.BarkparkFormConnectParams = function"
+  end
 end

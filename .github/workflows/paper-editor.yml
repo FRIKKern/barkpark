@@ -161,6 +161,8 @@ jobs:
         run: |
           node ../paper-editor-host-tests/__array_focus.test.mjs
           node ../paper-editor-host-tests/__form_remote_values.test.mjs
+          node ../paper-editor-host-tests/__form_connect_params.test.mjs
+          node ../paper-editor-host-tests/__form_confirmed_ok.test.mjs
           node ../paper-editor-host-tests/__editor_form_leave.test.mjs
           node ../paper-editor-host-tests/__studio_leave.test.mjs
           node ../paper-editor-host-tests/__press_names_its_document.test.mjs
@@ -281,6 +283,7 @@ jobs:
           node ../paper-editor-host-tests/__paper_editor_move.test.mjs
           node ../paper-editor-host-tests/__paper_find_bar.test.mjs
           node ../paper-editor-host-tests/__paper_anchor.test.mjs
+          node ../paper-editor-host-tests/__paper_bundle_gate.test.mjs
           node ../paper-editor-host-tests/__rt_remote_caret.test.mjs
           node ../paper-editor-host-tests/__rt_remote_seen.test.mjs
           node ../paper-editor-host-tests/__rt_remote_forget.test.mjs
