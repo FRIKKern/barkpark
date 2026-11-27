@@ -262,6 +262,6 @@ defmodule BarkparkWeb.Studio.TwoEditorsUnseenFieldTest do
     a = open(c, c.url)
     seen = drawn_seen(a)
     assert Map.keys(seen) == ["ok"]
-    assert is_integer(seen["ok"]["doc[title]"])
+    assert seen["ok"]["doc[title]"] =~ ~r/^[0-9a-f]{16}$/
   end
 end

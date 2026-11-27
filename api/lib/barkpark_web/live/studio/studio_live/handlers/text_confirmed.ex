@@ -20,11 +20,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   typed on the store: it is read as any post. One whose digest differs, or
   has none, was typed on a value the store no longer holds: it is held.
 
-  The digest is the server's own (`:erlang.phash2/1`); the page never
-  computes one, it only keeps what it was sent.
+  The digest is the server's own: 64 bits of sha256, as 16 hex characters
+  (`digest/1`). The page never computes one, it only keeps what it was
+  sent. It was a 27-bit `:erlang.phash2/1`, where a collision read a page
+  typed on another value as typed on the store, and wrote over it
+  (task-8a35dcc94956b8aa).
 
   A top-level rich text keeps one too, under its input name (`doc[body]`):
-  the digest of the HTML its editor draws (`CompositeField.drawn_digest/1`).
+  the digest of the HTML its editor draws (`CompositeField.drawn_html/1`).
   Its wrapper is phx-update="ignore" and has the same id after a rejoin,
   so the page keeps the editor it had while the new socket reads the new
   store (#28933 review). It is drawn with the form, confirmed after a post
@@ -49,7 +52,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   def key, do: @key
 
   @doc "The digest of a free-text value."
-  def digest(value) when is_binary(value), do: :erlang.phash2(value)
+  def digest(value) when is_binary(value),
+    do: :crypto.hash(:sha256, value) |> binary_part(0, 8) |> Base.encode16(case: :lower)
 
   @doc "Per input name, the digest of each free-text value in `values` (`name => value`)."
   def oks(values) do
@@ -109,10 +113,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
 
   # The form holds a top-level rich text as the HTML its editor draws
   # (`Content.Forms`), the store as blocks: one digest for both.
-  defp rich_digest(html) when is_binary(html), do: :erlang.phash2(html)
-  # A body never set draws "" (`CompositeField.drawn_digest(nil)`).
+  defp rich_digest(html) when is_binary(html), do: digest(html)
+  # A body never set draws "" (`CompositeField.drawn_html(nil)`).
   defp rich_digest(value) when is_list(value) or is_nil(value),
-    do: CompositeField.drawn_digest(value)
+    do: digest(CompositeField.drawn_html(value))
 
   defp rich_digest(_value), do: nil
 
