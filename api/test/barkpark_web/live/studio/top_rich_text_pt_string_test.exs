@@ -8,14 +8,13 @@ defmodule BarkparkWeb.Studio.TopRichTextPtStringTest do
   page was away, was overwritten by A's next post with no banner.
 
   The store's string is never converted or merged: a string A's post was
-  not read against stays as stored, a string B removed stays removed, and
-  A is held with the banner. A string A's post was read against, still
+  not read against stays as stored, and A is held with the banner. A string A's post was read against, still
   stored, is written over by A's edit as before (owner ruling #44: Studio
   turns a stored string into blocks at the next save).
 
   Not here: B removing the field (`unset`) under A's post or while A was
   away. The store then holds no string, and A's post is written over the
-  removal (task filed from this one).
+  removal (task-7565817187a53934).
   """
   use BarkparkWeb.ConnCase, async: false
 
