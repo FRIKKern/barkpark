@@ -96,9 +96,9 @@ defmodule BarkparkWeb.Studio.TopRichTextHeldEditorTest do
       assert form(a2)["body"] =~ "body0 A7"
     end
 
-    # A doc with no body draws "" for it (`Content.Forms.classic_form_value/4`,
-    # forms.ex:681), so the form always holds the field's HTML shape, and the
-    # held view's shape is read from the schema field anyway. A post there is
+    # A doc with no body draws "" for it (`Content.Forms.classic_form_value/4`
+    # draws "" for nil), so the form always holds the field's HTML shape, and
+    # the held view's shape is read from the schema field anyway. A post there is
     # written as posted: the store holds HTML, not blocks, and nothing holds
     # it (the rejoin case: task-bb19ab06ab1e87b2).
     test "#{surface}: a doc that had no body: the form draws \"\", and a post keeps the editor and its input",
