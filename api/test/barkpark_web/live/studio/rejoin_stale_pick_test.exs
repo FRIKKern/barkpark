@@ -214,6 +214,44 @@ defmodule BarkparkWeb.Studio.RejoinStalePickTest do
       assert cover(c)["asset"]["_ref"] == "image-new"
     end
 
+    # #29075 r1 review: the page's own pick is not drawn again, so its
+    # `_bp_drawn` stays the first value; a pick back to it is A's.
+    test "#{surface} control: a pick back to the drawn value, on a key in the body, is written",
+         c do
+      a = tab(c, @surface)
+      picks = page_picks(a)
+      old = c.id <> "-old"
+      ref_wrap = wrap(a, "bp-ref-wrap-reviewer")
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => c.id <> "-x"}, picks)
+      assert eventually(fn -> reviewer(c)["_ref"] == c.id <> "-x" end)
+      assert wrap(a, "bp-ref-wrap-reviewer") == ref_wrap
+      body_key(a, "body0 P1", %{picks | doc: %{picks.doc | "reviewer" => old}})
+      assert eventually(fn -> words(stored(c)["body"]) == ["body0 P1"] end)
+      assert reviewer(c)["_ref"] == old, "A's pick back to the drawn value was dropped"
+    end
+
+    test "#{surface} control: a pick back to the drawn value, then Save, is written", c do
+      a = tab(c, @surface)
+      picks = page_picks(a)
+      old = c.id <> "-old"
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => c.id <> "-x"}, picks)
+      assert eventually(fn -> reviewer(c)["_ref"] == c.id <> "-x" end)
+      save(a, %{picks | doc: %{picks.doc | "reviewer" => old}})
+      assert reviewer(c)["_ref"] == old, "A's pick back to the drawn value was dropped"
+    end
+
+    test "#{surface} control: an empty reference picked and cleared again, then Save, is cleared",
+         c do
+      put_field(c, "reviewer", nil)
+      a = tab(c, @surface)
+      picks = page_picks(a)
+      assert picks.drawn["reviewer"] == ""
+      post(a, ["doc[reviewer]"], %{picks.doc | "reviewer" => c.id <> "-x"}, picks)
+      assert eventually(fn -> reviewer(c)["_ref"] == c.id <> "-x" end)
+      save(a, %{picks | doc: %{picks.doc | "reviewer" => ""}})
+      assert reviewer(c) in [nil, ""], "A's clear was dropped"
+    end
+
     test "#{surface} control: a pick posted with a key in another field is written", c do
       a = tab(c, @surface)
       picks = page_picks(a)

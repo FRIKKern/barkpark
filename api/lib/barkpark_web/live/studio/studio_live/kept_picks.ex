@@ -21,6 +21,11 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   cancels the widget's own debounced one). A page's `_bp_drawn` can only
   keep a field from being written, never write one.
 
+  A value this socket wrote from the page's own post is the page's
+  (`editor_own_picks`): the widget is not drawn again after A's own pick, so
+  its `_bp_drawn` stays the first value, and a pick back to it, on a key in
+  another field or a Save, is A's and written (#29075 r1 review).
+
   Where the store holds another value than the page drew, the widget is
   drawn again from it (`editor_pick_gens`, a part of its wrapper id), so the
   page shows it and posts it as drawn from then on. A nested reference or
@@ -30,7 +35,7 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   import Phoenix.Component, only: [assign: 2]
 
   alias BarkparkWeb.Components.FieldInputs
-  alias BarkparkWeb.Studio.StudioLive.Path
+  alias BarkparkWeb.Studio.StudioLive.{Path, PostIdentity}
 
   @types ~w(reference image)
 
@@ -40,17 +45,20 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   widget drawn again where the store holds another value.
   """
   def through(params, socket, fun) do
-    {params, dropped} =
-      split(params, socket.assigns[:editor_schema], socket.assigns[:editor_form] || %{})
+    schema = socket.assigns[:editor_schema]
+    form = socket.assigns[:editor_form] || %{}
+    {params, dropped} = split(params, schema, form, own(socket))
 
     case fun.(params, socket) do
-      {:noreply, socket} -> {:noreply, redraw(socket, dropped)}
-      {:reply, reply, socket} -> {:reply, reply, redraw(socket, dropped)}
+      {:noreply, socket} -> {:noreply, socket |> redraw(dropped) |> wrote(params)}
+      {:reply, reply, socket} -> {:reply, reply, socket |> redraw(dropped) |> wrote(params)}
     end
   end
 
   @doc false
-  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema, form) do
+  def split(params, schema, form, own \\ %{})
+
+  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema, form, own) do
     target = target(params)
 
     # Only where the form, the socket's newest stored value, draws another
@@ -63,7 +71,7 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
           name != target,
           is_binary(drawn[name]),
           Map.get(doc, name) == drawn[name],
-          drawn(type, Map.get(form, name)) != drawn[name],
+          drawn(type, Map.get(form, name)) not in [drawn[name], Map.get(own, name)],
           into: %{},
           do: {name, {type, drawn[name]}}
 
@@ -71,7 +79,7 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
      dropped}
   end
 
-  def split(params, _schema, _form) when is_map(params),
+  def split(params, _schema, _form, _own) when is_map(params),
     do: {Map.delete(params, "_bp_drawn"), %{}}
 
   defp redraw(socket, dropped) when map_size(dropped) == 0, do: socket
@@ -87,6 +95,32 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
       end)
 
     assign(socket, editor_pick_gens: gens)
+  end
+
+  # Each top-level reference or image the page posted that the form now
+  # holds as posted: the form's value came from this page, of this document.
+  defp wrote(socket, %{"doc" => %{} = doc}) do
+    form = socket.assigns[:editor_form] || %{}
+
+    mine =
+      for %{"type" => type, "name" => name} <- fields(socket.assigns[:editor_schema]),
+          type in @types,
+          posted = Map.get(doc, name),
+          is_binary(posted),
+          drawn(type, Map.get(form, name)) == posted,
+          into: own(socket),
+          do: {name, posted}
+
+    assign(socket, editor_own_picks: {PostIdentity.of(socket), mine})
+  end
+
+  defp wrote(socket, _params), do: socket
+
+  defp own(socket) do
+    case socket.assigns[:editor_own_picks] do
+      {doc, picks} -> if doc == PostIdentity.of(socket), do: picks, else: %{}
+      _ -> %{}
+    end
   end
 
   # The value the widget draws for a form value (`FieldInputs.input/1`).
