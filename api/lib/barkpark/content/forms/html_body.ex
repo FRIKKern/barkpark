@@ -67,24 +67,34 @@ defmodule Barkpark.Content.Forms.HtmlBody do
   def blocks(_value), do: []
 
   @doc """
+  Whether two values of the field are the same stored value: two strings
+  by their bytes, anything else as `same?/2` draws it (nothing and "", a
+  hold's blocks). An image, an iframe or a class that `from_html/1` drops
+  is a change of the string (task-62e3d093b98a3bc3, as #29116 r2 reads a
+  `stored_string?/2` field).
+  """
+  def exact?(a, b) when is_binary(a) and is_binary(b), do: a === b
+  def exact?(a, b), do: same?(a, b)
+
+  @doc """
   What the write stores for an HTML post `mine`, read against `was` (what
   the page showed; `:unknown` after a rejoin) and `theirs` (the store under
-  the lock): `mine` when the page showed the store or the post draws the
-  store, else `theirs`, as stored.
+  the lock): `mine` when the page showed the store or the post is it
+  (`exact?/2`), else `theirs`, as stored.
   """
   def rebase(mine, theirs, was) do
-    if same?(mine, theirs) or (was != :unknown and same?(was, theirs)),
+    if exact?(mine, theirs) or (was != :unknown and exact?(was, theirs)),
       do: mine,
       else: theirs
   end
 
   @doc """
   Whether a written HTML post `posted` left A's words off the store: the
-  store before the write (`before`) is not what the page showed (`was`),
-  and the post draws neither of them.
+  store before the write (`before`) is not what the page showed (`was`,
+  `exact?/2`), and the post draws neither of them.
   """
   def held?(posted, before, was) do
     not same?(posted, before) and
-      (was == :unknown or (not same?(was, before) and not same?(posted, was)))
+      (was == :unknown or (not exact?(was, before) and not same?(posted, was)))
   end
 end
