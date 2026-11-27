@@ -12,7 +12,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
   paused for a field that had just been written.
 
   `stored/3` gives such a write the form with the store's value in each
-  held top-level field other than the write's own. `restore/2`, run after
+  held top-level field other than the write's own, read from the store
+  row as it is now, not the row A's socket last drew. `restore/2`, run after
   the write has settled, puts A's words back into the form and keeps the
   banner, the held field's unsaved mark and the hold state as they were.
   A Save or Reload still ends the hold, as before.
@@ -33,6 +34,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
 
   import Phoenix.Component, only: [assign: 2]
 
+  alias Barkpark.Content
+  alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
 
@@ -57,7 +60,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
         {form, nil}
 
       {tops, paths} ->
-        doc = socket.assigns[:editor_doc]
+        doc = store_row(socket)
         form = Enum.reduce(tops, form, &store_value(&2, &1, doc))
         form = Enum.reduce(paths, form, &store_at(&2, &1, doc))
 
@@ -73,6 +76,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
   end
 
   def stored(_socket, form, _own), do: {form, nil}
+
+  # The open document's row in the store now. `editor_doc` is the row A's
+  # socket had when the hold began: B's second save during the hold is not
+  # in it, and a write of the whole form put B's first value back over the
+  # second (#29078 r2 review, task-50094855250e5dad).
+  defp store_row(socket) do
+    own = socket.assigns[:editor_doc]
+
+    with %{doc_id: id} when is_binary(id) <- own,
+         type when is_binary(type) <- socket.assigns[:editor_type],
+         {%{} = doc, _, _} <-
+           Content.fetch_doc_with_draft(
+             type,
+             id,
+             socket.assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+      doc
+    else
+      _ -> own
+    end
+  end
 
   @doc """
   Records each `{id, path}` of a hold that starts (`{:rt, name}` or
