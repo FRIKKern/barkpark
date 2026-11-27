@@ -14,8 +14,9 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
 
   Each widget also posts the value it was drawn with (`_bp_drawn[name]`,
   `FieldInputs.input/1`). `through/3` drops a top-level reference or image
-  posted as drawn from a post that is not a change of that field: the store
-  keeps what it holds. A pick or a clear is not the drawn value, so it is
+  posted as drawn from a post that is not a change of that field, where the
+  socket's form holds another value than the page drew: the store keeps
+  what it holds. A pick or a clear is not the drawn value, so it is
   written, also when it rides on a key in another field (the body's change
   cancels the widget's own debounced one). A page's `_bp_drawn` can only
   keep a field from being written, never write one.
@@ -39,7 +40,8 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   widget drawn again where the store holds another value.
   """
   def through(params, socket, fun) do
-    {params, dropped} = split(params, socket.assigns[:editor_schema])
+    {params, dropped} =
+      split(params, socket.assigns[:editor_schema], socket.assigns[:editor_form] || %{})
 
     case fun.(params, socket) do
       {:noreply, socket} -> {:noreply, redraw(socket, dropped)}
@@ -48,15 +50,20 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   end
 
   @doc false
-  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema) do
+  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema, form) do
     target = target(params)
 
+    # Only where the form, the socket's newest stored value, draws another
+    # value than the page did: a value the page shows as stored is posted
+    # as before, so a bare-id reference still takes the `_ref` shape on the
+    # next save (owner ruling #42).
     dropped =
       for %{"type" => type, "name" => name} <- fields(schema),
           type in @types,
           name != target,
           is_binary(drawn[name]),
           Map.get(doc, name) == drawn[name],
+          drawn(type, Map.get(form, name)) != drawn[name],
           into: %{},
           do: {name, {type, drawn[name]}}
 
@@ -64,7 +71,8 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
      dropped}
   end
 
-  def split(params, _schema) when is_map(params), do: {Map.delete(params, "_bp_drawn"), %{}}
+  def split(params, _schema, _form) when is_map(params),
+    do: {Map.delete(params, "_bp_drawn"), %{}}
 
   defp redraw(socket, dropped) when map_size(dropped) == 0, do: socket
 
