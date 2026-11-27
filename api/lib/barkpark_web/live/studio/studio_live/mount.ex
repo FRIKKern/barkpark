@@ -371,6 +371,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # The fields typed in since the last save that landed (`settle_dirty/2`).
       editor_unsaved_keys: MapSet.new(),
       doc_conflict: false,
+      # A rejoin after the socket dropped (`_mounts` > 0): the page kept its
+      # top-level rich text editors, read against the digest it kept
+      # (`TextConfirmed.loaded/1`, task-fe9d8741f0641f97).
+      editor_rejoined?: BarkparkWeb.Studio.DeskLive.rejoin?(connect_params),
+      editor_rt_rejoin: MapSet.new(),
       # The dotted form keys (`doc[altText].nob`) whose input the author has
       # actually touched this buffer, accumulated from `phx-change`'s
       # `_target`. `Handlers.Fields.fold_dot_paths/2` folds an EMPTY value only
