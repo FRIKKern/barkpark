@@ -155,6 +155,58 @@ defmodule BarkparkWeb.Studio.TopRichTextRedrawPointsTest do
     refute html =~ @banner
   end
 
+  # `rebuild_panes/1` sends the digests itself: a rebuild that draws no
+  # editor (a list with no document open, as a project rescope leaves it)
+  # sends nothing.
+  test "studio control: a rebuild with no document open sends no digest", c do
+    {:ok, list, _html} = live(c.conn, "#{c.root}/#{c.type}")
+    render_async(list, 5_000)
+    refute has_element?(list, "#editor-form")
+    render_click(list, "desk-list-more", %{"type" => c.type})
+    render_click(list, "select-sort", %{"type" => c.type, "sort" => ""})
+    refute_push_event(list, "bp:form-confirmed", %{}, 300)
+  end
+
+  test "studio control: leaving the document for its list sends no digest", c do
+    a = open_tab(c, :studio)
+    page(a)
+    render_patch(a, "#{c.root}/#{c.type}")
+    refute has_element?(a, "#editor-form")
+    render_click(a, "desk-list-more", %{"type" => c.type})
+    refute_push_event(a, "bp:form-confirmed", %{}, 300)
+  end
+
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    # A load reads the form with `rebuild_panes/1`, then `TextConfirmed.loaded/1`
+    # sends the digests, or, on a socket that mounted as a rejoin, reads the
+    # page's post against the digest the page kept, and sends none. A digest
+    # sent by the rebuild itself would reach a rejoined page too, which takes
+    # it whatever its editor shows: a post typed offline would read as typed
+    # on the store, and B's save would be written over (#29054). LiveViewTest
+    # always joins with `_mounts: 0`, so the pin is the plain load: one push,
+    # `loaded/1`'s.
+    test "#{surface}: a load sends the page its digest once, from the load, not from the rebuild",
+         c do
+      a = open_tab(c, @surface)
+      %{proxy: {ref, _topic, _}} = a
+      render(a)
+
+      pushes =
+        Stream.repeatedly(fn ->
+          receive do
+            {^ref, {:push_event, "bp:form-confirmed", %{oks: oks}}} -> oks
+          after
+            300 -> :none
+          end
+        end)
+        |> Enum.take_while(&(&1 != :none))
+
+      assert [%{"doc[body]" => _}] = pushes
+    end
+  end
+
   for surface <- [:desk, :studio] do
     @surface surface
 
