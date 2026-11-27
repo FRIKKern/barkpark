@@ -854,7 +854,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
          rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
-      case row_index(rows, key, i) do
+      case row_index(rows, key, i, twins(keys, posted, key)) do
+        :twins ->
+          :drop
+
         nil ->
           case moved(form, Enum.reverse(posted), key) do
             {:ok, at} -> row_path(rest, posted, Enum.reverse(at), ctx)
@@ -872,19 +875,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp row_path([seg | rest], posted, now, ctx),
     do: row_path(rest, [seg | posted], [seg | now], ctx)
 
-  # The row at `i` still has the key: `i`. Else the one row that has it
-  # now; none: dropped. Two rows of one key (written past the API's own
-  # checks): by index, as before, never matched to the first for both.
-  defp row_index(rows, key, i) do
-    if match?(%{"_key" => ^key}, Enum.at(rows, i)) do
-      i
-    else
-      case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
-        [] -> nil
-        [j] -> j
-        _ -> i
-      end
+  # The one row that has the key now; none: dropped. Two rows of one key
+  # (written past the API's own checks, task-a35e29de94927377) go by their
+  # order among the post's rows of that key in this list (`twins`), when
+  # the post and the form hold as many; otherwise `:twins`, no row. By
+  # index, as before, A's row was written over the row another editor put
+  # there.
+  defp row_index(rows, key, i, twins) do
+    case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
+      [] -> nil
+      [j] when length(twins) < 2 -> j
+      js when length(js) == length(twins) -> Enum.at(js, Enum.find_index(twins, &(&1 == i)))
+      _ -> :twins
     end
+  end
+
+  # The indexes of the post's rows of `key` in the list `posted` (reversed,
+  # its row's index first) names a row of.
+  defp twins(keys, [_i | parent], key) do
+    parent = Enum.reverse(parent)
+
+    keys
+    |> Enum.flat_map(fn {at, k} ->
+      case Enum.split(at, -1) do
+        {^parent, [j]} when k == key and is_integer(j) -> [j]
+        _ -> []
+      end
+    end)
+    |> Enum.sort()
   end
 
   # A row whose list no longer holds its `_key`: another editor moved it
