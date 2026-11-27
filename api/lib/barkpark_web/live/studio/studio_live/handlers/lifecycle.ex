@@ -392,13 +392,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   `meta.code`) is taken from the newest version (`PostPath`): its siblings
   are read against this tab's own row, as other fields are
   (task-04e50efa8405b956).
+
+  A reference or image the post picked on the widget drawn from the newest
+  version (`KeptPicks`, `editor_post_picks`) is read as the target is
+  (task-36b1558c058a5f3b).
   """
   def post_base(socket) do
     own = socket.assigns[:editor_doc]
     seen = base_doc(socket)
     path = {socket.assigns[:editor_post_path], PostPath.shapes(socket)}
 
-    case List.wrap(socket.assigns[:editor_post_target]) do
+    case Enum.uniq(
+           List.wrap(socket.assigns[:editor_post_target]) ++
+             List.wrap(socket.assigns[:editor_post_picks])
+         ) do
       [_ | _] = keys when is_map(own) and is_map(seen) and seen != own ->
         Enum.reduce(keys, own, &take_seen(&2, seen, &1, path))
 
