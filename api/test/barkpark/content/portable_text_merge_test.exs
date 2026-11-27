@@ -26,6 +26,11 @@ defmodule Barkpark.Content.PortableTextMergeTest do
 
   defp words(blocks), do: Enum.map(blocks, fn bl -> hd(bl["children"])["text"] end)
 
+  defp in_order?([], _merged), do: true
+  defp in_order?(_want, []), do: false
+  defp in_order?([w | ws], [w | ms]), do: in_order?(ws, ms)
+  defp in_order?(want, [_ | ms]), do: in_order?(want, ms)
+
   defp keys_unique?(blocks), do: blocks |> Enum.map(& &1["_key"]) |> then(&(&1 == Enum.uniq(&1)))
 
   test "K5: A types in block 0, B adds a paragraph: both, theirs keys kept" do
@@ -113,6 +118,30 @@ defmodule Barkpark.Content.PortableTextMergeTest do
 
       for opts <- [[], [inline: false]], {a, z} <- [{mine, theirs}, {theirs, mine}] do
         assert {:clash, _, _} = M.merge(was, a, z, opts)
+      end
+    end
+
+    # #28928 r2 review, N1 (fuzz seed 13472, task-f32d84dcf9e632d8): the
+    # second line-up gave mine whole, every block kept but theirs' "b"
+    # before "a" lost, with :ok.
+    test "the second line-up never loses a side's order of its new blocks" do
+      was = [b("k0", "S"), b("k1", "S")]
+      mine = [b("m0", "a"), b("m1", "b"), b("m2", "b"), b("m3", "b")]
+      theirs = [b("t0", "b"), b("t1", "a")]
+
+      for opts <- [[], [inline: false]], {x, y} <- [{mine, theirs}, {theirs, mine}] do
+        case M.merge(was, x, y, opts) do
+          {:clash, _, _} ->
+            :ok
+
+          {:ok, merged} ->
+            for side <- [x, y] do
+              new = for w <- words(side), w != "S", do: w
+
+              assert in_order?(new, words(merged)),
+                     "order of #{inspect(new)} lost: #{inspect(words(merged))}"
+            end
+        end
       end
     end
 
