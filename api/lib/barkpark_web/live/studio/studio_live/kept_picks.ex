@@ -24,7 +24,14 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   A value this socket wrote from the page's own post is the page's
   (`editor_own_picks`): the widget is not drawn again after A's own pick, so
   its `_bp_drawn` stays the first value, and a pick back to it, on a key in
-  another field or a Save, is A's and written (#29075 r1 review).
+  another field or a Save, is A's and written (#29075 r1 review). Only a
+  pick is kept (a posted value that is not the drawn one; one posted as
+  drawn drops it), with the drawing it was made on, and a document load
+  drops them all (`Shared.rebuild_panes/1`). A pick back counts only on that
+  drawing: a remote replace draws the widget again from the store (a new
+  form generation, or the widget's own). Read past it, the store taking
+  back A's old pick made the redrawn widget's stale post read as A's
+  (task-030e09c0bde818b1).
 
   A pick the page posts as this socket last wrote it, where the store has
   since moved to another editor's value, is dropped the same way: the page
@@ -52,18 +59,24 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   def through(params, socket, fun) do
     schema = socket.assigns[:editor_schema]
     form = socket.assigns[:editor_form] || %{}
-    {params, dropped} = split(params, schema, form, own(socket))
+    drawn = params["_bp_drawn"]
+    {params, dropped} = split(params, schema, form, {own(socket, :now), own(socket, :any)})
 
     case fun.(params, socket) do
-      {:noreply, socket} -> {:noreply, socket |> redraw(dropped) |> wrote(params)}
-      {:reply, reply, socket} -> {:reply, reply, socket |> redraw(dropped) |> wrote(params)}
+      {:noreply, socket} ->
+        {:noreply, socket |> redraw(dropped) |> wrote(params, drawn)}
+
+      {:reply, reply, socket} ->
+        {:reply, reply, socket |> redraw(dropped) |> wrote(params, drawn)}
     end
   end
 
   @doc false
-  def split(params, schema, form, own \\ %{})
+  # `own`: this document's picks kept for the drawing on the page now, and
+  # its picks as this socket last wrote them, whatever was drawn since.
+  def split(params, schema, form, own \\ {%{}, %{}})
 
-  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema, form, own) do
+  def split(%{"doc" => %{} = doc, "_bp_drawn" => %{} = drawn} = params, schema, form, {now, any}) do
     target = target(params)
 
     # Only where the form, the socket's newest stored value, draws another
@@ -76,7 +89,12 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
           name != target,
           posted = Map.get(doc, name),
           is_binary(posted),
-          stale?(posted, drawn[name], Map.get(own, name), drawn(type, Map.get(form, name))),
+          stale?(
+            posted,
+            drawn[name],
+            {Map.get(now, name), Map.get(any, name)},
+            drawn(type, Map.get(form, name))
+          ),
           into: %{},
           do: {name, {type, posted}}
 
@@ -88,14 +106,15 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     do: {Map.delete(params, "_bp_drawn"), %{}}
 
   # Posted as the page drew it, where the store holds neither that nor this
-  # page's own pick.
-  defp stale?(posted, posted, own, now), do: now not in [posted, own]
+  # page's own pick made on that drawing (task-030e09c0bde818b1: a pick made
+  # before the widget was drawn again is not a pick back on it).
+  defp stale?(posted, posted, {own, _any}, now), do: now not in [posted, own]
 
   # Posted as this page last wrote it, where the store has since moved to
   # another's value: the page still shows its own pick, the redraw of the
   # other save not yet drawn (task-775ad6b350f78f2e). A page that drew the
   # store's value and posts its own again picked it again: written.
-  defp stale?(posted, drawn, posted, now), do: now != posted and drawn != now
+  defp stale?(posted, drawn, {_own, posted}, now), do: now != posted and drawn != now
 
   defp stale?(_posted, _drawn, _own, _now), do: false
 
@@ -114,31 +133,71 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     assign(socket, editor_pick_gens: gens)
   end
 
-  # Each top-level reference or image the page posted that the form now
-  # holds as posted: the form's value came from this page, of this document.
-  defp wrote(socket, %{"doc" => %{} = doc}) do
+  # Each top-level reference or image the page picked (posted as another
+  # value than it was drawn with) that the form now holds as posted, with the
+  # drawing it was picked on. One posted as drawn is the drawing's, not a
+  # pick: a record of that name goes.
+  defp wrote(socket, %{"doc" => %{} = doc}, drawn) do
     form = socket.assigns[:editor_form] || %{}
+    drawn = if is_map(drawn), do: drawn, else: %{}
 
     mine =
-      for %{"type" => type, "name" => name} <- fields(socket.assigns[:editor_schema]),
-          type in @types,
-          posted = Map.get(doc, name),
-          is_binary(posted),
-          drawn(type, Map.get(form, name)) == posted,
-          into: own(socket),
-          do: {name, posted}
+      Enum.reduce(fields(socket.assigns[:editor_schema]), kept(socket, :any), fn
+        %{"type" => type, "name" => name}, acc when type in @types ->
+          posted = Map.get(doc, name)
+
+          cond do
+            not is_binary(posted) ->
+              acc
+
+            posted == drawn[name] ->
+              Map.delete(acc, name)
+
+            drawn(type, Map.get(form, name)) == posted ->
+              Map.put(acc, name, {posted, gen(socket, name)})
+
+            true ->
+              acc
+          end
+
+        _field, acc ->
+          acc
+      end)
 
     assign(socket, editor_own_picks: {PostIdentity.of(socket), mine})
   end
 
-  defp wrote(socket, _params), do: socket
+  defp wrote(socket, _params, _drawn), do: socket
 
-  defp own(socket) do
+  defp own(socket, drawing),
+    do: Map.new(kept(socket, drawing), fn {name, {value, _gen}} -> {name, value} end)
+
+  # This document's picks as this socket last wrote them (`:any`), or only
+  # those made on the widget drawing the page shows now (`:now`).
+  defp kept(socket, drawing) do
     case socket.assigns[:editor_own_picks] do
-      {doc, picks} -> if doc == PostIdentity.of(socket), do: picks, else: %{}
-      _ -> %{}
+      {doc, %{} = picks} ->
+        if doc == PostIdentity.of(socket),
+          do:
+            for(
+              {name, {_value, gen} = pick} <- picks,
+              drawing == :any or gen == gen(socket, name),
+              into: %{},
+              do: {name, pick}
+            ),
+          else: %{}
+
+      _ ->
+        %{}
     end
   end
+
+  # The drawing of `name`'s widget: its wrapper id's form generation and its
+  # own (`FieldInputs.pick_wrap_id/5`).
+  defp gen(socket, name),
+    do:
+      {socket.assigns[:editor_form_gen] || 0,
+       Map.get(socket.assigns[:editor_pick_gens] || %{}, name, 0)}
 
   # The value the widget draws for a form value (`FieldInputs.input/1`).
   defp drawn("reference", value), do: FieldInputs.reference_id(value)
