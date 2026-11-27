@@ -16,28 +16,56 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
   the write has settled, puts A's words back into the form and keeps the
   banner, the held field's unsaved mark and the hold state as they were.
   A Save or Reload still ends the hold, as before.
+
+  A held path inside the write's own top (a row's rich text, a label in an
+  object, while an array op writes the object) takes the store's value too,
+  and gets A's words back after (task-ffb773f49c564973). The paths are each
+  held rich text's (`editor_rt_held`) and each held text's
+  (`editor_text_held`, `TextUnderLock.hold/3`). A row on the path is found
+  by its `_key`, in the form after the op and in the store: the op can move
+  it. An entry of a hold that has ended only keeps a value the form shows
+  unsaved until A's next post or Save, and only while the banner names its
+  top.
   """
 
   import Phoenix.Component, only: [assign: 2]
 
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Path
+
   # The hold, as the banner and the next post read it.
-  @kept [:editor_clash_fields, :editor_text_paused, :editor_rt_held, :editor_rt_clash]
+  @kept [
+    :editor_clash_fields,
+    :editor_text_paused,
+    :editor_text_held,
+    :editor_rt_held,
+    :editor_rt_clash
+  ]
 
   @doc """
   `{form, held}`: `form` with the store's value in each held top-level
   field not in `own`, and what `restore/2` needs (`nil`: nothing held).
   """
   def stored(socket, form, own) when is_map(form) do
-    case tops(socket.assigns, own) do
-      [] ->
+    mine = socket.assigns[:editor_form] || %{}
+
+    case {tops(socket.assigns, own), own_paths(socket.assigns, own, mine)} do
+      {[], []} ->
         {form, nil}
 
-      tops ->
+      {tops, paths} ->
         doc = socket.assigns[:editor_doc]
-        mine = socket.assigns[:editor_form] || %{}
+        form = Enum.reduce(tops, form, &store_value(&2, &1, doc))
+        form = Enum.reduce(paths, form, &store_at(&2, &1, doc))
 
-        {Enum.reduce(tops, form, &store_value(&2, &1, doc)),
-         %{tops: tops, mine: Map.take(mine, tops), kept: Map.take(socket.assigns, @kept)}}
+        {form,
+         %{
+           tops: tops,
+           mine: Map.take(mine, tops),
+           paths:
+             for(kp <- paths, {:ok, at} <- [find(mine, kp)], do: {kp, FormPath.get(mine, at)}),
+           kept: Map.take(socket.assigns, @kept)
+         }}
     end
   end
 
@@ -46,15 +74,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
   @doc "The hold `stored/3` read, back on the socket after the write."
   def restore(socket, nil), do: socket
 
-  def restore(socket, %{tops: tops, mine: mine, kept: kept}) do
+  def restore(socket, %{tops: tops, mine: mine, kept: kept} = held) do
     a = socket.assigns
+    paths = Map.get(held, :paths, [])
+    form = Enum.reduce(paths, Map.merge(a[:editor_form] || %{}, mine), &put_mine/2)
+    keys = tops ++ for({[top | _], _} <- paths, do: top)
 
     socket
     |> assign(
-      editor_form: Map.merge(a[:editor_form] || %{}, mine),
+      editor_form: form,
       editor_dirty: true,
       editor_unsaved_keys:
-        MapSet.union(a[:editor_unsaved_keys] || MapSet.new(), MapSet.new(tops)),
+        MapSet.union(a[:editor_unsaved_keys] || MapSet.new(), MapSet.new(keys)),
       doc_conflict: true,
       save_status:
         if(a[:save_status] in [nil, "Saved"],
@@ -64,6 +95,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
       editor_clash_fields:
         Enum.uniq((kept[:editor_clash_fields] || []) ++ (a[:editor_clash_fields] || [])),
       editor_text_paused: kept[:editor_text_paused] || a[:editor_text_paused] || [],
+      editor_text_held:
+        Enum.uniq((kept[:editor_text_held] || []) ++ (a[:editor_text_held] || [])),
       editor_rt_held: Map.merge(a[:editor_rt_held] || %{}, kept[:editor_rt_held] || %{}),
       editor_rt_clash: Map.merge(a[:editor_rt_clash] || %{}, kept[:editor_rt_clash] || %{})
     )
@@ -74,6 +107,71 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldFields do
       do: Enum.uniq(assigns[:editor_clash_fields] || []) -- List.wrap(own),
       else: []
   end
+
+  # Each held path below a top in `own` that the banner names, its rows by
+  # `_key` where they carry one (`keyed/2`). A held top-level field is the
+  # write's own field: the write is A's edit of it.
+  defp own_paths(assigns, own, mine) do
+    if assigns[:doc_conflict] == true do
+      named = assigns[:editor_clash_fields] || []
+
+      rich = for name <- Map.keys(assigns[:editor_rt_held] || %{}), do: Path.parse_path(name)
+      text = for key <- assigns[:editor_text_held] || [], do: List.wrap(key)
+
+      for [top, _ | _] = path <- Enum.uniq(rich ++ text),
+          top in List.wrap(own),
+          top in named,
+          uniq: true,
+          do: keyed(mine, path)
+    else
+      []
+    end
+  end
+
+  defp keyed(_value, []), do: []
+
+  defp keyed(list, [i | rest]) when is_list(list) and is_integer(i) do
+    case Enum.at(list, i) do
+      %{"_key" => key} = row when is_binary(key) -> [{:key, key} | keyed(row, rest)]
+      row -> [i | keyed(row, rest)]
+    end
+  end
+
+  defp keyed(value, [seg | rest]), do: [seg | keyed(FormPath.get(value, [seg]), rest)]
+
+  # The index path of a keyed path in `value`; `:error` where a row is gone.
+  defp find(_value, []), do: {:ok, []}
+
+  defp find(list, [{:key, key} | rest]) when is_list(list) do
+    case Enum.find_index(list, &match?(%{"_key" => ^key}, &1)) do
+      nil -> :error
+      i -> with {:ok, at} <- find(Enum.at(list, i), rest), do: {:ok, [i | at]}
+    end
+  end
+
+  defp find(_value, [{:key, _} | _]), do: :error
+
+  defp find(value, [seg | rest]),
+    do: with({:ok, at} <- find(FormPath.get(value, [seg]), rest), do: {:ok, [seg | at]})
+
+  defp store_at(form, kp, doc) do
+    store = stored_map(doc)
+
+    with {:ok, from} <- find(store, kp),
+         {:ok, to} <- find(form, kp),
+         do: FormPath.put(form, to, FormPath.get(store, from)),
+         else: (_ -> form)
+  end
+
+  defp put_mine({kp, value}, form) do
+    case find(form, kp) do
+      {:ok, at} -> FormPath.put(form, at, value)
+      :error -> form
+    end
+  end
+
+  defp stored_map(%{content: %{} = content} = doc), do: Map.put(content, "title", doc.title)
+  defp stored_map(_doc), do: %{}
 
   # Only a field the write posts. One the store does not hold is left out:
   # the save keeps a stored key the form does not post (`Content.Forms`).

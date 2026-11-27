@@ -121,7 +121,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextUnderLock do
         MapSet.union(socket.assigns[:editor_unsaved_keys] || MapSet.new(), MapSet.new(tops)),
       doc_conflict: true,
       save_status: "Updated by another user",
-      editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ tops)
+      editor_clash_fields: Enum.uniq((socket.assigns[:editor_clash_fields] || []) ++ tops),
+      # The held field itself, a path into an object too (`HeldFields`).
+      editor_text_held: Enum.uniq((socket.assigns[:editor_text_held] || []) ++ keys)
     )
   end
 
