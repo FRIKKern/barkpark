@@ -2254,7 +2254,7 @@ async function main() {
         ` mainLeft:Math.round(main.left*100)/100, actsLeft:Math.round(acts.left*100)/100};})()`,
       );
       if (m.dir !== "column") fail("GR109-attention-row-dead-rule", `@768 flex-direction is "${m.dir}", expected "column" — the stack itself died`);
-      if (m.align !== "flex-start") fail("GR109-attention-row-dead-rule", `@768 align-items is "${m.align}", expected "flex-start" — the authored rule is cascade-dead (row stacks but stays centred)`);
+      if (m.align !== "flex-start" && m.align !== "flow-start") fail("GR109-attention-row-dead-rule", `@768 align-items is "${m.align}", expected "flex-start" (Chrome 158+ prints the same computed value as "flow-start") — the authored rule is cascade-dead (row stacks but stays centred)`);
       if (Math.abs(m.actsLeft - m.mainLeft) > 1) fail("GR109-attention-row-dead-rule", `@768 .attention-acts left ${m.actsLeft} != .attention-main left ${m.mainLeft} — buttons are centred, not left-aligned`);
       if (!failures.some((f) => f.defect === "GR109-attention-row-dead-rule")) {
         okLine(`@768 computed column/flex-start; acts left ${m.actsLeft} == main left ${m.mainLeft} — the readiness gate stood in front of ${attPop} .attention-row .attention-acts group(s) on overview-past-due, counted rather than assumed (D228), and the geometry above is the FIRST row's`);
