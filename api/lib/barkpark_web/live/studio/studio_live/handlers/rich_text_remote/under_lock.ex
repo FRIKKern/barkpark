@@ -217,9 +217,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   defp owner(_owners, _name), do: :error
 
-  # A row's entry also names the `_key` of each row on the way, its own left
-  # out (`RowDraws.outer_keys/2`, an index for a keyless one); a page drawn
-  # before posts none, read as `:any`.
+  # A row inside another row also names the `_key` of each row on the way,
+  # its own left out (`RowDraws.outer_keys/2`, an index for a keyless one).
+  # Any other entry, and one from a page drawn before, has none: `:any`.
   defp entry(entry) when is_binary(entry) do
     case Jason.decode(entry) do
       {:ok, [name, key, digest | rest]}

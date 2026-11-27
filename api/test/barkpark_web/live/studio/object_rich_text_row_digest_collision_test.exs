@@ -89,7 +89,7 @@ defmodule BarkparkWeb.Studio.ObjectRichTextRowDigestCollisionTest do
     old = :erlang.phash2(CompositeField.drawn_html([block("w1", drawn_text)]))
 
     for entry <- page_owners(view) do
-      [name, key, _digest | _outer] = Jason.decode!(entry)
+      [name, key, _digest] = Jason.decode!(entry)
       Jason.encode!([name, key, old])
     end
   end

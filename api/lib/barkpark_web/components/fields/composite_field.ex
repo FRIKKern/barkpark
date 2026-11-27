@@ -887,10 +887,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   defp outer_keys(_assigns, _name), do: nil
 
   # The owner entry the editor posts (`UnderLock`): its input name, its row's
-  # `_key`, the digest of the HTML drawn, and the outer row keys when known.
+  # `_key`, the digest of the HTML drawn, and, in a row inside another row,
+  # the outer row keys. An object's or a top-level row's entry has none and
+  # keeps its three elements.
   defp owner_entry(name, key, value, outer) do
     entry = [name, key, TextConfirmed.digest(drawn_html(value))]
-    Jason.encode!(if(outer, do: entry ++ [outer], else: entry))
+    Jason.encode!(if(outer in [nil, []], do: entry, else: entry ++ [outer]))
   end
 
   defp child_path("", child), do: child
