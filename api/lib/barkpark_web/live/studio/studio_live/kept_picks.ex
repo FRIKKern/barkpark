@@ -50,7 +50,8 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   image (in an object or a row) is not read here.
 
   A pick made on the widget drawn from the socket's form (posted as another
-  value than drawn, drawn as the form holds it) is a change of that field,
+  value than drawn, drawn as the form holds it, on the drawing the socket
+  draws now: `_bp_drawn_at`) is a change of that field,
   as the post's target is (`editor_post_picks`, read with
   `editor_post_target`): the save reads it against the newest stored
   version this tab saw, not this tab's own last row (`Lifecycle.post_base/1`,
@@ -76,8 +77,9 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
     form = socket.assigns[:editor_form] || %{}
     drawn = params["_bp_drawn"]
     at = picked_on(params, socket)
+    picks = picked(params, {drawn, params["_bp_drawn_at"]}, socket, {schema, form})
     {params, dropped} = split(params, schema, form, {own(socket, :now), own(socket, :any)})
-    socket = assign(socket, editor_post_picks: picked(params, drawn, schema, form))
+    socket = assign(socket, editor_post_picks: picks)
 
     case fun.(params, socket) do
       {:noreply, socket} ->
@@ -255,8 +257,13 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
   # The top-level field this post is a change of: `["doc", "body"]` or
   # `["doc[body]"]`; nil for the Save button's post, which names none.
   # Each top-level reference or image the post picked on the widget drawn
-  # from `form`: posted as another value than drawn, drawn as `form` holds it.
-  defp picked(%{"doc" => %{} = doc}, %{} = drawn, schema, form) do
+  # from `form`: posted as another value than drawn, drawn as `form` holds
+  # it, on the drawing the socket draws now (`_bp_drawn_at[name]`). The
+  # value alone is not enough: B saving back the value the page still shows
+  # (an undo of A's pick) moves the form to it before the redraw reaches the
+  # page, and the page's stale post of A's pick read as made on it (#29146
+  # r1 review, H1). A page that posts no drawing names none.
+  defp picked(%{"doc" => %{} = doc}, {%{} = drawn, %{} = at}, socket, {schema, form}) do
     for %{"type" => type, "name" => name} <- fields(schema),
         type in @types,
         posted = Map.get(doc, name),
@@ -265,10 +272,16 @@ defmodule BarkparkWeb.Studio.StudioLive.KeptPicks do
         is_binary(was),
         posted != was,
         was == drawn(type, Map.get(form, name)),
+        Map.get(at, name) ==
+          FieldInputs.pick_drawing(
+            socket.assigns[:editor_form_gen],
+            socket.assigns[:editor_pick_gens],
+            name
+          ),
         do: name
   end
 
-  defp picked(_params, _drawn, _schema, _form), do: []
+  defp picked(_params, _drawn, _socket, _form), do: []
 
   defp done(socket), do: assign(socket, editor_post_picks: [])
 
