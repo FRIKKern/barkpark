@@ -24,7 +24,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.HeldSeed do
   alias BarkparkWeb.Studio.StudioLive.Path
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
-  @doc "The form to seed from: `form`, or with no hold open the same."
+  @doc """
+  The form to seed the fold from: with a hold of this document open, its
+  lists and objects as stored; with none, `form`.
+  """
   def form(socket, form) do
     if held?(socket), do: stored(socket, form), else: form
   end
