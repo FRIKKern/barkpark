@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -34,18 +35,42 @@ type fakePaperServer struct {
 	nextView string
 	lastView string
 	sentView bool
+	// carried are the items the pull counts (x-bpml-carried-count) and
+	// format=carried names; nil plays a server from before it. carriedView,
+	// when set, is the fingerprint the carried read answers instead of view;
+	// carriedRev, when set, is the rev it answers instead of rev.
+	carried     []map[string]string
+	carriedView string
+	carriedRev  string
 }
 
 func (f *fakePaperServer) handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/papers/", func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/source") || r.URL.Query().Get("format") != "bpml" {
+		format := r.URL.Query().Get("format")
+		if !strings.HasSuffix(r.URL.Path, "/source") || (format != "bpml" && format != "carried") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "text/bpml")
 		w.Header().Set("x-paper-rev", f.rev)
+		if f.carried != nil {
+			w.Header().Set("x-bpml-carried-count", strconv.Itoa(len(f.carried)))
+		}
+		if format == "carried" {
+			view := f.view
+			if f.carriedView != "" {
+				view = f.carriedView
+			}
+			if f.carriedRev != "" {
+				w.Header().Set("x-paper-rev", f.carriedRev)
+			}
+			w.Header().Set("x-bpml-view", view)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"count": len(f.carried), "carried": f.carried})
+			return
+		}
+		w.Header().Set("Content-Type", "text/bpml")
 		if f.view != "" {
 			w.Header().Set("x-bpml-view", f.view)
 		}

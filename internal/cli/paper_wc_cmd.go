@@ -133,7 +133,8 @@ func runPaperPull(out *writer, g globals, ctx manifest.Context, args []string) i
 		return exitGeneric
 	}
 
-	bpml, rev, view, apiErr, err := paperWCClient(ctx).PaperPullBpml(slug)
+	client := paperWCClient(ctx)
+	bpml, rev, view, count, apiErr, err := client.PaperPullBpml(slug)
 	if err != nil {
 		out.userErr("paper pull %s: %v", slug, err)
 		return exitGeneric
@@ -141,6 +142,11 @@ func runPaperPull(out *writer, g globals, ctx manifest.Context, args []string) i
 	if apiErr != nil {
 		renderPaperAPIErr(out, "pull "+slug, apiErr)
 		return exitGeneric
+	}
+
+	carried, code := pullCarried(out, client, slug, count, rev, view)
+	if code != exitOK {
+		return code
 	}
 
 	if err := writePaperWCCopy(dir, slug, bpml); err != nil {
@@ -160,10 +166,16 @@ func runPaperPull(out *writer, g globals, ctx manifest.Context, args []string) i
 	}
 
 	if out.output == "json" || out.output == "yaml" {
-		out.renderJSON(map[string]any{"ok": true, "slug": slug, "rev": rev, "path": paperWCFile(dir, slug), "bytes": len(bpml)})
+		answer := map[string]any{"ok": true, "slug": slug, "rev": rev, "path": paperWCFile(dir, slug), "bytes": len(bpml)}
+		if count >= 0 {
+			answer["carried_count"] = count
+			answer["carried"] = carried
+		}
+		out.renderJSON(answer)
 		return exitOK
 	}
 	out.outf("pulled %s @ rev %s → %s (%d bytes)", slug, rev, paperWCFile(dir, slug), len(bpml))
+	printCarried(out, carried)
 	return exitOK
 }
 
@@ -225,7 +237,7 @@ func runPaperStatus(out *writer, g globals, ctx manifest.Context, args []string)
 			// outage — for a scaffolded paper (rev-0 anchor, never pushed)
 			// "the server has no such paper yet" is the expected truth, and
 			// push is what will create it.
-			if _, rev, _, apiErr, err := client.PaperPullBpml(slug); err != nil {
+			if _, rev, _, _, apiErr, err := client.PaperPullBpml(slug); err != nil {
 				row["remote"] = "unreachable"
 			} else if apiErr != nil && apiErr.Status == 404 {
 				row["remote"] = "absent (push will create it)"

@@ -69,31 +69,38 @@ const paperBodyCap = 32 << 20
 // on (the x-paper-rev header) and the fingerprint of the bytes (x-bpml-view):
 // a push that sends it back is refused with 412 when the paper's view has
 // changed since, at any rev. The read is the public source route, carried with
-// the token so scoped instances resolve.
-func (c *Client) PaperPullBpml(slug string) (bpml string, rev string, view string, apiErr *PaperAPIErr, err error) {
+// the token so scoped instances resolve. carried is the whole count of list
+// items the print does not show all of (x-bpml-carried-count; PaperCarried
+// names them), or -1 from a server that sends no count.
+func (c *Client) PaperPullBpml(slug string) (bpml string, rev string, view string, carried int, apiErr *PaperAPIErr, err error) {
 	u := c.flatURL("/papers/" + url.PathEscape(slug) + "/source?format=bpml")
 
 	resp, err := c.authGet(u)
 	if err != nil {
-		return "", "", "", nil, err
+		return "", "", "", -1, nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, paperBodyCap))
 	if err != nil {
-		return "", "", "", nil, fmt.Errorf("paper pull %s: %w", slug, err)
+		return "", "", "", -1, nil, fmt.Errorf("paper pull %s: %w", slug, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", "", decodePaperErr(resp.StatusCode, body), nil
+		return "", "", "", -1, decodePaperErr(resp.StatusCode, body), nil
 	}
 
 	rev = resp.Header.Get("x-paper-rev")
 	if rev == "" {
-		return "", "", "", nil, fmt.Errorf("paper pull %s: server sent no x-paper-rev anchor", slug)
+		return "", "", "", -1, nil, fmt.Errorf("paper pull %s: server sent no x-paper-rev anchor", slug)
 	}
 
-	return string(body), rev, resp.Header.Get("x-bpml-view"), nil, nil
+	carried, err = carriedCount(resp.Header.Get("x-bpml-carried-count"))
+	if err != nil {
+		return "", "", "", -1, nil, fmt.Errorf("paper pull %s: %w", slug, err)
+	}
+
+	return string(body), rev, resp.Header.Get("x-bpml-view"), carried, nil, nil
 }
 
 // PaperSync pushes an edited BPML document under the pulled anchor. A nil
