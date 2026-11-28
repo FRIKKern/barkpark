@@ -323,21 +323,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> TextConfirmed.wrote(socket, rich, posted)
          |> TextConfirmed.paused(rich)
          |> row_draws()
-         |> dropped(folded, params)}
+         |> dropped(folded, params, touched_paths(socket))}
 
       _ ->
         {:noreply, socket}
     end
   end
 
-  defp dropped(socket, folded, params) do
-    folded
-    |> Map.get(@dropped, [])
-    |> RichTextRemote.DroppedRows.typed(
-      params["_bp_rt_owner"],
-      socket.assigns[:editor_rt_removed] || MapSet.new()
+  # `touched`: the inputs A changed, read before a Save clears them.
+  defp dropped(socket, folded, params, touched) do
+    leaves = Map.get(folded, @dropped, [])
+    owners = params["_bp_rt_owner"]
+    removed = socket.assigns[:editor_rt_removed] || MapSet.new()
+
+    RichTextRemote.DroppedRows.keep(
+      socket,
+      RichTextRemote.DroppedRows.typed(leaves, owners, removed) ++
+        RichTextRemote.DroppedRows.plain(
+          leaves,
+          owners,
+          touched,
+          base_form(socket),
+          removed
+        )
     )
-    |> then(&RichTextRemote.DroppedRows.keep(socket, &1))
   end
 
   # As an autosave: each free-text field of the Save is merged onto the
@@ -723,7 +732,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> TextConfirmed.wrote(socket, rich, posted)
          |> TextConfirmed.paused(rich)
          |> row_draws()
-         |> dropped(folded, params)}
+         |> dropped(folded, params, touched_paths(socket))}
 
       _ ->
         {:noreply, socket}

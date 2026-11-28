@@ -198,28 +198,94 @@ defmodule BarkparkWeb.Studio.KeylessRowOverKeyedTest do
                "A's keyless row was written into B's row: #{inspect(rows(stored(c)))}"
 
         assert "doc[rows][0].rt" in lost(a)
+        # A's untouched note in the dropped row is not A's text to copy.
+        refute "doc[rows][0].note" in lost(a)
         assert html =~ "doc-conflict-banner"
       end
     end
 
-    test "#{surface} W3, a plain subfield: A's note in the keyless row is never written into B's r0",
+    # task-41218d31b9a913c4: a dropped plain subfield's words reached no
+    # banner (`DroppedRows` read rich text only).
+    for how <- ["autosave", "save"] do
+      @how how
+      test "#{surface} #{how} W3, a plain subfield: A's note in the keyless row is never written into B's r0, and is shown",
+           c do
+        store(c, %{"rows" => [row(nil, ["one"], "n1"), row("r2", ["three"], "n3")]})
+        a = tab(c, @surface)
+        first = draw(a)
+
+        b_saves(c, a, %{
+          "rows" => [
+            row("r0", ["zero"], "z0"),
+            row(nil, ["one"], "n1"),
+            row("r2", ["three"], "n3")
+          ]
+        })
+
+        html = a_posts(a, first, [{"doc[rows][0].note", "n1 A"}], @how)
+
+        assert rows(stored(c)) == [
+                 {"r0", ["zero"], "z0"},
+                 {nil, ["one"], "n1"},
+                 {"r2", ["three"], "n3"}
+               ],
+               "A's note was written into B's row: #{inspect(rows(stored(c)))}"
+
+        # Before: nothing in the banner, A's "n1 A" lost with no notice.
+        assert lost(a) == ["doc[rows][0].note"], "A's note is in no banner: #{inspect(lost(a))}"
+        assert html =~ "doc-conflict-lost"
+        assert html =~ "n1 A"
+      end
+    end
+
+    test "#{surface} W1, a plain subfield: B removes the keyless row; A's typed note is shown, nothing written",
          c do
       store(c, %{"rows" => [row(nil, ["one"], "n1"), row("r2", ["three"], "n3")]})
       a = tab(c, @surface)
       first = draw(a)
 
+      b_saves(c, a, %{"rows" => [row("r0", ["zero"], "z0"), row("r2", ["three"], "n3")]})
+
+      html = a_posts(a, first, [{"doc[rows][0].note", "n1 A"}])
+
+      assert rows(stored(c)) == [{"r0", ["zero"], "z0"}, {"r2", ["three"], "n3"}]
+      assert lost(a) == ["doc[rows][0].note"]
+      assert html =~ "n1 A"
+    end
+
+    test "#{surface} control: B removes the keyless row; A's untouched note is not shown, A's typed rich text is",
+         c do
+      store(c, %{"rows" => [row(nil, ["one"], "n1"), row("r2", ["three"], "n3")]})
+      a = tab(c, @surface)
+      first = draw(a)
+
+      b_saves(c, a, %{"rows" => [row("r0", ["zero"], "z0"), row("r2", ["three"], "n3")]})
+
+      a_posts(a, first, [{"doc[rows][0].rt", "<p>one A</p>"}])
+
+      assert lost(a) == ["doc[rows][0].rt"]
+    end
+
+    test "#{surface} control: A typed its note before B's insert; it was written, and a later drop does not show it",
+         c do
+      store(c, %{"rows" => [row(nil, ["one"], "n1"), row("r2", ["three"], "n3")]})
+      a = tab(c, @surface)
+      first = draw(a)
+      a_posts(a, first, [{"doc[rows][0].note", "n1 A"}])
+      assert {nil, ["one"], "n1 A"} in rows(stored(c))
+
       b_saves(c, a, %{
-        "rows" => [row("r0", ["zero"], "z0"), row(nil, ["one"], "n1"), row("r2", ["three"], "n3")]
+        "rows" => [
+          row("r0", ["zero"], "z0"),
+          row(nil, ["one"], "n1 A"),
+          row("r2", ["three"], "n3")
+        ]
       })
 
-      a_posts(a, first, [{"doc[rows][0].note", "n1 A"}])
+      a_posts(a, first, [{"doc[rows][0].rt", "<p>one A</p>"}, {"doc[rows][0].note", "n1 A"}])
 
-      assert rows(stored(c)) == [
-               {"r0", ["zero"], "z0"},
-               {nil, ["one"], "n1"},
-               {"r2", ["three"], "n3"}
-             ],
-             "A's note was written into B's row: #{inspect(rows(stored(c)))}"
+      assert {nil, ["one"], "n1 A"} in rows(stored(c))
+      assert lost(a) == ["doc[rows][0].rt"]
     end
 
     # Controls: rows that post no `_key` though stored with one keep the
