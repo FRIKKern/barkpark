@@ -222,35 +222,52 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   end
 
   @doc """
-  After A's post was written (`saved`; `socket` before the write): each
-  top-level rich text read against the row the socket held (its `was` in
-  `values`, as `RichTextRemote.UnderLock.top/4` gave it) and not held went
-  in as typed. The store is A's, so the page's next post, sent before the
-  confirm, is A's own: the field's log of values the page may still show
-  (`took/3`) is dropped, or a digest of a value another editor's save moved
+  After A's post was written (`saved`; `socket` before the write; `posted`,
+  the post as the page sent it): each top-level rich text read against the
+  row the socket held (its `was` in `values`, as
+  `RichTextRemote.UnderLock.top/4` gave it) and not held went in. The page
+  now shows what A typed, and its next post, sent before the confirm of
+  this write lands, still names the digest of `was`. The field's log of
+  values the page may still show (`took/3`) becomes that one entry: the
+  digest of `was`, read as A's post. Another editor's save taken before the
+  confirm then logs the stored value over it as usual, and A's next post is
+  read against what A's page shows, not against the other editor's save it
+  never drew (#29259 r2 review, D1, D2: B's block was written back). An
+  older entry is dropped: a digest of a value another editor's save moved
   the field from, and back to, read A's own words as theirs (#29259 review,
   T6s, T6r, T6aa). A post read against a logged value was merged with that
   save: its log stays, and a stale next post is still read against it.
   """
-  def wrote(saved, socket, values) do
+  def wrote(saved, socket, values, posted \\ %{}) do
     log = saved.assigns[:editor_rt_took] || %{}
     held = saved.assigns[:editor_rt_held] || %{}
-
-    content =
-      case Lifecycle.base_doc(socket) do
-        %{content: %{} = content} -> content
-        _ -> %{}
-      end
+    now = stored_content(saved)
+    content = stored_content(socket)
 
     typed =
       for {name, {[key], was, _page}} <- values,
-          is_map_key(log, name),
           not is_map_key(held, name),
           was === Map.get(content, key),
-          do: name
+          html = Map.get(posted, key),
+          is_binary(html),
+          into: %{},
+          do: {name, [{rich_digest(was), shown(html, was, Map.get(now, key))}]}
 
-    if typed == [], do: saved, else: assign(saved, editor_rt_took: Map.drop(log, typed))
+    if typed == %{}, do: saved, else: assign(saved, editor_rt_took: Map.merge(log, typed))
   end
+
+  defp stored_content(socket) do
+    case Lifecycle.base_doc(socket) do
+      %{content: %{} = content} -> content
+      _ -> %{}
+    end
+  end
+
+  # What A's page shows after its post: the post, in the store's shape.
+  defp shown(html, _was, stored) when is_binary(stored), do: html
+
+  defp shown(html, was, _stored),
+    do: PortableText.from_html(html, if(is_list(was), do: was, else: []))
 
   @doc """
   At a document's load: a socket that mounted as a rejoin reads each
