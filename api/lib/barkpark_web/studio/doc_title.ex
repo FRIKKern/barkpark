@@ -39,4 +39,12 @@ defmodule BarkparkWeb.Studio.DocTitle do
       (schema && Map.get(schema, :singleton) == true && Map.get(schema, :title)) ||
       Gettext.gettext(BarkparkWeb.Gettext, "Untitled")
   end
+
+  @doc """
+  A desk list row (`PaneBuilder`'s doc item) with its document's `header/2`
+  name as `:header_title`. `Desk.Rows` carries it to the row's
+  `data-desk-title`, which names the frame `bp-desk.js` draws at the click.
+  """
+  @spec with_header(map(), map() | nil, map()) :: map()
+  def with_header(doc, schema, item), do: Map.put(item, :header_title, header(doc, schema))
 end

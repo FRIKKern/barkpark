@@ -1035,7 +1035,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           do: row_media(media_at.(preview_root(doc), deref), type_icon),
           else: {nil, type_icon}
 
-      %{
+      BarkparkWeb.Studio.DocTitle.with_header(doc, schema, %{
         type: :doc,
         id: pub_id,
         # Gyldendal parity E3.3 — `list_preview.media` names an image field;
@@ -1053,8 +1053,6 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # none.
         type_icon: row_icon,
         title: row_title(doc, schema, deref, fmt),
-        # What the document's editor header calls it (`DocTitle.header/2`).
-        header_title: BarkparkWeb.Studio.DocTitle.header(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -1067,7 +1065,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # A second line under the subtitle: Sanity's `description`.
         description: preview_line(doc, description, deref, fmt),
         updated: relative_updated(doc)
-      }
+      })
     end)
   end
 
