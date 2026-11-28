@@ -17,7 +17,10 @@ defmodule BarkparkWeb.Studio.BigObjectRichTextAutosaveCostTest do
   @moduletag :studio_live
   @moduletag timeout: 300_000
   @objects 50_000
-  @bound 120_000_000
+  # 135M: a post that is not the drawn HTML is compared with the image's
+  # plain read, as on main (#29288 r1 review, option (a)): one more parse
+  # of the image, about 11M here. Measured 112.4M seen, 122.5M not.
+  @bound 135_000_000
 
   defp span(k, t), do: %{"_type" => "span", "_key" => k, "text" => t, "marks" => []}
   defp chip(k), do: %{"_type" => "chip", "_key" => k, "v" => 1}
