@@ -375,7 +375,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # outcome is read before the reload drops it (`:saved_over`).
   defp do_save(params, not_codes, socket, text, {held, rich, posted, typed}) do
     before = socket.assigns[:editor_form] || %{}
-    written = autosave(socket, params, :save)
+    written = autosave(socket, params, :save, :page)
     text_held = TextUnderLock.held(written, text, params)
     {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
     # A rich text still held from before (`:still`) is not saved either: no
@@ -711,7 +711,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         written =
           based
           |> RefusedSave.target(keys, path)
-          |> autosave(doc, :change)
+          |> autosave(doc, :change, origin)
 
         text_held = TextUnderLock.held(written, text, doc)
 
@@ -755,8 +755,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # One parse per distinct rich text post for the whole write: the buffer's
   # coerce and the save's edit read parse the same HTML
   # (`PortableText.ParseMemo`, task-6a5c3e075299d4bc).
-  defp autosave(socket, params, trigger),
-    do: ParseMemo.around(fn -> Shared.do_autosave(socket, params, trigger) end)
+  # The one door A's writes take, the page's posts and the changes the
+  # server builds (an array op, an undo or redo, a paste, a revert, a
+  # restore of a field). A page's own post (`:page`) is what its editors
+  # show; a built one remounts each row rich text editor whose value it
+  # replaced (`RowMounts`, task-dd336795aff64006).
+  defp autosave(socket, params, trigger, origin) do
+    before = socket.assigns[:editor_form]
+    written = ParseMemo.around(fn -> Shared.do_autosave(socket, params, trigger) end)
+    if origin == :page, do: written, else: RowMounts.replaced(written, before)
+  end
 
   # Each row rich text the form now holds is a draw the page may show once a
   # remount reaches it: A's own array press (a duplicate's new key, a move)
@@ -1272,9 +1280,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           do: RichTextRemote.DroppedRows.removed(socket, row_at(current, idx)),
           else: socket
 
-      # Each index that now holds another row remounts its rich text editor.
-      socket = RowMounts.changed(socket, key_path, current, new_list)
-      saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
+      saved = socket |> RefusedSave.target(keys) |> autosave(new_form, :array_op, :built)
 
       {:noreply,
        saved

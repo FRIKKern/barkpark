@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.RowRichTextRemountTest do
   alias Barkpark.Content
   alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.EditorPost
+  alias BarkparkWeb.Studio.StudioLive.PostIdentity
   alias BarkparkWeb.Studio.StudioLive.RejoinForm
 
   @moduletag :studio_live
@@ -156,6 +157,26 @@ defmodule BarkparkWeb.Studio.RowRichTextRemountTest do
 
   defp draw(text), do: CompositeField.drawn_digest([block("x", text)])
 
+  # The desk's Mod+Z / Mod+Shift+Z with nothing focused (`DocUndo`).
+  defp undo(c, a, redo? \\ false) do
+    mark = %{PostIdentity.key() => PostIdentity.value("production", c.type, c.id)}
+    render_hook(a, "desk-undo", Map.put(mark, "redo", redo?))
+  end
+
+  # Every index draws the stored row there: its rich text input and owner.
+  defp consistent?(c, a) do
+    stored(c)["rows"]
+    |> Enum.with_index()
+    |> Enum.all?(fn {r, i} ->
+      text = Enum.join(words(r["rt"]), " ")
+
+      owner_draw(a, "doc[rows][#{i}].rt") == draw(text) and
+        (drawn(a)["doc[rows][#{i}].rt"] || "") =~ text
+    end)
+  end
+
+  defp texts(c), do: Enum.map(stored(c)["rows"], &words(&1["rt"]))
+
   defp list_path(c, :desk), do: "#{c.root}/_desk/#{c.type}"
   defp list_path(c, :studio), do: "#{c.root}/#{c.type}"
 
@@ -284,6 +305,73 @@ defmodule BarkparkWeb.Studio.RowRichTextRemountTest do
       refute wrapper_ids(
                rejoined(c, @surface, Map.update!(params, "_bp_form", &Map.delete(&1, "rows")))
              ) == ids
+    end
+
+    if surface == :desk do
+      test "#{@tg} U1: A removes keyless P, then undoes it; A edits row 0: P's rich text kept",
+           c do
+        store(c, [row(nil, "pee", "p"), row(nil, "queue", "q"), row("r2", "three", "n3")])
+        a = tab(c, @surface)
+        seq = mount_seq(a)
+        op(a, "remove_row", 0)
+        assert eventually(fn -> length(stored(c)["rows"]) == 2 end)
+        undo(c, a)
+        assert eventually(fn -> length(stored(c)["rows"]) == 3 end)
+
+        # Before: index 0 still drew Q at -m1 over P.
+        assert consistent?(c, a)
+        a_posts(a, seq, {"doc[rows][0].rt", drawn(a)["doc[rows][0].rt"] <> "<p>A</p>"}, @how)
+        assert texts(c) == [["pee", "A"], ["queue"], ["three"]]
+      end
+
+      test "#{@tg} U2: A removes keyless P, undoes and redoes it: each index draws its row", c do
+        store(c, [row(nil, "pee", "p"), row(nil, "queue", "q"), row("r2", "three", "n3")])
+        a = tab(c, @surface)
+        seq = mount_seq(a)
+        op(a, "remove_row", 0)
+        assert eventually(fn -> length(stored(c)["rows"]) == 2 end)
+        undo(c, a)
+        assert eventually(fn -> length(stored(c)["rows"]) == 3 end)
+        undo(c, a, true)
+        assert eventually(fn -> length(stored(c)["rows"]) == 2 end)
+        assert consistent?(c, a)
+        a_posts(a, seq, {"doc[rows][0].note", "q A"}, @how)
+        assert rows(stored(c)) == [{nil, ["queue"], "q A"}, {"r2", ["three"], "n3"}]
+      end
+
+      test "#{@tg} U3: A moves keyless Q up, then undoes it: each index draws its row", c do
+        store(c, [row(nil, "pee", "p"), row(nil, "queue", "q")])
+        a = tab(c, @surface)
+        seq = mount_seq(a)
+        op(a, "move_up", 1)
+        assert eventually(fn -> texts(c) == [["queue"], ["pee"]] end)
+        undo(c, a)
+        assert eventually(fn -> texts(c) == [["pee"], ["queue"]] end)
+        assert consistent?(c, a)
+        a_posts(a, seq, {"doc[rows][0].note", "p A"}, @how)
+        assert rows(stored(c)) == [{nil, ["pee"], "p A"}, {nil, ["queue"], "q"}]
+      end
+
+      test "#{@tg} U4: A inserts a row at 0, then undoes it: each index draws its row", c do
+        store(c, [row(nil, "pee", "p"), row(nil, "queue", "q")])
+        a = tab(c, @surface)
+        seq = mount_seq(a)
+
+        EditorPost.press(a, "array_op", %{
+          "action" => "insert_row",
+          "field" => "rows",
+          "path" => "doc[rows]",
+          "index" => "0",
+          "member" => "row"
+        })
+
+        assert eventually(fn -> length(stored(c)["rows"]) == 3 end)
+        undo(c, a)
+        assert eventually(fn -> length(stored(c)["rows"]) == 2 end)
+        assert consistent?(c, a)
+        a_posts(a, seq, {"doc[rows][0].note", "p A"}, @how)
+        assert rows(stored(c)) == [{nil, ["pee"], "p A"}, {nil, ["queue"], "q"}]
+      end
     end
 
     test "#{@tg} control: A types in row 0 with no array change: its editor keeps its mount", c do
