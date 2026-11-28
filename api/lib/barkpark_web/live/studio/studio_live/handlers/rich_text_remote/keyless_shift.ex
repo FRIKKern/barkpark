@@ -20,8 +20,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
   text post the same shape (#29235 review, D1-D5), and the post can't tell
   them apart. The socket's draw history can (`RowDraws.first/3`): the list
   moved when A typed in row i (the post is not its draw), and ONE save of
-  another editor's both gave row j that draw there and gave row i the
-  value it holds now (task-8d968bba2cfa23c4). Rows of one text had it at
+  another editor's both gave row j that draw there and gave row i a value
+  (task-8d968bba2cfa23c4). Row i need not hold that value now: Studio's
+  add saves an empty row at once, and B types in it with later saves
+  (#29315 review, T2, T2b). Rows of one text had it at
   mount, or by A's own write: A's own typing changes row i, and B adding,
   clearing or copying a row is no move (#29315 review, E1-E3). An empty
   draw is never read as one: every new row has it. A Reload starts the
@@ -67,7 +69,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
 
   # An entry's draw at i that A typed on, that is not the form's row i but
   # the form's keyless row j, with words, and one save of another editor's
-  # gave row j that draw and row i its value now.
+  # gave row j that draw and row i a value.
   defp by_history(socket, form, owners, posted) do
     for entry <- List.wrap(owners),
         {name, digest} <- [keyless_draw(entry)],
@@ -86,13 +88,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
         at = List.replace_at(path, -2, j),
         drawn(form, at) == digest,
         words?(FormPath.get(form, at)),
-        one_save?(RowDraws.first(socket, at, digest), RowDraws.first(socket, path, now)),
+        one_save?(RowDraws.first(socket, at, digest), RowDraws.firsts(socket, path)),
         typed?(FormPath.get(posted, path), digest),
         uniq: true,
         do: list
   end
 
-  defp one_save?({n, :theirs}, {n, :theirs}), do: true
+  defp one_save?({_n, :theirs} = at_j, at_i), do: at_j in at_i
   defp one_save?(_at_j, _at_i), do: false
 
   # The post's HTML at a row is not the draw its entry names.
