@@ -17,7 +17,10 @@ defmodule BarkparkWeb.Studio.DeskRejoinEditorTest do
 
   # The join, and whether the page sent itself the deferred load
   # (`{:desk_edit, target}`): traced on receive, so no read of the page can
-  # race the message it is about.
+  # race the message it is about. Since task-32a5956065c81200 no join or
+  # patch sends it (every connected load is in its own render), so the
+  # rendered editor is what each test below asserts; the trace stays as a
+  # check that the deferred load does not come back.
   defp joined(c, path, mounts) do
     :erlang.trace_pattern(:receive, [{[:_, :_, {:desk_edit, :_}], [], []}], [])
     :erlang.trace(:new_processes, true, [:receive])
@@ -79,20 +82,23 @@ defmodule BarkparkWeb.Studio.DeskRejoinEditorTest do
     assert :sys.get_state(view.pid).socket.assigns.desk_rejoin? == false
   end
 
-  test "control: a first join still draws the pane first and the editor after", c do
+  # A first join loads the document in its own render too, as any connected
+  # patch does (task-32a5956065c81200): a frame drawn before the editor was a
+  # second pane for a moment.
+  test "a first join draws the editor in the join render, with no deferred load", c do
     {view, doc, deferred?} = joined(c, desk(c, c.id), 0)
 
-    assert deferred?
-    refute has?(doc, "[data-pane-editing]")
-    assert eventually(fn -> has_element?(view, "#editor-form") end)
+    refute deferred?
+    assert has?(doc, "[data-pane-editing]"), "the join render holds the editor"
+    assert has_element?(view, ~s(section[data-pane-editing][id$="-editor"] #editor-form))
   end
 
-  test "after the rejoin, a patch to another document defers again", c do
+  test "after the rejoin, a patch to another document draws its editor in that patch", c do
     {view, _html, false} = rejoined(c, desk(c, c.id))
     html = render_patch(view, desk(c, c.id <> "-link"))
 
-    refute html =~ "data-pane-editing"
-    assert eventually(fn -> has_element?(view, "#editor-form") end)
+    assert html =~ "data-pane-editing"
+    assert has_element?(view, "#editor-form")
   end
 
   test "a rejoin on a document that is gone, or on a list, loads nothing and does not crash",

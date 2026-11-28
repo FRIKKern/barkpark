@@ -325,7 +325,9 @@ defmodule BarkparkWeb.Studio.DeskLiveTest do
   } do
     {:ok, view, _html} = live(admin(conn), "#{base}/#{@type_name};#{a}")
     render_async(view)
-    assert page_title(view) =~ "Alpha note"
+    # The join render carries this title (the browser puts it in the tab);
+    # LiveViewTest's page_title/1 reads titles from later patches only.
+    assert :sys.get_state(view.pid).socket.assigns.page_title =~ "Alpha note"
 
     view |> element(~s([data-pane-index="2"] a.dk-close)) |> render_click()
     render_async(view)

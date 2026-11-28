@@ -264,10 +264,13 @@ defmodule BarkparkWeb.Studio.DeskLive do
     socket = ListFirst.warm(socket, views)
     socket = EditorHost.follow(socket, panes, dataset)
 
-    # The pane's frame goes out with this patch; the editor follows in the
-    # next message, so a click is answered before the document is loaded.
-    # On a rejoin's first patch the pending document loads here instead,
-    # so the join render holds its editor in place (`rejoin?/1`).
+    # A connected page loads the pending document here, so the patch draws
+    # its editor: the browser has already answered the click with a frame
+    # (`bp-desk.js`), and a frame from the server in between was a second,
+    # different pane for a moment (a read-only copy of the form when the row
+    # had been hovered). A rejoin's first patch does the same, so the join
+    # render holds its editor in place (`rejoin?/1`). The first, unconnected
+    # render only draws the frame: the connected mount loads the document.
     {rejoin?, socket} =
       {socket.assigns[:desk_rejoin?] == true, assign(socket, :desk_rejoin?, false)}
 
@@ -286,8 +289,9 @@ defmodule BarkparkWeb.Studio.DeskLive do
         EditorHost.edit(socket, target)
 
       target ->
-        send(self(), {:desk_edit, target})
-        {:noreply, socket}
+        if connected?(socket),
+          do: EditorHost.edit(socket, target),
+          else: {:noreply, socket}
     end
   end
 
@@ -626,8 +630,6 @@ defmodule BarkparkWeb.Studio.DeskLive do
   end
 
   @impl true
-  def handle_info({:desk_edit, target}, socket), do: EditorHost.edit(socket, target)
-
   def handle_info({:document_changed, %{type: _, doc_id: _} = msg}, socket),
     do: {:noreply, LiveRefresh.changed(socket, msg)}
 

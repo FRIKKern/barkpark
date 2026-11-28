@@ -28,10 +28,14 @@ defmodule BarkparkWeb.Studio.DeskUnknownDatasetTest do
     conn: conn,
     scope: scope
   } do
-    {:ok, view, _html} = live(conn, "#{scope}/d/nosuch/studio/_desk/post;post-01")
-    {path, flash} = assert_redirect(view)
+    # The connected mount loads the document, and the Studio's read of the
+    # dataset sends the page on before its first connected render.
+    assert {:error, {:live_redirect, %{to: path}}} =
+             result = live(conn, "#{scope}/d/nosuch/studio/_desk/post;post-01")
+
     assert path == studio(scope)
-    assert flash["info"] =~ "nosuch"
+    assert {:ok, _studio, html} = follow_redirect(result, conn)
+    assert html =~ "nosuch"
   end
 
   test "a live patch to a dataset that does not exist leaves for the Studio's", %{
