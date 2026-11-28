@@ -7,6 +7,10 @@ defmodule BarkparkWeb.Studio.TopRichTextSaveSeenTest do
   The Save read it against the row the socket last took (B's), so A's
   words were written over B's fill (R2s) or over B's clear (R3), with no
   banner. A Save whose seen is the stored value still writes.
+
+  A post written as typed ends the log of values the page may still show
+  (#29259 review, T6s, T6r, T6aa): its next post, sent before the confirm,
+  is A's own, not a stale one. A merge with B's save keeps it.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -184,6 +188,82 @@ defmodule BarkparkWeb.Studio.TopRichTextSaveSeenTest do
       assert words(body(c)) == ["body0 A1 A2"]
       assert held(a) == []
       refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} T6s: B changes the body and reverts it; A Saves twice before the confirm: written",
+         c do
+      pt!(c)
+      put_body(c, [block("b1", "body0")])
+      a = tab(c, @surface)
+      b_saves(c, a, [block("b1", "body0 B")])
+      b_saves(c, a, [block("b1", "body0")])
+      render(a)
+      seen = page(a)
+
+      save(a, "<p>body0 a</p>", seen)
+      html = save(a, "<p>body0 a b</p>", seen)
+
+      # On #29259 r1: ["body0 a"], A held against A's own Save.
+      assert words(body(c)) == ["body0 a b"]
+      assert held(a) == []
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} T6r: A deletes B's words; an autosave and a Save before its confirm: written",
+         c do
+      pt!(c)
+      put_body(c, [block("b1", "body0")])
+      a = tab(c, @surface)
+      b_saves(c, a, [block("b1", "body0 B")])
+      render(a)
+      autosave(a, "<p>body0</p>", page(a))
+      assert words(body(c)) == ["body0"]
+      seen = page(a)
+
+      autosave(a, "<p>body0 a</p>", seen)
+      html = save(a, "<p>body0 a b</p>", seen)
+
+      # On #29259 r1: ["body0 a"], A held against A's own autosave.
+      assert words(body(c)) == ["body0 a b"]
+      assert held(a) == []
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} T6aa: B changes the body and reverts it; two autosaves before the confirm: written",
+         c do
+      pt!(c)
+      put_body(c, [block("b1", "body0")])
+      a = tab(c, @surface)
+      b_saves(c, a, [block("b1", "body0 B")])
+      b_saves(c, a, [block("b1", "body0")])
+      render(a)
+      seen = page(a)
+
+      autosave(a, "<p>body0 a</p>", seen)
+      html = autosave(a, "<p>body0 a b</p>", seen)
+
+      # On main: ["body0 a"], A held against A's own autosave.
+      assert words(body(c)) == ["body0 a b"]
+      assert held(a) == []
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} control: after a merge with B, A's next stale Save keeps B's block, A held",
+         c do
+      pt!(c)
+      put_body(c, [block("b1", "body0"), block("b2", "second")])
+      a = tab(c, @surface)
+      seen = page(a)
+      b_saves(c, a, [block("b1", "body0"), block("b2", "second B")])
+
+      save(a, "<p>body0 A</p><p>second</p>", seen)
+      assert eventually(fn -> words(body(c)) == ["body0 A", "second B"] end)
+      html = save(a, "<p>body0 A A2</p><p>second</p>", seen)
+
+      # Read against the store, it would write "second" over B's block.
+      assert words(body(c)) == ["body0 A", "second B"]
+      assert held(a) == ["doc[body]"]
+      assert html =~ "doc-conflict-banner"
     end
   end
 end

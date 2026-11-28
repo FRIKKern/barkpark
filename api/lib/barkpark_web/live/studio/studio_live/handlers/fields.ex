@@ -314,6 +314,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          saved
          |> TextConfirmed.confirm(units, posted)
          |> RichTextRemote.hold(held)
+         |> TextConfirmed.wrote(socket, rich)
          |> TextConfirmed.paused(rich)
          |> row_draws()}
 
@@ -692,7 +693,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {saved, held} = RichTextRemote.UnderLock.acts(saved, held, rich, {doc, posted})
 
         {:noreply,
-         saved |> RichTextRemote.hold(held) |> TextConfirmed.paused(rich) |> row_draws()}
+         saved
+         |> RichTextRemote.hold(held)
+         |> TextConfirmed.wrote(socket, rich)
+         |> TextConfirmed.paused(rich)
+         |> row_draws()}
 
       _ ->
         {:noreply, socket}
