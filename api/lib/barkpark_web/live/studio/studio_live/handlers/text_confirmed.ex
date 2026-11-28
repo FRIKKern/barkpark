@@ -43,6 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
   alias BarkparkWeb.Components.Fields.CompositeField
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.RejoinForm
 
@@ -218,6 +219,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
           _ -> stored
         end
     end
+  end
+
+  @doc """
+  After A's post was written (`saved`; `socket` before the write): each
+  top-level rich text read against the row the socket held (its `was` in
+  `values`, as `RichTextRemote.UnderLock.top/4` gave it) and not held went
+  in as typed. The store is A's, so the page's next post, sent before the
+  confirm, is A's own: the field's log of values the page may still show
+  (`took/3`) is dropped, or a digest of a value another editor's save moved
+  the field from, and back to, read A's own words as theirs (#29259 review,
+  T6s, T6r, T6aa). A post read against a logged value was merged with that
+  save: its log stays, and a stale next post is still read against it.
+  """
+  def wrote(saved, socket, values) do
+    log = saved.assigns[:editor_rt_took] || %{}
+    held = saved.assigns[:editor_rt_held] || %{}
+
+    content =
+      case Lifecycle.base_doc(socket) do
+        %{content: %{} = content} -> content
+        _ -> %{}
+      end
+
+    typed =
+      for {name, {[key], was, _page}} <- values,
+          is_map_key(log, name),
+          not is_map_key(held, name),
+          was === Map.get(content, key),
+          do: name
+
+    if typed == [], do: saved, else: assign(saved, editor_rt_took: Map.drop(log, typed))
   end
 
   @doc """

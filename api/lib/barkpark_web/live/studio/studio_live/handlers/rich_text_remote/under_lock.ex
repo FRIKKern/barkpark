@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Path
@@ -91,47 +92,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def values(_socket, _seen, _posted, _owners), do: %{}
 
-  # The lists whose keyless rows A's page drew at other indexes than the
-  # form holds them now: another editor put a keyless row in or took one
-  # out before them. A keyless row goes by its index, so a draw there names
-  # another row, and A's edit that did not clash with that row's blocks was
-  # merged into it unseen (#29178 review, Q2-Q4c). Each rich text of such a
-  # list is read as a draw not known: the store kept, A held.
-  defp shifted(socket, owners) do
-    form = socket.assigns[:editor_form] || %{}
+  # The lists whose keyless rows moved under A's page (`KeylessShift`):
+  # each rich text of such a list is read as a draw not known, the store
+  # kept and A held (#29178 review, Q2-Q4c).
+  defp shifted(socket, owners), do: KeylessShift.lists(socket.assigns[:editor_form], owners)
 
-    drawn =
-      for entry <- List.wrap(owners),
-          t = entry(entry),
-          is_tuple(t) and elem(t, 1) == "",
-          path = Path.parse_path(elem(t, 0)),
-          is_integer(row_index(path)),
-          reduce: %{} do
-        acc ->
-          Map.update(
-            acc,
-            list_of(path),
-            MapSet.new([row_index(path)]),
-            &MapSet.put(&1, row_index(path))
-          )
-      end
-
-    for {list, at} <- drawn, at != keyless_rows(FormPath.get(form, list)), do: list
-  end
-
-  # The list a row rich text's row is in, and the row's index there.
-  defp list_of(path), do: Enum.drop(path, -2)
-  defp row_index(path), do: Enum.at(path, -2)
-
-  defp keyless_rows(rows) when is_list(rows) do
-    for {%{} = row, i} <- Enum.with_index(rows),
-        not is_struct(row),
-        Map.get(row, "_key") in [nil, ""],
-        into: MapSet.new(),
-        do: i
-  end
-
-  defp keyless_rows(_rows), do: MapSet.new()
+  defp list_of(path), do: KeylessShift.list_of(path)
 
   @doc """
   The socket after a post with no `_bp_rt_seen`: each object rich text it
@@ -440,10 +406,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   it had (task-fe9d8741f0641f97). While A is held, the page shows A's view
   over theirs, and a post on it is A's: read against theirs, so it is
   written as typed.
-  """
-  def top(socket, posted, seen \\ nil)
 
-  def top(socket, posted, seen) when is_map(posted) do
+  `mode` is `:autosave` or `:save`. A Save is read against the value its
+  page showed too (`TextConfirmed.page_base/4`): a Save sent with the seen
+  of a value the socket has since taken over was written over the other
+  editor's save with no banner (#29174 review, R2s and R3). A Save is not
+  read for a rejoin: the rejoin hold lasts until a Save.
+  """
+  def top(socket, posted, seen \\ nil, mode \\ :autosave)
+
+  def top(socket, posted, seen, mode) when is_map(posted) do
     # `was` is the row the socket last took only because a top-level
     # wrapper remounts on every form generation. Not after a socket
     # rejoin: generation 0 gives the same wrapper id, and the wrapper is
@@ -471,7 +443,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       # rejoin is read against the digest the page kept (`TextConfirmed`,
       # task-fe9d8741f0641f97) before a hold's view: typing on A's view
       # stays held until a Save or Reload.
-      case {seen && TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen), holds} do
+      rejoin =
+        mode == :autosave && seen &&
+          TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen)
+
+      case {rejoin, holds} do
         {:unknown, _} ->
           {name, {[key], :unknown, nil}}
 
@@ -486,7 +462,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     end
   end
 
-  def top(_socket, _posted, _seen), do: %{}
+  def top(_socket, _posted, _seen, _mode), do: %{}
 
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(_schema), do: []

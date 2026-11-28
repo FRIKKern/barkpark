@@ -15957,3 +15957,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Autosave is paused for %{fields} until you Save or Reload."
 msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "Your text was in a row another editor moved or removed. Copy it before you reload."
+msgstr ""

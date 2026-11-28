@@ -15959,3 +15959,8 @@ msgstr "Dette arbeidsområdet er suspendert, så det kan ikke opprettes noe arbe
 #, elixir-autogen, elixir-format
 msgid "Autosave is paused for %{fields} until you Save or Reload."
 msgstr "Autolagring er satt på pause for %{fields} til du trykker Lagre eller Last inn på nytt."
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "Your text was in a row another editor moved or removed. Copy it before you reload."
+msgstr "Teksten din lå i en rad en annen redaktør flyttet eller fjernet. Kopier den før du laster inn på nytt."
