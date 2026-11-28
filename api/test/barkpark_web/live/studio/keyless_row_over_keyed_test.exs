@@ -266,7 +266,9 @@ defmodule BarkparkWeb.Studio.KeylessRowOverKeyedTest do
       assert lost(a) == ["doc[rows][0].rt"]
     end
 
-    test "#{surface} control: A typed its note before B's insert; it was written, and a later drop does not show it",
+    # A keyless row can't vouch for an earlier write at its index (#29332
+    # review, N5): the note is shown again; nothing is written.
+    test "#{surface} keyless: A typed its note before B's insert; it was written, and a later drop shows it again",
          c do
       store(c, %{"rows" => [row(nil, ["one"], "n1"), row("r2", ["three"], "n3")]})
       a = tab(c, @surface)
@@ -285,7 +287,7 @@ defmodule BarkparkWeb.Studio.KeylessRowOverKeyedTest do
       a_posts(a, first, [{"doc[rows][0].rt", "<p>one A</p>"}, {"doc[rows][0].note", "n1 A"}])
 
       assert {nil, ["one"], "n1 A"} in rows(stored(c))
-      assert lost(a) == ["doc[rows][0].rt"]
+      assert Enum.sort(lost(a)) == ["doc[rows][0].note", "doc[rows][0].rt"]
     end
 
     # Controls: rows that post no `_key` though stored with one keep the
