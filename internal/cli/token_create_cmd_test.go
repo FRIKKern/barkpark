@@ -32,7 +32,7 @@ func tokenCreateManifestCmd() manifest.Command {
 		Args:     []manifest.Arg{{Name: "label", Required: true, Type: "string"}},
 		Flags: []manifest.Flag{
 			{Name: "permissions", Type: "string", Default: "public-read",
-				Summary: "Comma list — public-read|read ONLY (default public-read)."},
+				Summary: "Comma list of public-read, read, write, admin (default public-read)."},
 			{Name: "dataset", Type: "string", Default: "production"},
 		},
 		Writes:       true,
@@ -382,5 +382,35 @@ func TestTokenCreateNamesADatasetOnlyWhenTheFlagWasTyped(t *testing.T) {
 				t.Errorf("dataset on the wire = %q, want %q (body %s)", got, tc.want, body)
 			}
 		})
+	}
+}
+
+// TestTokenCreateHelpNamesWriteAndAdmin is task-d0408c73a9206555: the help said
+// read-only, so agents concluded that a write token could not be minted here.
+// It must name every permission, say that write and admin go to the elevated
+// route and need an admin seat, and show one example that binds a dataset.
+func TestTokenCreateHelpNamesWriteAndAdmin(t *testing.T) {
+	var so, se bytes.Buffer
+	if code := runTokenCreate(newWriter(&so, &se), globals{help: true}, tokenCtx("https://s.example"), nil); code != exitOK {
+		t.Fatalf("help exit = %d", code)
+	}
+	help := se.String()
+	for _, want := range []string{"public-read", "write, admin", "/v1/tokens/elevated", "admin seat",
+		"token create ci --permissions read,write --dataset staging"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help does not name %q:\n%s", want, help)
+		}
+	}
+}
+
+// `bp token create --help` must reach that help even without --permissions.
+// Before, it fell through to the manifest help, which comes from the server
+// and said read-only on every server not yet redeployed.
+func TestTokenCreateHelpFlagTakesTheBuiltin(t *testing.T) {
+	if _, ok := lookupNounBuiltin("token", "create", globals{help: true}, nil); !ok {
+		t.Error("`bp token create --help` fell through to the manifest help")
+	}
+	if _, ok := lookupNounBuiltin("token", "create", globals{}, []string{"site"}); ok {
+		t.Error("a bare `bp token create <label>` must still ride the manifest path")
 	}
 }

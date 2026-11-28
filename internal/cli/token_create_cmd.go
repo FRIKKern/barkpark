@@ -9,8 +9,8 @@ package cli
 // public clamp entirely and QueryController.authed?/1 treats it as authenticated.
 // The authorization layer was never the problem. NOTHING MINTED ONE.
 //
-// The manifest already declares `token.create` with a `--permissions` flag whose
-// help reads "Comma list — public-read|read ONLY (default public-read)". That flag
+// The manifest already declared `token.create` with a `--permissions` flag whose
+// help read "Comma list — public-read|read ONLY (default public-read)". That flag
 // never reaches the wire as a list. commandFlagBelongsInBody (run.go) admits a
 // flag into the JSON body only for a BATCH write (or the two cycle.open
 // exceptions), and token.create is neither — so `--permissions` falls through to
@@ -395,9 +395,10 @@ func printTokenCreateHelp(out *writer) {
 	out.errf("                tier a desk-private dataset needs, and the tier the manifest verb")
 	out.errf("                cannot ask for: its --permissions rides the query string as a")
 	out.errf("                scalar, which the server rejects as invalid.")
-	out.errf("  write, admin  ADMIN-TO-ADMIN mint: only a token that already holds `admin` and an")
-	out.errf("                admin seat in the workspace may ask, and never for more than it holds")
-	out.errf("                (403 admin_required / permission_escalation otherwise). Audited.")
+	out.errf("  write, admin  ADMIN-TO-ADMIN mint, sent to /v1/tokens/elevated: only a token that")
+	out.errf("                already holds `admin` and an admin seat in the workspace may ask, and")
+	out.errf("                never for more than it holds (403 admin_required /")
+	out.errf("                permission_escalation otherwise). Audited.")
 	out.errf("")
 	out.errf("  --dataset <d>     bind the token to that ONE dataset; every other dataset answers")
 	out.errf("                    403, and a bound token cannot create a workspace or project or")
@@ -410,12 +411,13 @@ func printTokenCreateHelp(out *writer) {
 	out.errf("  bp instance admin-token <instance-id> --install")
 	out.errf("")
 	out.errf("The token is bound to the workspace your -w resolves to (the route is")
-	out.errf("POST /w/<workspace>/p/<project>/v1/tokens, admin-gated on your membership ROLE)")
-	out.errf("and the receipt prints the permissions and workspace the SERVER recorded, not the")
-	out.errf("ones you asked for.")
+	out.errf("POST /w/<workspace>/p/<project>/v1/tokens, or /v1/tokens/elevated for write and")
+	out.errf("admin, admin-gated on your membership ROLE) and the receipt prints the permissions")
+	out.errf("and workspace the SERVER recorded, not the ones you asked for.")
 	out.errf("")
 	out.errf("examples:")
 	out.errf("  bp -w gyldendal token create desk-reader --permissions read")
 	out.errf("  bp -w acme token create site --permissions public-read --dataset staging")
+	out.errf("  bp -w acme token create ci --permissions read,write --dataset staging")
 	out.errf("  bp token create --label laptop-admin --permissions read,write,admin --expires-in 90d")
 }

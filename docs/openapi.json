@@ -16232,7 +16232,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Mint a read-only, workspace-bound API token (public-read/read only).",
+        "summary": "Mint a workspace-bound API token: public-read, read, write or admin. write and admin go to /v1/tokens/elevated and need an admin token with an admin seat.",
         "tags": [
           "token"
         ],

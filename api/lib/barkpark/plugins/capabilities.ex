@@ -3544,7 +3544,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "token.create",
         "token",
         "create",
-        "Mint a read-only, workspace-bound API token (public-read/read only).",
+        "Mint a workspace-bound API token: public-read, read, write or admin. " <>
+          "write and admin go to /v1/tokens/elevated and need an admin token with an admin seat.",
         "POST",
         "/v1/tokens",
         "scoped_admin",
@@ -3553,7 +3554,10 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "permissions",
             "string",
-            "Comma list — public-read|read ONLY (default public-read).",
+            "Comma list of public-read, read, write, admin (default public-read). " <>
+              "bp sends write or admin to /v1/tokens/elevated: your token needs the admin " <>
+              "permission and an admin seat in the workspace, and gets at most what it holds. " <>
+              "Example: bp -w acme token create ci --permissions read,write --dataset staging",
             default: "public-read"
           ),
           flag("dataset", "string", "Dataset to bind.", default: "production")
