@@ -1268,7 +1268,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       # carries it is not shown as lost (`DroppedRows`).
       socket =
         if action == "remove_row",
-          do: RichTextRemote.DroppedRows.removed(socket, row_at(current, idx)),
+          do: RichTextRemote.DroppedRows.removed(socket, row_at(current, idx), key_path ++ [idx]),
           else: socket
 
       saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
