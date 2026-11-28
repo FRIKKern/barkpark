@@ -175,13 +175,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed do
   the editor shows (`RichTextRemote.UnderLock.top/3`). `page_base/4` gives
   it back (task-a368aa61eb491d9f).
   """
+  #
+  # An empty field the save filled is logged too, as nil (the page drew
+  # ""): its first words sent before the redraw are read against no blocks,
+  # not over the save (task-458319d6bec784c8). Not bound in the
+  # comprehension: a nil binding there filters the key out.
   def took(socket, %{content: %{} = was}, %{content: %{} = now}) do
     log =
       for key <- rich_keys(socket.assigns[:editor_schema]),
-          old = Map.get(was, key),
-          Map.get(now, key) != old,
+          Map.get(now, key) != Map.get(was, key),
           reduce: socket.assigns[:editor_rt_took] || %{} do
         log ->
+          old = Map.get(was, key)
           name = RemoteValues.input_name(key)
 
           Map.update(
