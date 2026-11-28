@@ -410,8 +410,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   `mode` is `:autosave` or `:save`. A Save is read against the value its
   page showed too (`TextConfirmed.page_base/4`): a Save sent with the seen
   of a value the socket has since taken over was written over the other
-  editor's save with no banner (#29174 review, R2s and R3). A Save is not
-  read for a rejoin: the rejoin hold lasts until a Save.
+  editor's save with no banner (#29174 review, R2s and R3). A Save on a
+  field a rejoin hold holds ends the hold; a Save with none open yet is
+  read for the rejoin as an autosave is: it was written over a save made
+  while the page was away, with no banner (#29259 review, T7b).
   """
   def top(socket, posted, seen \\ nil, mode \\ :autosave)
 
@@ -444,7 +446,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       # task-fe9d8741f0641f97) before a hold's view: typing on A's view
       # stays held until a Save or Reload.
       rejoin =
-        mode == :autosave && seen &&
+        (mode == :autosave or not Map.has_key?(holds, name)) && seen &&
           TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen)
 
       case {rejoin, holds} do

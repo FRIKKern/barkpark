@@ -385,6 +385,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # persist as cleared while the empty subfields a composite renderer posts
       # on every render stay ignored. Emptied wherever `editor_dirty` is.
       editor_touched_paths: MapSet.new(),
+      # The plain inputs A's posts wrote (`DroppedRows.wrote/4`).
+      editor_rt_plain_wrote: %{},
       # ── Server-owned save-halt mirror (p-hollow-studio-mirror) ────────
       # nil = no active halt. Set to the verbatim `{:error, {:halted, reason}}`
       # string by the paper handlers (shared/paper.ex paper_pane_op/paper_ops)

@@ -257,6 +257,17 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
                 blocks = PortableText.from_html(mine, if(is_list(was), do: was, else: []))
                 Map.put(acc, key, rich_text(base[key], blocks, stored, {:ok, was}))
 
+              # The store holds nothing (nil, []), over a page that showed words:
+              # another editor removed them (task-8bdc4000481ed6b2, P9;
+              # task-d91ccf6bf316123a). Read against what the page showed,
+              # as any edit: a clash keeps the removal, the field left out
+              # of the write, and A is held (`UnderLock`).
+              stored in [nil, []] and is_list(was) and not wordless?(was) ->
+                case rich_text(base[key], PortableText.from_html(mine, was), [], {:ok, was}) do
+                  [] -> Map.delete(acc, key)
+                  merged -> Map.put(acc, key, merged)
+                end
+
               true ->
                 acc
             end

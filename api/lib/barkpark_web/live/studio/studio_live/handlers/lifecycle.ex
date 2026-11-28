@@ -58,6 +58,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         editor_held_paths: %{},
         editor_store_doc: nil,
         editor_touched_paths: MapSet.new(),
+        editor_rt_plain_wrote: %{},
         object_dialog: nil,
         editor_rt_held: %{},
         editor_rt_clash: %{}

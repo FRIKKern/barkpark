@@ -10,11 +10,14 @@
 //   rows     a row never shows a half state: no opacity under 1 and no
 //            background on its way between two colours (a transition).
 //   title    a document pane's header text, once drawn, does not change.
-//   width    a pane that stays open keeps its x and width.
+//   width    a pane that stays open settles once: its x and width change at
+//            most one time per click (a document opening beside two lists
+//            narrows them to their 321 px minimum, as TanStack's and
+//            Sanity's do); a second change is a bounce.
 //
 // It prints the frames and one line per broken check, and exits 1 when a
-// check in --checks fails. NOT a CI gate: it needs a server, a signed-in
-// user, and a list with at least two documents.
+// check in --checks fails. A MANUAL MEASUREMENT, NOT a CI gate: it needs a
+// running server, a signed-in user, and a list with at least two documents.
 //
 // Run against a local server, opened as localhost (the socket's origin check
 // refuses 127.0.0.1): `PORT=4640 PHX_SERVER=true MIX_ENV=test mix phx.server`
@@ -73,13 +76,19 @@ export function judge(label, frames, checks) {
     if (mid.length) bad("rows", `row ${key} passes through ${mid.length} colour(s) between ${s[0]} and ${s[s.length - 1]}`);
   }
 
-  // A pane, by index and kind, that is drawn in the first frame and the last.
-  const first = frames[0], last = frames[frames.length - 1];
-  if (first && last) {
-    for (const p of first.panes.filter((p) => !p.leaving && p.w > 0)) {
-      const end = last.panes.find((q) => q.index === p.index && q.kind === p.kind && q.title === p.title && !q.leaving);
-      if (end && (end.x !== p.x || end.w !== p.w)) bad("width", `pane ${p.index} "${p.title}" moved ${p.x}+${p.w} -> ${end.x}+${end.w}`);
+  // A pane drawn before the click (by index, kind and title), frame by frame
+  // while it stays: one change of x or width is the layout settling, a
+  // second is a bounce.
+  const first = frames[0];
+  for (const p of first ? first.panes.filter((p) => !p.leaving && p.w > 0) : []) {
+    const boxes = [];
+    for (const f of frames) {
+      const q = f.panes.find((q) => q.index === p.index && q.kind === p.kind && q.title === p.title && !q.leaving && q.w > 0);
+      if (!q) continue;
+      const box = `${q.x}+${q.w}`;
+      if (boxes[boxes.length - 1] !== box) boxes.push(box);
     }
+    if (boxes.length > 2) bad("width", `pane ${p.index} "${p.title}" moved ${boxes.length - 1} times: ${boxes.join(" -> ")}`);
   }
 
   // A document pane's header text, from its first frame after the click on
