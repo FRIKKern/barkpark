@@ -82,6 +82,15 @@ const (
 
 // builtinWriteCensus is the whole built-in write population. Sorted by file.
 var builtinWriteCensus = []builtinWriteReceipt{
+	// ---- app_token ---------------------------------------------------------
+	{
+		File: "internal/cli/app_token_create_cmd.go", Func: "runAppTokenCreate", Sites: 1,
+		Endpoint: "POST /v1/auth/app-tokens", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx runs through screenBuiltinWriteReceipt, then parseAppTokenMintReceipt REQUIRES the server's " +
+			"`token`, `permissions` and `workspace_id` before any receipt prints; the workspace line is then " +
+			"compared with the stated -w, and a mismatch exits 1.",
+	},
 	// ---- chat ------------------------------------------------------------
 	{
 		File: "internal/cli/chat_cmd.go", Func: "runChatUnarchive", Sites: 1,
