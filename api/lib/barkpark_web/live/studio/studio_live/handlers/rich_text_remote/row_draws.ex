@@ -122,6 +122,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   end
 
   @doc """
+  The draws this socket kept for each rich text of the keyless row at
+  `row` (its path, `["rows", 0]`), by digest (`DroppedRows.removed/3`).
+  """
+  def keyless_digests(socket, row) do
+    n = length(row)
+
+    for {{path, ""}, draws} <- all(socket),
+        Enum.take(path, n) == row,
+        {digest, _value} <- draws,
+        do: digest
+  end
+
+  @doc """
   The value the draw `digest` of the row `key` at `path` showed. A number
   is the 27-bit digest a page drawn before the 64-bit one posts
   (task-9b705d11bf85560e): read by the old hash of each draw, as before.

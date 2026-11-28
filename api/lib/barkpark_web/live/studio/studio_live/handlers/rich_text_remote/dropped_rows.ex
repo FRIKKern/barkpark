@@ -19,9 +19,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
   opens, and when a later post or Save ends the conflict (`settled/1`): a
   later, unrelated clash showed the old line again (#29223 r2 review, B6).
 
-  A row A removed itself (`removed/2`) is not another editor's doing: a
+  A row A removed itself (`removed/3`) is not another editor's doing: a
   post the page sent before it redrew carries it, and it is not shown
-  (#29223 r2 review, B3).
+  (#29223 r2 review, B3). A keyed row goes by its `_key`. A keyless row
+  has only its index, so it goes by its input prefix and each draw its
+  rich text editors had there (`RowDraws.keyless_digests/2`): a stale post
+  names one of them in its owner entry (#29319 review, G2).
 
   A plain subfield (a string, a number) has no owner entry, so its words
   reached no banner (task-41218d31b9a913c4): `plain/5` reads them.
@@ -31,13 +34,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
 
   alias Barkpark.Content.PortableText
   alias BarkparkWeb.Components.Fields.CompositeField
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Path
 
   @doc """
   Of the dropped leaves (`{input name, value}`), A's words in each rich
   text A typed in, `{name, texts}`: one text per block. A leaf with no
   owner entry (a page that draws none) is not read, nor one of a row A
-  removed itself (`removed`, its row keys).
+  removed itself (`removed`, its row keys, and `{row, digest}` for a
+  keyless row).
   """
   def typed(dropped, owners, removed \\ MapSet.new()) do
     drawn = drawn(owners)
@@ -46,6 +52,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
         is_binary(html),
         {:ok, {key, digest}} <- [Map.fetch(drawn, name)],
         not MapSet.member?(removed, key),
+        not keyless_removed?(removed, name, drawn),
         blocks <- [PortableText.from_html(html, [])],
         not drawn?(blocks, digest),
         texts <- [texts(blocks)],
@@ -80,6 +87,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
         {:ok, row, leaf} <- [row_leaf(name)],
         leaf not in [["_key"], ["_type"]],
         not MapSet.member?(removed, keys[row <> "._key"]),
+        not keyless_removed?(removed, name, rich),
         not wrote?(wrote, slot(row, keys[row <> "._key"], name), value),
         do: {name, [text]}
   end
@@ -150,14 +158,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
       else: socket
   end
 
-  @doc "A row A removed with its own remove_row (`row`, the form's row)."
-  def removed(socket, %{"_key" => key}) when is_binary(key) and key != "" do
+  @doc """
+  A row A removed with its own remove_row (`row`, the form's row at
+  `path`): by its `_key`, or a keyless row by its input prefix and each
+  draw its rich text editors had there.
+  """
+  def removed(socket, row, path)
+
+  def removed(socket, %{"_key" => key}, _path) when is_binary(key) and key != "" do
     assign(socket,
       editor_rt_removed: MapSet.put(socket.assigns[:editor_rt_removed] || MapSet.new(), key)
     )
   end
 
-  def removed(socket, _row), do: socket
+  def removed(socket, %{} = row, path) when is_list(path) do
+    prefix = RichTextRemote.input_name(path)
+
+    form_draws =
+      for {_leaf, value} <- row, is_list(value), do: CompositeField.drawn_digest(value)
+
+    marks =
+      for digest <- RowDraws.keyless_digests(socket, path) ++ form_draws,
+          into: MapSet.new(),
+          do: {prefix, digest}
+
+    assign(socket,
+      editor_rt_removed: MapSet.union(socket.assigns[:editor_rt_removed] || MapSet.new(), marks)
+    )
+  end
+
+  def removed(socket, _row, _path), do: socket
 
   @doc """
   The rows A removed, less `keys`: rows the form holds again (`RowDraws`
@@ -177,6 +207,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
     case Regex.run(~r/^(.*\[\d+\])\.(.+)$/, name, capture: :all_but_first) do
       [row, leaf] -> {:ok, row, Path.parse_path(leaf)}
       _ -> :error
+    end
+  end
+
+  # A leaf of a keyless row A removed: one of the row's rich text owner
+  # entries names a draw that row had where A removed it.
+  defp keyless_removed?(removed, name, drawn) do
+    with {:ok, row, _leaf} <- row_leaf(name) do
+      Enum.any?(drawn, fn {entry, {key, digest}} ->
+        key in [nil, ""] and String.starts_with?(entry, row <> ".") and
+          MapSet.member?(removed, {row, digest})
+      end)
+    else
+      _ -> false
     end
   end
 
