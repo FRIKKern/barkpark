@@ -16,13 +16,26 @@ import (
 
 // runVersion prints the CLI version. -o json/yaml emit a small object,
 // -o minimal the bare version string; otherwise a human line.
+//
+// json, yaml and the human output also carry the latest cli-v* release from
+// cli-release-cache.json (no network): latest_cli, when it was checked, and
+// update_available. There is no count of releases behind: the cache holds only
+// the latest version (see staleOnFailureLine).
 func runVersion(out *writer, g globals) int {
-	v := map[string]string{"cli_version": cliVersion}
+	v := map[string]any{"cli_version": cliVersion}
 	if cliCommit != "" {
 		v["commit"] = cliCommit
 	}
 	if cliDate != "" {
 		v["build_date"] = cliDate
+	}
+	latest := versionLatestFromCache()
+	if latest.known {
+		v["latest_cli"] = latest.version
+		v["latest_cli_checked_at"] = latest.checkedAt
+		if cliVersion != "dev" {
+			v["update_available"] = latest.newer
+		}
 	}
 	switch out.output {
 	case "json":
@@ -37,8 +50,46 @@ func runVersion(out *writer, g globals) int {
 		out.outf("%s", cliVersion)
 	default:
 		out.outf("bp %s", cliVersion)
+		switch {
+		case !latest.known:
+			out.outf("latest release: unknown (nothing cached yet; `bp upgrade --check` looks it up)")
+		case cliVersion == "dev":
+			out.outf("latest release: %s (checked %s)", latest.version, latest.checkedAt)
+		case latest.newer:
+			out.outf("latest release: %s (checked %s); this bp is older: bp upgrade", latest.version, latest.checkedAt)
+		default:
+			out.outf("latest release: %s (checked %s); this bp is current", latest.version, latest.checkedAt)
+		}
 	}
 	return exitOK
+}
+
+// cachedLatestCLI is what `bp version` reports about the latest release.
+type cachedLatestCLI struct {
+	known     bool
+	version   string
+	checkedAt string // RFC3339, UTC
+	newer     bool   // the latest release is newer than this binary
+}
+
+// versionLatestFromCache reads cli-release-cache.json, with no TTL and no
+// network. A missing or malformed record, or a value that is not a plain
+// version (the file is user-writable), is unknown.
+func versionLatestFromCache() cachedLatestCLI {
+	rc, ok := loadReleaseCacheRecord()
+	if !ok {
+		return cachedLatestCLI{}
+	}
+	latest := strings.TrimSpace(rc.Latest)
+	if !versionShape.MatchString(latest) {
+		return cachedLatestCLI{}
+	}
+	return cachedLatestCLI{
+		known:     true,
+		version:   latest,
+		checkedAt: rc.CheckedAt.UTC().Format(time.RFC3339),
+		newer:     compareVersions(latest, cliVersion) > 0,
+	}
 }
 
 // runCapabilities prints the resolved manifest. Machine output (-o json/yaml)
