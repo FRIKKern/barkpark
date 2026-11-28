@@ -331,7 +331,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp dropped(socket, folded, params) do
     folded
     |> Map.get(@dropped, [])
-    |> RichTextRemote.DroppedRows.typed(params["_bp_rt_owner"])
+    |> RichTextRemote.DroppedRows.typed(
+      params["_bp_rt_owner"],
+      socket.assigns[:editor_rt_removed] || MapSet.new()
+    )
     |> then(&RichTextRemote.DroppedRows.keep(socket, &1))
   end
 
@@ -1201,10 +1204,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       # A refused array change is held under its own field (`RefusedSave`).
       keys = Enum.take(key_path, 1)
       {new_form, held} = HeldFields.stored(socket, new_form, keys)
+      # A row A removes is A's doing: a post sent before the redraw that
+      # carries it is not shown as lost (`DroppedRows`).
+      socket =
+        if action == "remove_row",
+          do: RichTextRemote.DroppedRows.removed(socket, row_at(current, idx)),
+          else: socket
+
       saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
-      {:noreply, saved |> settle_dirty(keys) |> row_draws() |> HeldFields.restore(held)}
+
+      {:noreply,
+       saved
+       |> settle_dirty(keys)
+       |> row_draws()
+       |> HeldFields.restore(held)
+       |> RichTextRemote.DroppedRows.settled()}
     end
   end
+
+  defp row_at(list, idx) when is_list(list) and is_integer(idx), do: Enum.at(list, idx)
+  defp row_at(_list, _idx), do: nil
 
   @doc false
   # A new row. In a several-member array (`of` is a list) it is the member the
