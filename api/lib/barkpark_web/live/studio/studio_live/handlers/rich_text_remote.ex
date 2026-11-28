@@ -583,8 +583,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
       else: []
   end
 
+  # `of` is a list of member types or ONE map descriptor; the schema takes
+  # both (`SchemaDefinition`). Read as a map, a map-of array's row rich
+  # text had none of this module's guards (task-9c10b827ba19f758).
   defp walk(%{"type" => "arrayOf", "of" => of}, path, old, new, {_inside?, mode})
-       when is_list(of) and is_list(new) do
+       when (is_list(of) or is_map(of)) and is_list(new) do
+    of = List.wrap(of)
     old = if is_list(old), do: old, else: []
 
     new
