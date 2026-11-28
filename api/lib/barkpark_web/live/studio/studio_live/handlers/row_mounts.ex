@@ -25,16 +25,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RowMounts do
   import Phoenix.Component, only: [assign: 2]
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
 
   @doc """
   The socket after A's side put a form the server built in place of
   `old_form`: an array op, an undo or redo, a paste, a revert, a restore,
   a Reload, a navigation back to the same document. Each row whose rich
-  text the new form holds differs from `old_form`'s at its index counts
-  one more, so its editor draws the new value. A page's own post is not one
-  of these: what it posted is what its editors show (`Shared.do_autosave/4`).
+  text the new form draws differs from what `old_form` draws at that index
+  counts one more, so its editor draws the new value. A page's own post is
+  not one of these: what it posted is what its editors show
+  (`Fields.autosave/4`).
   Another editor's save is not either: its values reach the page's editors
   by the remote push (`RichTextRemote`).
   """
@@ -42,10 +42,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RowMounts do
     new_form = socket.assigns[:editor_form]
 
     if is_map(old_form) and is_map(new_form) and old_form != new_form do
+      # Compared as drawn (`RichTextRemote.drawn/1`): blocks that differ only
+      # in their keys, as an undo's stored value and A's posted one do, draw
+      # the same and keep the editor.
       rows =
-        for path <- RichTextRemote.every(socket.assigns[:editor_schema], new_form),
+        for {path, _was, _now} <-
+              RichTextRemote.changes(socket.assigns[:editor_schema], old_form, new_form),
             RowDraws.row?(path),
-            FormPath.get(old_form, path) != FormPath.get(new_form, path),
             uniq: true,
             do: RichTextRemote.input_name(Enum.drop(path, -1))
 

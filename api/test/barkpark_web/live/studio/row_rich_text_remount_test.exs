@@ -352,6 +352,27 @@ defmodule BarkparkWeb.Studio.RowRichTextRemountTest do
         assert rows(stored(c)) == [{nil, ["pee"], "p A"}, {nil, ["queue"], "q"}]
       end
 
+      # replaced/2 compares each row's rich text at its index: a built write
+      # that changes no row's rich text (here the undo writes the whole
+      # rows value back) leaves every row editor, and words A has not
+      # posted in one, where they are.
+      # The desk's undo takes back an autosaved edit; a Save's is the save.
+      if how == "autosave" do
+        test "#{@tg} U5: A edits row 1's note, then undoes it (a built write of the rows): no row editor remounts",
+             c do
+          store(c, [row(nil, "pee", "p"), row(nil, "queue", "q")])
+          a = tab(c, @surface)
+          seq = mount_seq(a)
+          ids = wrapper_ids(a)
+          a_posts(a, seq, {"doc[rows][1].note", "q A"}, @how)
+          assert eventually(fn -> rows(stored(c)) |> Enum.at(1) |> elem(2) == "q A" end)
+          undo(c, a)
+          assert eventually(fn -> rows(stored(c)) |> Enum.at(1) |> elem(2) == "q" end)
+          assert wrapper_ids(a) == ids
+          assert :sys.get_state(a.pid).socket.assigns[:editor_row_mounts] in [nil, %{}]
+        end
+      end
+
       test "#{@tg} U4: A inserts a row at 0, then undoes it: each index draws its row", c do
         store(c, [row(nil, "pee", "p"), row(nil, "queue", "q")])
         a = tab(c, @surface)
@@ -372,6 +393,21 @@ defmodule BarkparkWeb.Studio.RowRichTextRemountTest do
         a_posts(a, seq, {"doc[rows][0].note", "p A"}, @how)
         assert rows(stored(c)) == [{nil, ["pee"], "p A"}, {nil, ["queue"], "q"}]
       end
+    end
+
+    test "#{@tg} control: two rows of one rich text; A removes row 0: row 0's editor keeps its mount",
+         c do
+      store(c, [row(nil, "same", "p"), row(nil, "same", "q")])
+      a = tab(c, @surface)
+      seq = mount_seq(a)
+      [first | _] = wrapper_ids(a)
+      op(a, "remove_row", 0)
+      assert eventually(fn -> length(stored(c)["rows"]) == 1 end)
+      # Its text and owner entry are the row's now there: nothing to redraw.
+      assert hd(wrapper_ids(a)) == first
+      assert owner_draw(a, "doc[rows][0].rt") == draw("same")
+      a_posts(a, seq, {"doc[rows][0].note", "q A"}, @how)
+      assert rows(stored(c)) == [{nil, ["same"], "q A"}]
     end
 
     test "#{@tg} control: A types in row 0 with no array change: its editor keeps its mount", c do
