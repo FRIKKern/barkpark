@@ -194,7 +194,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   (#29178 review, round 2: J2, J2t, J4c).
   """
   def split(socket, doc, seen, owners) when is_list(seen) and is_map(doc) do
-    moved = KeylessShift.lists(socket, owners, doc)
+    moved = KeylessShift.lists(socket, owners, doc, seen)
 
     # A log of another document is none of this one's (a forget lost).
     {log, holds, folded, born} =
