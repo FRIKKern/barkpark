@@ -97,6 +97,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     socket
     |> drop_holds()
     |> __MODULE__.RowDraws.reload(form)
+    # A row whose rich text the read replaced is drawn anew (`RowMounts`).
+    |> BarkparkWeb.Studio.StudioLive.Handlers.RowMounts.replaced(old_form)
     |> tell(all, %{reload: true})
   end
 

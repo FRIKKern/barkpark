@@ -63,6 +63,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # The document root, handed to each item's composite for `visibleWhen`
   # (task-9905a69475b1ff3b); the item itself is the "parent" scope.
   attr :root, :map, default: nil
+  # `RowMounts`: the counts a row rich text editor's wrapper id carries.
+  attr :row_mounts, :map, default: %{}
   # Optional `phx-target` for the reorder/add/remove buttons. Defaults to nil —
   # buttons then bubble to the enclosing LiveView (StudioLive). When a
   # `Phoenix.LiveComponent.CID` is passed (e.g. `@myself` from PaperFieldBlock),
@@ -136,7 +138,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   dataset: assigns[:dataset] || "production",
                   scope_prefix: assigns[:scope_prefix] || "",
                   api_token_raw: assigns[:api_token_raw] || "",
-                  root: assigns[:root]
+                  root: assigns[:root],
+                  row_mounts: assigns[:row_mounts] || %{}
                 })
               }
             />
@@ -744,6 +747,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       scope_prefix: assigns[:scope_prefix] || "",
       api_token_raw: assigns[:api_token_raw] || "",
       root: assigns[:root],
+      row_mounts: assigns[:row_mounts] || %{},
       on_reorder: assigns[:on_reorder] || "array_op",
       target: assigns[:target]
     })

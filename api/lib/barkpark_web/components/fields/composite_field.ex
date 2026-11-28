@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
   alias BarkparkWeb.Studio.Desk.Fieldsets
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RowMounts
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Path, as: FieldPath
 
@@ -50,6 +51,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # The document root a `visibleWhen` with the default "document" scope reads;
   # nil reads this object's own value, as before (task-9905a69475b1ff3b).
   attr :root, :map, default: nil
+  # `RowMounts`: the counts a row rich text editor's wrapper id carries.
+  attr :row_mounts, :map, default: %{}
   # The `phx-click` event and target of the buttons of an `arrayOf` inside
   # this object. The document form keeps "array_op"; the Portable Text block
   # dialog routes them to its own buffer (task-19392d1e6fc661e6).
@@ -94,7 +97,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         <.composite_body
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root} row_mounts={@row_mounts}
             on_reorder={@on_reorder} target={@target} id_base={@id_base}
         />
       <% @depth >= 2 -> %>
@@ -104,7 +107,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root} row_mounts={@row_mounts}
             on_reorder={@on_reorder} target={@target} id_base={@id_base}
           />
         </details>
@@ -115,7 +118,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root} row_mounts={@row_mounts}
             on_reorder={@on_reorder} target={@target} id_base={@id_base}
           />
         </fieldset>
@@ -167,6 +170,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # The document root a `visibleWhen` with the default "document" scope reads;
   # nil reads this object's own value, as before (task-9905a69475b1ff3b).
   attr :root, :map, default: nil
+  # `RowMounts`: the counts a row rich text editor's wrapper id carries.
+  attr :row_mounts, :map, default: %{}
   attr :on_reorder, :string, default: "array_op"
   attr :target, :any, default: nil
   attr :id_base, :string, default: nil
@@ -247,8 +252,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         # Keyed by the item's `_key` too: a moved item or another document
         # remounts the ignored editor instead of keeping the old text. The
         # same id as main's: an open page's editors do not remount at a deploy.
+        # And by how many times another row came under this one's place
+        # (`RowMounts`): a keyless row has no `_key`, and after A removed the
+        # row above, the editor kept that row's text and owner entry.
         wrap_id:
-          "bp-rt-sub-#{input_id}-#{:erlang.phash2(if(outer == nil, do: owner_key, else: {outer, owner_key}))}",
+          "bp-rt-sub-#{input_id}-#{:erlang.phash2(if(outer == nil, do: owner_key, else: {outer, owner_key}))}" <>
+            mount_suffix(assigns),
         owner: owner_entry(child_path(assigns.path, sub.name), owner_key, value, outer),
         html: drawn_html(value),
         label: title_for(sub),
@@ -341,6 +350,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
       root: Map.get(assigns, :root),
+      row_mounts: Map.get(assigns, :row_mounts) || %{},
       on_reorder: Map.get(assigns, :on_reorder) || "array_op",
       target: Map.get(assigns, :target),
       id_base: child_id_base(assigns, sub.name)
@@ -363,6 +373,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
       root: Map.get(assigns, :root),
+      row_mounts: Map.get(assigns, :row_mounts) || %{},
       on_reorder: Map.get(assigns, :on_reorder) || "array_op",
       target: Map.get(assigns, :target),
       id_base: child_id_base(assigns, sub.name)
@@ -886,6 +897,13 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     do: RowDraws.outer_keys(root, FieldPath.parse_path(child_path(path, name)))
 
   defp outer_keys(_assigns, _name), do: nil
+
+  defp mount_suffix(assigns) do
+    case RowMounts.count(Map.get(assigns, :row_mounts), assigns.path) do
+      0 -> ""
+      n -> "-m#{n}"
+    end
+  end
 
   # The owner entry the editor posts (`UnderLock`): its input name, its row's
   # `_key`, the digest of the HTML drawn, and, in a row inside another row,

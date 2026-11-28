@@ -443,12 +443,16 @@
   // the document and form generation the editor was drawn at. A socket
   // that rejoins draws that generation, so the widget wrappers keep the
   // page's ids and the editor keeps what was typed while the socket was
-  // down (`RejoinForm`, task-b656db94cc1dbd17).
+  // down (`RejoinForm`, task-b656db94cc1dbd17). With them the row mounts
+  // its row rich text editors were drawn at (`RowMounts`,
+  // task-dd336795aff64006), when there are any.
   window.BarkparkFormConnectParams = function () {
     var form = document.getElementById("editor-form");
     var doc = form && form.getAttribute("phx-value-_bp_doc");
     var gen = form && form.getAttribute("data-bp-form-gen");
-    return doc && gen ? { _bp_form: { doc: doc, gen: gen } } : {};
+    var rows = form && form.getAttribute("data-bp-row-mounts");
+    if (!(doc && gen)) return {};
+    return { _bp_form: rows ? { doc: doc, gen: gen, rows: rows } : { doc: doc, gen: gen } };
   };
 })();
 

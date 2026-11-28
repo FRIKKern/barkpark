@@ -28,6 +28,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # surface), so `uri` is unused in this body now.
   def finish_handle_params(socket, dataset, path, desk, _uri, params) do
     shown = BarkparkWeb.Studio.StudioLive.PostIdentity.of(socket)
+    was = socket.assigns[:editor_form]
 
     socket =
       socket
@@ -74,6 +75,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # A dialog a document action opened goes with its document.
       |> BarkparkWeb.Studio.StudioLive.PostIdentity.leave(shown)
       |> BarkparkWeb.Studio.StudioLive.DocSwap.start(shown)
+      # The same document read again (a Discard, a link back to it): each row
+      # rich text the read replaced is drawn anew (`RowMounts`).
+      |> then(fn s ->
+        if shown && BarkparkWeb.Studio.StudioLive.PostIdentity.of(s) == shown,
+          do: BarkparkWeb.Studio.StudioLive.Handlers.RowMounts.replaced(s, was),
+          else: s
+      end)
 
     # E3.5 (Gyldendal friction 67): a deep link whose head was a dead display
     # group (`/studio/content-types/<type>/<id>` on a declared desk) opened its

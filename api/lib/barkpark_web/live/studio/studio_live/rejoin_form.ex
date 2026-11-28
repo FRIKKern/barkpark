@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.StudioLive.RejoinForm do
   import Phoenix.Component, only: [assign: 2]
 
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RowMounts
 
   @key "_bp_form"
   @max_gen 100_000
@@ -30,14 +31,19 @@ defmodule BarkparkWeb.Studio.StudioLive.RejoinForm do
   def key, do: @key
 
   @doc """
-  The page's form from the connect params of a rejoin: `{doc, gen}`, or
-  nil (a first join, no form, or a value that is not one).
+  The page's form from the connect params of a rejoin: `{doc, gen}`, with
+  the page's row mounts as a third element when it sent any, or nil (a
+  first join, no form, or a value that is not one).
   """
   def from_params(%{@key => %{"doc" => doc, "gen" => gen}} = params)
       when is_binary(doc) and byte_size(doc) <= 2048 and (is_binary(gen) or is_integer(gen)) do
     with true <- BarkparkWeb.Studio.DeskLive.rejoin?(params),
          {n, ""} when n >= 0 and n <= @max_gen <- Integer.parse(to_string(gen)) do
-      {doc, n}
+      # The row mounts its editors were drawn at (`RowMounts`), when sent.
+      case RowMounts.parse(params[@key]["rows"]) do
+        rows when map_size(rows) > 0 -> {doc, n, rows}
+        _ -> {doc, n}
+      end
     else
       _ -> nil
     end
@@ -56,6 +62,11 @@ defmodule BarkparkWeb.Studio.StudioLive.RejoinForm do
     case page do
       {doc, gen} when is_binary(doc) ->
         if doc == PostIdentity.of(socket), do: assign(socket, editor_form_gen: gen), else: socket
+
+      {doc, gen, rows} when is_binary(doc) ->
+        if doc == PostIdentity.of(socket),
+          do: assign(socket, editor_form_gen: gen, editor_row_mounts: rows),
+          else: socket
 
       _ ->
         socket

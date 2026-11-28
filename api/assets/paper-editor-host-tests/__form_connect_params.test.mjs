@@ -36,6 +36,12 @@ assert.deepEqual(params(), { _bp_form: { doc, gen: "3" } });
 document.getElementById("editor-form").setAttribute("data-bp-form-gen", "4");
 assert.deepEqual(params(), { _bp_form: { doc, gen: "4" } });
 
+// task-dd336795aff64006: the row mounts the row rich text editors were
+// drawn at ride along when the form carries any.
+const rows = JSON.stringify({ "doc[rows][0]": 1 });
+document.body.innerHTML = `<form id="editor-form" phx-value-_bp_doc='${doc}' data-bp-form-gen="0" data-bp-row-mounts='${rows}'></form>`;
+assert.deepEqual(params(), { _bp_form: { doc, gen: "0", rows } });
+
 // A form with no document (or no generation) sends nothing.
 document.body.innerHTML = `<form id="editor-form" data-bp-form-gen="2"></form>`;
 assert.deepEqual(params(), {});
