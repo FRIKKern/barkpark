@@ -1105,7 +1105,7 @@ defmodule Barkpark.Content.PortableText do
   # (task-6a5c3e075299d4bc).
   for name <- ~w(data-link-kind data-pt-block data-pt-def data-pt-mark data-pt-object) do
     defp attr_re(unquote(name)),
-      do: unquote(Macro.escape(Regex.compile!(name <> ~S"\s*=\s*(\"([^\"]*)\"|'([^']*)')", "i")))
+      do: unquote(Macro.escape(Regex.compile!(name <> ~S{\s*=\s*("([^"]*)"|'([^']*)')}, "i")))
   end
 
   for name <- ~w(data-file-name data-link-params data-new-tab) do
@@ -1113,7 +1113,7 @@ defmodule Barkpark.Content.PortableText do
       do:
         unquote(
           Macro.escape(
-            Regex.compile!(~S"(?:^|\s)" <> name <> ~S"\s*=\s*(\"([^\"]*)\"|'([^']*)')", "i")
+            Regex.compile!(~S"(?:^|\s)" <> name <> ~S{\s*=\s*("([^"]*)"|'([^']*)')}, "i")
           )
         )
   end
