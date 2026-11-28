@@ -323,29 +323,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> TextConfirmed.wrote(socket, rich, posted)
          |> TextConfirmed.paused(rich)
          |> row_draws()
-         |> dropped(folded, params, touched_paths(socket))}
+         |> dropped(
+           folded,
+           params,
+           {touched_paths(socket), socket.assigns[:editor_rt_plain_wrote], :save}
+         )}
 
       _ ->
         {:noreply, socket}
     end
   end
 
-  # `touched`: the inputs A changed, read before a Save clears them.
-  defp dropped(socket, folded, params, touched) do
+  # `touched`, the inputs A changed, and `wrote`, what A's posts wrote
+  # there: read before a Save clears them. A Save records nothing: it
+  # cleared both (#29332 review, A1).
+  defp dropped(socket, folded, params, {touched, wrote, how}) do
     leaves = Map.get(folded, @dropped, [])
     owners = params["_bp_rt_owner"]
     removed = socket.assigns[:editor_rt_removed] || MapSet.new()
 
-    RichTextRemote.DroppedRows.keep(
-      socket,
+    wrote = wrote || %{}
+
+    socket
+    |> RichTextRemote.DroppedRows.keep(
       RichTextRemote.DroppedRows.typed(leaves, owners, removed) ++
-        RichTextRemote.DroppedRows.plain(
-          leaves,
-          owners,
-          touched,
-          base_form(socket),
-          removed
-        )
+        RichTextRemote.DroppedRows.plain(leaves, owners, touched, wrote, removed)
+    )
+    |> then(
+      &if(how == :save,
+        do: &1,
+        else: RichTextRemote.DroppedRows.wrote(&1, params, leaves, touched)
+      )
     )
   end
 
@@ -732,7 +740,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> TextConfirmed.wrote(socket, rich, posted)
          |> TextConfirmed.paused(rich)
          |> row_draws()
-         |> dropped(folded, params, touched_paths(socket))}
+         |> dropped(
+           folded,
+           params,
+           {touched_paths(socket), socket.assigns[:editor_rt_plain_wrote], :autosave}
+         )}
 
       _ ->
         {:noreply, socket}
@@ -1179,7 +1191,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   defp touched_paths(socket), do: socket.assigns[:editor_touched_paths] || MapSet.new()
 
-  defp clear_touched(socket), do: assign(socket, editor_touched_paths: MapSet.new())
+  defp clear_touched(socket),
+    do: assign(socket, editor_touched_paths: MapSet.new(), editor_rt_plain_wrote: %{})
 
   def toggle_content_preview(socket) do
     {:noreply, assign(socket, content_preview_visible: !socket.assigns.content_preview_visible)}
