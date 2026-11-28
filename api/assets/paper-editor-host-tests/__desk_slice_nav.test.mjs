@@ -81,6 +81,21 @@ const shown = (el) => [...el.children].filter((p) => p.hasAttribute("data-pane-i
   hook.destroyed();
 }
 
+// ── The frame is titled as the document's header will be ────────────────────
+// A row names an unnamed document apart from the others ("Untitled sheet ·
+// bb05…"); its editor's header says "Untitled". The row carries the header's
+// name (`data-desk-title`), so the frame's header never changes its words
+// when the editor lands (task-32a5956065c81200).
+{
+  const { hook } = mount();
+  rowTo("post;post-b").setAttribute("data-desk-title", "Untitled");
+  click(rowTo("post;post-b"));
+  assert.equal(q("[data-desk-skeleton] .pane-header-title").textContent, "Untitled", "titled from data-desk-title");
+  assert.equal(q("[data-desk-skeleton]").getAttribute("aria-label"), "Untitled");
+  window.dispatchEvent(new window.Event("phx:page-loading-stop"));
+  hook.destroyed();
+}
+
 // ── A click one pane up closes everything right of the pane it opens ────────
 {
   const { el, hook } = mount();
