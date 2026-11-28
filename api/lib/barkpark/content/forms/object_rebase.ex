@@ -129,12 +129,25 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
         if Map.has_key?(base, name) and value === Map.fetch!(base, name),
           do: put_theirs(row, name, theirs),
           else:
-            Map.put(row, name, rich_text(base[name], value, theirs[name], Map.fetch(seen, path)))
+            Map.put(row, name, row_rich(base[name], value, theirs[name], Map.fetch(seen, path)))
 
       :error ->
         row
     end
   end
+
+  # An empty editor posts "" (its draw of no blocks): read as no blocks, so
+  # another editor's words in the row are merged, not written over (#29235
+  # review, D5 with no seen). A post that leaves it empty keeps the "" it
+  # writes today.
+  defp row_rich(base, "", theirs, seen) when is_list(theirs) do
+    case rich_text(base, [], theirs, seen) do
+      [] -> ""
+      merged -> merged
+    end
+  end
+
+  defp row_rich(base, value, theirs, seen), do: rich_text(base, value, theirs, seen)
 
   # Untouched by the post: the store's row text, or none when it has none.
   defp put_theirs(row, name, theirs) do

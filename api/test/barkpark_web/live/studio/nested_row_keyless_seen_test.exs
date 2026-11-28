@@ -278,8 +278,8 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessSeenTest do
     end
   end
 
-  # D5 with no seen loses B's words on main too (#29235 review); with seen
-  # it merges.
+  # D5 (#29235 review): with seen it merges; with no seen B's words were
+  # lost on main too.
   for surface <- [:desk, :studio] do
     @surface surface
 
@@ -293,6 +293,35 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessSeenTest do
       autosave(a, ["", "<p>a words</p>"], owners, seen0(2))
 
       assert items_words(stored(c)) == [["b words"], ["a words"]]
+      assert held(a) == []
+    end
+
+    # task-8cca81dfb0c098f6: the same post from a page with no seen.
+    test "#{surface} D5 no seen: two empty rows; B types in row 0, A in row 1: B's words kept",
+         c do
+      put_items(c, [empty_it(), empty_it()])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [itk("b words"), empty_it()])
+
+      html = autosave(a, ["", "<p>a words</p>"], owners)
+
+      # Before: [[], ["a words"]], B's "b words" written over, no banner.
+      assert hd(items_words(stored(c))) == ["b words"],
+             "A's empty row 0 was written over B's words: #{inspect(items_words(stored(c)))}"
+
+      assert items_words(stored(c)) == [["b words"], ["a words"]]
+      assert held(a) == []
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{surface} D5 no seen, control: A alone clears its row: cleared", c do
+      put_items(c, [itk("alpha"), itk("beta")])
+      a = tab(c, @surface)
+      autosave(a, ["", "<p>beta</p>"], page_owners(a))
+      [row0, row1] = hd(stored(c)["sections"])["items"]
+      assert row0["rt"] in [nil, "", []], "A's clear was not written: #{inspect(row0["rt"])}"
+      assert words(row1["rt"]) == ["beta"]
       assert held(a) == []
     end
   end
