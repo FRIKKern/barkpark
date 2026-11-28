@@ -112,8 +112,8 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
 
   @doc """
   The URL changed to `panes`: keep the editor, leave the new document
-  `pending` (the page then sends itself `{:desk_edit, target}`, answered by
-  `edit/2`), or put the editor away.
+  `pending` (the page then loads it with `edit/2`, in the same patch once
+  connected), or put the editor away.
   """
   def follow(socket, panes, dataset) do
     target = target(panes, dataset)
@@ -125,7 +125,7 @@ defmodule BarkparkWeb.Studio.Desk.EditorHost do
       target != nil and target == socket.assigns.editing ->
         socket |> assign(:active, length(panes) - 1) |> load_inspectors()
 
-      # A new document: the page sends itself `{:desk_edit, target}` for it.
+      # A new document: the page loads it next (`edit/2`).
       target ->
         socket |> assign(active: nil, editing: nil, pending: target) |> put_away()
 
