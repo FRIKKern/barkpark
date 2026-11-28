@@ -242,6 +242,92 @@ defmodule BarkparkWeb.Studio.KeylessRowTwoSaveInsertTest do
       assert html =~ "doc-conflict-banner"
     end
 
+    # #29336 review, BT4, PU1, PU2: A's idle row 0 took B's pushes (its
+    # seen is the last seq), and A types on B's value: built on the form's
+    # row 0 now, not on A's old draw. The owner entry still names the old
+    # draw (the editor sits in an ignored wrapper). Written, as on main.
+    test "#{@tag_name} BT4: B adds an empty row in front, then types zed B; A's row 0 took both; A types on zed B: written",
+         c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [empty_it(), it("alpha")])
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(a, ["<p>zed B</p><p>new A</p>", "<p>alpha</p>"], owners, @seen, q)
+
+      # Before (#29336 r1): [["zed B"], ["alpha"]], held.
+      assert items_words(stored(c)) == [["zed B", "new A"], ["alpha"]],
+             "A's post on B's value was held: #{inspect(items_words(stored(c)))}"
+
+      assert held(a) == []
+    end
+
+    # Seen path only. Without `_bp_rt_seen` the base is the draw the owner
+    # entry names (alpha), and "a1" over B's empty row is a clash there:
+    # still held with `KeylessShift`'s history read off (#29336 r2).
+    if seen do
+      test "#{@tag_name} PU1: B adds an empty row in front; A's row 0 took it; A types a1 there: written",
+           c do
+        put_items(c, [it("alpha")])
+        a = tab(c, @surface)
+        o = page_owners(a)
+        b_saves(c, a, [empty_it(), it("alpha")])
+        q = drain(a)
+        owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+        autosave(a, ["<p>a1</p>", "<p>alpha</p>"], owners, @seen, q)
+
+        assert items_words(stored(c)) == [["a1"], ["alpha"]],
+               "A's post on B's value was held: #{inspect(items_words(stored(c)))}"
+
+        assert held(a) == []
+      end
+    end
+
+    test "#{@tag_name} PU2: one B save inserts zed B in front; A's row 0 took it; A types on it: written",
+         c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(a, ["<p>zed B</p><p>new A</p>", "<p>alpha</p>"], owners, @seen, q)
+
+      assert items_words(stored(c)) == [["zed B", "new A"], ["alpha"]],
+             "A's post on B's value was held: #{inspect(items_words(stored(c)))}"
+
+      assert held(a) == []
+    end
+
+    # The same insert, A busy on its old draw: held (#29336 review, AF).
+    test "#{@tag_name} AF: B adds an empty row in front; A (stale alpha) types in row 0: held",
+         c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [empty_it(), it("alpha")])
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(
+        a,
+        ["<p>alpha</p><p>new A</p>", "<p>alpha</p>"],
+        owners,
+        @seen,
+        Map.take(q, [@row1])
+      )
+
+      # B's empty row is kept (an empty rich text reads as nil or []).
+      assert [first, ["alpha"]] = items_words(stored(c))
+      assert first in [nil, []]
+      assert held(a) != []
+    end
+
     # Controls: no move, written as on main.
     test "#{@tag_name} control T2c: B edits row 1 twice in place; A types in row 0: written", c do
       put_items(c, [it("alpha"), it("beta")])
