@@ -250,13 +250,13 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         input_name: child_path(assigns.path, sub.name),
         input_id: input_id,
         # Keyed by the item's `_key` too: a moved item or another document
-        # remounts the ignored editor instead of keeping the old text. The
-        # same id as main's: an open page's editors do not remount at a deploy.
+        # remounts the ignored editor instead of keeping the old text; on the
+        # desk by its input name as well (`wrap_key/4`).
         # And by how many times another row came under this one's place
         # (`RowMounts`): a keyless row has no `_key`, and after A removed the
         # row above, the editor kept that row's text and owner entry.
         wrap_id:
-          "bp-rt-sub-#{input_id}-#{:erlang.phash2(if(outer == nil, do: owner_key, else: {outer, owner_key}))}" <>
+          "bp-rt-sub-#{input_id}-#{:erlang.phash2(wrap_key(assigns, sub, owner_key, outer))}" <>
             mount_suffix(assigns),
         owner: owner_entry(child_path(assigns.path, sub.name), owner_key, value, outer),
         html: drawn_html(value),
@@ -897,6 +897,22 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     do: RowDraws.outer_keys(root, FieldPath.parse_path(child_path(path, name)))
 
   defp outer_keys(_assigns, _name), do: nil
+
+  # What the wrapper id hashes beside the input id: the row's `_key` (and
+  # the outer rows' keys). The desk names a keyed row's input by its `_key`
+  # (`rows[_key=="r1"].rt`, an object array drawn as items), with no index:
+  # when another editor's save moved the row, LiveView moved the ignored
+  # wrapper with it and its input kept the old index's name, so the page
+  # posted r1's text under `rows[0]`, now r2's (task-d24c493daaefc627). There
+  # the input name, which has the index, is hashed too, as the Studio's ids
+  # already carry it.
+  defp wrap_key(assigns, sub, owner_key, outer) do
+    key = if outer == nil, do: owner_key, else: {outer, owner_key}
+
+    if is_binary(Map.get(assigns, :id_base)),
+      do: {key, child_path(assigns.path, sub.name)},
+      else: key
+  end
 
   defp mount_suffix(assigns) do
     case RowMounts.count(Map.get(assigns, :row_mounts), assigns.path) do
