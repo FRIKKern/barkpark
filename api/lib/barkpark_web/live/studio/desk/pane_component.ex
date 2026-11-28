@@ -32,6 +32,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   alias BarkparkWeb.Studio.Desk.Refs
   alias BarkparkWeb.Studio.Desk.Rows
   alias BarkparkWeb.Studio.Desk.Tree
+  alias BarkparkWeb.Studio.DocTitle
   alias BarkparkWeb.Studio.PaneBuilder
   alias Phoenix.LiveView.AsyncResult
 
@@ -433,6 +434,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
                   aria-current={selected?(@panes, @index, entry.next) && "true"}
                   data-selected={selected?(@panes, @index, entry.next)}
                   data-desk-row
+                  data-desk-title={entry[:header]}
               data-desk-opens={entry.next.kind}
               data-testid={@pane.kind == :list && entry.next.kind == :doc && "pane-item"}
             >
@@ -579,8 +581,11 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
   defp doc_titles(%{kind: :doc, id: id}, %{title: title}) when is_binary(title),
     do: %{id => title}
 
+  # A list names each document as its pane's header will (`header`), not as
+  # its row does: these name the pane that opens.
   defp doc_titles(%{kind: :list}, %{entries: entries}) when is_list(entries) do
-    for %{title: title, next: %{kind: :doc, id: id}} <- entries,
+    for %{next: %{kind: :doc, id: id}} = entry <- entries,
+        title = entry[:header] || entry[:title],
         is_binary(title),
         into: %{},
         do: {id, title}
@@ -861,7 +866,9 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
            Content.fetch_doc_with_draft(type, id, dataset, scope) do
       # The state is the header's pills, as the edit pane's, not a row.
       %{
-        title: doc_title(doc, schema),
+        # Named as its editor names it (`DocTitle.header/2`), so a document
+        # pane's header says the same words read-only and edited.
+        title: DocTitle.header(doc, schema),
         kind: schema.title || schema.name,
         draft?: draft?,
         published?: published?,
@@ -890,7 +897,7 @@ defmodule BarkparkWeb.Studio.Desk.PaneComponent do
     entries =
       for doc <- docs do
         next = %{kind: :doc, id: Content.published_id(doc.doc_id), type: schema.name}
-        %{title: doc_title(doc, schema), next: next}
+        %{title: doc_title(doc, schema), header: DocTitle.header(doc, schema), next: next}
       end
 
     note =

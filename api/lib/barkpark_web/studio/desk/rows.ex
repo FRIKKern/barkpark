@@ -236,6 +236,10 @@ defmodule BarkparkWeb.Studio.Desk.Rows do
   defp entry(item, type) do
     %{
       title: text(item.title) || item.id,
+      # The name the document pane's header gives it, from the first frame
+      # (`DocTitle.header/2`): the row's own name may differ ("Untitled sheet
+      # · bb05…" for the editor's "Untitled").
+      header: text(item[:header_title]),
       # The schema's list preview subtitle, or none: the TanStack row shows
       # the title alone where the schema names no subtitle (LOOKS C4), not
       # the Studio's "Updated 6h ago".

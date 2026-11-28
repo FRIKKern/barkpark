@@ -1053,6 +1053,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # none.
         type_icon: row_icon,
         title: row_title(doc, schema, deref, fmt),
+        # What the document's editor header calls it (`DocTitle.header/2`).
+        header_title: BarkparkWeb.Studio.DocTitle.header(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),

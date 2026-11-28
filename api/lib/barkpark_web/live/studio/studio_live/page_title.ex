@@ -4,8 +4,6 @@ defmodule BarkparkWeb.Studio.StudioLive.PageTitle do
   (`page_title`), moved out of `StudioLive.Shared` (task-42a6f063263338f6).
   """
 
-  use Gettext, backend: BarkparkWeb.Gettext
-
   import Phoenix.Component, only: [assign: 2]
 
   # The browser tab names the open document (task-fee30130f015c416): every
@@ -16,8 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PageTitle do
   # navigation: a save that renames it, and the block editor's sync
   # (task-72e1de4c53c5ed9f).
   # Same order as the document header names it (Editor's document_header):
-  # the stored title, else the schema's derived preview title (a titleless
-  # author is its name), else a singleton's schema title, else "Untitled".
+  # `DocTitle.header/2`.
   #
   # The row named is the newest stored version this tab has seen
   # (`Lifecycle.base_doc/1`): `editor_doc` stays this tab's own row after
@@ -29,8 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PageTitle do
     title =
       case title_doc(socket) do
         %{} = doc ->
-          BarkparkWeb.Studio.DocTitle.shown(Map.get(doc, :title)) ||
-            derived_title(doc, socket.assigns[:editor_schema])
+          BarkparkWeb.Studio.DocTitle.header(doc, socket.assigns[:editor_schema])
 
         _ ->
           "Studio"
@@ -82,11 +78,5 @@ defmodule BarkparkWeb.Studio.StudioLive.PageTitle do
       _ ->
         nil
     end
-  end
-
-  defp derived_title(doc, schema) do
-    Barkpark.Content.TitleDerivation.preview_title(doc, schema) ||
-      (schema && Map.get(schema, :singleton) == true && Map.get(schema, :title)) ||
-      gettext("Untitled")
   end
 end
