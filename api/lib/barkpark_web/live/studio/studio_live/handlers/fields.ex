@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive.Handlers.KeylessRowPost
   alias BarkparkWeb.Studio.StudioLive.Handlers.RemoteValues
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RowMounts
   alias BarkparkWeb.Studio.StudioLive.Handlers.SaveTells
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextConfirmed
   alias BarkparkWeb.Studio.StudioLive.Handlers.TextRejoin
@@ -1271,6 +1272,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
           do: RichTextRemote.DroppedRows.removed(socket, row_at(current, idx)),
           else: socket
 
+      # Each index that now holds another row remounts its rich text editor.
+      socket = RowMounts.changed(socket, key_path, current, new_list)
       saved = socket |> RefusedSave.target(keys) |> Shared.do_autosave(new_form, :array_op)
 
       {:noreply,

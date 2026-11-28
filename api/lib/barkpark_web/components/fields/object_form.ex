@@ -41,6 +41,8 @@ defmodule BarkparkWeb.Components.Fields.ObjectForm do
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
   attr :root, :map, default: nil
+  # `RowMounts`: the counts a row rich text editor's wrapper id carries.
+  attr :row_mounts, :map, default: %{}
   attr :target, :any, default: nil
 
   def object_form(assigns) do
@@ -85,6 +87,7 @@ defmodule BarkparkWeb.Components.Fields.ObjectForm do
           scope_prefix={@scope_prefix}
           api_token_raw={@api_token_raw}
           root={@root}
+          row_mounts={@row_mounts}
         />
       <% else %>
         <pre class="bp-input" data-structured-value style="margin:0;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= Jason.encode!(@value, pretty: true) %></pre>
