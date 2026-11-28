@@ -57,10 +57,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
   Of the dropped leaves, A's words in each plain subfield A typed in,
   `{name, [text]}`. The page posts no draw for one, so A typed in it when
   its input is among the inputs A changed (`touched`, kept until a Save or
-  a Reload) and A's own earlier post did not write that value under that
-  input (`wrote`, `wrote/4`): those words are in the store, and are not
-  lost. Another row holding the same words is no sign (#29319 review, G1:
-  a "TODO", or a box ticked off, as a sibling's). A leaf with an owner
+  a Reload) and A's own earlier post did not write that value in that
+  row (`wrote`, `wrote/4`, by the row's `_key`): those words are in the
+  store, and are not lost. Another row holding the same words is no sign
+  (#29319 review, G1: a "TODO", or a box ticked off, as a sibling's), nor
+  an earlier value at the same index: a keyless row has no identity, so
+  nothing vouches for it, and A's change there is always shown (#29332
+  review, N5, N5b). A leaf with an owner
   entry is rich text (`typed/3`); one of a row A removed itself (its
   row's posted `_key` in `removed`) is not read.
   """
@@ -77,14 +80,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
         {:ok, row, leaf} <- [row_leaf(name)],
         leaf not in [["_key"], ["_type"]],
         not MapSet.member?(removed, keys[row <> "._key"]),
-        Map.get(wrote, name) != value,
+        not wrote?(wrote, slot(row, keys[row <> "._key"], name), value),
         do: {name, [text]}
   end
 
   @doc """
-  `wrote` for `plain/5`, after a post: each plain input A changed
-  (`touched`) that the post carried and the fold did not drop, by name,
-  with the value posted. Reset with `touched`.
+  `wrote` for `plain/5`, after an autosave: each plain input A changed
+  (`touched`) in a row with a posted `_key` that the post carried and the
+  fold did not drop, by its list, the row's key and the leaf, with the
+  value posted. Reset with `touched`; a Save does not record (it clears
+  both, #29332 review, A1).
   """
   def wrote(socket, params, dropped, touched) do
     gone = MapSet.new(dropped, &elem(&1, 0))
@@ -94,11 +99,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
           not MapSet.member?(gone, name),
           value = Map.get(params, name),
           is_binary(value),
+          {:ok, row, _leaf} <- [row_leaf(name)],
+          slot = slot(row, params[row <> "._key"], name),
           into: socket.assigns[:editor_rt_plain_wrote] || %{},
-          do: {name, value}
+          do: {slot, value}
 
     assign(socket, editor_rt_plain_wrote: wrote)
   end
+
+  # A leaf's place by its row's identity: `{list, row key, leaf}`; a row
+  # with no `_key` has none (nil).
+  defp slot(row, key, name) when is_binary(key) and key != "" do
+    list = String.replace(row, ~r/\[\d+\]$/, "")
+    {list, key, String.replace_prefix(name, row, "")}
+  end
+
+  defp slot(_row, _key, _name), do: nil
+
+  defp wrote?(_wrote, nil, _value), do: false
+  defp wrote?(wrote, slot, value), do: Map.get(wrote, slot) == value
 
   @doc """
   The banner, with A's words of each `{name, texts}` (`typed/3`). With

@@ -326,7 +326,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> dropped(
            folded,
            params,
-           {touched_paths(socket), socket.assigns[:editor_rt_plain_wrote]}
+           {touched_paths(socket), socket.assigns[:editor_rt_plain_wrote], :save}
          )}
 
       _ ->
@@ -335,8 +335,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   end
 
   # `touched`, the inputs A changed, and `wrote`, what A's posts wrote
-  # there: read before a Save clears them.
-  defp dropped(socket, folded, params, {touched, wrote}) do
+  # there: read before a Save clears them. A Save records nothing: it
+  # cleared both (#29332 review, A1).
+  defp dropped(socket, folded, params, {touched, wrote, how}) do
     leaves = Map.get(folded, @dropped, [])
     owners = params["_bp_rt_owner"]
     removed = socket.assigns[:editor_rt_removed] || MapSet.new()
@@ -348,7 +349,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       RichTextRemote.DroppedRows.typed(leaves, owners, removed) ++
         RichTextRemote.DroppedRows.plain(leaves, owners, touched, wrote, removed)
     )
-    |> RichTextRemote.DroppedRows.wrote(params, leaves, touched)
+    |> then(
+      &if(how == :save,
+        do: &1,
+        else: RichTextRemote.DroppedRows.wrote(&1, params, leaves, touched)
+      )
+    )
   end
 
   # As an autosave: each free-text field of the Save is merged onto the
@@ -737,7 +743,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> dropped(
            folded,
            params,
-           {touched_paths(socket), socket.assigns[:editor_rt_plain_wrote]}
+           {touched_paths(socket), socket.assigns[:editor_rt_plain_wrote], :autosave}
          )}
 
       _ ->

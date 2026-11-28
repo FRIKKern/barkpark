@@ -206,7 +206,9 @@ defmodule BarkparkWeb.Studio.LostBannerPlainOwnRowTest do
       assert html =~ "doc-conflict-lost"
     end
 
-    test "#{surface} #{how} control: A's TODO was written before B's insert: not shown on a later drop",
+    # A keyless row has no identity: an earlier write at its index can't
+    # vouch for it (#29332 review, N5).
+    test "#{surface} #{how} keyless: A's TODO was written before B's insert: shown again on a later drop",
          c do
       store(c, %{"rows" => [rown(nil, "one", "n1", true), rown("r2", "three", "n3", true)]})
       a = tab(c, @surface)
@@ -230,6 +232,26 @@ defmodule BarkparkWeb.Studio.LostBannerPlainOwnRowTest do
       )
 
       assert {nil, ["one"], "TODO", true} in rows(stored(c))
+      assert Enum.sort(lost(a)) == ["doc[rows][0].note", "doc[rows][0].rt"]
+    end
+
+    test "#{surface} #{how} control: A's note in keyed k1 was written; B removes k1: not shown on the drop",
+         c do
+      store(c, %{"rows" => [rown("k1", "one", "n1", true), rown("r2", "three", "n3", true)]})
+      a = tab(c, @surface)
+      first = draw(a)
+      a_posts(a, first, [{"doc[rows][0].note", "TODO"}])
+      assert {"k1", ["one"], "TODO", true} in rows(stored(c))
+      b_saves(c, a, %{"rows" => [rown("r2", "three", "n3", true)]})
+
+      a_posts(
+        a,
+        first,
+        [{"doc[rows][0].rt", "<p>one A</p>"}, {"doc[rows][0].note", "TODO"}],
+        @how
+      )
+
+      assert rows(stored(c)) == [{"r2", ["three"], "n3", true}]
       assert lost(a) == ["doc[rows][0].rt"]
     end
 
@@ -250,6 +272,75 @@ defmodule BarkparkWeb.Studio.LostBannerPlainOwnRowTest do
       a_posts(a, first, [{"doc[rows][0].rt", "<p>one A</p>"}], @how)
 
       assert lost(a) == ["doc[rows][0].rt"]
+    end
+  end
+
+  # A Save of the page with no `_target`, as `phx-submit` posts it.
+  defp no_target(view, {inputs, owners}) do
+    params =
+      inputs
+      |> URI.encode_query()
+      |> Plug.Conn.Query.decode()
+      |> Map.put("_bp_rt_owner", owners)
+
+    EditorPost.hook(view, "save", params)
+  end
+
+  defp plain_wrote(a), do: :sys.get_state(a.pid).socket.assigns[:editor_rt_plain_wrote]
+
+  for surface <- [:desk, :studio] do
+    @surface surface
+
+    # #29332 review, N5b: the record named an index, and Q took P's.
+    test "#{surface} N5b: A ticks off P's box; B removes P, then inserts keyed r0; A ticks off Q's: shown",
+         c do
+      store(c, %{"rows" => [rown(nil, "pee", "p", true), rown(nil, "queue", "q", true)]})
+      a = tab(c, @surface)
+      a_posts(a, draw(a), [{"doc[rows][0].done", "false"}])
+      b_saves(c, a, %{"rows" => [rown(nil, "queue", "q", true)]})
+      second = draw(a)
+      b_saves(c, a, %{"rows" => [rown("r0", "zero", "z0", true), rown(nil, "queue", "q", true)]})
+
+      html = a_posts(a, second, [{"doc[rows][0].done", "false"}])
+
+      assert {nil, ["queue"], "q", true} in rows(stored(c))
+      # Before: lost == [], no banner: A's tick-off of Q hidden by P's.
+      assert lost(a) == ["doc[rows][0].done"], "A's change is in no banner: #{inspect(lost(a))}"
+      assert html =~ "doc-conflict-lost"
+    end
+
+    for save? <- [false, true] do
+      @save save?
+      test "#{surface} N5 save=#{save?}: A wrote TODO in P; B removes P, then inserts keyed r0; A types TODO into Q: shown",
+           c do
+        store(c, %{"rows" => [rown(nil, "pee", "p", true), rown(nil, "queue", "q", true)]})
+        a = tab(c, @surface)
+        a_posts(a, draw(a), [{"doc[rows][0].note", "TODO"}])
+        if @save, do: no_target(a, draw(a))
+        b_saves(c, a, %{"rows" => [rown(nil, "queue", "q", true)]})
+        second = draw(a)
+
+        b_saves(c, a, %{"rows" => [rown("r0", "zero", "z0", true), rown(nil, "queue", "q", true)]})
+
+        a_posts(a, second, [{"doc[rows][0].note", "TODO"}])
+
+        assert {nil, ["queue"], "q", true} in rows(stored(c))
+        assert lost(a) == ["doc[rows][0].note"], "A's TODO is in no banner: #{inspect(lost(a))}"
+      end
+    end
+
+    # #29332 review, A1: the Save cleared the record, then refilled it.
+    test "#{surface} A1: after autosaves in keyed rows and a Save, the record is empty", c do
+      store(c, %{"rows" => [rown("k1", "one", "n1", true), rown("r2", "three", "n3", true)]})
+      a = tab(c, @surface)
+      first = draw(a)
+      a_posts(a, first, [{"doc[rows][0].note", "n1 A"}])
+      a_posts(a, first, [{"doc[rows][1].note", "n3 A"}])
+      assert map_size(plain_wrote(a)) == 2
+
+      no_target(a, draw(a))
+
+      assert plain_wrote(a) == %{}
     end
   end
 end
