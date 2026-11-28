@@ -273,7 +273,8 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-bone { display: block; height: 10px; width: 60%; border-radius: 5px; background: var(--border); }
       .dk .dk-skeleton .pane-item { cursor: default; }
       .dk .dk-skeleton .pane-item:nth-child(even) .dk-bone { width: 42%; }
-      .dk [data-desk-leaving] { display: none; }
+      /* A pane a click closes, before the server answers (`bp-desk.js`). The id outranks every pane's own display, as `.dk .dk-edit`'s flex: the closing editor stayed drawn beside the new pane's frame. */
+      .dk [data-desk-leaving], #desk-panes > [data-desk-leaving] { display: none; }
       .dk .dk-pane:not(.dk-doc) > .pane-header { box-sizing: border-box; height: 49px; min-height: 49px; padding: 0 12px 0 20px; gap: 4px; border-bottom: 0; }
       .dk .dk-pane:not(.dk-doc) > .pane-header .pane-header-title { flex: 1; min-width: 0; font-size: 13px; line-height: 19px; font-weight: 600; color: var(--dk-fg-header); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dk .dk-pane:not(.dk-doc) > .pane-header .icon-btn { box-sizing: border-box; flex: none; width: 25px; height: 25px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 3px; background: none; color: var(--dk-icon-muted); }
