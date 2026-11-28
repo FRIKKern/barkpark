@@ -1,0 +1,660 @@
+﻿2026-10-15T01:16:32.4329515Z Current runner version: '2.337.0'
+2026-10-15T01:16:32.4349316Z ##[group]Runner Image Provisioner
+2026-10-15T01:16:32.4349894Z Hosted Compute Agent
+2026-10-15T01:16:32.4350313Z Version: 20261012.601
+2026-10-15T01:16:32.4350691Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+2026-10-15T01:16:32.4351124Z Build Date: 2026-10-12T17:48:21Z
+2026-10-15T01:16:32.4351573Z Worker ID: {9c5d8bc0-b822-442a-81e4-2b0201b881f5}
+2026-10-15T01:16:32.4352144Z Region: westus3
+2026-10-15T01:16:32.4352505Z Cloud: Azure
+2026-10-15T01:16:32.4352846Z ##[endgroup]
+2026-10-15T01:16:32.4353885Z ##[group]Operating System
+2026-10-15T01:16:32.4354343Z Ubuntu
+2026-10-15T01:16:32.4354658Z 24.04.5
+2026-10-15T01:16:32.4354994Z LTS
+2026-10-15T01:16:32.4355328Z ##[endgroup]
+2026-10-15T01:16:32.4355660Z ##[group]Runner Image
+2026-10-15T01:16:32.4356069Z Image: ubuntu-24.04
+2026-10-15T01:16:32.4356440Z Version: 20261012.334.1
+2026-10-15T01:16:32.4357245Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-15T01:16:32.4358115Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+2026-10-15T01:16:32.4358730Z ##[endgroup]
+2026-10-15T01:16:32.4359458Z ##[group]GITHUB_TOKEN Permissions
+2026-10-15T01:16:32.4360751Z Contents: read
+2026-10-15T01:16:32.4361096Z Metadata: read
+2026-10-15T01:16:32.4361496Z Packages: read
+2026-10-15T01:16:32.4362059Z ##[endgroup]
+2026-10-15T01:16:32.4363511Z Secret source: Actions
+2026-10-15T01:16:32.4364105Z Cache mode: write
+2026-10-15T01:16:32.4364541Z Prepare workflow directory
+2026-10-15T01:16:32.4742280Z Prepare all required actions
+2026-10-15T01:16:32.4774715Z Getting action download info
+2026-10-15T01:16:32.7853116Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-15T01:16:33.1617770Z Download action repository 'erlef/setup-beam@v1' (SHA:54075bcc5e249e4758d363f27d099f55d843f124)
+2026-10-15T01:16:34.2426258Z Download action repository 'actions/cache@v6' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+2026-10-15T01:16:34.3669111Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-10-15T01:16:34.5804437Z Complete job name: Sobelow static analysis (regression gate, baseline .sobelow-skips) (27.0, 1.18.1)
+2026-10-15T01:16:34.6366474Z ##[group]Run actions/checkout@v7
+2026-10-15T01:16:34.6367038Z with:
+2026-10-15T01:16:34.6367429Z   repository: FRIKKern/barkpark
+2026-10-15T01:16:34.6369461Z   token: ***
+2026-10-15T01:16:34.6369838Z   ssh-strict: true
+2026-10-15T01:16:34.6370223Z   ssh-user: git
+2026-10-15T01:16:34.6370615Z   persist-credentials: true
+2026-10-15T01:16:34.6371025Z   clean: true
+2026-10-15T01:16:34.6371426Z   sparse-checkout-cone-mode: true
+2026-10-15T01:16:34.6372028Z   fetch-depth: 1
+2026-10-15T01:16:34.6372409Z   fetch-tags: false
+2026-10-15T01:16:34.6372800Z   show-progress: true
+2026-10-15T01:16:34.6373184Z   lfs: false
+2026-10-15T01:16:34.6373549Z   submodules: false
+2026-10-15T01:16:34.6373947Z   set-safe-directory: true
+2026-10-15T01:16:34.6374367Z   allow-unsafe-pr-checkout: false
+2026-10-15T01:16:34.6374864Z ##[endgroup]
+2026-10-15T01:16:34.7118768Z Syncing repository: FRIKKern/barkpark
+2026-10-15T01:16:34.7120905Z ##[group]Getting Git version info
+2026-10-15T01:16:34.7121887Z Working directory is '/home/runner/work/barkpark/barkpark'
+2026-10-15T01:16:34.7123061Z [command]/usr/bin/git version
+2026-10-15T01:16:34.7211407Z git version 2.55.0
+2026-10-15T01:16:34.7225102Z ##[endgroup]
+2026-10-15T01:16:34.7237034Z Temporarily overriding HOME='/home/runner/work/_temp/ec17ebb7-3eec-4036-bedb-110d3a5530ca' before making global git config changes
+2026-10-15T01:16:34.7238378Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-15T01:16:34.7242266Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/barkpark/barkpark
+2026-10-15T01:16:34.7288708Z Deleting the contents of '/home/runner/work/barkpark/barkpark'
+2026-10-15T01:16:34.7297620Z ##[group]Determining repository object format
+2026-10-15T01:16:34.7298418Z ##[endgroup]
+2026-10-15T01:16:34.7299048Z ##[group]Initializing the repository
+2026-10-15T01:16:34.7302399Z [command]/usr/bin/git init /home/runner/work/barkpark/barkpark
+2026-10-15T01:16:34.7394278Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-15T01:16:34.7395783Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-15T01:16:34.7397776Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-15T01:16:34.7399724Z hint: call:
+2026-10-15T01:16:34.7400440Z hint:
+2026-10-15T01:16:34.7401312Z hint: 	git config --global init.defaultBranch <name>
+2026-10-15T01:16:34.7402313Z hint:
+2026-10-15T01:16:34.7403465Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-15T01:16:34.7404590Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-15T01:16:34.7405545Z hint:
+2026-10-15T01:16:34.7406341Z hint: 	git branch -m <name>
+2026-10-15T01:16:34.7407144Z hint:
+2026-10-15T01:16:34.7408153Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-15T01:16:34.7409564Z Initialized empty Git repository in /home/runner/work/barkpark/barkpark/.git/
+2026-10-15T01:16:34.7412513Z [command]/usr/bin/git remote add origin https://github.com/FRIKKern/barkpark
+2026-10-15T01:16:34.7459252Z ##[endgroup]
+2026-10-15T01:16:34.7460335Z ##[group]Disabling automatic garbage collection
+2026-10-15T01:16:34.7462690Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-15T01:16:34.7531794Z ##[endgroup]
+2026-10-15T01:16:34.7533346Z ##[group]Setting up auth
+2026-10-15T01:16:34.7534139Z Removing SSH command configuration
+2026-10-15T01:16:34.7536949Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-15T01:16:34.7578441Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-15T01:16:34.7884374Z Removing HTTP extra header
+2026-10-15T01:16:34.7888727Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-15T01:16:34.7921387Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-15T01:16:34.8106793Z Removing includeIf entries pointing to credentials config files
+2026-10-15T01:16:34.8107916Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-15T01:16:34.8145173Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-15T01:16:34.8333834Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-15T01:16:34.8370988Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/barkpark/barkpark/.git.path /home/runner/work/_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:16:34.8402691Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:16:34.8437501Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:16:34.8467833Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:16:34.8495439Z ##[endgroup]
+2026-10-15T01:16:34.8496123Z ##[group]Fetching the repository
+2026-10-15T01:16:34.8500655Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +b72717002d2cb9bb4b568fa3fd5048576cbba293:refs/remotes/pull/23205/merge
+2026-10-15T01:16:38.0265192Z From https://github.com/FRIKKern/barkpark
+2026-10-15T01:16:38.0265702Z  * [new ref]           b72717002d2cb9bb4b568fa3fd5048576cbba293 -> pull/23205/merge
+2026-10-15T01:16:38.0271307Z ##[endgroup]
+2026-10-15T01:16:38.0271910Z ##[group]Determining the checkout info
+2026-10-15T01:16:38.0272347Z ##[endgroup]
+2026-10-15T01:16:38.0275261Z [command]/usr/bin/git sparse-checkout disable
+2026-10-15T01:16:38.0333569Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-15T01:16:38.0368125Z ##[group]Checking out the ref
+2026-10-15T01:16:38.0372431Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/23205/merge
+2026-10-15T01:16:39.0519922Z Updating files:  73% (12898/17466)
+2026-10-15T01:16:39.0592673Z Updating files:  74% (12925/17466)
+2026-10-15T01:16:39.0676905Z Updating files:  75% (13100/17466)
+2026-10-15T01:16:39.0734269Z Updating files:  76% (13275/17466)
+2026-10-15T01:16:39.0781860Z Updating files:  77% (13449/17466)
+2026-10-15T01:16:39.0826791Z Updating files:  78% (13624/17466)
+2026-10-15T01:16:39.0900972Z Updating files:  79% (13799/17466)
+2026-10-15T01:16:39.0963089Z Updating files:  80% (13973/17466)
+2026-10-15T01:16:39.1010883Z Updating files:  81% (14148/17466)
+2026-10-15T01:16:39.1057529Z Updating files:  82% (14323/17466)
+2026-10-15T01:16:39.1105505Z Updating files:  83% (14497/17466)
+2026-10-15T01:16:39.1155594Z Updating files:  84% (14672/17466)
+2026-10-15T01:16:39.1204642Z Updating files:  85% (14847/17466)
+2026-10-15T01:16:39.1251797Z Updating files:  86% (15021/17466)
+2026-10-15T01:16:39.1302345Z Updating files:  87% (15196/17466)
+2026-10-15T01:16:39.1353026Z Updating files:  88% (15371/17466)
+2026-10-15T01:16:39.1400348Z Updating files:  89% (15545/17466)
+2026-10-15T01:16:39.1447038Z Updating files:  90% (15720/17466)
+2026-10-15T01:16:39.1493350Z Updating files:  91% (15895/17466)
+2026-10-15T01:16:39.1544321Z Updating files:  92% (16069/17466)
+2026-10-15T01:16:39.1613031Z Updating files:  93% (16244/17466)
+2026-10-15T01:16:39.1733689Z Updating files:  94% (16419/17466)
+2026-10-15T01:16:39.1793281Z Updating files:  95% (16593/17466)
+2026-10-15T01:16:39.2885383Z Updating files:  96% (16768/17466)
+2026-10-15T01:16:39.3160778Z Updating files:  97% (16943/17466)
+2026-10-15T01:16:39.3273578Z Updating files:  98% (17117/17466)
+2026-10-15T01:16:39.3395482Z Updating files:  99% (17292/17466)
+2026-10-15T01:16:39.3395751Z Updating files: 100% (17466/17466)
+2026-10-15T01:16:39.3395985Z Updating files: 100% (17466/17466), done.
+2026-10-15T01:16:39.3510724Z Note: switching to 'refs/remotes/pull/23205/merge'.
+2026-10-15T01:16:39.3510976Z
+2026-10-15T01:16:39.3511155Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-15T01:16:39.3511579Z changes and commit them, and you can discard any commits you make in this
+2026-10-15T01:16:39.3512150Z state without impacting any branches by switching back to a branch.
+2026-10-15T01:16:39.3512436Z
+2026-10-15T01:16:39.3512600Z If you want to create a new branch to retain commits you create, you may
+2026-10-15T01:16:39.3513011Z do so (now or later) by using -c with the switch command. Example:
+2026-10-15T01:16:39.3513238Z
+2026-10-15T01:16:39.3513345Z   git switch -c <new-branch-name>
+2026-10-15T01:16:39.3513501Z
+2026-10-15T01:16:39.3513593Z Or undo this operation with:
+2026-10-15T01:16:39.3513735Z
+2026-10-15T01:16:39.3513810Z   git switch -
+2026-10-15T01:16:39.3513919Z
+2026-10-15T01:16:39.3514105Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-15T01:16:39.3514393Z
+2026-10-15T01:16:39.3514701Z HEAD is now at b7271700 Merge ae794bec291367b8f23fc553156b78e3af879b41 into 1872e11ab93d916ac05217f4f6f1a26ec7f3a994
+2026-10-15T01:16:39.4097469Z ##[endgroup]
+2026-10-15T01:16:39.4142575Z [command]/usr/bin/git log -1 --format=%H
+2026-10-15T01:16:39.4167652Z b72717002d2cb9bb4b568fa3fd5048576cbba293
+2026-10-15T01:16:39.4367043Z ##[group]Run erlef/setup-beam@v1
+2026-10-15T01:16:39.4367197Z with:
+2026-10-15T01:16:39.4367308Z   otp-version: 27.0
+2026-10-15T01:16:39.4367429Z   elixir-version: 1.18.1
+2026-10-15T01:16:39.4369013Z   github-token: ***
+2026-10-15T01:16:39.4369131Z   otp-architecture: 64
+2026-10-15T01:16:39.4369252Z   install-hex: true
+2026-10-15T01:16:39.4369364Z   install-rebar: true
+2026-10-15T01:16:39.4369481Z   version-type: loose
+2026-10-15T01:16:39.4369614Z   disable_problem_matchers: false
+2026-10-15T01:16:39.4369776Z   hexpm-mirrors: https://builds.hex.pm
+
+2026-10-15T01:16:39.4369933Z ##[endgroup]
+2026-10-15T01:16:39.6151979Z ##[group]Installing Erlang/OTP OTP-27.0.1 - built on amd64/ubuntu-24.04
+2026-10-15T01:16:39.9887842Z [command]/usr/bin/tar zx --strip-components=1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/84fa4207-1079-4177-ada8-f8894c65ac30 -f /home/runner/work/_temp/5e03b927-dc53-452f-ae94-162032771c3c
+2026-10-15T01:16:43.0773557Z [command]/home/runner/work/_temp/.setup-beam/otp/Install -minimal /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:16:43.1028622Z Installed Erlang/OTP version
+2026-10-15T01:16:43.1038332Z [command]/home/runner/work/_temp/.setup-beam/otp/bin/erl -version
+2026-10-15T01:16:43.1154157Z Erlang (SMP,ASYNC_THREADS) (BEAM) emulator version 15.0.1
+2026-10-15T01:16:43.1186542Z ##[endgroup]
+2026-10-15T01:16:43.1187298Z [command]/home/runner/work/_temp/.setup-beam/otp/bin/erl -noshell -eval io:format(erlang:system_info(otp_release)), halt().
+2026-10-15T01:16:43.2976669Z 27::debug::Was not able to coerce latest with semver
+2026-10-15T01:16:43.2987497Z Using Elixir 1.18.1 (built for Erlang/OTP 27)
+2026-10-15T01:16:43.2988121Z ##[group]Installing Elixir v1.18.1-otp-27
+2026-10-15T01:16:43.4680535Z [command]/usr/bin/unzip -o -q /home/runner/work/_temp/90bdac1a-efeb-4999-9200-0df5c7089184
+2026-10-15T01:16:44.1443034Z Installed Elixir version
+2026-10-15T01:16:44.1455055Z [command]/home/runner/work/_temp/.setup-beam/elixir/bin/elixir -v
+2026-10-15T01:16:44.3105913Z Erlang/OTP 27 [erts-15.0.1] [source] [64-bit] [smp:4:4] [ds:4:4:10] [async-threads:1] [jit:ns]
+2026-10-15T01:16:44.3107210Z
+2026-10-15T01:16:44.3160258Z Elixir 1.18.1 (compiled with Erlang/OTP 27)
+2026-10-15T01:16:44.3213347Z ##[endgroup]
+2026-10-15T01:16:44.3213849Z ##[group]Running mix local.rebar,--force
+2026-10-15T01:16:44.3214440Z [command]/home/runner/work/_temp/.setup-beam/elixir/bin/mix local.rebar --force
+2026-10-15T01:16:44.9212015Z * creating /home/runner/.mix/elixir/1-18/rebar3
+2026-10-15T01:16:44.9280449Z ##[endgroup]
+2026-10-15T01:16:44.9280875Z ##[group]Running mix local.hex,--force
+2026-10-15T01:16:44.9288978Z [command]/home/runner/work/_temp/.setup-beam/elixir/bin/mix local.hex --force
+2026-10-15T01:16:45.5542776Z * creating /home/runner/.mix/archives/hex-2.5.3
+2026-10-15T01:16:45.5624482Z ##[endgroup]
+2026-10-15T01:16:45.6237218Z ##[group]Run actions/cache@v6
+2026-10-15T01:16:45.6237375Z with:
+2026-10-15T01:16:45.6237506Z   path: api/deps
+api/_build
+
+2026-10-15T01:16:45.6237796Z   key: Linux-mix-sobelow-27.0-1.18.1-01963184ab79c391d295662e83c0a1b886b05991ef82bd7961861b2c22ed3cbe
+2026-10-15T01:16:45.6238101Z   restore-keys: Linux-mix-sobelow-27.0-1.18.1-
+
+2026-10-15T01:16:45.6238301Z   enableCrossOsArchive: false
+2026-10-15T01:16:45.6238447Z   fail-on-cache-miss: false
+2026-10-15T01:16:45.6238584Z   lookup-only: false
+2026-10-15T01:16:45.6238708Z   save-always: false
+2026-10-15T01:16:45.6238835Z env:
+2026-10-15T01:16:45.6238990Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:16:45.6239230Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:16:45.6239424Z ##[endgroup]
+2026-10-15T01:16:45.9185016Z Cache hit for: Linux-mix-sobelow-27.0-1.18.1-01963184ab79c391d295662e83c0a1b886b05991ef82bd7961861b2c22ed3cbe
+2026-10-15T01:16:47.1517421Z Received 28458101 of 32652405 (87.2%), 27.1 MBs/sec
+2026-10-15T01:16:47.3238791Z Received 32652405 of 32652405 (100.0%), 26.5 MBs/sec
+2026-10-15T01:16:47.3239178Z Cache Size: ~31 MB (32652405 B)
+2026-10-15T01:16:47.3314290Z [command]/usr/bin/tar -xf /home/runner/work/_temp/571b0d9b-dd55-4e66-8355-479d564bf06f/cache.tzst -P -C /home/runner/work/barkpark/barkpark --use-compress-program unzstd
+2026-10-15T01:16:47.5276031Z Cache restored successfully
+2026-10-15T01:16:47.5341035Z Cache restored from key: Linux-mix-sobelow-27.0-1.18.1-01963184ab79c391d295662e83c0a1b886b05991ef82bd7961861b2c22ed3cbe
+2026-10-15T01:16:47.5442633Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:16:47.5443507Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:16:47.5443968Z [36;1mmix deps.get[0m
+2026-10-15T01:16:47.5719425Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:47.5719599Z env:
+2026-10-15T01:16:47.5719764Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:16:47.5720016Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:16:47.5720219Z ##[endgroup]
+2026-10-15T01:16:48.2487660Z Resolving Hex dependencies...
+2026-10-15T01:16:48.5372743Z Resolution completed in 0.286s
+2026-10-15T01:16:48.5838226Z Unchanged:
+2026-10-15T01:16:48.5838768Z   argon2_elixir 4.1.3
+2026-10-15T01:16:48.5850824Z   asn1_compiler 0.1.1
+2026-10-15T01:16:48.5851365Z   bandit 1.12.5 VULNERABLE!
+2026-10-15T01:16:48.5852409Z     EEF-CVE-2026-105659 (HIGH)
+2026-10-15T01:16:48.5852935Z     aka: CVE-2026-105659, GHSA-69m6-wcv4-rwcf
+2026-10-15T01:16:48.5853617Z     HTTP/2 blocked-send deadlines reset on every WINDOW_UPDATE, letting a trickle pin stream processes indefinitely in Bandit
+2026-10-15T01:16:48.5854396Z     https://osv.dev/vulnerability/EEF-CVE-2026-105659
+2026-10-15T01:16:48.5854830Z   bypass 2.1.0
+2026-10-15T01:16:48.5855173Z   cbor 1.0.2
+2026-10-15T01:16:48.5855512Z   cc_precompiler 0.1.11
+2026-10-15T01:16:48.5855876Z   cloak 1.1.4 VULNERABLE!
+2026-10-15T01:16:48.5856239Z     EEF-CVE-2026-95105 (HIGH)
+2026-10-15T01:16:48.5856613Z     aka: CVE-2026-95105
+2026-10-15T01:16:48.5857182Z     Cloak AES-CTR cipher lacks ciphertext authentication, allowing chosen-plaintext forgery by bit flipping
+2026-10-15T01:16:48.5857839Z     https://osv.dev/vulnerability/EEF-CVE-2026-95105
+2026-10-15T01:16:48.5858274Z   cloak_ecto 1.3.0 VULNERABLE!
+2026-10-15T01:16:48.5858650Z     EEF-CVE-2026-94206 (MEDIUM)
+2026-10-15T01:16:48.5859020Z     aka: CVE-2026-94206
+2026-10-15T01:16:48.5859514Z     Cloak PBKDF2 field ignores the configured iteration count and runs only :size rounds
+2026-10-15T01:16:48.5860093Z     https://osv.dev/vulnerability/EEF-CVE-2026-94206
+2026-10-15T01:16:48.5860504Z   color 0.13.0
+2026-10-15T01:16:48.5860849Z   comeonin 5.5.1
+2026-10-15T01:16:48.5861183Z   corsica 2.1.3
+2026-10-15T01:16:48.5861511Z   cowboy 2.19.0
+2026-10-15T01:16:48.5861968Z   cowboy_telemetry 0.4.0
+2026-10-15T01:16:48.5862320Z   cowlib 2.20.0 VULNERABLE!
+2026-10-15T01:16:48.5862690Z     EEF-CVE-2026-43966 (MEDIUM)
+2026-10-15T01:16:48.5863082Z     aka: CVE-2026-43966, GHSA-w4f7-4cxr-rv3c
+2026-10-15T01:16:48.5863619Z     HTTP Response Splitting via Non-VCHAR Bytes in cow_http_struct_hd:escape_string/2
+2026-10-15T01:16:48.5864208Z     https://osv.dev/vulnerability/EEF-CVE-2026-43966
+2026-10-15T01:16:48.5864565Z
+2026-10-15T01:16:48.5864803Z     EEF-CVE-2026-43969 (LOW)
+2026-10-15T01:16:48.5865195Z     aka: CVE-2026-43969, GHSA-g2wm-735q-3f56
+2026-10-15T01:16:48.5865733Z     Cookie Request Header Injection via Unvalidated Encoder in cow_cookie:cookie/1
+2026-10-15T01:16:48.5866317Z     https://osv.dev/vulnerability/EEF-CVE-2026-43969
+2026-10-15T01:16:48.5866746Z   db_connection 2.10.2
+2026-10-15T01:16:48.5867105Z   decimal 3.1.1 VULNERABLE!
+2026-10-15T01:16:48.5867470Z     EEF-CVE-2026-97853 (MEDIUM)
+2026-10-15T01:16:48.5867856Z     aka: CVE-2026-97853, GHSA-6c27-994x-c52f
+2026-10-15T01:16:48.5868727Z     Unbounded allocation in decimal Decimal.round/3 driven by the places argument enables DoS
+2026-10-15T01:16:48.5869332Z     https://osv.dev/vulnerability/EEF-CVE-2026-97853
+2026-10-15T01:16:48.5869758Z   dns_cluster 0.2.0
+2026-10-15T01:16:48.5870106Z   earmark_parser 1.4.45
+2026-10-15T01:16:48.5870449Z   ecto 3.13.6
+2026-10-15T01:16:48.5871015Z   ecto_sql 3.13.5
+2026-10-15T01:16:48.5871354Z   elixir_make 0.9.0
+2026-10-15T01:16:48.5871823Z   elixlsx 0.6.0
+2026-10-15T01:16:48.5872159Z   eqrcode 0.2.1
+2026-10-15T01:16:48.5872494Z   esaml 4.6.0 VULNERABLE!
+2026-10-15T01:16:48.5872860Z     EEF-CVE-2026-28809 (MEDIUM)
+2026-10-15T01:16:48.5873250Z     aka: CVE-2026-28809, GHSA-4g2h-vm7x-747c
+2026-10-15T01:16:48.5873725Z     XXE in esaml SAML library allows local file read and potential SSRF
+2026-10-15T01:16:48.5874252Z     https://osv.dev/vulnerability/EEF-CVE-2026-28809
+2026-10-15T01:16:48.5874687Z   ex_json_schema 0.11.5
+2026-10-15T01:16:48.5875040Z   expo 1.1.1
+2026-10-15T01:16:48.5875360Z   expty 0.2.1
+2026-10-15T01:16:48.5875685Z   finch 0.23.0
+2026-10-15T01:16:48.5876005Z   fine 0.1.6
+2026-10-15T01:16:48.5876326Z   gen_smtp 1.3.0
+2026-10-15T01:16:48.5876659Z   gettext 1.0.2
+2026-10-15T01:16:48.5876984Z   hpax 1.1.0
+2026-10-15T01:16:48.5877303Z   idna 7.1.0
+2026-10-15T01:16:48.5877618Z   image 0.67.0
+2026-10-15T01:16:48.5877998Z   jason 1.4.5
+2026-10-15T01:16:48.5878467Z   jose 1.11.12
+2026-10-15T01:16:48.5878837Z   lazy_html 0.1.13
+2026-10-15T01:16:48.5879169Z   mime 2.0.7
+2026-10-15T01:16:48.5879487Z   mint 1.10.2
+2026-10-15T01:16:48.5879917Z   mix_audit 2.1.5
+2026-10-15T01:16:48.5880232Z   nimble_options 1.1.1
+2026-10-15T01:16:48.5880390Z   nimble_pool 1.1.0
+2026-10-15T01:16:48.5880615Z   nimble_totp 1.0.0
+2026-10-15T01:16:48.5880742Z   oban 2.21.1
+2026-10-15T01:16:48.5880864Z   phoenix 1.8.9
+2026-10-15T01:16:48.5880990Z   phoenix_ecto 4.7.0
+2026-10-15T01:16:48.5881121Z   phoenix_html 4.3.0
+2026-10-15T01:16:48.5881259Z   phoenix_live_dashboard 0.8.7
+2026-10-15T01:16:48.5881416Z   phoenix_live_view 1.1.33
+2026-10-15T01:16:48.5881553Z   phoenix_pubsub 2.2.0
+2026-10-15T01:16:48.5881784Z   phoenix_template 1.0.4
+2026-10-15T01:16:48.5881917Z   plug 1.20.3
+2026-10-15T01:16:48.5882034Z   plug_cowboy 2.9.0
+2026-10-15T01:16:48.5882156Z   plug_crypto 2.2.0
+2026-10-15T01:16:48.5882281Z   postgrex 0.22.4
+2026-10-15T01:16:48.5882398Z   ranch 1.8.1
+2026-10-15T01:16:48.5882513Z   req 0.6.3
+2026-10-15T01:16:48.5882624Z   saxy 1.6.0
+2026-10-15T01:16:48.5882741Z   sobelow 0.14.1
+2026-10-15T01:16:48.5882871Z   sweet_xml 0.7.5
+2026-10-15T01:16:48.5882985Z   swoosh 1.28.1
+2026-10-15T01:16:48.5883101Z   telemetry 1.4.2
+2026-10-15T01:16:48.5883227Z   telemetry_metrics 1.1.0
+2026-10-15T01:16:48.5883378Z   telemetry_metrics_prometheus_core 1.2.1
+2026-10-15T01:16:48.5883541Z   telemetry_poller 1.3.0
+2026-10-15T01:16:48.5883677Z   thousand_island 1.5.0
+2026-10-15T01:16:48.5883803Z   vix 0.38.0
+2026-10-15T01:16:48.5883912Z   wax_ 0.7.0
+2026-10-15T01:16:48.5884021Z   websock 0.5.3
+2026-10-15T01:16:48.5884142Z   websock_adapter 0.6.0
+2026-10-15T01:16:48.5884269Z   x509 0.9.2
+2026-10-15T01:16:48.5884382Z   xlsx_reader 0.8.11
+2026-10-15T01:16:48.5884506Z   xml_builder 2.4.1
+2026-10-15T01:16:48.5884625Z   yamerl 0.10.0
+2026-10-15T01:16:48.5884741Z   yaml_elixir 2.12.2
+2026-10-15T01:16:48.6171221Z Found packages with security advisories, see above for details
+2026-10-15T01:16:48.7320592Z All dependencies are up to date
+2026-10-15T01:16:48.7492394Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:16:48.7493351Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:16:48.7493884Z [36;1mmix sobelow --skip --exit Low[0m
+2026-10-15T01:16:48.7559999Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:16:48.7560177Z env:
+2026-10-15T01:16:48.7560366Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:16:48.7560622Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:16:48.7560823Z ##[endgroup]
+2026-10-15T01:16:49.1913134Z Checking Sobelow version...
+2026-10-15T01:16:49.1916566Z
+2026-10-15T01:16:49.4132441Z A new version of Sobelow is available:
+2026-10-15T01:16:49.4132767Z mix archive.install hex sobelow
+2026-10-15T01:16:49.4132929Z
+2026-10-15T01:16:52.2040912Z ##############################################
+2026-10-15T01:16:52.2041848Z #                                            #
+2026-10-15T01:16:52.2042382Z #          Running Sobelow - v0.14.1         #
+2026-10-15T01:16:52.2042841Z #  Created by Griffin Byatt - @griffinbyatt  #
+2026-10-15T01:16:52.2043291Z #     NCC Group - https://nccgroup.trust     #
+2026-10-15T01:16:52.2043606Z #                                            #
+2026-10-15T01:16:52.2043988Z ##############################################
+2026-10-15T01:16:52.2044228Z
+2026-10-15T01:16:56.0431562Z [32mSQL.Query: SQL injection - Low Confidence[0m
+2026-10-15T01:16:56.0432874Z File: lib/barkpark/media/storage/local_write.ex
+2026-10-15T01:16:56.0433156Z Line: 133
+2026-10-15T01:16:56.0433375Z Function: check_address:115
+2026-10-15T01:16:56.0433608Z Variable: query
+2026-10-15T01:16:56.0433772Z
+2026-10-15T01:16:56.0433944Z -----------------------------------------------
+2026-10-15T01:16:56.0434125Z
+2026-10-15T01:17:24.8915713Z ... SCAN COMPLETE ...
+2026-10-15T01:17:24.8918560Z
+2026-10-15T01:17:24.9054122Z breaker-capture: ── this step FAILED (exit 1) ──────────────────────────
+2026-10-15T01:17:24.9054462Z breaker-capture: the command that failed, verbatim:
+2026-10-15T01:17:24.9054708Z breaker-capture:     mix sobelow --skip --exit Low
+2026-10-15T01:17:24.9089540Z ##[warning]mix sobelow --skip --exit Low
+2026-10-15T01:17:24.9122404Z ##[error]Process completed with exit code 1.
+2026-10-15T01:17:24.9157539Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:17:24.9158345Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:17:24.9158833Z [36;1mbash scripts/sobelow-baseline-setdiff.sh --selftest[0m
+2026-10-15T01:17:24.9211297Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:17:24.9211458Z env:
+2026-10-15T01:17:24.9211795Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:17:24.9212069Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:17:24.9212277Z ##[endgroup]
+2026-10-15T01:17:24.9573220Z ok   byte-identical                     exit=0
+2026-10-15T01:17:24.9700357Z ok   reordered, same set                exit=0
+2026-10-15T01:17:24.9854372Z ok   one row ADDED                      exit=1
+2026-10-15T01:17:25.0004863Z ok   one row REMOVED                    exit=1
+2026-10-15T01:17:25.0155650Z ok   added hidden in reorder            exit=1
+2026-10-15T01:17:25.0231962Z ok   OLD empty -> fail closed           exit=2
+2026-10-15T01:17:25.0308908Z ok   NEW empty -> fail closed           exit=2
+2026-10-15T01:17:25.0386547Z ok   blank-only -> fail closed          exit=2
+2026-10-15T01:17:25.0532891Z ok   missing file -> fail closed        exit=2
+2026-10-15T01:17:25.0679635Z ok   label: reordered                   reordering_only=true
+2026-10-15T01:17:25.0825370Z ok   label: byte-identical              reordering_only=false
+2026-10-15T01:17:25.0837039Z SELFTEST PASS
+2026-10-15T01:17:25.0899686Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:17:25.0900668Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:17:25.0901246Z [36;1mbash scripts/sobelow-baseline-reconcile.sh "/home/runner/work/_temp/sobelow-baseline-reconcile"[0m
+2026-10-15T01:17:25.0955256Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:17:25.0955420Z env:
+2026-10-15T01:17:25.0955590Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:17:25.0955850Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:17:25.0956075Z ##[endgroup]
+2026-10-15T01:17:31.6684745Z ##############################################
+2026-10-15T01:17:31.6685331Z #                                            #
+2026-10-15T01:17:31.6685987Z #          Running Sobelow - v0.14.1         #
+2026-10-15T01:17:31.6686383Z #  Created by Griffin Byatt - @griffinbyatt  #
+2026-10-15T01:17:31.6686703Z #     NCC Group - https://nccgroup.trust     #
+2026-10-15T01:17:31.6686988Z #                                            #
+2026-10-15T01:17:31.6687311Z ##############################################
+2026-10-15T01:17:31.6687490Z
+2026-10-15T01:17:31.7217281Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7218348Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7218700Z Pipeline: media_mutate
+2026-10-15T01:17:31.7218932Z Line: 1070
+2026-10-15T01:17:31.7219175Z
+2026-10-15T01:17:31.7219487Z -----------------------------------------------
+2026-10-15T01:17:31.7219821Z
+2026-10-15T01:17:31.7220196Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7220614Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7220914Z Pipeline: user_auth
+2026-10-15T01:17:31.7221111Z Line: 1000
+2026-10-15T01:17:31.7221242Z
+2026-10-15T01:17:31.7221428Z -----------------------------------------------
+2026-10-15T01:17:31.7221763Z
+2026-10-15T01:17:31.7222166Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7222777Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7223105Z Pipeline: session_token_root
+2026-10-15T01:17:31.7223334Z Line: 926
+2026-10-15T01:17:31.7223441Z
+2026-10-15T01:17:31.7223608Z -----------------------------------------------
+2026-10-15T01:17:31.7223800Z
+2026-10-15T01:17:31.7224140Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7224485Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7224739Z Pipeline: scoped_media_mutate
+2026-10-15T01:17:31.7224986Z Line: 596
+2026-10-15T01:17:31.7225086Z
+2026-10-15T01:17:31.7225250Z -----------------------------------------------
+2026-10-15T01:17:31.7225435Z
+2026-10-15T01:17:31.7225673Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7226005Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7226255Z Pipeline: scoped_mutate
+2026-10-15T01:17:31.7226453Z Line: 559
+2026-10-15T01:17:31.7226545Z
+2026-10-15T01:17:31.7226708Z -----------------------------------------------
+2026-10-15T01:17:31.7226893Z
+2026-10-15T01:17:31.7227148Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7227488Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7227744Z Pipeline: shared_media_api
+2026-10-15T01:17:31.7227961Z Line: 510
+2026-10-15T01:17:31.7228058Z
+2026-10-15T01:17:31.7228226Z -----------------------------------------------
+2026-10-15T01:17:31.7228412Z
+2026-10-15T01:17:31.7228671Z [31mConfig.CSRF: Missing CSRF Protections - High Confidence[0m
+2026-10-15T01:17:31.7229029Z File: lib/barkpark_web/router.ex
+2026-10-15T01:17:31.7229282Z Pipeline: sso_browser
+2026-10-15T01:17:31.7229901Z Line: 226
+2026-10-15T01:17:31.7230006Z
+2026-10-15T01:17:31.7230167Z -----------------------------------------------
+2026-10-15T01:17:31.7230346Z
+2026-10-15T01:17:31.8479965Z [31mConfig.HTTPS: HTTPS Not Enabled - High Confidence[0m
+2026-10-15T01:17:31.8480490Z
+2026-10-15T01:17:31.8481013Z -----------------------------------------------
+2026-10-15T01:17:31.8481386Z
+2026-10-15T01:17:35.5629255Z [32mSQL.Query: SQL injection - Low Confidence[0m
+2026-10-15T01:17:35.5629821Z File: lib/barkpark/media/storage/local_write.ex
+2026-10-15T01:17:35.5630142Z Line: 133
+2026-10-15T01:17:35.5630375Z Function: check_address:115
+2026-10-15T01:17:35.5630673Z Variable: query
+2026-10-15T01:17:35.5630817Z
+2026-10-15T01:17:35.5631173Z -----------------------------------------------
+2026-10-15T01:17:35.5631380Z
+2026-10-15T01:18:04.7792702Z [32mXSS.Raw: XSS - Low Confidence[0m
+2026-10-15T01:18:04.7793218Z File: lib/barkpark_web/layouts/bulldocs.html.heex
+2026-10-15T01:18:04.7793556Z Line: 95
+2026-10-15T01:18:04.7793881Z Variable: Elixir.Barkpark.PortableDoc.Render.Stylesheet
+2026-10-15T01:18:04.7794095Z
+2026-10-15T01:18:04.7794407Z -----------------------------------------------
+2026-10-15T01:18:04.7794714Z
+2026-10-15T01:18:04.7794882Z [32mXSS.Raw: XSS - Low Confidence[0m
+2026-10-15T01:18:04.7795149Z File: lib/barkpark_web/layouts/quiz.html.heex
+2026-10-15T01:18:04.7795388Z Line: 21
+2026-10-15T01:18:04.7795634Z Variable: Elixir.Barkpark.PortableDoc.Render.Stylesheet
+2026-10-15T01:18:04.7795848Z
+2026-10-15T01:18:04.7795998Z -----------------------------------------------
+2026-10-15T01:18:04.7796173Z
+2026-10-15T01:18:04.7796276Z ... SCAN COMPLETE ...
+2026-10-15T01:18:04.7796393Z
+2026-10-15T01:18:04.8144423Z Sobelow reconciliation artifact ready for human review: /home/runner/work/_temp/sobelow-baseline-reconcile
+2026-10-15T01:18:04.8186021Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:18:04.8186800Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:18:04.8187297Z [36;1mbash scripts/sobelow-fresh-finding-guard.sh --selftest[0m
+2026-10-15T01:18:04.8237547Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:18:04.8237687Z env:
+2026-10-15T01:18:04.8237839Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:18:04.8238072Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:18:04.8238264Z ##[endgroup]
+2026-10-15T01:18:04.8438429Z fixtures against the guard as written:
+2026-10-15T01:18:04.8628035Z   ok    honest scanner, main already red       exit 0
+2026-10-15T01:18:04.8814740Z   ok    honest scanner, main green             exit 0
+2026-10-15T01:18:04.8980290Z   ok    scanner never names the probe          exit 1
+2026-10-15T01:18:04.9098526Z   ok    probe named BEFORE it is planted       exit 1
+2026-10-15T01:18:04.9134633Z
+2026-10-15T01:18:04.9135468Z fixtures against MUTANT: probe-name grep neutered:
+2026-10-15T01:18:04.9305990Z   ok    honest scanner, main already red       exit 0
+2026-10-15T01:18:04.9475794Z   ok    honest scanner, main green             exit 0
+2026-10-15T01:18:04.9759688Z   ok    probe named BEFORE it is planted       exit 1
+2026-10-15T01:18:04.9760152Z   ok    mutation caught: neutering the probe-name grep reds the fixtures
+2026-10-15T01:18:04.9796087Z
+2026-10-15T01:18:04.9796732Z fixtures against MUTANT: transition assertion removed:
+2026-10-15T01:18:04.9978963Z   ok    honest scanner, main already red       exit 0
+2026-10-15T01:18:05.0157948Z   ok    honest scanner, main green             exit 0
+2026-10-15T01:18:05.0321796Z   ok    scanner never names the probe          exit 1
+2026-10-15T01:18:05.0515770Z   ok    mutation caught: removing the transition assertion reds the fixtures
+2026-10-15T01:18:05.0516125Z
+2026-10-15T01:18:05.0516462Z SELFTEST PASS: the guard greens on a real transition (red or green main), reds when the scanner
+2026-10-15T01:18:05.0517300Z                never names the probe, reds when the probe is named before it exists, and each
+2026-10-15T01:18:05.0517591Z                of those two assertions is proven load-bearing by deleting it.
+2026-10-15T01:18:05.0585998Z ##[group]Run if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+2026-10-15T01:18:05.0586807Z [36;1mif [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block[0m
+2026-10-15T01:18:05.0587358Z [36;1mbash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow[0m
+2026-10-15T01:18:05.0641338Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:18:05.0641487Z env:
+2026-10-15T01:18:05.0641771Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:18:05.0642085Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:18:05.0642287Z ##[endgroup]
+2026-10-15T01:18:05.1658970Z PASS: /home/runner/work/barkpark/barkpark/api/scripts/sobelow-anchor-tokens.tsv matches the detector modules in deps/sobelow
+2026-10-15T01:18:05.1728526Z ##[group]Run echo "::notice title=Sobelow gate self-proofs skipped::SKIPPED: no Sobelow gate input changed, so the fresh-finding guard did not re-run and the baseline reconcile ran only if Sobelow failed (reconcile: success). Inputs: api/.sobelow-skips api/.sobelow-conf api/mix.exs api/mix.lock api/lib/barkpark/sobelow_fresh_finding_guard.ex api/scripts/sobelow-fresh-finding-guard.sh api/scripts/sobelow-baseline-reconcile.sh api/scripts/sobelow-baseline-setdiff.sh .github/workflows/security.yml scripts/breaker-capture.sh. Both run on every push to main that runs this job."
+2026-10-15T01:18:05.1730669Z [36;1mecho "::notice title=Sobelow gate self-proofs skipped::SKIPPED: no Sobelow gate input changed, so the fresh-finding guard did not re-run and the baseline reconcile ran only if Sobelow failed (reconcile: success). Inputs: api/.sobelow-skips api/.sobelow-conf api/mix.exs api/mix.lock api/lib/barkpark/sobelow_fresh_finding_guard.ex api/scripts/sobelow-fresh-finding-guard.sh api/scripts/sobelow-baseline-reconcile.sh api/scripts/sobelow-baseline-setdiff.sh .github/workflows/security.yml scripts/breaker-capture.sh. Both run on every push to main that runs this job."[0m
+2026-10-15T01:18:05.1783959Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:18:05.1784105Z env:
+2026-10-15T01:18:05.1784267Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:18:05.1784513Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:18:05.1784712Z ##[endgroup]
+2026-10-15T01:18:05.1853802Z ##[notice]SKIPPED: no Sobelow gate input changed, so the fresh-finding guard did not re-run and the baseline reconcile ran only if Sobelow failed (reconcile: success). Inputs: api/.sobelow-skips api/.sobelow-conf api/mix.exs api/mix.lock api/lib/barkpark/sobelow_fresh_finding_guard.ex api/scripts/sobelow-fresh-finding-guard.sh api/scripts/sobelow-baseline-reconcile.sh api/scripts/sobelow-baseline-setdiff.sh .github/workflows/security.yml scripts/breaker-capture.sh. Both run on every push to main that runs this job.
+2026-10-15T01:18:05.1889327Z ##[group]Run actions/upload-artifact@v4
+2026-10-15T01:18:05.1889512Z with:
+2026-10-15T01:18:05.1889654Z   name: sobelow-baseline-otp-27.0-elixir-1.18.1
+2026-10-15T01:18:05.1889871Z   path: /home/runner/work/_temp/sobelow-baseline-reconcile
+2026-10-15T01:18:05.1890064Z   include-hidden-files: true
+2026-10-15T01:18:05.1890207Z   if-no-files-found: error
+2026-10-15T01:18:05.1890344Z   compression-level: 6
+2026-10-15T01:18:05.1890477Z   overwrite: false
+2026-10-15T01:18:05.1890594Z env:
+2026-10-15T01:18:05.1890747Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:18:05.1890984Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:18:05.1891324Z ##[endgroup]
+2026-10-15T01:18:05.2980860Z (node:3184) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-15T01:18:05.2981320Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-15T01:18:05.3023250Z With the provided path, there will be 4 files uploaded
+2026-10-15T01:18:05.3029268Z Artifact name is valid!
+2026-10-15T01:18:05.3029575Z Root directory input is valid!
+2026-10-15T01:18:05.7025957Z Beginning upload of artifact content to blob storage
+2026-10-15T01:18:05.7160472Z (node:3184) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-15T01:18:05.9494134Z Uploaded bytes 1794
+2026-10-15T01:18:06.0117230Z Finished uploading artifact content to blob storage!
+2026-10-15T01:18:06.0117896Z SHA256 digest of uploaded artifact zip is e48521a0f5d4d6a50d93487d89c57c1189d5aba3644365b49dc603026e86bd70
+2026-10-15T01:18:06.0118471Z Finalizing artifact upload
+2026-10-15T01:18:06.2704580Z Artifact sobelow-baseline-otp-27.0-elixir-1.18.1.zip successfully finalized. Artifact ID 11940228428
+2026-10-15T01:18:06.2705427Z Artifact sobelow-baseline-otp-27.0-elixir-1.18.1 has been successfully uploaded! Final size is 1794 bytes. Artifact ID is 11940228428
+2026-10-15T01:18:06.2709896Z Artifact download URL: https://github.com/FRIKKern/barkpark/actions/runs/38664708907/artifacts/11940228428
+2026-10-15T01:18:06.2833624Z ##[group]Run bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-sobelow -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+2026-10-15T01:18:06.2834184Z [36;1mbash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-sobelow -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"[0m
+2026-10-15T01:18:06.2886743Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:18:06.2886903Z env:
+2026-10-15T01:18:06.2887067Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:18:06.2887313Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:18:06.2888265Z   STEP_OUTCOMES: {
+  "s1": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  },
+  "s2": {
+    "outputs": {},
+    "outcome": "failure",
+    "conclusion": "success"
+  },
+  "s7": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  },
+  "s3": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  },
+  "s4": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  },
+  "s5": {
+    "outputs": {},
+    "outcome": "skipped",
+    "conclusion": "skipped"
+  },
+  "s6": {
+    "outputs": {},
+    "outcome": "success",
+    "conclusion": "success"
+  }
+}
+2026-10-15T01:18:06.2889845Z   STEP_NAMES: {"s1": "Fetch deps", "s2": "Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)", "s3": "Reconcile baseline on the pinned CI toolchain", "s4": "Fresh-finding guard can lose (selftest first, like its two siblings below)", "s5": "Prove a fresh String.to_atom finding still reds", "s6": "Anchor-token table still matches the Sobelow detector modules", "s7": "Baseline setdiff can lose (selftest first, then the reconcile step runs it bare)"}
+2026-10-15T01:18:06.2890784Z   JOB_NAME: Sobelow static analysis (regression gate, baseline .sobelow-skips)
+2026-10-15T01:18:06.2891012Z   WORKFLOW_FILE: security.yml
+2026-10-15T01:18:06.2892936Z   GITHUB_TOKEN: ***
+2026-10-15T01:18:06.2893069Z ##[endgroup]
+2026-10-15T01:18:09.2704414Z main-red-breaker: FAIL — 'Sobelow static analysis (regression gate, baseline .sobelow-skips)' failed on a step main does not: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding). Main RAN that step and it PASSED, so the red is this PR's own. (Main run 38656533063, head 1872e11a, concluded success 82 min ago, after skipping 0 uninformative cancelled/skipped run(s).)
+2026-10-15T01:18:09.2719456Z ##[error]'Sobelow static analysis (regression gate, baseline .sobelow-skips)' failed on a step main runs and passes: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding).
+2026-10-15T01:18:09.2732130Z instrument main-red-breaker-sobelow: exit 1 -> MEASURED-DEFECT
+2026-10-15T01:18:09.2756438Z ##[error]Process completed with exit code 1.
+2026-10-15T01:18:09.2781368Z ##[group]Run echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+2026-10-15T01:18:09.2782096Z [36;1mecho "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"[0m
+2026-10-15T01:18:09.2836552Z shell: /usr/bin/bash -e {0}
+2026-10-15T01:18:09.2836706Z env:
+2026-10-15T01:18:09.2836875Z   INSTALL_DIR_FOR_OTP: /home/runner/work/_temp/.setup-beam/otp
+2026-10-15T01:18:09.2837134Z   INSTALL_DIR_FOR_ELIXIR: /home/runner/work/_temp/.setup-beam/elixir
+2026-10-15T01:18:09.2837356Z   BP_STEP_VERDICT: MEASURED-DEFECT
+2026-10-15T01:18:09.2837513Z ##[endgroup]
+2026-10-15T01:18:09.2992283Z Post job cleanup.
+2026-10-15T01:18:09.3614573Z [command]/usr/bin/git version
+2026-10-15T01:18:09.3656458Z git version 2.55.0
+2026-10-15T01:18:09.3681296Z Temporarily overriding HOME='/home/runner/work/_temp/412af1ee-a81b-46a2-b579-7b6d2fcfcf67' before making global git config changes
+2026-10-15T01:18:09.3682193Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-15T01:18:09.3685054Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/barkpark/barkpark
+2026-10-15T01:18:09.3714772Z Removing SSH command configuration
+2026-10-15T01:18:09.3719633Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-15T01:18:09.3751020Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-15T01:18:09.3979621Z Removing HTTP extra header
+2026-10-15T01:18:09.3985374Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-15T01:18:09.4023190Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-15T01:18:09.4253611Z Removing includeIf entries pointing to credentials config files
+2026-10-15T01:18:09.4259415Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-15T01:18:09.4289565Z includeif.gitdir:/home/runner/work/barkpark/barkpark/.git.path
+2026-10-15T01:18:09.4309192Z includeif.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path
+2026-10-15T01:18:09.4309545Z includeif.gitdir:/github/workspace/.git.path
+2026-10-15T01:18:09.4309811Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-15T01:18:09.4310881Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/barkpark/barkpark/.git.path
+2026-10-15T01:18:09.4323927Z /home/runner/work/_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:18:09.4332131Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/barkpark/barkpark/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-b808e7b9\-6cbe\-4f5e\-b1c0\-247dd1b4827d\.config
+2026-10-15T01:18:09.4365298Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path
+2026-10-15T01:18:09.4388613Z /home/runner/work/_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:18:09.4394596Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/barkpark/barkpark/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-b808e7b9\-6cbe\-4f5e\-b1c0\-247dd1b4827d\.config
+2026-10-15T01:18:09.4430697Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-15T01:18:09.4453184Z /github/runner_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:18:09.4458221Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-b808e7b9\-6cbe\-4f5e\-b1c0\-247dd1b4827d\.config
+2026-10-15T01:18:09.4486726Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-15T01:18:09.4508758Z /github/runner_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config
+2026-10-15T01:18:09.4513929Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-b808e7b9\-6cbe\-4f5e\-b1c0\-247dd1b4827d\.config
+2026-10-15T01:18:09.4546791Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-15T01:18:09.4744863Z Removing credentials config '/home/runner/work/_temp/git-credentials-b808e7b9-6cbe-4f5e-b1c0-247dd1b4827d.config'
+2026-10-15T01:18:09.4876197Z Evaluate and set job outputs
+2026-10-15T01:18:09.4880988Z Set output 'verdict'
+2026-10-15T01:18:09.4882453Z Cleaning up orphan processes
+2026-10-15T01:18:09.5085297Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

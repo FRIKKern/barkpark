@@ -1,0 +1,3 @@
+
+ERROR:  media object address is reserved
+CONTEXT:  PL/pgSQL function reserve_media_object_v1() line 40 at RAISE

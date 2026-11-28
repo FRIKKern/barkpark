@@ -1,0 +1,13 @@
+{
+  "exit": 0,
+  "stdout": "Elixir 1.19.5\nformatted C:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/lib/barkpark/managed_runtime/write_admission.ex\nformatted C:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/lib/barkpark/media/blobstore/local.ex\nformatted C:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/lib/barkpark/media/storage/local_write.ex\nformatted C:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/managed_runtime/write_admission/physical_effect_test.exs\nformatted C:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs\nformatted C:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_live.exs\n",
+  "stderr": "",
+  "files": [
+    "api/lib/barkpark/managed_runtime/write_admission.ex",
+    "api/lib/barkpark/media/blobstore/local.ex",
+    "api/lib/barkpark/media/storage/local_write.ex",
+    "api/test/barkpark/managed_runtime/write_admission/physical_effect_test.exs",
+    "api/test/barkpark/media/local_write_test.exs",
+    "api/test/barkpark/media/local_write_live.exs"
+  ]
+}

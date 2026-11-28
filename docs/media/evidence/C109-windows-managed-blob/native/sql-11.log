@@ -1,0 +1,4 @@
+
+ERROR:  media object address is reserved
+CONTEXT:  PL/pgSQL function reserve_media_object_v1() line 40 at RAISE
+COPY media_files, line 1: "3f1f67f7-3c99-4400-9d7d-fd0a6dc6dbda	replacement	replacement	d/b69cd5f1-0c75-4b02-8642-25bcf4e70029/..."

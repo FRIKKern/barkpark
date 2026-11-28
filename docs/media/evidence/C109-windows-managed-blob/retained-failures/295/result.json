@@ -1,0 +1,45 @@
+{
+  "status": "failed",
+  "startedAt": "2026-10-15T01:16:25.571Z",
+  "root": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-Jwbm9Y",
+  "data": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-Jwbm9Y\\data",
+  "release": "C:\\Users\\Frikk\\Documents\\GitHub\\barkdown\\runtime\\C109-full-current-293",
+  "source": "ae794bec291367b8f23fc553156b78e3af879b41",
+  "build": ".git/C109-runtime294/result.json",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "osRelease": "10.0.26200"
+  },
+  "checks": [
+    {
+      "name": "fresh owned release migrates versioned server DDL and boots",
+      "record": {
+        "version": 1,
+        "hostPid": 35444,
+        "hostStartedAt": "2026-10-15T01:16:25.6125380Z",
+        "pid": 38024,
+        "startedAt": "2026-10-15T01:17:11.2317886Z",
+        "port": 60568,
+        "pgPort": 60569,
+        "bootId": "120a5fab-df15-4c2c-bc74-1f522d9128ba",
+        "launchedAt": "2026-10-15T01:17:12.116Z"
+      }
+    },
+    {
+      "name": "four real uploads bind raw scope, Unicode display names and native originals"
+    }
+  ],
+  "limits": [
+    "Internal transaction only; HTTP delete unchanged",
+    "Original-blob writer lock/admission proof only; no native cleanup, HTTP adoption, rendition/cache/remote writer coverage or full reconciliation",
+    "No real library, Mac, admission settlement, installer or stage acceptance",
+    "Full current-source locked backend built on Windows; reader/package/adoption acceptance separate"
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: Owned ExUnit proof failed; retain .git/C109-native295/exunit-unit.log\n\n1 !== 0\n\n    at proof (file:///C:/Users/Frikk/Documents/GitHub/barkdown/.git/media-fence-native295.mjs:24:1213)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///C:/Users/Frikk/Documents/GitHub/barkdown/.git/media-fence-native295.mjs:35:3",
+  "finalPgStatus": 3,
+  "finalPgSignal": null,
+  "elapsedMs": 120145,
+  "finishedAt": "2026-10-15T01:18:25.717Z",
+  "privateDataRetained": true
+}
