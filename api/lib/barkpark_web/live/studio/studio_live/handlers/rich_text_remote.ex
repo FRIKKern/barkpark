@@ -96,7 +96,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
     socket
     |> drop_holds()
-    |> __MODULE__.RowDraws.record_form(form)
+    |> __MODULE__.RowDraws.reload(form)
     |> tell(all, %{reload: true})
   end
 
@@ -194,7 +194,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   (#29178 review, round 2: J2, J2t, J4c).
   """
   def split(socket, doc, seen, owners) when is_list(seen) and is_map(doc) do
-    moved = KeylessShift.lists(socket.assigns[:editor_form], owners)
+    moved = KeylessShift.lists(socket, owners, doc)
 
     # A log of another document is none of this one's (a forget lost).
     {log, holds, folded, born} =
@@ -454,7 +454,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
       socket
       |> assign(editor_rt_born: born, editor_rt_born_doc: PostIdentity.of(socket))
-      |> __MODULE__.RowDraws.record_form(form)
+      |> __MODULE__.RowDraws.record_form(form, :born)
       |> send_values(values)
     end
   end
@@ -485,6 +485,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_born: %{},
         editor_rt_page: nil,
         editor_rt_row_draws: nil,
+        editor_rt_row_first: nil,
         editor_rt_rekeyed: nil,
         editor_rt_removed: nil
       )
