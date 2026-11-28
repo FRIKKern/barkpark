@@ -106,6 +106,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   end
 
   @doc """
+  When the socket first had each draw it keeps at the keyless row rich text
+  `path` (`first/3`), as a list.
+  """
+  def firsts(socket, path) do
+    case socket.assigns[:editor_rt_row_first] do
+      {doc, _n, %{} = firsts} when not is_nil(doc) ->
+        if doc == PostIdentity.of(socket),
+          do: for({{{^path, ""}, _digest}, first} <- firsts, do: first),
+          else: []
+
+      _ ->
+        []
+    end
+  end
+
+  @doc """
   The value the draw `digest` of the row `key` at `path` showed. A number
   is the 27-bit digest a page drawn before the 64-bit one posts
   (task-9b705d11bf85560e): read by the old hash of each draw, as before.
