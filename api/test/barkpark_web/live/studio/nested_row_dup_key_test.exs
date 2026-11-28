@@ -1,12 +1,12 @@
 defmodule BarkparkWeb.Studio.NestedRowDupKeyTest do
   @moduledoc """
-  task-f10341a15bcac784 (#29164 review, E7b). Rows with no `_key` go by
-  their index. B inserts a keyless item before A's; A's post, typed on the
-  first draw, names A's item by its old index, and the fold writes it into
-  the item now there, B's. `UnderLock` read that row's draw by index, but
-  `ObjectRebase` rebased only rows with a `_key`, so A's text was written
-  over B's new item with no banner. A keyless row is now read against the
-  keyless row at its index: merged, or the store's kept and A held.
+  task-a35e29de94927377 (#29165 review, W1). Two rows of one array share a
+  `_key` (written past the API's own checks). B inserts a row; A's post,
+  typed on the draw before it, names A's row by that key, which names no
+  one row, and the fold wrote A's leaves by the old index: into B's new
+  row, with no banner. Such a key now goes by index only while the rows
+  are the ones the post names; else A's leaves are dropped and A's words
+  shown in the banner (`DroppedRows`).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -17,7 +17,6 @@ defmodule BarkparkWeb.Studio.NestedRowDupKeyTest do
   alias BarkparkWeb.Studio.StudioLive.PostIdentity
 
   @moduletag :studio_live
-  @rb "Someone else rewrote"
 
   defp rt, do: %{"name" => "rt", "title" => "rt", "type" => "richText"}
 
@@ -124,38 +123,76 @@ defmodule BarkparkWeb.Studio.NestedRowDupKeyTest do
   end
 
   defp kt(k, text), do: %{"_type" => "item", "_key" => k, "rt" => [block("k" <> text, text)]}
-  defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
+
+  defp lost(a),
+    do:
+      for(
+        {{:lost, n}, t} <- :sys.get_state(a.pid).socket.assigns[:editor_rt_clash] || %{},
+        do: {n, t}
+      )
 
   for surface <- [:desk, :studio] do
     @surface surface
 
-    test "#{surface} W1: two rows share _key d; B inserts n before them; A's stale post types in the first",
+    test "#{surface} W1: B inserts a row before two rows of one key; A types in the first: B's row kept, A's words shown",
          c do
       put_items(c, [kt("d", "alpha"), kt("d", "beta")])
       a = tab(c, @surface)
       owners = page_owners(a)
       b_saves(c, a, [kt("n", "zed B"), kt("d", "alpha"), kt("d", "beta")])
+
       html = autosave(a, [{"d", "<p>alpha A</p>"}, {"d", "<p>beta</p>"}], owners)
 
-      IO.puts(
-        "ZZW1 #{@surface} stored=#{inspect(items_words(stored(c)))} held=#{inspect(held(a))} banner=#{html =~ "doc-conflict-banner"}"
-      )
+      # Before: [["alpha A"], ["beta"], ["beta"]], B's "zed B" gone, no banner.
+      assert items_words(stored(c)) == [["zed B"], ["alpha"], ["beta"]],
+             "A's post was written over B's new row: #{inspect(items_words(stored(c)))}"
 
-      assert hd(items_words(stored(c))) == ["zed B"], "B's inserted row overwritten"
+      assert lost(a) == [{"doc[sections][0].items[0].rt", ["alpha A"]}]
+      assert html =~ "doc-conflict-lost"
     end
 
-    test "#{surface} W1b: B inserts n after them; A's stale post types in the second", c do
+    test "#{surface} W1: B inserts a row between them; A types in the second: B's row kept, A's words shown",
+         c do
       put_items(c, [kt("d", "alpha"), kt("d", "beta")])
       a = tab(c, @surface)
       owners = page_owners(a)
       b_saves(c, a, [kt("d", "alpha"), kt("n", "zed B"), kt("d", "beta")])
+
       html = autosave(a, [{"d", "<p>alpha</p>"}, {"d", "<p>beta A</p>"}], owners)
 
-      IO.puts(
-        "ZZW1 #{@surface} b stored=#{inspect(items_words(stored(c)))} held=#{inspect(held(a))} banner=#{html =~ "doc-conflict-banner"}"
-      )
+      # Before: [["alpha"], ["beta A"], ["beta"]].
+      assert items_words(stored(c)) == [["alpha"], ["zed B"], ["beta"]],
+             "A's post was written over B's new row: #{inspect(items_words(stored(c)))}"
 
-      assert Enum.at(items_words(stored(c)), 1) == ["zed B"], "B's inserted row overwritten"
+      assert lost(a) == [{"doc[sections][0].items[1].rt", ["beta A"]}]
+      assert html =~ "doc-conflict-lost"
+    end
+
+    test "#{surface} W1: B removes the first of them; A types in it: B's removal kept, A's words shown",
+         c do
+      put_items(c, [kt("d", "alpha"), kt("d", "beta")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [kt("d", "beta")])
+
+      html = autosave(a, [{"d", "<p>alpha A</p>"}, {"d", "<p>beta</p>"}], owners)
+
+      assert items_words(stored(c)) == [["beta"]],
+             "A's post was written over the row left: #{inspect(items_words(stored(c)))}"
+
+      assert lost(a) == [{"doc[sections][0].items[0].rt", ["alpha A"]}]
+      assert html =~ "doc-conflict-lost"
+    end
+
+    test "#{surface} control: rows of one key, nothing moved: A's words written by index", c do
+      put_items(c, [kt("d", "alpha"), kt("d", "beta")])
+      a = tab(c, @surface)
+
+      html = autosave(a, [{"d", "<p>alpha</p>"}, {"d", "<p>beta A</p>"}], page_owners(a))
+
+      assert items_words(stored(c)) == [["alpha"], ["beta A"]]
+      assert lost(a) == []
+      refute html =~ "doc-conflict-banner"
     end
   end
 end

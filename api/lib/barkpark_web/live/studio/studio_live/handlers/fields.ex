@@ -863,7 +863,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
          rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
-      case row_index(rows, key, i) do
+      case row_index(rows, key, i, posted_keys(keys, Enum.reverse(tl(posted)))) do
         nil -> :drop
         j -> row_path(rest, posted, [j | now], ctx)
       end
@@ -875,19 +875,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp row_path([seg | rest], posted, now, ctx),
     do: row_path(rest, [seg | posted], [seg | now], ctx)
 
-  # The row at `i` still has the key: `i`. Else the one row that has it
-  # now; none: dropped. Two rows of one key (written past the API's own
-  # checks): by index, as before, never matched to the first for both.
-  defp row_index(rows, key, i) do
-    if match?(%{"_key" => ^key}, Enum.at(rows, i)) do
-      i
-    else
-      case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
-        [] -> nil
-        [j] -> j
-        _ -> i
-      end
+  # The one row that has the key now; none: dropped. A key two rows share,
+  # in the form or in the post (written past the API's own checks), names
+  # no one row: by index while the rows are the ones the post names, in
+  # its order, else dropped. By index, B's row inserted before them took
+  # A's leaves (task-a35e29de94927377).
+  defp row_index(rows, key, i, posted) do
+    case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
+      [j] when not is_map_key(posted.twice, key) -> j
+      [] -> nil
+      _ -> if posted.at == form_keys(rows), do: i
     end
+  end
+
+  # The keys the post gives the rows of the array at `prefix`, by index,
+  # and those it gives more than one row.
+  defp posted_keys(keys, prefix) do
+    at =
+      for {path, key} <- keys,
+          Enum.drop(path, -1) == prefix,
+          into: %{},
+          do: {List.last(path), key}
+
+    twice =
+      at |> Map.values() |> Enum.frequencies() |> Map.filter(fn {_k, n} -> n > 1 end)
+
+    %{at: at, twice: twice}
+  end
+
+  defp form_keys(rows) do
+    for {%{"_key" => key}, j} <- Enum.with_index(rows), is_binary(key), into: %{}, do: {j, key}
   end
 
   defp form_at(form, path) do
