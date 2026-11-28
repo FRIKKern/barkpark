@@ -440,10 +440,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   it had (task-fe9d8741f0641f97). While A is held, the page shows A's view
   over theirs, and a post on it is A's: read against theirs, so it is
   written as typed.
-  """
-  def top(socket, posted, seen \\ nil)
 
-  def top(socket, posted, seen) when is_map(posted) do
+  `mode` is `:autosave` or `:save`. A Save is read against the value its
+  page showed too (`TextConfirmed.page_base/4`): a Save sent with the seen
+  of a value the socket has since taken over was written over the other
+  editor's save with no banner (#29174 review, R2s and R3). A Save is not
+  read for a rejoin: the rejoin hold lasts until a Save.
+  """
+  def top(socket, posted, seen \\ nil, mode \\ :autosave)
+
+  def top(socket, posted, seen, mode) when is_map(posted) do
     # `was` is the row the socket last took only because a top-level
     # wrapper remounts on every form generation. Not after a socket
     # rejoin: generation 0 gives the same wrapper id, and the wrapper is
@@ -471,7 +477,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
       # rejoin is read against the digest the page kept (`TextConfirmed`,
       # task-fe9d8741f0641f97) before a hold's view: typing on A's view
       # stays held until a Save or Reload.
-      case {seen && TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen), holds} do
+      rejoin =
+        mode == :autosave && seen &&
+          TextConfirmed.rejoin_seen(socket, name, Map.get(content, key), seen)
+
+      case {rejoin, holds} do
         {:unknown, _} ->
           {name, {[key], :unknown, nil}}
 
@@ -486,7 +496,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     end
   end
 
-  def top(_socket, _posted, _seen), do: %{}
+  def top(_socket, _posted, _seen, _mode), do: %{}
 
   defp fields(%{fields: fields}) when is_list(fields), do: fields
   defp fields(_schema), do: []

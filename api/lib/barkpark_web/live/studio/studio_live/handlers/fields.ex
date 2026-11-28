@@ -292,7 +292,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
               posted,
               params["_bp_rt_owner"]
             ),
-            RichTextRemote.UnderLock.top(socket, posted)
+            RichTextRemote.UnderLock.top(socket, posted, params["_bp_seen"], :save)
           )
 
         {doc, not_codes} = CodelistShape.split(doc, socket.assigns[:editor_schema])
@@ -317,6 +317,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          saved
          |> TextConfirmed.confirm(units, posted)
          |> RichTextRemote.hold(held)
+         |> TextConfirmed.wrote(socket, rich)
          |> TextConfirmed.paused(rich)
          |> row_draws()
          |> dropped(folded, params)}
@@ -705,6 +706,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {:noreply,
          saved
          |> RichTextRemote.hold(held)
+         |> TextConfirmed.wrote(socket, rich)
          |> TextConfirmed.paused(rich)
          |> row_draws()
          |> dropped(folded, params)}
