@@ -12,19 +12,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
 
   Each rich text of such a list is read as a draw not known, on the post
   with `_bp_rt_seen` (`RichTextRemote.split/4`) and without it
-  (`UnderLock.values/4`): the store kept, A held. A page re-rendered after
-  the insert draws an entry at every index, so its indexes match (R2r):
-  telling that from two rows of the same text needs the socket's draw
-  history, not the post (#29235 review, D1-D5).
+  (`UnderLock.values/4`): the store kept, A held.
+
+  A page re-rendered after the insert draws an entry at every index, so its
+  indexes match (R2r): the entry at i keeps A's draw (its editor sits in an
+  ignored wrapper), and that draw is the form's row j now. Two rows of one
+  text post the same shape (#29235 review, D1-D5), and the post can't tell
+  them apart. The socket's draw history can (`RowDraws.first/3`): the list
+  moved when A typed in row i (the post is not its draw), and ONE save of
+  another editor's both gave row j that draw there and gave row i the
+  value it holds now (task-8d968bba2cfa23c4). Rows of one text had it at
+  mount, or by A's own write: A's own typing changes row i, and B adding,
+  clearing or copying a row is no move (#29315 review, E1-E3). An empty
+  draw is never read as one: every new row has it. A Reload starts the
+  history again (`RowDraws.reload/2`): the page shows the form then
+  (RL1, RL2).
   """
 
+  alias Barkpark.Content.PortableText
+  alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Path
 
-  @doc "The moved lists' paths (`[\"sections\", 0, \"items\"]`), by the post's owner entries."
-  def lists(form, owners) do
-    form = form || %{}
+  @doc """
+  The moved lists' paths (`[\"sections\", 0, \"items\"]`), by the post's
+  owner entries and its values (`posted`, the post's `doc`).
+  """
+  def lists(socket, owners, posted) do
+    form = socket.assigns[:editor_form] || %{}
+    Enum.uniq(by_index(form, owners) ++ by_history(socket, form, owners, posted))
+  end
 
+  defp by_index(form, owners) do
     drawn =
       for entry <- List.wrap(owners),
           name <- [keyless(entry)],
@@ -44,6 +64,57 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
 
     for {list, at} <- drawn, at != keyless_rows(FormPath.get(form, list)), do: list
   end
+
+  # An entry's draw at i that A typed on, that is not the form's row i but
+  # the form's keyless row j, with words, and one save of another editor's
+  # gave row j that draw and row i its value now.
+  defp by_history(socket, form, owners, posted) do
+    for entry <- List.wrap(owners),
+        {name, digest} <- [keyless_draw(entry)],
+        is_binary(digest),
+        path = Path.parse_path(name),
+        length(path) >= 2,
+        i = row_index(path),
+        is_integer(i),
+        list = list_of(path),
+        rows = FormPath.get(form, list),
+        is_list(rows),
+        now = drawn(form, path),
+        now != digest,
+        j <- keyless_rows(rows),
+        j != i,
+        at = List.replace_at(path, -2, j),
+        drawn(form, at) == digest,
+        words?(FormPath.get(form, at)),
+        one_save?(RowDraws.first(socket, at, digest), RowDraws.first(socket, path, now)),
+        typed?(FormPath.get(posted, path), digest),
+        uniq: true,
+        do: list
+  end
+
+  defp one_save?({n, :theirs}, {n, :theirs}), do: true
+  defp one_save?(_at_j, _at_i), do: false
+
+  # The post's HTML at a row is not the draw its entry names.
+  defp typed?(html, digest) when is_binary(html),
+    do: CompositeField.drawn_digest(PortableText.from_html(html, [])) != digest
+
+  defp typed?(_html, _digest), do: false
+
+  # A value that is not only empty text blocks (an image block counts).
+  defp words?(blocks) when is_list(blocks), do: not Enum.all?(blocks, &wordless_block?/1)
+  defp words?(_value), do: false
+
+  defp wordless_block?(%{"children" => children}) when is_list(children),
+    do: Enum.all?(children, &wordless_span?/1)
+
+  defp wordless_block?(_block), do: false
+
+  defp wordless_span?(%{"text" => text}) when is_binary(text), do: String.trim(text) == ""
+  defp wordless_span?(%{} = span), do: not Map.has_key?(span, "text")
+  defp wordless_span?(_span), do: false
+
+  defp drawn(form, path), do: CompositeField.drawn_digest(FormPath.get(form, path))
 
   @doc "The list a row rich text's row is in."
   def list_of(path), do: Enum.drop(path, -2)
@@ -69,4 +140,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
   end
 
   defp keyless(_entry), do: nil
+
+  # An owner entry with no row key: its input name and the draw it names.
+  defp keyless_draw(entry) when is_binary(entry) do
+    case Jason.decode(entry) do
+      {:ok, [name, key, digest | _]} when is_binary(name) and key in [nil, ""] -> {name, digest}
+      _ -> nil
+    end
+  end
+
+  defp keyless_draw(_entry), do: nil
 end
