@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias Barkpark.Content
   alias Barkpark.Content.Forms
   alias Barkpark.Content.Forms.CodelistShape
+  alias Barkpark.Content.PortableText.ParseMemo
   alias BarkparkWeb.Components.Fields.ArrayField
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Handlers.ArrayItems
@@ -356,7 +357,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # outcome is read before the reload drops it (`:saved_over`).
   defp do_save(params, not_codes, socket, text, {held, rich, posted, typed}) do
     before = socket.assigns[:editor_form] || %{}
-    written = Shared.do_autosave(socket, params, :save)
+    written = autosave(socket, params, :save)
     text_held = TextUnderLock.held(written, text, params)
     {written, held} = RichTextRemote.UnderLock.acts(written, held, rich, {params, posted})
     # A rich text still held from before (`:still`) is not saved either: no
@@ -626,7 +627,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
   # server built. Only a browser post is read for codelist shape
   # (`CodelistShape`): a built one writes a stored value back as it is.
-  defp autosave_open(params, socket, origin) do
+  # One parse per distinct rich text post for the whole post: the desk's
+  # read of the page's value (`UnderLock.posted/4`) and the save's parse the
+  # same HTML (`PortableText.ParseMemo`, task-6a5c3e075299d4bc).
+  defp autosave_open(params, socket, origin),
+    do: ParseMemo.around(fn -> autosave_post(params, socket, origin) end)
+
+  defp autosave_post(params, socket, origin) do
     params = PostIdentity.no_marks(params)
     socket = socket |> track_touched(params) |> assign(editor_write_landed: nil)
 
@@ -686,7 +693,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         written =
           based
           |> RefusedSave.target(keys, path)
-          |> Shared.do_autosave(doc, :change)
+          |> autosave(doc, :change)
 
         text_held = TextUnderLock.held(written, text, doc)
 
@@ -722,6 +729,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {:noreply, socket}
     end
   end
+
+  # One parse per distinct rich text post for the whole write: the buffer's
+  # coerce and the save's edit read parse the same HTML
+  # (`PortableText.ParseMemo`, task-6a5c3e075299d4bc).
+  defp autosave(socket, params, trigger),
+    do: ParseMemo.around(fn -> Shared.do_autosave(socket, params, trigger) end)
 
   # Each row rich text the form now holds is a draw the page may show once a
   # remount reaches it: A's own array press (a duplicate's new key, a move)
@@ -869,7 +882,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
     with {:ok, key} <- Map.fetch(keys, Enum.reverse(posted)),
          rows when is_list(rows) <- form_at(form, Enum.reverse(now)) do
-      case row_index(rows, key, i) do
+      case row_index(rows, key, i, posted_keys(keys, Enum.reverse(tl(posted)))) do
         nil -> :drop
         j -> row_walk(rest, posted, [j | now], ctx)
       end
@@ -886,20 +899,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   defp row_walk([seg | rest], posted, now, ctx),
     do: row_walk(rest, [seg | posted], [seg | now], ctx)
 
-  # The row at `i` still has the key: `i`. Else the one row that has it
-  # now; none: dropped. Two rows of one key (written past the API's own
-  # checks): by index, as before, never matched to the first for both.
-  defp row_index(rows, key, i) do
-    if match?(%{"_key" => ^key}, Enum.at(rows, i)) do
-      i
-    else
-      case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
-        [] -> nil
-        [j] -> j
-        _ -> i
-      end
+  # The one row that has the key now; none: dropped. A key two rows share,
+  # in the form or in the post (written past the API's own checks), names
+  # no one row: by index while the form holds that key at the indexes the
+  # post gives it, else dropped. By index, B's row inserted before them took
+  # A's leaves (task-a35e29de94927377). Only the key's own places are
+  # compared: B's edit elsewhere in the array leaves the rows where A's page
+  # drew them (#29285 r1 review, F1-F3).
+  defp row_index(rows, key, i, posted) do
+    case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
+      [j] when not is_map_key(posted.twice, key) -> j
+      [] -> nil
+      at -> if at == posted_at(posted, key), do: i
     end
   end
+
+  # The keys the post gives the rows of the array at `prefix`, by index,
+  # and those it gives more than one row.
+  defp posted_keys(keys, prefix) do
+    at =
+      for {path, key} <- keys,
+          Enum.drop(path, -1) == prefix,
+          into: %{},
+          do: {List.last(path), key}
+
+    twice =
+      at |> Map.values() |> Enum.frequencies() |> Map.filter(fn {_k, n} -> n > 1 end)
+
+    %{at: at, twice: twice}
+  end
+
+  defp posted_at(posted, key), do: Enum.sort(for({j, ^key} <- posted.at, do: j))
 
   defp form_at(form, path) do
     Enum.reduce_while(path, form, fn
