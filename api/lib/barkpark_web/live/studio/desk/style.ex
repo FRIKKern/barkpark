@@ -122,6 +122,9 @@ defmodule BarkparkWeb.Studio.Desk.Style do
       .dk .dk-rows { position: relative; padding: 0 12px 12px; }
       .dk .dk-row > .pane-item { box-sizing: border-box; display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 7px 8px; height: 33px; min-height: 33px; border: 0; border-radius: 3px; font-size: 13px; line-height: 19px; font-weight: 500; color: var(--dk-fg); background: none; }
       .dk [data-pane-kind="list"] .dk-row > a.pane-item[data-desk-opens="doc"] { padding: 5px 8px; height: auto; min-height: 49px; }
+      /* A row is selected, or loses the selection, in one frame. The Studio's 150 ms background transition (`.pane-item`) ran under a colour that changes at once: white words on a clear row for a frame, then a pale row. A click's dim (`.phx-click-loading`) is no answer here either: `bp-desk.js` selects the row and draws the pane it opens at once. */
+      .dk .dk-row > a.pane-item { transition: none; }
+      .dk .dk-row > a.pane-item.phx-click-loading, .dk a[data-desk-ref].phx-click-loading { opacity: 1; }
       .dk .dk-row > a.pane-item:hover:not(.selected) { background: var(--dk-card-hover); color: var(--dk-fg); }
       .dk [data-pane-kind="list"] .dk-row > a.pane-item[data-desk-opens="doc"]:hover:not(.selected) .dk-row-title { color: var(--dk-row-hover-fg); }
       .dk [data-pane-kind="list"] .dk-row > a.pane-item[data-desk-opens="doc"]:hover:not(.selected) .dk-row-sub { color: var(--dk-row-hover-muted); }
