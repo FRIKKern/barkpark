@@ -18,7 +18,9 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
   ## Field visibility
 
   `readable?` is the board's fail-closed predicate
-  (`Barkpark.Tasks.Board.field_visibility_gate/2`). A field the reader may not
+  (`Barkpark.Tasks.Board.field_visibility_gate/2`), or one for each workspace
+  and project (`Barkpark.Tasks.FieldGates`): each row by its own, the target
+  lookup by all of them. A field the reader may not
   see is left out of the row, and its filter and sort are dropped in
   `parse/2`, so a hidden value cannot be found by narrowing the count either.
   Title, doc id and lifecycle status are the fields the board shows ungated.
@@ -38,6 +40,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
   alias Barkpark.Content.DraftId
   alias Barkpark.Repo
   alias Barkpark.Tasks
+  alias Barkpark.Tasks.FieldGates
   alias Barkpark.Tasks.Query
 
   @page_size 50
@@ -123,7 +126,7 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
   One page of rows plus the match count.
 
   `opts`: `:dataset` (required), `:workspace_id` (nil reads every workspace),
-  `:readable?` (required, the field-visibility predicate), and `:project_id`
+  `:readable?` (required, the field-visibility gate or `FieldGates` set), and `:project_id`
   (opt-in). With `:project_id` the rows are held to the workspace AND that
   project by `Scope.scope_to_workspace/3`, the clamp `/v1/tasks` reads with,
   so a row with no project is left out as it is there; a nil `:project_id`
@@ -140,7 +143,8 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
         }
   def page(filters, opts) do
     dataset = Keyword.fetch!(opts, :dataset)
-    readable? = Keyword.fetch!(opts, :readable?)
+    gates = Keyword.fetch!(opts, :readable?)
+    readable? = FieldGates.all(gates)
     ws_id = Keyword.get(opts, :workspace_id)
     tenant = {ws_id, Keyword.get(opts, :project_id, :any)}
 
@@ -162,10 +166,12 @@ defmodule Barkpark.Plugins.Tasks.Web.ListQuery do
       )
       |> Repo.all()
 
-    parent_ids = if readable?.("parent_id"), do: parent_ids(docs), else: []
+    row_gate = &FieldGates.pick(gates, &1)
+    parent_ids = docs |> Enum.filter(&row_gate.(&1).("parent_id")) |> parent_ids()
     titles = parent_titles(parent_ids, dataset, tenant)
+    rows = Enum.map(docs, &row(&1, titles, row_gate.(&1)))
 
-    %{rows: Enum.map(docs, &row(&1, titles, readable?)), total: total, page: page, pages: pages}
+    %{rows: rows, total: total, page: page, pages: pages}
   end
 
   # ── scope ───────────────────────────────────────────────────────────────────

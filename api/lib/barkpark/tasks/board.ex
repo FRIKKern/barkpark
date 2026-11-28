@@ -104,6 +104,7 @@ defmodule Barkpark.Tasks.Board do
   alias Barkpark.Repo
   alias Barkpark.Tasks
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.FieldGates
   alias Barkpark.Tasks.TwinCollapse
   alias Barkpark.Tasks.Validation
 
@@ -267,16 +268,19 @@ defmodule Barkpark.Tasks.Board do
   def snapshot(opts \\ []) do
     dataset = Keyword.get(opts, :dataset, "production")
     now = Keyword.get(opts, :now) || DateTime.utc_now()
+    workspace_id = Keyword.get(opts, :workspace_id)
 
-    collapsed = load_task_docs(dataset, Keyword.get(opts, :workspace_id))
+    collapsed = load_task_docs(dataset, workspace_id)
     docs = Enum.map(collapsed, fn {doc, _pair?} -> doc end)
     status_by_pk = Map.new(docs, fn d -> {d.id, lifecycle_of(d)} end)
     blockers_by_pk = load_blocker_targets(Map.keys(status_by_pk))
-    readable? = field_visibility_gate(dataset, workspace_id: Keyword.get(opts, :workspace_id))
+
+    # Each card by its own workspace and project's task schema (`FieldGates`).
+    gates = FieldGates.for_rows(dataset, docs)
 
     collapsed
     |> Enum.map(fn {doc, pair?} ->
-      to_card(doc, pair?, blockers_by_pk, status_by_pk, readable?)
+      to_card(doc, pair?, blockers_by_pk, status_by_pk, FieldGates.pick(gates, doc))
     end)
     |> build(now: now)
   end
@@ -304,9 +308,9 @@ defmodule Barkpark.Tasks.Board do
   decides, read through `Content.Schema.get_schema_for_redaction/3` as
   `/v1/tasks` reads it: that workspace's own schema, else the shared global
   one, never another workspace's. A nil key is dropped. With no workspace the
-  read is unscoped, which resolves the dataset to the Default workspace's: the
-  operator's flat mount, which shows every workspace's tasks under one gate
-  (task-c626f2be5264f61a).
+  read is unscoped, which resolves the dataset to the Default workspace's. A
+  view of tasks from several workspaces or projects gates each row by its own
+  (`Barkpark.Tasks.FieldGates`).
   """
   @spec field_visibility_gate(String.t(), keyword()) :: (String.t() -> boolean())
   def field_visibility_gate(dataset, scope \\ []) do
