@@ -328,6 +328,7 @@ defmodule BarkparkWeb.Studio.Desk.ListSearch do
 
     %{
       title: text(doc.title) || TitleDerivation.preview_title(doc, schema) || id,
+      header: BarkparkWeb.Studio.DocTitle.header(doc, schema),
       sub: nil,
       draft: String.starts_with?(doc.doc_id, "drafts."),
       icon: BarkparkWeb.Icons.row_icon(Map.get(schema, :icon)),

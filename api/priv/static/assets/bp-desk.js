@@ -504,7 +504,9 @@
     if (!wasCurrent) {
       // A reference always opens a document; a row says what it opens.
       var kind = row.getAttribute("data-desk-opens") || "doc";
-      frames.push(skeleton(root.ownerDocument, index + 1, kind, label(row)));
+      // Titled as the pane's header will be (`data-desk-title`, the editor's
+      // name for the document), else as the row reads.
+      frames.push(skeleton(root.ownerDocument, index + 1, kind, row.getAttribute("data-desk-title") || label(row)));
       root.insertBefore(frames[0], pane.nextSibling);
     }
 
