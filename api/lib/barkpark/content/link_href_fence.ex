@@ -276,15 +276,34 @@ defmodule Barkpark.Content.LinkHrefFence do
   pointer from the content's root.
   """
   @spec refused(term(), String.t()) :: [{String.t(), String.t()}]
-  def refused(%{} = map, path) when not is_struct(map) do
-    own_defs(map, path) ++ Enum.flat_map(map, fn {k, v} -> refused(v, "#{path}/#{escape(k)}") end)
+  def refused(value, path) when is_binary(path), do: scan(value, [path])
+
+  # The walk carries the path as its segments, last first, and spells it
+  # only for a finding: spelt at every key, a 50k-object rich text spent a
+  # tenth of its save on paths nobody read (task-6a5c3e075299d4bc).
+  defp scan(%{} = map, at) when not is_struct(map) do
+    defs =
+      case Map.get(map, "markDefs") do
+        [_ | _] = list -> def_findings(list, spelt(["markDefs" | at]))
+        _ -> []
+      end
+
+    defs ++ Enum.flat_map(map, fn {k, v} -> scan(v, [k | at]) end)
   end
 
-  def refused(list, path) when is_list(list) do
-    list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> refused(v, "#{path}/#{i}") end)
+  defp scan(list, at) when is_list(list) do
+    list |> Enum.with_index() |> Enum.flat_map(fn {v, i} -> scan(v, [i | at]) end)
   end
 
-  def refused(_value, _path), do: []
+  defp scan(_value, _at), do: []
+
+  defp spelt(at) do
+    [root | segments] = Enum.reverse(at)
+    IO.iodata_to_binary([root | Enum.map(segments, &["/", segment(&1)])])
+  end
+
+  defp segment(i) when is_integer(i), do: Integer.to_string(i)
+  defp segment(key), do: escape(key)
 
   # A string that could hold a link: `<a` or `<A` (`<area`, `<A HREF`…; no
   # space may follow `<`). A byte match, not a case fold of the whole string.

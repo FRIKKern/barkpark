@@ -22,6 +22,7 @@ defmodule Barkpark.Content.Forms do
   alias Barkpark.Content
   alias Barkpark.Content.Forms.ObjectRebase
   alias Barkpark.Content.Forms.Unset
+  alias Barkpark.Content.PortableText.ParseMemo
 
   alias Barkpark.Content.{
     CanonicalShapes,
@@ -371,7 +372,7 @@ defmodule Barkpark.Content.Forms do
           coerced != SlugValue.text(stored) ->
         Map.put(stored, "current", coerced)
 
-      coerced === coerce_field_value(field, form_image(field, stored)) ->
+      image_post?(field, posted, coerced, stored) ->
         stored
 
       # Edited Portable Text is rebuilt from the posted HTML against the
@@ -552,6 +553,21 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp posted_rich_text(_sub, _posted, coerced_sub), do: coerced_sub
+
+  # A post that coerces to what the input showed for `stored`. A rich text
+  # post byte-equal to the HTML its editor drew is that image, with no parse
+  # of it (task-6a5c3e075299d4bc: a 50k-object post's drawn image was parsed
+  # on every autosave of an untouched field). Any other post is compared as
+  # before (#29288 r1 review: a "stored read" compare instead rewrote two
+  # blocks of one `_key` on a post that only differed in its quoting).
+  defp image_post?(%{"type" => "richText"} = field, posted, coerced, stored)
+       when is_binary(posted) and is_list(stored) do
+    image = form_image(field, stored)
+    posted == image or coerced === coerce_field_value(field, image)
+  end
+
+  defp image_post?(field, _posted, coerced, stored),
+    do: coerced === coerce_field_value(field, form_image(field, stored))
 
   # What the Classic input showed for a stored value — the value the browser
   # posts back when the author does not touch it.
@@ -1168,11 +1184,14 @@ defmodule Barkpark.Content.Forms do
 
   # The posted content fields the save reads as edits: a field whose post is
   # only what the form drew for `snapshot` is dropped.
+  # One parse per distinct posted rich text (`PortableText.ParseMemo`).
   defp edits(params, snapshot, schema) do
-    params
-    |> preserve_datetime_values(snapshot, schema)
-    |> preserve_untouched_fields(snapshot, schema)
-    |> drop_unset()
+    ParseMemo.around(fn ->
+      params
+      |> preserve_datetime_values(snapshot, schema)
+      |> preserve_untouched_fields(snapshot, schema)
+      |> drop_unset()
+    end)
   end
 
   @doc """
