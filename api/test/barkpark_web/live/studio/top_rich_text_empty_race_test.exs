@@ -79,7 +79,10 @@ defmodule BarkparkWeb.Studio.TopRichTextEmptyRaceTest do
     })
   end
 
-  defp b2(c) do
+  defp b2(c), do: set2(c, [block("k9", "B2")])
+
+  # B's write through the store, as `/v1` or an import makes it.
+  defp set2(c, value) do
     {doc, _, _} = Content.fetch_doc_with_draft(c.type, c.id, "production")
 
     {:ok, _} =
@@ -88,10 +91,23 @@ defmodule BarkparkWeb.Studio.TopRichTextEmptyRaceTest do
         %{
           "doc_id" => "drafts." <> c.id,
           "title" => doc.title,
-          "content" => Map.put(doc.content, "body2", [block("k9", "B2")])
+          "content" => Map.put(doc.content, "body2", value)
         },
         "production"
       )
+  end
+
+  defp first_words(c, surface, b_value) do
+    add_field(c, "body2", %{"format" => "portableText"})
+    a = tab(c, surface)
+    seen = page(a)
+
+    html =
+      inside(a, fn -> Task.await(Task.async(fn -> set2(c, b_value) end)) end, fn ->
+        types_f(a, "body2", "<p>A2</p>", seen)
+      end)
+
+    {a, html}
   end
 
   defp body2(c), do: stored(c)["body2"]
@@ -127,6 +143,33 @@ defmodule BarkparkWeb.Studio.TopRichTextEmptyRaceTest do
       assert words(body2(c) || []) == ["A2"]
       assert held(a) == []
       refute html =~ "doc-conflict-banner"
+    end
+
+    # P3 (#29177 review): a store with no words is read as empty. Barkpark's
+    # own editors never store that shape; a `/v1` or import writer can.
+    for {shape, value} <- [
+          {"one wordless block", [block("e0", "")]},
+          {"two wordless blocks", [block("e0", ""), block("e1", "")]}
+        ] do
+      @value value
+      test "#{surface} P3: B stores #{shape} inside A's first words: A written, no hold", c do
+        {a, html} = first_words(c, @surface, @value)
+
+        # Before: the wordless store kept, A held with the banner.
+        assert words(body2(c) || []) == ["A2"],
+               "A's first words were not written: #{inspect(body2(c))}"
+
+        assert held(a) == []
+        refute html =~ "doc-conflict-banner"
+      end
+    end
+
+    test "#{surface} P3 control: B stores an image with no words: B's image is kept", c do
+      image = %{"_type" => "image", "_key" => "i9", "asset" => %{"_ref" => "image-x"}}
+      {_a, _html} = first_words(c, @surface, [image])
+
+      assert Enum.any?(body2(c) || [], &(&1["_key"] == "i9")),
+             "B's image was lost: #{inspect(body2(c))}"
     end
   end
 end
