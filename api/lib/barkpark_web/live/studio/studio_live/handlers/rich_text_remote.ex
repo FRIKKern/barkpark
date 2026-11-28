@@ -492,11 +492,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     end
   end
 
-  @doc "Ends every hold: the form was read again from the store."
+  @doc """
+  Ends every hold: the form was read again from the store. So do A's own
+  row removals (`DroppedRows.removed/2`, #29283 review D4).
+  """
   def drop_holds(socket),
     do:
       socket
-      |> assign(editor_rt_held: %{}, editor_rt_clash: %{})
+      |> assign(editor_rt_held: %{}, editor_rt_clash: %{}, editor_rt_removed: nil)
       |> HeldFields.drop_paths()
 
   @doc """

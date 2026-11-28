@@ -135,6 +135,12 @@ defmodule BarkparkWeb.Studio.NestedRowLostBannerTest do
         do: {n, t}
       )
 
+  defp removed(a),
+    do:
+      Enum.sort(
+        MapSet.to_list(:sys.get_state(a.pid).socket.assigns[:editor_rt_removed] || MapSet.new())
+      )
+
   defp two, do: [sec("s1", [it("i1", "alpha")]), sec("s2", [it("i2", "beta")])]
   defp removed_s, do: [sec("s1", []), sec("s2", [it("i2", "beta")])]
   defp stale, do: [{"s1", [{"i1", "<p>alpha A</p>"}]}, {"s2", [{"i2", "<p>beta</p>"}]}]
@@ -212,6 +218,62 @@ defmodule BarkparkWeb.Studio.NestedRowLostBannerTest do
       refute html =~ "doc-conflict-lost"
       refute html =~ "alpha A more"
       assert lost(a) == []
+    end
+
+    test "#{surface} D2: A removes i1; B adds i1 back, then removes it; A typed in it: A's words shown",
+         c do
+      three = [sec("s1", [it("i1", "alpha"), it("i3", "gamma")]), sec("s2", [it("i2", "beta")])]
+      put_c(c, %{"sections" => three})
+      a = tab(c, @surface)
+
+      BarkparkWeb.EditorPost.press(a, "array_op", %{
+        "action" => "remove_row",
+        "path" => "doc[sections][0].items",
+        "index" => "0"
+      })
+
+      b_saves(c, a, %{"sections" => three})
+      o = page_owners(a)
+
+      b_saves(c, a, %{
+        "sections" => [sec("s1", [it("i3", "gamma")]), sec("s2", [it("i2", "beta")])]
+      })
+
+      html =
+        autosave(
+          a,
+          [
+            {"s1", [{"i1", "<p>alpha A</p>"}, {"i3", "<p>gamma</p>"}]},
+            {"s2", [{"i2", "<p>beta</p>"}]}
+          ],
+          o
+        )
+
+      # On round 1: i1 stayed A's removal, so A's words went with no banner.
+      assert lost(a) == [{"doc[sections][0].items[0].rt", ["alpha A"]}]
+      assert html =~ "doc-conflict-lost"
+    end
+
+    test "#{surface} D4: Reload ends A's own removals", c do
+      three = [sec("s1", [it("i1", "alpha"), it("i3", "gamma")]), sec("s2", [it("i2", "beta")])]
+      put_c(c, %{"sections" => three})
+      a = tab(c, @surface)
+      o = page_owners(a)
+
+      BarkparkWeb.EditorPost.press(a, "array_op", %{
+        "action" => "remove_row",
+        "path" => "doc[sections][0].items",
+        "index" => "1"
+      })
+
+      b_saves(c, a, %{"sections" => [sec("s1", []), sec("s2", [it("i2", "beta")])]})
+      autosave(a, stale(), o)
+      assert removed(a) == ["i3"]
+
+      a |> element("[phx-click=reload-remote-doc]") |> render_click()
+
+      # On round 1: still ["i3"] after the Reload.
+      assert removed(a) == []
     end
   end
 end

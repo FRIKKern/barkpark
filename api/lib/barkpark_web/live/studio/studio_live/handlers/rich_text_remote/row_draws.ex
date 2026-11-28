@@ -38,9 +38,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
           row?(path),
           key = row_key(form, path),
           value = FormPath.get(form, path),
-          do: {id(form, path, key), CompositeField.drawn_digest(value), value}
+          do: {key, {id(form, path, key), CompositeField.drawn_digest(value), value}}
 
-    record(socket, entries)
+    # A row A removed that the form holds again (B's save or a Reload brought
+    # its key back) is no longer A's removal (`DroppedRows.removed/2`).
+    socket
+    |> record(Enum.map(entries, &elem(&1, 1)))
+    |> RichTextRemote.DroppedRows.back(Enum.map(entries, &elem(&1, 0)))
   end
 
   def record_form(socket, _form), do: socket

@@ -89,6 +89,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
 
   def removed(socket, _row), do: socket
 
+  @doc """
+  The rows A removed, less `keys`: rows the form holds again (`RowDraws`
+  records each form the page draws). A later drop of such a row is another
+  editor's doing (#29283 review, D2).
+  """
+  def back(socket, keys) do
+    removed = socket.assigns[:editor_rt_removed]
+
+    if removed && MapSet.size(removed) > 0,
+      do: assign(socket, editor_rt_removed: MapSet.difference(removed, MapSet.new(keys))),
+      else: socket
+  end
+
   defp lost?({:lost, _name}), do: true
   defp lost?(_key), do: false
 
