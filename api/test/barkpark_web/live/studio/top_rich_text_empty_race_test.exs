@@ -113,6 +113,25 @@ defmodule BarkparkWeb.Studio.TopRichTextEmptyRaceTest do
   defp body2(c), do: stored(c)["body2"]
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
 
+  defp save_f(view, name, html, seen) do
+    view
+    |> element("#editor-form")
+    |> render_submit(%{
+      "doc" => %{"title" => "T0", name => html},
+      "_bp_seen" => Jason.encode!(seen)
+    })
+  end
+
+  defp snap2(a) do
+    case BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle.base_doc(:sys.get_state(a.pid).socket) do
+      %{content: %{} = content} -> content["body2"]
+      _ -> nil
+    end
+  end
+
+  defp took2?(a),
+    do: is_list((:sys.get_state(a.pid).socket.assigns[:editor_rt_took] || %{})["doc[body2]"])
+
   for surface <- [:desk, :studio] do
     @surface surface
 
@@ -170,6 +189,38 @@ defmodule BarkparkWeb.Studio.TopRichTextEmptyRaceTest do
 
       assert Enum.any?(body2(c) || [], &(&1["_key"] == "i9")),
              "B's image was lost: #{inspect(body2(c))}"
+    end
+  end
+
+  # #29292 r1 review (W_wordless): A's page showed B's words; B cleared the
+  # field, and a `/v1` writer stored a wordless block inside A's stale post.
+  # The wordless store is B's clear, not an empty field: A is held.
+  for surface <- [:desk, :studio], how <- ["autosave", "save"] do
+    @surface surface
+    @how how
+
+    test "#{surface} #{how} W_wordless: A's page showed words, the store is a wordless clear: B kept, A held",
+         c do
+      add_field(c, "body2", %{"format" => "portableText"})
+      a = tab(c, @surface)
+      set2(c, [block("k9", "B1")])
+      assert eventually(fn -> words(snap2(a) || []) == ["B1"] end)
+      render(a)
+      seen = page(a)
+      set2(c, [])
+      assert eventually(fn -> took2?(a) end)
+
+      post = if @how == "save", do: &save_f/4, else: &types_f/4
+
+      html =
+        inside(a, fn -> Task.await(Task.async(fn -> set2(c, [block("k9", "")]) end)) end, fn ->
+          post.(a, "body2", "<p>B1 A</p>", seen)
+        end)
+
+      # Before (desk Save): ["B1 A"], B's clear written over with no banner.
+      assert words(body2(c)) == [""], "B's clear was written over: #{inspect(words(body2(c)))}"
+      assert held(a) == ["doc[body2]"]
+      assert html =~ "doc-conflict-banner"
     end
   end
 end

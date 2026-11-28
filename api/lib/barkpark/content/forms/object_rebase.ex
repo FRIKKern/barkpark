@@ -234,9 +234,13 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
               # stored blocks): when the store holds blocks now, another
               # editor filled it, and A's first words are read against the
               # empty draw like any edit (task-fe3cbbb28707625d). A store
-              # with no words is read as empty: A's words are written
-              # (task-a88c4edd5b469a22).
-              PortableText.value?(stored) and not is_binary(was) and not wordless?(stored) ->
+              # with no words, over a page that showed none, is read as
+              # empty: A's words are written (task-a88c4edd5b469a22). A
+              # page that showed words is read against them, as before: the
+              # wordless store is another editor's clear (#29292 r1 review).
+              PortableText.value?(stored) and not is_binary(was) and
+                  not (wordless?(stored) and
+                           (was in [nil, []] or (is_list(was) and wordless?(was)))) ->
                 blocks = PortableText.from_html(mine, if(is_list(was), do: was, else: []))
                 Map.put(acc, key, rich_text(base[key], blocks, stored, {:ok, was}))
 
