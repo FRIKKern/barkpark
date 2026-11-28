@@ -39,7 +39,8 @@ defmodule BarkparkWeb.GroqController do
     with :ok <- known_dataset(dataset, conn),
          {:ok, query} <- query_text(params),
          {:ok, query_params} <- query_params(conn, params),
-         :ok <- perspective_ok(params) do
+         :ok <- perspective_ok(params),
+         :ok <- v1_perspective_ok(params) do
       result =
         Barkpark.Groq.query(query, query_params,
           dataset: dataset,
@@ -95,6 +96,14 @@ defmodule BarkparkWeb.GroqController do
 
       {:error, {:bad_perspective, value}} ->
         ReadPerspective.refuse(conn, value, @perspectives)
+
+      {:error, :v1_perspective} ->
+        query_error(
+          conn,
+          400,
+          "validationError",
+          "Perspectives are not supported for this version"
+        )
     end
   end
 
@@ -250,6 +259,14 @@ defmodule BarkparkWeb.GroqController do
       value -> {:error, {:bad_perspective, value}}
     end
   end
+
+  # API v1 predates perspectives: Sanity answers any but `raw` with this 400
+  # (task-63b105dbf2e71209). v1 is otherwise read as current GROQ here; the
+  # old GROQ-1 rules are not emulated.
+  defp v1_perspective_ok(%{"api_version" => "1", "perspective" => p}) when p != "raw",
+    do: {:error, :v1_perspective}
+
+  defp v1_perspective_ok(_params), do: :ok
 
   defp resolve_perspective(conn, params) do
     params =
