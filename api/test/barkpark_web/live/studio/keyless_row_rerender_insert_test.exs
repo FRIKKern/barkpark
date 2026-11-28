@@ -95,8 +95,9 @@ defmodule BarkparkWeb.Studio.KeylessRowRerenderInsertTest do
   end
 
   # A's post as its page sends it: the keyless items' HTML by the index the
-  # page drew them at, with its owner entries.
-  defp autosave(a, htmls, owners, seen) do
+  # page drew them at, with its owner entries. `seqs`: the seen number per
+  # input name (`drain/1`), else 0.
+  defp autosave(a, htmls, owners, seen, seqs \\ %{}) do
     %{editor_doc: d, dataset: ds} = :sys.get_state(a.pid).socket.assigns
 
     params =
@@ -128,11 +129,42 @@ defmodule BarkparkWeb.Studio.KeylessRowRerenderInsertTest do
           Map.put(
             params,
             "_bp_rt_seen",
-            for(i <- 0..(length(htmls) - 1), do: "doc[sections][0].items[#{i}].rt|0")
+            for(
+              i <- 0..(length(htmls) - 1),
+              n = "doc[sections][0].items[#{i}].rt",
+              do: "#{n}|#{Map.get(seqs, n, 0)}"
+            )
           ),
         else: params
 
     render_hook(a, "autosave", params)
+  end
+
+  # After a Reload that replaced A's held words in row 0: written on a post
+  # with seen numbers; held with none (control J2R).
+  defp reloaded(c, a, true) do
+    assert items_words(stored(c)) == [["zed B", "new A"], ["alpha"]]
+    assert held(a) == []
+  end
+
+  defp reloaded(c, a, false) do
+    assert items_words(stored(c)) == [["zed B"], ["alpha"]]
+    assert held(a) == ["doc[sections][0].items[0].rt"]
+  end
+
+  # Every bp:rt-remote push so far: the last number per input name.
+  defp drain(a, acc \\ %{}) do
+    {ref, _, _} = a.proxy
+
+    receive do
+      {^ref, {:push_event, "bp:rt-remote", %{values: v}}} ->
+        drain(
+          a,
+          Enum.reduce(v, acc, fn {n, %{seq: s}}, m -> Map.update(m, n, s, &max(&1, s)) end)
+        )
+    after
+      200 -> acc
+    end
   end
 
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
@@ -184,6 +216,23 @@ defmodule BarkparkWeb.Studio.KeylessRowRerenderInsertTest do
       html = autosave(a, ["<p>alpha</p><p>new A</p>"], o, @seen)
       assert items_words(stored(c)) == [["zed B"], ["alpha"]]
       assert held(a) != [] and html =~ "doc-conflict-banner"
+    end
+
+    # With no `_bp_rt_seen`, a post after a Reload that replaced A's held
+    # words can't show it took the Reload: held, as before this change.
+    test "#{@tag_name} control J2R: J2 held, Reload, A types in row 0: written with seen, held without",
+         c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      autosave(a, ["<p>alpha</p><p>new A</p>"], o, @seen)
+      assert held(a) != []
+      render_hook(a, "reload-remote-doc", %{})
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+      autosave(a, ["<p>zed B</p><p>new A</p>", "<p>alpha</p>"], owners, @seen, q)
+      reloaded(c, a, @seen)
     end
 
     test "#{@tag_name} control J7: B edits row 1, A row 0: merged", c do
@@ -274,6 +323,137 @@ defmodule BarkparkWeb.Studio.KeylessRowRerenderInsertTest do
       assert items_words(stored(c)) == [["alpha AA"], ["alpha"], ["gamma B"]]
       assert held(a) == []
       refute html =~ "doc-conflict-banner"
+    end
+
+    # #29315 review, false holds: row i changed by A's own typing while row
+    # j took row i's draw from B (E1-E3), a Reload (RL1, RL2), and A typing
+    # only in the re-rendered row (P2).
+    @row1 "doc[sections][0].items[1].rt"
+
+    test "#{@tag_name} E1: [empty]; A types; B adds an empty row; A types more in row 0: written",
+         c do
+      put_items(c, [empty_it()])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      autosave(a, ["<p>a1</p>"], o, @seen)
+      b_saves(c, a, [itk("a1"), empty_it()])
+      q = drain(a)
+      owners = o ++ [entry(1, [], own(o, 0))]
+
+      html = autosave(a, ["<p>a1 a2</p>", ""], owners, @seen, Map.take(q, [@row1]))
+
+      assert items_words(stored(c)) == [["a1 a2"], []]
+      assert held(a) == []
+      refute html =~ "doc-conflict-banner"
+    end
+
+    test "#{@tag_name} E2: [empty, beta]; A types in row 0; B clears row 1; A types more: written",
+         c do
+      put_items(c, [empty_it(), it("beta")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      autosave(a, ["<p>a1</p>", "<p>beta</p>"], o, @seen)
+      b_saves(c, a, [itk("a1"), empty_it()])
+      q = drain(a)
+
+      autosave(a, ["<p>a1 a2</p>", ""], o, @seen, Map.take(q, [@row1]))
+
+      assert items_words(stored(c)) == [["a1 a2"], []]
+      assert held(a) == []
+    end
+
+    test "#{@tag_name} E3: A types in row 0; B sets row 1 to row 0's first text; A types more: written",
+         c do
+      put_items(c, [itk("alpha"), itk("beta")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      autosave(a, ["<p>alpha A</p>", "<p>beta</p>"], o, @seen)
+      b_saves(c, a, [itk("alpha A"), itk("alpha")])
+      q = drain(a)
+
+      autosave(a, ["<p>alpha AA</p>", "<p>alpha</p>"], o, @seen, Map.take(q, [@row1]))
+
+      assert items_words(stored(c)) == [["alpha AA"], ["alpha"]]
+      assert held(a) == []
+    end
+
+    test "#{@tag_name} RL1: R2r page; A presses Reload; A types in row 0, which shows B's row: written",
+         c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      _ = drain(a)
+      render_hook(a, "reload-remote-doc", %{})
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(a, ["<p>zed B</p><p>new A</p>", "<p>alpha</p>"], owners, @seen, q)
+
+      assert items_words(stored(c)) == [["zed B", "new A"], ["alpha"]]
+      assert held(a) == []
+    end
+
+    test "#{@tag_name} RL2: R2r held; A presses Reload; A types again in row 0: written", c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      q0 = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(
+        a,
+        ["<p>alpha</p><p>new A</p>", "<p>alpha</p>"],
+        owners,
+        @seen,
+        Map.take(q0, [@row1])
+      )
+
+      assert held(a) != []
+      render_hook(a, "reload-remote-doc", %{})
+      q = drain(a)
+
+      autosave(a, ["<p>zed B</p><p>new A</p>", "<p>alpha</p>"], owners, @seen, q)
+
+      # The R2r history plays no part after the Reload: as J2R.
+      reloaded(c, a, @seen)
+    end
+
+    test "#{@tag_name} control RL3: Reload, then B inserts in front; A types in row 0: held", c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      render_hook(a, "reload-remote-doc", %{})
+      _ = drain(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(
+        a,
+        ["<p>alpha</p><p>new A</p>", "<p>alpha</p>"],
+        owners,
+        @seen,
+        Map.take(q, [@row1])
+      )
+
+      assert items_words(stored(c)) == [["zed B"], ["alpha"]]
+      assert held(a) != []
+    end
+
+    test "#{@tag_name} P2: R2r page; A types only in the re-rendered row 1: written", c do
+      put_items(c, [it("alpha")])
+      a = tab(c, @surface)
+      o = page_owners(a)
+      b_saves(c, a, [it("zed B"), it("alpha")])
+      q = drain(a)
+      owners = [own(o, 0), entry(1, it("alpha")["rt"], own(o, 0))]
+
+      autosave(a, ["<p>alpha</p>", "<p>alpha A</p>"], owners, @seen, Map.take(q, [@row1]))
+
+      assert items_words(stored(c)) == [["zed B"], ["alpha A"]]
+      assert held(a) == []
     end
   end
 end

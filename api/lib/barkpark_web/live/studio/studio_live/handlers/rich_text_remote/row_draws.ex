@@ -81,6 +81,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   end
 
   @doc """
+  Records `form` after a Reload or a restore (`RichTextRemote.repaint/2`):
+  the page is told every value then, so when each draw was first had
+  starts again, as at mount (#29315 review, RL1-RL2).
+  """
+  def reload(socket, form) do
+    socket
+    |> assign(:editor_rt_row_first, nil)
+    |> record_form(form, :born)
+  end
+
+  @doc """
   When the socket first had the draw `digest` at the keyless row rich text
   `path`, and how: `{n, origin}`, a larger `n` later; `nil` when not kept.
   """

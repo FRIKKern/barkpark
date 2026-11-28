@@ -82,7 +82,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
 
   def values(socket, nil, posted, owners) when is_map(posted) do
     shown = shown(socket, owners)
-    shifted = shifted(socket, owners)
+    shifted = shifted(socket, owners, posted)
 
     for {name, path, _html} <- posted_texts(socket, posted, owners),
         {:ok, was} <- [was(socket, shown, owners, name, path)],
@@ -95,7 +95,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   # The lists whose keyless rows moved under A's page (`KeylessShift`):
   # each rich text of such a list is read as a draw not known, the store
   # kept and A held (#29178 review, Q2-Q4c).
-  defp shifted(socket, owners), do: KeylessShift.lists(socket, owners)
+  defp shifted(socket, owners, posted), do: KeylessShift.lists(socket, owners, posted)
 
   defp list_of(path), do: KeylessShift.list_of(path)
 

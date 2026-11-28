@@ -19,20 +19,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
   ignored wrapper), and that draw is the form's row j now. Two rows of one
   text post the same shape (#29235 review, D1-D5), and the post can't tell
   them apart. The socket's draw history can (`RowDraws.first/3`): the list
-  moved when row j first had that draw from another editor's save, later
-  than row i had it (task-8d968bba2cfa23c4). Rows of one text had it at
-  mount, or by A's own write.
+  moved when A typed in row i (the post is not its draw), and ONE save of
+  another editor's both gave row j that draw there and gave row i the
+  value it holds now (task-8d968bba2cfa23c4). Rows of one text had it at
+  mount, or by A's own write: A's own typing changes row i, and B adding,
+  clearing or copying a row is no move (#29315 review, E1-E3). An empty
+  draw is never read as one: every new row has it. A Reload starts the
+  history again (`RowDraws.reload/2`): the page shows the form then
+  (RL1, RL2).
   """
 
+  alias Barkpark.Content.PortableText
   alias BarkparkWeb.Components.Fields.CompositeField
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws
   alias BarkparkWeb.Studio.StudioLive.Path
 
-  @doc "The moved lists' paths (`[\"sections\", 0, \"items\"]`), by the post's owner entries."
-  def lists(socket, owners) do
+  @doc """
+  The moved lists' paths (`[\"sections\", 0, \"items\"]`), by the post's
+  owner entries and its values (`posted`, the post's `doc`).
+  """
+  def lists(socket, owners, posted) do
     form = socket.assigns[:editor_form] || %{}
-    Enum.uniq(by_index(form, owners) ++ by_history(socket, form, owners))
+    Enum.uniq(by_index(form, owners) ++ by_history(socket, form, owners, posted))
   end
 
   defp by_index(form, owners) do
@@ -56,10 +65,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
     for {list, at} <- drawn, at != keyless_rows(FormPath.get(form, list)), do: list
   end
 
-  # An entry's draw at i that is not the form's row i, but the form's
-  # keyless row j, which first had it from another editor's save, after
-  # row i had it.
-  defp by_history(socket, form, owners) do
+  # An entry's draw at i that A typed on, that is not the form's row i but
+  # the form's keyless row j, with words, and one save of another editor's
+  # gave row j that draw and row i its value now.
+  defp by_history(socket, form, owners, posted) do
     for entry <- List.wrap(owners),
         {name, digest} <- [keyless_draw(entry)],
         is_binary(digest),
@@ -70,18 +79,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift do
         list = list_of(path),
         rows = FormPath.get(form, list),
         is_list(rows),
-        drawn(form, path) != digest,
+        now = drawn(form, path),
+        now != digest,
         j <- keyless_rows(rows),
         j != i,
         at = List.replace_at(path, -2, j),
         drawn(form, at) == digest,
-        later?(RowDraws.first(socket, at, digest), RowDraws.first(socket, path, digest)),
+        words?(FormPath.get(form, at)),
+        one_save?(RowDraws.first(socket, at, digest), RowDraws.first(socket, path, now)),
+        typed?(FormPath.get(posted, path), digest),
         uniq: true,
         do: list
   end
 
-  defp later?({n_j, :theirs}, {n_i, _origin}), do: n_j > n_i
-  defp later?(_at_j, _at_i), do: false
+  defp one_save?({n, :theirs}, {n, :theirs}), do: true
+  defp one_save?(_at_j, _at_i), do: false
+
+  # The post's HTML at a row is not the draw its entry names.
+  defp typed?(html, digest) when is_binary(html),
+    do: CompositeField.drawn_digest(PortableText.from_html(html, [])) != digest
+
+  defp typed?(_html, _digest), do: false
+
+  # A value that is not only empty text blocks (an image block counts).
+  defp words?(blocks) when is_list(blocks), do: not Enum.all?(blocks, &wordless_block?/1)
+  defp words?(_value), do: false
+
+  defp wordless_block?(%{"children" => children}) when is_list(children),
+    do: Enum.all?(children, &wordless_span?/1)
+
+  defp wordless_block?(_block), do: false
+
+  defp wordless_span?(%{"text" => text}) when is_binary(text), do: String.trim(text) == ""
+  defp wordless_span?(%{} = span), do: not Map.has_key?(span, "text")
+  defp wordless_span?(_span), do: false
 
   defp drawn(form, path), do: CompositeField.drawn_digest(FormPath.get(form, path))
 
