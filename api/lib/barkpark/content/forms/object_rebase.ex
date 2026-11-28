@@ -246,8 +246,14 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
               # HTML (`Content.Forms` reads a post as blocks only over
               # stored blocks): when the store holds blocks now, another
               # editor filled it, and A's first words are read against the
-              # empty draw like any edit (task-fe3cbbb28707625d).
-              PortableText.value?(stored) and not is_binary(was) ->
+              # empty draw like any edit (task-fe3cbbb28707625d). A store
+              # with no words, over a page that showed none, is read as
+              # empty: A's words are written (task-a88c4edd5b469a22). A
+              # page that showed words is read against them, as before: the
+              # wordless store is another editor's clear (#29292 r1 review).
+              PortableText.value?(stored) and not is_binary(was) and
+                  not (wordless?(stored) and
+                           (was in [nil, []] or (is_list(was) and wordless?(was)))) ->
                 blocks = PortableText.from_html(mine, if(is_list(was), do: was, else: []))
                 Map.put(acc, key, rich_text(base[key], blocks, stored, {:ok, was}))
 
@@ -261,6 +267,21 @@ defmodule Barkpark.Content.Forms.ObjectRebase do
 
       _, acc ->
         acc
+    end)
+  end
+
+  # Blocks whose spans hold no words, and nothing else: no image, no
+  # custom block, no inline object.
+  defp wordless?(blocks) do
+    Enum.all?(blocks, fn
+      %{"_type" => "block", "children" => spans} when is_list(spans) ->
+        Enum.all?(spans, &match?(%{"_type" => "span", "text" => t} when t in ["", nil], &1))
+
+      %{"_type" => "block"} = b ->
+        not Map.has_key?(b, "children")
+
+      _ ->
+        false
     end)
   end
 
