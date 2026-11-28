@@ -7,8 +7,8 @@ defmodule Barkpark.Content.PortableText.ParseMemo do
   over the field and its object, and the post once more against the stored
   blocks. A 50k-object post took a fifth of a second of work per parse.
   `PortableText.from_html/3` is a pure function of its arguments, so inside
-  `around/1` each distinct `{html, stored, opts}` is parsed once and the
-  same blocks are given again. Nothing outlives the call.
+  `around/1` each distinct `{html, stored, annotations, made}` is parsed
+  once and the same blocks are given again. Nothing outlives the call.
   """
 
   @key {__MODULE__, :parsed}

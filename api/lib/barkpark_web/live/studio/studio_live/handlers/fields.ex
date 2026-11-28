@@ -610,7 +610,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # `origin` is `:page` for a browser post, `{:built, bases}` for a change the
   # server built. Only a browser post is read for codelist shape
   # (`CodelistShape`): a built one writes a stored value back as it is.
-  defp autosave_open(params, socket, origin) do
+  # One parse per distinct rich text post for the whole post: the desk's
+  # read of the page's value (`UnderLock.posted/4`) and the save's parse the
+  # same HTML (`PortableText.ParseMemo`, task-6a5c3e075299d4bc).
+  defp autosave_open(params, socket, origin),
+    do: ParseMemo.around(fn -> autosave_post(params, socket, origin) end)
+
+  defp autosave_post(params, socket, origin) do
     params = PostIdentity.no_marks(params)
     socket = socket |> track_touched(params) |> assign(editor_write_landed: nil)
 

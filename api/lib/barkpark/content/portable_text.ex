@@ -318,12 +318,20 @@ defmodule Barkpark.Content.PortableText do
   objects by `_key`).
   """
   @spec from_html(String.t(), [map()], keyword()) :: [map()]
-  def from_html(html, stored \\ [], opts \\ []) when is_binary(html),
-    do: ParseMemo.parsed({html, stored, opts}, fn -> parse_html(html, stored, opts) end)
-
-  defp parse_html(html, stored, opts) do
-    stored = if value?(stored), do: stored, else: []
+  def from_html(html, stored \\ [], opts \\ []) when is_binary(html) do
+    # The field counts only by its declared annotations, so the save's parse
+    # (`field:`) and the desk's read of the same post with the same blocks
+    # (none) are one parse (task-6a5c3e075299d4bc).
     annotations = declared_annotations(Keyword.get(opts, :field))
+    made = {Map.new(Keyword.get(opts, :defs, %{})), Map.new(Keyword.get(opts, :objects, %{}))}
+
+    ParseMemo.parsed({html, stored, annotations, made}, fn ->
+      parse_html(html, stored, annotations, made)
+    end)
+  end
+
+  defp parse_html(html, stored, annotations, {new_defs, new_objects}) do
+    stored = if value?(stored), do: stored, else: []
 
     # The inline objects the stored blocks hold, by `_key`. The editor HTML only
     # NAMES an object (its `_key` in `data-pt-object`); the object itself is
@@ -339,7 +347,7 @@ defmodule Barkpark.Content.PortableText do
 
     # An inline object the Studio has just made (`:objects`, by `_key`): the
     # editor names it like a stored one.
-    stored_objects = Map.merge(stored_objects, Map.new(Keyword.get(opts, :objects, %{})))
+    stored_objects = Map.merge(stored_objects, new_objects)
 
     # The custom blocks (a `mediaModule`, a `quote`) the stored value holds, by
     # `_key`. The editor shows each as an inert `<div data-pt-block="key">`;
@@ -374,7 +382,7 @@ defmodule Barkpark.Content.PortableText do
 
     # A mark definition the Studio has just made (`:defs`, by `_key`), from
     # the annotation dialog: the editor names it like a stored one.
-    stored_defs = Map.merge(stored_defs, Map.new(Keyword.get(opts, :defs, %{})))
+    stored_defs = Map.merge(stored_defs, new_defs)
 
     # Each token's byte range rides along, so a block knows the HTML it was
     # read from (`:src`), which `keep_stored/2` compares with a stored block.
