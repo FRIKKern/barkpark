@@ -44,7 +44,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
   alias Barkpark.Content.PortableText
   alias Barkpark.Content.PortableTextMerge
   alias BarkparkWeb.Studio.StudioLive.Handlers.HeldFields
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle
   alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
+  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.KeylessShift
   alias BarkparkWeb.Studio.StudioLive.Path
 
   @event "bp:rt-remote"
@@ -181,7 +183,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
 
   A rich text whose number is current is A's to save as typed.
   """
-  def split(socket, doc, seen) when is_list(seen) and is_map(doc) do
+  def split(socket, doc, seen), do: split(socket, doc, seen, nil)
+
+  @doc """
+  `split/3`, with the post's owner entries (`_bp_rt_owner[]`). A rich text
+  not held in a list whose keyless rows moved under A's page
+  (`KeylessShift`) is read as a draw not known (`unknown/4`), against the
+  store's row at its index: its name is its index, so its log is another
+  row's, and A's words were merged into B's new row with no banner
+  (#29178 review, round 2: J2, J2t, J4c).
+  """
+  def split(socket, doc, seen, owners) when is_list(seen) and is_map(doc) do
+    moved = KeylessShift.lists(socket.assigns[:editor_form], owners)
+
     # A log of another document is none of this one's (a forget lost).
     {log, holds, folded, born} =
       if socket.assigns[:editor_rt_doc] == PostIdentity.of(socket),
@@ -199,6 +213,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         gap? = later != [] and length(later) == length(all) and n >= Map.get(folded, name, n + 1)
 
         case {Map.get(born, name), Map.get(holds, name)} do
+          {_born, nil} when moved != [] and length(path) >= 2 ->
+            if KeylessShift.list_of(path) in moved,
+              do: unknown(doc, acts, {name, path, posted}, stored_at(socket, path)),
+              else: read(doc, acts, {name, path, posted}, {n, gap?}, nil, later)
+
           # A number of a socket gone (`born/1`; 0 is a page that never had a value).
           {{seq, value}, nil} when n > 0 and n < seq ->
             unknown(doc, acts, {name, path, posted}, newest(later, value))
@@ -212,7 +231,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
     end)
   end
 
-  def split(_socket, doc, _seen), do: {doc, []}
+  def split(_socket, doc, _seen, _owners), do: {doc, []}
+
+  defp stored_at(socket, path) do
+    case Lifecycle.base_doc(socket) do
+      %{content: %{} = content} -> FormPath.get(content, path)
+      _ -> nil
+    end
+  end
 
   @doc """
   The value a post on number `n` was typed on, as `split/3` reads it: the
