@@ -841,7 +841,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               id={"doc-conflict-" <> Barkpark.Content.published_id(@editor_doc.doc_id)}
               conflict={@doc_conflict}
               disabled={BarkparkWeb.Studio.Desk.ReadonlyFields.refused?("reload-remote-doc", @parent_assigns)}
-              theirs={(@parent_assigns[:editor_rt_clash] || %{}) |> Map.values() |> List.flatten()}
+              theirs={for({name, texts} <- @parent_assigns[:editor_rt_clash] || %{}, not match?({:lost, _}, name), text <- texts, do: text)}
+              lost={for({{:lost, _}, texts} <- @parent_assigns[:editor_rt_clash] || %{}, text <- texts, do: text)}
               paused={paused_titles(@editor_schema, @parent_assigns[:editor_text_paused])}
             />
           </div>
@@ -1417,6 +1418,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     doc:
       "the titles of the fields whose autosave a rejoin hold paused until a Save or Reload (`TextRejoin.hold/3`)"
 
+  attr :lost, :list,
+    default: [],
+    doc:
+      "A's words in a row another editor moved or removed, which the save had no row for (`RichTextRemote.DroppedRows`)"
+
   def doc_conflict_banner(assigns) do
     ~H"""
     <%= if @conflict do %>
@@ -1432,6 +1438,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             fields: Enum.join(@paused, ", ")
           ) %>
         </p>
+        <p :if={@lost != []} class="bp-doc-conflict-lost" data-test-id="doc-conflict-lost">
+          <%= gettext("Your text was in a row another editor moved or removed. Copy it before you reload.") %>
+        </p>
+        <blockquote :for={text <- @lost} class="bp-doc-conflict-theirs" data-version="mine">{text}</blockquote>
         <blockquote :for={text <- Enum.take(@theirs, 5)} class="bp-doc-conflict-theirs" data-version="theirs">{text}</blockquote>
         <%!-- A patch would close the fold under the reader: `open` is the page's (#28891 review). --%>
         <details
