@@ -24,14 +24,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
   (#29223 r2 review, B3).
 
   A plain subfield (a string, a number) has no owner entry, so its words
-  reached no banner (task-41218d31b9a913c4): `plain/4` reads them.
+  reached no banner (task-41218d31b9a913c4): `plain/5` reads them.
   """
 
   import Phoenix.Component, only: [assign: 2]
 
   alias Barkpark.Content.PortableText
   alias BarkparkWeb.Components.Fields.CompositeField
-  alias BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.FormPath
   alias BarkparkWeb.Studio.StudioLive.Path
 
   @doc """
@@ -58,12 +57,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
   Of the dropped leaves, A's words in each plain subfield A typed in,
   `{name, [text]}`. The page posts no draw for one, so A typed in it when
   its input is among the inputs A changed (`touched`, kept until a Save or
-  a Reload) and no row of its parent in `form` holds the same words: an
-  earlier post wrote them there, and they are not lost. A leaf with an
-  owner entry is rich text (`typed/3`); one of a row A removed itself
-  (its row's posted `_key` in `removed`) is not read.
+  a Reload) and A's own earlier post did not write that value under that
+  input (`wrote`, `wrote/4`): those words are in the store, and are not
+  lost. Another row holding the same words is no sign (#29319 review, G1:
+  a "TODO", or a box ticked off, as a sibling's). A leaf with an owner
+  entry is rich text (`typed/3`); one of a row A removed itself (its
+  row's posted `_key` in `removed`) is not read.
   """
-  def plain(dropped, owners, touched, form, removed \\ MapSet.new()) do
+  def plain(dropped, owners, touched, wrote, removed \\ MapSet.new()) do
     rich = drawn(owners)
     keys = Map.new(dropped)
 
@@ -76,8 +77,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
         {:ok, row, leaf} <- [row_leaf(name)],
         leaf not in [["_key"], ["_type"]],
         not MapSet.member?(removed, keys[row <> "._key"]),
-        not held?(form, name, value),
+        Map.get(wrote, name) != value,
         do: {name, [text]}
+  end
+
+  @doc """
+  `wrote` for `plain/5`, after a post: each plain input A changed
+  (`touched`) that the post carried and the fold did not drop, by name,
+  with the value posted. Reset with `touched`.
+  """
+  def wrote(socket, params, dropped, touched) do
+    gone = MapSet.new(dropped, &elem(&1, 0))
+
+    wrote =
+      for name <- touched,
+          not MapSet.member?(gone, name),
+          value = Map.get(params, name),
+          is_binary(value),
+          into: socket.assigns[:editor_rt_plain_wrote] || %{},
+          do: {name, value}
+
+    assign(socket, editor_rt_plain_wrote: wrote)
   end
 
   @doc """
@@ -140,30 +160,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.DroppedRows do
       _ -> :error
     end
   end
-
-  # Whether a row under the leaf's parent in `form` holds `value` there.
-  defp held?(form, name, value) do
-    path = Path.parse_path(name)
-
-    case Enum.find_index(Enum.reverse(path), &is_integer/1) do
-      nil ->
-        false
-
-      back ->
-        at = length(path) - back - 1
-        {parent, [_index | leaf]} = Enum.split(path, at)
-
-        form
-        |> FormPath.get(parent)
-        |> List.wrap()
-        |> Enum.any?(&(FormPath.get(&1, leaf) |> to_text() == value))
-    end
-  end
-
-  defp to_text(value) when is_binary(value), do: value
-  defp to_text(nil), do: nil
-  defp to_text(value) when is_number(value) or is_boolean(value), do: to_string(value)
-  defp to_text(_value), do: nil
 
   defp lost?({:lost, _name}), do: true
   defp lost?(_key), do: false
