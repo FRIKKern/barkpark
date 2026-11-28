@@ -3,7 +3,10 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessMixedTest do
   task-4d6529dace20f151 (#29178 r2 review, M3). A list holds a keyless row
   and a keyed one. B inserts a keyed row in front of the keyless row; A's
   page, typed on the first draw, posts the keyless row at its old index,
-  where B's keyed row now is.
+  where B's keyed row now is. On main before #29298 it was written into
+  B's row. #29298's `KeylessRowPost.over_keyed?/4` drops it in the fold:
+  B's row is kept, nothing of A's post is written, and A's words are shown
+  in the lost box. These tests pin that.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -125,6 +128,13 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessMixedTest do
   defp items_keys(content), do: Enum.map(hd(content["sections"])["items"], & &1["_key"])
   defp held(a), do: Map.keys(:sys.get_state(a.pid).socket.assigns[:editor_rt_held] || %{})
 
+  defp lost(a),
+    do:
+      for(
+        {{:lost, n}, t} <- :sys.get_state(a.pid).socket.assigns[:editor_rt_clash] || %{},
+        do: {n, t}
+      )
+
   @row0 "doc[sections][0].items[0].rt"
   @row1 "doc[sections][0].items[1].rt"
 
@@ -133,7 +143,7 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessMixedTest do
 
     for seen <- [false, true] do
       @seen seen
-      test "#{surface} M3#{if seen, do: " (with _bp_rt_seen)"}: B inserts a keyed row in front of the keyless one; A types in the keyless: B's row kept, A held",
+      test "#{surface} M3#{if seen, do: " (with _bp_rt_seen)"}: B inserts a keyed row in front of the keyless one; A types in the keyless: B's row kept, nothing written, A's words in the lost box",
            c do
         put_items(c, [it("alpha"), keyed("k1", "one")])
         a = tab(c, @surface)
@@ -149,14 +159,14 @@ defmodule BarkparkWeb.Studio.NestedRowKeylessMixedTest do
             if(@seen, do: ["#{@row0}|0", "#{@row1}|0"])
           )
 
-        # Before, with no seen: A's keyless post written into k0, B's "zero B"
-        # lost, no banner. With a seen it was already held (`split/4`).
+        # Before #29298, with no seen: A's keyless post written into k0, B's
+        # "zero B" lost, no banner.
         assert items_words(stored(c)) == [["zero B"], ["alpha"], ["one"]],
                "A's keyless post was written into B's row: #{inspect(items_words(stored(c)))}"
 
         assert items_keys(stored(c)) == ["k0", nil, "k1"]
-        assert held(a) != []
-        assert html =~ "doc-conflict-banner"
+        assert lost(a) == [{@row0, ["alpha", "new A"]}]
+        assert html =~ "doc-conflict-lost"
       end
     end
 

@@ -84,13 +84,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
     shown = shown(socket, owners)
     shifted = shifted(socket, owners)
 
-    named =
-      for {name, path, _html} <- posted_texts(socket, posted, owners),
-          {:ok, was} <- [was(socket, shown, owners, name, path)],
-          into: %{},
-          do: {name, {path, if(list_of(path) in shifted, do: :unknown, else: was), nil}}
-
-    Map.merge(unnamed_moved(socket, posted, owners, shifted), named)
+    for {name, path, _html} <- posted_texts(socket, posted, owners),
+        {:ok, was} <- [was(socket, shown, owners, name, path)],
+        into: %{},
+        do: {name, {path, if(list_of(path) in shifted, do: :unknown, else: was), nil}}
   end
 
   def values(_socket, _seen, _posted, _owners), do: %{}
@@ -101,25 +98,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.UnderLock do
   defp shifted(socket, owners), do: KeylessShift.lists(socket.assigns[:editor_form], owners)
 
   defp list_of(path), do: KeylessShift.list_of(path)
-
-  # A row of a moved list that no owner entry names: the page drew a
-  # keyless row at its index, and another editor put a keyed row there
-  # (#29178 r2 review, M3). The fold writes A's keyless post by index, into
-  # that row; it is read as a draw not known, the store kept and A held.
-  defp unnamed_moved(_socket, _posted, _owners, []), do: %{}
-
-  defp unnamed_moved(socket, posted, owners, shifted) do
-    form = socket.assigns[:editor_form] || %{}
-
-    for path <- RichTextRemote.every(socket.assigns[:editor_schema], form),
-        row?(path),
-        list_of(path) in shifted,
-        name = RichTextRemote.input_name(path),
-        row_owner(socket, owners, name, path) == :error,
-        is_binary(FormPath.get(posted, path)),
-        into: %{},
-        do: {name, {path, :unknown, nil}}
-  end
 
   @doc """
   The socket after a post with no `_bp_rt_seen`: each object rich text it
