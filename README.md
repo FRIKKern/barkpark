@@ -14,16 +14,19 @@ Build a website or keep a recipe collection. Use only what you need.
 
 ## What you can do
 
-| Write | Work | Run |
-|---|---|---|
-| Content: own fields, drafts | Tasks, agent queues, tickets | Websites, deploys, domains |
-| Papers that update live | Agents you task and check | Servers: start, restore |
-| Sheets: formulas, Excel | Search with facets | Tokens, sharing, sign-on |
-| Media: tags, rights | Quizzes, ONIX book data | Revisions to go back to |
+- **Edit content in [Studio][st]:** your own fields, drafts, publishing and revisions. Two people can edit one document at once.
+- **Write Papers** that update live while people read them.
+- **Place blocks freely** in the [Fluid editor][fe], the next-gen editor we're building, with its own phone layout.
+- **Hand work to agents:** they claim tasks from a queue and prove each check before they close it.
+- **Run sites:** deploy a website, add a domain, start or restore a server.
 
-In the browser, the terminal, the CLI or through an agent.
+Also media, search, sign-on, and plugins for Sheets, quizzes and ONIX book data.
+In the browser, the terminal, the CLI or an agent.
 
-<img src="docs/readme/paper-dark.webp" width="768" alt="A Paper in the reader">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/fluid-dark.webp">
+  <img src="docs/readme/fluid-light.webp" width="768" alt="The Fluid editor during a drag: a block moves across the grid, and the blue area shows where it will land">
+</picture>
 
 ## Where we're going
 
