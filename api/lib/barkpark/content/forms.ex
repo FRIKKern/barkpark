@@ -372,7 +372,7 @@ defmodule Barkpark.Content.Forms do
           coerced != SlugValue.text(stored) ->
         Map.put(stored, "current", coerced)
 
-      coerced === coerce_field_value(field, form_image(field, stored)) ->
+      image_post?(field, posted, coerced, stored) ->
         stored
 
       # Edited Portable Text is rebuilt from the posted HTML against the
@@ -547,6 +547,27 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp posted_rich_text(_sub, _posted, coerced_sub), do: coerced_sub
+
+  # A post that coerces to what the input showed for `stored`. A Portable
+  # Text post that is not the HTML its editor drew is read on against the
+  # stored blocks (`PortableText.from_html/3`) without parsing that HTML as
+  # well: an untouched block is the stored one there, and a field the read
+  # gives back as stored is dropped as untouched (`preserve_untouched_fields/3`)
+  # (task-6a5c3e075299d4bc: a 50k-object post's drawn image was parsed for a
+  # compare the stored read answers).
+  defp image_post?(%{"type" => "richText"} = field, posted, coerced, stored)
+       when is_binary(posted) and is_list(stored) do
+    image = form_image(field, stored)
+
+    cond do
+      not portable_text_field?(field, stored) -> coerced === coerce_field_value(field, image)
+      posted == image -> true
+      true -> false
+    end
+  end
+
+  defp image_post?(field, _posted, coerced, stored),
+    do: coerced === coerce_field_value(field, form_image(field, stored))
 
   # What the Classic input showed for a stored value — the value the browser
   # posts back when the author does not touch it.

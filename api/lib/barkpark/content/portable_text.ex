@@ -471,7 +471,9 @@ defmodule Barkpark.Content.PortableText do
   # `{:moved, block, i}`, kept too, but not a fixed point (#28714 review S4).
   defp keep_stored(blocks, []), do: for({block, _src} <- blocks, not empty?(block), do: block)
 
-  defp keep_stored(blocks, stored) do
+  defp keep_stored(blocks, stored), do: ParseMemo.around(fn -> keep(blocks, stored) end)
+
+  defp keep(blocks, stored) do
     seen =
       Enum.map(stored, fn b ->
         html = to_html([b])
@@ -479,9 +481,12 @@ defmodule Barkpark.Content.PortableText do
         {{normalize(frag), drawn_list(b)}, html}
       end)
 
+    # A posted block is drawn only when its source matches no stored block
+    # (`drawn/1`): a 50k-object block read from a stored one's HTML was drawn
+    # for nothing (task-6a5c3e075299d4bc).
     posted =
       Enum.map(blocks, fn {block, src} ->
-        {src && {normalize(src), drawn_list(block)}, to_html([block])}
+        {src && {normalize(src), drawn_list(block)}, {:draw, block}}
       end)
 
     fixed = posted |> line_up(seen) |> Map.new()
@@ -511,7 +516,10 @@ defmodule Barkpark.Content.PortableText do
   # A posted block is a stored one when it was read from that block's editor
   # HTML or renders to its HTML.
   defp same_block?({src, html}, {frag, stored_html}),
-    do: (src != nil and src == frag) or html == stored_html
+    do: (src != nil and src == frag) or drawn(html) == stored_html
+
+  # A posted block's HTML, drawn once (`keep_stored/2` runs in a `ParseMemo`).
+  defp drawn({:draw, block}), do: ParseMemo.parsed({:draw, block}, fn -> to_html([block]) end)
 
   # The line-up's table at most, rebuilt × stored blocks between the blocks
   # both lists start and end with (#28724 review B2: 10,000 against 10,000
@@ -581,7 +589,7 @@ defmodule Barkpark.Content.PortableText do
   # on each lookup (#28724 r2 review S1).
   defp take(index, used, src, html) do
     {i, index} = if src, do: first_unused(index, {:src, src}, used), else: {nil, index}
-    if i, do: {i, index}, else: first_unused(index, {:html, html}, used)
+    if i, do: {i, index}, else: first_unused(index, {:html, drawn(html)}, used)
   end
 
   defp first_unused(index, key, used) do
@@ -1508,7 +1516,7 @@ defmodule Barkpark.Content.PortableText do
       [first | _] = group ->
         if list_kind(first),
           do: lists_html(group, 1),
-          else: Enum.map_join(group, &block_html/1)
+          else: Enum.map_join(group, &drawn_block/1)
     end)
   end
 
@@ -1557,6 +1565,15 @@ defmodule Barkpark.Content.PortableText do
   defp list_kind(%{"listItem" => "number"}), do: "ol"
   defp list_kind(%{"listItem" => _}), do: "ul"
   defp list_kind(_), do: nil
+
+  # A text block drawn once per save (`ParseMemo`): the save draws the
+  # stored value for the form's image and for each block's match, and the
+  # posted block a stored one was read from, the same block again
+  # (task-6a5c3e075299d4bc).
+  defp drawn_block(%{"_type" => "block"} = b),
+    do: ParseMemo.parsed({:html, b}, fn -> block_html(b) end)
+
+  defp drawn_block(b), do: block_html(b)
 
   defp block_html(%{"_type" => "block"} = b) do
     tag =
