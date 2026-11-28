@@ -16,6 +16,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
       words on that draw, and draws them on its next remount.
 
   `fetch/4` finds the value a post was typed on; none is `:error`.
+
+  Each draw also keeps when the socket first had it there, and how
+  (`first/3`): with the socket's own born value, from another editor's
+  save or a Reload (`:theirs`), or from A's own write (`:own`). A keyless
+  row goes by its index, so a value first had at an index from another
+  editor's save, after A's page drew it at another index, moved there
+  (`KeylessShift`, task-8d968bba2cfa23c4).
   """
 
   import Phoenix.Component, only: [assign: 3]
@@ -31,8 +38,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   @doc "Whether a rich text's path is inside a row (it carries an index)."
   def row?(path), do: Enum.any?(path, &is_integer/1)
 
-  @doc "Records each row rich text value of `form` under its row key and digest."
-  def record_form(socket, form) when is_map(form) do
+  @doc """
+  Records each row rich text value of `form` under its row key and digest.
+  `origin` is how the socket came to hold `form`: `:born`, `:theirs` (another
+  editor's save, a Reload) or `:own` (A's own write or press).
+  """
+  def record_form(socket, form, origin \\ :own)
+
+  def record_form(socket, form, origin) when is_map(form) do
     entries =
       for path <- RichTextRemote.every(socket.assigns[:editor_schema], form),
           row?(path),
@@ -43,11 +56,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
     # A row A removed that the form holds again (B's save or a Reload brought
     # its key back) is no longer A's removal (`DroppedRows.removed/2`).
     socket
-    |> record(Enum.map(entries, &elem(&1, 1)))
+    |> record(Enum.map(entries, &elem(&1, 1)), origin)
     |> RichTextRemote.DroppedRows.back(Enum.map(entries, &elem(&1, 0)))
   end
 
-  def record_form(socket, _form), do: socket
+  def record_form(socket, _form, _origin), do: socket
 
   @doc """
   Records A's own `value`, posted on the draw `digest` of the row `key` at
@@ -57,10 +70,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
   def record_own(socket, path, {key, digest}, value) do
     id = id(form(socket), path, key)
 
-    record(socket, [
-      {id, digest, value},
-      {id, CompositeField.drawn_digest(value), value}
-    ])
+    record(
+      socket,
+      [
+        {id, digest, value},
+        {id, CompositeField.drawn_digest(value), value}
+      ],
+      :own
+    )
+  end
+
+  @doc """
+  When the socket first had the draw `digest` at the keyless row rich text
+  `path`, and how: `{n, origin}`, a larger `n` later; `nil` when not kept.
+  """
+  def first(socket, path, digest) do
+    case socket.assigns[:editor_rt_row_first] do
+      {doc, _n, %{} = firsts} when not is_nil(doc) ->
+        if doc == PostIdentity.of(socket), do: Map.get(firsts, {{path, ""}, digest})
+
+      _ ->
+        nil
+    end
   end
 
   @doc """
@@ -124,9 +155,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
     end
   end
 
-  defp record(socket, []), do: socket
+  defp record(socket, [], _origin), do: socket
 
-  defp record(socket, entries) do
+  defp record(socket, entries, origin) do
     case PostIdentity.of(socket) do
       nil ->
         socket
@@ -138,8 +169,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote.RowDraws do
             Map.put(draws, id, Enum.take([{digest, value} | kept], @cap))
           end)
 
-        assign(socket, :editor_rt_row_draws, {doc, draws})
+        socket
+        |> assign(:editor_rt_row_draws, {doc, draws})
+        |> record_first(doc, entries, origin, draws)
     end
+  end
+
+  # Only a keyless row's draws (`{path, ""}`): a keyed row goes by its key.
+  # A draw pushed out of `draws` is forgotten here too.
+  defp record_first(socket, doc, entries, origin, draws) do
+    {n, firsts} =
+      case socket.assigns[:editor_rt_row_first] do
+        {^doc, n, %{} = firsts} -> {n + 1, firsts}
+        _ -> {1, %{}}
+      end
+
+    firsts =
+      for({{_path, ""} = id, digest, _value} <- entries, reduce: firsts) do
+        acc -> Map.put_new(acc, {id, digest}, {n, origin})
+      end
+      |> Map.filter(fn {{id, digest}, _} ->
+        List.keymember?(Map.get(draws, id, []), digest, 0)
+      end)
+
+    assign(socket, :editor_rt_row_first, {doc, n, firsts})
   end
 
   defp all(socket) do
