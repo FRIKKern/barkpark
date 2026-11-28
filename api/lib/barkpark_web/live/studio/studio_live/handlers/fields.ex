@@ -319,7 +319,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          saved
          |> TextConfirmed.confirm(units, posted)
          |> RichTextRemote.hold(held)
-         |> TextConfirmed.wrote(socket, rich)
+         |> TextConfirmed.wrote(socket, rich, posted)
          |> TextConfirmed.paused(rich)
          |> row_draws()
          |> dropped(folded, params)}
@@ -713,7 +713,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {:noreply,
          saved
          |> RichTextRemote.hold(held)
-         |> TextConfirmed.wrote(socket, rich)
+         |> TextConfirmed.wrote(socket, rich, posted)
          |> TextConfirmed.paused(rich)
          |> row_draws()
          |> dropped(folded, params)}
