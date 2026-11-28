@@ -92,7 +92,7 @@ defmodule BarkparkWeb.Studio.NestedRowDupKeyTest do
 
   # A's post as its page sends it: the items' HTML by the index the page
   # drew them at.
-  defp autosave(a, htmls, owners) do
+  defp autosave(a, htmls, owners, target \\ "doc[sections][0].items[0].rt") do
     %{editor_doc: d, dataset: ds} = :sys.get_state(a.pid).socket.assigns
 
     params =
@@ -115,7 +115,7 @@ defmodule BarkparkWeb.Studio.NestedRowDupKeyTest do
       |> Plug.Conn.Query.decode()
       |> Map.merge(%{
         "_bp_doc" => PostIdentity.value(ds, d.type, d.doc_id),
-        "_target" => ["doc[sections][0].items[0].rt"],
+        "_target" => [target],
         "_bp_rt_owner" => owners
       })
 
@@ -182,6 +182,67 @@ defmodule BarkparkWeb.Studio.NestedRowDupKeyTest do
 
       assert lost(a) == [{"doc[sections][0].items[0].rt", ["alpha A"]}]
       assert html =~ "doc-conflict-lost"
+    end
+
+    # #29285 r1 review (F1-F3): B's edit elsewhere in the array leaves the
+    # pair where A's page drew it: A's words are written by index, as main
+    # writes them.
+    test "#{surface} F1: B appends a row after the pair; A types in the first: written", c do
+      put_items(c, [kt("d", "alpha"), kt("d", "beta"), kt("x", "ex")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [kt("d", "alpha"), kt("d", "beta"), kt("x", "ex"), kt("n", "new B")])
+
+      html =
+        autosave(a, [{"d", "<p>alpha A</p>"}, {"d", "<p>beta</p>"}, {"x", "<p>ex</p>"}], owners)
+
+      assert items_words(stored(c)) == [["alpha A"], ["beta"], ["ex"], ["new B"]],
+             "A's words were dropped: #{inspect(items_words(stored(c)))}"
+
+      assert lost(a) == []
+      refute html =~ "doc-conflict-lost"
+    end
+
+    test "#{surface} F2: B swaps two rows after the pair; A types in the second: written", c do
+      put_items(c, [kt("d", "alpha"), kt("d", "beta"), kt("x", "ex"), kt("y", "why")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [kt("d", "alpha"), kt("d", "beta"), kt("y", "why"), kt("x", "ex")])
+
+      html =
+        autosave(
+          a,
+          [
+            {"d", "<p>alpha</p>"},
+            {"d", "<p>beta A</p>"},
+            {"x", "<p>ex</p>"},
+            {"y", "<p>why</p>"}
+          ],
+          owners,
+          "doc[sections][0].items[1].rt"
+        )
+
+      assert items_words(stored(c)) == [["alpha"], ["beta A"], ["why"], ["ex"]],
+             "A's words were dropped: #{inspect(items_words(stored(c)))}"
+
+      assert lost(a) == []
+      refute html =~ "doc-conflict-lost"
+    end
+
+    test "#{surface} F3: B removes a row after the pair; A types in the first: written", c do
+      put_items(c, [kt("d", "alpha"), kt("d", "beta"), kt("x", "ex")])
+      a = tab(c, @surface)
+      owners = page_owners(a)
+      b_saves(c, a, [kt("d", "alpha"), kt("d", "beta")])
+
+      html =
+        autosave(a, [{"d", "<p>alpha A</p>"}, {"d", "<p>beta</p>"}, {"x", "<p>ex</p>"}], owners)
+
+      assert items_words(stored(c)) == [["alpha A"], ["beta"]],
+             "A's words were dropped: #{inspect(items_words(stored(c)))}"
+
+      assert lost(a) == []
+      refute html =~ "doc-conflict-lost"
     end
 
     test "#{surface} control: rows of one key, nothing moved: A's words written by index", c do

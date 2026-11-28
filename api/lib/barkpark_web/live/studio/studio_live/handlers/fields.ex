@@ -877,14 +877,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   # The one row that has the key now; none: dropped. A key two rows share,
   # in the form or in the post (written past the API's own checks), names
-  # no one row: by index while the rows are the ones the post names, in
-  # its order, else dropped. By index, B's row inserted before them took
-  # A's leaves (task-a35e29de94927377).
+  # no one row: by index while the form holds that key at the indexes the
+  # post gives it, else dropped. By index, B's row inserted before them took
+  # A's leaves (task-a35e29de94927377). Only the key's own places are
+  # compared: B's edit elsewhere in the array leaves the rows where A's page
+  # drew them (#29285 r1 review, F1-F3).
   defp row_index(rows, key, i, posted) do
     case for({%{"_key" => ^key}, j} <- Enum.with_index(rows), do: j) do
       [j] when not is_map_key(posted.twice, key) -> j
       [] -> nil
-      _ -> if posted.at == form_keys(rows), do: i
+      at -> if at == posted_at(posted, key), do: i
     end
   end
 
@@ -903,9 +905,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     %{at: at, twice: twice}
   end
 
-  defp form_keys(rows) do
-    for {%{"_key" => key}, j} <- Enum.with_index(rows), is_binary(key), into: %{}, do: {j, key}
-  end
+  defp posted_at(posted, key), do: Enum.sort(for({j, ^key} <- posted.at, do: j))
 
   defp form_at(form, path) do
     Enum.reduce_while(path, form, fn
