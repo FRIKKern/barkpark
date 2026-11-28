@@ -485,7 +485,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.RichTextRemote do
         editor_rt_born: %{},
         editor_rt_page: nil,
         editor_rt_row_draws: nil,
-        editor_rt_rekeyed: nil
+        editor_rt_rekeyed: nil,
+        editor_rt_removed: nil
       )
       |> push_event(@event, %{forget: true, doc: now, values: %{}})
     end
